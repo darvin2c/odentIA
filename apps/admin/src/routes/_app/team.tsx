@@ -3,6 +3,7 @@ import {
   Button,
   Field,
   FieldError,
+  FieldGroup,
   FieldLabel,
   Input,
   Select,
@@ -396,32 +397,34 @@ function TeamPage() {
         isSubmitting={invite.isPending}
         error={invite.isError ? apiMessage(invite.error) : null}
       >
-        <Field>
-          <FieldLabel htmlFor="invite-email">Correo del integrante</FieldLabel>
-          <Input
-            id="invite-email"
-            type="email"
-            autoComplete="email"
-            value={inviteEmail}
-            onChange={(event) => setInviteEmail(event.target.value)}
-          />
-          <FieldError>{null}</FieldError>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="invite-role">Rol</FieldLabel>
-          <Select
-            value={inviteRole}
-            onValueChange={(value) => setInviteRole(value === "admin" ? "admin" : "support")}
-          >
-            <SelectTrigger id="invite-role">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="support">Soporte</SelectItem>
-              <SelectItem value="admin">Administración</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="invite-email">Correo del integrante</FieldLabel>
+            <Input
+              id="invite-email"
+              type="email"
+              autoComplete="email"
+              value={inviteEmail}
+              onChange={(event) => setInviteEmail(event.target.value)}
+            />
+            <FieldError>{null}</FieldError>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="invite-role">Rol</FieldLabel>
+            <Select
+              value={inviteRole}
+              onValueChange={(value) => setInviteRole(value === "admin" ? "admin" : "support")}
+            >
+              <SelectTrigger id="invite-role">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="support">Soporte</SelectItem>
+                <SelectItem value="admin">Administración</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        </FieldGroup>
       </FormDrawer>
       <ConfirmDialog
         open={confirm !== null}

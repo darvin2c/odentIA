@@ -4,7 +4,7 @@
  * precios; el dictado sigue agregando tratamientos al plan.
  */
 import { formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { Button, Checkbox, cn, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
+import { Button, Checkbox, cn, Field, FieldDescription, FieldGroup, FieldLabel, Input } from "@odentia/ui"
 import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { type ReactNode, useId, useState } from "react"
 import type { AdjustBudgetLineBody, BudgetLine, BudgetOption, BudgetWithTotals } from "../../../lib/budgets"
@@ -676,27 +676,29 @@ export function BudgetDraftEditor({
             void submitDiscount()
           }}
         >
-          <Field>
-            <FieldLabel htmlFor={`${uid}-discount-percent`}>Descuento, en porcentaje</FieldLabel>
-            <Input
-              id={`${uid}-discount-percent`}
-              inputMode="numeric"
-              autoComplete="off"
-              value={discountPercent}
-              onChange={(event) => setDiscountPercent(event.currentTarget.value)}
-            />
-            <FieldDescription>Un número del 1 al 100.</FieldDescription>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-discount-reason`}>Motivo del descuento</FieldLabel>
-            <Input
-              id={`${uid}-discount-reason`}
-              value={discountReason}
-              maxLength={500}
-              onChange={(event) => setDiscountReason(event.currentTarget.value)}
-            />
-            <FieldDescription>Queda anotado en cada tratamiento que baja.</FieldDescription>
-          </Field>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor={`${uid}-discount-percent`}>Descuento, en porcentaje</FieldLabel>
+              <Input
+                id={`${uid}-discount-percent`}
+                inputMode="numeric"
+                autoComplete="off"
+                value={discountPercent}
+                onChange={(event) => setDiscountPercent(event.currentTarget.value)}
+              />
+              <FieldDescription>Un número del 1 al 100.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${uid}-discount-reason`}>Motivo del descuento</FieldLabel>
+              <Input
+                id={`${uid}-discount-reason`}
+                value={discountReason}
+                maxLength={500}
+                onChange={(event) => setDiscountReason(event.currentTarget.value)}
+              />
+              <FieldDescription>Queda anotado en cada tratamiento que baja.</FieldDescription>
+            </Field>
+          </FieldGroup>
         </FormDrawer>
       ) : null}
     </>

@@ -10,6 +10,7 @@ import {
   ComboboxList,
   Field,
   FieldError,
+  FieldGroup,
   FieldLabel,
   Input,
   InputGroup,
@@ -669,222 +670,224 @@ function PromotionForm({
         onClose={onClose}
         onSubmit={submit}
       >
-        <Field>
-          <FieldLabel htmlFor={`${id}-nombre`}>
-            {initial ? "Nombre" : "Nombre, como sale en la publicación"}
-          </FieldLabel>
-          <Input
-            id={`${id}-nombre`}
-            value={name}
-            maxLength={120}
-            aria-invalid={(submitted && nameIssue !== null) || undefined}
-            onChange={(event) => setName(event.target.value)}
-          />
-          {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
-        </Field>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <FieldGroup>
           <Field>
-            <span id={`${id}-empieza`} className="text-sm font-medium">
-              {started ? "Empezó" : "Empieza"}
-            </span>
-            {started ? (
-              <p className="text-sm" aria-labelledby={`${id}-empieza`}>
-                {dayShort(startsOn, regional)}
-              </p>
-            ) : (
-              <DatePickerButton
-                aria-labelledby={`${id}-empieza`}
-                className="w-full justify-start"
-                value={startsOn}
-                min={today}
-                onChange={setStartsOn}
-              >
-                {dayShort(startsOn, regional)}
-              </DatePickerButton>
-            )}
+            <FieldLabel htmlFor={`${id}-nombre`}>
+              {initial ? "Nombre" : "Nombre, como sale en la publicación"}
+            </FieldLabel>
+            <Input
+              id={`${id}-nombre`}
+              value={name}
+              maxLength={120}
+              aria-invalid={(submitted && nameIssue !== null) || undefined}
+              onChange={(event) => setName(event.target.value)}
+            />
+            {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
           </Field>
-          <Field>
-            <span id={`${id}-termina`} className="text-sm font-medium">
-              {ended ? "Terminó" : "Termina"}
-            </span>
-            {ended ? (
-              <p className="text-sm" aria-labelledby={`${id}-termina`}>
-                {endsOn ? dayShort(endsOn, regional) : "Se desactivó"}
-              </p>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field>
+              <span id={`${id}-empieza`} className="text-sm font-medium">
+                {started ? "Empezó" : "Empieza"}
+              </span>
+              {started ? (
+                <p className="text-sm" aria-labelledby={`${id}-empieza`}>
+                  {dayShort(startsOn, regional)}
+                </p>
+              ) : (
                 <DatePickerButton
-                  aria-labelledby={`${id}-termina`}
-                  className="min-w-0 flex-1 justify-start"
-                  value={endsOn || startsOn}
-                  min={startsOn > today ? startsOn : today}
-                  onChange={setEndsOn}
+                  aria-labelledby={`${id}-empieza`}
+                  className="w-full justify-start"
+                  value={startsOn}
+                  min={today}
+                  onChange={setStartsOn}
                 >
-                  {endsOn ? dayShort(endsOn, regional) : "Sin fecha de fin"}
+                  {dayShort(startsOn, regional)}
                 </DatePickerButton>
-                {endsOn ? (
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setEndsOn("")}>
-                    Quitar fin
-                  </Button>
-                ) : null}
-              </div>
-            )}
-            {datesIssue ? <FieldError>{datesIssue}</FieldError> : null}
-          </Field>
-        </div>
-        {ended ? (
-          <p className="text-xs text-muted-foreground">
-            Una promoción terminada no vuelve a ofrecerse. Para repetirla, crea una nueva.
-          </p>
-        ) : null}
-
-        <div className="flex flex-col gap-3">
-          <span className="text-sm font-medium">
-            {initial ? "Servicios y su precio" : "Servicios y su precio en la promoción"}
-          </span>
-          {rows.map((row, index) => {
-            const price = parsePrice(row, locale)
-            const issue = submitted ? priceIssues[index] : null
-            const above = price !== null && price > row.tariffCents
-            return (
-              <div key={row.serviceId} className="flex flex-col gap-2 rounded-lg border p-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <span className="flex min-w-0 flex-col">
-                    <span className="text-sm font-medium break-words">{row.serviceName}</span>
-                    <span className="text-xs text-muted-foreground">
-                      Normal {formatAmount(row.tariffCents, row.currency, locale)}
-                    </span>
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Quitar ${row.serviceName} de la promoción`}
-                    onClick={() =>
-                      setRows((list) => list.filter((item) => item.serviceId !== row.serviceId))
-                    }
-                  >
-                    Quitar
-                  </Button>
-                </div>
+              )}
+            </Field>
+            <Field>
+              <span id={`${id}-termina`} className="text-sm font-medium">
+                {ended ? "Terminó" : "Termina"}
+              </span>
+              {ended ? (
+                <p className="text-sm" aria-labelledby={`${id}-termina`}>
+                  {endsOn ? dayShort(endsOn, regional) : "Se desactivó"}
+                </p>
+              ) : (
                 <div className="flex flex-wrap items-center gap-2">
-                  <RadioChips
-                    aria-label={`Tipo de precio de ${row.serviceName}`}
-                    className="w-auto"
-                    value={row.mode}
-                    options={MODE_OPTIONS}
-                    onChange={(mode) =>
-                      // Si la clínica no había elegido otra cosa, lo que dice el agente sigue al tipo de precio.
-                      setRow(row.serviceId, {
-                        mode,
-                        ...(row.disclosure === disclosureFor(row.mode) ? { disclosure: disclosureFor(mode) } : {}),
-                      })
-                    }
-                  />
-                  <InputGroup className="w-40">
-                    <InputGroupAddon align="inline-start">
-                      <InputGroupText>{currencySymbol(row.currency, locale)}</InputGroupText>
-                    </InputGroupAddon>
-                    <InputGroupInput
-                      inputMode="decimal"
-                      placeholder={formatMoneyInput(0, row.currency, locale)}
-                      aria-label={
-                        row.mode === "from"
-                          ? `Precio desde de ${row.serviceName} en la promoción`
-                          : `Precio de ${row.serviceName} en la promoción`
-                      }
-                      aria-invalid={Boolean(issue) || undefined}
-                      value={row.priceText}
-                      onChange={(event) => setRow(row.serviceId, { priceText: event.target.value })}
-                    />
-                  </InputGroup>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span aria-hidden className="text-muted-foreground">{receptionName} lo dice</span>
-                  <ChoiceSelect
-                    className="w-auto min-w-48"
-                    aria-label={`Cómo dice ${receptionName} el precio de ${row.serviceName}`}
-                    value={row.disclosure}
-                    onChange={(event) => setRow(row.serviceId, { disclosure: event.target.value as PriceDisclosure })}
+                  <DatePickerButton
+                    aria-labelledby={`${id}-termina`}
+                    className="min-w-0 flex-1 justify-start"
+                    value={endsOn || startsOn}
+                    min={startsOn > today ? startsOn : today}
+                    onChange={setEndsOn}
                   >
-                    {PRICE_DISCLOSURE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </ChoiceSelect>
+                    {endsOn ? dayShort(endsOn, regional) : "Sin fecha de fin"}
+                  </DatePickerButton>
+                  {endsOn ? (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setEndsOn("")}>
+                      Quitar fin
+                    </Button>
+                  ) : null}
                 </div>
-                {issue ? <FieldError>{issue}</FieldError> : null}
-                {above ? (
-                  <p className="text-xs text-warning" role="status">
-                    Es más que el precio normal ({formatMoney(row.tariffCents, row.currency, locale)}
-                    ). Revisa que sea lo que quieres.
-                  </p>
-                ) : null}
-              </div>
-            )
-          })}
-          {rows.some((row) => row.mode === "from") ? (
+              )}
+              {datesIssue ? <FieldError>{datesIssue}</FieldError> : null}
+            </Field>
+          </div>
+          {ended ? (
             <p className="text-xs text-muted-foreground">
-              «Desde» anuncia un mínimo. El precio final lo pone quien hace el presupuesto.
+              Una promoción terminada no vuelve a ofrecerse. Para repetirla, crea una nueva.
             </p>
           ) : null}
-          <ServiceAdder
-            id={`${id}-servicio`}
-            label={rows.length === 0 ? "Agregar un servicio" : "Agregar otro servicio"}
-            locale={locale}
-            taken={rows.map((row) => row.serviceId)}
-            onAdd={(service) =>
-              setRows((list) => [
-                ...list,
-                {
-                  serviceId: service.id,
-                  serviceName: service.name,
-                  currency: service.currency,
-                  tariffCents: service.priceCents,
-                  mode: "fixed",
-                  disclosure: "exacto",
-                  priceText: "",
-                },
-              ])
-            }
-          />
-          {submitted && rowsIssue ? <FieldError>{rowsIssue}</FieldError> : null}
-        </div>
 
-        <Field>
-          <FieldLabel htmlFor={`${id}-condiciones`}>
-            {initial ? "Condiciones" : "Condiciones, en una frase"}
-          </FieldLabel>
-          <Textarea
-            id={`${id}-condiciones`}
-            value={conditions}
-            rows={2}
-            maxLength={500}
-            onChange={(event) => setConditions(event.target.value)}
-          />
-        </Field>
+          <div className="flex flex-col gap-3">
+            <span className="text-sm font-medium">
+              {initial ? "Servicios y su precio" : "Servicios y su precio en la promoción"}
+            </span>
+            {rows.map((row, index) => {
+              const price = parsePrice(row, locale)
+              const issue = submitted ? priceIssues[index] : null
+              const above = price !== null && price > row.tariffCents
+              return (
+                <div key={row.serviceId} className="flex flex-col gap-2 rounded-lg border p-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <span className="flex min-w-0 flex-col">
+                      <span className="text-sm font-medium break-words">{row.serviceName}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Normal {formatAmount(row.tariffCents, row.currency, locale)}
+                      </span>
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Quitar ${row.serviceName} de la promoción`}
+                      onClick={() =>
+                        setRows((list) => list.filter((item) => item.serviceId !== row.serviceId))
+                      }
+                    >
+                      Quitar
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <RadioChips
+                      aria-label={`Tipo de precio de ${row.serviceName}`}
+                      className="w-auto"
+                      value={row.mode}
+                      options={MODE_OPTIONS}
+                      onChange={(mode) =>
+                        // Si la clínica no había elegido otra cosa, lo que dice el agente sigue al tipo de precio.
+                        setRow(row.serviceId, {
+                          mode,
+                          ...(row.disclosure === disclosureFor(row.mode) ? { disclosure: disclosureFor(mode) } : {}),
+                        })
+                      }
+                    />
+                    <InputGroup className="w-40">
+                      <InputGroupAddon align="inline-start">
+                        <InputGroupText>{currencySymbol(row.currency, locale)}</InputGroupText>
+                      </InputGroupAddon>
+                      <InputGroupInput
+                        inputMode="decimal"
+                        placeholder={formatMoneyInput(0, row.currency, locale)}
+                        aria-label={
+                          row.mode === "from"
+                            ? `Precio desde de ${row.serviceName} en la promoción`
+                            : `Precio de ${row.serviceName} en la promoción`
+                        }
+                        aria-invalid={Boolean(issue) || undefined}
+                        value={row.priceText}
+                        onChange={(event) => setRow(row.serviceId, { priceText: event.target.value })}
+                      />
+                    </InputGroup>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span aria-hidden className="text-muted-foreground">{receptionName} lo dice</span>
+                    <ChoiceSelect
+                      className="w-auto min-w-48"
+                      aria-label={`Cómo dice ${receptionName} el precio de ${row.serviceName}`}
+                      value={row.disclosure}
+                      onChange={(event) => setRow(row.serviceId, { disclosure: event.target.value as PriceDisclosure })}
+                    >
+                      {PRICE_DISCLOSURE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </ChoiceSelect>
+                  </div>
+                  {issue ? <FieldError>{issue}</FieldError> : null}
+                  {above ? (
+                    <p className="text-xs text-warning" role="status">
+                      Es más que el precio normal ({formatMoney(row.tariffCents, row.currency, locale)}
+                      ). Revisa que sea lo que quieres.
+                    </p>
+                  ) : null}
+                </div>
+              )
+            })}
+            {rows.some((row) => row.mode === "from") ? (
+              <p className="text-xs text-muted-foreground">
+                «Desde» anuncia un mínimo. El precio final lo pone quien hace el presupuesto.
+              </p>
+            ) : null}
+            <ServiceAdder
+              id={`${id}-servicio`}
+              label={rows.length === 0 ? "Agregar un servicio" : "Agregar otro servicio"}
+              locale={locale}
+              taken={rows.map((row) => row.serviceId)}
+              onAdd={(service) =>
+                setRows((list) => [
+                  ...list,
+                  {
+                    serviceId: service.id,
+                    serviceName: service.name,
+                    currency: service.currency,
+                    tariffCents: service.priceCents,
+                    mode: "fixed",
+                    disclosure: "exacto",
+                    priceText: "",
+                  },
+                ])
+              }
+            />
+            {submitted && rowsIssue ? <FieldError>{rowsIssue}</FieldError> : null}
+          </div>
 
-        <p className="text-xs text-muted-foreground" role="status">
-          {initial
-            ? usedNote
-            : "Al llegar la fecha de fin deja de ofrecerse sola. Lo ya cobrado con ella no cambia."}
-        </p>
-        {initial?.state === "vigente" ? (
-          <Button
-            type="button"
-            variant="outline"
-            className="min-h-11 self-start"
-            disabled={saveMutation.isPending}
-            onClick={() => {
-              endMutation.reset()
-              setConfirmEnd(true)
-            }}
-          >
-            Terminar la promoción hoy
-          </Button>
-        ) : null}
+          <Field>
+            <FieldLabel htmlFor={`${id}-condiciones`}>
+              {initial ? "Condiciones" : "Condiciones, en una frase"}
+            </FieldLabel>
+            <Textarea
+              id={`${id}-condiciones`}
+              value={conditions}
+              rows={2}
+              maxLength={500}
+              onChange={(event) => setConditions(event.target.value)}
+            />
+          </Field>
+
+          <p className="text-xs text-muted-foreground" role="status">
+            {initial
+              ? usedNote
+              : "Al llegar la fecha de fin deja de ofrecerse sola. Lo ya cobrado con ella no cambia."}
+          </p>
+          {initial?.state === "vigente" ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 self-start"
+              disabled={saveMutation.isPending}
+              onClick={() => {
+                endMutation.reset()
+                setConfirmEnd(true)
+              }}
+            >
+              Terminar la promoción hoy
+            </Button>
+          ) : null}
+        </FieldGroup>
       </FormDrawer>
 
       {initial ? (

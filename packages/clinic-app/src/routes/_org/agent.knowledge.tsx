@@ -3,6 +3,7 @@ import {
   Checkbox,
   Field,
   FieldDescription,
+  FieldGroup,
   FieldLabel,
   Input,
   Select,
@@ -424,241 +425,243 @@ function AgentKnowledgePage() {
           cancelLabel="Cancelar"
           submitDisabled={incomplete || isAmbiguousMutationError(saveMutation.error)}
         >
-          {answering ? (
-            <>
-              <div className="flex flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
-                <p className="[overflow-wrap:anywhere]">
-                  <span className="font-semibold">Preguntaron:</span> «{answering.question}»
-                  {answering.count > 1 ? ` · ${answering.count} veces` : ""}
-                </p>
-                <div className="flex flex-wrap items-center gap-x-4">
-                  <Link
-                    to="/inbox"
-                    search={{ conversation: answering.conversationId }}
-                    className="inline-flex min-h-11 items-center font-semibold text-primary hover:underline sm:min-h-8"
-                  >
-                    Ver la conversación
-                  </Link>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className={`h-auto p-0 text-muted-foreground ${TOUCH}`}
-                    disabled={discardMutation.isPending || saveMutation.isPending}
-                    onClick={() => discardMutation.mutate(answering)}
-                  >
-                    No hace falta responderla: descartar
-                  </Button>
-                </div>
-                {discardMutation.isError ? (
-                  <p role="alert" className="text-destructive">
-                    {mutationErrorMessage(discardMutation.error) ?? "No pudimos descartar la pregunta."}
+          <FieldGroup>
+            {answering ? (
+              <>
+                <div className="flex flex-col gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm">
+                  <p className="[overflow-wrap:anywhere]">
+                    <span className="font-semibold">Preguntaron:</span> «{answering.question}»
+                    {answering.count > 1 ? ` · ${answering.count} veces` : ""}
                   </p>
+                  <div className="flex flex-wrap items-center gap-x-4">
+                    <Link
+                      to="/inbox"
+                      search={{ conversation: answering.conversationId }}
+                      className="inline-flex min-h-11 items-center font-semibold text-primary hover:underline sm:min-h-8"
+                    >
+                      Ver la conversación
+                    </Link>
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className={`h-auto p-0 text-muted-foreground ${TOUCH}`}
+                      disabled={discardMutation.isPending || saveMutation.isPending}
+                      onClick={() => discardMutation.mutate(answering)}
+                    >
+                      No hace falta responderla: descartar
+                    </Button>
+                  </div>
+                  {discardMutation.isError ? (
+                    <p role="alert" className="text-destructive">
+                      {mutationErrorMessage(discardMutation.error) ?? "No pudimos descartar la pregunta."}
+                    </p>
+                  ) : null}
+                </div>
+                {publishedEntries.length > 0 ? (
+                  <Field>
+                    <FieldLabel htmlFor="nc-existente">¿Ya tienes una respuesta para esto?</FieldLabel>
+                    <Select
+                      value={form.existingId || "nueva"}
+                      onValueChange={(value) => setForm({ ...form, existingId: !value || value === "nueva" ? "" : value })}
+                    >
+                      <SelectTrigger id="nc-existente" aria-label="Respuesta existente" className="w-full">
+                        <SelectValue>
+                          {publishedEntries.find((entry) => entry.id === form.existingId)?.title ?? "No, escribir una nueva"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="nueva">No, escribir una nueva</SelectItem>
+                        {publishedEntries.map((entry) => (
+                          <SelectItem key={entry.id} value={entry.id}>
+                            {entry.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FieldDescription>
+                      Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra.
+                    </FieldDescription>
+                  </Field>
                 ) : null}
-              </div>
-              {publishedEntries.length > 0 ? (
-                <Field>
-                  <FieldLabel htmlFor="nc-existente">¿Ya tienes una respuesta para esto?</FieldLabel>
-                  <Select
-                    value={form.existingId || "nueva"}
-                    onValueChange={(value) => setForm({ ...form, existingId: !value || value === "nueva" ? "" : value })}
-                  >
-                    <SelectTrigger id="nc-existente" aria-label="Respuesta existente" className="w-full">
-                      <SelectValue>
-                        {publishedEntries.find((entry) => entry.id === form.existingId)?.title ?? "No, escribir una nueva"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="nueva">No, escribir una nueva</SelectItem>
-                      {publishedEntries.map((entry) => (
-                        <SelectItem key={entry.id} value={entry.id}>
-                          {entry.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FieldDescription>
-                    Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra.
-                  </FieldDescription>
-                </Field>
-              ) : null}
-            </>
-          ) : null}
-          {basicsRun && missing.length > 1 ? (
-            <Field>
-              <FieldLabel htmlFor="nc-falta">Pregunta básica</FieldLabel>
-              <Select
-                value={form.basicKey}
-                onValueChange={(value) => {
-                  const item = missing.find((candidate) => candidate.key === value)
-                  if (!item) return
-                  // Cambiar de pregunta conserva lo escrito en la respuesta.
-                  setForm({ ...form, title: item.question, basicKey: item.key })
-                  setBaseline({ ...baseline, title: item.question, basicKey: item.key })
-                }}
-              >
-                <SelectTrigger id="nc-falta" aria-label="Pregunta básica" className="w-full">
-                  <SelectValue>{missing.find((item) => item.key === form.basicKey)?.question ?? "Elige una pregunta"}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {missing.map((item) => (
-                    <SelectItem key={item.key} value={item.key}>
-                      {item.question}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FieldDescription>Puedes responderlas en el orden que quieras.</FieldDescription>
-            </Field>
-          ) : null}
-          {usesExisting ? null : (
-            <>
-              {creating && !basicsRun ? (
-                <Field>
-                  <FieldLabel htmlFor="nc-tipo">Tipo</FieldLabel>
-                  <Select value={form.kind} onValueChange={(value) => setForm({ ...form, kind: value ?? "faq" })}>
-                    <SelectTrigger id="nc-tipo" aria-label="Tipo" className="w-full">
-                      <SelectValue>{KIND_LABEL[form.kind] ?? form.kind}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(KIND_LABEL).map(([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              ) : null}
+              </>
+            ) : null}
+            {basicsRun && missing.length > 1 ? (
               <Field>
-                <FieldLabel htmlFor="nc-titulo">La pregunta</FieldLabel>
-                <Input
-                  id="nc-titulo"
-                  value={form.title}
-                  maxLength={TITLE_CHARS}
-                  onChange={(event) => setForm({ ...form, title: event.target.value })}
-                  placeholder="¿Atienden sin cita?"
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="nc-cuerpo">La respuesta</FieldLabel>
-                <Textarea
-                  id="nc-cuerpo"
-                  rows={5}
-                  value={form.body}
-                  onChange={(event) => setForm({ ...form, body: event.target.value })}
-                  placeholder="Respuesta oficial…"
-                />
-              </Field>
-            </>
-          )}
-          {answering ? null : (
-            <>
-              <Field>
-                <FieldLabel htmlFor="nc-formas">Otras formas de preguntarlo</FieldLabel>
-                <Textarea
-                  id="nc-formas"
-                  rows={3}
-                  value={form.askForms}
-                  onChange={(event) => setForm({ ...form, askForms: event.target.value })}
-                  placeholder={"¿Puedo ir sin reservar?\n¿Reciben pacientes sin turno?"}
-                />
-                <FieldDescription>Una por línea. Ayudan a {receptionName} a encontrar esta respuesta.</FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="nc-sede">Sede</FieldLabel>
+                <FieldLabel htmlFor="nc-falta">Pregunta básica</FieldLabel>
                 <Select
-                  value={form.branchId || "todas"}
-                  onValueChange={(value) => setForm({ ...form, branchId: !value || value === "todas" ? "" : value })}
+                  value={form.basicKey}
+                  onValueChange={(value) => {
+                    const item = missing.find((candidate) => candidate.key === value)
+                    if (!item) return
+                    // Cambiar de pregunta conserva lo escrito en la respuesta.
+                    setForm({ ...form, title: item.question, basicKey: item.key })
+                    setBaseline({ ...baseline, title: item.question, basicKey: item.key })
+                  }}
                 >
-                  <SelectTrigger id="nc-sede" aria-label="Sede" className="w-full">
-                    <SelectValue>
-                      {form.branchId
-                        ? `Solo ${branchOptions.find((branch) => branch.id === form.branchId)?.name ?? "una sede"}`
-                        : "Todas las sedes"}
-                    </SelectValue>
+                  <SelectTrigger id="nc-falta" aria-label="Pregunta básica" className="w-full">
+                    <SelectValue>{missing.find((item) => item.key === form.basicKey)?.question ?? "Elige una pregunta"}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="todas">Todas las sedes</SelectItem>
-                    {branchOptions.map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        Solo {branch.name}
+                    {missing.map((item) => (
+                      <SelectItem key={item.key} value={item.key}>
+                        {item.question}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <FieldDescription>Puedes responderlas en el orden que quieras.</FieldDescription>
               </Field>
-              <div className="grid gap-4 sm:grid-cols-2">
+            ) : null}
+            {usesExisting ? null : (
+              <>
+                {creating && !basicsRun ? (
+                  <Field>
+                    <FieldLabel htmlFor="nc-tipo">Tipo</FieldLabel>
+                    <Select value={form.kind} onValueChange={(value) => setForm({ ...form, kind: value ?? "faq" })}>
+                      <SelectTrigger id="nc-tipo" aria-label="Tipo" className="w-full">
+                        <SelectValue>{KIND_LABEL[form.kind] ?? form.kind}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(KIND_LABEL).map(([value, label]) => (
+                          <SelectItem key={value} value={value}>
+                            {label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                ) : null}
                 <Field>
-                  <FieldLabel htmlFor="nc-desde">Vale desde</FieldLabel>
-                  <DatePickerButton
-                    id="nc-desde"
-                    className="w-full"
-                    value={form.validFrom}
-                    emptyLabel="Desde ya"
-                    onChange={(validFrom) =>
-                      setForm({
-                        ...form,
-                        validFrom,
-                        // Un periodo no termina antes de empezar.
-                        validUntil: form.validUntil && validFrom && form.validUntil < validFrom ? validFrom : form.validUntil,
-                      })
-                    }
+                  <FieldLabel htmlFor="nc-titulo">La pregunta</FieldLabel>
+                  <Input
+                    id="nc-titulo"
+                    value={form.title}
+                    maxLength={TITLE_CHARS}
+                    onChange={(event) => setForm({ ...form, title: event.target.value })}
+                    placeholder="¿Atienden sin cita?"
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="nc-hasta">Vale hasta</FieldLabel>
-                  <DatePickerButton
-                    id="nc-hasta"
-                    className="w-full"
-                    value={form.validUntil}
-                    min={form.validFrom || undefined}
-                    emptyLabel="Sin vencimiento"
-                    onChange={(validUntil) => setForm({ ...form, validUntil })}
+                  <FieldLabel htmlFor="nc-cuerpo">La respuesta</FieldLabel>
+                  <Textarea
+                    id="nc-cuerpo"
+                    rows={5}
+                    value={form.body}
+                    onChange={(event) => setForm({ ...form, body: event.target.value })}
+                    placeholder="Respuesta oficial…"
                   />
                 </Field>
-              </div>
-              <p className="-mt-2 text-sm text-muted-foreground">
-                Déjalas vacías si vale siempre. Pasada la fecha, {receptionName} deja de usarla sin que hagas nada.
-              </p>
-              {basicsRun ? null : (
+              </>
+            )}
+            {answering ? null : (
+              <>
                 <Field>
-                  <FieldLabel htmlFor="nc-basica">Pregunta básica que cubre</FieldLabel>
+                  <FieldLabel htmlFor="nc-formas">Otras formas de preguntarlo</FieldLabel>
+                  <Textarea
+                    id="nc-formas"
+                    rows={3}
+                    value={form.askForms}
+                    onChange={(event) => setForm({ ...form, askForms: event.target.value })}
+                    placeholder={"¿Puedo ir sin reservar?\n¿Reciben pacientes sin turno?"}
+                  />
+                  <FieldDescription>Una por línea. Ayudan a {receptionName} a encontrar esta respuesta.</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="nc-sede">Sede</FieldLabel>
                   <Select
-                    value={form.basicKey || "ninguna"}
-                    onValueChange={(value) => setForm({ ...form, basicKey: !value || value === "ninguna" ? "" : value })}
+                    value={form.branchId || "todas"}
+                    onValueChange={(value) => setForm({ ...form, branchId: !value || value === "todas" ? "" : value })}
                   >
-                    <SelectTrigger id="nc-basica" aria-label="Pregunta básica" className="w-full">
+                    <SelectTrigger id="nc-sede" aria-label="Sede" className="w-full">
                       <SelectValue>
-                        {(basics?.items ?? []).find((item) => item.key === form.basicKey)?.question ?? "Ninguna"}
+                        {form.branchId
+                          ? `Solo ${branchOptions.find((branch) => branch.id === form.branchId)?.name ?? "una sede"}`
+                          : "Todas las sedes"}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ninguna">Ninguna</SelectItem>
-                      {(basics?.items ?? []).map((item) => (
-                        <SelectItem key={item.key} value={item.key}>
-                          {item.question}
+                      <SelectItem value="todas">Todas las sedes</SelectItem>
+                      {branchOptions.map((branch) => (
+                        <SelectItem key={branch.id} value={branch.id}>
+                          Solo {branch.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </Field>
-              )}
-              {creating ? (
-                <Field>
-                  <label htmlFor="nc-publicar" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
-                    <Checkbox
-                      id="nc-publicar"
-                      checked={form.publish}
-                      onCheckedChange={(value) => setForm({ ...form, publish: value === true })}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="nc-desde">Vale desde</FieldLabel>
+                    <DatePickerButton
+                      id="nc-desde"
+                      className="w-full"
+                      value={form.validFrom}
+                      emptyLabel="Desde ya"
+                      onChange={(validFrom) =>
+                        setForm({
+                          ...form,
+                          validFrom,
+                          // Un periodo no termina antes de empezar.
+                          validUntil: form.validUntil && validFrom && form.validUntil < validFrom ? validFrom : form.validUntil,
+                        })
+                      }
                     />
-                    Publicar al guardar
-                  </label>
-                  <FieldDescription>Sin publicar queda como borrador y {receptionName} no la usa.</FieldDescription>
-                </Field>
-              ) : null}
-            </>
-          )}
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="nc-hasta">Vale hasta</FieldLabel>
+                    <DatePickerButton
+                      id="nc-hasta"
+                      className="w-full"
+                      value={form.validUntil}
+                      min={form.validFrom || undefined}
+                      emptyLabel="Sin vencimiento"
+                      onChange={(validUntil) => setForm({ ...form, validUntil })}
+                    />
+                  </Field>
+                </div>
+                <p className="-mt-2 text-sm text-muted-foreground">
+                  Déjalas vacías si vale siempre. Pasada la fecha, {receptionName} deja de usarla sin que hagas nada.
+                </p>
+                {basicsRun ? null : (
+                  <Field>
+                    <FieldLabel htmlFor="nc-basica">Pregunta básica que cubre</FieldLabel>
+                    <Select
+                      value={form.basicKey || "ninguna"}
+                      onValueChange={(value) => setForm({ ...form, basicKey: !value || value === "ninguna" ? "" : value })}
+                    >
+                      <SelectTrigger id="nc-basica" aria-label="Pregunta básica" className="w-full">
+                        <SelectValue>
+                          {(basics?.items ?? []).find((item) => item.key === form.basicKey)?.question ?? "Ninguna"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ninguna">Ninguna</SelectItem>
+                        {(basics?.items ?? []).map((item) => (
+                          <SelectItem key={item.key} value={item.key}>
+                            {item.question}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
+                {creating ? (
+                  <Field>
+                    <label htmlFor="nc-publicar" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
+                      <Checkbox
+                        id="nc-publicar"
+                        checked={form.publish}
+                        onCheckedChange={(value) => setForm({ ...form, publish: value === true })}
+                      />
+                      Publicar al guardar
+                    </label>
+                    <FieldDescription>Sin publicar queda como borrador y {receptionName} no la usa.</FieldDescription>
+                  </Field>
+                ) : null}
+              </>
+            )}
+          </FieldGroup>
         </FormDrawer>
       ) : null}
     </PageShell>

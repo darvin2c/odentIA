@@ -6,6 +6,7 @@ import {
   cn,
   Field,
   FieldError,
+  FieldGroup,
   FieldLabel,
   Input,
   InputGroup,
@@ -970,129 +971,131 @@ function OwnServiceDrawer({
       onClose={onClose}
       onSubmit={submit}
     >
-      <Field>
-        <FieldLabel htmlFor={`${id}-nombre`}>Nombre</FieldLabel>
-        <Input
-          id={`${id}-nombre`}
-          value={name}
-          maxLength={200}
-          aria-invalid={(submitted && nameIssue !== null) || undefined}
-          onChange={(event) => setName(event.target.value)}
-        />
-        {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
-      </Field>
-      <OfficialCodeField
-        value={officialCode}
-        onChange={setOfficialCode}
-        error={submitted ? codeIssue : null}
-      />
-      <Field>
-        <FieldLabel htmlFor={`${id}-especialidad`}>Especialidad</FieldLabel>
-        <ChoiceSelect
-          id={`${id}-especialidad`}
-          value={specialtyId}
-          placeholder={specialtiesQuery.isPending ? "Cargando…" : "Elige la especialidad"}
-          disabled={specialtiesQuery.isPending}
-          aria-invalid={(submitted && specialtyIssue !== null) || undefined}
-          onChange={(event) => setSpecialtyId(event.target.value)}
-        >
-          {(specialtiesQuery.data?.data ?? []).map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </ChoiceSelect>
-        {submitted && specialtyIssue ? <FieldError>{specialtyIssue}</FieldError> : null}
-      </Field>
-      {/* Sin «dónde» (latidIA, decisión 4 del issue 229), todo servicio es general. */}
-      {productUi().site ? (
+      <FieldGroup>
         <Field>
-          <span id={`${id}-donde`} className="text-sm font-medium">
-            Dónde se hace
-          </span>
-          <RadioChips
-            labelledBy={`${id}-donde`}
-            value={scope}
-            options={SERVICE_PLACE_OPTIONS}
-            onChange={(next) => {
-              setScope(next)
-              // Lo que deja en la pieza depende de dónde se hace.
-              setLeavesCondition("")
-              setLeavesVariant("")
+          <FieldLabel htmlFor={`${id}-nombre`}>Nombre</FieldLabel>
+          <Input
+            id={`${id}-nombre`}
+            value={name}
+            maxLength={200}
+            aria-invalid={(submitted && nameIssue !== null) || undefined}
+            onChange={(event) => setName(event.target.value)}
+          />
+          {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
+        </Field>
+        <OfficialCodeField
+          value={officialCode}
+          onChange={setOfficialCode}
+          error={submitted ? codeIssue : null}
+        />
+        <Field>
+          <FieldLabel htmlFor={`${id}-especialidad`}>Especialidad</FieldLabel>
+          <ChoiceSelect
+            id={`${id}-especialidad`}
+            value={specialtyId}
+            placeholder={specialtiesQuery.isPending ? "Cargando…" : "Elige la especialidad"}
+            disabled={specialtiesQuery.isPending}
+            aria-invalid={(submitted && specialtyIssue !== null) || undefined}
+            onChange={(event) => setSpecialtyId(event.target.value)}
+          >
+            {(specialtiesQuery.data?.data ?? []).map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </ChoiceSelect>
+          {submitted && specialtyIssue ? <FieldError>{specialtyIssue}</FieldError> : null}
+        </Field>
+        {/* Sin «dónde» (latidIA, decisión 4 del issue 229), todo servicio es general. */}
+        {productUi().site ? (
+          <Field>
+            <span id={`${id}-donde`} className="text-sm font-medium">
+              Dónde se hace
+            </span>
+            <RadioChips
+              labelledBy={`${id}-donde`}
+              value={scope}
+              options={SERVICE_PLACE_OPTIONS}
+              onChange={(next) => {
+                setScope(next)
+                // Lo que deja en la pieza depende de dónde se hace.
+                setLeavesCondition("")
+                setLeavesVariant("")
+              }}
+            />
+            <p className="text-xs text-muted-foreground">
+              Así la atención sabe qué pedir al registrarlo.
+            </p>
+          </Field>
+        ) : null}
+        {leaves ? (
+          <leaves.Field
+            idPrefix={id}
+            scope={scope}
+            condition={leavesCondition}
+            variant={leavesVariant}
+            onChange={(nextCondition, nextVariant) => {
+              setLeavesCondition(nextCondition)
+              setLeavesVariant(nextVariant)
             }}
           />
+        ) : null}
+        <Field>
+          <span id={`${id}-cobro`} className="text-sm font-medium">
+            Cómo se cobra
+          </span>
+          <RadioChips
+            labelledBy={`${id}-cobro`}
+            value={billingMode}
+            options={BILLING_OPTIONS}
+            onChange={setBillingMode}
+          />
           <p className="text-xs text-muted-foreground">
-            Así la atención sabe qué pedir al registrarlo.
+            Por sesión: se cobra el precio en cada visita atendida.
           </p>
         </Field>
-      ) : null}
-      {leaves ? (
-        <leaves.Field
-          idPrefix={id}
-          scope={scope}
-          condition={leavesCondition}
-          variant={leavesVariant}
-          onChange={(nextCondition, nextVariant) => {
-            setLeavesCondition(nextCondition)
-            setLeavesVariant(nextVariant)
-          }}
-        />
-      ) : null}
-      <Field>
-        <span id={`${id}-cobro`} className="text-sm font-medium">
-          Cómo se cobra
-        </span>
-        <RadioChips
-          labelledBy={`${id}-cobro`}
-          value={billingMode}
-          options={BILLING_OPTIONS}
-          onChange={setBillingMode}
-        />
-        <p className="text-xs text-muted-foreground">
-          Por sesión: se cobra el precio en cada visita atendida.
-        </p>
-      </Field>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field>
-          <FieldLabel htmlFor={`${id}-precio`}>
-            {billingMode === "session" ? "Precio por sesión" : "Precio"}
-          </FieldLabel>
-          <InputGroup>
-            <InputGroupAddon align="inline-start">
-              <InputGroupText>{currencySymbol(regional.currency, regional.locale)}</InputGroupText>
-            </InputGroupAddon>
-            <InputGroupInput
-              id={`${id}-precio`}
-              inputMode="decimal"
-              placeholder={formatMoneyInput(0, regional.currency, regional.locale)}
-              aria-invalid={priceIssue !== null || undefined}
-              value={price}
-              onChange={(event) => setPrice(event.target.value)}
-            />
-          </InputGroup>
-          {priceIssue ? (
-            <FieldError>{priceIssue}</FieldError>
-          ) : (
-            <p className="text-xs text-muted-foreground">Usa 0 si no tiene costo.</p>
-          )}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${id}-duracion`}>Duración</FieldLabel>
-          <InputGroup>
-            <InputGroupInput
-              id={`${id}-duracion`}
-              inputMode="numeric"
-              aria-invalid={durationIssue !== null || undefined}
-              value={durationMin}
-              onChange={(event) => setDurationMin(event.target.value)}
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupText>min</InputGroupText>
-            </InputGroupAddon>
-          </InputGroup>
-          {durationIssue ? <FieldError>{durationIssue}</FieldError> : null}
-        </Field>
-      </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field>
+            <FieldLabel htmlFor={`${id}-precio`}>
+              {billingMode === "session" ? "Precio por sesión" : "Precio"}
+            </FieldLabel>
+            <InputGroup>
+              <InputGroupAddon align="inline-start">
+                <InputGroupText>{currencySymbol(regional.currency, regional.locale)}</InputGroupText>
+              </InputGroupAddon>
+              <InputGroupInput
+                id={`${id}-precio`}
+                inputMode="decimal"
+                placeholder={formatMoneyInput(0, regional.currency, regional.locale)}
+                aria-invalid={priceIssue !== null || undefined}
+                value={price}
+                onChange={(event) => setPrice(event.target.value)}
+              />
+            </InputGroup>
+            {priceIssue ? (
+              <FieldError>{priceIssue}</FieldError>
+            ) : (
+              <p className="text-xs text-muted-foreground">Usa 0 si no tiene costo.</p>
+            )}
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`${id}-duracion`}>Duración</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id={`${id}-duracion`}
+                inputMode="numeric"
+                aria-invalid={durationIssue !== null || undefined}
+                value={durationMin}
+                onChange={(event) => setDurationMin(event.target.value)}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>min</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+            {durationIssue ? <FieldError>{durationIssue}</FieldError> : null}
+          </Field>
+        </div>
+      </FieldGroup>
     </FormDrawer>
   )
 }

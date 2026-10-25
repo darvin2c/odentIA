@@ -46,10 +46,13 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await leave.getByRole("button", { name: "Descartar y salir" }).click()
   await expect(page).toHaveURL(/\/home/)
 
-  // La app de cuenta tiene la misma columna: el perfil se edita al lado.
+  // La app de cuenta tiene la misma columna: el perfil se edita al lado. Va a
+  // todo el alto junto a su cabecera, no debajo: así su pie queda a la vista.
   await gotoHydrated(page, `${PANEL}/profile?edit=password`)
   await expect(column.getByRole("region", { name: "Cambiar contraseña" })).toBeVisible()
   await expect(page.getByRole("dialog")).toHaveCount(0)
+  expect(await column.boundingBox()).toMatchObject({ y: 0, height: 900 })
+  await expect(column.getByRole("button", { name: "Cancelar" })).toBeInViewport({ ratio: 1 })
 
   // Estrecha: el mismo formulario es un cajón.
   await page.setViewportSize({ width: 1100, height: 800 })
