@@ -79,10 +79,31 @@
 @keyframes lt-rtabs-grow { from { transform: scaleX(0); } to { transform: none; } }
 
 @media (max-width: 720px) {
-  .lt-rtabs { padding: 16px; border-radius: 20px; gap: 14px; }
-  .lt-rtabs-card { padding: 14px; }
+  /* Teléfono: más apretado, para que las pestañas y lo que muestra Pacientes quepan en 390 × 844. */
+  .lt-rtabs { padding: 14px; border-radius: 20px; gap: 10px; }
+  .lt-rtabs-top { gap: 6px; }
+  .lt-rtabs-top > b { font-size: 20px; }
+  .lt-rtabs-pills { gap: 6px; }
+  .lt-rtabs-pills span { font-size: 12px; padding: 5px 10px; }
+  .lt-rtabs-vs { font-size: 12px; margin-top: -4px; }
+  .lt-rtabs-card { padding: 12px; }
+  .lt-rtabs-hgroup { margin-bottom: 2px; }
+  .lt-rtabs-hgroup .lt-rtabs-label { font-size: 13px; }
+  .lt-rtabs-step { gap: 4px; padding-top: 2px; }
+  .lt-rtabs-step .lt-rtabs-track { height: 12px; }
+  .lt-rtabs-sub { font-size: 11.5px; }
+  .lt-rtabs-tip { margin-top: 6px; padding: 10px 12px; font-size: 13px; line-height: 1.45; }
+  /* Resumen y Agente: dos tarjetas por fila, más bajas. */
+  .lt-rtabs-grid, .lt-rtabs-grid-agents { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .lt-rtabs-grid .lt-rtabs-card { gap: 4px; }
+  .lt-rtabs-grid .lt-rtabs-label { font-size: 12.5px; }
+  .lt-rtabs-grid .lt-rtabs-cmp { font-size: 12px; }
+  .lt-rtabs-grid .lt-rtabs-big { font-size: 22px; }
   .lt-rtabs-big { font-size: 26px; }
   .lt-rtabs-line, .lt-rtabs-line-room { grid-template-columns: minmax(0, 1fr) auto; }
   .lt-rtabs-line .lt-rtabs-track { grid-column: 1 / -1; grid-row: 2; }
   .lt-rtabs-panel { min-height: 0; }
+  /* Las cinco pestañas a la vista, en dos filas (3 + 2): nada queda escondido de lado. */
+  .lt-rtabs-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 4px; overflow: visible; }
+  .lt-rtabs-tabs button { padding: 0 6px; min-height: 44px; font-size: 14px; }
 }

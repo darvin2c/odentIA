@@ -40,7 +40,8 @@ const { tag, name, color, phrase, h1, meaning, copyBasis = 440, demoBasis = 540,
   .ah { padding: 144px 0 96px; }
   .ah-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px 56px; align-items: var(--al); }
   .ah-copy { flex: 1 1 var(--cb); min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-  .ah-copy.top { padding-top: 40px; }
+  /* Un poco de aire sobre el nombre, sin bajar el botón principal de la primera pantalla en 1280 × 720. */
+  .ah-copy.top { padding-top: 20px; }
   .ah-demo { flex: 1 1 var(--db); min-width: 0; }
   .ah-tag { color: var(--c); font-size: 13px; letter-spacing: .12em; }
   .ah-name { font-size: clamp(64px, 8vw, 104px); line-height: .9; letter-spacing: -.06em; font-weight: 800; }

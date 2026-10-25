@@ -188,6 +188,11 @@ const rows = plan
 
   .faqwrap { background: var(--paper); }
 
+  /* Portátil (1366 × 768, 1280 × 720): menos aire bajo la cabecera para que la demo entera y el botón
+     principal quepan en la primera pantalla. */
+  @media (min-width: 1081px) and (max-height: 820px) {
+    .ch { padding-top: 112px; }
+  }
   @media (max-width: 1080px) {
     .ch-in { grid-template-columns: minmax(0, 1fr); }
     .ch-copy { max-width: 640px; }

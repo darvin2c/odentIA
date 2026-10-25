@@ -17,8 +17,8 @@ const BASE = { when: "Lunes 26 de octubre · 09:00", short: "lunes 26 a las 09:0
 
 /** Los papeles de la consulta del 24 de octubre: se descargan 30 días, hasta el 23 de noviembre. */
 const PAPERS = [
-  { id: "receta", name: "Receta N.º 1", sub: "24 de octubre · disponible hasta el 23 de noviembre" },
-  { id: "comprobante", name: "Comprobante N.º 000001", sub: "24 de octubre · disponible hasta el 23 de noviembre" },
+  { id: "receta", name: "Receta N.º 1", sub: "24 oct. · hasta el 23 de noviembre" },
+  { id: "comprobante", name: "Comprobante N.º 000001", sub: "24 oct. · hasta el 23 de noviembre" },
 ]
 
 /** Los tres interruptores de «Tus mensajes»; las novedades solo con su sí. */
@@ -191,7 +191,7 @@ export default function PatientPhone() {
           </section>
 
           <section className={card(3)} aria-label="Tus papeles">
-            <span className="pp-h">TUS PAPELES</span>
+            <span className="pp-h">TUS PAPELES · QUEDAN AQUÍ 30 DÍAS</span>
             {PAPERS.map((p) => (
               <span key={p.id} className="pp-paper">
                 <span className="pp-paper-name">
@@ -207,12 +207,10 @@ export default function PatientPhone() {
                 </button>
               </span>
             ))}
-            <span className="pp-sub small">Cada papel queda aquí 30 días. Después, pídeselo al consultorio.</span>
           </section>
 
           <section className={card(4)} aria-label="Tus mensajes">
-            <span className="pp-h">TUS MENSAJES</span>
-            <span className="pp-sub small">Elige qué mensajes quieres recibir del consultorio.</span>
+            <span className="pp-h">TUS MENSAJES · ELIGE CUÁLES RECIBES</span>
             {MESSAGES.map((m) => (
               <span key={m.id} className="pp-line sep">
                 <span>{m.title}</span>

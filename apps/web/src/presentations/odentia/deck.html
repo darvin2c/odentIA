@@ -223,8 +223,9 @@ h1, h2, h3, p { margin: 0; }
 .p1nhead b { font-weight: 600; }
 .p1night.ok .p1nhead { color: var(--sky); }
 .p1people { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
-.p1p { display: flex; align-items: center; gap: 9px; padding: 11px 10px; border-radius: 14px; background: rgba(13,38,47,.85); border: 1.5px solid var(--line); animation: pop .3s both; transition: border-color .3s, opacity .4s, box-shadow .3s; min-width: 0; }
-.p1p i { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 15px; font-weight: 800; background: #3b5a63; color: var(--on); transition: background .3s, color .3s; }
+/* Seis por fila en 800 px: avatar y rellenos justos para que el nombre entero quepa («Carmen»). */
+.p1p { display: flex; align-items: center; gap: 6px; padding: 11px 8px; border-radius: 14px; background: rgba(13,38,47,.85); border: 1.5px solid var(--line); animation: pop .3s both; transition: border-color .3s, opacity .4s, box-shadow .3s; min-width: 0; }
+.p1p i { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 15px; font-weight: 800; background: #3b5a63; color: var(--on); transition: background .3s, color .3s; }
 .p1p span { display: flex; flex-direction: column; min-width: 0; }
 .p1p b { font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .p1p small { font-family: var(--agent); font-size: 14px; color: var(--on-3); }
@@ -858,8 +859,44 @@ h1, h2, h3, p { margin: 0; }
   .layer.cur .mod i { background: var(--sky); }
   .kpi path { stroke-dashoffset: 0; }
 }
+/* ===== De pie (teléfono o tableta): el aviso para girar y las partes una debajo de otra =====
+   deck.js pone «stacked» en <html> y escala cada parte al ancho de la pantalla (fit). Acostado y en
+   el escritorio no se aplica nada de esto. */
+.turn { display: none; }
+html.stacked, html.stacked body { height: auto; overflow: visible; }
+html.stacked { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html.stacked body { margin: 0; }
+.stacked .turn {
+  display: flex; align-items: center; gap: 12px;
+  margin: calc(12px + env(safe-area-inset-top, 0px)) 16px 12px; padding: 12px 16px;
+  border-radius: 14px; background: rgba(15,46,56,.88); border: 1px solid var(--line-2);
+  font: 600 15px/1.4 var(--font); color: var(--on);
+}
+.stacked .turn svg { width: 30px; height: 30px; flex: none; fill: none; stroke: var(--sky); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.stacked .viewport { position: relative; inset: auto; }
+.stacked .stage { left: 0; top: 0; height: auto; display: flex; flex-direction: column; gap: 40px; background: none; overflow: visible; }
+.stacked .slide { position: relative; inset: auto; flex: none; height: 1080px; visibility: visible; overflow: hidden; background: 
+    radial-gradient(1200px 700px at 78% 30%, rgba(79,195,215,0.09), transparent 60%),
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    var(--night); }
+.stacked .stage.cold .slide.on { background: 
+    radial-gradient(1200px 700px at 78% 30%, rgba(232,146,124,0.06), transparent 60%),
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 64px 64px,
+    #0b1c22; }
+/* Las demás partes se ven quietas en su primer momento; la que queda a la vista empieza al llegar. */
+.stacked .slide:not(.on) > .layer:first-child { opacity: 1; visibility: visible; transform: none; filter: none; transition: none; }
+/* De pie no se presenta: quedan solo las flechas (el guion y la pantalla completa son para quien presenta). */
+.stacked .count, .stacked .progress, .stacked #notesBtn, .stacked #full, .stacked .notes-panel { display: none; }
+.stacked .controls button { box-sizing: border-box; min-height: 44px; min-width: 44px; }
+@media (prefers-reduced-motion: no-preference) {
+  .stacked .turn svg { animation: turn 3s ease-in-out infinite; }
+}
+@keyframes turn { 0%, 25% { transform: none; } 45%, 75% { transform: rotate(-90deg); } 95%, 100% { transform: none; } }
 </style>
 
+<p class="turn" id="turn"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="10" y="4" width="12" height="22" rx="2.5"/><path d="M14.5 22.5h3"/><path d="M27 17a10 10 0 0 1-8 9.8M24.5 23.8l-5.5 3 1.2-5.7" /></svg><span>Gira el teléfono para ver la presentación</span></p>
 <div class="viewport" id="viewport">
 <div class="stage" id="stage" role="region" aria-roledescription="presentación" aria-label="Programa Fundadores de odentIA">
 

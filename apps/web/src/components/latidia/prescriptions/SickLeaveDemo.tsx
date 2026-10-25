@@ -63,7 +63,9 @@ export default function SickLeaveDemo() {
           </span>
           <span className="sl-range">{range}.</span>
         </fieldset>
-        <span className="sl-field">
+        {/* En el teléfono no se muestra: la constancia de al lado ya lo dice, y así los días y el documento
+            caben en una pantalla. */}
+        <span className="sl-field sl-indic">
           <span className="sl-label">Indicaciones (opcional)</span>
           <span className="sl-box">Reposo relativo, sin esfuerzo físico</span>
         </span>

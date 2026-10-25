@@ -1,14 +1,15 @@
 /* La atención de Rosa dictándose (ClioDictation.tsx, tablero «Clio» de latidIA). Todo bajo .lcd. Imita la
-   app real: fondo claro, tarjetas blancas, sugerencias en lila suave y botones en píldora. */
+   app real: fondo claro, tarjetas blancas, sugerencias en lila suave y botones en píldora. El alto fijo
+   (el del paso más alto) evita saltos y deja la atención entera en una pantalla de 768 px. */
 .lcd {
   background: #f6f5fa;
   color: var(--ink);
   border-radius: 26px;
-  padding: 20px;
-  min-height: 820px;
+  padding: 16px 18px;
+  min-height: 730px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.6);
 }
 .lcd-top {
@@ -21,11 +22,11 @@
 .lcd-who {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
   min-width: 0;
 }
 .lcd-who b {
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: -0.02em;
 }
 .lcd-crumbs {
@@ -50,10 +51,10 @@
   background: #f5f0fd;
   border: 1px solid #dccdf5;
   border-radius: 18px;
-  padding: 14px 16px;
+  padding: 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 .lcd-bar-head {
   display: flex;
@@ -109,8 +110,8 @@
   gap: 14px;
   background: #fff;
   border-radius: 12px;
-  padding: 8px 12px;
-  min-height: 44px;
+  padding: 6px 12px;
+  min-height: 40px;
 }
 .lcd-wave {
   display: flex;
@@ -164,10 +165,10 @@
   background: #fff;
   border: 1px solid #ece8f4;
   border-radius: 16px;
-  padding: 12px 14px;
+  padding: 9px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .lcd-block-head {
   display: flex;
@@ -187,7 +188,7 @@
   align-items: center;
   gap: 8px 10px;
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 7px 10px;
   background: #f5f0fd;
   box-shadow: inset 0 0 0 1px #dccdf5;
   transition: background-color 0.4s, box-shadow 0.4s;
@@ -240,7 +241,7 @@
   font-size: 13px;
   font-weight: 700;
   border-radius: 999px;
-  padding: 7px 13px;
+  padding: 6px 12px;
   white-space: nowrap;
 }
 .lcd-btn.p {
@@ -255,7 +256,7 @@
 .lcd-btn.ok {
   color: #166534;
   background: #ecfdf3;
-  padding: 7px 12px;
+  padding: 6px 12px;
 }
 .lcd-bulk .lcd-btn {
   padding: 8px 14px;

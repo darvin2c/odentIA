@@ -266,7 +266,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 <style>
   /* La cabecera va encima, absoluta: 88 px suyos y 64 de aire, como en el tablero. */
   .rh { padding: 152px 0 96px; }
-  .rh-in { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  /* El texto arranca arriba, junto a la ficha: el botón principal queda a la vista en 1280 × 720. */
+  .rh-in { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
   .rh-copy { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
   .rh-h1 { font-size: clamp(36px, 3.8vw, 50px); line-height: 1.03; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
   .acc { color: var(--sky); }

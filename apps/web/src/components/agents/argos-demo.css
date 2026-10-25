@@ -3,6 +3,11 @@
 .ad-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .ad-head b { font-size: 18px; }
 .ad-scope { font-size: 13px; color: var(--muted); background: #f1f5f9; border-radius: 999px; padding: 6px 12px; }
+/* «Preguntar otra vez» en la esquina de arriba: al tocarlo, la pregunta empieza justo debajo. */
+.ad-again { margin-left: auto; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 700 13px var(--font); color: var(--ink-2); background: #fff; border: 1px solid #cbd5e1; transition: border-color .2s ease; }
+.ad-again:hover { border-color: var(--night); }
+.ad-again:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.ad-again svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ad-field { display: flex; align-items: center; gap: 10px; border-radius: 999px; padding: 6px 6px 6px 18px; }
 .ad-soft { background: #f1f5f9; }
 .ad-amber { border: 1.5px solid var(--amber); }

@@ -25,7 +25,6 @@ const trail: [string, string][] = [
 ]
 // El ámbar de Argos sobre claro no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
 const argosTag = "#9a6a12"
-const REPLAY = "odentia:reportes-preguntar"
 
 const faq: FaqItem[] = [
   ...page.faq,
@@ -47,7 +46,6 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <p class="sh-title">Pregúntale a <span style={`color: ${AGENT_COLORS.administrador.dark}`}>tu clínica.</span></p>
     <Fragment slot="actions">
       <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-      <button type="button" class="btn btn-g" data-replay={REPLAY}>Preguntar otra vez</button>
     </Fragment>
     <ArgosDemo
       slot="demo"
@@ -58,7 +56,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       field="amber"
       actions={[{ label: "Ver quiénes", primary: true }, { label: "Fijar en Resumen" }, { label: "Descargar" }]}
       note="Demostración con datos de ejemplo."
-      replayEvent={REPLAY}
+      replay="Preguntar otra vez"
     />
   </SplitHero>
 
@@ -107,13 +105,6 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <CtaBand title="Pregúntale a tu clínica desde hoy." />
 </Base>
 )}
-
-<script>
-  // «Preguntar otra vez»: la demostración de Argos (isla) escucha este evento y vuelve a empezar.
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-replay]")) {
-    button.addEventListener("click", () => window.dispatchEvent(new Event(button.dataset.replay ?? "")))
-  }
-</script>
 
 <style>
   .shot { margin: 0; display: flex; flex-direction: column; gap: 8px; max-width: 900px; align-self: center; width: 100%; }

@@ -1,5 +1,5 @@
 /* Calculadora «Lo que pagas y lo que recuperas» (isla ValueCalculator): arriba la tarjeta del plan
-   y la cuenta del mes sobre claro; debajo, los números de la clínica sobre fondo noche. */
+   y la cuenta del mes sobre claro; debajo, los números de la clínica y su resultado sobre fondo noche. */
 .vc {
   display: flex;
   flex-direction: column;
@@ -71,6 +71,8 @@
   border-top: 1px solid var(--line);
   padding-top: 8px;
 }
+/* Los números de la clínica y su resultado, en la misma pantalla: en una columna (tableta y teléfono)
+   con la franja de resumen pegada abajo; desde 1000 px, en dos columnas con el resultado quieto al lado. */
 .vc-panel {
   border-radius: 26px;
   padding: 36px;
@@ -80,11 +82,16 @@
   flex-direction: column;
   gap: 20px;
 }
-.vc-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+.vc-edit {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vc-out {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  align-items: stretch;
+  min-width: 0;
 }
 .vc-in {
   border-radius: 22px;
@@ -173,6 +180,10 @@
   line-height: 1.45;
   color: #d6e8ec;
 }
+.vc-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
 .vc-row strong {
   font-family: var(--mono);
   font-size: 15px;
@@ -180,21 +191,21 @@
   white-space: nowrap;
 }
 
-.vc-res {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 22px 40px;
-  align-items: stretch;
-  padding: 36px 40px;
-  border-radius: 26px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+/* El texto oscuro sobre el color de la marca: celeste en odentIA y lila en latidIA (web.css). */
+.vc {
+  --vc-on-sky: #03252e;
 }
-.vc-left {
+:root[data-brand="latidia"] .vc {
+  --vc-on-sky: #1e0b3d;
+}
+.vc-res {
   display: flex;
   flex-direction: column;
-  gap: 30px;
-  min-width: 0;
+  gap: 26px;
+  padding: 30px 32px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 .vc-bar {
   display: flex;
@@ -214,7 +225,7 @@
   color: #d6e8ec;
 }
 .vc-big {
-  font-size: 72px;
+  font-size: 56px;
   font-weight: 800;
   letter-spacing: -0.04em;
   line-height: 0.9;
@@ -232,41 +243,28 @@
   border-radius: 999px;
   transition: width 0.6s cubic-bezier(0.3, 0.7, 0.2, 1);
 }
-.vc-diff {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 16px;
-  padding-top: 22px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-}
-.vc-diff span {
-  font-size: 17px;
-  color: var(--on-night-2);
-}
-.vc-diff strong {
-  font-size: 44px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 0.9;
-  white-space: nowrap;
-  color: #fff;
-}
+/* La franja de la razón: el texto a la izquierda y la cifra grande a la derecha. */
 .vc-ratio {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  padding: 30px 32px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "t n"
+    "l n"
+    "f n";
+  align-items: center;
+  gap: 4px 20px;
+  padding: 26px 30px;
   border-radius: 22px;
   background: var(--sky);
-  color: #03252e;
+  color: var(--vc-on-sky);
 }
 .vc-rt {
+  grid-area: t;
   font-size: 18px;
   font-weight: 700;
 }
 .vc-ratio strong {
+  grid-area: n;
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -274,33 +272,166 @@
   letter-spacing: -0.05em;
   line-height: 0.85;
   white-space: nowrap;
-  color: #03252e;
+  color: var(--vc-on-sky);
 }
 .vc-cur {
-  font-size: 34px;
+  font-size: 28px;
   letter-spacing: -0.02em;
 }
 .vc-n {
-  font-size: 120px;
+  font-size: 88px;
 }
 .vc-rl {
+  grid-area: l;
   font-size: 18px;
   font-weight: 600;
   line-height: 1.3;
 }
+.vc-fav {
+  grid-area: f;
+  margin-top: 6px;
+  font-size: 14.5px;
+  line-height: 1.35;
+}
+.vc-fav b {
+  font-weight: 800;
+  white-space: nowrap;
+}
 .vc-note {
-  grid-column: 1 / -1;
   font-size: 12.5px;
   color: var(--on-night-3);
 }
+/* Resumen pegado abajo mientras se editan los números; al terminar ellos, queda debajo y se va. */
+.vc-dock {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: var(--sky);
+  color: var(--vc-on-sky);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.vc-dock-t {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.3;
+}
+/* Una cifra no se corta entre «USD» y el número. */
+.vc-dock-t > span > span {
+  white-space: nowrap;
+}
+.vc-dock-t b {
+  font-size: 14px;
+  font-weight: 800;
+}
+.vc-dock-n {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.vc-dock-n small {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vc-fill {
+    transition: none;
+  }
+}
 
-@media (max-width: 900px) {
-  .vc-res {
-    grid-template-columns: 1fr;
+/* Escritorio: dos columnas que caben en la pantalla (1280 × 720), con el resultado quieto al lado. */
+@media (min-width: 1000px) {
+  .vc-panel {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 20px;
     padding: 24px;
   }
+  .vc-out {
+    position: sticky;
+    top: 24px;
+    gap: 12px;
+  }
+  .vc-dock {
+    display: none;
+  }
+  .vc-in {
+    padding: 18px 20px;
+    gap: 4px;
+  }
+  .vc-in .sizes {
+    gap: 6px;
+  }
+  .vc-in .sizes legend {
+    margin-bottom: 4px;
+  }
+  .vc-l {
+    padding-top: 4px;
+  }
+  .vc-range {
+    height: 22px;
+  }
+  .vc-sup {
+    margin-top: 4px;
+    padding-top: 4px;
+  }
+  .vc-col {
+    padding: 14px 20px;
+    gap: 0;
+  }
+  .vc-row {
+    padding: 8px 0;
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  .vc-res {
+    gap: 16px;
+    padding: 18px 20px;
+  }
+  .vc-bar {
+    gap: 8px;
+  }
+  .vc-bl {
+    align-items: center;
+  }
+  .vc-bl > span {
+    font-size: 15px;
+  }
   .vc-big {
-    font-size: 56px;
+    font-size: 40px;
+  }
+  .vc-track {
+    height: 14px;
+  }
+  .vc-ratio {
+    padding: 18px 22px;
+    gap: 2px 16px;
+  }
+  .vc-rt,
+  .vc-rl {
+    font-size: 16px;
+  }
+  .vc-fav {
+    font-size: 14px;
+  }
+  /* A 1024 px la columna es angosta: la cifra se achica con la pantalla para no salirse de su franja. */
+  .vc-cur {
+    font-size: clamp(22px, 2.1vw, 28px);
+  }
+  .vc-n {
+    font-size: clamp(60px, 6.4vw, 88px);
   }
 }
 /* Teléfono: todo en una columna, sin deslizadores, cifras debajo de su etiqueta. */
@@ -326,8 +457,8 @@
     padding: 14px;
     gap: 14px;
   }
-  .vc-grid {
-    grid-template-columns: 1fr;
+  .vc-out {
+    gap: 14px;
   }
   .vc-in,
   .vc-col {
@@ -349,6 +480,8 @@
   .vc-num {
     width: 84px;
     padding: 0 8px;
+    /* Que el campo enfocado no quede detrás de la franja de resumen. */
+    scroll-margin-bottom: 110px;
   }
   .vc-range {
     display: none;
@@ -370,14 +503,9 @@
     font-size: 14px;
   }
   .vc-res {
-    display: flex;
-    flex-direction: column;
     gap: 20px;
     padding: 20px 18px;
     border-radius: 20px;
-  }
-  .vc-left {
-    gap: 20px;
   }
   .vc-bar {
     gap: 8px;
@@ -397,17 +525,14 @@
     height: 14px;
     margin-top: 4px;
   }
-  .vc-diff {
-    padding-top: 12px;
-    gap: 10px;
-  }
-  .vc-diff span {
-    font-size: 14px;
-  }
-  .vc-diff strong {
-    font-size: 28px;
-  }
+  /* En el teléfono la razón va apilada: la cifra debajo de «Recuperas». */
   .vc-ratio {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "t"
+      "n"
+      "l"
+      "f";
     gap: 8px;
     padding: 20px;
     border-radius: 18px;
@@ -416,13 +541,38 @@
   .vc-rl {
     font-size: 15px;
   }
+  .vc-fav {
+    margin-top: 2px;
+    font-size: 14px;
+  }
   .vc-cur {
     font-size: 26px;
   }
   .vc-n {
-    font-size: 88px;
+    font-size: min(88px, 22vw);
   }
   .vc-note {
     font-size: 11.5px;
+  }
+  /* «USD» encima de la cifra, para que «Pierdes … · pagas …» quepa en una línea a 360 px. */
+  .vc-dock {
+    padding: 10px 12px 10px 14px;
+    gap: 10px;
+  }
+  .vc-dock-t {
+    font-size: 12px;
+  }
+  .vc-dock-t b {
+    font-size: 13px;
+  }
+  .vc-dock-n {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-size: 40px;
+  }
+  .vc-dock-n small {
+    font-size: 12px;
+    line-height: 1.1;
   }
 }

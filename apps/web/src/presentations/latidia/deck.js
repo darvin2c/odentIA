@@ -7,11 +7,37 @@
   let timers = [], rafs = new Set(), cleanups = [];
 
   /* ---------- Escala ---------- */
+  // De pie (teléfono o tableta), el escenario entero quedaba como una franja con el texto a 3–10 px:
+  // ahí las partes van una debajo de otra, cada una al ancho de la pantalla, y arriba el aviso
+  // «Gira el teléfono…» (clase «stacked» en <html>). Acostado y en el escritorio, como siempre.
+  const viewport = document.getElementById("viewport");
+  const standing = matchMedia("(orientation: portrait) and (max-width: 1100px)");
+  let stacked = false, fromScroll = false;
+  /** Dónde queda la parte en curso al bajar: su centro a esta altura de la ventana. */
+  const READ_AT = 0.35;
   function fit() {
-    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
-    stage.style.transform = `scale(${s}) translate(-50%, -50%)`;
+    stacked = standing.matches;
+    document.documentElement.classList.toggle("stacked", stacked);
+    if (!stacked) {
+      viewport.style.height = viewport.style.paddingBottom = "";
+      const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+      stage.style.transform = `scale(${s}) translate(-50%, -50%)`;
+      return;
+    }
+    const s = viewport.clientWidth / 1920;
+    stage.style.transform = `scale(${s})`;
+    viewport.style.height = stage.offsetHeight * s + "px";
+    // Aire al final para que la última parte también llegue a la altura de lectura.
+    viewport.style.paddingBottom = Math.max(0, innerHeight * (1 - READ_AT) - 540 * s) + "px";
+  }
+  /** Lleva la parte n a la altura de lectura (solo de pie). */
+  function reveal(n, smooth) {
+    if (!stacked) return;
+    const r = slides[n].getBoundingClientRect();
+    scrollTo({ top: scrollY + r.top + r.height / 2 - innerHeight * READ_AT, behavior: smooth && !reduce ? "smooth" : "auto" });
   }
   addEventListener("resize", fit); fit();
+  standing.addEventListener("change", () => { fit(); if (stacked) reveal(index, false); else scrollTo(0, 0); });
 
   /* ---------- Utilidades de escena ---------- */
   const later = (fn, ms) => timers.push(setTimeout(fn, reduce ? Math.min(ms, 30) : ms));
@@ -63,6 +89,8 @@
     document.getElementById("notesTitle").textContent = "Guion · parte " + (n + 1) + " de " + slides.length;
     document.getElementById("notesText").textContent = notes ? notes.textContent : "";
     try { history.replaceState(null, "", "#p" + (n + 1)); } catch (e) {}
+    // De pie, la parte nueva sube a la vista (salvo cuando fue el propio desplazamiento el que la eligió).
+    if (stacked && slideChanged && !fromScroll) reveal(n, !fresh);
   }
   function next() {
     const layers = layersOf(slides[index]);
@@ -831,10 +859,35 @@
     else if (e.key === "n" || e.key === "N") toggleNotes();
     else if (e.key === "f" || e.key === "F") document.getElementById("full").click();
   });
-  document.getElementById("viewport").addEventListener("click", (e) => { (e.clientX > innerWidth * 0.3 ? next : prev)(); });
-  let sx = null;
-  addEventListener("touchstart", e => { sx = e.touches[0].clientX; }, { passive: true });
-  addEventListener("touchend", e => { if (sx === null) return; const dx = e.changedTouches[0].clientX - sx; if (Math.abs(dx) > 40) (dx < 0 ? next : prev)(); sx = null; });
+  viewport.addEventListener("click", (e) => {
+    // De pie, tocar otra parte la abre; tocar la que está en curso avanza como siempre.
+    if (stacked) {
+      const i = slides.indexOf(e.target.closest(".slide"));
+      if (i >= 0 && i !== index) { show(i, 0); return; }
+    }
+    (e.clientX > innerWidth * 0.3 ? next : prev)();
+  });
+  let sx = null, sy = 0;
+  addEventListener("touchstart", e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  addEventListener("touchend", e => {
+    if (sx === null) return;
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    // De pie se baja con el dedo: solo un gesto claramente de lado cambia de momento.
+    if (Math.abs(dx) > 40 && (!stacked || Math.abs(dx) > 2 * Math.abs(dy))) (dx < 0 ? next : prev)();
+    sx = null;
+  });
+  // De pie, al dejar de bajar, la parte que queda a la altura de lectura pasa a ser la actual y empieza.
+  let settle = 0;
+  addEventListener("scroll", () => {
+    if (!stacked) return;
+    clearTimeout(settle);
+    settle = setTimeout(() => {
+      const line = innerHeight * READ_AT;
+      let best = index, dist = Infinity;
+      slides.forEach((s, i) => { const r = s.getBoundingClientRect(), d = Math.abs(r.top + r.height / 2 - line); if (d < dist) { dist = d; best = i; } });
+      if (best !== index) { fromScroll = true; show(best, 0); fromScroll = false; }
+    }, 160);
+  }, { passive: true });
 
   const m = /^#p(\d+)$/.exec(location.hash);
   show(m ? +m[1] - 1 : 0, 0, true);
