@@ -2,6 +2,7 @@ import { type ConsentSections, SUGGESTED_CONSENT_TEMPLATES } from "@odentia/clin
 import type { Db } from "@odentia/db"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { clinicalFormResponse } from "@odentia/db/schema/clinical-forms"
+import { orgProfile } from "@odentia/db/schema/org"
 import { and, eq, ilike } from "drizzle-orm"
 import {
   advanceClinicalOrder,
@@ -292,13 +293,19 @@ export async function seedClinicalForms(
   const orders = await listClinicalOrders(tx, orgId, { patientId })
   // Una orden de imagen con su diagnóstico, para «Imprimir» y «Enviar».
   if (!orders.some((order) => order.kind === "imagen")) {
+    // Dientes impactados, en la lista de la clínica (la demo de producción usa la CIE-11).
+    const [profile] = await tx
+      .select({ system: orgProfile.diagnosisSystem })
+      .from(orgProfile)
+      .where(eq(orgProfile.organizationId, orgId))
+      .limit(1)
     await createClinicalOrder(tx, orgId, ownerUserId, {
       kind: "imagen",
       patientId,
       recipient: "Centro de imágenes Miraflores",
       title: "Radiografía panorámica",
       detail: "Evaluar tercer molar inferior izquierdo (pieza 38).",
-      diagnosisCode: "K01.1",
+      diagnosisCode: profile?.system === "ICD-11" ? "DA07.8" : "K01.1",
     })
   }
   if (orders.length === 0) {

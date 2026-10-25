@@ -70,6 +70,11 @@ export interface ReportsAgentSeedInput {
   orgId: string
   /** Quienes dictan sus consultas: desde cuántos meses atrás y qué parte de sus atenciones, al empezar y hoy. */
   dictating: Array<{ userId: string; fromMonthsAgo: number; share: [number, number] }>
+  /**
+   * El plan con que cobra la historia. Sin él, el de la semilla (que se crea si
+   * falta); la demo de producción pasa el plan real y no crea planes.
+   */
+  planCode?: string
 }
 
 /** Un número de 0 a 1 que depende solo del texto: la misma historia da las mismas decisiones. */
@@ -98,9 +103,10 @@ function chunks<T>(items: T[], size = 500): T[][] {
 
 export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Promise<{ conversations: number; consultations: number; recoveries: number; handoffs: number }> {
   const { orgId } = input
-  await seedSaasBilling(tx)
-  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.code, ACTION_PLAN_CODE)).limit(1)
-  if (!plan) throw new Error(`Falta el plan semilla ${ACTION_PLAN_CODE}`)
+  const planCode = input.planCode ?? ACTION_PLAN_CODE
+  if (!input.planCode) await seedSaasBilling(tx)
+  const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.code, planCode)).limit(1)
+  if (!plan) throw new Error(`Falta el plan ${planCode}`)
   const price = (micros: number | null) => (micros === null ? null : discountedMicros(micros, 0))
   const priced = (micros: number | null) => ({ currency: plan.currency, basePriceMicros: micros, priceMicros: price(micros), discountBps: 0 })
   const prices = planPrices(plan)
