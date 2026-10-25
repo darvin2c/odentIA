@@ -1,12 +1,13 @@
 ---
 // Cabecera: se superpone a la portada oscura de cada página; en teléfono, un menú desplegable.
-// «Agentes» abre los tres agentes (lienzo del paso 3, tablero 1): con clic o Enter, y se cierra con Esc o afuera.
+// Una entrada con `menu` («Agentes», y en latidIA «El sistema») abre su desplegable con clic o Enter, y se
+// cierra con Esc o afuera; solo uno abierto a la vez.
 import latidiaDark from "../assets/latidia-logotipo-dark.svg?raw"
 import latidiaLight from "../assets/latidia-logotipo-light.svg?raw"
 import logoDark from "../assets/logotipo-dark.svg?raw"
 import logoLight from "../assets/logotipo-light.svg?raw"
 import { MEDICAL, WORDS } from "../lib/product"
-import { agentNav, ctaOf, loginUrl, mainNav } from "../lib/site"
+import { ctaOf, loginUrl, mainNav, type NavEntry } from "../lib/site"
 const cta = ctaOf(Astro.locals.pricing)
 
 interface Props {
@@ -15,6 +16,10 @@ interface Props {
 const { variant = "dark" } = Astro.props
 const path = Astro.url.pathname.replace(/\/$/, "") || "/"
 const current = (href: string) => path === href || path.startsWith(`${href}/`)
+// En la página a la que lleva el botón principal (pedir la invitación) el botón sobra: ya está ahí.
+const showCta = !current(cta.href)
+/** Un desplegable está en curso si lo está su página que reúne todo o cualquiera de sus filas. */
+const inMenu = (l: NavEntry) => Boolean(l.menu && ((l.menu.all && current(l.menu.all.href)) || l.menu.items.some((i) => current(i.href))))
 const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : variant === "dark" ? logoDark : logoLight
 ---
 <header class:list={["site-head", variant]}>
@@ -22,21 +27,25 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
     <a href="/" class="logo" aria-label={`${WORDS.name}, inicio`} set:html={logo} />
     <nav class="nav" aria-label="Principal">
       {mainNav.map((l) =>
-        l.href === "/agentes" && agentNav.length ? (
+        l.menu ? (
           <details class="dd" data-dd>
-            <summary class:list={["navlink", { cur: current(l.href) }]}>
+            <summary class:list={["navlink", { cur: inMenu(l) }]}>
               {l.label}
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
             </summary>
-            <div class="panel">
-              {agentNav.map((a) => (
-                <a href={a.href} class="ag" aria-current={current(a.href) ? "page" : undefined}>
-                  <i style={`background: ${a.color}`} aria-hidden="true" />
-                  <span><b>{a.label}</b><span>{a.text}</span></span>
-                  <span aria-hidden="true" style={`color: ${a.color}`}>→</span>
-                </a>
-              ))}
-              <a href="/agentes" class="all" aria-current={path === "/agentes" ? "page" : undefined}><span>Los tres juntos, en un caso de principio a fin</span><span aria-hidden="true">→</span></a>
+            <div class:list={["panel", { two: l.menu.columns === 2 }]}>
+              <div class="items">
+                {l.menu.items.map((a) => (
+                  <a href={a.href} class:list={["ag", { plain: !a.color }]} aria-current={current(a.href) ? "page" : undefined}>
+                    {a.color ? <i style={`background: ${a.color}`} aria-hidden="true" /> : null}
+                    <span><b>{a.label}</b><span>{a.text}</span></span>
+                    {a.color ? <span aria-hidden="true" style={`color: ${a.color}`}>→</span> : null}
+                  </a>
+                ))}
+              </div>
+              {l.menu.all ? (
+                <a href={l.menu.all.href} class="all" aria-current={path === l.menu.all.href ? "page" : undefined}><span>{l.menu.all.label}</span><span aria-hidden="true">→</span></a>
+              ) : null}
             </div>
           </details>
         ) : (
@@ -46,34 +55,38 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
     </nav>
     <div class="acts">
       <a class="navlink" href={loginUrl}>Ingresar</a>
-      <a class="btn btn-p btn-sm" href={cta.href}>{cta.label}</a>
+      {showCta ? <a class="btn btn-p btn-sm" href={cta.href}>{cta.label}</a> : null}
     </div>
     <details class="menu">
       <summary aria-label="Abrir menú"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h14M3 10h14M3 14h14" /></svg></summary>
       <div class="sheet">
         {mainNav.map((l) =>
-          l.href === "/agentes" && agentNav.length ? (
+          l.menu ? (
             <>
-              <span class="st">Agentes</span>
-              {agentNav.map((a) => (
-                <a href={a.href} class="sa" aria-current={current(a.href) ? "page" : undefined}><i style={`background: ${a.color}`} aria-hidden="true" />{a.label}</a>
+              <span class="st">{l.label}</span>
+              {l.menu.items.map((a) => (
+                <a href={a.href} class="sa" aria-current={current(a.href) ? "page" : undefined}>{a.color ? <i style={`background: ${a.color}`} aria-hidden="true" /> : null}{a.label}</a>
               ))}
-              <a href="/agentes" class="sub" aria-current={path === "/agentes" ? "page" : undefined}>Los tres juntos</a>
+              {l.menu.all ? <a href={l.menu.all.href} class="sub" aria-current={path === l.menu.all.href ? "page" : undefined}>{l.menu.all.short}</a> : null}
             </>
           ) : (
             <a href={l.href} aria-current={current(l.href) ? "page" : undefined}>{l.label}</a>
           ),
         )}
         <a href={loginUrl}>Ingresar</a>
-        <a class="btn btn-d" href={cta.href}>{cta.label}</a>
+        {showCta ? <a class="btn btn-d" href={cta.href}>{cta.label}</a> : null}
       </div>
     </details>
   </div>
 </header>
 
 <script>
-  // El menú de Agentes se cierra con Esc (vuelve el foco a «Agentes») y al hacer clic afuera.
-  for (const dd of document.querySelectorAll<HTMLDetailsElement>("[data-dd]")) {
+  // Cada desplegable se cierra con Esc (vuelve el foco a su botón), al hacer clic afuera y al abrir otro.
+  const menus = [...document.querySelectorAll<HTMLDetailsElement>("[data-dd]")]
+  for (const dd of menus) {
+    dd.addEventListener("toggle", () => {
+      if (dd.open) for (const other of menus) if (other !== dd) other.open = false
+    })
     dd.addEventListener("keydown", (event) => {
       if (event.key === "Escape" && dd.open) {
         dd.open = false
@@ -117,10 +130,14 @@ const logo = MEDICAL ? (variant === "dark" ? latidiaDark : latidiaLight) : varia
   .dd summary svg { transition: transform .2s; }
   .dd[open] summary svg { transform: rotate(180deg); }
   .panel { position: absolute; left: 50%; top: calc(100% + 14px); transform: translateX(-50%); width: 560px; padding: 12px; border-radius: 20px; background: var(--paper); box-shadow: 0 30px 70px -30px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 2px; }
+  .panel.two { width: 640px; }
+  .items { display: flex; flex-direction: column; gap: 2px; }
+  .two .items { display: grid; grid-template-columns: 1fr 1fr; }
+  .ag.plain { grid-template-columns: 1fr; }
   .ag { display: grid; grid-template-columns: 12px 1fr auto; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 14px; color: var(--ink); text-decoration: none; }
-  .ag > span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; }
+  .ag > span:not([aria-hidden]) { display: flex; flex-direction: column; gap: 2px; }
   .ag b { font-size: 16px; }
-  .ag > span:nth-child(2) > span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+  .ag > span:not([aria-hidden]) > span { font-size: 14px; line-height: 1.45; color: var(--muted); }
   .ag:hover, .ag[aria-current] { background: var(--teal-soft); }
   .all { display: flex; justify-content: space-between; margin-top: 6px; padding: 12px 16px; border-top: 1px solid var(--line); color: var(--teal); text-decoration: none; font-weight: 700; font-size: 15px; }
   .all:hover { color: var(--teal-hover); }

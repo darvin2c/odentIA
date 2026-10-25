@@ -1,0 +1,241 @@
+---
+// /receta-y-descanso-medico, solo de latidIA (lienzo de la web de latidIA, tablero «Receta»): la
+// receta que avisa (embarazo, niños, controlados y alergias), el descanso médico numerado y
+// firmado, las órdenes y los consentimientos, las preguntas y el cierre. La receta no revisa
+// interacciones ni es la receta oficial de ningún país: eso no se dice.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { days, giftOf, shownPlan } from "../../../lib/pricing"
+import { WORDS } from "../../../lib/product"
+import { ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import PrescriptionDemo from "./PrescriptionDemo"
+import SickLeaveDemo from "./SickLeaveDemo"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const plan = shownPlan(pricing)
+const gift = giftOf(pricing)
+const founder = plan !== null && plan === pricing.founders
+
+const path = "/receta-y-descanso-medico"
+const title = "Receta médica y descanso médico para consultorio"
+const description =
+  "Receta médica y descanso médico firmados desde la historia clínica de tu consultorio: avisa alergias y embarazo, pide el peso de un niño y deja fuera los controlados. El descanso sale numerado y le llega a la persona por WhatsApp."
+const trail: [string, string][] = [["Inicio", "/"], ["Receta y descanso médico", path]]
+
+const rules = [
+  { n: "01 · Alergias", title: "Avisa antes de emitir", text: "Si la persona tiene registrada una alergia a lo que recetas, lo ves en la receta." },
+  { n: "02 · Embarazo y lactancia", title: "Te lo recuerda", text: "Lo contraindicado en el embarazo solo se receta con un motivo escrito." },
+  { n: "03 · Niños", title: "Pide el peso", text: "A un menor de 12 años se le receta con su peso, y el peso va en la receta." },
+  { n: "04 · Controlados", title: "No se emiten aquí", text: "Opioides, benzodiazepinas y afines: «usa la receta oficial» de tu país." },
+]
+
+const papers = [
+  { title: "Orden de imagen", text: "Radiografía, ecografía, tomografía, resonancia o mamografía, con lo que buscas." },
+  { title: "Orden de laboratorio", text: "Los análisis que pides, firmados, para que la persona los lleve." },
+  { title: "Derivación", text: "A otra especialidad o a otro médico, con el motivo." },
+  { title: "Consentimientos", text: "Procedimiento menor, inyectables y toma de muestras, firmados por la persona." },
+  { title: "Lo que trae la persona", text: "Subes su radiografía, ecografía, tomografía, resonancia, mamografía o una foto clínica." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Puedo corregir un descanso médico ya emitido?",
+    a: "No. Se anula con un motivo y emites uno nuevo, con otro número. El anulado queda guardado con su motivo, así se sabe qué pasó.",
+  },
+  {
+    q: "¿El diagnóstico aparece en el descanso?",
+    a: "Solo si la persona lo autoriza, y lo marcas al emitirlo. Sin su autorización, el diagnóstico no va en la constancia ni se guarda en ella.",
+  },
+  {
+    q: "¿Cómo le llega a la persona?",
+    a: "Por el canal donde conversa con tu consultorio, como WhatsApp, y queda en Su enlace 30 días para descargarlo. También lo puedes imprimir.",
+  },
+  {
+    q: "¿Y los medicamentos controlados?",
+    a: "No se emiten en la receta del consultorio. La receta te lo dice al elegirlos: usa la receta oficial de tu país.",
+  },
+  {
+    q: "¿Clío puede preparar la receta?",
+    a: "Clío propone los medicamentos que dictas. La receta y el descanso no se confirman como una sugerencia: los emites tú, con su botón y tu firma.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <section class="hero ph">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap ph-in">
+      <div class="ph-copy">
+        <span class="tag tag-d rise">[ Receta y descanso médico ]</span>
+        <h1 class="ph-h1 rise d1">Receta médica y descanso médico <span class="acc">firmados, sin escribirlos a mano.</span></h1>
+        <p class="ph-lead rise d2">La receta te recuerda el embarazo, te pide el peso de un niño y no deja pasar un controlado. El descanso médico sale numerado y le llega a la persona por WhatsApp.</p>
+        <div class="ph-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="#descanso">Ver el descanso médico</a>
+        </div>
+      </div>
+      <div class="ph-card rise d2">
+        <PrescriptionDemo client:load />
+      </div>
+    </div>
+  </section>
+
+  <section class="ps white">
+    <div class="wrap ps-in">
+      <div class="head">
+        <span class="tag">[ La receta ]</span>
+        <h2 class="ps-h2">Cuatro avisos que cuidan tu firma.</h2>
+        <p class="ps-lead">Eliges cada medicamento por su DCI de una lista de 97 de medicina general; el nombre comercial es opcional. La receta mira los antecedentes de la persona mientras la escribes.</p>
+      </div>
+      <div class="rules">
+        <div class="rule-grid">
+          {rules.map((rule) => (
+            <div class="card-l">
+              <span class="n">{rule.n}</span>
+              <h3>{rule.title}</h3>
+              <p>{rule.text}</p>
+            </div>
+          ))}
+        </div>
+        <figure class="shot">
+          <img
+            src="/img/latidia/receta-embarazo.jpg"
+            width="1280"
+            height="800"
+            loading="lazy"
+            decoding="async"
+            alt="Panel Emitir receta: medicamento por DCI, concentración, forma farmacéutica, dosis, vía, frecuencia, duración y el botón Emitir receta."
+          />
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="ps alt" id="descanso">
+    <div class="wrap ps-in">
+      <div class="head">
+        <span class="tag">[ Descanso médico ]</span>
+        <h2 class="ps-h2">El descanso médico, firmado y numerado en un minuto.</h2>
+        <p class="ps-lead">Eliges desde cuándo y cuántos días. El diagnóstico solo figura si la persona lo autoriza. Una vez emitido no se corrige: se anula con motivo.</p>
+      </div>
+      <SickLeaveDemo client:visible />
+      <div class="pair">
+        <figure class="shot">
+          <img
+            src="/img/latidia/descanso-formulario.jpg"
+            width="1280"
+            height="800"
+            loading="lazy"
+            decoding="async"
+            alt="Panel Emitir descanso médico: desde, días, indicaciones y la casilla de autorización del diagnóstico."
+          />
+          <figcaption>El formulario. Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img
+            src="/img/latidia/descanso.jpg"
+            width="1280"
+            height="800"
+            loading="lazy"
+            decoding="async"
+            alt="Descanso médico N.º 1 emitido, sin diagnóstico porque la persona no lo autorizó, con Imprimir, Enviar a la persona y Anular."
+          />
+          <figcaption>Ya emitido, en Documentos. Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="ps white">
+    <div class="wrap ps-in">
+      <div class="head">
+        <span class="tag">[ Órdenes y consentimientos ]</span>
+        <h2 class="ps-h2">Los demás papeles de la consulta, en el mismo lugar.</h2>
+      </div>
+      <div class="cards">
+        {papers.map((item) => (
+          <div class="card-l">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+        <div class="card-l">
+          <h3>En Su enlace, 30 días</h3>
+          <p>La receta y el descanso médico, para que la persona los descargue. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap"><Faq items={faq} /></div>
+
+  <CtaBand title="Recetas y descansos que salen bien a la primera.">
+    <Fragment slot="text">
+      {gift ? (
+        founder ? (
+          <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, salas ni usuarios.</>
+        ) : (
+          <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, salas ni usuarios.</>
+        )
+      ) : (
+        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, salas ni usuarios.`
+      )}
+    </Fragment>
+  </CtaBand>
+</Base>
+
+<style>
+  /* La cabecera va encima, absoluta: 88 px suyos y 64 de aire, como en el tablero. */
+  .ph { padding: 152px 0 96px; }
+  .ph-in { position: relative; z-index: 2; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .ph-copy { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .ph-h1 { font-size: clamp(36px, 3.8vw, 50px); line-height: 1.03; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .ph-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .ph-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ph-card { flex: 1.25 1 540px; min-width: 0; }
+
+  /* Secciones alternas, blanco y el lila muy claro de latidIA. */
+  .ps { padding: 96px 0; }
+  .ps.white { background: var(--paper); }
+  .ps.alt { background: #f7f5fc; scroll-margin-top: 24px; }
+  .ps-in { display: flex; flex-direction: column; gap: 40px; }
+  .head { display: flex; flex-direction: column; gap: 14px; max-width: 880px; }
+  .ps-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .ps-lead { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+
+  .rules { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  .rule-grid { flex: 1 1 420px; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 14px; }
+  .rules .shot { flex: 1 1 460px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+  .card-l { background: #f7f5fc; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .card-l .n { font-family: var(--agent-font); font-size: 12px; color: var(--teal); text-transform: uppercase; }
+  .card-l h3 { font-size: 19px; line-height: 1.25; }
+  .card-l p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .cards .card-l { padding: 24px; }
+  .cards .card-l h3 { font-size: 20px; }
+  .cards .card-l p { font-size: 16px; }
+  .card-l a { font-weight: 700; }
+
+  /* Capturas con marco: borde lila suave, radio y sombra; la nota debajo. */
+  .shot { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .shot img { width: 100%; height: auto; border-radius: 20px; border: 1px solid #e9e2f7; box-shadow: 0 30px 60px -30px rgba(30, 11, 61, .35); }
+  .shot figcaption { font-size: 13px; color: var(--soft); }
+  .pair { display: flex; flex-wrap: wrap; gap: 24px; }
+  .pair .shot { flex: 1 1 420px; }
+
+  .faqwrap { background: #f7f5fc; padding-bottom: 8px; }
+
+  @media (max-width: 720px) {
+    .ph { padding: 104px 0 56px; }
+    .ph-in { gap: 32px; }
+    .ph-lead { font-size: 17px; }
+    .ps { padding: 64px 0; }
+    .ps-in { gap: 32px; }
+    .rule-grid, .rules .shot, .pair .shot { flex-basis: 100%; }
+  }
+</style>

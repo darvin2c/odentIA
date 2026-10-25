@@ -1,0 +1,200 @@
+---
+// /portal-del-paciente de latidIA (lienzo de la web de latidIA, tablero «Enlace»): la portada con
+// el teléfono de Rosa, cómo entra, lo que decide el consultorio, las preguntas y el cierre.
+// Lo que se promete es lo que hacen hoy Su enlace (`/reserva`) y el portal (`/portal`) de la app:
+// en Su enlace, la receta y el comprobante 30 días y «Tus mensajes» para elegir qué recibe; el
+// descanso médico le llega por WhatsApp o por correo; el portal lo da recepción y se vuelve con la
+// huella o la cara. odentIA sigue con su propia página.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { giftOf } from "../../../lib/pricing"
+import { ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import PasskeyLogin from "./PasskeyLogin"
+import PatientPhone from "./PatientPhone"
+
+const title = "Portal del paciente para tu consultorio, sin descargar nada"
+const description =
+  "Portal del paciente para consultorios médicos: cada paciente tiene su enlace para ver su próxima cita, cambiarla o cancelarla, completar sus datos y descargar su receta. Sin aplicación y sin contraseña."
+const cta = ctaOf(Astro.locals.pricing)
+const gift = giftOf(Astro.locals.pricing)
+const trail: [string, string][] = [["Inicio", "/"], ["Portal del paciente", "/portal-del-paciente"]]
+
+const steps = [
+  { title: "Le llega por su canal", text: "Sofi se lo envía cuando pide una cita, y Argos cuando le toca su control." },
+  { title: "Lo abre en el navegador", text: "No descarga nada ni crea una contraseña." },
+  {
+    title: "Vuelve con su huella o su cara",
+    text: "Si tu consultorio le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, responde el mensaje y recibe uno nuevo.",
+  },
+]
+
+const decides: { title: string; text: string; link?: { href: string; label: string } }[] = [
+  { title: "Su cita", text: "Reserva, cambia o cancela en los horarios libres. El que deja se libera para otro." },
+  {
+    title: "Sus datos y su salud",
+    text: "Los llena antes de llegar. Lo que declara queda como declarado por él, y sus alergias ya hacen que la receta avise.",
+  },
+  {
+    title: "Sus papeles",
+    text: "La receta y el comprobante, para descargar durante 30 días. El descanso médico le llega por WhatsApp o por correo.",
+    link: { href: "/receta-y-descanso-medico", label: "Ver cómo se emiten" },
+  },
+  {
+    title: "Sus mensajes",
+    text: "Elige qué mensajes recibe: recordatorios, controles y novedades. Los avisos de su cita y sus papeles le llegan siempre.",
+  },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿El paciente tiene que descargar una aplicación?",
+    a: "No. Su enlace se abre en el navegador del teléfono. Si tu consultorio le da acceso al portal, guarda su acceso y vuelve con su huella o su cara.",
+  },
+  {
+    q: "¿Qué pasa si el enlace venció?",
+    a: "Responde el mensaje del consultorio y recibe uno nuevo. No hay contraseñas que recordar.",
+  },
+  {
+    q: "¿Cuánto tiempo puede descargar su receta?",
+    a: "La receta y el comprobante quedan en Su enlace durante 30 días desde que se emitieron. Después, se los pide al consultorio. El descanso médico le llega por WhatsApp o por correo al emitirse.",
+  },
+  {
+    q: "¿Lo que llena el paciente entra directo a la historia clínica?",
+    a: "Entra como lo que declaró el paciente, no como algo que el médico confirmó. Sus alergias ya hacen que la receta avise, y el médico las revisa en Antecedentes.",
+  },
+  {
+    q: "¿Quién atiende a una mamá que agenda por su hijo?",
+    a: "Cada uno con lo suyo: la cita y los papeles son del hijo, y la conversación es con la mamá.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="pt">
+    <section class="hero pt-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap pt-hero-in">
+        <div class="pt-copy">
+          <span class="tag tag-d pt-tag rise">[ Su enlace ]</span>
+          <h1 class="pt-h1 rise d1">El portal del paciente de tu consultorio, <span class="acc">sin descargar nada.</span></h1>
+          <p class="pt-lead rise d2">Cada paciente tiene su propio enlace: ve su próxima cita, la cambia o la cancela, completa sus datos y descarga su receta. Sin llamar y sin contraseña.</p>
+          <div class="pt-ctas rise d3">
+            <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+            <a class="btn btn-g" href="#entrar">Cómo entra</a>
+          </div>
+          <span class="pt-hint rise d3">Toca los botones del teléfono: es una demostración con datos de ejemplo.</span>
+        </div>
+        <div class="pt-phone rise d2">
+          <PatientPhone client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="pt-sec white" id="entrar">
+      <div class="wrap pt-enter">
+        <div class="pt-enter-copy">
+          <div class="pt-head">
+            <span class="tag pt-tag">[ Cómo entra ]</span>
+            <h2 class="pt-h2">Un enlace propio, sin aplicación y sin contraseña.</h2>
+          </div>
+          <ol class="pt-steps">
+            {steps.map((step, i) => (
+              <li>
+                <span class="pt-n">{String(i + 1).padStart(2, "0")}</span>
+                <span class="pt-step"><b>{step.title}</b><span>{step.text}</span></span>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div class="pt-login">
+          <PasskeyLogin client:visible />
+        </div>
+      </div>
+    </section>
+
+    <section class="pt-sec">
+      <div class="wrap pt-in">
+        <div class="pt-head">
+          <span class="tag pt-tag">[ Tú decides ]</span>
+          <h2 class="pt-h2">Lo que antes era una llamada, ahora lo resuelve solo.</h2>
+          <p class="pt-p">En el portal, tu consultorio decide qué ve cada paciente desde Configuración › Portal del paciente: sus citas, sus documentos y su cuenta.</p>
+        </div>
+        <div class="pt-grid">
+          {decides.map((item) => (
+            <div class="pt-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}{item.link && <> <a href={item.link.href}>{item.link.label}</a></>}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <div class="pt-faq">
+      <Faq items={faq} />
+    </div>
+    <CtaBand title="Que tus pacientes resuelvan sin llamar.">
+      <Fragment slot="text">
+        {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
+        Sin tarjeta y sin límite de médicos, salas ni usuarios.
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  /* El fondo alterno y las líneas de latidIA (lienzo: #f7f5fc y #e9e2f7), no los grises de odentIA. */
+  .pt { --lat-soft: #f7f5fc; --lat-line: #e9e2f7; background: var(--paper); }
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 56 de aire, como en el tablero. */
+  .pt-hero { padding: 144px 0 96px; }
+  .pt-hero-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px 64px; align-items: center; justify-content: center; }
+  .pt-copy { flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .pt-phone { flex: 0 1 380px; min-width: 0; max-width: 100%; }
+  .pt-tag { font-size: 13px; letter-spacing: .12em; }
+  .pt-h1 { font-size: clamp(36px, 4.2vw, 56px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .pt-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .pt-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .pt-hint { font-size: 14px; color: var(--on-night-3); }
+
+  .pt-sec { padding: 96px 0; background: var(--lat-soft); }
+  .pt-sec.white { background: var(--paper); }
+  .pt-in { display: flex; flex-direction: column; gap: 36px; }
+  .pt-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .pt-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .pt-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+
+  .pt-enter { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .pt-enter-copy { flex: 1.3 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+  .pt-login { flex: 0 1 340px; min-width: 0; max-width: 100%; margin: 0 auto; }
+  .pt-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .pt-steps li { display: flex; gap: 16px; align-items: flex-start; background: var(--lat-soft); border-radius: 18px; padding: 18px 20px; }
+  .pt-n { font-family: var(--agent-font); font-size: 12px; color: var(--teal); padding-top: 3px; }
+  .pt-step { display: flex; flex-direction: column; gap: 4px; }
+  .pt-step b { font-size: 17px; }
+  .pt-step span { font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+  .pt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; }
+  .pt-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .pt-card h3 { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
+  .pt-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .pt-card a { font-weight: 700; }
+
+  .pt-faq { background: var(--paper); padding-bottom: 8px; }
+  .pt-faq :global(details.q) { border-bottom-color: var(--lat-line); }
+
+  @media (max-width: 720px) {
+    .pt-hero { padding: 104px 0 56px; }
+    .pt-hero-in { gap: 32px; }
+    .pt-lead { font-size: 17px; }
+    .pt-ctas :global(.btn) { flex: 1 1 100%; }
+    .pt-copy, .pt-phone, .pt-enter-copy, .pt-login { flex-basis: 100%; }
+    .pt-sec { padding: 64px 0; }
+    .pt-in { gap: 28px; }
+    .pt-enter { gap: 32px; }
+    .pt-p { font-size: 16px; }
+    .pt-steps li { padding: 16px; gap: 12px; }
+  }
+</style>

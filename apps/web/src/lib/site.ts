@@ -27,29 +27,58 @@ export function ctaOf(pricing: Pricing): { href: string; label: string } {
 
 export type NavLink = { href: string; label: string }
 
-/** Una página de agente en el menú «Agentes ▾»: su color (sobre claro) y una línea de lo que hace. */
-export type AgentNavLink = NavLink & { text: string; color: string }
+/** Una fila de un menú desplegable: una línea de lo que hay y, en los agentes, su color (sobre claro). */
+export type MenuItem = NavLink & { text: string; color?: string }
 
-/** El menú de Agentes (lienzo del paso 3, tablero 1): cada agente con su color y lo que hace. */
-export const agentNav: AgentNavLink[] = MEDICAL
-  ? []
-  : [
-      { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde, informa y agenda por todos tus canales, a cualquier hora.", color: "#0e7490" },
-      { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas la consulta y prepara la nota, el odontograma y el presupuesto.", color: "#1f9d7a" },
-      { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes de tu clínica.", color: "#c98a1c" },
-    ]
+/** Un menú desplegable de la cabecera; `all` lleva a la página que reúne todo (`short`, en el teléfono). */
+export type NavMenu = { items: MenuItem[]; all?: NavLink & { short: string }; columns?: 1 | 2 }
 
-// latidIA empieza con su web mínima (decisión 18 del issue 229): inicio, precios, invitación y legales.
-// En odentIA, «Agentes» abre el menú de los tres (agentNav); su dirección lleva a los tres juntos.
-export const mainNav: NavLink[] = MEDICAL
+/** Una entrada de la cabecera: un enlace o, con `menu`, un desplegable. */
+export type NavEntry = NavLink & { menu?: NavMenu }
+
+/** Los tres agentes de cada web (lienzo del paso 3, tablero 1): su color y lo que hace cada uno. */
+const agentsMenu: NavMenu = MEDICAL
+  ? {
+      items: [
+        { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde a cualquier hora, agenda y reconoce una urgencia.", color: "#0e7490" },
+        { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas y ordena la consulta: signos vitales, examen, receta y descanso.", color: "#1f9d7a" },
+        { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes.", color: "#c98a1c" },
+      ],
+      all: { href: "/agentes", label: "Los tres juntos, en una consulta de principio a fin", short: "Los tres juntos" },
+    }
+  : {
+      items: [
+        { href: "/agentes/recepcion", label: "Sofi · recepción", text: "Responde, informa y agenda por todos tus canales, a cualquier hora.", color: "#0e7490" },
+        { href: "/agentes/asistente-clinico", label: "Clío · consulta", text: "Dictas la consulta y prepara la nota, el odontograma y el presupuesto.", color: "#1f9d7a" },
+        { href: "/agentes/administrador", label: "Argos · administración", text: "Trae de vuelta a tus pacientes y responde lo que le preguntes de tu clínica.", color: "#c98a1c" },
+      ],
+      all: { href: "/agentes", label: "Los tres juntos, en un caso de principio a fin", short: "Los tres juntos" },
+    }
+
+/** «El sistema» de latidIA: lo que tiene el consultorio, en dos columnas. */
+const systemMenu: NavMenu = {
+  columns: 2,
+  items: [
+    { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales", text: "Examen por sistemas, antecedentes y su presión en el tiempo." },
+    { href: "/receta-y-descanso-medico", label: "Receta y descanso médico", text: "Avisa embarazo y alergias; el descanso, firmado y numerado." },
+    { href: "/agenda-medica", label: "Agenda y controles", text: "Por sala y por médico, con controles que se repiten." },
+    { href: "/caja-y-cobros", label: "Caja y varias sedes", text: "Cada consulta cobrada, en cada sede." },
+    { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
+    { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente ve su cita, sus datos y sus papeles." },
+    { href: "/seguridad", label: "Seguridad y datos de salud", text: "Cada rol ve solo lo suyo." },
+  ],
+}
+
+export const mainNav: NavEntry[] = MEDICAL
   ? [
-      { href: "/#agentes", label: "Agentes" },
-      { href: "/#sistema", label: "El sistema" },
+      { href: "/agentes", label: "Agentes", menu: agentsMenu },
+      { href: "/historia-clinica-electronica", label: "El sistema", menu: systemMenu },
+      { href: "/omnicanal", label: "Omnicanal" },
       { href: "/precios", label: "Precios" },
     ]
   : [
       { href: "/omnicanal", label: "Omnicanal" },
-      { href: "/agentes", label: "Agentes" },
+      { href: "/agentes", label: "Agentes", menu: agentsMenu },
       { href: "/precios", label: "Precios" },
       { href: "/seguridad", label: "Seguridad" },
     ]
@@ -57,11 +86,33 @@ export const mainNav: NavLink[] = MEDICAL
 export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
   ? [
       {
+        title: "Agentes",
+        links: [
+          { href: "/agentes", label: "Los tres agentes" },
+          { href: "/agentes/recepcion", label: "Sofi · recepción" },
+          { href: "/agentes/asistente-clinico", label: "Clío · consulta" },
+          { href: "/agentes/administrador", label: "Argos · administración" },
+        ],
+      },
+      {
+        title: "El sistema",
+        links: [
+          { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales" },
+          { href: "/receta-y-descanso-medico", label: "Receta y descanso médico" },
+          { href: "/agenda-medica", label: "Agenda y controles" },
+          { href: "/caja-y-cobros", label: "Caja y varias sedes" },
+          { href: "/reportes", label: "Reportes" },
+          { href: "/portal-del-paciente", label: "Su enlace" },
+        ],
+      },
+      {
         title: WORDS.name,
         links: [
+          { href: "/omnicanal", label: "Omnicanal y WhatsApp" },
           { href: "/precios", label: "Precios" },
+          { href: "/seguridad", label: "Seguridad" },
           { href: "/solicitar-invitacion", label: "Pide tu invitación" },
-          { href: `mailto:${contactEmail}`, label: "Habla con nosotros" },
+          { href: "/contacto", label: "Habla con nosotros" },
         ],
       },
     ]
@@ -104,8 +155,8 @@ export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
   },
 ]
 
-/** Dónde se habla con una persona: la página de contacto de odentIA o, en latidIA, el correo. */
-export const contactHref = MEDICAL ? `mailto:${contactEmail}` : "/contacto"
+/** Dónde se habla con una persona: la página de contacto de cada web. */
+export const contactHref = "/contacto"
 
 export const legalLinks: NavLink[] = [
   { href: "/terminos", label: "Términos" },

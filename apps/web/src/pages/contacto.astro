@@ -1,6 +1,8 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.contacto).
+// Contenido en src/lib/pages-data.ts (PAGES.contacto). En latidIA, su propia página (components/latidia/contact).
+import ContactPage from "../components/latidia/contact/ContactPage.astro"
 import InnerPage from "../components/pages/InnerPage.astro"
 import { PAGES } from "../lib/pages-data"
+import { MEDICAL } from "../lib/product"
 ---
-<InnerPage page={PAGES.contacto} />
+{MEDICAL ? <ContactPage /> : <InnerPage page={PAGES.contacto} />}

@@ -1,0 +1,90 @@
+/* La ficha de Luis en la portada: se parece a la app (fondo claro, tarjetas blancas con borde lila
+   suave, chips grises). Los colores del gráfico son los de la app: sistólica azul, diastólica naranja. */
+.pc {
+  --pc-line: #e9e2f7;
+  --pc-chip: #eef0f4;
+  background: #f7f7fb;
+  color: var(--ink);
+  border-radius: 26px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6);
+  min-width: 0;
+}
+.pc-box { background: var(--paper); border: 1px solid var(--pc-line); border-radius: 18px; }
+.pc-head { background: var(--paper); border: 1px solid var(--pc-line); border-radius: 18px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pc-av { width: 48px; height: 48px; flex: none; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px; }
+.pc-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 180px; }
+.pc-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pc-name b { font-size: 18px; }
+.pc-chip { font-size: 12px; font-weight: 600; background: var(--pc-chip); color: var(--ink-2); border-radius: 999px; padding: 3px 8px; }
+.pc-meta { font-size: 13px; color: var(--muted); }
+.pc-attend { font-size: 13px; font-weight: 700; color: #fff; background: var(--teal); border-radius: 999px; padding: 9px 14px; }
+
+.pc-tabs { display: flex; gap: 4px; flex-wrap: wrap; background: #eceaf3; border-radius: 22px; padding: 4px; align-self: flex-start; max-width: 100%; }
+.pc-tab { min-height: 44px; padding: 0 14px; border-radius: 999px; border: 0; cursor: pointer; font: 600 14px var(--font); background: transparent; color: var(--muted); }
+.pc-tab[aria-selected="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, .08); }
+.pc-tab:focus-visible, .pc-hit:focus-visible, .pc-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+.pc-body { min-height: 330px; display: flex; flex-direction: column; }
+.pc-vitals { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; }
+.pc-graph { flex: 1.6 1 300px; min-width: 0; padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.pc-gh { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--soft); }
+.pc-t { font-size: 15px; font-weight: 700; color: var(--ink); }
+.pc-svg { position: relative; }
+.pc-svg svg { display: block; width: 100%; height: auto; }
+.pc-axis { font-family: var(--font); font-size: 11px; fill: var(--soft); }
+.pc-sys, .pc-dia { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.pc-sys { stroke: #1d8fb0; }
+.pc-dia { stroke: #ea6a2f; }
+.pc-dot-s, .pc-dot-d { stroke: #fff; stroke-width: 2; transition: r .2s ease; }
+.pc-dot-s { fill: #1d8fb0; }
+.pc-dot-d { fill: #ea6a2f; }
+.pc-val { font-family: var(--font); font-size: 12px; font-weight: 800; fill: var(--ink); transition: opacity .2s ease; }
+.pc-date { font-family: var(--font); font-size: 11px; fill: var(--ink-2); }
+.pc-hit { position: absolute; top: 0; bottom: 0; width: 44px; border: 0; border-radius: 10px; cursor: pointer; padding: 0; background: transparent; }
+.pc-hit:hover, .pc-hit[aria-pressed="true"] { background: rgba(109, 63, 192, .07); }
+.pc-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); flex-wrap: wrap; margin-top: auto; }
+.pc-legend span { display: flex; align-items: center; gap: 6px; }
+.pc-legend i { width: 14px; height: 2px; }
+.pc-legend i.s { background: #1d8fb0; }
+.pc-legend i.d { background: #ea6a2f; }
+.pc-hint { margin-left: auto; }
+
+.pc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pc-table th { text-align: left; color: var(--soft); font-weight: 600; padding: 8px 2px; }
+.pc-table td { padding: 11px 2px; border-top: 1px solid var(--pc-chip); }
+
+.pc-side { flex: 1 1 190px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.pc-last { padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+.pc-sub { font-size: 12px; color: var(--soft); margin-bottom: 6px; }
+.pc-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 7px 0; border-top: 1px solid #f1f0f6; }
+.pc-kv span { color: var(--ink-2); }
+.pc-count { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--muted); }
+.pc-toggle { align-self: flex-start; min-height: 44px; border: 0; border-radius: 999px; background: var(--pc-chip); color: var(--ink); font: 600 13px var(--font); padding: 0 14px; cursor: pointer; }
+.pc-toggle:hover { filter: brightness(.96); }
+
+.pc-ante { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.pc-card { background: var(--paper); border: 1px solid var(--pc-line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.pc-card b { font-size: 14px; }
+.pc-card span { font-size: 13px; color: var(--muted); }
+.pc-problems { background: #fff8ea; border-color: #f3dfb2; grid-column: 1 / -1; }
+
+.pc-list { padding: 6px 16px; }
+.pc-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid #f1f0f6; }
+.pc-row:last-of-type { border-bottom: 0; }
+.pc-rc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pc-rc b { font-size: 14px; }
+.pc-rc span { font-size: 12px; color: var(--soft); }
+.pc-state { font-size: 12px; font-weight: 700; color: var(--ink-2); background: var(--pc-chip); border-radius: 999px; padding: 4px 9px; }
+.pc-state.ok { color: #1f7a5c; background: #e4f6ee; }
+.pc-foot { display: block; font-size: 12px; color: var(--soft); padding: 10px 0; border-top: 1px solid #f1f0f6; }
+.pc-note { font-size: 12px; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .pc { padding: 12px; border-radius: 20px; }
+  .pc-body { min-height: 0; }
+  .pc-hint { margin-left: 0; }
+}

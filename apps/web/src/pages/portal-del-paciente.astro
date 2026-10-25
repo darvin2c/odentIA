@@ -1,6 +1,8 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.enlace).
+// Contenido en src/lib/pages-data.ts (PAGES.enlace); latidIA tiene su propia página (PortalPage).
 import InnerPage from "../components/pages/InnerPage.astro"
+import PortalPage from "../components/latidia/portal/PortalPage.astro"
 import { PAGES } from "../lib/pages-data"
+import { MEDICAL } from "../lib/product"
 ---
-<InnerPage page={PAGES.enlace} />
+{MEDICAL ? <PortalPage /> : <InnerPage page={PAGES.enlace} />}

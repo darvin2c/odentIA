@@ -1,0 +1,233 @@
+---
+// /contacto de latidIA (lienzo de latidIA, tablero «Contacto»): los dos caminos (pedir la invitación o
+// escribirnos un correo), lo que pasa después, cómo escribirnos y las preguntas de antes de empezar.
+// Sin formulario: la web solo envía la lista de espera y el Libro de Reclamaciones (apps/AGENTS.md), así
+// que el tablero «Cuatro datos y tu mensaje» queda como un correo con lo que conviene contarnos.
+// El regalo, la invitación y los días hábiles para responder salen de Astro.locals.pricing; el correo,
+// de `contactEmail`; la razón social y el RUC, de TITULAR.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { TITULAR } from "../../../lib/legal/types"
+import { businessDays, giftOf, shownPlan } from "../../../lib/pricing"
+import { contactEmail, ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const plan = shownPlan(pricing)
+const invite = pricing.signupMode === "invitacion"
+const founders = plan !== null && plan === pricing.founders
+const answer = businessDays(pricing.terms.waitlistAnswerDays)
+// «Sin cuota» solo si el plan que se muestra no la cobra.
+const noFee = plan !== null && plan.plan === 0
+const title = "Habla con nosotros"
+const description =
+  "¿Quieres saber si latidIA le sirve a tu consultorio médico? Pide tu invitación o escríbenos: te responde una persona del equipo."
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Habla con nosotros", "/contacto"],
+]
+const mailto = `mailto:${contactEmail}`
+
+const steps: [string, string][] = invite
+  ? [
+      ["Pides tu invitación", "O nos escribes con tu duda."],
+      ["Te respondemos", `En ${answer}, una persona del equipo.`],
+      ["Creas tu consultorio", "Tu sede, tus salas, tu horario y tu tarifario."],
+      ["Tus agentes empiezan", gift ? `Con los ${gift} que pagamos nosotros.` : "Desde el primer día."],
+    ]
+  : [
+      ["Creas tu cuenta", "O nos escribes con tu duda."],
+      ["Creas tu consultorio", "Tu sede, tus salas, tu horario y tu tarifario."],
+      ["Conectas tus canales", "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web o el correo."],
+      ["Tus agentes empiezan", gift ? `Con ${gift} de crédito.` : "Desde el primer día."],
+    ]
+
+const tell = [
+  { title: "Cuántos son", text: "Cuántos médicos y sedes tienen, y si hay alguien en la recepción." },
+  { title: "Por dónde te escriben", text: "WhatsApp, Instagram, Messenger, el correo… o todos a la vez." },
+  { title: "Qué te gustaría resolver", text: "La agenda, la historia clínica, la receta, los controles o los cobros." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Puedo traer mis pacientes?",
+    a: "Escríbenos y lo vemos contigo. Los nuevos se registran solos cuando te escriben o cuando llenan sus datos desde su enlace.",
+  },
+  {
+    q: "¿Cuánto tarda empezar?",
+    a: invite
+      ? `Te respondemos en ${answer}. Con la invitación, la puesta en marcha te guía paso a paso: tu sede, tus salas, tu horario y tu tarifario.`
+      : "Te registras y la puesta en marcha te guía paso a paso: tu sede, tus salas, tu horario y tu tarifario.",
+  },
+  {
+    q: "¿Necesito WhatsApp Business?",
+    a: "No para empezar: Sofi responde también por Instagram, Messenger, Telegram, el chat de tu web y el correo. Para WhatsApp conectas el número de tu consultorio a través de Meta, con pasos guiados. Lo que cobra Meta se le paga a Meta.",
+  },
+  {
+    q: "¿Sirve en mi país?",
+    a: "Está hecho para consultorios de habla hispana. La moneda, la zona horaria, el número de emergencias que da Sofi y los diagnósticos (CIE-10 o CIE-11) van según tu país.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="lt">
+    <section class="hero cp">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap cp-in">
+        <div class="cp-head">
+          <span class="tag tag-d cp-tag rise">[ Contacto ]</span>
+          <h1 class="cp-h1 rise d1">Habla con <span class="accent">nosotros.</span></h1>
+          <p class="cp-lead rise d2">¿Quieres saber si latidIA le sirve a tu consultorio? {invite ? "Pide tu invitación" : "Crea tu cuenta"} o escríbenos. Te responde una persona del equipo.</p>
+        </div>
+        <div class="cp-paths rise d2">
+          <div class="cp-path">
+            <span class="cp-k">Camino 1 · {founders ? "Fundadores" : "Empieza"}</span>
+            {invite ? (
+              gift ? (
+                <p class="cp-path-t">Pide tu invitación y empieza con <span class="gift">{gift}</span> nuestros.</p>
+              ) : (
+                <p class="cp-path-t">Pide tu invitación.</p>
+              )
+            ) : (
+              <p class="cp-path-t">Crea tu cuenta{gift ? <> y empieza con <span class="gift">{gift}</span> de crédito</> : null}.</p>
+            )}
+            <p class="cp-path-x">
+              {gift ? `Los primeros ${gift} de tus agentes los pagamos nosotros. ` : invite ? `Se entra por invitación; te respondemos en ${answer}. ` : ""}
+              {noFee ? "Sin tarjeta y sin cuota." : "Sin tarjeta."}
+            </p>
+            <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          </div>
+          <div class="cp-path">
+            <span class="cp-k">Camino 2 · Una duda</span>
+            <p class="cp-path-t">Escríbenos y te contamos si te sirve.</p>
+            <p class="cp-path-x">Cuéntanos cuántos médicos y sedes tienen, y por dónde te escriben tus pacientes.</p>
+            <a class="btn btn-g" href={mailto}>{contactEmail}</a>
+          </div>
+        </div>
+        <div class="cp-next rise d3">
+          <span class="cp-k cp-k-soft">Lo que pasa después</span>
+          <ol class="cp-steps">
+            {steps.map(([t, x], i) => (
+              <li style={`--i: ${i}`}>
+                <span class="cp-num" aria-hidden="true">{i + 1}</span>
+                <span><b>{t}</b><span>{x}</span></span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-white">
+      <div class="wrap cp-mail">
+        <div class="cp-mail-copy">
+          <span class="tag cp-tag">[ Escríbenos ]</span>
+          <h2 class="cp-h2">Un correo, con tres cosas.</h2>
+          <p class="cp-text">Escribe a <a href={mailto}>{contactEmail}</a> y te responde una persona del equipo, no un formulario. Si te queda más cómodo, deja tu WhatsApp en el correo y te escribimos por ahí.</p>
+          <p class="cp-small">Usamos lo que nos cuentes solo para responderte. {TITULAR.razonSocial} · RUC {TITULAR.ruc}.</p>
+          <p class="cp-small">¿Un reclamo? Va en el <a href="/pe/libro-de-reclamaciones">Libro de Reclamaciones</a>.</p>
+        </div>
+        <div class="cp-box">
+          <ul class="cp-tell">
+            {tell.map((item, i) => (
+              <li><span class="cp-num cp-num-l" aria-hidden="true">{i + 1}</span><span><b>{item.title}</b><span>{item.text}</span></span></li>
+            ))}
+          </ul>
+          <figure class="cp-example">
+            <figcaption>Un correo de ejemplo</figcaption>
+            <blockquote>Somos dos médicos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para medicina familiar?</blockquote>
+          </figure>
+          <a class="btn btn-d" href={mailto}>Escribir un correo</a>
+        </div>
+      </div>
+    </section>
+
+    <div class="faqwrap">
+      <Faq items={faq} title="Antes de empezar." />
+    </div>
+    <CtaBand title="Cuéntanos de tu consultorio.">
+      <Fragment slot="text">
+        {gift ? (
+          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de médicos, salas ni usuarios.</>
+        ) : (
+          <>Tus agentes trabajan en tu consultorio desde el primer día. Sin límite de médicos, salas ni usuarios.</>
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  /* Las superficies de latidIA: el gris claro y las líneas con un poco de su lila (como el tablero). */
+  .lt {
+    --bg: color-mix(in srgb, var(--teal) 4%, #fff);
+    --line: color-mix(in srgb, var(--teal) 12%, #fff);
+  }
+  .accent { color: var(--sky); }
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 64 de aire, como en el tablero. */
+  .cp { padding: 152px 0 96px; }
+  .cp-in { position: relative; display: flex; flex-direction: column; gap: 40px; }
+  .cp-head { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
+  .cp-tag { font-size: 13px; letter-spacing: .12em; }
+  .cp-h1 { font-size: clamp(44px, 5.4vw, 72px); line-height: .98; letter-spacing: -.045em; font-weight: 800; }
+  .cp-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); }
+  .cp-paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  .cp-path { background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .14); border-radius: 24px; padding: 28px; display: flex; flex-direction: column; gap: 14px; transition: border-color .2s ease; }
+  .cp-path:hover { border-color: color-mix(in srgb, var(--sky-2) 60%, transparent); }
+  .cp-path .btn { align-self: flex-start; margin-top: auto; }
+  .cp-k { font-family: var(--agent-font); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--sky-2); }
+  .cp-k-soft { color: var(--on-night-3); }
+  .cp-path-t { font-size: 26px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; text-wrap: balance; }
+  .cp-path-x { font-size: 16px; line-height: 1.55; color: var(--on-night-2); }
+  .cp-next { display: flex; flex-direction: column; gap: 14px; }
+  .cp-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+  /* Un paso resaltado a la vez, en bucle de 8,8 s (2,2 s cada uno). Sin movimiento, todos iguales. */
+  .cp-steps li { display: flex; gap: 12px; align-items: flex-start; border-radius: 18px; padding: 16px; background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .1); animation: cp-step 8.8s calc(var(--i) * 2.2s) infinite; }
+  .cp-steps li > span:last-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .cp-steps b { font-size: 16px; }
+  .cp-steps li > span:last-child span { font-size: 14px; line-height: 1.45; color: var(--on-night-2); }
+  .cp-num { flex: 0 0 32px; width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-family: var(--agent-font); font-weight: 600; font-size: 14px; background: var(--sky); color: var(--night); }
+  @keyframes cp-step {
+    0%, 25% { background: color-mix(in srgb, var(--sky) 16%, transparent); border-color: color-mix(in srgb, var(--sky-2) 55%, transparent); }
+    30%, 100% { background: rgba(255, 255, 255, .04); border-color: rgba(255, 255, 255, .1); }
+  }
+
+  .cp-mail { display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start; }
+  .cp-mail-copy { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+  .cp-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .cp-text { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .cp-text a { font-weight: 700; overflow-wrap: anywhere; }
+  .cp-small { font-size: 14px; line-height: 1.5; color: var(--soft); }
+  .cp-small a { display: inline-block; padding: 8px 0; }
+  .cp-box { flex: 1.2 1 480px; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 24px; padding: 28px; display: flex; flex-direction: column; gap: 18px; }
+  .cp-box .btn { align-self: flex-start; }
+  .cp-tell { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  .cp-tell li { display: flex; gap: 12px; align-items: flex-start; }
+  .cp-tell li > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+  .cp-tell b { font-size: 16px; }
+  .cp-tell li > span:last-child span { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .cp-num-l { background: var(--teal-soft); color: var(--teal-hover); }
+  .cp-example { margin: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .cp-example figcaption { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+  .cp-example blockquote { margin: 0; font-size: 15px; line-height: 1.5; }
+
+  .faqwrap { background: var(--bg); }
+
+  @media (max-width: 720px) {
+    .cp { padding: 104px 0 64px; }
+    .cp-in { gap: 28px; }
+    .cp-lead { font-size: 17px; }
+    .cp-path { padding: 18px; }
+    .cp-path-t { font-size: 22px; }
+    .cp-path .btn { align-self: stretch; white-space: normal; text-align: center; }
+    .cp-mail { gap: 24px; }
+    .cp-mail-copy, .cp-box { flex-basis: 100%; }
+    .cp-text { font-size: 16px; }
+    .cp-box { padding: 18px; }
+    .cp-box .btn { align-self: stretch; }
+  }
+</style>

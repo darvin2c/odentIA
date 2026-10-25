@@ -1,0 +1,52 @@
+/* Seis canales, una ficha (tablero «Omnicanal»): la tarjeta blanca de la portada con los canales,
+   sus cables hacia la ficha de Rosa, la línea de tiempo y la caja de «Responder por». */
+.cr { background: var(--paper); color: var(--ink); border-radius: 26px; padding: 20px; display: flex; flex-wrap: wrap; align-items: center; box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6); }
+.cr-chs { width: 250px; flex: 0 0 250px; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cr-ch { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 14px; background: #f8fafc; box-shadow: 0 0 0 1px #eef0f4; transition: box-shadow .3s, background-color .3s; }
+.cr-ch.used { background: var(--paper); box-shadow: 0 0 0 1px #e9e2f7; }
+.cr-ch.on { background: #f5f0fd; box-shadow: 0 0 0 2px #b79cf0; }
+.cr-ico { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 10px; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; transition: opacity .3s; }
+.cr-ch-text { display: flex; flex-direction: column; min-width: 0; }
+.cr-ch-text b { font-size: 14px; }
+.cr-ch-text span { font-size: 12px; color: var(--soft); }
+.cr-wire { flex: 0 0 80px; }
+.cr-wire path { transition: stroke .3s; }
+.cr-flow { stroke-dasharray: 6 8; animation: cr-flow .9s linear infinite; }
+@keyframes cr-flow { to { stroke-dashoffset: -14; } }
+
+.cr-rec { flex: 1 1 360px; min-width: 0; border: 1px solid #e9e2f7; border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; background: #fbfafe; }
+.cr-rec-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid #e9e2f7; background: var(--paper); flex-wrap: wrap; }
+.cr-av { width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%; background: #ece4fb; color: #4c2a8a; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+.cr-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
+.cr-who b { font-size: 16px; }
+.cr-who span { font-size: 12px; color: var(--soft); }
+.cr-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.cr-pills span { font-size: 12px; font-weight: 600; background: #eef0f4; border-radius: 999px; padding: 5px 10px; }
+.cr-pills .cr-count { color: #4c2a8a; background: #ece4fb; }
+.cr-thread { height: 360px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 48px); mask-image: linear-gradient(to bottom, transparent 0, #000 48px); display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; padding: 14px 16px; }
+.cr-msg { display: flex; flex-direction: column; gap: 3px; max-width: 82%; align-self: flex-start; animation: cr-pop .4s ease-out; }
+.cr-msg.out { align-self: flex-end; align-items: flex-end; }
+.cr-meta { font-family: var(--agent-font); font-size: 10.5px; }
+.cr-bubble { font-size: 14px; line-height: 1.45; border-radius: 14px; padding: 9px 12px; background: var(--paper); border: 1px solid #ece8f5; }
+.cr-msg.out .cr-bubble { background: #d6f1f6; border-color: #d6f1f6; }
+.cr-event { align-self: center; font-size: 12px; font-weight: 700; color: #4c2a8a; background: #ece4fb; border-radius: 999px; padding: 7px 12px; text-align: center; animation: cr-pop .4s ease-out; }
+@keyframes cr-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.cr-reply { border-top: 1px solid #e9e2f7; background: var(--paper); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.cr-by { display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap; }
+.cr-by legend { float: left; font-size: 12px; font-weight: 700; color: var(--muted); margin-right: 4px; }
+.cr-by button { min-height: 44px; padding: 0 12px; border-radius: 999px; border: 0; cursor: pointer; font: 600 13px var(--font); background: #eef0f4; color: var(--ink-2); }
+.cr-by button[aria-pressed="true"] { background: var(--teal); color: #fff; }
+.cr-box { display: flex; gap: 8px; align-items: center; }
+.cr-field { flex: 1 1 auto; min-width: 0; min-height: 44px; border-radius: 999px; background: #eef0f4; color: var(--soft); font-size: 14px; padding: 12px 16px; }
+.cr-send { width: 44px; height: 44px; flex: 0 0 auto; border-radius: 50%; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+.cr-note { font-size: 12px; color: var(--muted); }
+.cr-foot { flex: 1 1 100%; font-size: 12px; color: var(--muted); padding-top: 12px; }
+
+/* En el teléfono los canales van en dos columnas arriba y la ficha debajo, sin cables. */
+@media (max-width: 760px) {
+  .cr { padding: 14px; border-radius: 22px; }
+  .cr-wire { display: none; }
+  .cr-chs { flex: 1 1 100%; width: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-bottom: 16px; }
+  .cr-thread { height: 400px; }
+}

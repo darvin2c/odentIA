@@ -1,0 +1,98 @@
+/* La caja del día (CashDay.tsx), en la portada de /caja-y-cobros de latidIA. Todo bajo .lt-cash.
+   Los lilas suaves salen de --teal (el primario de latidIA), como en las tarjetas de la app. */
+.lt-cash {
+  --lt-cash-line: color-mix(in srgb, var(--teal) 12%, #fff);
+  --lt-cash-tint: color-mix(in srgb, var(--teal) 6%, #fff);
+  --lt-cash-tint-line: color-mix(in srgb, var(--teal) 22%, #fff);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-start;
+}
+.lt-cash-card {
+  flex: 1 1 330px;
+  min-width: 0;
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 24px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6);
+}
+.lt-cash-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lt-cash-title { display: flex; flex-direction: column; gap: 2px; }
+.lt-cash-title b { font-size: 18px; }
+.lt-cash-title span { font-size: 13px; color: var(--muted); }
+.lt-cash-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 6px 10px; color: var(--muted); background: #eef0f4; }
+.lt-cash-state i { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+.lt-cash-state[data-state="open"] { color: #166534; background: #e7f6ec; }
+.lt-cash-state[data-state="open"] i { background: #16a34a; animation: lt-cash-pulse 1.6s ease-in-out infinite; }
+.lt-cash-state[data-state="ready"] { color: var(--teal-hover); background: var(--teal-soft); }
+.lt-cash-state[data-state="ready"] i { background: var(--teal); }
+.lt-cash-rows { display: flex; flex-direction: column; min-height: 360px; }
+.lt-cash-row { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; padding: 11px 8px; border-top: 1px solid var(--lt-cash-line); border-radius: 12px; transition: background-color .4s ease; animation: lt-cash-in .45s ease both; }
+.lt-cash-row[data-now] { background: var(--lt-cash-tint); }
+.lt-cash-time { font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding-top: 2px; }
+.lt-cash-who { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.lt-cash-who b { font-size: 15px; }
+.lt-cash-who > span:not(.lt-cash-chip) { font-size: 13px; color: var(--muted); }
+.lt-cash-chip { align-self: flex-start; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 9px; color: #166534; background: #e7f6ec; }
+.lt-cash-chip[data-owed] { color: #8a5a00; background: #fdf1d8; }
+.lt-cash-amount { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.lt-cash-amount b { font-family: var(--agent-font); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lt-cash-amount span { font-size: 12px; color: var(--soft); }
+.lt-cash-empty { border: 1px dashed var(--lt-cash-tint-line); border-radius: 14px; padding: 18px; font-size: 14px; color: var(--muted); text-align: center; }
+.lt-cash-foot { border-top: 1px solid var(--lt-cash-line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.lt-cash-total { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.lt-cash-total span { font-size: 14px; color: var(--muted); }
+.lt-cash-total b { font-family: var(--agent-font); font-size: 22px; font-variant-numeric: tabular-nums; }
+.lt-cash-methods { display: flex; gap: 6px; flex-wrap: wrap; }
+.lt-cash-methods span { font-size: 12px; background: #eef0f4; color: var(--ink-2); border-radius: 999px; padding: 5px 10px; }
+.lt-cash-owed { font-size: 13px; color: #8a5a00; }
+.lt-cash-close { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--lt-cash-tint); border: 1px solid var(--lt-cash-tint-line); border-radius: 14px; padding: 10px 12px; animation: lt-cash-in .45s ease both; }
+.lt-cash-close > span:first-child { font-size: 13px; color: var(--teal-hover); flex: 1 1 200px; }
+.lt-cash-close-btn { font-size: 13px; font-weight: 700; color: #fff; background: var(--teal); border-radius: 999px; padding: 8px 14px; }
+.lt-cash-note { font-size: 12px; color: var(--soft); }
+
+/* El ticket impreso: papel cálido, letra de máquina, cortes punteados. */
+.lt-cash-ticket {
+  flex: 0 1 236px;
+  min-width: 210px;
+  margin-top: 40px;
+  background: #fffdf8;
+  color: #1e293b;
+  border-radius: 8px;
+  padding: 18px 16px;
+  box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .6);
+  font-family: var(--agent-font);
+  font-size: 12.5px;
+  line-height: 1.6;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(12px);
+  transition: opacity .5s ease, transform .5s ease, visibility .5s;
+}
+.lt-cash-ticket[data-on] { opacity: 1; visibility: visible; transform: none; }
+.lt-cash-c { text-align: center; }
+.lt-cash-ticket b.cd-c { font-size: 13px; }
+.lt-cash-dim { color: var(--soft); }
+.lt-cash-line { display: flex; justify-content: space-between; gap: 8px; }
+.lt-cash-line.cd-dim { color: var(--muted); }
+.lt-cash-cut { border-top: 1px dashed #cbd5e1; margin: 6px 0; }
+.lt-cash-left { color: #8a5a00; background: #fdf1d8; margin: 2px -6px; padding: 2px 6px; border-radius: 4px; transition: background-color .4s ease, color .4s ease; }
+.lt-cash-left[data-paid] { color: #166534; background: transparent; }
+.lt-cash-fiscal { color: var(--muted); font-size: 11.5px; }
+
+@keyframes lt-cash-pulse { 50% { opacity: .35; } }
+@keyframes lt-cash-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 720px) {
+  .lt-cash-card { padding: 16px; border-radius: 20px; }
+  .lt-cash-rows { min-height: 0; }
+  .lt-cash-ticket { flex: 1 1 100%; margin-top: 0; }
+}

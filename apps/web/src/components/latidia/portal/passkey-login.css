@@ -1,0 +1,12 @@
+/* La entrada al portal (tablero «Enlace»): la tarjeta centrada con la huella, que se pone verde al entrar. */
+.pk { width: 340px; max-width: 100%; margin: 0 auto; background: #f6f4fa; border: 1px solid #e9e2f7; border-radius: 30px; padding: 28px 22px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.pk-org { font-family: var(--agent-font); font-size: 11px; letter-spacing: .08em; color: #6b5a8e; }
+.pk-finger { width: 76px; height: 76px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #ece4fb; color: var(--teal); transition: background-color .4s, color .4s; }
+.pk-finger.in { background: #e4f6ee; color: #1f7a5c; }
+.pk-say { display: flex; flex-direction: column; gap: 6px; }
+.pk-say b { font-size: 20px; letter-spacing: -.02em; }
+.pk-say span { font-size: 14px; color: var(--muted); }
+.pk-main { width: 100%; min-height: 48px; border: 0; border-radius: 999px; background: var(--teal); color: #fff; font: 700 15px var(--font); cursor: pointer; }
+.pk-main:hover { background: var(--teal-hover); }
+.pk-help { font-size: 14px; color: var(--muted); }
+.pk-reset { min-height: 44px; border: 0; background: none; color: var(--teal); font: 600 14px var(--font); cursor: pointer; }

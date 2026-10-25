@@ -1,0 +1,308 @@
+---
+// /agentes/asistente-clinico de latidIA (tablero «Clio» del lienzo): «Clío.» en grande con su frase y el
+// h1 para los buscadores; la atención de Rosa dictándose; cómo queda en la historia (los 10 sistemas del
+// examen, los signos vitales y el diagnóstico); nada entra sin confirmar, con dos capturas reales; la
+// receta que revisa; cuánto cobra (cifras de Astro.locals.pricing); las preguntas y el cierre. Clío
+// propone y el médico confirma: nunca «diagnostica».
+import Base from "../../../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../../../lib/faq"
+import { money, shownPlan } from "../../../../lib/pricing"
+import { AGENT_COLORS, ctaOf } from "../../../../lib/site"
+import AgentClose from "../AgentClose.astro"
+import AgentFaq, { type AgentQuestion } from "../AgentFaq.astro"
+import AgentHero from "../AgentHero.astro"
+import AgentPrices from "../AgentPrices.astro"
+import "../agent-page.css"
+import ClioDictation from "./ClioDictation"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const color = AGENT_COLORS.clinico
+
+const title = "Clío, dictado de la consulta médica con IA para tu historia clínica"
+const description =
+  "Dicta la consulta y Clío ordena la historia clínica: motivo, signos vitales, examen físico por sistemas, diagnóstico CIE-10 o CIE-11, receta y descanso médico. Nada entra sin tu confirmación."
+
+// El examen físico de Rosa: lo que no se dictó queda «No examinado», nunca «normal».
+type State = "ok" | "found" | "none"
+const systems: { name: string; state: State; note?: string }[] = [
+  { name: "Estado general", state: "ok" },
+  { name: "Piel", state: "none" },
+  { name: "Cabeza y cuello", state: "none" },
+  { name: "Boca y garganta", state: "found", note: "Amígdalas aumentadas con placas blanquecinas." },
+  { name: "Tórax y pulmones", state: "ok" },
+  { name: "Corazón", state: "ok" },
+  { name: "Abdomen", state: "none" },
+  { name: "Genital y urinario", state: "none" },
+  { name: "Extremidades", state: "none" },
+  { name: "Neurológico", state: "none" },
+]
+const stateLabel: Record<State, string> = { ok: "Sin alteraciones", found: "Con hallazgos", none: "No examinado" }
+const examined = systems.filter((s) => s.state !== "none").length
+const found = systems.filter((s) => s.state === "found").length
+const vitals = [
+  { k: "PA", v: "118/76", u: "mmHg" },
+  { k: "FC", v: "96", u: "lpm" },
+  { k: "T", v: "38,4", u: "°C" },
+]
+
+const steps = [
+  { title: "Confirmar o Editar", text: "Cada sugerencia, una por una o todas las listas de un toque. Lo que descartas no deja rastro." },
+  { title: "Corriges hablando", text: "«No, la temperatura es 38,4». «Quita el ibuprofeno». Si te corriges al dictar, vale lo último." },
+  { title: "Puedes escribir en vez de dictar", text: "Con alguien en la sala o sin micrófono: «Escribir lo dictado» y Clío propone igual." },
+  { title: "Escucha solo si pulsas «Dictar»", text: "No ve las atenciones anteriores ni las conversaciones: solo lo que dictas en esta." },
+]
+const checks = [
+  "Avisa si choca con una alergia registrada.",
+  "Con embarazo o lactancia lo recuerda; lo contraindicado se receta solo con un motivo.",
+  "A un menor de 12 años le pide el peso.",
+  "Los controlados no se emiten aquí: usa la receta oficial.",
+]
+
+// Un día de consulta con los precios publicados: 20 consultas completas. Sin precios, no se pregunta.
+const completa = plan?.tiers.completa ?? null
+const day =
+  plan && completa !== null
+    ? {
+        q: "¿Cuánto cuesta un día de consulta?",
+        a: `Con precios ${founder ? "de Fundadores" : "de lista"}, 20 consultas completas son ${money(20 * completa, plan.currency)}.`,
+      }
+    : null
+const faq: AgentQuestion[] = [
+  { q: "¿Clío diagnostica?", a: "No. Registra el diagnóstico que tú nombras, con su código de la lista de tu consultorio, CIE-10 o CIE-11, presuntivo o definitivo." },
+  { q: "¿Escucha toda la consulta?", a: "Solo desde que pulsas «Dictar». Puedes dictar al final, en un minuto, como si se lo contaras a un colega." },
+  { q: "¿Y lo que no dicto del examen?", a: "Queda «No examinado». Un sistema sin marcar nunca cuenta como normal." },
+  {
+    q: "¿Emite la receta o el descanso por mí?",
+    a: "No. Los deja listos; los emites tú con tu firma. El descanso lleva el diagnóstico solo si la persona lo autoriza.",
+  },
+  { q: "¿Qué pasa si me equivoco al dictar?", a: "Lo corriges en voz alta y vale lo último, o tocas «Editar». Nada se guarda hasta que confirmas." },
+  ...(day ? [day] : []),
+]
+
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Agentes", "/agentes"],
+  ["Clío, asistente clínico", "/agentes/asistente-clinico"],
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }) => ({ q, a })))]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="la" style={`--ag: ${color.light}`}>
+    <AgentHero
+      tag="Tu agente de consulta"
+      name="Clío"
+      color={color.dark}
+      phrase="Tú atiendes. La historia se escribe sola."
+      h1="Dictado de la consulta médica: el motivo, los signos vitales, el examen por sistemas, el diagnóstico con su código, la receta y el descanso médico, listos para que los confirmes."
+      meaning="La musa de la historia: escribe la historia clínica mientras el médico atiende."
+    >
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <button type="button" class="btn btn-g" data-clio-replay>Volver a dictar</button>
+      </Fragment>
+      <ClioDictation slot="demo" client:load />
+    </AgentHero>
+
+    <section class="la-sec">
+      <div class="wrap la-in">
+        <div class="la-head">
+          <span class="tag la-tag">[ Cómo queda ]</span>
+          <h2 class="la-h2">Hablas como a un colega. Queda como una historia clínica.</h2>
+          <p class="la-lead">Cada cosa cae en su bloque. Del examen físico, solo cuenta lo que nombras: lo que no dictas queda «No examinado», nunca «normal».</p>
+        </div>
+        <div class="cp-result">
+          <div class="la-card cp-exam">
+            <div class="cp-exam-head">
+              <h3>Examen físico · Rosa</h3>
+              <span>{examined} examinados · {found} con hallazgos · {systems.length - examined} sin examinar</span>
+            </div>
+            <ul class="cp-sys">
+              {systems.map((s) => (
+                <li class:list={["cp-s", s.state]}>
+                  <span class="cp-s-row">
+                    <span class="cp-s-name">{s.name}</span>
+                    <span class="cp-s-state">{stateLabel[s.state]}</span>
+                  </span>
+                  {s.note && <span class="cp-s-note">{s.note}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div class="cp-side">
+            <div class="la-card cp-box">
+              <h3>Signos vitales de esta consulta</h3>
+              <dl class="cp-vitals">
+                {vitals.map((v) => (
+                  <div><dt>{v.k}</dt><dd><b>{v.v}</b><span>{v.u}</span></dd></div>
+                ))}
+              </dl>
+              <span class="cp-small">
+                La temperatura se corrigió en voz alta: «No, la temperatura es 38,4». Vale lo último que dijiste. Quedan en sus
+                <a href="/historia-clinica-electronica">gráficos en el tiempo</a>.
+              </span>
+            </div>
+            <div class="la-card cp-box">
+              <h3>Diagnóstico</h3>
+              <span class="cp-dx"><b>J03.9</b><span>Amigdalitis aguda, no especificada</span></span>
+              <span class="cp-small">CIE-10 · Presuntivo · el que nombraste, de la lista de tu consultorio.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="la-sec white">
+      <div class="wrap la-in">
+        <div class="la-head">
+          <span class="tag la-tag">[ Decides tú ]</span>
+          <h2 class="la-h2">Nada entra a la historia sin tu confirmación.</h2>
+          <p class="la-lead">Clío propone; tú confirmas, corriges o descartas. Al terminar la consulta firmas con tu colegiatura y después solo se agregan adendas.</p>
+        </div>
+        <div class="la-split">
+          <ol class="cp-steps">
+            {steps.map((step, i) => (
+              <li>
+                <span class="cp-n" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+                <span><b>{step.title}</b><span>{step.text}</span></span>
+              </li>
+            ))}
+          </ol>
+          <div class="cp-shots">
+            <figure class="la-shot cp-shot">
+              <div class="la-frame" style="aspect-ratio: 482 / 760">
+                <img
+                  src="/img/latidia/clio-sugerencias.jpg"
+                  width="1280"
+                  height="2765"
+                  loading="lazy"
+                  decoding="async"
+                  alt="La atención de Rosa con el dictado terminado: el motivo y los signos vitales como sugerencias, cada una con Confirmar y Editar."
+                  style="width: 265.56%; left: -56.02%; top: -39.47%"
+                />
+              </div>
+              <figcaption><b>Las sugerencias, en su bloque</b>Captura real del producto, con datos de prueba.</figcaption>
+            </figure>
+            <figure class="la-shot cp-shot">
+              <div class="la-frame" style="aspect-ratio: 495 / 790">
+                <img
+                  src="/img/latidia/clio-confirmado.jpg"
+                  width="1280"
+                  height="1941"
+                  loading="lazy"
+                  decoding="async"
+                  alt="La misma atención con lo confirmado en la historia y el aviso «Descanso médico emitido»."
+                  style="width: 258.59%; left: -55.56%; top: -40.51%"
+                />
+              </div>
+              <figcaption><b>Confirmado, y el descanso emitido</b>Captura real del producto, con datos de prueba.</figcaption>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="la-sec">
+      <div class="wrap la-split cp-rx-in">
+        <div class="cp-rx-copy">
+          <span class="tag la-tag">[ La receta que revisa ]</span>
+          <h2 class="la-h2 s">Dictas la receta. Antes de emitirla, se revisa.</h2>
+          <p class="la-lead s">Clío arma la receta con lo dictado: medicamento, dosis, frecuencia y duración, y calcula la cantidad. Tú la emites con tu firma.</p>
+          <ul class="cp-checks">
+            {checks.map((check) => <li><span aria-hidden="true">✓</span><span>{check}</span></li>)}
+          </ul>
+          <a class="la-more" href="/receta-y-descanso-medico">Ver la receta y el descanso médico →</a>
+        </div>
+        <div class="cp-rx">
+          <div class="cp-rx-card">
+            <div class="cp-rx-head"><b>Receta · Julia Ramos Vega</b><span>32 años · Dra. Elena Vela</span></div>
+            <div class="cp-warn">Está embarazada, 12 semanas: revisa que cada medicamento sea seguro en el embarazo.</div>
+            <div class="cp-med"><b>Paracetamol 500 mg · tableta</b><span>1 tableta cada 8 horas por 3 días · vía oral · cantidad: 9</span></div>
+            <div class="cp-rx-actions" aria-hidden="true"><span class="g">Cancelar</span><span class="p">Emitir receta</span></div>
+          </div>
+          <div class="cp-stop"><b aria-hidden="true">!</b><span>Clonazepam es una benzodiazepina, un medicamento controlado: no va en la receta común, usa la receta oficial.</span></div>
+          <span class="cp-small">Réplica con datos de ejemplo. Los avisos usan las palabras del producto.</span>
+        </div>
+      </div>
+    </section>
+
+    <AgentPrices
+      agent="clio"
+      white
+      title="Una vez por consulta, y solo si confirmas."
+      text="Si descartas el borrador y escribes tú, no se cobra. Sin tope de pausas ni de minutos. La consulta de Rosa fue completa: dejó indicado el descanso."
+    />
+
+    <AgentFaq items={faq} />
+    <AgentClose title="Tu próxima consulta, ya escrita." />
+  </div>
+</Base>
+
+<style>
+  .cp-result { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+  .cp-exam { flex: 1 1 560px; min-width: 0; gap: 14px; border-radius: 22px; }
+  .cp-exam-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .cp-exam-head span { font-family: var(--agent-font); font-size: 12px; color: var(--muted); }
+  .cp-sys { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .cp-s { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; background: #f8fafc; }
+  .cp-s-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .cp-s-name { font-size: 14px; font-weight: 600; }
+  .cp-s-state { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+  .cp-s.ok .cp-s-state { color: #166534; background: #ecfdf3; }
+  .cp-s.none .cp-s-name { color: var(--soft); }
+  .cp-s.none .cp-s-state { font-weight: 600; color: var(--soft); border: 1px dashed #cbd5e1; padding: 3px 9px; }
+  .cp-s.found { background: #fff8eb; box-shadow: inset 0 0 0 1px #f3d9a6; }
+  .cp-s.found .cp-s-name { font-weight: 700; }
+  .cp-s.found .cp-s-state { color: #8a5a00; background: #fdecc8; }
+  .cp-s-note { font-size: 13px; color: var(--muted); }
+  .cp-side { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+  .cp-box { gap: 12px; border-radius: 22px; }
+  .cp-vitals { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .cp-vitals > div { background: var(--la-soft); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .cp-vitals dt { font-family: var(--agent-font); font-size: 11px; color: var(--soft); }
+  .cp-vitals dd { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+  .cp-vitals b { font-size: 20px; letter-spacing: -.02em; }
+  .cp-vitals dd span { font-size: 12px; color: var(--soft); }
+  .cp-small { font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .cp-dx { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 16px; font-weight: 600; }
+  .cp-dx b { font-family: var(--agent-font); font-size: 15px; color: #4c2a8a; }
+
+  .cp-steps { flex: 1 1 340px; min-width: 0; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
+  .cp-steps li { display: flex; gap: 14px; padding: 16px 0; border-top: 1px solid var(--la-line); }
+  .cp-steps li > span:last-child { display: flex; flex-direction: column; gap: 4px; }
+  .cp-steps b { font-size: 18px; }
+  .cp-steps li > span:last-child > span { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .cp-n { font-family: var(--agent-font); font-size: 12px; color: var(--ag); padding-top: 4px; }
+  .cp-shots { flex: 1 1 600px; min-width: 0; display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
+  .cp-shot { flex: 1 1 260px; max-width: 360px; }
+
+  .cp-rx-in { align-items: center; gap: 48px; }
+  .cp-rx-copy { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .cp-checks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 16px; line-height: 1.45; }
+  .cp-checks li { display: flex; gap: 10px; }
+  .cp-checks li > span:first-child { color: var(--ag); font-weight: 800; }
+  .cp-rx { flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .cp-rx-card { background: var(--paper); border: 1px solid var(--la-line); border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 30px 60px -36px rgba(30, 11, 61, .35); }
+  .cp-rx-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 18px; }
+  .cp-rx-head span { font-size: 13px; color: var(--soft); }
+  .cp-warn { background: #fff8eb; border: 1px solid #f3d9a6; border-radius: 14px; padding: 12px 14px; font-size: 14px; line-height: 1.45; color: #6b4500; }
+  .cp-med { border: 1px solid #ece8f4; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 15px; }
+  .cp-med span { font-size: 14px; color: var(--muted); }
+  .cp-rx-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .cp-rx-actions span { font-size: 14px; border-radius: 999px; padding: 10px 16px; }
+  .cp-rx-actions .g { font-weight: 600; color: var(--ink-2); background: #eef0f4; }
+  .cp-rx-actions .p { font-weight: 700; color: #fff; background: #6d3fc0; }
+  .cp-stop { background: var(--paper); border: 1px solid #f5c2c2; border-radius: 18px; padding: 14px 16px; font-size: 14px; line-height: 1.45; color: #7f1d1d; display: flex; gap: 10px; }
+
+  @media (max-width: 720px) {
+    .cp-exam, .cp-box { padding: 18px; }
+    .cp-rx-in { gap: 24px; }
+    .cp-rx-card { padding: 16px; }
+    .cp-steps li > span:last-child > span { font-size: 15px; }
+  }
+  @media (max-width: 560px) {
+    .cp-sys { grid-template-columns: 1fr; }
+  }
+</style>

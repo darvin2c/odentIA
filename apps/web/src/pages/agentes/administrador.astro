@@ -10,6 +10,8 @@ import SplitHero from "../../components/agents/SplitHero.astro"
 import CtaBand from "../../components/CtaBand.astro"
 import Faq from "../../components/Faq.astro"
 import Base from "../../layouts/Base.astro"
+import AdminPage from "../../components/latidia/agents/admin/AdminPage.astro"
+import { MEDICAL } from "../../lib/product"
 import { ARGOS_NO_SHOWS, ARGOS_OWED, ARGOS_TOP_SALES } from "../../lib/argos-demo"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
 import { PAGES } from "../../lib/pages-data"
@@ -37,6 +39,7 @@ const faq: FaqItem[] = [
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
 ---
+{MEDICAL ? <AdminPage /> : (
 <Base title={page.title} description={page.description} jsonLd={jsonLd}>
   <SplitHero
     tag="Tu agente administrador"
@@ -123,6 +126,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   <CtaBand title="Que nadie se quede atrás." />
 </Base>
 
+)}
 <style>
   .ask { padding: 96px 0; background: var(--paper); }
   .ask-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }

@@ -1,0 +1,193 @@
+---
+// /caja-y-cobros de latidIA (lienzo de latidIA, tablero «Caja»): la caja del día que se llena cobro a
+// cobro con el ticket de Luis, lo que controla la caja, «sin presupuesto» con la captura real y varias
+// sedes. Los Reportes del tablero tienen su propia página (/reportes). Los montos en soles son del
+// tarifario de ejemplo del Consultorio San Martín; el regalo y el botón salen de Astro.locals.pricing.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { giftOf } from "../../../lib/pricing"
+import { ctaOf } from "../../../lib/site"
+import FeatureGrid from "../../agents/FeatureGrid.astro"
+import SplitHero from "../../agents/SplitHero.astro"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import CashDay from "./CashDay"
+import Sites from "./Sites"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const title = "Caja y cobros para consultorio médico"
+const description =
+  "Caja para tu consultorio médico: cobra cada consulta con tu tarifario, ticket con el impuesto aparte, quién debe y desde cuándo, cierre de caja y varias sedes. Sin presupuesto obligatorio."
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Caja y cobros", "/caja-y-cobros"],
+]
+const REPLAY = "latidia:caja-repetir"
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Necesito un presupuesto para cobrar?",
+    a: "No. Lo que indicas en la atención ya queda aceptado y se cobra con el tarifario. El presupuesto lo preparas solo si la persona quiere saber cuánto costará.",
+  },
+  {
+    q: "¿El ticket es una boleta o una factura?",
+    a: "No. Es un recibo interno de tu consultorio, con el subtotal y el impuesto separados, y lo dice al pie: «Recibo interno. No es un documento fiscal.»",
+  },
+  {
+    q: "¿Qué pasa si un paciente paga solo una parte?",
+    a: "El resto queda a su nombre como «Le falta pagar», con la fecha, hasta que lo pague. En Reportes ves quién te debe y desde cuándo.",
+  },
+  {
+    q: "¿Cada sede tiene su caja?",
+    a: "Sí. La agenda y la caja son de cada sede, con su propio cierre. La historia del paciente es una sola en todas, y en Reportes ves una sede o todas juntas.",
+  },
+  {
+    q: "¿Quién ve la caja?",
+    a: "Quien tiene ese permiso en tu consultorio. Caja cobra sin ver la historia clínica ni la agenda.",
+  },
+  {
+    q: "¿Cuesta más tener otra sede?",
+    a: "No. Pagas por el trabajo de tus agentes, no por cuántas sedes, médicos o usuarios tienes.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="lt">
+    <SplitHero
+      tag="Caja y cobros"
+      color="var(--sky-2)"
+      h1="Caja y cobros para tu consultorio médico: lo cobrado por consulta, quién debe, el cierre del día y cada sede con lo suyo."
+      lead="Cobras desde la ficha de cada paciente con el tarifario de tu consultorio. Lo que falta pagar queda a su nombre y, al final del mes, Reportes ya tiene las cuentas."
+      copyBasis={400}
+      demoBasis={560}
+    >
+      <p class="sh-title big">Cobras la consulta. <span class="accent">El mes se cuenta solo.</span></p>
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <button type="button" class="btn btn-g" data-lt-replay={REPLAY}>Repetir el día</button>
+      </Fragment>
+      <CashDay slot="demo" client:load replayEvent={REPLAY} />
+    </SplitHero>
+
+    <FeatureGrid
+      tag="La caja"
+      title="Lo que entra, lo que sale y lo que falta cobrar."
+      lead="Cada cobro sale del tarifario de tu consultorio: consulta S/ 80, control S/ 50, electrocardiograma S/ 60. No escribes precios a mano en cada ticket."
+      min={250}
+      small
+      white
+      items={[
+        { title: "Se abre sola", text: "Con el primer cobro del día. Nadie tiene que acordarse de abrirla." },
+        { title: "Tus medios de pago", text: "Efectivo, tarjeta, transferencia: los que configura tu consultorio, en el orden que eliges." },
+        { title: "«Le falta pagar»", text: "Si paga una parte, el resto queda a su nombre, con la fecha, hasta que lo pague." },
+        { title: "El ticket", text: "Separa subtotal e impuesto y siempre dice «Recibo interno. No es un documento fiscal.»" },
+        { title: "Gastos y efectivo", text: "Ingresos y retiros de efectivo con su motivo. Anular pide motivo y queda quién lo hizo." },
+        { title: "Cierre de caja", text: "Al cerrar, imprimes la hoja para firmar la entrega del día." },
+      ]}
+    >
+      <p class="more">Caja ve lo que necesita para cobrar, sin la historia clínica. <a href="/seguridad">Qué ve cada rol →</a></p>
+    </FeatureGrid>
+
+    <section class="bp-split">
+      <div class="wrap bp-split-in">
+        <div class="bp-copy">
+          <span class="tag bp-tag">[ Sin presupuesto ]</span>
+          <h2 class="bp-h2">Lo que indicas ya queda aceptado.</h2>
+          <p class="bp-lead">Indicas una nebulización o un control dentro de la atención y se puede agendar enseguida. El presupuesto es opcional: lo preparas solo si la persona quiere saber cuánto costará.</p>
+          <div class="bp-quote">
+            <span>Lo que dice la pantalla</span>
+            <p>«Opcional: lo indicado ya queda aceptado. Prepáralo si la persona quiere saber cuánto costará.»</p>
+          </div>
+          <p class="bp-text">Por eso, en Reportes, pagar es la consulta cobrada: no espera a que alguien acepte un presupuesto. <a href="/reportes">Así se ve en Reportes →</a></p>
+        </div>
+        <figure class="bp-shot">
+          <img
+            src="/img/latidia/plan-sin-presupuesto.jpg"
+            width="1280"
+            height="1412"
+            loading="lazy"
+            decoding="async"
+            alt="La pestaña Plan de un paciente: la nebulización indicada aparece aceptada y, debajo, «Sin presupuesto. No hace falta para agendar ni para atender.» con el botón «Preparar presupuesto»."
+          />
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section section-white">
+      <div class="wrap bp-sites">
+        <div class="bp-head">
+          <span class="tag bp-tag">[ Varias sedes ]</span>
+          <h2 class="bp-h2">Cada sede con lo suyo. El paciente, uno solo.</h2>
+          <p class="bp-lead">La agenda y la caja son de cada sede. La historia del paciente es una sola en todas. Los reportes, de todas juntas o de una. Elige una sede y mira qué cambia.</p>
+        </div>
+        <Sites client:visible />
+        <p class="more">Sin cobrar por sede: todo el sistema incluido, sin límite de médicos, salas ni usuarios. <a href="/precios">Ver los precios →</a></p>
+      </div>
+    </section>
+
+    <div class="faqwrap">
+      <Faq items={faq} title="Sobre la caja y los cobros." />
+    </div>
+    <CtaBand title="Cobras la consulta. El mes se cuenta solo.">
+      <Fragment slot="text">
+        {gift ? (
+          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de médicos, salas ni usuarios.</>
+        ) : (
+          <>Tus agentes trabajan en tu consultorio desde el primer día. Sin límite de médicos, salas ni usuarios.</>
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<script>
+  // «Repetir el día»: la caja del día (isla) escucha este evento y vuelve a empezar.
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-lt-replay]")) {
+    button.addEventListener("click", () => window.dispatchEvent(new Event(button.dataset.ltReplay ?? "")))
+  }
+</script>
+
+<style>
+  /* Las superficies de latidIA: el gris claro y las líneas con un poco de su lila (como el tablero). */
+  .lt {
+    --bg: color-mix(in srgb, var(--teal) 4%, #fff);
+    --line: color-mix(in srgb, var(--teal) 12%, #fff);
+  }
+  /* La frase grande del tablero: 64 px como máximo, no los 72 de SplitHero. */
+  .lt .big { font-size: clamp(42px, 4.6vw, 64px); line-height: .98; letter-spacing: -.045em; }
+  .accent { display: block; color: var(--sky); }
+  .more { font-size: 15px; color: var(--muted); }
+  .more a { font-weight: 700; display: inline-block; padding: 10px 0; }
+  .bp-tag { font-size: 13px; letter-spacing: .12em; }
+  .bp-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .bp-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .bp-text { font-size: 16px; line-height: 1.55; color: var(--muted); }
+  .bp-text a { font-weight: 700; }
+
+  .bp-split { padding: 104px 0; background: var(--bg); }
+  .bp-split-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .bp-copy { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+  .bp-quote { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+  .bp-quote span { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+  .bp-quote p { font-size: 16px; line-height: 1.5; }
+  .bp-shot { flex: 1 1 520px; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .bp-shot img { width: 100%; height: auto; border-radius: 20px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(30, 11, 61, .35); }
+  .bp-shot figcaption { font-size: 13px; color: var(--soft); }
+
+  .bp-sites { display: flex; flex-direction: column; gap: 32px; }
+  .bp-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+
+  .faqwrap { background: var(--bg); }
+
+  @media (max-width: 720px) {
+    .bp-split { padding: 64px 0; }
+    .bp-split-in { gap: 32px; }
+    .bp-copy, .bp-shot { flex-basis: 100%; }
+    .bp-lead { font-size: 16px; }
+    .bp-sites { gap: 24px; }
+  }
+</style>

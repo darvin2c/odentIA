@@ -13,7 +13,8 @@ import SystemSection from "../components/home/SystemSection.astro"
 import TrustSection from "../components/home/TrustSection.astro"
 import ValueSection from "../components/home/ValueSection.astro"
 import "../components/home/home.css"
-import LatidiaHome from "../components/latidia/LatidiaHome.astro"
+import { homeFaq as latidiaFaq } from "../components/latidia/home/faq"
+import LatidiaHome from "../components/latidia/home/HomePage.astro"
 import Base from "../layouts/Base.astro"
 import { faqJsonLd } from "../lib/faq"
 import { MEDICAL } from "../lib/product"
@@ -48,7 +49,7 @@ const softwareLd = {
   description,
 }
 ---
-<Base title={title} description={description} jsonLd={MEDICAL ? [softwareLd] : [softwareLd, faqLd]}>
+<Base title={title} description={description} jsonLd={MEDICAL ? [softwareLd, faqJsonLd(latidiaFaq(gift))] : [softwareLd, faqLd]}>
   {MEDICAL ? <LatidiaHome /> : (
   <div class="home">
     <HomeHero client:load ctaHref={cta.href} ctaLabel={cta.label} note={note} />

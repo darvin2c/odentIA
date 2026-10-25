@@ -1,0 +1,20 @@
+/* Interruptores de «Tú decides» (AgentSwitches): la fila entera es el botón. */
+.asw { display: flex; flex-direction: column; gap: 10px; }
+.asw-row { width: 100%; min-height: 88px; display: flex; align-items: center; gap: 20px; padding: 18px 22px; border-radius: 18px; cursor: pointer; color: var(--ink); text-align: left; font-family: var(--font); background: #f8fafc; border: 1px solid var(--line); transition: background .3s, border-color .3s; }
+.asw-row.on { background: var(--paper); border-color: #dccdf5; box-shadow: 0 6px 18px rgba(76, 42, 138, .06); }
+.asw-row:hover { border-color: var(--teal); }
+.asw-row:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+.asw-copy { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.asw-copy b { font-size: 17px; }
+.asw-agent { font-family: var(--agent-font); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.asw-agent.sofi { color: #0e7490; }
+.asw-agent.argos { color: #9a6a12; }
+.asw-desc { font-size: 15px; line-height: 1.45; color: var(--muted); }
+.asw-track { flex: none; width: 50px; height: 30px; border-radius: 999px; padding: 4px; display: flex; justify-content: flex-start; background: #cbd5e1; transition: background .25s; }
+.asw-row.on .asw-track { background: var(--teal); justify-content: flex-end; }
+.asw-track i { width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); }
+@media (max-width: 720px) {
+  .asw-row { min-height: 80px; gap: 14px; padding: 14px 16px; border-radius: 16px; }
+  .asw-copy b { font-size: 16px; }
+  .asw-desc { font-size: 14px; }
+}

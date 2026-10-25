@@ -1,0 +1,54 @@
+/* El teléfono de Rosa (tablero «Enlace»): marco oscuro, la pantalla clara y una tarjeta blanca por
+   cosa, como la página real de Su enlace, con el botón lila en píldora y los grises de la app. */
+.pp { width: 380px; max-width: 100%; margin: 0 auto; background: #0b0518; border-radius: 44px; padding: 12px; box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .7), inset 0 0 0 1px rgba(255, 255, 255, .08); }
+.pp-screen { background: #f6f4fa; color: var(--ink); border-radius: 34px; overflow: hidden; display: flex; flex-direction: column; }
+.pp-status { display: flex; justify-content: space-between; align-items: center; padding: 10px 22px 6px; font-size: 12px; font-weight: 700; }
+.pp-notch { width: 90px; height: 22px; border-radius: 999px; background: #0b0518; }
+.pp-body { padding: 8px 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.pp-hello { display: flex; flex-direction: column; gap: 2px; padding: 4px 4px 0; }
+.pp-hello span { font-family: var(--agent-font); font-size: 10.5px; letter-spacing: .08em; color: #6b5a8e; }
+.pp-hello b { font-size: 22px; letter-spacing: -.02em; }
+
+.pp-card { background: var(--paper); border-radius: 20px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04); transition: opacity .5s, transform .5s; }
+.pp-card.pp-hidden { opacity: 0; transform: translateY(10px); }
+.pp-h { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--teal); }
+.pp-when { font-size: 18px; letter-spacing: -.01em; }
+.pp-what { font-size: 14px; color: var(--ink-2); }
+.pp-sub { font-size: 13px; color: var(--soft); }
+.pp-sub.small { font-size: 12px; }
+.pp-q { font-size: 16px; }
+.pp-ok { font-size: 12px; font-weight: 700; color: #1f7a5c; background: #e4f6ee; border-radius: 999px; padding: 4px 9px; align-self: flex-start; }
+.pp-row { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 4px; }
+.pp-btn { flex: 1 1 auto; min-height: 44px; border: 0; border-radius: 999px; background: #eef0f4; color: var(--ink); font: 600 14px var(--font); padding: 0 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.pp-btn.main { background: var(--teal); color: #fff; font-weight: 700; }
+.pp-btn.main:disabled { background: #e4dcf3; color: #6f6290; cursor: default; }
+.pp-btn.danger { background: #b42318; color: #fff; font-weight: 700; }
+.pp-btn:not(:disabled):hover { filter: brightness(.96); }
+.pp-fake { cursor: default; }
+.pp-pulse { animation: pp-pulse 1.6s ease-out infinite; }
+@keyframes pp-pulse { 0% { box-shadow: 0 0 0 0 rgba(109, 63, 192, .45); } 100% { box-shadow: 0 0 0 12px rgba(109, 63, 192, 0); } }
+.pp-slots { display: flex; flex-direction: column; gap: 6px; }
+.pp-slots legend { padding: 0; margin-bottom: 2px; }
+.pp-slot { min-height: 44px; border-radius: 14px; text-align: left; font: 600 14px var(--font); padding: 0 14px; cursor: pointer; border: 1px solid #e3def0; background: var(--paper); color: var(--ink); }
+.pp-slot[aria-pressed="true"] { border: 2px solid var(--teal); background: #f5f0fd; color: #4c2a8a; }
+.pp-map { height: 92px; border-radius: 14px; background: linear-gradient(135deg, #e8e3f3 0 25%, #f1eef8 25% 50%, #e8e3f3 50% 75%, #f1eef8 75%); background-size: 28px 28px; display: flex; align-items: center; justify-content: center; }
+.pp-map span { width: 18px; height: 18px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--teal); box-shadow: 0 0 0 4px rgba(109, 63, 192, .2); }
+
+.pp-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 14px; padding: 4px 0; }
+.pp-line.sep { border-top: 1px solid #f1f0f6; }
+.pp-done { font-size: 12px; font-weight: 700; color: #1f7a5c; }
+.pp-sent { font-size: 12px; font-weight: 700; color: #4c2a8a; text-align: right; }
+.pp-chip-btn { flex: 0 0 auto; min-height: 44px; border: 0; border-radius: 999px; background: #ece4fb; color: #4c2a8a; font: 700 13px var(--font); padding: 0 14px; cursor: pointer; }
+.pp-chip-btn.ok { background: #e4f6ee; color: #1f7a5c; }
+.pp-paper { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f1f0f6; }
+.pp-paper-name { display: flex; flex-direction: column; min-width: 0; }
+.pp-paper-name b { font-size: 14px; }
+.pp-paper-name span { font-size: 12px; color: var(--soft); }
+/* El interruptor de cada mensaje: un botón con aria-pressed, «Sí» o «No» escrito además del color. */
+.pp-switch { flex: 0 0 auto; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; cursor: pointer; font: 600 12px var(--font); color: var(--soft); padding: 0 2px; }
+.pp-switch i { width: 38px; height: 22px; border-radius: 999px; background: #d5d9e0; position: relative; transition: background-color .25s; }
+.pp-switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .25s; }
+.pp-switch[aria-pressed="true"] { color: #4c2a8a; }
+.pp-switch[aria-pressed="true"] i { background: var(--teal); }
+.pp-switch[aria-pressed="true"] i::after { transform: translateX(16px); }
+@media (max-width: 420px) { .pp { border-radius: 36px; padding: 8px; } .pp-screen { border-radius: 28px; } .pp-body { padding: 8px 12px 16px; } }

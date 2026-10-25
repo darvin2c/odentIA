@@ -1,0 +1,237 @@
+---
+// /agentes/administrador de latidIA (tablero «Argos» del lienzo): «Argos.» en grande con su frase y el h1
+// para los buscadores; las preguntas a Argos que se responden con cifras, dibujo y «Así lo calculé»;
+// cómo trae de vuelta a tus pacientes (12 meses, controles que se repiten, otro horario, tarea de
+// llamada) con los controles de Luis y la captura del control que se repite; «Pregúntale» con la captura
+// de Reportes; cuánto cobra (cifras de Astro.locals.pricing); las preguntas y el cierre.
+import Base from "../../../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../../../lib/faq"
+import { shownPlan } from "../../../../lib/pricing"
+import { AGENT_COLORS, ctaOf } from "../../../../lib/site"
+import AgentClose from "../AgentClose.astro"
+import AgentFaq, { type AgentQuestion } from "../AgentFaq.astro"
+import AgentHero from "../AgentHero.astro"
+import AgentPrices from "../AgentPrices.astro"
+import "../agent-page.css"
+import ArgosQuestions from "./ArgosQuestions"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const plan = shownPlan(pricing)
+const color = AGENT_COLORS.administrador
+// El ámbar de Argos sobre claro (#c98a1c) no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
+const amberText = "#9a6a12"
+
+const title = "Argos, agente administrador con IA para tu consultorio médico"
+const description =
+  "Argos avisa los controles que se repiten, invita a volver a quien lleva 12 meses sin venir, ofrece otro horario a quien faltó y responde tus preguntas con las cifras de Reportes de tu consultorio médico."
+
+const brings = [
+  { kicker: "12 meses", title: "Invita a volver", text: "A quien lleva un año sin venir y no tiene nada pendiente: un chequeo a tiempo." },
+  { kicker: "1 · 3 · 6 · 12 meses", title: "Avisa los controles", text: "Los que se repiten hasta «Dejar de repetir». Cada uno deja indicado el siguiente." },
+  { kicker: "Faltó o canceló", title: "Le ofrece otro horario", text: "A quien faltó o canceló, con un horario libre para que no quede sin atenderse." },
+  { kicker: "Si no puede escribir", title: "Te deja una llamada", text: "Sin canal o sin permiso para escribirle: una tarea de llamada en Tareas, con el motivo." },
+]
+const asks = [
+  "«¿Cuántos pacientes nuevos llegaron por Instagram?»",
+  "«¿Cuántas ecografías hicimos este mes?»",
+  "«¿Cuánto me deben y desde cuándo?»",
+  "«¿Qué especialidad tiene más inasistencias?»",
+]
+
+// Los controles de Luis (datos de la demo): la sistólica de 152 a 132 y la diastólica de 96 a 84.
+// Escala del dibujo: 160 mmHg arriba (y = 20) y 80 abajo (y = 160).
+const xs = [80, 220, 360, 480]
+const y = (mmHg: number) => 20 + ((160 - mmHg) * 140) / 80
+const systolic = [152, 146, 138, 132]
+const diastolic = [96, 92, 88, 84]
+const line = (values: number[]) => values.map((v, i) => `${xs[i]},${y(v)}`).join(" ")
+
+const included = plan?.argos?.included
+const faq: AgentQuestion[] = [
+  { q: "¿Argos escribe a mis pacientes?", a: "Argos decide a quién y cuándo; Sofi le escribe por su canal, dentro de tu horario de recontacto." },
+  { q: "¿A quién invita a volver?", a: "A quien lleva 12 meses sin venir y no tiene una cita ni un control pendiente." },
+  { q: "¿Los controles se repiten solos?", a: "Cada 1, 3, 6 o 12 meses, hasta que tocas «Dejar de repetir». Al completar uno queda indicado el siguiente." },
+  { q: "¿Qué pasa si no puede escribirle?", a: "Te deja una tarea de llamada con el motivo. Nadie se queda sin aviso por no tener WhatsApp." },
+  { q: "¿De dónde salen sus cifras?", a: "De Reportes, con las mismas cuentas. Cuenta la consulta cobrada y siempre dice «Así lo calculé»." },
+  {
+    q: "¿Y si no sabe la respuesta?",
+    a: `Te lo dice, sin inventar. Esa pregunta no cuenta ${included ? `entre tus ${included} del mes` : "entre las incluidas"}.`,
+  },
+]
+
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Agentes", "/agentes"],
+  ["Argos, administración", "/agentes/administrador"],
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }) => ({ q, a })))]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="la" style={`--ag: ${amberText}`}>
+    <AgentHero
+      tag="Tu agente de administración"
+      name="Argos"
+      color={color.dark}
+      phrase="Ve todo tu consultorio. Nadie se queda atrás."
+      h1="Controles que se repiten, pacientes que vuelven y respuestas con las cifras de tu consultorio médico."
+      meaning="El gigante de los cien ojos: ve lo pendiente y no deja a ningún paciente atrás."
+    >
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <a class="btn btn-g" href="/caja-y-cobros">Ver Caja y reportes</a>
+      </Fragment>
+      <ArgosQuestions slot="demo" client:load />
+    </AgentHero>
+
+    <section class="la-sec">
+      <div class="wrap la-in">
+        <div class="la-head">
+          <span class="tag la-tag">[ Trae de vuelta a tus pacientes ]</span>
+          <h2 class="la-h2">Lo pendiente, sin listas ni llamadas de más.</h2>
+          <p class="la-lead">Argos ve quién necesita un mensaje y Sofi se lo escribe por su canal. Si no puede escribirle, te deja la tarea con el motivo.</p>
+        </div>
+        <div class="ad-4">
+          {brings.map((item) => (
+            <div class="la-card">
+              <span class="ad-kicker">{item.kicker}</span>
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+
+        <div class="ad-luis">
+          <div class="la-card ad-chart">
+            <div class="ad-chart-head">
+              <span><b>Luis Gómez Salas · 62 años</b><span>Hipertenso · control de presión arterial cada 3 meses</span></span>
+              <span class="ad-repeat">Se repite cada 3 meses</span>
+            </div>
+            <svg viewBox="0 0 520 190" role="img" aria-label="Presión arterial de Luis en sus 4 controles: la sistólica baja de 152 a 132 y la diastólica de 96 a 84">
+              {[160, 140, 120, 100, 80].map((v) => (
+                <>
+                  <line x1="40" y1={y(v)} x2="510" y2={y(v)} stroke={v === 80 ? "#e9e2f7" : "#f1ecf9"} />
+                  <text x="32" y={y(v) + 4} text-anchor="end" font-size="11" fill="#64748b" class="ad-mono">{v}</text>
+                </>
+              ))}
+              <polyline points={line(systolic)} fill="none" stroke="#6d3fc0" stroke-width="3" stroke-linejoin="round" />
+              <polyline points={line(diastolic)} fill="none" stroke="#c98a1c" stroke-width="3" stroke-linejoin="round" />
+              {systolic.map((v, i) => <circle cx={xs[i]} cy={y(v)} r="5" fill="#6d3fc0" />)}
+              {diastolic.map((v, i) => <circle cx={xs[i]} cy={y(v)} r="5" fill="#c98a1c" />)}
+              <text x="80" y={y(152) - 13} text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">152/96</text>
+              <text x="480" y={y(132) - 13} text-anchor="middle" font-size="13" font-weight="700" fill="#0f172a">132/84</text>
+              {["1.er control", "2.º", "3.º", "4.º · hoy"].map((label, i) => (
+                <text x={xs[i]} y="182" text-anchor="middle" font-size="11" fill="#64748b">{label}</text>
+              ))}
+            </svg>
+            <div class="ad-legend">
+              <span><i style="background: #6d3fc0"></i>Sistólica, mmHg</span>
+              <span><i style="background: #c98a1c"></i>Diastólica, mmHg</span>
+              <span>Peso: de 86 a 82 kg · continúa con enalapril y dieta baja en sal</span>
+            </div>
+          </div>
+          <div class="ad-wa">
+            <span class="ad-wa-tag">Cuando se acerca el siguiente · WhatsApp</span>
+            <div class="ad-out">Hola, Luis. Te toca tu control de presión arterial con la Dra. Vela. Tengo libre el martes a las 10:00 o el jueves a las 17:00. Trae el registro de presión de la casa. ¿Cuál te acomoda?</div>
+            <div class="ad-in">El martes, por favor.</div>
+            <div class="ad-booked"><span>Martes · 10:00 · Control de presión · Sala 2</span><span>reservada</span></div>
+            <span class="ad-wa-note">Argos ve que le toca; Sofi le escribe dentro de tu horario de recontacto.</span>
+          </div>
+        </div>
+
+        <figure class="la-shot ad-shot-wide">
+          <div class="la-frame" style="aspect-ratio: 990 / 320; background: var(--paper)">
+            <img
+              src="/img/latidia/control-repite.jpg"
+              width="1280"
+              height="1342"
+              loading="lazy"
+              decoding="async"
+              alt="El control de presión arterial, pendiente, que se repite cada 3 meses, con Reservar, Completar control y Dejar de repetir."
+              style="width: 129.29%; left: -27.27%; top: -316.25%"
+            />
+          </div>
+          <figcaption>Captura real del producto, con datos de prueba: el control que se repite, en el Plan del paciente.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="la-sec white">
+      <div class="wrap la-split ad-ask-in">
+        <div class="ad-ask-copy">
+          <span class="tag la-tag">[ Pregúntale ]</span>
+          <h2 class="la-h2 s">Le preguntas como a una persona. Responde con tus cifras.</h2>
+          <p class="la-lead s">Desde Reportes o el buscador. Usa las mismas cuentas de Reportes, cuenta la consulta cobrada, dice cómo lo calculó y lo que no sabe te lo dice.</p>
+          <ul class="ad-asks">
+            {asks.map((ask) => <li>{ask}</li>)}
+          </ul>
+          <a class="la-more" href="/reportes">Ver Reportes →</a>
+        </div>
+        <figure class="la-shot ad-shot">
+          <div class="la-frame" style="aspect-ratio: 1020 / 1060; background: var(--paper)">
+            <img
+              src="/img/latidia/reportes-pacientes.jpg"
+              width="1280"
+              height="1626"
+              loading="lazy"
+              decoding="async"
+              alt="Reportes, pestaña Pacientes: dónde se caen los pacientes, con «Pregúntale a Argos» arriba a la derecha."
+              style="width: 125.49%; left: -25.49%; top: 0"
+            />
+          </div>
+          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <AgentPrices
+      agent="argos"
+      title="Recordar no se cobra. Recuperar, sí."
+      text="La cita recuperada cuenta cuando vuelve quien no tenía cita ni tratamiento en curso, y viene. Una consulta de S/ 80 que no habría ocurrido."
+    />
+
+    <AgentFaq items={faq} white />
+    <AgentClose title="Que ningún paciente se quede atrás." />
+  </div>
+</Base>
+
+<style>
+  .ad-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+  .ad-kicker { font-family: var(--agent-font); font-size: 12px; text-transform: uppercase; color: var(--ag); }
+  .ad-luis { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+  .ad-chart { flex: 1 1 560px; min-width: 0; gap: 14px; border-radius: 22px; }
+  .ad-chart-head { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .ad-chart-head > span:first-child { display: flex; flex-direction: column; gap: 2px; font-size: 20px; }
+  .ad-chart-head > span:first-child > span { font-size: 14px; color: var(--muted); }
+  .ad-repeat { font-size: 12px; font-weight: 700; color: #4c2a8a; background: #ece4fb; border-radius: 999px; padding: 5px 10px; }
+  .ad-chart svg { width: 100%; height: auto; font-family: var(--font); }
+  .ad-chart svg .ad-mono { font-family: var(--agent-font); }
+  .ad-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+  .ad-legend span { display: flex; align-items: center; gap: 6px; }
+  .ad-legend i { width: 14px; height: 3px; display: inline-block; }
+  .ad-wa { flex: 1 1 340px; min-width: 0; background: #efeaf7; border-radius: 22px; padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+  .ad-wa-tag { font-family: var(--agent-font); font-size: 12px; text-transform: uppercase; color: #6b5a8e; }
+  .ad-out { align-self: flex-end; max-width: 92%; background: #d6f1f6; border-radius: 16px; padding: 12px 14px; font-size: 15px; line-height: 1.45; }
+  .ad-in { align-self: flex-start; max-width: 80%; background: var(--paper); border-radius: 16px; padding: 12px 14px; font-size: 15px; line-height: 1.45; }
+  .ad-booked { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; background: var(--paper); border-radius: 14px; padding: 12px 14px; font-size: 14px; font-weight: 700; box-shadow: 0 0 0 2px #f5c46b; }
+  .ad-booked span:last-child { font-family: var(--agent-font); font-size: 12px; font-weight: 500; color: var(--ag); }
+  .ad-wa-note { font-size: 12px; line-height: 1.45; color: var(--muted); margin-top: auto; }
+  .ad-shot-wide { width: 100%; max-width: 820px; margin: 0 auto; }
+  .ad-ask-in { align-items: center; gap: 48px; }
+  .ad-ask-copy { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .ad-asks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 16px; }
+  .ad-shot { flex: 1 1 560px; }
+  .ad-shot .la-frame { border-radius: 22px; }
+  @media (max-width: 1080px) {
+    .ad-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 720px) {
+    .ad-chart { padding: 18px; }
+    .ad-wa { padding: 16px; }
+    .ad-ask-in { gap: 24px; }
+    .ad-out, .ad-in { font-size: 14.5px; }
+  }
+  @media (max-width: 600px) {
+    .ad-4 { grid-template-columns: 1fr; }
+  }
+</style>

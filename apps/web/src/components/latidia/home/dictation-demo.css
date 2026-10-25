@@ -1,0 +1,106 @@
+/* La portada de latidIA (DictationDemo): la línea de pulso arriba y la atención con las
+   sugerencias de Clío abajo, como las capturas de la app (recuadro lila, «Confirmar» y «Editar»). */
+.ld { margin: 0; background: rgba(255, 255, 255, .045); border: 1px solid rgba(255, 255, 255, .12); border-radius: 28px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 80px rgba(6, 0, 20, .45); color: var(--on-night); }
+.ld-narrow { display: none; }
+.ld-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ld-who { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--on-night-3); }
+.ld-status { display: inline-flex; align-items: center; gap: 8px; font-family: var(--agent-font); font-size: 12px; padding: 6px 12px; border-radius: 999px; background: rgba(183, 156, 240, .18); color: #e6dbfb; }
+.ld-status.live { background: rgba(166, 240, 216, .12); color: var(--mint); }
+.ld-blink { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--sky); }
+.ld-status.live .ld-blink { background: var(--mint); animation: ld-blink 1.2s ease-in-out infinite; }
+
+.ld-pulse { position: relative; border-radius: 18px; background: linear-gradient(180deg, rgba(18, 6, 42, .65), rgba(30, 11, 61, .45)); border: 1px solid rgba(183, 156, 240, .18); padding: 16px 18px 14px; overflow: hidden; }
+.ld-pulse-head { display: flex; justify-content: space-between; align-items: baseline; }
+.ld-listen { font-family: var(--agent-font); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #8f7cc0; }
+.ld-bpm { display: flex; align-items: center; gap: 8px; font-family: var(--agent-font); color: var(--on-night); }
+.ld-bpm b { font-size: 26px; font-weight: 600; letter-spacing: -.02em; }
+.ld-bpm > span:last-child { font-size: 13px; color: var(--on-night-3); }
+.ld-heart { width: 9px; height: 9px; border-radius: 50%; background: var(--sky); box-shadow: 0 0 12px var(--sky); display: inline-block; animation: ld-beat .833s ease-out infinite; }
+.ld-ecg { display: block; width: 100%; height: 72px; margin: 4px 0 6px; }
+.ld-ecg-base { fill: none; stroke: rgba(183, 156, 240, .22); stroke-width: 1.6; }
+.ld-ecg-line { fill: none; stroke: var(--sky); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 0 6px rgba(183, 156, 240, .8)); stroke-dasharray: 190 810; animation: ld-sweep 2.5s linear infinite; }
+.ld-words { display: flex; flex-direction: column; gap: 4px; min-height: 58px; }
+.ld-before { font-size: 13px; line-height: 1.4; color: #8f7cc0; min-height: 18px; padding-left: 26px; }
+.ld-now { display: flex; gap: 10px; align-items: flex-start; color: var(--sky); }
+.ld-now svg { flex: none; margin-top: 4px; }
+.ld-heard { font-size: 18px; line-height: 1.4; font-weight: 600; color: var(--on-night); }
+.ld-heard.idle { color: #8f7cc0; }
+.ld-heard.end { color: var(--mint); }
+
+.ld-app { background: #f6f4fb; color: var(--ink); border-radius: 20px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.ld-head { display: flex; align-items: center; gap: 12px; padding: 6px 4px 8px; flex-wrap: wrap; }
+.ld-bot { width: 34px; height: 34px; border-radius: 10px; background: var(--teal-soft); color: var(--teal); display: flex; align-items: center; justify-content: center; flex: none; }
+.ld-head-copy { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ld-head-copy b { font-size: 15px; }
+.ld-head-copy span { font-size: 13px; color: var(--muted); }
+.ld-all { flex: none; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 9px 14px; background: var(--teal); color: #fff; box-shadow: 0 0 0 4px rgba(109, 63, 192, .18); }
+.ld-all.done { background: #e3f5ee; color: #16614b; box-shadow: none; }
+.ld-row { background: #fff; border: 1px solid #ece6f7; border-radius: 14px; padding: 8px 10px 8px 14px; display: grid; grid-template-columns: 118px 1fr; gap: 10px; align-items: center; }
+.ld-row-name { display: flex; flex-direction: column; gap: 2px; }
+.ld-row-name b { font-size: 14px; font-weight: 700; }
+.ld-row-name span { font-size: 12px; color: var(--soft); }
+.ld-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; border-radius: 12px; padding: 8px 10px; min-height: 40px; border: 1px solid #dccdf5; background: #f5f0fd; transition: background .4s, border-color .4s; }
+.ld-box.empty { border: 1px dashed #dfd8ec; color: #94a3b8; background: transparent; }
+.ld-box.ok { border-color: #cdeedf; background: #f2fbf7; }
+.ld-text { font-size: 14px; line-height: 1.35; flex: 1; min-width: 0; }
+.ld-text s { color: #94a3b8; margin-right: 2px; }
+.ld-fixed { background: var(--teal-soft); color: var(--teal-hover); font-weight: 700; border-radius: 6px; padding: 0 4px; }
+.ld-voice { display: block; font-size: 11px; color: var(--teal); font-family: var(--agent-font); }
+.ld-acts { display: flex; gap: 6px; flex: none; }
+.ld-ok, .ld-emit { background: var(--teal); color: #fff; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 7px 13px; flex: none; }
+.ld-edit { background: #eef0f4; color: var(--ink-2); font-size: 13px; font-weight: 600; border-radius: 999px; padding: 7px 12px; }
+.ld-tick { display: none; }
+.ld-done { flex: none; background: #e3f5ee; color: #16614b; font-size: 13px; font-weight: 700; border-radius: 999px; padding: 7px 12px; }
+
+.ld-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ld-note { font-size: 13px; color: var(--on-night-3); max-width: 360px; }
+.ld-btns { display: flex; gap: 8px; }
+.ld-btn { min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .3); background: transparent; color: var(--on-night); font-family: var(--font); font-weight: 700; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+.ld-btn:hover { border-color: rgba(255, 255, 255, .7); }
+.ld-replay { border: 0; background: rgba(183, 156, 240, .2); }
+.ld-replay:hover { background: rgba(183, 156, 240, .32); }
+.ld-btn:focus-visible { outline: 3px solid var(--sky); outline-offset: 2px; }
+
+@keyframes ld-sweep { from { stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
+@keyframes ld-beat { 0% { transform: scale(1); } 12% { transform: scale(1.45); } 30%, 100% { transform: scale(1); } }
+@keyframes ld-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* Teléfono (tablero «InicioTel»): el bloque arriba y su sugerencia debajo, con ✓ redondos. */
+@media (max-width: 720px) {
+  .ld { border-radius: 22px; padding: 12px; gap: 10px; }
+  .ld-wide { display: none; }
+  .ld-narrow { display: inline; }
+  .ld-top { flex-wrap: nowrap; gap: 8px; }
+  .ld-who { font-size: 11px; letter-spacing: .06em; }
+  .ld-pulse { border-radius: 16px; padding: 12px 14px; }
+  .ld-bpm b { font-size: 22px; }
+  .ld-ecg { height: 56px; margin: 2px 0 6px; }
+  .ld-words { min-height: 44px; }
+  .ld-before { display: none; }
+  .ld-heard { font-size: 15px; }
+  .ld-app { border-radius: 16px; padding: 10px; gap: 6px; }
+  .ld-bot { display: none; }
+  .ld-head { padding: 4px 2px 6px; }
+  .ld-head-copy b { font-size: 14px; line-height: 1.3; }
+  .ld-head-copy span { font-size: 12px; }
+  .ld-all { flex: 1 1 100%; text-align: center; padding: 10px 14px; }
+  .ld-row { grid-template-columns: 1fr; gap: 6px; padding: 8px; border-radius: 12px; }
+  .ld-row-name { flex-direction: row; justify-content: space-between; gap: 8px; padding: 0 4px; }
+  .ld-row-name b { font-size: 13px; }
+  .ld-row-name span { font-size: 11px; }
+  .ld-box { flex-wrap: nowrap; }
+  .ld-text { font-size: 13px; }
+  .ld-voice { display: none; }
+  .ld-ok, .ld-edit { display: none; }
+  .ld-tick { display: flex; width: 32px; height: 32px; border-radius: 50%; background: var(--teal); color: #fff; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; }
+  .ld-emit { font-size: 12px; padding: 7px 10px; }
+  .ld-done { width: 32px; height: 32px; border-radius: 50%; background: #d4f1e5; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 14px; font-weight: 800; }
+  .ld-foot { flex-direction: column-reverse; align-items: stretch; gap: 8px; }
+  .ld-note { font-size: 12px; text-align: center; max-width: none; }
+  .ld-btn { flex: 1; justify-content: center; }
+}
+
+/* Sin movimiento: la línea entera y quieta (las animaciones las apaga web.css). */
+@media (prefers-reduced-motion: reduce) {
+  .ld-ecg-line { stroke-dasharray: none; }
+}

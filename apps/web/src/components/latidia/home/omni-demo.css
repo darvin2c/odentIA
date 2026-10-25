@@ -1,0 +1,65 @@
+/* Omnicanal del inicio (OmniDemo): los dos mensajes a la izquierda, los hilos que viajan y la
+   ficha de Rosa a la derecha. En el teléfono, uno debajo del otro con un hilo vertical. */
+.od { display: grid; grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1.1fr); align-items: center; background: #f7f5fc; border: 1px solid #e9e2f7; border-radius: 28px; padding: 36px; }
+.od-msgs { display: flex; flex-direction: column; gap: 18px; }
+.od-msg, .od-item, .od-note { opacity: 0; transform: translateY(8px); transition: opacity .45s, transform .45s; }
+.od-msg.on, .od-item.on, .od-note.on { opacity: 1; transform: none; }
+.od-msg { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 18px 18px 18px 6px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 24px rgba(76, 42, 138, .06); }
+.od-ch { display: flex; align-items: center; gap: 8px; font-family: var(--agent-font); font-size: 12px; text-transform: uppercase; }
+.od-ch i { width: 8px; height: 8px; border-radius: 50%; }
+.od-ch.wa { color: #1d7a45; }
+.od-ch.wa i { background: #25a35a; }
+.od-ch.mail { color: var(--muted); }
+.od-ch.mail i { background: var(--soft); }
+.od-text { font-size: 16px; line-height: 1.45; }
+.od-reply { align-self: flex-end; background: #e3f4f8; color: #0b4f61; border-radius: 14px 14px 4px 14px; padding: 9px 12px; font-size: 14px; line-height: 1.4; max-width: 88%; }
+
+.od-wires { position: relative; height: 240px; display: flex; flex-direction: column; justify-content: space-around; padding: 0 16px; }
+.od-wire { position: relative; height: 2px; background: repeating-linear-gradient(90deg, #cdbdf0 0 6px, transparent 6px 12px); }
+.od-dot { position: absolute; left: 0; top: -4px; width: 10px; height: 10px; border-radius: 50%; animation: od-flow 2.4s linear infinite; }
+.od-dot.wa { background: #25a35a; }
+.od-dot.mail { background: var(--soft); animation-delay: 1.2s; }
+
+.od-card { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 18px 40px rgba(76, 42, 138, .08); min-width: 0; }
+.od-person { display: flex; align-items: center; gap: 14px; }
+.od-avatar { width: 52px; height: 52px; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); font-weight: 800; font-size: 18px; display: flex; align-items: center; justify-content: center; flex: none; }
+.od-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.od-name b { font-size: 19px; letter-spacing: -.01em; }
+.od-name span { font-size: 13px; color: var(--soft); }
+.od-tabs { display: flex; gap: 4px; background: #eef0f4; border-radius: 999px; padding: 4px; font-size: 13px; overflow: hidden; max-width: 100%; }
+.od-tabs span { padding: 6px 10px; color: var(--muted); white-space: nowrap; }
+.od-tabs span.on { background: var(--paper); border-radius: 999px; font-weight: 700; color: var(--ink); }
+.od-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-height: 148px; }
+.od-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; font-size: 14px; line-height: 1.35; background: #faf8fe; border: 1px solid #f0ebf9; }
+.od-ico { width: 30px; height: 30px; border-radius: 9px; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
+.od-ico.wa { background: #e4f5ea; color: #1d7a45; }
+.od-ico.mail { background: #eef0f4; color: var(--ink-2); }
+.od-item-text { flex: 1; min-width: 0; }
+.od-item-text span { display: block; font-size: 13px; color: var(--soft); }
+.od-time { font-family: var(--agent-font); font-size: 12px; color: var(--soft); }
+.od-note { font-size: 14px; font-weight: 700; color: var(--teal-hover); background: var(--teal-soft); border-radius: 12px; padding: 10px 14px; text-align: center; }
+
+@keyframes od-flow { 0% { transform: translateX(0); opacity: 0; } 15%, 85% { opacity: 1; } 100% { transform: translateX(78px); opacity: 0; } }
+@keyframes od-down { 0% { transform: translateY(0); opacity: 0; } 15%, 85% { opacity: 1; } 100% { transform: translateY(24px); opacity: 0; } }
+
+@media (max-width: 960px) {
+  .od { grid-template-columns: 1fr; padding: 14px; border-radius: 22px; gap: 10px; }
+  .od-msgs { gap: 10px; }
+  .od-wires { height: 34px; width: 2px; margin: 0 auto; padding: 0; display: block; background: repeating-linear-gradient(180deg, #cdbdf0 0 5px, transparent 5px 10px); }
+  .od-wire { position: static; height: 0; background: none; }
+  .od-wire + .od-wire { display: none; }
+  .od .od-dot { left: -4px; top: 0; background: var(--teal); animation-name: od-down; }
+  .od-card { padding: 14px; border-radius: 18px; gap: 10px; }
+  .od-feed { min-height: 0; }
+}
+@media (max-width: 720px) {
+  .od-msg { padding: 14px 16px; }
+  .od-reply, .od-tabs, .od-time { display: none; }
+  .od-text { font-size: 15px; }
+  .od-avatar { width: 42px; height: 42px; font-size: 16px; }
+  .od-name b { font-size: 16px; }
+  .od-name span { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .od-dot { opacity: 0; }
+}

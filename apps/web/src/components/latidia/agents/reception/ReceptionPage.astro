@@ -1,0 +1,217 @@
+---
+// /agentes/recepcion de latidIA (tablero «Sofi» del lienzo): «Sofi.» en grande con su frase y el h1 para
+// los buscadores; el WhatsApp del Consultorio San Martín con las escenas «Agenda» y «Urgencia»; lo que
+// hace hoy, con la señal de alarma al frente; cuánto cobra (cifras de Astro.locals.pricing); lo que
+// decides tú; las preguntas de los médicos y el cierre. Sofi no da consejos médicos: el principio
+// «No diagnostica, no receta y no decide por el profesional» está en el agente (packages/agent).
+import Base from "../../../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../../../lib/faq"
+import { hours, money, shownPlan } from "../../../../lib/pricing"
+import { AGENT_COLORS, ctaOf } from "../../../../lib/site"
+import AgentClose from "../AgentClose.astro"
+import AgentFaq, { type AgentQuestion } from "../AgentFaq.astro"
+import AgentHero from "../AgentHero.astro"
+import AgentPrices from "../AgentPrices.astro"
+import "../agent-page.css"
+import SofiChat from "./SofiChat"
+
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const color = AGENT_COLORS.recepcion
+
+const title = "Sofi, recepcionista virtual con IA para consultorios médicos"
+const description =
+  "Sofi responde el WhatsApp de tu consultorio médico, Instagram, Messenger, Telegram, el chat de tu web y el correo, agenda citas con el sí del paciente y, ante una señal de alarma, da el número de emergencias."
+
+// Una conversación por persona en la ventana de las condiciones comerciales (de la administración).
+const windowHours = pricing.terms.conversationWindowHours
+const perPerson = windowHours === 24 ? "al día" : `cada ${hours(windowHours)}`
+
+// Las señales de alarma que reconoce en un consultorio y el número de emergencias de cada país.
+const alarms = [
+  "Embarazada con sangrado",
+  "«Ya no siento al bebé»",
+  "Se rompió la fuente",
+  "Labios morados",
+  "No despierta",
+  "El peor dolor de cabeza de su vida",
+  "Vomitar sangre",
+  "Se tomó muchas pastillas",
+]
+const features = [
+  { title: "Responde siempre", text: "De día, de noche y en domingo, por el canal donde le escriben. Todo cae en la misma ficha de la persona. Nunca se calla por un tope." },
+  {
+    title: "Agenda, mueve o cancela",
+    text: "En los horarios libres de cada médico y cada sala, con el sí del paciente. Si no sabe qué necesita, le ofrece una consulta, donde el médico ve qué necesita y cuánto costará.",
+  },
+  {
+    title: "No ve la historia clínica",
+    text: "Ve la agenda, los servicios, los precios y los datos de contacto. Diagnósticos, notas y signos vitales, no: eso queda entre el paciente y su médico.",
+  },
+  { title: "Entiende notas de voz", text: "Si la mamá manda un audio porque tiene al niño en brazos, Sofi lo lee como texto y responde." },
+  {
+    title: "Te pasa lo que es tuyo",
+    text: "Una duda sobre síntomas o medicamentos llega a tu equipo con un resumen de lo hablado. Si alguien del equipo escribe, Sofi espera 15 minutos.",
+  },
+]
+
+// Lo que cuesta una noche normal, con los precios publicados: ocho personas que solo preguntan y dos
+// que agendan y vienen. Sin precios, la pregunta no se hace.
+// «0,40», «1,00»: los sumandos sin la moneda y con dos decimales, como en la tarjeta de precios.
+const bare = (value: number, currency: string) => {
+  const shown = money(value, currency).replace(`${currency} `, "")
+  return shown.includes(",") ? shown : `${shown},00`
+}
+const informa = plan?.tiers.informa ?? null
+const agenda = plan?.tiers.agenda ?? null
+const night =
+  plan && informa !== null && agenda !== null
+    ? {
+        q: "¿Cuánto me cuesta una noche normal?",
+        a: `Con precios ${founder ? "de Fundadores" : "de lista"}, ocho personas que solo preguntan y dos que agendan y vienen son ${bare(8 * informa, plan.currency)} + ${bare(2 * agenda, plan.currency)}: ${money(8 * informa + 2 * agenda, plan.currency)}.`,
+      }
+    : null
+
+const faq: AgentQuestion[] = [
+  {
+    q: "¿Sofi da consejos médicos?",
+    a: "No. No diagnostica, no receta y no decide por el médico: no dice qué tomar ni qué tiene la persona. Si la duda es de salud, te la pasa con un resumen; si suena a urgencia, da el número de emergencias.",
+  },
+  { q: "¿Ve la historia clínica de mis pacientes?", a: "No. Ve las citas y los datos de contacto. Diagnósticos, notas y signos vitales quedan fuera de su alcance." },
+  {
+    q: "¿Qué pasa si escriben una urgencia a medianoche?",
+    a: "Da el número de emergencias de tu país y el teléfono del consultorio, y la conversación te llega marcada para que la veas apenas entres.",
+  },
+  {
+    q: "¿Agenda sin preguntarme?",
+    a: "Agenda en los horarios libres que tú dejas en la agenda y solo con el sí del paciente. Si prefieres, lo apagas y Sofi envía su enlace para que elija.",
+  },
+  { q: "¿Se hace pasar por una persona?", a: "No. Se presenta como asistente virtual del consultorio, con el nombre que le pongas." },
+  {
+    q: "¿En qué canales responde?",
+    a: "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo. Si Rosa escribe por dos, sigue siendo una sola Rosa.",
+    link: { href: "/omnicanal", label: "Cómo funciona" },
+  },
+  { q: "¿Y si alguien de mi equipo quiere responder?", a: "Escribe en la conversación y Sofi se aparta 15 minutos. Nadie habla encima de nadie." },
+  ...(night ? [night] : []),
+]
+
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  ["Agentes", "/agentes"],
+  ["Sofi, recepción", "/agentes/recepcion"],
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }) => ({ q, a })))]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="la" style={`--ag: ${color.light}`}>
+    <AgentHero
+      tag="Tu agente de recepción"
+      name="Sofi"
+      color={color.dark}
+      phrase="Tu recepción, también de noche."
+      h1="Responde el WhatsApp de tu consultorio médico, Instagram, Messenger, Telegram, el chat de tu web y el correo, y agenda con el sí del paciente."
+      meaning="De sophía, sabiduría: sabe lo que tu consultorio atiende, cuánto cuesta y cuándo hay hora. Tú le pones el nombre."
+      copyBasis={460}
+      demoBasis={480}
+      align="center"
+    >
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <a class="btn btn-g" href="#cobra">Cuánto cobra Sofi</a>
+      </Fragment>
+      <SofiChat slot="demo" client:load />
+    </AgentHero>
+
+    <section class="la-sec">
+      <div class="wrap la-in">
+        <div class="la-head">
+          <span class="tag la-tag">[ Lo que hace hoy ]</span>
+          <h2 class="la-h2">Siempre responde. Y sabe cuándo no es una cita.</h2>
+          <p class="la-lead">Hace el trabajo de recepción de un consultorio: horarios, precios, citas y dirección. Lo que toca al médico, te lo pasa.</p>
+        </div>
+        <div class="rp-grid">
+          <div class="la-card rp-alarm">
+            <h3>Reconoce una señal de alarma</h3>
+            <p>No agenda una urgencia para mañana. Da el número de emergencias del país y el teléfono del consultorio, y avisa a tu equipo.</p>
+            <ul class="rp-chips" aria-label="Algunas señales de alarma">
+              {alarms.map((alarm) => <li>{alarm}</li>)}
+            </ul>
+            <span class="rp-numbers">Perú 106 · México 911 · Colombia 123 · Chile 131 · Argentina 911</span>
+          </div>
+          {features.map((item) => (
+            <div class="la-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <AgentPrices
+      agent="sofi"
+      white
+      title={`Una vez por persona ${perPerson}, según lo que pasó en tu agenda.`}
+      text="Aunque Rosa escriba veinte mensajes, es una sola conversación. Si la consulta se dio, se suma la diferencia; si no vino, se queda en «gestiona»."
+    />
+
+    <section class="la-sec">
+      <div class="wrap la-split">
+        <div class="rp-decide-copy">
+          <span class="tag la-tag">[ Tú decides ]</span>
+          <h2 class="la-h2 s">Lo que hace, lo prendes o lo apagas.</h2>
+          <p class="la-lead s">Y eliges cuándo puede escribir por su cuenta: el horario de recontacto. Responder, responde siempre; una señal de alarma, a cualquier hora.</p>
+        </div>
+        <ul class="rp-decide" aria-label="Así se ve en tu consultorio">
+          <li>
+            <span><b>Agendar citas</b><span>Apagado: le envía su enlace para que la persona elija la hora.</span></span>
+            <span class="rp-switch" aria-hidden="true"><span></span></span>
+          </li>
+          <li>
+            <span><b>Horario de recontacto</b><span>Lunes a viernes de 8:00 a 20:00 y sábado de 8:00 a 14:00, como viene.</span></span>
+            <span class="rp-change" aria-hidden="true">Cambiar</span>
+          </li>
+          <li>
+            <span><b>Nombre y tono</b><span>Cercano, neutro o formal; de tú o de usted; con pocos emojis o ninguno.</span></span>
+            <span class="rp-change" aria-hidden="true">Cambiar</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <AgentFaq items={faq} white />
+    <AgentClose title="Que Sofi atienda tu consultorio esta noche." />
+  </div>
+</Base>
+
+<style>
+  /* La señal de alarma ocupa dos columnas y dos filas: es lo primero que un médico quiere saber. */
+  .rp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-flow: dense; gap: 16px; }
+  .rp-alarm { grid-column: span 2; grid-row: span 2; justify-content: center; gap: 16px; padding: 28px; border-left: 4px solid #dc2626; }
+  .rp-alarm h3 { font-size: 26px; letter-spacing: -.02em; }
+  .rp-chips { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+  .rp-chips li { font-size: 14px; font-weight: 600; background: #fdecec; color: #7f1d1d; border-radius: 999px; padding: 8px 13px; }
+  .rp-numbers { font-family: var(--agent-font); font-size: 12px; color: var(--muted); }
+  .rp-decide-copy { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .rp-decide { flex: 1 1 520px; min-width: 0; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .rp-decide li { background: var(--paper); border: 1px solid var(--la-line); border-radius: 16px; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .rp-decide li > span:first-child { display: flex; flex-direction: column; gap: 2px; }
+  .rp-decide li > span:first-child > span { font-size: 15px; line-height: 1.45; color: var(--muted); }
+  .rp-switch { flex: none; width: 48px; height: 28px; border-radius: 999px; background: #0e7490; display: flex; justify-content: flex-end; padding: 3px; }
+  .rp-switch span { width: 22px; height: 22px; border-radius: 50%; background: #fff; }
+  .rp-change { flex: none; font-weight: 700; color: #0e7490; }
+  @media (max-width: 1020px) {
+    .rp-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rp-alarm { grid-row: auto; }
+  }
+  @media (max-width: 680px) {
+    .rp-grid { grid-template-columns: 1fr; }
+    .rp-alarm { grid-column: auto; padding: 20px; }
+    .rp-alarm h3 { font-size: 22px; }
+    .rp-decide li { padding: 16px; }
+    .rp-decide li > span:first-child > span { font-size: 14px; }
+  }
+</style>

@@ -1,0 +1,62 @@
+---
+// Portada de cada agente de latidIA (tableros Sofi, Clio y Argos): a la izquierda el nombre enorme con
+// el punto de su color, la frase, el h1 para los buscadores a 22 px, el significado del nombre y los
+// botones; a la derecha, la demostración. Como SplitHero de odentIA, con los tonos lila del h1 y del
+// significado. La cabecera del sitio va absoluta encima: el relleno de arriba le deja su sitio.
+interface Props {
+  /** Lo que va entre corchetes, arriba. */
+  tag: string
+  /** El nombre del agente, sin el punto. */
+  name: string
+  /** Color del agente sobre oscuro: corchete, punto, frase y raya del significado. */
+  color: string
+  phrase: string
+  h1: string
+  meaning: string
+  /** Ancho base del texto y de la demostración, como en cada tablero. */
+  copyBasis?: number
+  demoBasis?: number
+  /** Sofi centra el texto con la conversación; Clío y Argos lo dejan arriba (su demo es alta). */
+  align?: "center" | "start"
+}
+const { tag, name, color, phrase, h1, meaning, copyBasis = 440, demoBasis = 540, align = "start" } = Astro.props
+---
+<section class="hero ah" style={`--c: ${color}; --cb: ${copyBasis}px; --db: ${demoBasis}px; --al: ${align === "center" ? "center" : "flex-start"}`}>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="wrap ah-in">
+    <div class:list={["ah-copy", { top: align === "start" }]}>
+      <span class="tag ah-tag rise">[ {tag} ]</span>
+      <p class="ah-name rise d1">{name}<span>.</span></p>
+      <p class="ah-phrase rise d1">{phrase}</p>
+      <h1 class="ah-h1 rise d2">{h1}</h1>
+      <p class="ah-meaning rise d2">{meaning}</p>
+      <div class="ah-ctas rise d3"><slot name="actions" /></div>
+    </div>
+    <div class="ah-demo rise d2"><slot name="demo" /></div>
+  </div>
+</section>
+
+<style>
+  .ah { padding: 144px 0 96px; }
+  .ah-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px 56px; align-items: var(--al); }
+  .ah-copy { flex: 1 1 var(--cb); min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  .ah-copy.top { padding-top: 40px; }
+  .ah-demo { flex: 1 1 var(--db); min-width: 0; }
+  .ah-tag { color: var(--c); font-size: 13px; letter-spacing: .12em; }
+  .ah-name { font-size: clamp(64px, 8vw, 104px); line-height: .9; letter-spacing: -.06em; font-weight: 800; }
+  .ah-name span { color: var(--c); }
+  .ah-phrase { font-size: clamp(28px, 3vw, 40px); line-height: 1.05; letter-spacing: -.035em; font-weight: 800; color: var(--c); text-wrap: balance; }
+  /* El h1 es para los buscadores: dice qué es, en chico. */
+  .ah-h1 { font-size: 22px; line-height: 1.35; font-weight: 700; color: #ece6f8; text-wrap: pretty; }
+  .ah-meaning { padding-left: 14px; border-left: 2px solid var(--c); font-size: 15px; line-height: 1.5; font-style: italic; color: var(--on-night-2); }
+  .ah-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  @media (max-width: 720px) {
+    .ah { padding: 104px 0 64px; }
+    .ah-in { gap: 32px; }
+    .ah-copy { gap: 16px; flex-basis: 100%; }
+    .ah-copy.top { padding-top: 0; }
+    .ah-demo { flex-basis: 100%; }
+    .ah-h1 { font-size: 19px; }
+    .ah-ctas :global(.btn) { flex: 1 1 100%; }
+  }
+</style>

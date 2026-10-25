@@ -1,0 +1,225 @@
+---
+// /omnicanal de latidIA (lienzo de la web de latidIA, tablero «Omnicanal»): la portada con los
+// seis canales que llegan a la ficha de Rosa, una sola persona aunque cambie de canal (y la mamá
+// que escribe por su hijo), WhatsApp para consultorios con la ventana de 24 horas y el
+// recordatorio aprobado, las preguntas y el cierre. odentIA sigue con su propia página.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { giftOf } from "../../../lib/pricing"
+import { ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import ChannelsToRecord from "./ChannelsToRecord"
+import WhatsappWindow from "./WhatsappWindow"
+
+const title = "WhatsApp y omnicanal para consultorios médicos"
+const description =
+  "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo de tu consultorio en la ficha de cada paciente, con su historia y sus citas. Conecta tu número de siempre y deja que Sofi responda."
+const cta = ctaOf(Astro.locals.pricing)
+const gift = giftOf(Astro.locals.pricing)
+const trail: [string, string][] = [["Inicio", "/"], ["Omnicanal y WhatsApp", "/omnicanal"]]
+
+const onePerson: { title: string; text: string; link?: { href: string; label: string } }[] = [
+  { title: "Una ficha por persona", text: "Con todos sus canales y su única historia clínica. Sin fichas repetidas." },
+  { title: "Sin adivinar por el número", text: "Un número parecido no basta. Cuando se sabe quién es, se une a su ficha de siempre." },
+  { title: "Sofi responde en cada canal", text: "Donde le escriben, a cualquier hora.", link: { href: "/agentes/recepcion", label: "Conoce a Sofi" } },
+  { title: "Tu equipo, cuando hace falta", text: "Lo que necesita a una persona pasa a tu equipo, con un resumen de lo hablado." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Tengo que cambiar de número?",
+    a: "No. Conectas el número de tu consultorio desde tu cuenta de Meta, con pasos guiados dentro de latidIA, y tus pacientes siguen escribiendo al de siempre.",
+  },
+  {
+    q: "¿Qué pasa si alguien escribe desde otro número?",
+    a: "No se adivina por el número ni se crea una ficha nueva por las dudas. Cuando se sabe quién es, la conversación se une a su ficha de siempre.",
+  },
+  {
+    q: "¿Mi equipo puede responder también?",
+    a: "Sí, desde la Bandeja o desde la ficha de la persona, eligiendo por qué canal. Si alguien del equipo escribe, Sofi espera 15 minutos antes de volver a hablar.",
+  },
+  {
+    q: "¿Cuánto cuesta WhatsApp?",
+    a: "Lo cobra Meta al consultorio, con sus propias tarifas, y lo revisas en tu cuenta de Meta. latidIA no lo cobra ni lo estima: cobra por el trabajo de sus agentes, no por mensaje.",
+  },
+  {
+    q: "¿Sofi responde en todos los canales?",
+    a: "Sí, siempre y en el canal donde le escriben, de día o de noche. Lo que tú decides es cuándo puede escribir por su cuenta.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <div class="om">
+    <section class="hero om-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap om-hero-in">
+        <div class="om-top">
+          <div class="om-copy">
+            <span class="tag tag-d om-tag rise">[ Omnicanal ]</span>
+            <h1 class="om-h1 rise d1">Todos los canales de tu consultorio, <span class="acc">en la ficha de cada paciente.</span></h1>
+          </div>
+          <div class="om-side">
+            <p class="om-lead rise d2">WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo llegan a un solo lugar. Cada mensaje se une a la persona, con su historia y sus citas.</p>
+            <div class="om-ctas rise d3">
+              <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+              <a class="btn btn-g" href="#whatsapp">Cómo va WhatsApp</a>
+            </div>
+          </div>
+        </div>
+        <div class="rise d2">
+          <ChannelsToRecord client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="om-sec">
+      <div class="wrap om-in">
+        <div class="om-head">
+          <span class="tag om-tag">[ Una sola persona ]</span>
+          <h2 class="om-h2">Cambia de canal y la conversación sigue con ella.</h2>
+          <p class="om-p">Quien atiende ve lo que Rosa preguntó por Instagram el lunes y lo que pidió por WhatsApp hoy, sin buscar en el celular de recepción.</p>
+        </div>
+        <div class="om-split">
+          <div class="om-cards">
+            {onePerson.map((item) => (
+              <div class="om-card">
+                <h3>{item.title}</h3>
+                <p>{item.text}{item.link && <> <a href={item.link.href}>{item.link.label}</a></>}</p>
+              </div>
+            ))}
+          </div>
+          <div class="om-who">
+            <span class="om-who-tag">Quien escribe no siempre es el paciente</span>
+            <div class="om-who-row"><span>Escribe por WhatsApp</span><b>Rosa Paredes, la mamá</b></div>
+            <div class="om-who-row"><span>El paciente</span><b>Tomás Paredes, 8 años</b></div>
+            <p>La cita y la historia clínica quedan a nombre de Tomás; la conversación, con Rosa. Cada uno en su ficha.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="om-sec white" id="whatsapp">
+      <div class="wrap om-in wa">
+        <div class="om-head">
+          <span class="tag om-tag">[ WhatsApp ]</span>
+          <h2 class="om-h2">WhatsApp para tu consultorio, con tu número de siempre.</h2>
+          <p class="om-p">Conectas el número del consultorio desde tu cuenta de Meta, con pasos guiados. Tus pacientes siguen escribiendo donde siempre.</p>
+        </div>
+        <div class="om-wa">
+          <div class="om-window">
+            <WhatsappWindow client:visible />
+          </div>
+          <div class="om-phone">
+            <div class="om-phone-top">
+              <span class="om-phone-av" aria-hidden="true">CS</span>
+              <span class="om-phone-who"><b>Consultorio San Martín</b><span>WhatsApp · 18:00</span></span>
+            </div>
+            <div class="om-bub in">
+              <span>Hola, Rosa. Te recordamos tu cita de mañana a las 09:00 con la Dra. Elena Vela en Consultorio San Martín, Av. Perú 1820.</span>
+              <span>Si necesitas cambiarla, responde este mensaje o entra a tu enlace.</span>
+              <span class="om-bub-time">18:00</span>
+            </div>
+            <div class="om-bub out">Gracias, ahí estaré.</div>
+            <span class="om-phone-note">Un mensaje aprobado: sale aunque Rosa no haya escrito en días.</span>
+          </div>
+        </div>
+        <div class="om-grid">
+          <div class="om-card soft">
+            <h3>Recordatorio de cada cita</h3>
+            <p>Con la hora, el médico y la dirección. Si responde, lo atiende Sofi.</p>
+          </div>
+          <div class="om-card soft">
+            <h3>Su enlace en el mensaje</h3>
+            <p>Para elegir la hora, cambiar su cita o descargar su receta. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+          </div>
+          <div class="om-card soft">
+            <h3>Lo que cobra Meta</h3>
+            <p>WhatsApp se lo cobra Meta al consultorio, con sus tarifas. Lo revisas en tu cuenta de Meta; latidIA no lo cobra ni lo estima.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="om-faq">
+      <Faq items={faq} />
+    </div>
+    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta.">
+      <Fragment slot="text">
+        {gift && <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. </>}
+        Sin tarjeta y sin límite de médicos, salas ni usuarios.
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  /* El fondo alterno y las líneas de latidIA (lienzo: #f7f5fc y #e9e2f7), no los grises de odentIA. */
+  .om { --lat-soft: #f7f5fc; --lat-line: #e9e2f7; background: var(--paper); }
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 56 de aire, como en el tablero. */
+  .om-hero { padding: 144px 0 96px; }
+  .om-hero-in { position: relative; display: flex; flex-direction: column; gap: 44px; }
+  .om-top { display: flex; flex-wrap: wrap; gap: 24px 56px; align-items: flex-end; }
+  .om-copy { flex: 1.3 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  .om-side { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  .om-tag { font-size: 13px; letter-spacing: .12em; }
+  .om-h1 { font-size: clamp(36px, 4.2vw, 56px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .om-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .om-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  .om-sec { padding: 96px 0; background: var(--lat-soft); }
+  .om-sec.white { background: var(--paper); }
+  .om-in { display: flex; flex-direction: column; gap: 40px; }
+  .om-in.wa { gap: 44px; }
+  .om-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .om-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .om-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+
+  .om-split { display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch; }
+  .om-cards { flex: 1.4 1 480px; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+  .om-card { background: var(--paper); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+  .om-card h3 { font-size: 19px; line-height: 1.25; letter-spacing: -.01em; }
+  .om-card p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .om-card a { font-weight: 700; }
+  .om-card.soft { background: var(--lat-soft); padding: 24px; }
+  .om-card.soft h3 { font-size: 20px; }
+  .om-card.soft p { font-size: 16px; }
+  .om-who { flex: 1 1 340px; min-width: 0; background: var(--night); color: var(--on-night); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+  .om-who-tag { font-family: var(--agent-font); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--sky-2); }
+  .om-who-row { background: rgba(255, 255, 255, .07); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+  .om-who-row span { font-size: 12px; color: var(--on-night-3); }
+  .om-who-row b { font-size: 16px; }
+  .om-who p { font-size: 15px; line-height: 1.55; color: var(--on-night-2); }
+
+  .om-wa { display: flex; flex-wrap: wrap; gap: 28px; align-items: stretch; }
+  .om-window { flex: 1.2 1 460px; min-width: 0; }
+  /* El teléfono con el recordatorio: los colores de la conversación de WhatsApp, no los de la marca. */
+  .om-phone { flex: 0 1 340px; width: 340px; max-width: 100%; margin: 0 auto; align-self: flex-start; background: #e9e4dc; border-radius: 30px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .om-phone-top { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, .08); }
+  .om-phone-av { width: 36px; height: 36px; border-radius: 50%; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+  .om-phone-who { display: flex; flex-direction: column; }
+  .om-phone-who b { font-size: 14px; }
+  .om-phone-who span { font-size: 11px; color: var(--muted); }
+  .om-bub { font-size: 14px; line-height: 1.45; border-radius: 14px; padding: 10px 12px; }
+  .om-bub.in { align-self: flex-start; max-width: 92%; background: var(--paper); display: flex; flex-direction: column; gap: 6px; }
+  .om-bub.out { align-self: flex-end; max-width: 80%; background: #d9fdd3; }
+  .om-bub-time { font-size: 11px; color: var(--soft); align-self: flex-end; }
+  .om-phone-note { font-size: 12px; color: var(--muted); text-align: center; }
+  .om-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+
+  .om-faq { background: var(--lat-soft); padding-bottom: 8px; }
+  .om-faq :global(details.q) { border-bottom-color: var(--lat-line); }
+
+  @media (max-width: 720px) {
+    .om-hero { padding: 104px 0 56px; }
+    .om-hero-in { gap: 32px; }
+    .om-lead { font-size: 17px; }
+    .om-ctas :global(.btn) { flex: 1 1 100%; }
+    .om-sec { padding: 64px 0; }
+    .om-in, .om-in.wa { gap: 28px; }
+    .om-p { font-size: 16px; }
+    .om-copy, .om-side, .om-cards, .om-who, .om-window { flex-basis: 100%; }
+  }
+</style>
