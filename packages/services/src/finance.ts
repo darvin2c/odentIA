@@ -1422,21 +1422,29 @@ export async function dismissExpenseGap(
 
 /**
  * Cuentas por cobrar por paciente y moneda: cargos vigentes menos aplicaciones
- * vigentes. Contrato para Reportes y Portal (saldo del paciente).
+ * vigentes. Contrato para Reportes y Portal (saldo del paciente). Con
+ * `outstandingOnly`, solo los cargos con saldo, filtrados en la consulta: las
+ * deudas no recorren toda la historia de cobros de la clínica.
  */
 export async function getReceivables(
   tx: Db,
   orgId: string,
-  query: { patientId?: string; branchId?: string } = {},
+  query: { patientId?: string; branchId?: string; outstandingOnly?: boolean } = {},
 ) {
   const chargeFilter = [eq(patientCharge.organizationId, orgId), isNull(patientCharge.voidedAt)]
   if (query.patientId) chargeFilter.push(eq(patientCharge.patientId, query.patientId))
   if (query.branchId) chargeFilter.push(eq(patientCharge.branchId, query.branchId))
+  if (query.outstandingOnly)
+    chargeFilter.push(sql`${patientCharge.amountCents} > coalesce((
+      select sum(a.amount_cents) from patient_payment_application a
+      where a.organization_id = ${patientCharge.organizationId} and a.charge_id = ${patientCharge.id} and a.voided_at is null
+    ), 0)`)
   const charges = await tx
     .select()
     .from(patientCharge)
     .where(and(...chargeFilter))
     .orderBy(asc(patientCharge.createdAt), asc(patientCharge.id))
+  if (query.outstandingOnly && charges.length === 0) return []
   const applications = await tx
     .select()
     .from(patientPaymentApplication)
@@ -1445,6 +1453,9 @@ export async function getReceivables(
         eq(patientPaymentApplication.organizationId, orgId),
         isNull(patientPaymentApplication.voidedAt),
         ...(query.patientId ? [eq(patientPaymentApplication.patientId, query.patientId)] : []),
+        ...(query.outstandingOnly
+          ? [inArray(patientPaymentApplication.chargeId, charges.map((charge) => charge.id))]
+          : []),
       ),
     )
   const appliedByCharge = new Map<string, number>()
@@ -2493,7 +2504,7 @@ export async function getDebts(
   orgId: string,
   query: { branchId?: string } = {},
 ): Promise<DebtRow[]> {
-  const rows = await getReceivables(tx, orgId, {})
+  const rows = await getReceivables(tx, orgId, { outstandingOnly: true })
   const live = rows.filter((r) => r.outstandingCents > 0)
   if (live.length === 0) return []
   const groups: Record<string, DebtRow & { latestCharge: string | null }> = {}

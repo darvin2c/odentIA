@@ -700,10 +700,14 @@ if (passwordHash) {
     })),
   )
 }
+// La cuenta de quien muestra la demo: dueña, pero no atiende (sin horario no es
+// una columna de la Agenda).
+let salesOwnerId: string | null = null
 if (PROD && DEMO_OWNER_EMAIL) {
   const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, DEMO_OWNER_EMAIL)).limit(1)
   if (!owner) throw new Error(`No hay una cuenta con el correo ${DEMO_OWNER_EMAIL}`)
   await db.insert(member).values({ id: randomUUID(), organizationId: ORG_A, userId: owner.id, role: "owner", createdAt: new Date() })
+  salesOwnerId = owner.id
 }
 await db.insert(member).values([
   { id: randomUUID(), organizationId: ORG_A, userId: ANA_ID, role: "owner", createdAt: new Date() },
@@ -1985,7 +1989,7 @@ for (const code of ["ENDODONCIA", "CORONA", "EXODONCIA"]) {
 }
 await db.transaction(async (tx) => {
   await createPromotion(tx, ORG_A, ANA_ID, {
-    name: "Profilaxis preventiva demo",
+    name: "Mes de la prevención",
     startsAt: daysAgo(1).toISOString(),
     endsAt: new Date(Date.now() + 30 * 86_400_000).toISOString(),
     conditions: "Precio promocional para la profilaxis.",
@@ -2803,16 +2807,21 @@ await seedPeriodontalCase(db, {
   daysAgo,
 })
 
-// --- Volumen para paginación: 40 contactos+pacientes ---
-for (let i = 1; i <= 40; i++) {
-  const n = String(i).padStart(2, "0")
-  const created = await createContact(db, ORG_A, {
-    displayName: `Paciente Demo ${n}`,
-  })
+// --- Volumen para paginación: 40 contactos+pacientes con nombres de verdad
+// (la demo se muestra en ventas: nada de «Paciente 01»).
+const PAGINACION_NOMBRES = ["Andrea", "Bruno", "Camila", "Diego", "Fiorella", "Gonzalo", "Héctor", "Isabel"]
+const PAGINACION_APELLIDOS = ["Alvarado Ríos", "Cárdenas Soto", "Espinoza Luna", "Gutiérrez Paz", "Medina Rojas"]
+for (let i = 0; i < 40; i++) {
+  const given = PAGINACION_NOMBRES[i % PAGINACION_NOMBRES.length]!
+  const family = PAGINACION_APELLIDOS[Math.floor(i / PAGINACION_NOMBRES.length)]!
+  const name = `${given} ${family}`
+  const created = await createContact(db, ORG_A, { displayName: name })
   await createPatient(db, ORG_A, ANA_ID, {
-    displayName: `Paciente Demo ${n}`,
+    displayName: name,
+    givenNames: given,
+    familyName: family,
     contacts: [{ contactId: created.id, relationship: "self", isPreferred: true }],
-    phone: `+519000000${n}`,
+    phone: `+5194${String(3_100_000 + i * 7_919).padStart(7, "0")}`,
   })
 }
 
@@ -3036,7 +3045,7 @@ const registrationConfig = await db.transaction((tx) =>
       "personal.cirugias": "optional",
     },
     privacyNotice:
-      "AVISO DE DEMOSTRACIÓN: autorizo el tratamiento de estos datos ficticios para mostrar el registro de pacientes. No utilizar datos reales en esta demostración.",
+      "Dental Smile usará tus datos solo para registrarte como paciente, atenderte y recordarte tus citas. Puedes pedir verlos, corregirlos o eliminarlos escribiendo a recepción.",
   }),
 )
 await db.transaction((tx) =>
@@ -3305,9 +3314,9 @@ await db.transaction((tx) =>
       formVersion: registrationConfig.version,
       answers: {
         demographics: {
-          displayName: "Valeria Quispe · QR demo",
+          displayName: "Valeria Quispe Mamani",
           givenNames: "Valeria",
-          familyName: "Quispe · QR demo",
+          familyName: "Quispe Mamani",
           birthDate: "1998-04-10",
           sex: "F",
           phone: VALERIA_PHONE,
@@ -3344,9 +3353,9 @@ await db.transaction((tx) =>
       formVersion: registrationConfig.version,
       answers: {
         demographics: {
-          displayName: "Thiago Quispe · QR demo",
+          displayName: "Thiago Huanca Quispe",
           givenNames: "Thiago",
-          familyName: "Quispe",
+          familyName: "Huanca Quispe",
           birthDate: "2019-03-02",
           sex: "M",
           phone: VALERIA_PHONE,
@@ -3355,7 +3364,7 @@ await db.transaction((tx) =>
         },
         respondent: "representative",
         representative: {
-          displayName: "Valeria Quispe · QR demo",
+          displayName: "Valeria Quispe Mamani",
           relationship: "guardian",
           relationshipDetail: "Madre",
           phone: VALERIA_PHONE,
@@ -3449,7 +3458,7 @@ const domainSeed = {
 }
 // Solo Miraflores lleva agenda: Surco se deja limpia (sin unidades dentales, horarios ni ausencias)
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
-await db.transaction((tx) => seedAvailability(tx, domainSeed))
+await db.transaction((tx) => seedAvailability(tx, { ...domainSeed, exceptUserIds: salesOwnerId ? [salesOwnerId] : [] }))
 // La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
 // (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {

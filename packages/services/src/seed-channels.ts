@@ -14,14 +14,14 @@ export async function seedChannels(
 ): Promise<void> {
   const existing = await listConnections(tx, input.orgId)
   const byName = new Map(existing.map((c) => [c.displayName, c] as const))
-  const messenger = byName.get("Messenger Demo") ?? (await createConnection(
+  const messenger = byName.get("Messenger Dental Smile") ?? (await createConnection(
     tx,
     input.orgId,
     secretsKey,
     {
       channel: "messenger",
       provider: "messenger",
-      displayName: "Messenger Demo",
+      displayName: "Messenger Dental Smile",
       config: { pageId: "seed-page", pageAccessToken: "seed-dev", appSecret: "seed-dev" },
     },
     { fetch: deps.fetch, validateExternal: false },
@@ -29,14 +29,14 @@ export async function seedChannels(
   if (messenger.status !== "disabled") {
     await setConnectionStatus(tx, input.orgId, messenger.id, "disabled")
   }
-  const instagram = byName.get("Instagram Demo") ?? (await createConnection(
+  const instagram = byName.get("Instagram Dental Smile") ?? (await createConnection(
     tx,
     input.orgId,
     secretsKey,
     {
       channel: "instagram",
       provider: "instagram",
-      displayName: "Instagram Demo",
+      displayName: "Instagram Dental Smile",
       config: { instagramId: "seed-ig", accessToken: "seed-dev", appSecret: "seed-dev" },
     },
     { fetch: deps.fetch, validateExternal: false },

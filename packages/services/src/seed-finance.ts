@@ -25,10 +25,10 @@ export async function seedFinance(tx: Db, input: {
   if (!cash || !wallet || !transfer) throw new Error("Faltan los medios de pago de la clínica demo")
   const shift = await ensureOpenShift(tx, orgId, ownerUserId, branchId, "PEN")
   await addShiftMovement(tx, orgId, ownerUserId, shift.id, {
-    direction: "ingreso", kind: "aporte", amountCents: 20000, concept: "Fondo de efectivo demo",
+    direction: "ingreso", kind: "aporte", amountCents: 20000, concept: "Fondo de caja inicial",
   })
   const charge = await createCharge(tx, orgId, ownerUserId, patientId, {
-    branchId, description: "Profilaxis demo caja", amountCents: 12000, currency: "PEN",
+    branchId, description: "Profilaxis", amountCents: 12000, currency: "PEN",
   })
   await collectCharge(tx, orgId, ownerUserId, patientId, {
     branchId, payerContactId: contactId, chargeIds: [charge.id], requestId,
@@ -38,23 +38,23 @@ export async function seedFinance(tx: Db, input: {
     ], cashReceivedCents: 10000,
   })
   await createExpense(tx, orgId, ownerUserId, {
-    branchId, category: "Materiales", concept: "Guantes y mascarillas demo", amountCents: 3550, fromCash: true,
+    branchId, category: "Materiales", concept: "Guantes y mascarillas", amountCents: 3550, fromCash: true,
   })
   const cancelled = await collectCharge(tx, orgId, ownerUserId, patientId, {
     branchId, advanceCents: 5000, requestId: "50206010-0000-4000-8000-000000000002",
     payments: [{ paymentMethodId: cash.id, amountCents: 5000 }],
   })
   await voidTicket(tx, orgId, ownerUserId, patientId, cancelled.ticket.id, {
-    reason: "Importe digitado por error en la demostración", allowPostClose: false,
+    reason: "Importe digitado por error", allowPostClose: false,
   })
   const state = await getCashState(tx, orgId, { branchId, currency: "PEN" })
   const countedCents = state.cashOnHandCents - 500
   await closeCashWindow(tx, orgId, ownerUserId, {
     branchId, countedCents, retainedCents: 10000, deliveredCents: countedCents - 10000,
-    notes: "Diferencia demo de 5 soles para revisar el aviso a administración",
+    notes: "Faltan 5 soles al cierre; se revisará con administración",
   })
   await createCharge(tx, orgId, ownerUserId, patientId, {
-    branchId, description: "Resina demo pendiente", amountCents: 24000, currency: "PEN",
+    branchId, description: "Resina", amountCents: 24000, currency: "PEN",
   })
   await updatePaymentMethod(tx, orgId, ownerUserId, transfer.id, { isActive: false })
 }
