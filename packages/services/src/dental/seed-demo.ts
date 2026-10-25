@@ -11,6 +11,10 @@
  *
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
+ *
+ * La misma historia es la demo de ventas en producción con
+ * `DEMO_MODE=produccion` y `DEMO_OWNER_EMAIL` (ver `PROD` abajo y
+ * `docs/deployment.md`): una sola clínica, sin cuentas que entren y en CIE-11.
  */
 import { LEGAL } from "@odentia/auth/legal"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
@@ -275,19 +279,43 @@ const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY)
 
 const db = createOwnerDb(databaseUrl)
 
-const ORG_A = "seed-org-dental-smile"
-const ORG_B = "seed-org-clinica-norte"
+/**
+ * La demo de producción (`seed:demo-produccion`): la misma clínica para mostrar
+ * odentIA en ventas, sin nada que sirva para entrar ni nada global. Su equipo
+ * son personas sin cuenta (correos de `example.com`, RFC 2606), la dueña de la
+ * demo es la persona de `DEMO_OWNER_EMAIL`, los diagnósticos van en CIE-11 (la
+ * lista oficial que carga producción) y no se crean administradores, planes,
+ * clínicas de prueba, reclamaciones ni el consultorio de latidIA. Clínica Norte
+ * se crea porque la historia la usa y se borra al terminar.
+ */
+const PROD = process.env.DEMO_MODE === "produccion"
+const DEMO_OWNER_EMAIL = process.env.DEMO_OWNER_EMAIL?.trim().toLowerCase()
+if (PROD && !DEMO_OWNER_EMAIL) throw new Error("DEMO_OWNER_EMAIL es obligatoria en la demo de producción")
+// La semilla de desarrollo crea administradores con la clave de la semilla: nunca en producción.
+if (!PROD && process.env.NODE_ENV === "production") {
+  throw new Error("En producción solo corre la demo de ventas: DEMO_MODE=produccion y DEMO_OWNER_EMAIL")
+}
+const ID = PROD ? "demo" : "seed"
+const ORG_A = `${ID}-org-dental-smile`
+const ORG_B = `${ID}-org-clinica-norte`
 // El consultorio de latidIA (`../medical/seed-demo.ts`) se borra y se crea con la demo.
 const SEED_ORGS = [ORG_A, ORG_B, MEDICAL_DEMO_ORG]
-const ANA_ID = "seed-user-ana"
-const LUIS_ID = "seed-user-luis"
-const CORA_ID = "seed-user-cora"
+const ANA_ID = `${ID}-user-ana`
+const LUIS_ID = `${ID}-user-luis`
+const CORA_ID = `${ID}-user-cora`
 /** La endodoncista de Dental Smile (fase 4, tablero 2): atiende martes y jueves por la tarde. */
-const ROJAS_ID = "seed-user-rojas"
+const ROJAS_ID = `${ID}-user-rojas`
 /** El odontólogo de la Sede San Isidro: la segunda sede con historia en Reportes. */
-const SALAS_ID = "seed-user-salas"
+const SALAS_ID = `${ID}-user-salas`
 /** Caja de Dental Smile: responde desde Inicio los temas de pagos que le pasa Sofi (decisión 3 del pulido de la Bandeja). */
-const CAJA_ID = "seed-user-caja"
+const CAJA_ID = `${ID}-user-caja`
+/** El correo de cada persona del equipo: en producción, uno que no llega a nadie. */
+const SEED_EMAIL_DOMAIN = PROD ? "example.com" : "odentia.dev"
+const seedEmail = (dev: string, prod: string) => (PROD ? `${prod}@${SEED_EMAIL_DOMAIN}` : `${dev}@${SEED_EMAIL_DOMAIN}`)
+/** Los diagnósticos de la historia, en la lista de la clínica (producción solo tiene la CIE-11). */
+const DX = PROD
+  ? { caries: "DA08.0", pulpitis: "DA09.0", dentalExam: "QA00.8" }
+  : { caries: "K02.1", pulpitis: "K04.0", dentalExam: "Z01.2" }
 const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID, CAJA_ID]
 /** Las cuentas que se borran: las de odentIA y la Dra. Vela del consultorio de latidIA. */
 const WIPED_USERS = [...SEED_USERS, VELA_ID]
@@ -299,20 +327,25 @@ const PASSWORD = "Demo1234"
 const SHARED_PHONE = "+51987654999"
 
 const tomorrowIso = (): string => new Date(Date.now() + 86_400_000).toISOString()
-async function wipeSeed(): Promise<void> {
+/** Borra lo de esas organizaciones y esas personas (por defecto, todo lo de la semilla). */
+async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USERS): Promise<void> {
+  const orgList = sql.join(
+    orgs.map((id) => sql`${id}`),
+    sql`, `,
+  )
   const previousDocuments = await db
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
-    .where(inArray(patientDocument.organizationId, SEED_ORGS))
+    .where(inArray(patientDocument.organizationId, orgs))
   const previousMessages = await db
     .select({ attachments: message.attachments })
     .from(message)
-    .where(inArray(message.organizationId, SEED_ORGS))
+    .where(inArray(message.organizationId, orgs))
   // Un concepto vendido apunta a su producto (ADR 0067): se suelta antes de borrar
   // los productos; el concepto se borra después con los cobros.
   await db.execute(
     sql`update patient_charge set product_id = null, product_quantity = null, request_key = null
-      where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG}) and product_id is not null`,
+      where organization_id in (${orgList}) and product_id is not null`,
   )
   // Hijos de los nuevos dominios: purga únicamente las organizaciones demo.
   for (const table of [
@@ -328,6 +361,8 @@ async function wipeSeed(): Promise<void> {
     "saas_negotiation",
     "saas_charge_line",
     "saas_action",
+    // Lo guardado por día (ADR 0085): sin esto, volver a sembrar no puede borrar la clínica.
+    "storage_usage_day",
     "portal_challenge",
     "portal_passkey",
     "portal_verification",
@@ -414,71 +449,71 @@ async function wipeSeed(): Promise<void> {
     "report_digest",
   ]) {
     await db.execute(
-      sql`delete from ${sql.identifier(table)} where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`,
+      sql`delete from ${sql.identifier(table)} where organization_id in (${orgList})`,
     )
   }
   // Finanzas, recetas, controles y responsabilidades: antes que sus padres
   // (vínculos de contacto, atenciones, ítems, líneas y documentos).
   await db
     .delete(patientPaymentApplication)
-    .where(inArray(patientPaymentApplication.organizationId, SEED_ORGS))
+    .where(inArray(patientPaymentApplication.organizationId, orgs))
   await db
     .delete(patientPaymentRefund)
-    .where(inArray(patientPaymentRefund.organizationId, SEED_ORGS))
+    .where(inArray(patientPaymentRefund.organizationId, orgs))
   // Las devoluciones (ADR 0068) después de lo que las nombra y antes de sus tickets.
-  await db.execute(sql`delete from payment_return where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
-  await db.delete(patientCharge).where(inArray(patientCharge.organizationId, SEED_ORGS))
-  await db.delete(patientPayment).where(inArray(patientPayment.organizationId, SEED_ORGS))
-  await db.execute(sql`delete from payment_ticket where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
-  await db.execute(sql`delete from ticket_counter where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
-  await db.execute(sql`delete from organization_payment_method where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
-  await db.delete(prescriptionItem).where(inArray(prescriptionItem.organizationId, SEED_ORGS))
-  await db.delete(prescription).where(inArray(prescription.organizationId, SEED_ORGS))
-  await db.delete(clinicalFollowUp).where(inArray(clinicalFollowUp.organizationId, SEED_ORGS))
+  await db.execute(sql`delete from payment_return where organization_id in (${orgList})`)
+  await db.delete(patientCharge).where(inArray(patientCharge.organizationId, orgs))
+  await db.delete(patientPayment).where(inArray(patientPayment.organizationId, orgs))
+  await db.execute(sql`delete from payment_ticket where organization_id in (${orgList})`)
+  await db.execute(sql`delete from ticket_counter where organization_id in (${orgList})`)
+  await db.execute(sql`delete from organization_payment_method where organization_id in (${orgList})`)
+  await db.delete(prescriptionItem).where(inArray(prescriptionItem.organizationId, orgs))
+  await db.delete(prescription).where(inArray(prescription.organizationId, orgs))
+  await db.delete(clinicalFollowUp).where(inArray(clinicalFollowUp.organizationId, orgs))
   await db
     .delete(patientResponsibility)
-    .where(inArray(patientResponsibility.organizationId, SEED_ORGS))
-  await db.delete(patientRegistration).where(inArray(patientRegistration.organizationId, SEED_ORGS))
+    .where(inArray(patientResponsibility.organizationId, orgs))
+  await db.delete(patientRegistration).where(inArray(patientRegistration.organizationId, orgs))
   await db
     .delete(patientRegistrationLink)
-    .where(inArray(patientRegistrationLink.organizationId, SEED_ORGS))
+    .where(inArray(patientRegistrationLink.organizationId, orgs))
   await db
     .delete(patientRegistrationConfig)
-    .where(inArray(patientRegistrationConfig.organizationId, SEED_ORGS))
-  await db.delete(message).where(inArray(message.organizationId, SEED_ORGS))
+    .where(inArray(patientRegistrationConfig.organizationId, orgs))
+  await db.delete(message).where(inArray(message.organizationId, orgs))
   // Las citas creadas por el agente referencian su conversación: se suelta la
   // referencia antes de borrarla (las citas se purgan más abajo).
   await db
     .update(appointment)
     .set({ conversationId: null })
-    .where(inArray(appointment.organizationId, SEED_ORGS))
-  await db.delete(conversation).where(inArray(conversation.organizationId, SEED_ORGS))
-  await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, SEED_ORGS))
-  await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, SEED_ORGS))
-  await db.delete(encounterSite).where(inArray(encounterSite.organizationId, SEED_ORGS))
+    .where(inArray(appointment.organizationId, orgs))
+  await db.delete(conversation).where(inArray(conversation.organizationId, orgs))
+  await db.delete(contactIdentity).where(inArray(contactIdentity.organizationId, orgs))
+  await db.delete(encounterProcedure).where(inArray(encounterProcedure.organizationId, orgs))
+  await db.delete(encounterSite).where(inArray(encounterSite.organizationId, orgs))
   // Los diagnósticos migrados desde notas antiguas las referencian (`legacy_note_id`): van antes.
-  await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, SEED_ORGS))
-  await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, SEED_ORGS))
+  await db.delete(encounterDiagnosis).where(inArray(encounterDiagnosis.organizationId, orgs))
+  await db.delete(clinicalNote).where(inArray(clinicalNote.organizationId, orgs))
   // Los ítems del plan referencian el hallazgo que los motivó: se suelta la
   // referencia antes de borrar el odontograma (los ítems se borran después).
-  await db.delete(planItemFinding).where(inArray(planItemFinding.organizationId, SEED_ORGS))
-  await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, SEED_ORGS))
+  await db.delete(planItemFinding).where(inArray(planItemFinding.organizationId, orgs))
+  await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, orgs))
   await db
     .delete(odontogramAssessment)
-    .where(inArray(odontogramAssessment.organizationId, SEED_ORGS))
+    .where(inArray(odontogramAssessment.organizationId, orgs))
   // Contextos antes que documentos; vínculos atención-plan antes que ítems y
   // presupuestos (FK en cascada parcial, orden explícito e idempotente).
   await db
     .delete(patientDocumentContext)
-    .where(inArray(patientDocumentContext.organizationId, SEED_ORGS))
-  await db.delete(encounterPlanItem).where(inArray(encounterPlanItem.organizationId, SEED_ORGS))
+    .where(inArray(patientDocumentContext.organizationId, orgs))
+  await db.delete(encounterPlanItem).where(inArray(encounterPlanItem.organizationId, orgs))
   // Lo agendado de un plan apunta a sus tratamientos: va antes que ellos.
-  await db.delete(appointmentPlanItem).where(inArray(appointmentPlanItem.organizationId, SEED_ORGS))
-  await db.delete(patientDocument).where(inArray(patientDocument.organizationId, SEED_ORGS))
-  await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, SEED_ORGS))
-  await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, SEED_ORGS))
-  await db.delete(patientCondition).where(inArray(patientCondition.organizationId, SEED_ORGS))
-  await db.delete(patientMedication).where(inArray(patientMedication.organizationId, SEED_ORGS))
+  await db.delete(appointmentPlanItem).where(inArray(appointmentPlanItem.organizationId, orgs))
+  await db.delete(patientDocument).where(inArray(patientDocument.organizationId, orgs))
+  await db.delete(patientAnamnesis).where(inArray(patientAnamnesis.organizationId, orgs))
+  await db.delete(patientAllergy).where(inArray(patientAllergy.organizationId, orgs))
+  await db.delete(patientCondition).where(inArray(patientCondition.organizationId, orgs))
+  await db.delete(patientMedication).where(inArray(patientMedication.organizationId, orgs))
   // Solo el reset manual owner elimina snapshots demo; el guard runtime queda intacto.
   await db.transaction(async (tx) => {
     await tx.execute(
@@ -486,7 +521,7 @@ async function wipeSeed(): Promise<void> {
     )
     await tx
       .delete(treatmentBudgetItem)
-      .where(inArray(treatmentBudgetItem.organizationId, SEED_ORGS))
+      .where(inArray(treatmentBudgetItem.organizationId, orgs))
     await tx.execute(
       sql`alter table treatment_budget_item enable trigger treatment_budget_item_guard_trigger`,
     )
@@ -496,29 +531,29 @@ async function wipeSeed(): Promise<void> {
     )
     await tx
       .delete(treatmentBudgetOption)
-      .where(inArray(treatmentBudgetOption.organizationId, SEED_ORGS))
+      .where(inArray(treatmentBudgetOption.organizationId, orgs))
     await tx.execute(
       sql`alter table treatment_budget_option enable trigger treatment_budget_option_guard_trigger`,
     )
   })
-  await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, SEED_ORGS))
-  await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, SEED_ORGS))
-  await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, SEED_ORGS))
+  await db.delete(treatmentPlanItem).where(inArray(treatmentPlanItem.organizationId, orgs))
+  await db.delete(treatmentBudget).where(inArray(treatmentBudget.organizationId, orgs))
+  await db.delete(treatmentPlan).where(inArray(treatmentPlan.organizationId, orgs))
   // El periodontograma apunta a su atención (ADR 0054): va antes que ella.
-  await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, SEED_ORGS))
-  await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, SEED_ORGS))
-  await db.delete(encounter).where(inArray(encounter.organizationId, SEED_ORGS))
+  await db.delete(periodontalTooth).where(inArray(periodontalTooth.organizationId, orgs))
+  await db.delete(periodontalChart).where(inArray(periodontalChart.organizationId, orgs))
+  await db.delete(encounter).where(inArray(encounter.organizationId, orgs))
   // «Mi calendario» apunta a la persona: va antes que el equipo.
-  await db.delete(calendarFeedUse).where(inArray(calendarFeedUse.organizationId, SEED_ORGS))
-  await db.delete(calendarFeed).where(inArray(calendarFeed.organizationId, SEED_ORGS))
+  await db.delete(calendarFeedUse).where(inArray(calendarFeedUse.organizationId, orgs))
+  await db.delete(calendarFeed).where(inArray(calendarFeed.organizationId, orgs))
   // La atención referencia su cita (ADR 0002): las citas se borran después.
-  await db.delete(appointment).where(inArray(appointment.organizationId, SEED_ORGS))
-  await db.delete(scheduleRoom).where(inArray(scheduleRoom.organizationId, SEED_ORGS))
-  await db.execute(sql`delete from promotion_service_price where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
-  await db.execute(sql`delete from promotion where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
-  await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, SEED_ORGS))
+  await db.delete(appointment).where(inArray(appointment.organizationId, orgs))
+  await db.delete(scheduleRoom).where(inArray(scheduleRoom.organizationId, orgs))
+  await db.execute(sql`delete from promotion_service_price where organization_id in (${orgList})`)
+  await db.execute(sql`delete from promotion where organization_id in (${orgList})`)
+  await db.delete(serviceCatalog).where(inArray(serviceCatalog.organizationId, orgs))
   // Los servicios apuntan a su especialidad: la lista de la clínica va después.
-  await db.execute(sql`delete from org_specialty where organization_id in (${ORG_A}, ${ORG_B}, ${MEDICAL_DEMO_ORG})`)
+  await db.execute(sql`delete from org_specialty where organization_id in (${orgList})`)
   // El snapshot del registro referencia `user`, `patient`, `contact` y `branch`
   // sin cascada: sin borrarlo primero, la baja del usuario semilla falla por FK.
   // Se borra por organización **y** por actor: una corrida de e2e deja registros
@@ -527,45 +562,45 @@ async function wipeSeed(): Promise<void> {
     .delete(patientRegistration)
     .where(
       or(
-        inArray(patientRegistration.organizationId, SEED_ORGS),
-        inArray(patientRegistration.actorUserId, WIPED_USERS),
+        inArray(patientRegistration.organizationId, orgs),
+        inArray(patientRegistration.actorUserId, users),
       ),
     )
   // Persona única: un paciente no existe sin su propia persona, así que sus
   // vínculos y la ficha se retiran en la misma transacción.
   await db.transaction(async (tx) => {
-    await tx.delete(patientContact).where(inArray(patientContact.organizationId, SEED_ORGS))
-    await tx.delete(patient).where(inArray(patient.organizationId, SEED_ORGS))
+    await tx.delete(patientContact).where(inArray(patientContact.organizationId, orgs))
+    await tx.delete(patient).where(inArray(patient.organizationId, orgs))
   })
-  await db.delete(contact).where(inArray(contact.organizationId, SEED_ORGS))
-  await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, SEED_ORGS))
-  await db.delete(pipeline).where(inArray(pipeline.organizationId, SEED_ORGS))
-  await db.delete(channelConnection).where(inArray(channelConnection.organizationId, SEED_ORGS))
+  await db.delete(contact).where(inArray(contact.organizationId, orgs))
+  await db.delete(pipelineStage).where(inArray(pipelineStage.organizationId, orgs))
+  await db.delete(pipeline).where(inArray(pipeline.organizationId, orgs))
+  await db.delete(channelConnection).where(inArray(channelConnection.organizationId, orgs))
   // Los mensajes de WhatsApp son de la organización, no de la conexión; sus versiones se van en cascada.
-  await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, SEED_ORGS))
-  await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, SEED_ORGS))
+  await db.delete(clinicMessage).where(inArray(clinicMessage.organizationId, orgs))
+  await db.delete(customFieldDef).where(inArray(customFieldDef.organizationId, orgs))
   // El índice de búsqueda del agente apunta a la organización: se borra antes.
-  await db.delete(agentSearchItem).where(inArray(agentSearchItem.organizationId, SEED_ORGS))
-  await db.delete(agentConfig).where(inArray(agentConfig.organizationId, SEED_ORGS))
-  await db.delete(orgCounter).where(inArray(orgCounter.organizationId, SEED_ORGS))
-  await db.delete(branch).where(inArray(branch.organizationId, SEED_ORGS))
-  await db.delete(orgProfile).where(inArray(orgProfile.organizationId, SEED_ORGS))
-  await db.delete(auditEvent).where(inArray(auditEvent.organizationId, SEED_ORGS))
-  await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, SEED_ORGS))
-  await db.delete(member).where(inArray(member.organizationId, SEED_ORGS))
-  await db.delete(invitation).where(inArray(invitation.organizationId, SEED_ORGS))
-  await db.delete(organization).where(inArray(organization.id, SEED_ORGS))
-  await db.execute(sql`delete from "verification" where "identifier" ilike '%@odentia.dev%'`)
+  await db.delete(agentSearchItem).where(inArray(agentSearchItem.organizationId, orgs))
+  await db.delete(agentConfig).where(inArray(agentConfig.organizationId, orgs))
+  await db.delete(orgCounter).where(inArray(orgCounter.organizationId, orgs))
+  await db.delete(branch).where(inArray(branch.organizationId, orgs))
+  await db.delete(orgProfile).where(inArray(orgProfile.organizationId, orgs))
+  await db.delete(auditEvent).where(inArray(auditEvent.organizationId, orgs))
+  await db.delete(professionalProfile).where(inArray(professionalProfile.organizationId, orgs))
+  await db.delete(member).where(inArray(member.organizationId, orgs))
+  await db.delete(invitation).where(inArray(invitation.organizationId, orgs))
+  await db.delete(organization).where(inArray(organization.id, orgs))
+  await db.execute(sql`delete from "verification" where "identifier" ilike ${`%@${SEED_EMAIL_DOMAIN}%`}`)
   // Las clínicas demo de los avisos (`seedClinicNoticesDemo`) quedan entre
   // corridas, pero su contrato lo aceptó Ana: esa aceptación se va con ella y
   // la semilla la vuelve a poner junto con su membresía (que se va en cascada).
   await db.execute(
     sql`delete from processing_agreement_acceptance where accepted_by in (${sql.join(
-      WIPED_USERS.map((id) => sql`${id}`),
+      users.map((id) => sql`${id}`),
       sql`, `,
     )})`,
   )
-  await db.delete(user).where(inArray(user.id, WIPED_USERS))
+  await db.delete(user).where(inArray(user.id, users))
   for (const document of previousDocuments) await storage.deleteAttachment(document.storageKey)
   for (const row of previousMessages) {
     if (!Array.isArray(row.attachments)) continue
@@ -601,7 +636,7 @@ await db.insert(user).values([
     name: "Dra. Ana Torres",
     firstName: "Ana",
     lastName: "Torres",
-    email: "ana@odentia.dev",
+    email: seedEmail("ana", "ana.torres"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -610,7 +645,7 @@ await db.insert(user).values([
     name: "Luis Prado",
     firstName: "Luis",
     lastName: "Prado",
-    email: "luis@odentia.dev",
+    email: seedEmail("luis", "luis.prado"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -619,7 +654,7 @@ await db.insert(user).values([
     name: "Dra. Cora Vega",
     firstName: "Cora",
     lastName: "Vega",
-    email: "cora@odentia.dev",
+    email: seedEmail("cora", "cora.vega"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -628,7 +663,7 @@ await db.insert(user).values([
     name: "Dra. Elena Rojas",
     firstName: "Elena",
     lastName: "Rojas",
-    email: "rojas@odentia.dev",
+    email: seedEmail("rojas", "elena.rojas"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -637,7 +672,7 @@ await db.insert(user).values([
     name: "Dr. Diego Salas",
     firstName: "Diego",
     lastName: "Salas",
-    email: "salas@odentia.dev",
+    email: seedEmail("salas", "diego.salas"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -646,21 +681,30 @@ await db.insert(user).values([
     name: "Paula Ríos",
     firstName: "Paula",
     lastName: "Ríos",
-    email: "caja@odentia.dev",
+    email: seedEmail("caja", "paula.rios"),
     emailVerified: true,
     ...SEED_TERMS,
   },
 ])
-const passwordHash = await hashPassword(PASSWORD)
-await db.insert(account).values(
-  SEED_USERS.map((userId) => ({
-    id: randomUUID(),
-    accountId: userId,
-    providerId: "credential",
-    userId,
-    password: passwordHash,
-  })),
-)
+// En producción nadie del equipo de la demo tiene con qué entrar: sin cuenta
+// ni contraseña. Entra solo quien la muestra, con su propia cuenta.
+const passwordHash = PROD ? null : await hashPassword(PASSWORD)
+if (passwordHash) {
+  await db.insert(account).values(
+    SEED_USERS.map((userId) => ({
+      id: randomUUID(),
+      accountId: userId,
+      providerId: "credential",
+      userId,
+      password: passwordHash,
+    })),
+  )
+}
+if (PROD && DEMO_OWNER_EMAIL) {
+  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, DEMO_OWNER_EMAIL)).limit(1)
+  if (!owner) throw new Error(`No hay una cuenta con el correo ${DEMO_OWNER_EMAIL}`)
+  await db.insert(member).values({ id: randomUUID(), organizationId: ORG_A, userId: owner.id, role: "owner", createdAt: new Date() })
+}
 await db.insert(member).values([
   { id: randomUUID(), organizationId: ORG_A, userId: ANA_ID, role: "owner", createdAt: new Date() },
   {
@@ -738,7 +782,7 @@ await db.insert(orgProfile).values([
     locale: "es-PE",
     timezone: "America/Lima",
     // La lista de diagnósticos que recomienda Perú (decisión 26).
-    diagnosisSystem: "ICD-10",
+    diagnosisSystem: PROD ? "ICD-11" : "ICD-10",
     // El que da el agente ante una urgencia (ADR 0050); la clínica B no tiene y ve el aviso.
     emergencyPhone: "+5115550123",
   },
@@ -752,7 +796,7 @@ await db.insert(orgProfile).values([
     locale: "es-PE",
     timezone: "America/Lima",
     // La lista de diagnósticos que recomienda Perú (decisión 26).
-    diagnosisSystem: "ICD-10",
+    diagnosisSystem: PROD ? "ICD-11" : "ICD-10",
   },
 ])
 await db.transaction(async (tx) => {
@@ -2049,7 +2093,7 @@ const hallazgos36 = await addOdontogramEntries(db, ORG_A, ANA_ID, rosaPatientId,
   condition: "caries",
   surfaces: ["occlusal"],
   details: { variant: "dentin" },
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   encounterId: draft.id,
 })
 const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2059,7 +2103,7 @@ const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   odontogramEntryId: hallazgos36[0]!.id,
   toothNumber: 36,
   surfaces: ["occlusal"],
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   detail: "Obturación pieza 36",
 })
 const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
@@ -2067,7 +2111,7 @@ const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   planId: planRestaurador.id,
   sourceEncounterId: draft.id,
   toothNumber: 46,
-  diagnosisCode: "K04.0",
+  diagnosisCode: DX.pulpitis,
   detail: "Endodoncia pieza 46",
   // Endodoncia en dos sesiones (apertura y obturación): ejercita el progreso.
   plannedSessions: 2,
@@ -2077,7 +2121,7 @@ const corona46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   planId: planRestaurador.id,
   sourceEncounterId: draft.id,
   toothNumber: 46,
-  diagnosisCode: "K04.0",
+  diagnosisCode: DX.pulpitis,
   detail: "Corona cerámica pieza 46 (diferida)",
 })
 // Presupuesto 1 de Rosa: 3 ítems del plan, aceptación parcial (corona diferida
@@ -2181,20 +2225,20 @@ await addClinicalNote(db, ORG_A, ANA_ID, rosaPatientId, {
 })
 // Diagnósticos de la atención (ADR 0003 y 0041): en la lista de la clínica (CIE-10), con tipo y sitio dental.
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   diagnosisType: "confirmed",
   toothNumber: 36,
   surfaces: ["occlusal"],
   note: "Dolor a la percusión; caries en dentina.",
 })
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  diagnosisCode: "K04.0",
+  diagnosisCode: DX.pulpitis,
   diagnosisType: "provisional",
   toothNumber: 46,
 })
 // Un diagnóstico mal registrado se anula con motivo; queda en la traza.
 const dxErrado = await addEncounterDiagnosis(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   diagnosisType: "provisional",
   toothNumber: 37,
 })
@@ -2466,7 +2510,7 @@ await updateEncounterDraft(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
 // Solo el aceptado se realiza; conserva el vínculo atención-plan.
 await addEncounterProcedure(db, ORG_A, ANA_ID, rosaPatientId, draft.id, {
   toothNumber: 36,
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   planItemId: obt36.id,
 })
 // El cierre cobra el acto ejecutado (cargo automático, una sola vez).
@@ -2570,7 +2614,7 @@ await cancelFollowUp(db, ORG_A, ANA_ID, rosaPatientId, controlEndo.id, {
 await createPrescription(db, ORG_A, ANA_ID, rosaPatientId, {
   planItemId: obt36.id,
   notes: "Solo si aparece dolor no controlado.",
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   items: [
     {
       genericName: "ibuprofeno",
@@ -2664,7 +2708,7 @@ const elenaEval = await createEncounter(db, ORG_A, ANA_ID, elenaPatientId, {
   reason: "Control de rutina",
 })
 await addEncounterDiagnosis(db, ORG_A, ANA_ID, elenaPatientId, elenaEval.id, {
-  diagnosisCode: "Z01.2",
+  diagnosisCode: DX.dentalExam,
   diagnosisType: "confirmed",
 })
 const elenaPlan = await createTreatmentPlan(db, ORG_A, ANA_ID, elenaPatientId, {
@@ -2718,7 +2762,7 @@ for (const tooth of [16, 26, 36]) {
     condition: "caries",
     surfaces: ["occlusal"],
     details: { variant: "dentin" },
-    diagnosis: { diagnosisCode: "K02.1", diagnosisType: "confirmed" },
+    diagnosis: { diagnosisCode: DX.caries, diagnosisType: "confirmed" },
     treatment: { serviceId: resinaCpmsA.id },
   })
   luciaResinas[tooth] = panel.planItems[0]!.id
@@ -2732,7 +2776,7 @@ await createClinicalOrder(db, ORG_A, ANA_ID, {
   encounterId: luciaEval.id,
   title: "Radiografía panorámica",
   recipient: "Centro de imágenes",
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
 })
 const cierreLucia = await finalizeEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaEval.id)
 if (!cierreLucia.budget) throw new Error("La evaluación de Lucía debía dejar armado su presupuesto")
@@ -3239,7 +3283,7 @@ const obtPedro = await addPlanItem(db, ORG_A, ANA_ID, pedro.id, {
   planId: planPedro.id,
   sourceEncounterId: consultaPedro.id,
   toothNumber: 75,
-  diagnosisCode: "K02.1",
+  diagnosisCode: DX.caries,
   detail: "Obturación pieza 75",
 })
 const revisionPedro = await reviseBudget(db, ORG_A, ANA_ID, pedro.id, presupuestoPedro.id, {
@@ -3666,7 +3710,8 @@ for (const seed of [
   seedOpportunities,
   seedPortal,
   seedWorkspace,
-  seedRoles,
+  // Recepción, odontólogo y caja con la clave de la semilla: solo en desarrollo.
+  ...(PROD ? [] : [seedRoles]),
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
@@ -3825,7 +3870,7 @@ const reportsHistory = await db.transaction((tx) => {
   })
 })
 // Lo que contó el cobro por acción de esa historia (Reportes › Agente): la suscripción pasa a activa.
-await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
+await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, ...(PROD ? { planCode: "odentia" } : {}), dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
 // Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
 const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
 // Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
@@ -3857,6 +3902,9 @@ await db.transaction(async (tx) => {
     { organizationId: ORG_A, feedId: feed!.id, day: at(1, 3).toISOString().slice(0, 10), client: "navegador", hits: 1, firstAt: at(1, 3), lastAt: at(1, 3) },
   ])
 })
+// Lo de la plataforma (administración, planes ficticios, clínicas de prueba,
+// soporte y Libro de Reclamaciones): solo en desarrollo, nunca en la demo de producción.
+if (!PROD) {
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -3918,6 +3966,7 @@ await db.transaction(async (tx) => {
     )
   }
 })
+}
 // Lo que hicieron los agentes este mes (ADR 0031 y 0085), para ver Plan y
 // pagos y «Ver cada acción» con datos: conversaciones de cada tipo, consultas
 // de cada tipo, una cita recuperada y un paquete de preguntas a Argos, con el
@@ -4017,7 +4066,7 @@ await db.transaction(async (tx) => {
   const actionOf = (key: string) => reviewed.find((row) => row.key === key)?.id
   const ana = { userId: ANA_ID, roleLabel: "Dueño" }
   const caseIds: string[] = []
-  const kept = actionOf("semilla:conversacion:2")
+  const kept = PROD ? undefined : actionOf("semilla:conversacion:2")
   if (kept) {
     const asked = await requestActionReview(db, ORG_A, ana, {
       actionId: kept,
@@ -4033,7 +4082,8 @@ await db.transaction(async (tx) => {
       })
     }
   }
-  const pending = actionOf("semilla:conversacion:4")
+  // Los pedidos de revisión abren casos en Soporte de odentIA: solo en desarrollo.
+  const pending = PROD ? undefined : actionOf("semilla:conversacion:4")
   if (pending) {
     const asked = await requestActionReview(db, ORG_A, ana, {
       actionId: pending,
@@ -4059,7 +4109,10 @@ await db.insert(aiUsage).values([
 ])
 
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
-await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })
+if (passwordHash) await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })
+// La demo de producción es una sola clínica: Clínica Norte (que la historia
+// usa para mostrar el aislamiento entre clínicas) y su dueña se van al final.
+if (PROD) await wipeSeed([ORG_B], [CORA_ID])
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
@@ -4099,5 +4152,9 @@ console.log(
   `Argos en Reportes (dental-smile): ${reportsArgos.pins} respuestas fijadas en el Resumen, meta de cobrado ${reportsArgos.goalText} desde este mes`,
   `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress).map(([status, count]) => `${count} ${status}`).join(", ")}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
 )
-console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev")
+console.log(
+  PROD
+    ? `demo de producción: entra ${DEMO_OWNER_EMAIL} con su cuenta; el equipo de la demo no tiene acceso`
+    : "credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev",
+)
 process.exit(0)
