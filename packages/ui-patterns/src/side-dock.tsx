@@ -243,7 +243,7 @@ export function SideColumn({
     <aside
       {...props}
       className={cn(
-        "sticky top-(--notice-strip-h) flex h-[calc(100svh-var(--notice-strip-h,0px))] shrink-0 flex-col border-l bg-background outline-none",
+        "sticky top-[var(--notice-strip-h,0px)] flex h-[calc(100svh-var(--notice-strip-h,0px))] shrink-0 flex-col border-l bg-background outline-none",
         className,
       )}
       // Un solo `width`: con `min-width` aparte, el mínimo ganaría al tope y la

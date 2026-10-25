@@ -503,7 +503,7 @@ export function AppShell(props: AppShellProps): React.JSX.Element {
         <CloseFloatingSidebarOnNavigate pathname={pathname} />
         <Sidebar
           collapsible="icon"
-          className="top-(--notice-strip-h) h-[calc(100svh-var(--notice-strip-h,0px))]"
+          className="top-[var(--notice-strip-h,0px)] h-[calc(100svh-var(--notice-strip-h,0px))]"
         >
           <ShellSidebarHeader brand={brand} brandIcon={brandIcon} switcher={switcher} />
           <SidebarNav items={items} activeTo={activeTo} LinkComponent={LinkComponent} />
