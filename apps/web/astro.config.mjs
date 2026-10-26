@@ -8,8 +8,9 @@ import react from "@astrojs/react"
 import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
-const LEGAL_EN_PREPARACION =
-  /\/(terminos|privacidad|cookies|encargo-de-tratamiento|subencargados|aviso-legal)$/
+// Fuera del mapa mientras su texto conserve algún marcador (van con noindex): privacidad espera el
+// código de inscripción del banco de datos en la ANPD.
+const LEGAL_EN_PREPARACION = /\/privacidad$/
 
 // La presentación de Fundadores es para mostrarla o enviarla, no para buscadores (lleva noindex).
 const FUERA_DEL_MAPA = /\/presentacion$/

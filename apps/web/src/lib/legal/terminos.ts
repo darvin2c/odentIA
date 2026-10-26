@@ -153,14 +153,14 @@ export function terminosFor(pricing: Pricing): LegalDoc {
         "Los precios están expresados en dólares estadounidenses y no incluyen impuestos. Se añaden los impuestos que correspondan según la ley aplicable; en Perú, el Impuesto General a las Ventas (IGV). Los comprobantes se emiten conforme a la normativa tributaria peruana.",
         "Las plantillas de mensajes de WhatsApp que exige Meta para iniciar conversaciones las cobra Meta directamente a la Clínica, según sus propias tarifas. Esos importes no forman parte del precio de odentIA.",
         { h: "Cambios de precio" },
-        "odentIA puede modificar los precios avisando a la Clínica con al menos [Por completar: días de aviso previo] días de anticipación por correo electrónico y dentro de la aplicación. Los nuevos precios se aplican desde el siguiente periodo de facturación posterior al aviso. Si la Clínica no está de acuerdo, puede cancelar el servicio antes de que entren en vigor.",
+        "odentIA puede modificar los precios avisando a la Clínica con al menos 30 días de anticipación por correo electrónico y dentro de la aplicación. Los nuevos precios se aplican desde el siguiente periodo de facturación posterior al aviso. Si la Clínica no está de acuerdo, puede cancelar el servicio antes de que entren en vigor.",
       ],
     },
     {
       id: "pagos",
       title: "Pagos y suspensión por falta de pago",
       blocks: [
-        "La Clínica paga por los medios de pago que odentIA ofrece en la aplicación [Por completar: medios de pago aceptados]. Al registrar un medio de pago, autoriza los cargos del plan y del consumo variable en las fechas de facturación.",
+        "La Clínica paga el plan y el consumo variable de cada periodo por los medios que odentIA le indica en la aplicación, como la transferencia bancaria. odentIA no guarda datos de tarjetas.",
         `Si un pago no se puede cobrar, odentIA avisará a la Clínica y le dará un plazo de ${days(terms.graceDays)} para regularizarlo. Vencido ese plazo, odentIA puede suspender los agentes y, después, el acceso a la cuenta, salvo la exportación de datos. La suspensión no elimina los datos y el servicio se reactiva al regularizar el pago.`,
         "Salvo que la ley disponga otra cosa, los importes pagados no son reembolsables, incluidos los periodos ya iniciados.",
       ],
@@ -237,8 +237,8 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       title: "Disponibilidad y soporte",
       blocks: [
         "odentIA hará esfuerzos razonables para mantener el servicio disponible y avisará con anticipación de los mantenimientos programados que puedan interrumpirlo. Pueden producirse interrupciones por causas ajenas a odentIA, como fallos de proveedores de canales, de modelos de inteligencia artificial o de infraestructura.",
-        "Nivel de servicio: [Por completar: nivel de servicio si se ofrece].",
-        `El soporte se presta por correo electrónico en ${contactEmail} y dentro de la aplicación [Por completar: horario y canales de soporte].`,
+        "odentIA no ofrece un nivel de servicio garantizado ni compensaciones por indisponibilidad.",
+        `El soporte se presta por correo electrónico en ${contactEmail} y dentro de la aplicación, de lunes a viernes de 9:00 a 18:00 (hora de Lima). Las consultas recibidas fuera de ese horario se atienden el siguiente día hábil.`,
         "odentIA puede mejorar o modificar funciones del servicio. Si retira una función esencial, lo avisará con antelación razonable.",
       ],
     },
@@ -263,22 +263,22 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       title: "Duración, cancelación y exportación de datos",
       blocks: [
         "El contrato es de duración indefinida y se renueva cada mes. La Clínica puede cancelarlo en cualquier momento desde la aplicación; la cancelación surte efecto al terminar el periodo en curso y se factura el consumo variable producido hasta esa fecha.",
-        "odentIA puede terminar el contrato por incumplimiento grave de la Clínica, por falta de pago no regularizada o avisando con [Por completar: días de aviso para terminar sin causa] días de anticipación.",
-        "Antes y después de cancelar, la Clínica puede exportar sus datos en formatos de uso común. odentIA conserva los datos durante [Por completar: plazo de conservación tras la cancelación] días después de terminar el contrato para permitir su exportación y luego los elimina, salvo que la ley obligue a conservarlos. La Clínica es responsable de conservar su historia clínica durante el plazo que exija la normativa sanitaria.",
+        "odentIA puede terminar el contrato por incumplimiento grave de la Clínica, por falta de pago no regularizada o avisando con 30 días de anticipación.",
+        "Antes y después de cancelar, la Clínica puede exportar sus datos en formatos de uso común. odentIA conserva los datos durante 30 días después de terminar el contrato para permitir su exportación y luego los elimina, salvo que la ley obligue a conservarlos. La Clínica es responsable de conservar su historia clínica durante el plazo que exija la normativa sanitaria.",
       ],
     },
     {
       id: "cambios",
       title: "Cambios en estos términos",
       blocks: [
-        "odentIA puede modificar estos términos. Los cambios relevantes se avisarán por correo electrónico y dentro de la aplicación con al menos [Por completar: días de aviso previo] días de anticipación. Si la Clínica sigue usando el servicio después de esa fecha, acepta los nuevos términos; si no está de acuerdo, puede cancelar antes de que entren en vigor.",
+        "odentIA puede modificar estos términos. Los cambios relevantes se avisarán por correo electrónico y dentro de la aplicación con al menos 30 días de anticipación. Si la Clínica sigue usando el servicio después de esa fecha, acepta los nuevos términos; si no está de acuerdo, puede cancelar antes de que entren en vigor.",
       ],
     },
     {
       id: "ley",
       title: "Ley aplicable y jurisdicción",
       blocks: [
-        "Estos términos se rigen por las leyes de la República del Perú. Las partes procurarán resolver cualquier controversia de buena fe. Si no lo consiguen, se someten a los jueces y tribunales del distrito judicial de Lima, Perú [Por confirmar: jueces de Lima o arbitraje].",
+        "Estos términos se rigen por las leyes de la República del Perú. Las partes procurarán resolver cualquier controversia de buena fe. Si no lo consiguen, se someten a los jueces y tribunales del distrito judicial de Lima, Perú.",
         "Si alguna cláusula fuera declarada inválida, las demás seguirán vigentes.",
       ],
     },
