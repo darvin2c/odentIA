@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { api } from "../lib/api"
 import { CostMarginOverviewSection } from "./cost-margin"
+import { matchesProduct, type ProductChoice, ProductMark, useOrgProducts } from "./product"
 
 interface TrialRow {
   organizationId: string
@@ -31,25 +32,30 @@ function left(row: TrialRow): string {
   return parts.join(" · ")
 }
 
-export function TodayBilling() {
+export function TodayBilling({ product = "todos" }: { product?: ProductChoice }) {
   const trials = useQuery({
     queryKey: ["admin", "billing", "trial-watch"],
     queryFn: () => api<TrialRow[]>("/api/admin/billing/trial-watch"),
     retry: false,
   })
+  const products = useOrgProducts().data ?? {}
+  const rows = (trials.data ?? []).filter((row) => matchesProduct(product, products[row.organizationId]))
   // Soporte no ve importes: sin acceso, la sección no aparece.
   return (
     <>
-      {trials.data && trials.data.length > 0 ? (
+      {rows.length > 0 ? (
         <section aria-labelledby="pruebas" className="flex flex-col gap-2">
           <h2 id="pruebas" className="text-base font-semibold">
             Pruebas por vencer o sin saldo
           </h2>
           <ul className="divide-y rounded-xl border bg-card">
-            {trials.data.map((row) => (
+            {rows.map((row) => (
               <li key={row.organizationId} className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4 text-sm">
                 <div className="min-w-0 flex-1 basis-60">
-                  <p className="font-medium">{row.organizationName}</p>
+                  <p className="flex flex-wrap items-center gap-2 font-medium">
+                    {row.organizationName}
+                    {products[row.organizationId] ? <ProductMark product={products[row.organizationId]} /> : null}
+                  </p>
                   <p className="text-muted-foreground">
                     Le queda: {left(row)} · {row.did.conversacion} conversaciones, {row.did.consulta} consultas
                     {row.did.cita ? `, ${row.did.cita} citas` : ""}
@@ -65,7 +71,7 @@ export function TodayBilling() {
         </section>
       ) : null}
       {/* Costo y margen de todas las clínicas, con la alarma y la Fundadora sin uso (ADR 0085, tablero O3). */}
-      <CostMarginOverviewSection />
+      <CostMarginOverviewSection product={product} />
     </>
   )
 }

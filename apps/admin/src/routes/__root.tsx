@@ -3,8 +3,7 @@ import { ErrorState, PageShell } from "@odentia/ui-patterns"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useState } from "react"
-import faviconIco from "../../../../assets/brand/favicon.ico?url"
-import favicon from "../../../../assets/brand/favicon.svg?url"
+import favicon from "../assets/favicon.svg?url"
 import { panelUrl } from "../lib/host"
 import appCss from "../styles/app.css?url"
 
@@ -14,11 +13,11 @@ export const Route = createRootRoute({
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "robots", content: "noindex, nofollow" },
-      { title: "Administración · odentIA" },
+      { title: "Administración" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: faviconIco, sizes: "16x16 32x32 48x48 64x64" },
+      // La «A» grafito: la pestaña de la administración no se confunde con la de una clínica.
       { rel: "icon", href: favicon, type: "image/svg+xml" },
     ],
   }),
@@ -69,7 +68,8 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="es">
+    // Neutra en negro: el color queda para distinguir el producto de cada clínica (globals.css).
+    <html lang="es" data-brand="admin">
       <head>
         <HeadContent />
       </head>

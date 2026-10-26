@@ -44,6 +44,17 @@ export const tenantUrl = (slug: string, path = "/", product?: string | null) =>
 
 export const panelUrl = (path = "/") => `https://app.${BASE_DOMAIN}${BASE_PORT}${path}`
 
+/**
+ * La administración es una sola, en el dominio de odentIA (ADR 0091): `admin.`
+ * en el dominio de otro producto lleva ahí en vez de tratarse como una clínica.
+ * Sin otro dominio al que ir (en local, con uno solo), no redirige.
+ */
+export function adminRedirectFor(hostname: string): string | null {
+  if (hostname !== `admin.${BASE_DOMAIN}`) return null
+  const target = `admin.${PRODUCT_DOMAINS.dental || BASE_DOMAIN}`
+  return target === hostname ? null : `https://${target}${BASE_PORT}/`
+}
+
 /** Página de la web de marketing (dominio raíz). */
 export const webUrl = (path = "/") => `https://${BASE_DOMAIN}${BASE_PORT}${path}`
 

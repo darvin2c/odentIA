@@ -267,6 +267,93 @@
     --agent-border: #3e2f66;
 }
 
+/*
+ * La administración (lienzo «Administración en negro», aprobado el
+ * 2026-10-26): neutra y formal, en negro, grafito, gris y blanco. El color
+ * queda solo para distinguir el producto de cada clínica (`--product-*`:
+ * odentIA en celeste, latidIA en lila); los estados conservan el suyo porque
+ * avisan algo. La app la pone con `<html data-brand="admin">`.
+ */
+:root[data-brand="admin"] {
+    --canvas: #fafafa;
+    --background: #fafafa;
+    --foreground: #18181b;
+    --card-foreground: #18181b;
+    --popover-foreground: #18181b;
+    --secondary: #f4f4f5;
+    --secondary-foreground: #18181b;
+    --muted: #f4f4f5;
+    --muted-foreground: #52525b;
+    --accent: #f4f4f5;
+    --accent-foreground: #18181b;
+    --border: #e4e4e7;
+    --input: #d4d4d8;
+    --sidebar: #ffffff;
+    --sidebar-foreground: #27272a;
+    --sidebar-accent: #f4f4f5;
+    --sidebar-accent-foreground: #18181b;
+    --sidebar-border: #e4e4e7;
+    --identity-accent: #27272a;
+    --identity-ink: #18181b;
+    --primary: #3f3f46;
+    --primary-foreground: #ffffff;
+    --primary-soft: #f4f4f5;
+    --primary-soft-foreground: #27272a;
+    --ring: #52525b;
+    --sidebar-primary: #3f3f46;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-ring: #52525b;
+    --agent-soft: #f4f4f5;
+    --agent-border: #e4e4e7;
+    --product-dental: #0e7490;
+    --product-dental-soft: #d9eff5;
+    --product-dental-foreground: #0b5568;
+    --product-medical: #6d3fc0;
+    --product-medical-soft: #ece4fb;
+    --product-medical-foreground: #4c2a8a;
+}
+
+:root.dark[data-brand="admin"] {
+    --canvas: #09090b;
+    --background: #09090b;
+    --foreground: #fafafa;
+    --card: #18181b;
+    --card-foreground: #fafafa;
+    --popover: #18181b;
+    --popover-foreground: #fafafa;
+    --secondary: #27272a;
+    --secondary-foreground: #fafafa;
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --accent: #27272a;
+    --accent-foreground: #fafafa;
+    --border: #27272a;
+    --input: #3f3f46;
+    --sidebar: #111113;
+    --sidebar-foreground: #e4e4e7;
+    --sidebar-accent: #27272a;
+    --sidebar-accent-foreground: #fafafa;
+    --sidebar-border: #27272a;
+    --identity-accent: #e4e4e7;
+    --identity-ink: #fafafa;
+    --primary: #e4e4e7;
+    --primary-foreground: #09090b;
+    --primary-soft: #27272a;
+    --primary-soft-foreground: #e4e4e7;
+    --ring: #a1a1aa;
+    --sidebar-primary: #e4e4e7;
+    --sidebar-primary-foreground: #09090b;
+    --sidebar-ring: #a1a1aa;
+    --agent-soft: #1f1f23;
+    --agent-border: #3f3f46;
+    --product-dental: #4fc3d7;
+    --product-dental-soft: #0b3d4a;
+    --product-dental-foreground: #a5dbe8;
+    --product-medical: #b79cf0;
+    --product-medical-soft: #2e1a55;
+    --product-medical-foreground: #cbb6f5;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

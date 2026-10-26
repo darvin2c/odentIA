@@ -35,6 +35,7 @@ import { CircleAlert, ListChecks } from "lucide-react"
 import * as React from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
+import { countByProduct, matchesProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { webUrl } from "../../lib/host"
 
 type StatusFilter = "por_revisar" | "invitada" | "entro" | "descartada" | "todas"
@@ -180,7 +181,10 @@ function WaitlistPage() {
       return pagePayload.parse(await api(`/api/admin/waitlist?${params}`))
     },
   })
-  const rows = list.data?.rows ?? []
+  const [product, setProduct] = React.useState<ProductChoice>("todos")
+  const allRows = list.data?.rows ?? []
+  const rows = allRows.filter((r) => matchesProduct(product, r.product))
+  const productCounts = countByProduct(allRows, (r) => r.product)
   const now = new Date()
   const open = (id: string | undefined) => void navigate({ search: (prev) => ({ ...prev, solicitud: id }), replace: true })
   const compact = Boolean(search.solicitud)
@@ -199,7 +203,7 @@ function WaitlistPage() {
         cell: ({ row: r }) => `${r.original.firstName} ${r.original.lastName}`,
         meta: { view: { primary: true } },
       },
-      { id: "product", header: "Producto", cell: ({ row: r }) => productWords(r.original.product).name },
+      { id: "product", header: "Producto", cell: ({ row: r }) => <ProductMark product={r.original.product} /> },
       { id: "where", header: "Dónde", cell: ({ row: r }) => `${r.original.city}, ${countryName(r.original.countryCode)}` },
       { id: "professionals", header: "Atienden", cell: ({ row: r }) => PROFESSIONALS_LABEL[r.original.professionals] ?? r.original.professionals },
       { id: "tool", header: "Usan hoy", cell: ({ row: r }) => TOOL_LABEL[r.original.currentTool] ?? r.original.currentTool },
@@ -296,6 +300,7 @@ function WaitlistPage() {
           isFetching={list.isFetching && !list.isPending}
           className="w-full sm:w-80"
         />
+        <ProductFilter value={product} onChange={setProduct} counts={productCounts} />
       </div>
 
       {list.isPending ? (

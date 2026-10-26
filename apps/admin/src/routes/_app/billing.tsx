@@ -33,6 +33,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
 import { ApiError, api } from "../../lib/api"
+import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { NegotiationsSection } from "../../components/billing-terms"
 import { CommercialTermsSection } from "../../components/commercial-terms"
@@ -146,6 +147,11 @@ function errorMessage(error: unknown): string {
 function BillingPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState("")
+  // El producto filtra las listas de clínicas de esta página; planes y medios son de los dos.
+  const [product, setProduct] = useState<ProductChoice>("todos")
+  const products = useOrgProducts().data ?? {}
+  const ofProduct = <T extends { organizationId: string }>(rows: readonly T[] | undefined): T[] =>
+    (rows ?? []).filter((row) => matchesProduct(product, products[row.organizationId]))
   const [planDrawer, setPlanDrawer] = useState<null | { plan?: Plan }>(null)
   const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string }>(null)
   const [methodDrawer, setMethodDrawer] = useState(false)
@@ -257,6 +263,7 @@ function BillingPage() {
           { label: "Registrar pago", onSelect: () => setManualOpen(true) },
         ]}
       />
+      <ProductFilter value={product} onChange={setProduct} />
 
       <section aria-labelledby="pendientes" className="flex flex-col gap-2">
         <h2 id="pendientes" className="text-base font-semibold">
@@ -270,22 +277,23 @@ function BillingPage() {
             message={errorMessage(pending.error)}
             onRetry={() => void pending.refetch()}
           />
-        ) : pending.data.length === 0 ? (
+        ) : ofProduct(pending.data).length === 0 ? (
           <EmptyState
             title="Sin comprobantes pendientes"
             description="Cuando una clínica registre su comprobante aparecerá aquí para confirmarlo."
           />
         ) : (
           <ul className="flex flex-col gap-2">
-            {pending.data.map((payment) => (
+            {ofProduct(pending.data).map((payment) => (
               <li
                 key={payment.id}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
               >
                 <div className="min-w-0 flex-1 basis-56">
                   <p className="text-sm font-medium">{payment.receiptFilename ?? "Comprobante"}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     {payment.organizationName ?? payment.organizationId} · {payment.methodCode}
+                    {products[payment.organizationId] ? <ProductMark product={products[payment.organizationId]} /> : null}
                   </p>
                 </div>
                 <p className="text-sm font-semibold tabular-nums">
@@ -359,21 +367,22 @@ function BillingPage() {
             message={errorMessage(overview.error)}
             onRetry={() => void overview.refetch()}
           />
-        ) : overview.data.length === 0 ? (
+        ) : ofProduct(overview.data).length === 0 ? (
           <EmptyState
             title="Sin suscripciones"
             description="Aún no hay clínicas con este estado."
           />
         ) : (
           <ul className="flex flex-col gap-2">
-            {overview.data.map((row) => (
+            {ofProduct(overview.data).map((row) => (
               <li
                 key={row.organizationId}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
               >
                 <div className="min-w-0 flex-1 basis-56">
-                  <p className="text-sm font-medium">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-medium">
                     {row.organizationName ?? row.organizationId}
+                    {products[row.organizationId] ? <ProductMark product={products[row.organizationId]} /> : null}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {STATUS_LABEL[row.status] ?? row.status}
@@ -404,7 +413,7 @@ function BillingPage() {
         )}
       </section>
       <UnassignedSection
-        orgs={unassigned.data}
+        orgs={unassigned.data ? ofProduct(unassigned.data) : undefined}
         isPending={unassigned.isPending}
         plans={plans.data ?? []}
         onDone={refresh}

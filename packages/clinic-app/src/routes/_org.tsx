@@ -70,7 +70,7 @@ import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient, authFetch } from "../lib/auth-client"
 import { requireTermsAccepted, requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
 import { apiFetch } from "../lib/api"
-import { legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
+import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
 import { productUi } from "../product/product-ui"
@@ -117,6 +117,8 @@ async function loadOrgRegion(): Promise<OrgRegion> {
 
 export const Route = createFileRoute("/_org")({
   beforeLoad: async ({ location }) => {
+    const toAdmin = adminRedirectFor(requestHostname())
+    if (toAdmin) throw redirect({ href: toAdmin })
     const session = await requireVerifiedSession(location)
     await requireTermsAccepted(location)
     const slug = orgSlugFromHostname(requestHostname())
