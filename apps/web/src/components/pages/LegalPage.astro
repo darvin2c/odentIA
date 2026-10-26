@@ -1,7 +1,7 @@
 ---
 // Documento legal de la web: título, fecha de la versión, índice con anclas, secciones numeradas, tablas y
 // marcadores «[Por completar…]» / «[Por confirmar…]» resaltados. Los textos viven en src/lib/legal/.
-// Una página va con noindex mientras su texto conserve algún marcador.
+// Una página va con noindex y el aviso de borrador mientras su texto conserve algún marcador.
 //
 // `page` (sin `doc`) mantiene la plantilla breve de las páginas que aún no tienen texto propio
 // (LEGAL en src/lib/pages-data.ts); esas van siempre sin indexar.
@@ -47,7 +47,7 @@ const hasToc = doc.sections.length > 1
       <span class="tag">[ Legal ]</span>
       <h1 class="h2">{doc.title}</h1>
       {props.doc && <p class="updated">Última actualización: <time datetime={LEGAL_UPDATED_ISO}>{LEGAL_UPDATED}</time></p>}
-      <p class="draft" role="note">Esta versión puede cambiar antes del lanzamiento.</p>
+      {noindex && <p class="draft" role="note">Esta versión puede cambiar antes del lanzamiento.</p>}
       {doc.intro.map((p) => <p class="intro"><LegalText text={p} /></p>)}
     </header>
 

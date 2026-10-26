@@ -324,7 +324,7 @@ const FAQ_META: FaqItem = {
 }
 const FAQ_TRAINING: FaqItem = {
   q: "¿Usan los datos de mi clínica para entrenar la IA?",
-  a: "[Por confirmar con el proveedor de IA y el abogado antes de publicar] No. Los datos de tu clínica se usan solo para atender a tus pacientes y no se usan para entrenar modelos de inteligencia artificial.",
+  a: "No. Los datos de tu clínica se usan solo para atender a tus pacientes. odentIA no los usa para entrenar modelos, y los proveedores de inteligencia artificial que usa por API (OpenAI y TypeSafe) tampoco.",
 }
 
 const AGENTS_PARENT: [string, string] = ["Agentes", "/agentes"]
