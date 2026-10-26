@@ -1,0 +1,104 @@
+/* La demo de imágenes (ImagingDemo.tsx): oscura como el visor de la clínica. Todo bajo .iv. */
+.iv { background: #0b1418; color: #e6eef1; border-radius: 22px; overflow: hidden; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .06); display: flex; flex-direction: column; }
+[data-brand="latidia"] .iv { background: #120a1f; }
+.iv-top { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; padding: 14px 16px 12px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.iv-title { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.iv-title b { font-size: 14.5px; }
+.iv-title span { font-size: 12px; color: #9fb4bb; }
+.iv-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, .07); }
+.iv-tabs button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: #b9cad0; font: 600 13px var(--font); cursor: pointer; white-space: nowrap; transition: background-color .2s ease, color .2s ease; }
+.iv-tabs button[aria-pressed="true"] { background: rgba(255, 255, 255, .14); color: #fff; }
+.iv-tools { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.iv-slider { display: inline-flex; align-items: center; gap: 8px; font: 600 12px var(--font); color: #9fb4bb; text-transform: uppercase; letter-spacing: .05em; }
+.iv-slider input { width: 96px; accent-color: var(--sky); }
+.iv-tool { min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, .18); background: transparent; color: #e6eef1; font: 600 12.5px var(--font); cursor: pointer; }
+.iv-tool[aria-pressed="true"] { background: var(--sky); border-color: var(--sky); color: #06222a; }
+.iv-tool.ghost { border-color: transparent; color: #9fb4bb; }
+.iv-tabs button:focus-visible, .iv-tool:focus-visible, .iv-teeth button:focus-visible, .iv-xray-img:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+
+.iv-panel { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 16px; }
+.iv-label { font-family: var(--agent-font); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #9fb4bb; }
+
+/* Panorámica y cortes: la panorámica ancha y, al lado, el corte de la pieza con su medida. */
+.iv-pano { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); }
+.iv-pano > .iv-panel + .iv-panel { border-left: 1px solid rgba(255, 255, 255, .08); }
+.iv-pano-img { position: relative; border-radius: 10px; overflow: hidden; background: #000; }
+.iv-pano-img img { display: block; width: 100%; height: auto; }
+.iv-mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #f5a524; box-shadow: 0 0 8px rgba(245, 165, 36, .7); transition: left .45s cubic-bezier(.2, .8, .2, 1); }
+.iv-mark b { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); padding: 1px 6px; border-radius: 6px; background: #f5a524; color: #1a1205; font: 800 11px var(--font); }
+.iv-teeth { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; }
+.iv-teeth button { min-height: 32px; padding: 0; border: 0; border-radius: 8px; background: rgba(255, 255, 255, .06); color: #b9cad0; font: 700 12px var(--font); cursor: pointer; transition: background-color .2s ease, color .2s ease; }
+.iv-teeth button[aria-pressed="true"] { background: #f5a524; color: #1a1205; }
+.iv-cross { position: relative; width: 100%; max-width: 230px; margin: 0 auto; aspect-ratio: 65 / 89; border-radius: 10px; background-color: #000; background-size: 1200% 100%; background-repeat: no-repeat; }
+.iv-measure { position: absolute; height: 2px; background: var(--sky); box-shadow: 0 0 6px rgba(79, 195, 215, .8); transition: left .45s ease, width .45s ease; }
+.iv-measure::before, .iv-measure::after { content: ""; position: absolute; top: -5px; width: 2px; height: 12px; background: var(--sky); }
+.iv-measure::before { left: 0; }
+.iv-measure::after { right: 0; }
+.iv-measure b { position: absolute; left: 50%; top: -24px; transform: translateX(-50%); padding: 1px 6px; border-radius: 6px; background: rgba(6, 34, 42, .85); color: #dff6fb; font: 700 11px var(--font); white-space: nowrap; }
+.iv-read { margin: 0; text-align: center; font-size: 13.5px; color: #cfdde2; }
+.iv-read b { color: #fff; }
+
+/* Tres cortes: cada plano con su barra, como en el visor. */
+.iv-cuts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.iv-cuts[data-planes="1"] { grid-template-columns: minmax(0, 1fr); max-width: 420px; margin: 0 auto; width: 100%; }
+.iv-cuts > .iv-panel + .iv-panel { border-left: 1px solid rgba(255, 255, 255, .08); }
+.iv-frame { width: 100%; aspect-ratio: 1; border-radius: 10px; background-color: #000; background-size: 100% 2400%; background-repeat: no-repeat; }
+.iv-step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9fb4bb; white-space: nowrap; }
+.iv-step input { flex: 1; min-width: 0; accent-color: var(--sky); }
+
+/* Radiografía: se acerca con un toque. */
+.iv-xray { align-items: stretch; }
+.iv-xray-img { display: block; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: #000; cursor: zoom-in; max-width: 520px; width: 100%; margin: 0 auto; }
+.iv-xray-img img { display: block; width: 100%; height: auto; transition: transform .35s ease; transform-origin: 40% 60%; }
+.iv-xray-img[data-zoom] { cursor: zoom-out; }
+.iv-xray-img[data-zoom] img { transform: scale(1.9); }
+
+.iv-foot { margin: 0; padding: 10px 16px 14px; font-size: 12px; line-height: 1.45; color: #8ea3aa; border-top: 1px solid rgba(255, 255, 255, .08); }
+
+@media (prefers-reduced-motion: reduce) {
+  .iv-mark, .iv-measure, .iv-xray-img img { transition: none; }
+}
+@media (max-width: 760px) {
+  .iv-pano { grid-template-columns: minmax(0, 1fr); }
+  .iv-pano > .iv-panel + .iv-panel { border-left: 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+  .iv-cross { max-width: 160px; }
+  .iv-cuts { grid-template-columns: minmax(0, 1fr); }
+  .iv-cuts > .iv-panel + .iv-panel { border-left: 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+  .iv-teeth { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .iv-slider input { width: 80px; }
+}
+
+/* El selector de plano solo en el teléfono, donde se ve un plano a la vez. */
+.iv-planes { display: none; }
+@media (max-width: 760px) {
+  .iv-planes { display: flex; gap: 4px; padding: 10px 16px 0; border: 0; margin: 0; }
+  .iv-planes button { flex: 1; min-height: 36px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, .07); color: #b9cad0; font: 600 12.5px var(--font); }
+  .iv-planes button[aria-pressed="true"] { background: rgba(255, 255, 255, .16); color: #fff; }
+  .iv-cuts > .iv-panel[data-off] { display: none; }
+  .iv-cuts > .iv-panel + .iv-panel { border-top: 0; }
+  .iv-frame { max-width: 320px; margin: 0 auto; }
+}
+
+/* En escritorio las tres pestañas miden lo mismo: cambiar de vista no mueve la página. */
+@media (min-width: 1081px) {
+  .iv { min-height: 624px; }
+  .iv-pano, .iv-cuts, .iv-xray { flex: 1; }
+  .iv-cuts { align-content: center; }
+  .iv-xray { justify-content: center; }
+  .iv-xray-img { max-width: 430px; }
+}
+
+/* Teléfono: las pestañas a lo ancho, las piezas en una fila que se desliza y el corte al lado de su medida. */
+@media (max-width: 760px) {
+  .iv-tabs { width: 100%; }
+  .iv-tabs button { flex: 1; padding: 0 6px; font-size: 12px; }
+  .iv-tools { gap: 6px 10px; padding: 8px 16px; }
+  .iv-slider { font-size: 11px; gap: 6px; }
+  .iv-slider input { width: 64px; }
+  .iv-teeth { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .iv-teeth button { flex: none; min-width: 40px; }
+  .iv-pano > .iv-panel + .iv-panel { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 6px 14px; }
+  .iv-pano > .iv-panel + .iv-panel .iv-label { grid-column: 1 / -1; }
+  .iv-cross { max-width: 112px; margin: 0; }
+  .iv-read { text-align: left; }
+}

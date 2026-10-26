@@ -57,12 +57,14 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       slot="demo"
       client:visible
       questions={[ARGOS_NO_SHOWS, ARGOS_OWED, ARGOS_TOP_SALES]}
+      agent={{ name: "Argos · tus cifras", meta: "Sonrisa Norte · octubre, hasta hoy" }}
       chips
       auto
       caret
       actions={[{ label: "Fijar en Resumen" }, { label: "Descargar" }]}
       source="Cifra oficial · la misma de Reportes"
-      note="Demostración con datos de ejemplo. Toca otra pregunta."
+      note="Datos de ejemplo. Toca otra pregunta."
+      replay="Preguntar otra vez"
     />
   </SplitHero>
 

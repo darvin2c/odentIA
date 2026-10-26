@@ -1,0 +1,91 @@
+/* 07 · El buscador (SearchSection): en escritorio el texto a la izquierda y la ventana a la derecha;
+   en tableta y teléfono, el título, la ventana y después los puntos. */
+.home .find {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-areas:
+    "head demo"
+    "more demo";
+  grid-template-rows: auto 1fr;
+  gap: 28px 56px;
+  align-items: start;
+}
+.home .find-head {
+  grid-area: head;
+}
+.home .find-demo {
+  grid-area: demo;
+  min-width: 0;
+}
+.home .find-more {
+  grid-area: more;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.home .find-points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.home .find-points li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: var(--on-night-2);
+}
+.home .find-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--sky);
+}
+.home .find-points strong {
+  color: var(--on-night);
+}
+.home .find-note {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--on-night-3);
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+@media (max-width: 1020px) {
+  .home .find {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "head" "demo" "more";
+    grid-template-rows: none;
+    gap: 28px;
+  }
+  .home .find-head {
+    max-width: 760px;
+  }
+}
+@media (max-width: 720px) {
+  .home .find {
+    gap: 18px;
+  }
+  .home .find-points {
+    gap: 10px;
+  }
+  .home .find-points li {
+    font-size: 15px;
+  }
+  .home .find-note {
+    font-size: 13.5px;
+  }
+}
+/* El título va al lado de la ventana: un poco menor que el de las secciones de ancho completo. */
+.home .find-head .h2 {
+  font-size: clamp(34px, 3.6vw, 52px);
+}

@@ -51,6 +51,11 @@ const { tag, name, color, phrase, h1, meaning, copyBasis = 440, demoBasis = 540,
   .ah-h1 { font-size: 22px; line-height: 1.35; font-weight: 700; color: #ece6f8; text-wrap: pretty; }
   .ah-meaning { padding-left: 14px; border-left: 2px solid var(--c); font-size: 15px; line-height: 1.5; font-style: italic; color: var(--on-night-2); }
   .ah-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+  /* Portátil (1366 × 768, 1280 × 720): menos aire bajo la cabecera para que la demo entera quepa en
+     la primera pantalla, como en las páginas de agente de odentIA. */
+  @media (min-width: 1081px) and (max-height: 820px) {
+    .ah { padding-top: 96px; }
+  }
   @media (max-width: 720px) {
     .ah { padding: 104px 0 64px; }
     .ah-in { gap: 32px; }

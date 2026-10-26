@@ -55,33 +55,44 @@ const agentsMenu: NavMenu = MEDICAL
       all: { href: "/agentes", label: "Los tres juntos, en un caso de principio a fin", short: "Los tres juntos" },
     }
 
-/** «El sistema» de latidIA: lo que tiene el consultorio, en dos columnas. */
-const systemMenu: NavMenu = {
-  columns: 2,
-  items: [
-    { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales", text: "Examen por sistemas, antecedentes y su presión en el tiempo." },
-    { href: "/receta-y-descanso-medico", label: "Receta y descanso médico", text: "Avisa embarazo y alergias; el descanso, firmado y numerado." },
-    { href: "/agenda-medica", label: "Agenda y controles", text: "Por sala y por médico, con controles que se repiten." },
-    { href: "/caja-y-cobros", label: "Caja y varias sedes", text: "Cada consulta cobrada, en cada sede." },
-    { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
-    { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente ve su cita, sus datos y sus papeles." },
-    { href: "/seguridad", label: "Seguridad y datos de salud", text: "Cada rol ve solo lo suyo." },
-  ],
-}
+/** «El sistema»: lo que tiene la clínica o el consultorio, en dos columnas. Las dos webs lo llevan
+ * en el mismo lugar de la cabecera, para llegar a cada parte en un toque. */
+const systemMenu: NavMenu = MEDICAL
+  ? {
+      columns: 2,
+      items: [
+        { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales", text: "Examen por sistemas, antecedentes y su presión en el tiempo." },
+        { href: "/historia-clinica-electronica#imagenes", label: "Radiografías y ecografías", text: "Las que trae la persona, en su historia: brillo, zoom y comparar." },
+        { href: "/receta-y-descanso-medico", label: "Receta y descanso médico", text: "Avisa embarazo y alergias; el descanso, firmado y numerado." },
+        { href: "/agenda-medica", label: "Agenda y controles", text: "Por sala y por médico, con controles que se repiten." },
+        { href: "/caja-y-cobros", label: "Caja y varias sedes", text: "Cada consulta cobrada, en cada sede." },
+        { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
+        { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente ve su cita, sus datos y sus papeles." },
+        { href: "/seguridad", label: "Seguridad y datos de salud", text: "Cada rol ve solo lo suyo." },
+      ],
+    }
+  : {
+      columns: 2,
+      items: [
+        { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma", text: "Odontograma en herradura, periodontograma y cada atención en orden." },
+        { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía", text: "Ábrelas en la ficha: brillo, medidas y comparar. Sin instalar nada." },
+        { href: "/presupuestos-dentales", label: "Presupuestos", text: "Opciones claras con los precios de tu tarifario." },
+        { href: "/agenda-odontologica", label: "Agenda", text: "Por odontólogo y unidad dental, con recordatorios solos." },
+        { href: "/caja-y-cobros", label: "Caja y cobros", text: "Cobros, adelantos y el cierre de caja con su hoja." },
+        { href: "/reportes", label: "Reportes con Argos", text: "Lo que te deja el mes, y pregúntale lo que quieras saber." },
+        { href: "/portal-del-paciente", label: "Su enlace", text: "Tu paciente reserva y ve su cita y sus papeles." },
+        { href: "/varias-sedes", label: "Varias sedes", text: "Cada sede con su agenda y su caja; tú lo ves todo junto." },
+        { href: "/seguridad", label: "Seguridad", text: "Cada rol ve solo lo suyo." },
+      ],
+    }
 
-export const mainNav: NavEntry[] = MEDICAL
-  ? [
-      { href: "/agentes", label: "Agentes", menu: agentsMenu },
-      { href: "/historia-clinica-electronica", label: "El sistema", menu: systemMenu },
-      { href: "/omnicanal", label: "Omnicanal" },
-      { href: "/precios", label: "Precios" },
-    ]
-  : [
-      { href: "/omnicanal", label: "Omnicanal" },
-      { href: "/agentes", label: "Agentes", menu: agentsMenu },
-      { href: "/precios", label: "Precios" },
-      { href: "/seguridad", label: "Seguridad" },
-    ]
+/** La misma cabecera en las dos webs: Agentes, El sistema, Omnicanal y Precios. */
+export const mainNav: NavEntry[] = [
+  { href: "/agentes", label: "Agentes", menu: agentsMenu },
+  { href: MEDICAL ? "/historia-clinica-electronica" : "/historia-clinica-y-odontograma", label: "El sistema", menu: systemMenu },
+  { href: "/omnicanal", label: "Omnicanal" },
+  { href: "/precios", label: "Precios" },
+]
 
 export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
   ? [
@@ -138,6 +149,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
     links: [
       { href: "/agenda-odontologica", label: "Agenda" },
       { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma" },
+      { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía" },
       { href: "/presupuestos-dentales", label: "Presupuestos" },
       { href: "/caja-y-cobros", label: "Caja y cobros" },
       { href: "/portal-del-paciente", label: "Su enlace" },

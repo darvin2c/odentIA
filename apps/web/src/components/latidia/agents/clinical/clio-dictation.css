@@ -1,16 +1,10 @@
 /* La atención de Rosa dictándose (ClioDictation.tsx, tablero «Clio» de latidIA). Todo bajo .lcd. Imita la
    app real: fondo claro, tarjetas blancas, sugerencias en lila suave y botones en píldora. El alto fijo
    (el del paso más alto) evita saltos y deja la atención entera en una pantalla de 768 px. */
+/* La tarjeta (fondo, borde y sombra) es la común de los agentes: .af-card. */
 .lcd {
-  background: #f6f5fa;
-  color: var(--ink);
-  border-radius: 26px;
-  padding: 16px 18px;
-  min-height: 730px;
-  display: flex;
-  flex-direction: column;
+  min-height: 600px;
   gap: 8px;
-  box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.6);
 }
 .lcd-top {
   display: flex;
@@ -165,10 +159,10 @@
   background: #fff;
   border: 1px solid #ece8f4;
   border-radius: 16px;
-  padding: 9px 12px;
+  padding: 7px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 .lcd-block-head {
   display: flex;
@@ -188,7 +182,7 @@
   align-items: center;
   gap: 8px 10px;
   border-radius: 12px;
-  padding: 7px 10px;
+  padding: 5px 10px;
   background: #f5f0fd;
   box-shadow: inset 0 0 0 1px #dccdf5;
   transition: background-color 0.4s, box-shadow 0.4s;
@@ -241,7 +235,7 @@
   font-size: 13px;
   font-weight: 700;
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 5px 12px;
   white-space: nowrap;
 }
 .lcd-btn.p {

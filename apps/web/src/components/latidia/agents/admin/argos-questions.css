@@ -1,14 +1,12 @@
 /* Preguntas a Argos en latidIA (ArgosQuestions.tsx, tablero «Argos»). Todo bajo .laq. El ámbar es el de
    Argos: #c98a1c en el dibujo y #9a6a12 en las cifras y textos chicos sobre claro (contraste). */
+/* La tarjeta (fondo, borde y sombra) es la común de los agentes: .af-card. */
 .laq {
-  background: #fff;
-  color: var(--ink);
-  border-radius: 26px;
-  padding: 22px;
-  min-height: 690px;
+  padding: 18px;
+  min-height: 600px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
   box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.6);
 }
 .laq-top {
@@ -42,7 +40,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #f7f5fc;
+  background: #fff;
   border: 1px solid #e9e2f7;
   border-radius: 999px;
   padding: 6px 6px 6px 18px;
@@ -109,12 +107,13 @@
   opacity: 0.3;
 }
 .laq-answer {
+  background: #fff;
   border: 1px solid #e9e2f7;
   border-radius: 18px;
-  padding: 18px;
+  padding: 12px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
   opacity: 0;
   transition: opacity 0.4s;
 }
@@ -132,7 +131,7 @@
   gap: 2px;
 }
 .laq-figures b {
-  font-size: 34px;
+  font-size: 28px;
   line-height: 1;
   letter-spacing: -0.03em;
   color: #9a6a12;
@@ -149,7 +148,7 @@
   display: flex;
   align-items: flex-end;
   gap: 14px;
-  height: 172px;
+  height: 116px;
   padding: 0 4px;
 }
 .laq-col {
@@ -181,12 +180,12 @@
 .laq-bars {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 .laq-bar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 .laq-bar-row {
   display: flex;
@@ -198,14 +197,14 @@
   white-space: nowrap;
 }
 .laq-track {
-  height: 10px;
+  height: 8px;
   border-radius: 999px;
   background: #f1ecf9;
   display: block;
 }
 .laq-fill {
   display: block;
-  height: 10px;
+  height: 8px;
   border-radius: 999px;
   background: #c98a1c;
   transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);

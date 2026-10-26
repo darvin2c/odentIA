@@ -1,0 +1,133 @@
+---
+// /radiografias-y-tomografia (odentIA): la portada con el visor de demostración (una tomografía real
+// de ejemplo, con las vistas que arma la clínica), cómo llega una imagen a la ficha en tres pasos, lo
+// que puedes hacer con cada una, las preguntas y el cierre. Título, descripción, migas y preguntas
+// salen de PAGES.imagenes.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import ImagingDemo from "./ImagingDemo"
+
+const page = PAGES.imagenes
+const cta = ctaOf(Astro.locals.pricing)
+const trail: [string, string][] = [["Inicio", "/"], page.parent, [page.crumb, page.path]]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(page.faq)]
+
+const steps = [
+  { n: "01", title: "Recepción la sube", text: "La carpeta del CD, un ZIP o las fotos de la radiografía. Si el nombre del archivo no es el del paciente, te avisa." },
+  { n: "02", title: "Queda en su ficha", text: "Con su tipo, su fecha de toma y sus piezas, junto a la historia y el odontograma. Nada se pierde en una gaveta." },
+  { n: "03", title: "La abres y mides", text: "En la consulta, en el navegador. Guardas la vista en la atención y el paciente la ve contigo." },
+]
+
+const can = [
+  { title: "Panorámica y cortes", text: "odentIA propone el arco y arma la panorámica; los cortes de cada pieza, cada 1 mm, con «Ir a la pieza»." },
+  { title: "Tres cortes", text: "Desde arriba, de frente y de lado, con la rueda o las flechas para avanzar." },
+  { title: "Medir y ángulo", text: "Quedan guardados con tu nombre y la fecha. Son medidas orientativas." },
+  { title: "Brillo que se ajusta solo", text: "«Hueso», «Diente» y «Tejido blando» se calculan con los grises de cada estudio." },
+  { title: "Radiografías claras", text: "Zoom, brillo y contraste; en DICOM también invertir y medir en milímetros." },
+  { title: "Comparar con la anterior", text: "La radiografía de hoy al lado de la anterior de la misma pieza." },
+]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <section class="hero ih">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap ih-in">
+      <div class="ih-copy">
+        <span class="tag tag-d rise">[ Radiografías y tomografía ]</span>
+        <h1 class="ih-h1 rise d1">La tomografía de tu paciente, <span class="acc">abierta en su ficha.</span></h1>
+        <p class="ih-lead rise d2">Sin instalar programas ni buscar el CD. Panorámica, cortes y medidas en el navegador, junto a su historia. Pruébalo aquí al lado: es una tomografía real.</p>
+        <div class="ih-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="/historia-clinica-y-odontograma">Ver la historia clínica</a>
+        </div>
+      </div>
+      <div class="ih-demo rise d2">
+        <ImagingDemo client:visible variant="dental" />
+      </div>
+    </div>
+  </section>
+
+  <section class="section is">
+    <div class="wrap is-in">
+      <div class="is-head">
+        <span class="tag">[ Cómo llega a la ficha ]</span>
+        <h2 class="is-h2">Del CD a la consulta, en tres pasos.</h2>
+      </div>
+      <ol class="is-steps">
+        {steps.map((step) => (
+          <li class="is-step">
+            <span class="is-n">{step.n}</span>
+            <h3>{step.title}</h3>
+            <p>{step.text}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="section section-white">
+    <div class="wrap is-in">
+      <div class="is-head">
+        <span class="tag">[ Lo que puedes hacer ]</span>
+        <h2 class="is-h2">Todo lo que necesitas para explicar el caso.</h2>
+        <p class="is-lead">El paciente entiende mejor lo que ve. Con la imagen en pantalla, el presupuesto se conversa solo.</p>
+      </div>
+      <div class="is-grid">
+        {can.map((item) => (
+          <div class="is-card">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={page.faq} />
+  </div>
+  <CtaBand title="Tus imágenes, en la ficha desde hoy." />
+</Base>
+
+<style>
+  /* La cabecera del sitio va absoluta encima. En portátil, menos aire para que el visor entero quepa. */
+  .ih { padding: 144px 0 88px; }
+  .ih-in { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 44px; align-items: center; }
+  .ih-copy { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  .ih-h1 { font-size: clamp(36px, 4.2vw, 52px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky-2); }
+  .ih-lead { font-size: 18px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .ih-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ih-demo { min-width: 0; }
+
+  .is { background: var(--bg); }
+  .is-in { display: flex; flex-direction: column; gap: 36px; }
+  .is-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .is-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .is-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .is-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+  .is-step { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .is-n { font-family: var(--agent-font); font-size: 13px; color: var(--teal); letter-spacing: .08em; }
+  .is-step h3, .is-card h3 { font-size: 20px; line-height: 1.25; }
+  .is-step p, .is-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .is-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+  .is-card { background: var(--bg); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+
+  .faqwrap { background: var(--bg); padding-bottom: 8px; }
+
+  @media (min-width: 1081px) and (max-height: 820px) {
+    .ih { padding-top: 108px; }
+  }
+  @media (max-width: 1080px) {
+    .ih-in { grid-template-columns: minmax(0, 1fr); }
+    .ih-copy { max-width: 640px; }
+  }
+  @media (max-width: 720px) {
+    .ih { padding: 104px 0 56px; }
+    .ih-in { gap: 32px; }
+    .ih-lead { font-size: 17px; }
+  }
+</style>

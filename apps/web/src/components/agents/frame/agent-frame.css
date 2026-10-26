@@ -1,0 +1,66 @@
+/* Piezas comunes de las demos de los agentes (AgentFrame.tsx), iguales en las dos webs. Todo bajo
+   .af-* para no tocar el resto. --teal y --teal-soft cambian solos con la marca (data-brand). */
+/* La tarjeta de la demo: clara sobre la portada oscura, la misma para los tres agentes. */
+.af-card { background: #e8f0f2; color: var(--ink); border-radius: 26px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .55); }
+[data-brand="latidia"] .af-card { background: #f1ecfa; }
+@media (max-width: 720px) {
+  .af-card { border-radius: 20px; padding: 14px; }
+}
+.af-head { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent); }
+.af-avatar { width: 40px; height: 40px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px; color: #fff; }
+/* Sofi lleva el color de la marca; Clío y Argos, el suyo de siempre. */
+.af-sofi { background: var(--teal); }
+.af-clio { background: #1f9d7a; }
+.af-argos { background: #c98a1c; }
+.af-who { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.3; }
+.af-who b { font-size: 15px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-meta { font-family: var(--agent-font); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-state { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--teal-soft); color: var(--teal); font: 700 12.5px var(--font); }
+.af-state i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.af-state[data-live] { background: #fde8e8; color: #c0262d; }
+.af-state[data-live] i { animation: af-pulse 1.1s ease-in-out infinite; }
+.af-state[data-done] { background: #dcf5ea; color: #157a5c; }
+
+/* El globo de voz: la persona a la izquierda, su nombre, el micrófono, la onda y lo que dice. */
+.af-voice { display: flex; align-items: flex-start; gap: 10px; }
+.af-person { width: 36px; height: 36px; flex: none; border-radius: 50%; background: var(--ink); color: #fff; display: flex; align-items: center; justify-content: center; font: 700 12.5px var(--font); letter-spacing: .02em; }
+.af-bubble { position: relative; flex: 1; min-width: 0; background: var(--paper); border-radius: 4px 18px 18px 18px; padding: 10px 14px 12px; box-shadow: 0 1px 3px rgba(15, 23, 42, .08), 0 0 0 1px color-mix(in srgb, var(--ink) 6%, transparent); display: flex; flex-direction: column; gap: 6px; transition: box-shadow .3s ease; }
+.af-voice[data-speaking] .af-bubble { box-shadow: 0 0 0 2px #e5484d, 0 6px 18px -8px rgba(229, 72, 77, .55); }
+.af-voice-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.af-voice-head b { font-size: 13.5px; color: var(--ink); }
+.af-mic { display: inline-flex; align-items: center; gap: 6px; font: 600 12.5px var(--font); color: var(--muted); }
+.af-mic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.af-voice[data-speaking] .af-mic { color: #c0262d; }
+.af-voice[data-speaking] .af-mic svg { animation: af-pulse 1.1s ease-in-out infinite; }
+.af-wave { display: flex; align-items: center; gap: 3px; height: 22px; }
+.af-wave i { width: 3px; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--ink) 22%, transparent); transition: height .3s ease; }
+/* La onda solo mientras habla: una frase ya dicha no necesita la línea vacía. */
+.af-voice:not([data-speaking]) .af-wave { display: none; }
+.af-voice[data-speaking] .af-wave i { background: #e5484d; animation: af-wave 0.9s ease-in-out infinite; }
+.af-voice[data-speaking] .af-wave i:nth-child(3n) { animation-duration: .7s; }
+.af-voice[data-speaking] .af-wave i:nth-child(4n + 1) { animation-duration: 1.15s; }
+.af-voice[data-speaking] .af-wave i:nth-child(5n + 2) { animation-delay: -.3s; }
+.af-voice[data-speaking] .af-wave i:nth-child(2n) { animation-delay: -.55s; }
+.af-said { font-size: 15px; line-height: 1.45; color: var(--ink); text-wrap: pretty; }
+/* El resto de la frase ocupa su lugar sin verse: el globo no salta de alto mientras se escribe. */
+.af-rest { color: transparent; }
+
+.af-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.af-note { font-size: 12px; color: var(--muted); }
+.af-replay { min-height: 36px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); background: var(--paper); color: var(--ink); font: 700 13px var(--font); cursor: pointer; transition: border-color .2s ease, color .2s ease; }
+.af-replay:hover { border-color: var(--teal); color: var(--teal); }
+.af-replay:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.af-replay svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+@keyframes af-pulse { 50% { opacity: .35; } }
+@keyframes af-wave { 0%, 100% { height: 4px; } 50% { height: 20px; } }
+@media (prefers-reduced-motion: reduce) {
+  .af-state[data-live] i, .af-voice[data-speaking] .af-mic svg, .af-voice[data-speaking] .af-wave i { animation: none; }
+  .af-voice[data-speaking] .af-wave i { height: 10px; }
+}
+@media (max-width: 720px) {
+  .af-avatar { width: 34px; height: 34px; font-size: 15px; }
+  .af-person { width: 30px; height: 30px; font-size: 11px; }
+  .af-said { font-size: 14px; }
+  .af-state { padding: 4px 9px; font-size: 12px; }
+}
