@@ -168,7 +168,7 @@ export const PRIVACIDAD: LegalDoc = {
       id: "banco-de-datos",
       title: "Banco de datos",
       blocks: [
-        "Los datos de los que odentIA es responsable se almacenan en el banco de datos de su titularidad, inscrito en el Registro Nacional de Protección de Datos Personales de la ANPD con el código [Por completar: código de inscripción].",
+        "Los datos de los que odentIA es responsable se almacenan en el banco de datos de su titularidad. odentIA lo inscribirá en el Registro Nacional de Protección de Datos Personales de la ANPD y publicará aquí su código de inscripción.",
       ],
     },
     {
