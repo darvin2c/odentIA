@@ -30,6 +30,9 @@ import { panelUrl } from "../lib/host"
 import { requireAdminSession } from "../lib/session"
 
 export const Route = createFileRoute("/_app")({
+  // Sin SSR: si el código hace falta lo decide la API con la cookie del equipo
+  // y el país de quien mira (ADR 0090), y eso solo lo tiene su navegador.
+  ssr: false,
   beforeLoad: async () => ({ adminSession: await requireAdminSession() }),
   component: AdminLayout,
 })

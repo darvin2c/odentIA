@@ -38,7 +38,13 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { ...init, credentials: "include", headers })
   if (!response.ok) {
     const parsed = errorSchema.safeParse(await response.json().catch(() => ({})))
-    throw new ApiError(response.status, parsed.success ? (parsed.data.error ?? {}) : {})
+    const shape = parsed.success ? (parsed.data.error ?? {}) : {}
+    // A mitad de trabajo la API puede volver a pedir el código (otro país, la
+    // marca venció): se lleva a ponerlo, no a «Algo salió mal» (ADR 0090).
+    if (shape.code === "MFA_REQUIRED" && typeof window !== "undefined" && window.location.pathname !== "/security") {
+      window.location.assign("/security")
+    }
+    throw new ApiError(response.status, shape)
   }
   if (response.status === 204) return undefined as T
   const envelope = envelopeSchema.parse(await response.json())

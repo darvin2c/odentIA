@@ -42,7 +42,9 @@ interface AccessSession {
   hasPassword: boolean
   enrolled: boolean
   verified: boolean
-  method: "totp" | "recovery" | null
+  method: "totp" | "recovery" | "device" | null
+  /** Por qué se pide el código: «country», entras desde otro país (ADR 0090). */
+  challengeReason?: "country" | null
 }
 
 interface EnrollStart {
@@ -202,6 +204,7 @@ function SecurityPage() {
       <ChallengeState
         name={session.data.user.name}
         email={session.data.user.email}
+        otherCountry={session.data.challengeReason === "country"}
         onVerified={() => void enter()}
       />
     )
@@ -769,7 +772,7 @@ function BackupCodesStep(props: { email: string; codes: string[]; onEnter: () =>
 }
 
 /** Las veces siguientes: solo el código; el respaldo es un enlace, no una casilla (tableros 4 y 5). */
-function ChallengeState(props: { name: string; email: string; onVerified: () => void }) {
+function ChallengeState(props: { name: string; email: string; otherCountry: boolean; onVerified: () => void }) {
   const [recovery, setRecovery] = useState(false)
   const [code, setCode] = useState("")
   const verify = useMutation({
@@ -797,7 +800,9 @@ function ChallengeState(props: { name: string; email: string; onVerified: () => 
         description={
           recovery
             ? "Uno de los 10 que guardaste al activar el segundo factor. Cada código sirve una sola vez."
-            : `${firstName ? `Hola, ${firstName}. ` : ""}Tu contraseña ya está; abre tu app de autenticación y busca «odentIA · ${props.email}».`
+            : props.otherCountry
+              ? `Entras desde otro país: confirma que eres tú. Abre tu app de autenticación y busca «odentIA · ${props.email}».`
+              : `${firstName ? `Hola, ${firstName}. ` : ""}Tu contraseña ya está; abre tu app de autenticación y busca «odentIA · ${props.email}».`
         }
       />
       <form
@@ -860,6 +865,9 @@ function ChallengeState(props: { name: string; email: string; onVerified: () => 
         >
           Entrar
         </SubmitButton>
+        {recovery ? null : (
+          <p className="text-sm text-muted-foreground">Después, en este equipo no te lo volveremos a pedir.</p>
+        )}
       </form>
       <Button type="button" variant="link" className="h-auto self-start p-0" onClick={switchMode}>
         {recovery ? "Usar el código de la app" : "Usar un código de respaldo"}
@@ -875,7 +883,7 @@ function ChallengeState(props: { name: string; email: string; onVerified: () => 
 
 /** Ya protegido: entrar, o revocar el factor para cambiar de teléfono (sin cambios de fondo). */
 function VerifiedState(props: {
-  method: "totp" | "recovery" | null
+  method: "totp" | "recovery" | "device" | null
   onRevoked: () => void
   onEnter: () => void
 }) {

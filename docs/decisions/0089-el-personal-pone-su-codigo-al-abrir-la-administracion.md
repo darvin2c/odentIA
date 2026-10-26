@@ -1,6 +1,6 @@
 # 0089 · El personal de odentIA pone su código al abrir la administración, no al entrar
 
-Fecha: 2026-10-25 · Estado: aceptada
+Fecha: 2026-10-25 · Estado: aceptada · El plazo de 48 h lo reemplaza la [0090](0090-el-codigo-de-la-administracion-se-pide-solo-cuando-hace-falta.md)
 
 ## Problema
 
