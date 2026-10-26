@@ -1,7 +1,8 @@
 // «Lo que pagas y lo que recuperas»: la clínica pone sus números y compara lo que hoy pierde
 // sin agentes con su cuenta del mes en odentIA. Es un ejemplo, nunca una promesa de resultados.
 // Arriba, la tarjeta del plan (llega como hijo, armada en el servidor) y al lado la cuenta del mes,
-// cada fila cobrada por su tipo (ADR 0085); debajo, los números de la clínica y lo que pierde.
+// cada fila cobrada por su tipo (ADR 0085); debajo, los números de la clínica y, en la misma pantalla,
+// lo que pierde y lo que recupera: al lado en escritorio, en una franja pegada abajo en tableta y teléfono.
 import { type ChangeEvent, type ReactNode, useEffect, useId, useState } from "react"
 import { usd, type ValuePrices } from "../../lib/pricing"
 import { WORDS } from "../../lib/product"
@@ -44,6 +45,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
   const top = Math.max(r.withoutUs, r.withUs, 1)
   const sinPct = `${((r.withoutUs / top) * 100).toFixed(1)}%`
   const conPct = `${Math.max(2, (r.withUs / top) * 100).toFixed(1)}%`
+  const ratio = r.ratio.toFixed(1).replace(".", ",")
 
   // En el teléfono, las filas se dicen más corto (como en el tablero de teléfono).
   const L = narrow
@@ -126,7 +128,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
         </div>
       </div>
       <div className="vc-panel">
-        <div className="vc-grid">
+        <div className="vc-edit">
           <div className="vc-in">
             <span className="tag tag-d">Tu clínica, en un mes</span>
             <SizePicker current={sizeOf(v)} onPick={setV} />
@@ -176,6 +178,28 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
               </label>
             </details>
           </div>
+          {/* Tableta y teléfono: el resumen queda pegado abajo mientras se editan los números y termina
+              con ellos. Lo anuncia el resultado completo de abajo, así que aquí no se repite. */}
+          <div className="vc-dock" aria-hidden="true">
+            <span className="vc-dock-t">
+              <span>
+                Pierdes <span>{usd(r.withoutUs)}</span> · pagas <span>{usd(r.withUs)}</span>
+              </span>
+              <b>{r.worthIt ? "Recuperas por cada dólar que pagas" : "con estos números todavía no conviene"}</b>
+            </span>
+            <strong className="vc-dock-n">
+              {r.worthIt ? (
+                <>
+                  <small>USD</small> <span>{ratio}</span>
+                </>
+              ) : (
+                "—"
+              )}
+            </strong>
+          </div>
+        </div>
+        {/* En escritorio, al lado de los números y quieta al bajar: se ve al abrir «Ajustar los supuestos». */}
+        <div className="vc-out">
           <div className="vc-col">
             <span className="tag vc-amber">Sin {WORDS.name}, cada mes</span>
             <div className="vc-row">
@@ -191,9 +215,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
               <strong>{usd(r.lostTime)}</strong>
             </div>
           </div>
-        </div>
-        <div className="vc-res">
-          <div className="vc-left">
+          <div className="vc-res">
             <div className="vc-bar">
               <div className="vc-bl">
                 <span>Sin {WORDS.name} pierdes, cada mes</span>
@@ -212,19 +234,24 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
                 <span className="vc-fill" style={{ width: conPct, background: "var(--sky)" }} />
               </div>
             </div>
-            <div className="vc-diff">
-              <span>{r.worthIt ? "A tu favor, cada mes" : L.tryIt}</span>
-              <strong>{r.worthIt ? usd(r.inFavor) : "—"}</strong>
-            </div>
           </div>
           <div className="vc-ratio" aria-live="polite">
             <span className="vc-rt">Recuperas</span>
             <strong>
               <span className="vc-cur">{r.worthIt ? "USD" : ""}</span>
-              <span className="vc-n">{r.worthIt ? r.ratio.toFixed(1).replace(".", ",") : "—"}</span>
+              <span className="vc-n">{r.worthIt ? ratio : "—"}</span>
             </strong>
             <span className="vc-rl">
               {r.worthIt ? "por cada dólar que pagas" : "con estos números todavía no conviene"}
+            </span>
+            <span className="vc-fav">
+              {r.worthIt ? (
+                <>
+                  A tu favor, cada mes: <b>{usd(r.inFavor)}</b>
+                </>
+              ) : (
+                L.tryIt
+              )}
             </span>
           </div>
           <span className="mono vc-note">

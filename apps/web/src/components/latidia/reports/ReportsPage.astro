@@ -26,7 +26,6 @@ const trail: [string, string][] = [
   ["Inicio", "/"],
   ["Reportes", "/reportes"],
 ]
-const REPLAY = "latidia:reportes-preguntar"
 // El ámbar de Argos sobre claro no llega al contraste de un texto de 13 px; el tablero usa uno más oscuro.
 const argosTag = "#9a6a12"
 
@@ -95,9 +94,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <p class="sh-title">Pregúntale a <span style={`color: ${AGENT_COLORS.administrador.dark}`}>tu consultorio.</span></p>
       <Fragment slot="actions">
         <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-        <button type="button" class="btn btn-g" data-lt-replay={REPLAY}>Preguntar otra vez</button>
       </Fragment>
-      <ArgosAsk slot="demo" client:load replayEvent={REPLAY} />
+      <ArgosAsk slot="demo" client:load />
     </SplitHero>
 
     <section class="section section-white">
@@ -152,13 +150,6 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     </CtaBand>
   </div>
 </Base>
-
-<script>
-  // «Preguntar otra vez»: Argos (isla) escucha este evento y vuelve a hacer la pregunta.
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-lt-replay]")) {
-    button.addEventListener("click", () => window.dispatchEvent(new Event(button.dataset.ltReplay ?? "")))
-  }
-</script>
 
 <style>
   /* Las superficies de latidIA: el gris claro y las líneas con un poco de su lila (como el tablero). */

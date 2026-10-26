@@ -129,7 +129,9 @@ const { kind } = Astro.props
 </div>
 
 <style>
-  .hv { position: relative; display: flex; justify-content: center; animation: float 7s ease-in-out infinite; }
+  /* contain: el ancho lo pone la columna, nunca el contenido: sin esto, en el teléfono la columna de la
+     portada se estiraba al ancho mínimo del teléfono dibujado y recortaba la bajada y los botones. */
+  .hv { position: relative; display: flex; justify-content: center; contain: inline-size; animation: float 7s ease-in-out infinite; }
   @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
   .panel { width: min(520px, 100%); padding: 22px; border-radius: 24px; background: rgba(8,26,32,.78); box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 40px 80px -40px rgba(0,0,0,.6); display: flex; flex-direction: column; gap: 14px; color: #e2eef1; }
   .ph { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono); font-size: 12px; letter-spacing: .04em; color: #9fb8bf; text-transform: uppercase; }
@@ -166,7 +168,8 @@ const { kind } = Astro.props
   .close { align-self: flex-start; padding: 10px 14px; border-radius: 999px; background: var(--sky); color: #03252e; font-weight: 700; font-size: 13.5px; }
 
   /* Teléfono (Su enlace y WhatsApp) */
-  .phone { position: relative; width: min(320px, 100%); padding: 40px 18px 22px; border-radius: 40px; background: #f6f8fb; color: var(--ink); box-shadow: 0 0 0 10px #0d2a33, 0 40px 80px -30px rgba(0,0,0,.7); display: flex; flex-direction: column; gap: 12px; }
+  /* Se encoge con el ancho disponible y deja sitio al marco de 10 px (la sombra) a cada lado. */
+  .phone { position: relative; width: min(320px, calc(100% - 20px)); padding: 40px 18px 22px; border-radius: 40px; background: #f6f8fb; color: var(--ink); box-shadow: 0 0 0 10px #0d2a33, 0 40px 80px -30px rgba(0,0,0,.7); display: flex; flex-direction: column; gap: 12px; }
   .notch { position: absolute; top: 12px; left: 50%; width: 90px; height: 18px; margin-left: -45px; border-radius: 999px; background: #0d2a33; }
   .phone .ex { position: absolute; right: 18px; bottom: -36px; color: var(--on-night-3); box-shadow: inset 0 0 0 1px rgba(255,255,255,.14); }
   .pk { font-size: 11px; color: var(--soft); }

@@ -74,8 +74,13 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
     return { ...r, why, cls: on ? (i === day - 1 && day < 7 ? "drow on last" : "drow on") : "drow" }
   })
 
+  const play = () => setDay(prefersReducedMotion() ? 7 : 0)
+  const totalTxt = usd(total)
+
+  // El total va junto al botón que reproduce el día; en teléfono, en una barra pegada abajo
+  // mientras se ven las filas. Solo una de las dos se ve a la vez, y esa es la que se anuncia.
   return (
-    <>
+    <div className="dayblk">
       <div className="dayhead">
         <div className="stack dayhead-t">
           <h3 className="h3d">Así se ve un día en tu cuenta.</h3>
@@ -84,13 +89,17 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
             cobra.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-p"
-          onClick={() => setDay(prefersReducedMotion() ? 7 : 0)}
-        >
-          Reproducir el día
-        </button>
+        <div className="daynow">
+          <span className="daytot">
+            <span>Total del día</span>
+            <strong className="mono" aria-live="polite">
+              {totalTxt}
+            </strong>
+          </span>
+          <button type="button" className="btn btn-p" onClick={play}>
+            Reproducir el día
+          </button>
+        </div>
       </div>
       <div className="days">
         {rows.map((r) => (
@@ -108,17 +117,24 @@ export default function DayRows({ prices, conversationHours }: { prices: ValuePr
         ))}
         <div className="dayfoot">
           <span>Ejemplo de un jueves en una clínica de 4 odontólogos.</span>
-          <span className="daytot">
-            <span>Total del día</span>
-            <strong className="mono">{usd(total)}</strong>
-            <span className="mono dpend">
-              {day >= 6
-                ? `Si Rosa asiste el viernes: + ${usd(prices.recovered)} y se devuelven ${usd(prices.tiers.gestiona)}`
-                : ""}
-            </span>
+          <span className="mono dpend">
+            {day >= 6
+              ? `Si Rosa asiste el viernes: + ${usd(prices.recovered)} y se devuelven ${usd(prices.tiers.gestiona)}`
+              : ""}
           </span>
         </div>
       </div>
-    </>
+      <div className="daydock">
+        <span className="daydock-t">
+          <span>Total del día · {day} de 7</span>
+          <strong className="mono" aria-live="polite">
+            {totalTxt}
+          </strong>
+        </span>
+        <button type="button" className="btn btn-p btn-sm daydock-b" onClick={play}>
+          Reproducir el día
+        </button>
+      </div>
+    </div>
   )
 }

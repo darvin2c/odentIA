@@ -35,6 +35,7 @@ import AgentTabs from "./AgentTabs"
         <span class="mono m-only mx-m" aria-hidden="true">arriba: todos los canales · derecha: actúan</span>
       </div>
     </div>
-    <AgentTabs client:visible={{ rootMargin: "200px" }} />
+    {/* `data-cta-room`: mientras se ven las pestañas, la barra fija del teléfono se aparta. */}
+    <div data-cta-room><AgentTabs client:visible={{ rootMargin: "200px" }} /></div>
   </div>
 </section>

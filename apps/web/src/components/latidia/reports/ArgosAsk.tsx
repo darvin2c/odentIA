@@ -1,7 +1,7 @@
 // Argos responde en la portada de /reportes de latidIA: la pregunta se escribe letra a letra, Argos dice
 // sus pasos («Leyendo la pregunta», «Consultando…»), responde con las cifras destacadas, el dibujo crece y
 // debajo dice «Así lo calculé», con sus botones. Tres preguntas que pasan solas hasta que la persona
-// elige una; «Preguntar otra vez» (en la portada) manda `replayEvent`. Con movimiento reducido se ve la
+// elige una; «Preguntar otra vez» va arriba, en la propia ventana de Reportes. Con movimiento reducido se ve la
 // respuesta sin animar. Las cifras son las del Consultorio San Martín de ejemplo (las mismas de las
 // pestañas de Reportes), en soles: no son precios de latidIA.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
@@ -68,11 +68,6 @@ const TYPE_MS = 45
 const THINK_MS = 1400
 const NEXT_MS = 6500
 
-interface Props {
-  /** Un evento de window que vuelve a hacer la pregunta (el botón «Preguntar otra vez» de la portada). */
-  replayEvent?: string
-}
-
 /** «Te deben **S/ 1.230**…» con lo destacado en negrita. */
 function Rich({ text }: { text: string }) {
   return (
@@ -85,7 +80,7 @@ function Rich({ text }: { text: string }) {
   )
 }
 
-export default function ArgosAsk({ replayEvent }: Props) {
+export default function ArgosAsk() {
   // Se arma en el servidor con la primera respuesta completa: sin JavaScript se lee igual.
   const [pick, setPick] = useState(0)
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
@@ -136,13 +131,6 @@ export default function ArgosAsk({ replayEvent }: Props) {
     return stop
   }, [play, stop])
 
-  useEffect(() => {
-    if (!replayEvent) return
-    const again = () => play(pick, false)
-    window.addEventListener(replayEvent, again)
-    return () => window.removeEventListener(replayEvent, again)
-  }, [replayEvent, play, pick])
-
   const cur = QUESTIONS[pick]
   const max = Math.max(...cur.bars.map(([, v]) => v))
   const done = phase === 2
@@ -151,7 +139,12 @@ export default function ArgosAsk({ replayEvent }: Props) {
     <div className="lt-ask">
       <div className="lt-ask-head">
         <b>Reportes</b>
-        <span className="lt-ask-scope">Octubre · Todas las sedes</span>
+        <span className="lt-ask-side">
+          <span className="lt-ask-scope">Octubre · Todas las sedes</span>
+          <button type="button" className="lt-ask-replay" onClick={() => play(pick, false)}>
+            <span aria-hidden="true">↻</span> Preguntar otra vez
+          </button>
+        </span>
       </div>
       <div className="lt-ask-field">
         <span className="lt-ask-q">

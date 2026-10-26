@@ -230,6 +230,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   }
   /* La frase grande del tablero: 64 px como máximo, no los 72 de SplitHero. */
   .lt .big { font-size: clamp(42px, 4.6vw, 64px); line-height: .98; letter-spacing: -.045em; }
+  /* El texto de la portada arranca arriba, a la altura de la demostración, y no centrado contra ella:
+     así el botón principal queda a la vista en una pantalla de 1280 × 720. */
+  .lt :global(.sh-in) { align-items: flex-start; }
   .accent { color: var(--sky); }
   .sp-in { display: flex; flex-direction: column; gap: 36px; }
   .sp-head { display: flex; flex-direction: column; gap: 14px; max-width: 820px; }

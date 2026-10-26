@@ -24,7 +24,6 @@ const trail: [string, string][] = [
   ["Inicio", "/"],
   ["Caja y cobros", "/caja-y-cobros"],
 ]
-const REPLAY = "latidia:caja-repetir"
 
 const faq: FaqItem[] = [
   {
@@ -67,9 +66,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <p class="sh-title big">Cobras la consulta. <span class="accent">El mes se cuenta solo.</span></p>
       <Fragment slot="actions">
         <a class="btn btn-p" href={cta.href}>{cta.label}</a>
-        <button type="button" class="btn btn-g" data-lt-replay={REPLAY}>Repetir el día</button>
       </Fragment>
-      <CashDay slot="demo" client:load replayEvent={REPLAY} />
+      <CashDay slot="demo" client:load />
     </SplitHero>
 
     <FeatureGrid
@@ -144,13 +142,6 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   </div>
 </Base>
 
-<script>
-  // «Repetir el día»: la caja del día (isla) escucha este evento y vuelve a empezar.
-  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-lt-replay]")) {
-    button.addEventListener("click", () => window.dispatchEvent(new Event(button.dataset.ltReplay ?? "")))
-  }
-</script>
-
 <style>
   /* Las superficies de latidIA: el gris claro y las líneas con un poco de su lila (como el tablero). */
   .lt {
@@ -159,6 +150,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   }
   /* La frase grande del tablero: 64 px como máximo, no los 72 de SplitHero. */
   .lt .big { font-size: clamp(42px, 4.6vw, 64px); line-height: .98; letter-spacing: -.045em; }
+  /* El texto de la portada arranca arriba, a la altura de la demostración, y no centrado contra ella:
+     así el botón principal queda a la vista en una pantalla de 1280 × 720. */
+  .lt :global(.sh-in) { align-items: flex-start; }
   .accent { display: block; color: var(--sky); }
   .more { font-size: 15px; color: var(--muted); }
   .more a { font-weight: 700; display: inline-block; padding: 10px 0; }

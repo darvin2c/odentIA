@@ -1,15 +1,10 @@
 // La caja del día del Consultorio San Martín (lienzo de latidIA, tablero «Caja», portada): los cobros
 // entran uno a uno, Luis paga una parte con tarjeta y sale su ticket con el impuesto aparte y «Le falta
 // pagar»; por la tarde paga lo que faltaba y la caja queda lista para cerrar. Un paso cada 1,7 s.
-// «Repetir el día» (en la portada) manda el evento `replayEvent`. Con movimiento reducido se ve el día
-// terminado, sin animar. Los montos son del tarifario de ejemplo del consultorio, no precios de latidIA.
+// «Repetir el día» va en la esquina de la propia caja, para ver el día empezar desde donde se toca. Con
+// movimiento reducido se ve el día terminado, sin animar. Los montos son del tarifario de ejemplo del consultorio, no precios de latidIA.
 import { useCallback, useEffect, useRef, useState } from "react"
 import "./cash-day.css"
-
-interface Props {
-  /** Un evento de window que vuelve a empezar el día (el botón «Repetir el día» de la portada). */
-  replayEvent?: string
-}
 
 const STEP_MS = 1700
 const LAST = 6
@@ -27,7 +22,7 @@ const DAY: Charge[] = [
 /** «S/ 80,00»: los soles del tarifario de ejemplo. */
 const soles = (v: number) => `S/ ${v.toFixed(2).replace(".", ",")}`
 
-export default function CashDay({ replayEvent }: Props) {
+export default function CashDay() {
   // Se arma en el servidor con el día terminado: sin JavaScript se lee igual.
   const [n, setN] = useState(LAST)
   const timer = useRef<number | undefined>(undefined)
@@ -52,12 +47,6 @@ export default function CashDay({ replayEvent }: Props) {
     return () => window.clearInterval(timer.current)
   }, [play])
 
-  useEffect(() => {
-    if (!replayEvent) return
-    window.addEventListener(replayEvent, play)
-    return () => window.removeEventListener(replayEvent, play)
-  }, [replayEvent, play])
-
   const luisPaid = n >= 5
   const shown = DAY.filter((d) => n >= d.at)
   const total = shown.reduce((sum, d) => sum + d.amount, 0)
@@ -74,9 +63,14 @@ export default function CashDay({ replayEvent }: Props) {
             <b>Caja de hoy</b>
             <span>Sede San Martín · sábado 24 oct.</span>
           </div>
-          <span className="lt-cash-state" data-state={state}>
-            <i aria-hidden="true" />
-            {stateText}
+          <span className="lt-cash-side">
+            <span className="lt-cash-state" data-state={state}>
+              <i aria-hidden="true" />
+              {stateText}
+            </span>
+            <button type="button" className="lt-cash-replay" onClick={play}>
+              <span aria-hidden="true">↻</span> Repetir el día
+            </button>
           </span>
         </div>
         {/* Lo que entra se anuncia a los lectores de pantalla, sin repetir toda la lista. */}

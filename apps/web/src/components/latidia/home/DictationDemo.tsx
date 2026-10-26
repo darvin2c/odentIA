@@ -1,7 +1,8 @@
 // La portada de latidIA (lienzo «Inicio», sección 1): la Dra. Vela dicta la consulta de Rosa sobre
 // la línea de pulso «72 lpm» y Clío propone cada cosa en su bloque; la temperatura se corrige por
 // voz y al final la doctora confirma las cinco listas. El descanso no se confirma: se emite aparte.
-// Se repite en bucle con «Pausar» y «Repetir»; sin movimiento se ve el final.
+// Se repite en bucle con «Pausar» y «Repetir», arriba junto al estado para que se vean con lo que
+// controlan; sin movimiento se ve el final.
 import { useState } from "react"
 import { useLoop } from "./loop"
 import "./dictation-demo.css"
@@ -58,12 +59,30 @@ export default function DictationDemo() {
     <figure className="ld" aria-label="Demostración: Clío ordena la consulta que dicta la Dra. Vela">
       <div className="ld-top">
         <span className="ld-who">
-          <span className="ld-wide">Consulta de Rosa Paredes · Dra. Elena Vela</span>
+          <span className="ld-wide">Rosa Paredes · Dra. Vela</span>
           <span className="ld-narrow">Rosa · Dra. Vela</span>
         </span>
         <span className={`ld-status${listening ? " live" : ""}`}>
           <i className="ld-blink" aria-hidden="true"></i>
           <span>{status}</span>
+        </span>
+        <span className="ld-btns">
+          <button type="button" className="ld-btn" aria-pressed={paused} onClick={() => setPaused(!paused)}>
+            {paused ? "Seguir" : "Pausar"}
+          </button>
+          <button
+            type="button"
+            className="ld-btn ld-replay"
+            onClick={() => {
+              setPaused(false)
+              restart()
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <path d="M2 7a5 5 0 1 0 1.6-3.7M2 1.5v3h3"></path>
+            </svg>
+            Repetir
+          </button>
         </span>
       </div>
 
@@ -152,24 +171,6 @@ export default function DictationDemo() {
 
       <div className="ld-foot">
         <span className="ld-note">Demostración con datos de prueba. Nada entra a la historia hasta que la doctora confirma.</span>
-        <span className="ld-btns">
-          <button type="button" className="ld-btn" aria-pressed={paused} onClick={() => setPaused(!paused)}>
-            {paused ? "Seguir" : "Pausar"}
-          </button>
-          <button
-            type="button"
-            className="ld-btn ld-replay"
-            onClick={() => {
-              setPaused(false)
-              restart()
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-              <path d="M2 7a5 5 0 1 0 1.6-3.7M2 1.5v3h3"></path>
-            </svg>
-            Repetir
-          </button>
-        </span>
       </div>
     </figure>
   )

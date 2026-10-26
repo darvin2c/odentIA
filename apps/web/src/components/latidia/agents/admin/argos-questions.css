@@ -243,13 +243,35 @@
   margin-top: auto;
 }
 
+/* Teléfono: de la pregunta elegida a «Así lo calculé» en una pantalla de 740 px. */
 @media (max-width: 720px) {
   .laq {
     border-radius: 20px;
-    padding: 16px;
+    padding: 14px;
+    gap: 10px;
     min-height: 0;
   }
+  .laq-chips {
+    gap: 6px;
+  }
+  .laq-chip {
+    padding: 0 12px;
+  }
+  .laq-answer {
+    padding: 14px;
+    gap: 10px;
+  }
+  .laq-figures {
+    gap: 20px;
+  }
   .laq-figures b {
-    font-size: 28px;
+    font-size: 26px;
+  }
+  .laq-text {
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  .laq-cols {
+    height: 156px;
   }
 }

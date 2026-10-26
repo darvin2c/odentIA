@@ -67,7 +67,11 @@ export default function Sites() {
           </button>
         ))}
       </fieldset>
-      <div className="lt-sites-grid">
+      {/* En el teléfono las cuatro tarjetas pasan de lado (se asoma la siguiente) para que los botones y lo que
+          cambian quepan en una pantalla; la región se recorre también con las flechas del teclado. */}
+      {/* biome-ignore lint/a11y/useSemanticElements: es una zona que se desliza dentro de la demo, no una sección de la página. */}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: una zona que se desliza necesita el foco para recorrerla con el teclado (WCAG 2.1.1). */}
+      <div className="lt-sites-grid" role="region" aria-label="Lo que cambia con la sede" tabIndex={0}>
         <div className="lt-sites-card">
           <span className="lt-sites-k">Agenda de hoy · por sede</span>
           {one ? (

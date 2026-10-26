@@ -1,8 +1,9 @@
 /* Inicio de la web: estilos portados de los tableros «Main» (escritorio) y «Teléfono» (≤ 720 px).
    Todo va bajo .home para no tocar otras páginas ni los componentes compartidos. */
 
+/* `clip` y no `hidden`: recorta sin volverse contenedor de desplazamiento, así funcionan las barras pegadas. */
 .home {
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 .home .m-only {
   display: none;
@@ -59,7 +60,7 @@
   background: #0a2129;
   color: #f1f5f9;
   position: relative;
-  overflow: hidden;
+  overflow: clip;
 }
 .home .hs-in {
   position: relative;
@@ -663,8 +664,22 @@
   padding: 4px 6px 10px;
   border-bottom: 1px solid #d3dee3;
 }
+.home .oc-title {
+  gap: 2px;
+  min-width: 0;
+}
 .home .oc-head strong {
   font-size: 15px;
+}
+/* «Volver a ver» en la cabecera, donde empieza la conversación. */
+.home .oc-head .replay,
+.home .chathead .replay {
+  flex: none;
+  margin: 0;
+  padding: 0 12px;
+}
+.home .chathead .replay {
+  margin-left: auto;
 }
 .home .oc-head .mono {
   font-size: 12px;
@@ -891,7 +906,7 @@
 .home .ag {
   display: flex;
   flex-wrap: wrap;
-  gap: 32px;
+  gap: 28px;
   align-items: flex-start;
 }
 .home .ag-tabs {
@@ -907,7 +922,7 @@
   align-items: flex-start;
   gap: 6px;
   text-align: left;
-  padding: 18px 20px;
+  padding: 14px 18px;
   border-radius: 16px;
   border: 0;
   background: transparent;
@@ -958,22 +973,21 @@
 .home .chatbox {
   background: #e7eef1;
   border-radius: 26px;
-  padding: 18px;
+  padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 520px;
+  gap: 8px;
 }
 .home .chathead {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 6px 12px;
+  gap: 10px;
+  padding: 0 0 8px 4px;
   border-bottom: 1px solid #d3dee3;
 }
 .home .chatav {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex: none;
   border-radius: 50%;
   background: #0e7490;
@@ -1001,14 +1015,14 @@
 }
 .home .tone {
   min-height: 44px;
-  padding: 0 14px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 0;
   background: transparent;
   color: #334155;
   font-family: var(--font);
   font-weight: 700;
-  font-size: 13.5px;
+  font-size: 13px;
   cursor: pointer;
 }
 .home .tone:hover {
@@ -1024,7 +1038,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 14px;
+  gap: 4px 10px;
 }
 .home .emo {
   display: inline-flex;
@@ -1068,16 +1082,16 @@
 .home .chatmsgs {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 6px;
+  gap: 8px;
+  padding: 4px;
   flex: 1;
 }
 .home .bubble {
-  max-width: 82%;
-  padding: 10px 14px;
+  max-width: 86%;
+  padding: 8px 12px;
   border-radius: 16px;
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.42;
   animation: pop 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 .home .bubble.in {
@@ -1147,13 +1161,13 @@
 .home .ag-side {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 .home .agenda {
-  padding: 22px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 .home .agenda-h {
   display: flex;
@@ -1172,9 +1186,9 @@
   grid-template-columns: 52px 1fr;
   gap: 10px;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-size: 14px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  font-size: 13.5px;
   transition:
     background-color 0.4s ease,
     color 0.4s ease;
@@ -1199,13 +1213,13 @@
 .home .ag-copy {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 4px;
+  gap: 8px;
+  padding: 0 4px;
 }
 .home .ag-copy p,
 .home .ag-mcopy {
-  font-size: 16px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.5;
   color: #334155;
 }
 .home .ag-link {
@@ -1224,18 +1238,20 @@
   background: #0a2129;
   color: #e2eef1;
   border-radius: 26px;
-  padding: 26px;
+  padding: 20px 22px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  min-height: 520px;
+  gap: 14px;
 }
 .home .dict-h {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
+}
+.home .dict-who {
+  gap: 4px;
+  min-width: 0;
 }
 .home .dict-h .mono {
   font-size: 12px;
@@ -1282,8 +1298,8 @@
   gap: 12px;
 }
 .home .dict-lines p {
-  font-size: 16px;
-  line-height: 1.55;
+  font-size: 15px;
+  line-height: 1.5;
   color: #cfe2e7;
 }
 .home .dict-org {
@@ -1291,8 +1307,7 @@
   color: #7fd6e4;
 }
 .home .dict-replay {
-  margin-top: auto;
-  align-self: flex-start;
+  flex: none;
   min-height: 44px;
   padding: 0 16px;
   border-radius: 999px;
@@ -1303,10 +1318,10 @@
   cursor: pointer;
 }
 .home .sugg {
-  padding: 24px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 .home .sugg-h {
   display: flex;
@@ -1324,12 +1339,12 @@
 .home .sugg-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  font-size: 15px;
-  line-height: 1.5;
+  gap: 8px;
+  font-size: 14.5px;
+  line-height: 1.45;
 }
 .home .sugg-body p {
-  margin: 6px 0 0;
+  margin: 3px 0 0;
 }
 .home .sl {
   color: #64748b;
@@ -1355,10 +1370,9 @@
   color: #64748b;
 }
 .home .admc {
-  padding: 28px;
+  padding: 18px 22px;
   display: flex;
   flex-direction: column;
-  min-height: 520px;
 }
 .home .admc-h {
   display: flex;
@@ -1380,7 +1394,7 @@
   display: grid;
   grid-template-columns: 28px 1fr;
   gap: 14px;
-  padding: 14px 0;
+  padding: 8px 0;
   transition: opacity 0.4s ease;
 }
 .home .step .dot {
@@ -1411,32 +1425,32 @@
   color: #64748b;
 }
 .home .stepb {
-  gap: 4px;
+  gap: 2px;
 }
 .home .stepb .mono {
   font-size: 12px;
   color: #64748b;
 }
 .home .stepb strong {
-  font-size: 16px;
-  line-height: 1.4;
+  font-size: 15px;
+  line-height: 1.35;
 }
 .home .stepb span:last-child {
-  font-size: 14.5px;
-  line-height: 1.5;
+  font-size: 13.5px;
+  line-height: 1.45;
   color: #475569;
 }
 .home .counts {
   background: #0a2129;
   color: #f1f5f9;
   border-radius: 22px;
-  padding: 28px;
+  padding: 22px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 .home .counts-t {
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.15;
@@ -1445,6 +1459,46 @@
   font-size: 16px;
   line-height: 1.5;
   color: #b9cfd5;
+}
+
+/* Escritorio estrecho y tableta: las pestañas en una fila sobre el panel, que usa todo el ancho. */
+@media (max-width: 1100px) and (min-width: 721px) {
+  .home .ag {
+    gap: 16px;
+  }
+  .home .ag-tabs {
+    flex: 1 1 100%;
+    max-width: none;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .home .tabbtn {
+    gap: 4px;
+    padding: 12px 16px;
+    background: #eef2f6;
+  }
+  .home .tabbtn:hover {
+    background: #e2e8f0;
+  }
+  .home .tabbtn.on {
+    background: #0a2129;
+  }
+  .home .tablabel {
+    font-size: 17px;
+  }
+  .home .tabsub {
+    font-size: 13px;
+  }
+  .home .ag-demo {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 0 4px;
+    font-size: 12px;
+  }
+  .home .ag-body {
+    flex: 1 1 100%;
+  }
 }
 
 /* ——— 03 · Un caso ——— */
@@ -1733,20 +1787,21 @@
 }
 
 /* ——— 05 · El valor y el precio ——— */
+/* Escritorio: campos a la izquierda; a la derecha la cuenta y el resultado, fijos mientras se ajusta. */
 .home .vgrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 20px;
+  align-items: start;
 }
 .home .vin {
   border-radius: 22px;
-  padding: 22px;
+  padding: 18px 20px;
   background: rgba(255, 255, 255, 0.05);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 .home .vl {
   display: flex;
@@ -1754,9 +1809,9 @@
   align-items: center;
   gap: 12px;
   font-size: 14.5px;
-  line-height: 1.4;
+  line-height: 1.35;
   color: #d6e8ec;
-  padding-top: 6px;
+  padding-top: 4px;
 }
 .home .vl small {
   display: block;
@@ -1787,13 +1842,12 @@
 .home .vrange {
   width: 100%;
   accent-color: #4fc3d7;
-  height: 26px;
+  height: 24px;
   cursor: pointer;
 }
 .home .vsup {
-  margin-top: 6px;
+  margin-top: 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  padding-top: 8px;
 }
 .home .vsup summary {
   cursor: pointer;
@@ -1804,14 +1858,25 @@
   font-size: 12.5px;
   color: #9fd9e4;
 }
-.home .vcol {
+.home .vout {
+  position: sticky;
+  top: 24px;
   border-radius: 22px;
-  padding: 22px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.home .vcol {
+  border-radius: 16px;
+  padding: 10px 16px 4px;
   background: rgba(245, 196, 107, 0.07);
   box-shadow: inset 0 0 0 1px rgba(245, 196, 107, 0.3);
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 .home .vcol.us {
   background: rgba(79, 195, 215, 0.08);
@@ -1820,61 +1885,57 @@
 .home .vtag-a {
   color: #f5c46b;
 }
+.home .vcol .tag {
+  padding-bottom: 2px;
+}
 .home .vrow {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
   align-items: baseline;
-  padding: 12px 0;
+  padding: 6px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 14.5px;
-  line-height: 1.45;
+  font-size: 13.5px;
+  line-height: 1.4;
   color: #d6e8ec;
+}
+.home .vrow:last-child {
+  border-bottom: 0;
 }
 .home .vrow strong {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: 14px;
   color: #ffffff;
   white-space: nowrap;
 }
 .home .vres {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 22px 40px;
-  align-items: stretch;
-  padding: 36px 40px;
-  border-radius: 26px;
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-}
-.home .vleft {
   display: flex;
   flex-direction: column;
-  gap: 30px;
-  min-width: 0;
+  gap: 12px;
+  padding: 4px 4px 0;
 }
 .home .vbar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 .home .vbl {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 20px;
+  gap: 16px;
 }
 .home .vbl span {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
   color: #d6e8ec;
 }
 .home .vbig {
-  font-size: 72px;
+  font-size: 40px;
   font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 0.9;
+  letter-spacing: -0.035em;
+  line-height: 1;
   white-space: nowrap;
 }
 .home .vbig.va {
@@ -1884,7 +1945,7 @@
   color: #7fd6e4;
 }
 .home .vtrack {
-  height: 18px;
+  height: 10px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -1895,44 +1956,48 @@
   border-radius: 999px;
   transition: width 0.6s cubic-bezier(0.3, 0.7, 0.2, 1);
 }
-.home .vdiff {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 16px;
-  padding-top: 22px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
-}
-.home .vdiff span {
-  font-size: 17px;
-  color: #b9cfd5;
-}
-.home .vdiff strong {
-  font-size: 44px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-  line-height: 0.9;
-  white-space: nowrap;
-  color: #ffffff;
-}
+/* La proporción en una franja: el texto a la izquierda y la cifra grande a la derecha. */
 .home .vratio {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  padding: 30px 32px;
-  border-radius: 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 2px;
+  padding: 14px 22px;
+  border-radius: 18px;
   background: #4fc3d7;
   color: #03252e;
 }
+.home .vrl {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 .home .vr1 {
   font-size: 18px;
+  font-weight: 800;
+}
+.home .vr3 {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.home .vdiff {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #0b4a57;
+}
+.home .vdiff strong {
+  font-family: var(--mono);
   font-weight: 700;
+  color: #03252e;
+  white-space: nowrap;
 }
 .home .vr2 {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
   font-weight: 800;
   letter-spacing: -0.05em;
   line-height: 0.85;
@@ -1940,41 +2005,78 @@
   color: #03252e;
 }
 .home .vrc {
-  font-size: 34px;
+  font-size: 26px;
   letter-spacing: -0.02em;
 }
 .home .vrn {
-  font-size: 120px;
-}
-.home .vr3 {
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.3;
+  font-size: 88px;
 }
 .home .vnote {
-  grid-column: 1 / -1;
-  font-size: 12.5px;
+  font-size: 12px;
   color: #8fb0b8;
 }
 .home .vsep {
   height: 1px;
   background: rgba(255, 255, 255, 0.12);
 }
+/* El resumen pegado abajo solo existe en teléfono y tableta. */
+.home .vdock {
+  display: none;
+}
 @media (max-width: 1100px) {
   .home .vgrid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .home .vin {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
   }
   .home .vbig {
-    font-size: 56px;
+    font-size: 34px;
+  }
+  .home .vrn {
+    font-size: 72px;
   }
 }
 @media (max-width: 900px) {
-  .home .vres {
+  .home .vgrid {
     grid-template-columns: 1fr;
-    padding: 24px;
+    gap: 16px;
+  }
+  .home .vout {
+    position: static;
+  }
+  .home .vdock {
+    position: sticky;
+    bottom: 12px;
+    z-index: 5;
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 18px;
+    border-radius: 18px;
+    background: #4fc3d7;
+    color: #03252e;
+    box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.55);
+  }
+  .home .vdock-t {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    font-size: 12.5px;
+    line-height: 1.3;
+  }
+  .home .vdock-t > span:first-child {
+    font-weight: 700;
+  }
+  .home .vdock-nw {
+    white-space: nowrap;
+  }
+  .home .vdock-n {
+    flex: none;
+    font-size: clamp(24px, 7.5vw, 30px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    white-space: nowrap;
   }
 }
 .home .pcards {
@@ -2012,41 +2114,70 @@
   line-height: 1.55;
   color: #b9cfd5;
 }
+/* Un día en la cuenta: título a la izquierda; a la derecha, el total que corre y el botón. */
+.home .dayblk {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
 .home .dayhead {
   display: flex;
   flex-wrap: wrap;
-  gap: 24px;
+  gap: 16px 32px;
   align-items: flex-end;
   justify-content: space-between;
-  padding-top: 16px;
+  padding-top: 8px;
 }
 .home .dayhead-t {
-  gap: 14px;
-  max-width: 760px;
+  gap: 10px;
+  flex: 1 1 420px;
+  max-width: 680px;
 }
 .home .h3d {
   margin: 0;
-  font-size: clamp(26px, 2.6vw, 38px);
+  font-size: clamp(26px, 2.6vw, 36px);
   line-height: 1.1;
   letter-spacing: -0.03em;
   font-weight: 800;
 }
+.home .daynow {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.home .daytot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.home .daytot > span {
+  font-size: 13px;
+  color: #9fb8bf;
+}
+.home .daytot strong {
+  font-size: 30px;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: #ffffff;
+  white-space: nowrap;
+}
 .home .days {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   background: #eef2f6;
-  border-radius: 26px;
-  padding: 14px;
+  border-radius: 24px;
+  padding: 10px;
   color: #0f172a;
 }
 .home .drow {
   display: grid;
-  grid-template-columns: 72px 150px 1fr 120px;
-  gap: 20px;
+  grid-template-columns: 56px 64px 1fr 96px;
+  gap: 16px;
   align-items: center;
-  padding: 18px 22px;
-  border-radius: 16px;
+  padding: 9px 18px;
+  border-radius: 14px;
   transition:
     opacity 0.4s ease,
     background-color 0.4s ease,
@@ -2062,23 +2193,24 @@
   box-shadow: inset 3px 0 0 #0e7490;
 }
 .home .dtime {
-  font-size: 14px;
+  font-size: 13.5px;
   color: #475569;
 }
 .home .dagent {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14.5px;
   color: #0b5568;
 }
 .home .dwhat {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  font-size: 16px;
-  line-height: 1.45;
+  gap: 2px;
+  font-size: 15px;
+  line-height: 1.4;
 }
 .home .dwhy {
-  font-size: 14px;
+  font-size: 12.5px;
+  line-height: 1.4;
   color: #64748b;
 }
 .home .price {
@@ -2086,7 +2218,7 @@
   font-weight: 600;
   font-size: 13px;
   letter-spacing: 0.02em;
-  padding: 6px 10px;
+  padding: 5px 10px;
   border-radius: 8px;
   white-space: nowrap;
   justify-self: end;
@@ -2103,26 +2235,19 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  padding: 22px 22px 14px;
-  font-size: 15px;
+  align-items: baseline;
+  gap: 4px 16px;
+  padding: 8px 18px 4px;
+  font-size: 14px;
   color: #475569;
 }
-.home .daytot {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.home .daytot strong {
-  font-size: 30px;
-  letter-spacing: -0.02em;
-  color: #0f172a;
-}
 .home .dpend {
-  font-size: 13px;
+  font-size: 12.5px;
   color: #64748b;
+}
+/* La barra del total en teléfono: oculta en escritorio, donde el total va en la cabecera. */
+.home .daydock {
+  display: none;
 }
 .home .pfoot {
   display: flex;
@@ -2143,20 +2268,21 @@
 .home .pfoot .btn {
   margin-top: 24px;
 }
-@media (max-width: 960px) {
+/* Teléfono: arriba la hora, el agente y el precio; debajo, qué pasó. */
+@media (max-width: 720px) {
   .home .drow {
-    grid-template-columns: 60px 1fr;
-    gap: 6px 14px;
+    grid-template-columns: 48px 1fr auto;
+    gap: 4px 12px;
   }
   .home .drow .dagent {
     grid-column: 2;
   }
+  .home .drow .dprice {
+    grid-column: 3;
+    grid-row: 1;
+  }
   .home .drow .dwhat {
     grid-column: 1 / -1;
-  }
-  .home .drow .dprice {
-    grid-column: 1 / -1;
-    justify-self: start;
   }
 }
 
@@ -2507,7 +2633,7 @@
     line-height: 1.4;
   }
   .home .ag {
-    gap: 16px;
+    gap: 12px;
   }
   .home .ag-tabs {
     flex: 1 1 100%;
@@ -2515,7 +2641,7 @@
     flex-direction: row;
     gap: 8px;
     overflow-x: auto;
-    padding: 8px 0 4px;
+    padding: 4px 0 2px;
   }
   .home .tabbtn {
     flex: none;
@@ -2542,32 +2668,115 @@
   .home .ag-demo {
     display: none;
   }
+  .home .ag-grid {
+    gap: 12px;
+  }
   .home .chatbox {
-    border-radius: 22px;
-    padding: 14px;
-    min-height: 430px;
+    border-radius: 20px;
+    padding: 10px 12px 12px;
+    gap: 6px;
+  }
+  .home .chatav {
+    width: 32px;
+    height: 32px;
+  }
+  .home .chathead strong {
+    font-size: 14px;
+  }
+  .home .chathead .mono {
+    font-size: 11px;
+  }
+  .home .tone {
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+  .home .emo {
+    font-size: 12.5px;
+  }
+  .home .chatmsgs {
+    gap: 5px;
+    padding: 2px;
   }
   .home .bubble {
-    max-width: 86%;
-    padding: 10px 13px;
-    font-size: 14.5px;
+    max-width: 88%;
+    padding: 7px 11px;
+    font-size: 13.5px;
+    line-height: 1.38;
+  }
+  .home .sys {
+    padding: 6px 12px;
+    font-size: 12px;
   }
   .home .dict,
   .home .admc {
-    border-radius: 22px;
-    padding: 20px;
-    min-height: 0;
+    border-radius: 20px;
+    padding: 14px 16px;
+  }
+  .home .dict {
+    gap: 8px;
+  }
+  .home .dict-lines {
+    gap: 6px;
+  }
+  .home .dict-lines p {
+    font-size: 13.5px;
+    line-height: 1.42;
+  }
+  .home .dict-replay {
+    white-space: nowrap;
+  }
+  .home .sugg {
+    padding: 14px 16px;
+    gap: 8px;
+  }
+  .home .sugg-body {
+    gap: 6px;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  /* Cada parte de la nota con su nombre al comienzo de la línea, no encima. */
+  .home .sugg-body p {
+    display: inline;
+    margin: 0;
+  }
+  .home .sugg-body .sl {
+    margin-right: 6px;
+  }
+  .home .admc-h .replay {
+    white-space: nowrap;
+  }
+  .home .step {
+    gap: 12px;
+    padding: 6px 0;
+  }
+  /* En teléfono, el detalle solo del paso que está ocurriendo; los demás quedan en su título. */
+  .home .step:not(.now) .stepb span:last-child {
+    display: none;
+  }
+  .home .stepb strong {
+    font-size: 14.5px;
+  }
+  .home .stepb span:last-child {
+    font-size: 13px;
+    line-height: 1.4;
   }
   .home .counts {
-    padding: 18px;
+    padding: 14px 16px;
     border-radius: 16px;
+    gap: 4px;
   }
   .home .counts-t {
-    font-size: 22px;
+    font-size: 19px;
+  }
+  .home .counts-s {
+    font-size: 13.5px;
+  }
+  .home .ag-copy {
+    gap: 0;
   }
   .home .ag-copy p,
   .home .ag-mcopy {
-    font-size: 15px;
+    font-size: 14px;
   }
 
   /* 03 */
@@ -2609,6 +2818,21 @@
     bottom: 0;
     width: 2px;
     background: #dbe3ea;
+  }
+  /* La hora y el canal en una sola línea, y el texto debajo: el caso entero cabe en una pantalla. */
+  .home .cstep,
+  .home .cstep.on {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 4px 8px;
+    padding-bottom: 14px;
+  }
+  .home .cstep strong {
+    grid-column: 1 / -1;
+  }
+  .home .cstep .chan {
+    justify-self: start;
   }
   .home .cstep .when {
     font-size: 11px;
@@ -2678,10 +2902,6 @@
   .home .hs-night {
     padding: 56px 0;
   }
-  .home .vgrid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
   .home .vin {
     padding: 16px;
     border-radius: 18px;
@@ -2704,71 +2924,48 @@
     min-height: 44px;
     padding: 0 8px;
   }
-  .home .vcol {
-    padding: 16px;
+  .home .vout {
+    padding: 12px;
     border-radius: 18px;
-    gap: 2px;
+  }
+  .home .vcol {
+    padding: 10px 14px 2px;
+    border-radius: 14px;
   }
   .home .vrow {
     font-size: 13.5px;
-    padding: 10px 0;
+    padding: 8px 0;
     gap: 10px;
-  }
-  .home .vrow strong {
-    font-size: 14px;
-  }
-  .home .vres {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    padding: 20px 18px;
-    border-radius: 20px;
-  }
-  .home .vleft {
-    gap: 20px;
-  }
-  .home .vbar {
-    gap: 8px;
   }
   .home .vbl {
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: 4px;
   }
   .home .vbl span {
     font-size: 14px;
   }
   .home .vbig {
-    font-size: 46px;
-  }
-  .home .vtrack {
-    height: 14px;
-    margin-top: 4px;
-  }
-  .home .vdiff {
-    padding-top: 12px;
-    gap: 10px;
-  }
-  .home .vdiff span {
-    font-size: 14px;
-  }
-  .home .vdiff strong {
-    font-size: 28px;
+    font-size: 36px;
   }
   .home .vratio {
-    padding: 20px;
-    border-radius: 18px;
-    gap: 8px;
+    padding: 14px 16px;
+    gap: 10px;
   }
-  .home .vr1,
+  .home .vr1 {
+    font-size: 16px;
+  }
   .home .vr3 {
-    font-size: 15px;
+    font-size: 13.5px;
+  }
+  .home .vdiff {
+    font-size: 13px;
   }
   .home .vrc {
-    font-size: 26px;
+    font-size: 20px;
   }
   .home .vrn {
-    font-size: 88px;
+    font-size: 60px;
   }
   .home .vnote {
     font-size: 11.5px;
@@ -2813,14 +3010,46 @@
     padding: 8px;
   }
   .home .drow {
-    padding: 14px;
+    padding: 12px 14px;
   }
-  .home .dayhead .btn,
   .home .pfoot .btn {
     width: 100%;
   }
-  .home .daytot strong {
-    font-size: 24px;
+  /* El total y el botón bajan a una barra pegada abajo mientras se ven las filas. */
+  .home .daynow {
+    display: none;
+  }
+  .home .daydock {
+    position: sticky;
+    bottom: 12px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 10px 10px 16px;
+    border-radius: 18px;
+    background: #ffffff;
+    color: #0f172a;
+    box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.55);
+  }
+  .home .daydock-t {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .home .daydock-t span {
+    font-size: 12.5px;
+    color: #475569;
+  }
+  .home .daydock-t strong {
+    font-size: 22px;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+  .home .daydock-b {
+    flex: none;
   }
 
   /* 06 */
@@ -2879,6 +3108,19 @@
     padding: 12px 16px 16px;
     background: rgba(255, 255, 255, 0.94);
     box-shadow: 0 -8px 24px -12px rgba(15, 23, 42, 0.25);
+  }
+  .home .sticky-cta {
+    transition:
+      transform 0.25s ease,
+      visibility 0s linear 0s;
+  }
+  /* Se aparta mientras se ve un bloque que necesita el alto (StickyCta.astro) y vuelve después. */
+  .home .sticky-cta.is-away {
+    transform: translateY(110%);
+    visibility: hidden;
+    transition:
+      transform 0.25s ease,
+      visibility 0s linear 0.25s;
   }
   .home .sticky-cta .btn-d {
     flex: 1;

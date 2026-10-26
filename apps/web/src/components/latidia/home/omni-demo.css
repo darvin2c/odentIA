@@ -20,7 +20,7 @@
 .od-dot.wa { background: #25a35a; }
 .od-dot.mail { background: var(--soft); animation-delay: 1.2s; }
 
-.od-card { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 18px 40px rgba(76, 42, 138, .08); min-width: 0; }
+.od-card { background: var(--paper); border: 1px solid #e9e2f7; border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 18px 40px rgba(76, 42, 138, .08); min-width: 0; container-type: inline-size; }
 .od-person { display: flex; align-items: center; gap: 14px; }
 .od-avatar { width: 52px; height: 52px; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); font-weight: 800; font-size: 18px; display: flex; align-items: center; justify-content: center; flex: none; }
 .od-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -29,6 +29,12 @@
 .od-tabs { display: flex; gap: 4px; background: #eef0f4; border-radius: 999px; padding: 4px; font-size: 13px; overflow: hidden; max-width: 100%; }
 .od-tabs span { padding: 6px 10px; color: var(--muted); white-space: nowrap; }
 .od-tabs span.on { background: var(--paper); border-radius: 999px; font-weight: 700; color: var(--ink); }
+/* La ficha angosta (ventanas de ~960 a 1110 px): las cinco pestañas caben más juntas y, si aun así no
+   alcanzan, pasan a una segunda fila en vez de cortarse «Cobros». */
+@container (max-width: 460px) {
+  .od-tabs { gap: 2px; font-size: 12px; flex-wrap: wrap; border-radius: 18px; }
+  .od-tabs span { padding: 6px 7px; }
+}
 .od-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-height: 148px; }
 .od-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; font-size: 14px; line-height: 1.35; background: #faf8fe; border: 1px solid #f0ebf9; }
 .od-ico { width: 30px; height: 30px; border-radius: 9px; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }

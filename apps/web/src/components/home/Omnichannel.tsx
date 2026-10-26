@@ -96,11 +96,25 @@ export default function Omnichannel() {
         </div>
       </div>
       <div className="oc-chat">
+        {/* «Volver a ver» va arriba, junto al primer mensaje: al tocarlo se ve empezar la conversación. */}
         <div className="oc-head">
-          <strong>Conversación con Lucía Ramos</strong>
-          <span className="mono">
-            {nUsed + (nUsed === 1 ? " canal" : " canales") + " · 1 historia"}
+          <span className="stack oc-title">
+            <strong>Conversación con Lucía Ramos</strong>
+            <span className="mono">
+              {nUsed + (nUsed === 1 ? " canal" : " canales") + " · 1 historia"}
+            </span>
           </span>
+          <button
+            type="button"
+            className="mono replay"
+            onClick={() => {
+              hold.current = 0
+              // En pausa o con menos movimiento no hay reproducción: se queda la conversación completa.
+              setOc(moving ? 0 : OC.length)
+            }}
+          >
+            Volver a ver
+          </button>
         </div>
         <div className="oc-msgs" aria-live="polite">
           {shown.map((m) => (
@@ -114,16 +128,6 @@ export default function Omnichannel() {
           ))}
           {oc >= 7 && <div className="sys">Una persona · 3 canales · 1 historia</div>}
         </div>
-        <button
-          type="button"
-          className="mono replay"
-          onClick={() => {
-            hold.current = 0
-            setOc(0)
-          }}
-        >
-          Volver a ver
-        </button>
       </div>
       <p className="oc-note">
         Carmen, su mamá, agenda y paga. Las dos escriben por canales distintos y todo queda en la

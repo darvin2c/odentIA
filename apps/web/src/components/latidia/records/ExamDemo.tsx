@@ -45,6 +45,8 @@ export default function ExamDemo() {
   if (okNames.length) parts.push(`Sin alteraciones: ${okNames.join(", ")}.`)
   if (hallParts.length) parts.push(hallParts.join(" ").replace(/\.?$/, "."))
   if (notNames.length) parts.push(`No examinado: ${notNames.join(", ")}.`)
+  const recordText = parts.join(" ") || "Nada examinado todavía."
+  const count = `${examined} de ${SYSTEMS.length} examinados`
 
   return (
     <div className="ex">
@@ -80,6 +82,15 @@ export default function ExamDemo() {
             </div>
           )
         })}
+        {/* En el teléfono, una copia breve de lo escrito acompaña a las filas al bajar; el registro
+            completo (el que se anuncia) sigue debajo. */}
+        <div className="ex-mini" aria-hidden="true">
+          <span className="ex-rec-head">
+            <span className="ex-k">ASÍ QUEDA EN LA HISTORIA</span>
+            <span className="ex-count">{count}</span>
+          </span>
+          <span className="ex-mini-text">{recordText}</span>
+        </div>
         <span className="ex-foot">
           Lo que no marcas queda como «No examinado» en la historia: nunca se da por normal. Toca un botón marcado para
           desmarcarlo.
@@ -87,9 +98,12 @@ export default function ExamDemo() {
       </div>
       <div className="ex-aside">
         <div className="ex-record">
-          <span className="ex-k">ASÍ QUEDA EN LA HISTORIA</span>
+          <span className="ex-rec-head">
+            <span className="ex-k">ASÍ QUEDA EN LA HISTORIA</span>
+            <span className="ex-count">{count}</span>
+          </span>
           <span className="ex-text" aria-live="polite">
-            {parts.join(" ") || "Nada examinado todavía."}
+            {recordText}
           </span>
         </div>
         <div className="ex-why">

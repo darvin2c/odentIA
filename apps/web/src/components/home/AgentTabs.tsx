@@ -229,6 +229,10 @@ export default function AgentTabs() {
                   <strong>Sofi · Clínica Sonrisa Norte</strong>
                   <span className="mono">Miércoles · 23:40 · la clínica está cerrada</span>
                 </span>
+                {/* Arriba, junto a la conversación que vuelve a empezar. */}
+                <button type="button" className="mono replay" onClick={() => replay("rec")}>
+                  Volver a ver
+                </button>
               </div>
               <div className="voice">
                 <fieldset className="tones" aria-label="Tono del asistente">
@@ -285,9 +289,6 @@ export default function AgentTabs() {
                   </div>
                 )}
               </div>
-              <button type="button" className="mono replay" onClick={() => replay("rec")}>
-                Volver a ver
-              </button>
             </div>
             <div className="ag-side">
               <div className="card agenda d-only">
@@ -332,8 +333,13 @@ export default function AgentTabs() {
           <div className="ag-grid">
             <div className="dict">
               <div className="dict-h">
-                <span className="tag tag-d">Consulta de Carlos Medina</span>
-                <span className="mono">Dra. Paredes · 09:40</span>
+                <span className="stack dict-who">
+                  <span className="tag tag-d">Consulta de Carlos Medina</span>
+                  <span className="mono">Dra. Paredes · 09:40</span>
+                </span>
+                <button type="button" className="mono dict-replay" onClick={() => replay("cli")}>
+                  Volver a escuchar
+                </button>
               </div>
               {note >= 1 && note < 4 && (
                 <div className="wave" aria-hidden="true">
@@ -350,9 +356,6 @@ export default function AgentTabs() {
                 ))}
               </div>
               {note === 4 && <p className="mono dict-org">Ordenando la nota…</p>}
-              <button type="button" className="mono dict-replay" onClick={() => replay("cli")}>
-                Volver a escuchar
-              </button>
             </div>
             <div className="card sugg">
               <div className="sugg-h">

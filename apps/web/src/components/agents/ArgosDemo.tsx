@@ -2,7 +2,8 @@
 // letra, Argos muestra sus pasos («Leyendo la pregunta», «Consultando…») y responde con la frase, el
 // dibujo que crece (barras o columnas), «Así lo calculé» y sus botones. La usan /agentes/administrador
 // (tres preguntas para elegir, que pasan solas) y /reportes (una pregunta, en columnas, y «Preguntar
-// otra vez» desde la portada). Con movimiento reducido se ve la respuesta sin animar.
+// otra vez» en la esquina de la propia demo: al tocarlo se ve empezar). Con movimiento reducido se ve
+// la respuesta sin animar.
 //
 // Las cifras (S/ 4.820, Dr. Ríos 18 %…) son de una clínica de ejemplo, no precios de odentIA.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
@@ -41,8 +42,8 @@ interface Props {
   /** Muestra el cursor mientras escribe. */
   caret?: boolean
   note: string
-  /** Un evento de window que vuelve a empezar la pregunta (el botón «Preguntar otra vez» de la portada). */
-  replayEvent?: string
+  /** El botón que vuelve a empezar la pregunta, en la esquina de arriba de la demo («Preguntar otra vez»). */
+  replay?: string
 }
 
 const TYPE_MS = 45
@@ -72,13 +73,14 @@ export default function ArgosDemo({
   field = "soft",
   caret = false,
   note,
-  replayEvent,
+  replay,
 }: Props) {
   // Se arma en el servidor con la primera respuesta completa: sin JavaScript se lee igual.
   const [pick, setPick] = useState(0)
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
   const [phase, setPhase] = useState<0 | 1 | 2>(2)
   const timers = useRef<number[]>([])
+  const box = useRef<HTMLDivElement | null>(null)
 
   const stop = useCallback(() => {
     for (const t of timers.current) {
@@ -89,10 +91,10 @@ export default function ArgosDemo({
   }, [])
 
   const play = useCallback(
-    (i: number, keepGoing: boolean) => {
+    (i: number, keepGoing: boolean, asked = false) => {
       stop()
       setPick(i)
-      if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      if (!asked && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
         setChars(Number.POSITIVE_INFINITY)
         setPhase(2)
         return
@@ -124,12 +126,12 @@ export default function ArgosDemo({
     return stop
   }, [play, stop, auto])
 
-  useEffect(() => {
-    if (!replayEvent) return
-    const again = () => play(pick, false)
-    window.addEventListener(replayEvent, again)
-    return () => window.removeEventListener(replayEvent, again)
-  }, [replayEvent, play, pick])
+  // Vuelve a empezar y, si la respuesta queda bajo el borde de la ventana, sube lo justo para verla entera.
+  const again = () => {
+    play(pick, false, true)
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    box.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" })
+  }
 
   const cur = questions[pick]
   const max = Math.max(...cur.bars.map(([, v]) => v))
@@ -137,11 +139,20 @@ export default function ArgosDemo({
   const typed = cur.q.slice(0, chars)
 
   return (
-    <div className="ad">
-      {head && (
+    <div className="ad" ref={box}>
+      {(head || replay) && (
         <div className="ad-head">
-          <b>{head.title}</b>
-          <span className="ad-scope">{head.scope}</span>
+          {head && <b>{head.title}</b>}
+          {head && <span className="ad-scope">{head.scope}</span>}
+          {/* Lo pide quien mira: se repite aunque prefiera menos movimiento (como «Volver a dictar»). */}
+          {replay && (
+            <button type="button" className="ad-again" onClick={again}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" />
+              </svg>
+              {replay}
+            </button>
+          )}
         </div>
       )}
       <div className={`ad-field ad-${field}`}>

@@ -25,6 +25,11 @@
 .lt-cash-title { display: flex; flex-direction: column; gap: 2px; }
 .lt-cash-title b { font-size: 18px; }
 .lt-cash-title span { font-size: 13px; color: var(--muted); }
+.lt-cash-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* «Repetir el día», pegado a la caja que vuelve a empezar. */
+.lt-cash-replay { min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 700 13px var(--font); color: var(--teal-hover); background: var(--paper); border: 1px solid var(--lt-cash-tint-line); transition: border-color .2s ease, background-color .2s ease; }
+.lt-cash-replay:hover { border-color: var(--teal); background: var(--lt-cash-tint); }
+.lt-cash-replay:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .lt-cash-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 6px 10px; color: var(--muted); background: #eef0f4; }
 .lt-cash-state i { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
 .lt-cash-state[data-state="open"] { color: #166534; background: #e7f6ec; }

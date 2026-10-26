@@ -1,19 +1,25 @@
 /* La demo de Clío sobre la portada oscura: la consulta, el odontograma en claro y las líneas del dictado. */
-.cd { background: #0d2a33; border-radius: 26px; padding: 22px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); display: flex; flex-direction: column; gap: 14px; }
+.cd { background: #0d2a33; border-radius: 26px; padding: 16px 18px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); display: flex; flex-direction: column; gap: 12px; }
 .cd-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .cd-who, .cd-state { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .cd-who { color: var(--on-night-3); }
 .cd-state { display: flex; align-items: center; gap: 8px; color: var(--mint); letter-spacing: .02em; text-transform: none; }
 .cd-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); }
 .cd-state.live i { animation: cd-pulse 1.2s ease-in-out infinite; }
-.cd-arch { padding: 22px 16px; background: var(--bg); border-radius: 18px; }
-.cd-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.cd-lines li { display: flex; gap: 12px; align-items: baseline; padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.4; opacity: .25; color: var(--on-night-3); transition: opacity .5s ease, background-color .5s ease, color .5s ease; }
+.cd-arch { padding: 14px 16px; background: var(--bg); border-radius: 18px; }
+/* El arco se achica con el alto de la ventana para que la demo entera se vea sin bajar la página
+   (≈ 333 px fijos de cabecera, líneas y rellenos más el arco de 10 × 9 y su leyenda). */
+.cd-arch .oa { max-width: clamp(280px, calc((100svh - 470px) * 1.1), 520px); }
+.cd-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.cd-lines li { display: flex; gap: 12px; align-items: baseline; padding: 7px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.35; opacity: .25; color: var(--on-night-3); transition: opacity .5s ease, background-color .5s ease, color .5s ease; }
 .cd-lines li.on { opacity: 1; background: rgba(166, 240, 216, .08); color: #e2eef1; }
 .cd-block { flex: none; min-width: 92px; font-family: var(--agent-font); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--on-night-3); }
 @keyframes cd-pulse { 50% { opacity: .35; } }
 @media (max-width: 720px) {
-  .cd { padding: 14px; border-radius: 20px; }
-  .cd-arch { padding: 16px 8px; }
+  .cd { padding: 12px; gap: 10px; border-radius: 20px; }
+  .cd-arch { padding: 10px 8px; }
   .cd-lines li { flex-direction: column; gap: 2px; }
+  /* Las líneas van en dos renglones: el arco cede ese alto (360 × 740 la muestra entera). Más
+     angosto no sirve: la leyenda del arco pasa a tres renglones. */
+  .cd-arch .oa { max-width: clamp(260px, calc((100svh - 500px) * 1.1), 520px); }
 }

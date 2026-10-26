@@ -278,23 +278,58 @@
   border-top: 1px solid #e9e2f7;
 }
 
+/* Teléfono: los controles en dos filas (escena y emojis; el tono debajo) y el chat apretado, para que
+   del tono a la última burbuja quepa en una pantalla de 740 px. */
 @media (max-width: 720px) {
   .lsc {
     border-radius: 20px;
   }
-  .lsc-controls {
+  .lsc-top {
     padding: 10px 12px;
+    gap: 10px;
+  }
+  .lsc-avatar {
+    width: 34px;
+    height: 34px;
+  }
+  .lsc-controls {
+    padding: 8px 12px;
+    gap: 6px 8px;
+  }
+  .lsc-right {
+    display: contents;
   }
   .lsc-emoji {
     margin-left: 0;
   }
+  .lsc-tones {
+    order: 1;
+    flex: 1 1 100%;
+  }
+  .lsc-tone {
+    flex: 1 1 0;
+  }
   .lsc-chat {
-    padding: 14px 12px;
+    padding: 10px;
+    gap: 8px;
+    min-height: 0;
+  }
+  .lsc-day {
+    display: none;
   }
   .lsc-msg[data-kind="in"],
   .lsc-msg[data-kind="out"] {
-    font-size: 14.5px;
-    max-width: 90%;
+    font-size: 14px;
+    line-height: 1.4;
+    max-width: 92%;
+    padding: 8px 10px 6px;
+  }
+  .lsc-msg[data-kind="card"],
+  .lsc-msg[data-kind="band"] {
+    padding: 10px 12px;
+  }
+  .lsc-note {
+    padding: 10px 12px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
