@@ -563,7 +563,6 @@ h1, h2, h3, p { margin: 0; }
 .p7big b { font-size: 88px; font-weight: 600; line-height: 1; color: var(--warn); letter-spacing: -0.04em; white-space: nowrap; }
 .p7big span { font-size: 22px; color: var(--on-2); max-width: 230px; line-height: 1.3; }
 .p7big.ans b { color: var(--mint); }
-.p7soon { align-self: flex-start; font-family: var(--agent); font-size: 17px; color: var(--amber); border: 1.5px dashed rgba(245,196,107,.6); border-radius: 999px; padding: 6px 14px; }
 .p7clock { position: absolute; right: 0; top: 0; z-index: 30; font-family: var(--agent); font-size: 60px; color: var(--warn); text-align: right; line-height: 1; text-shadow: 0 0 30px rgba(232,146,124,.4); }
 .p7clock small { display: block; font-size: 18px; color: var(--on-2); margin-top: 6px; }
 .p7w { position: absolute; border-radius: 12px; overflow: hidden; background: #f4f6f4; color: #2c3a33; box-shadow: 0 26px 60px rgba(0,0,0,.55); transform: rotate(var(--r, 0deg)); animation: p7in .35s cubic-bezier(.3,1.4,.5,1) both; transition: transform .7s, opacity .7s; }
@@ -950,6 +949,10 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 /* ===== De pie (teléfono o tableta): el aviso para girar y las partes una debajo de otra =====
    deck.js pone «stacked» en <html> y escala cada parte al ancho de la pantalla (fit). Acostado y en
    el escritorio no se aplica nada de esto. */
+/* Mientras se presenta, los botones se apartan para no tapar el número de la parte; vuelven al mover el puntero. */
+.controls { transition: opacity .4s; }
+body.idle .controls { opacity: 0; pointer-events: none; }
+
 .turn { display: none; }
 html.stacked, html.stacked body { height: auto; overflow: visible; }
 html.stacked { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -1464,7 +1467,7 @@ html.stacked body { margin: 0; }
       <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="{{giftN}}" data-prefix="{{cur}} ">{{gift}}</span><h3>Para tus agentes, de regalo</h3><p>Los primeros {{gift}} de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta {{giftDays}} para usarlos.</p></div>
       <div class="perk in" style="--d:.45s"><span class="k num" data-count="{{F.feeN}}" data-prefix="{{cur}} ">{{F.fee$}}</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
       <div class="perk in" style="--d:.6s"><span class="k num" data-count="{{discountN}}" data-suffix=" %">{{discount}}</span><h3>Menos en todo</h3><p>Conversaciones, consultas, citas recuperadas, preguntas a Argos y espacio.</p></div>
-      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante un año.</p></div>
+      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante {{months}}.</p></div>
       <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu consultorio con la invitación.</p></div>
       <div class="perk next in" style="--d:1.05s"><span class="k">Sin límite</span><h3>De médicos, salas ni usuarios</h3><p>Cada médico con su agenda y su firma; cada sala con sus horarios. No se cobra por ninguno.</p></div>
     </div>

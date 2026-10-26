@@ -507,7 +507,6 @@ h1, h2, h3, p { margin: 0; }
 .p7big b { font-size: 88px; font-weight: 600; line-height: 1; color: var(--warn); letter-spacing: -0.04em; white-space: nowrap; }
 .p7big span { font-size: 22px; color: var(--on-2); max-width: 230px; line-height: 1.3; }
 .p7big.ans b { color: var(--mint); }
-.p7soon { align-self: flex-start; font-family: var(--agent); font-size: 17px; color: var(--amber); border: 1.5px dashed rgba(245,196,107,.6); border-radius: 999px; padding: 6px 14px; }
 .p7clock { position: absolute; right: 0; top: 0; z-index: 30; font-family: var(--agent); font-size: 60px; color: var(--warn); text-align: right; line-height: 1; text-shadow: 0 0 30px rgba(232,146,124,.4); }
 .p7clock small { display: block; font-size: 18px; color: var(--on-2); margin-top: 6px; }
 .p7w { position: absolute; border-radius: 12px; overflow: hidden; background: #f4f6f4; color: #2c3a33; box-shadow: 0 26px 60px rgba(0,0,0,.55); transform: rotate(var(--r, 0deg)); animation: p7in .35s cubic-bezier(.3,1.4,.5,1) both; transition: transform .7s, opacity .7s; }
@@ -695,6 +694,84 @@ h1, h2, h3, p { margin: 0; }
 /* Sin la escena (de pie, sin JS o con movimiento reducido) se ve el final. */
 .layer:not(.cur) .sys0 .zero-br b, .layer:not(.cur) .sys0-copy { opacity: 1; transform: none; }
 .layer:not(.cur) .sys0 .zero-br::before, .layer:not(.cur) .sys0 .zero-br::after { opacity: 1; transform: none; }
+/* 9 · La ventana de un módulo: la ventana clara de la app, al costado, con su pantalla de muestra. */
+.layer.ready .mod.has-screen i { background: var(--sky); animation: ping 1.8s infinite; }
+.mscrim { position: absolute; inset: 0; z-index: 8; background: rgba(6,19,24,.62); backdrop-filter: blur(3px); opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; }
+.msc { position: absolute; z-index: 9; left: 600px; top: 112px; width: 1180px; height: 820px; box-sizing: border-box; display: flex; flex-direction: column; border-radius: 26px; background: #fff; color: #0f172a; box-shadow: 0 50px 120px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); overflow: hidden; opacity: 0; visibility: hidden; transform: translateX(80px) scale(.97); transition: opacity .35s, transform .55s cubic-bezier(.2,.8,.2,1), visibility 0s .55s; }
+.layer.mopen .mscrim { opacity: 1; visibility: visible; transition: opacity .35s; }
+.layer.mopen .msc { opacity: 1; visibility: visible; transform: none; transition: opacity .35s, transform .55s cubic-bezier(.2,.8,.2,1); }
+.layer.mopen .tap { opacity: 0; }
+.msc-h { display: flex; align-items: center; gap: 20px; padding: 22px 30px; border-bottom: 1px solid #e2e8f0; }
+.msc-h > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.msc-t { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; }
+.msc-s { font-size: 20px; color: #64748b; }
+.msc-zero { font-family: var(--agent); font-size: 20px; font-weight: 600; color: #0e7490; background: #e3f4f8; padding: 8px 16px; border-radius: 999px; }
+.msc-x { width: 52px; height: 52px; border-radius: 50%; border: 1px solid #e2e8f0; background: #fff; color: #334155; font: 300 40px/1 var(--font); display: grid; place-items: center; text-align: center; }
+.msc-x:hover { background: #f1f5f9; }
+.msc-b { flex: 1; min-height: 0; position: relative; padding: 24px 30px; }
+.ms-btn { display: inline-flex; align-items: center; font-size: 19px; font-weight: 700; color: #fff; background: #0e7490; padding: 10px 20px; border-radius: 12px; transition: transform .15s, box-shadow .2s; }
+.ms-btn.press { transform: scale(.94); box-shadow: 0 0 0 6px rgba(14,116,144,.2); }
+.ms-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.ms-dot.sky { background: var(--sky); box-shadow: 0 0 10px var(--sky); }
+.ms-dot.mint { background: #10b981; box-shadow: 0 0 10px #10b981; }
+.ms-k { font-family: var(--agent); font-size: 16px; color: #64748b; }
+/* Agenda: Sofi llena el hueco de las 10:00 */
+.ms-agenda { position: relative; height: 100%; display: flex; flex-direction: column; gap: 16px; }
+.ms-bar { display: flex; justify-content: space-between; align-items: center; }
+.ms-seg { display: inline-flex; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; font-size: 18px; }
+.ms-seg > * { padding: 8px 18px; color: #475569; }
+.ms-seg b { background: #f1f5f9; color: #0f172a; }
+.ms-grid { flex: 1; display: grid; grid-template-columns: 90px 1fr 1fr; grid-template-rows: 40px repeat(4, 1fr); column-gap: 14px; position: relative; padding-bottom: 104px; }
+.ms-col { font-size: 20px; align-self: center; }
+.ms-h { grid-column: 1; font-family: var(--agent); font-size: 16px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+.ms-grid > i { grid-column: 2 / 4; border-top: 1px solid #e2e8f0; }
+.ms-ap { margin: 6px 0; border-radius: 14px; padding: 10px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-left: 5px solid #94a3b8; display: flex; flex-direction: column; justify-content: center; gap: 4px; font-size: 19px; transition: background .4s, border-color .4s, box-shadow .4s; }
+.ms-ap b { font-size: 20px; }
+.ms-st { font-size: 16px; color: #64748b; }
+.ms-st.amber { color: #b45309; } .ms-st.teal { color: #0e7490; } .ms-st.sky { color: #0e7490; font-weight: 700; }
+.ms-ap.free { background: transparent; border: 2px dashed #cbd5e1; color: #94a3b8; align-items: center; }
+.ms-ap.pending { border: 2px dashed var(--sky); color: #0e7490; flex-direction: row; align-items: center; gap: 12px; }
+.ms-ap.new { background: #e3f4f8; border: 1px solid #9fd9e6; border-left: 5px solid var(--sky); box-shadow: 0 0 0 4px rgba(79,195,215,.25), 0 10px 30px -8px rgba(14,116,144,.45); animation: pop .5s cubic-bezier(.3,1.6,.5,1); }
+.ms-typing { display: inline-flex; gap: 5px; }
+.ms-typing i { width: 8px; height: 8px; border-radius: 50%; background: var(--sky); animation: blink 1s infinite; }
+.ms-typing i:nth-child(2) { animation-delay: .2s; } .ms-typing i:nth-child(3) { animation-delay: .4s; }
+.ms-wa { position: absolute; right: 0; bottom: 0; width: 430px; padding: 12px 18px; border-radius: 18px 18px 6px 18px; background: #dcfce7; border: 1px solid #bbf7d0; box-shadow: 0 16px 40px -12px rgba(0,0,0,.35); opacity: 0; transform: translateY(30px); transition: opacity .35s, transform .5s cubic-bezier(.3,1.5,.5,1); }
+.ms-wa.on { opacity: 1; transform: none; }
+.ms-wa-h { font-family: var(--agent); font-size: 15px; color: #15803d; }
+.ms-wa p { font-size: 19px; line-height: 1.4; margin-top: 4px; }
+.ms-toast { position: absolute; left: 0; bottom: 6px; display: flex; align-items: center; gap: 12px; font-size: 19px; font-weight: 600; color: #fff; background: #0f172a; padding: 12px 22px; border-radius: 14px; opacity: 0; transform: translateY(20px); transition: opacity .3s, transform .45s cubic-bezier(.3,1.5,.5,1); }
+.ms-toast.on { opacity: 1; transform: none; }
+/* Odontograma: Clío escucha la caries de la 16 y pasa al plan */
+.ms-odo { height: 100%; display: grid; grid-template-columns: 560px 1fr; gap: 34px; align-items: center; }
+.ms-odo-l { display: flex; flex-direction: column; gap: 14px; }
+.ms-arch { position: relative; width: 100%; }
+.ms-under { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.ms-slot { position: absolute; border-radius: 6px; transition: box-shadow .2s; }
+.ms-slot.pick { box-shadow: 0 0 0 3px #7c3aed; }
+.ms-slot.hit .ms-crown { animation: pop .5s cubic-bezier(.3,1.6,.5,1); }
+.ms-crown { display: block; width: 100%; height: auto; overflow: visible; }
+.ms-num { position: absolute; transform: translate(-50%, -50%); font-size: 14px; color: #64748b; line-height: 1; }
+.ms-num.pick { color: #0f172a; font-weight: 700; }
+.ms-legend { display: flex; justify-content: center; gap: 22px; font-size: 16px; color: #475569; }
+.ms-legend span { display: flex; align-items: center; gap: 8px; }
+.ms-legend i { width: 10px; height: 10px; border-radius: 50%; }
+.ms-odo-r { display: flex; flex-direction: column; gap: 18px; }
+.ms-voice { display: flex; align-items: center; gap: 12px; font-size: 19px; padding: 12px 16px; border-radius: 14px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; opacity: 0; transform: translateY(14px); transition: opacity .3s, transform .45s cubic-bezier(.3,1.5,.5,1); }
+.ms-voice q { font-style: italic; quotes: "«" "»"; }
+.ms-voice.on { opacity: 1; transform: none; }
+.ms-panel { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; border-radius: 18px; border: 1px solid #e2e8f0; border-left: 5px solid #10b981; background: #f8fafc; opacity: 0; transform: translateY(14px); transition: opacity .3s, transform .45s cubic-bezier(.3,1.5,.5,1); }
+.ms-panel.on { opacity: 1; transform: none; }
+.ms-panel > b { font-size: 22px; }
+.ms-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ms-chips span { font-size: 17px; padding: 6px 14px; border-radius: 999px; border: 1px solid #e2e8f0; color: #475569; background: #fff; }
+.ms-chips .on { background: #fee2e2; border-color: #fca5a5; color: #b91c1c; font-weight: 700; }
+.ms-f { font-size: 18px; color: #64748b; }
+.ms-f b { color: #0f172a; }
+.ms-panel .ms-btn { align-self: flex-start; margin-top: 4px; }
+.ms-plan { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px; border-radius: 16px; border: 1px solid #e2e8f0; opacity: 0; transform: translateY(14px); transition: opacity .3s, transform .45s cubic-bezier(.3,1.5,.5,1); }
+.ms-plan.on { opacity: 1; transform: none; box-shadow: 0 0 0 4px rgba(16,185,129,.18); }
+.ms-plan div { display: flex; justify-content: space-between; align-items: center; font-size: 19px; }
+.ms-plan div span { font-size: 16px; color: #b45309; }
 
 /* Lo que se toca: no avanza la presentación y lo dice una pista abajo a la derecha, cuando la escena terminó. */
 [data-tap] { cursor: pointer; font: inherit; color: inherit; text-align: left; }
@@ -978,6 +1055,10 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
 /* ===== De pie (teléfono o tableta): el aviso para girar y las partes una debajo de otra =====
    deck.js pone «stacked» en <html> y escala cada parte al ancho de la pantalla (fit). Acostado y en
    el escritorio no se aplica nada de esto. */
+/* Mientras se presenta, los botones se apartan para no tapar el número de la parte; vuelven al mover el puntero. */
+.controls { transition: opacity .4s; }
+body.idle .controls { opacity: 0; pointer-events: none; }
+
 .turn { display: none; }
 html.stacked, html.stacked body { height: auto; overflow: visible; }
 html.stacked { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -1169,6 +1250,7 @@ html.stacked body { margin: 0; }
       <div class="copy">
         <h2 class="h2 in" style="--d:.1s">Dictas en la consulta. La nota queda lista para confirmar.</h2>
         <p class="lead in" style="--d:.3s"><b class="c-mint">Clío</b> escucha y propone la nota, el diagnóstico y el plan. Nada entra a la historia sin la confirmación del odontólogo.</p>
+        <div class="p7big ans in" style="--d:5.4s"><b>0</b><span>notas pendientes al cerrar el día</span></div>
       </div>
       <div class="scene">
         <div class="dict in" style="--d:.2s">
@@ -1179,7 +1261,7 @@ html.stacked body { margin: 0; }
       </div>
     </div>
   </div>
-  <aside class="notes">Todos los odontólogos se reconocen aquí. Clic: dictan mientras atienden y Clío propone la nota ordenada, el diagnóstico con su código y el plan. El odontólogo confirma cada parte; nada entra a la historia sin su firma.</aside>
+  <aside class="notes">Todos los odontólogos se reconocen aquí. Clic: dictan mientras atienden y Clío propone la nota ordenada, el diagnóstico con su código y el plan. El odontólogo confirma cada parte; nada entra a la historia sin su firma. Y al cerrar el día no queda ninguna nota pendiente.</aside>
 </section>
 
 <!-- ============ 6 · Argos ============ -->
@@ -1225,12 +1307,11 @@ html.stacked body { margin: 0; }
     <div class="copy in" style="--d:.1s; flex:none; width:620px">
       <h2 class="h2" style="font-size:70px">Le preguntas a <span class="c-amber">Argos</span>. Él arma el reporte.</h2>
       <p class="lead">Con las cifras de tu clínica, comparadas y en palabras. Y te dice qué haría.</p>
-      <span class="p7soon">Próximamente · lo usas primero como clínica fundadora</span>
       <div class="p7big ans"><b style="color:var(--amber)">0 h</b><span>armando reportes</span></div>
     </div>
     <div class="p7sc" aria-hidden="true"></div>
   </div>
-  <aside class="notes">Pregunten quién arma los reportes de la clínica y cuánto le toma: descargar de la agenda y de la caja, buscar el archivo bueno entre cinco versiones, pedir por WhatsApp lo que falta y cuadrar cifras que no cuadran. Se va un día entero, y el Excel no dice qué hacer. Clic: con odentIA le preguntas a Argos, con palabras, y él arma el reporte con las cifras de la clínica y lo que haría. Ojo: preguntarle con palabras es lo próximo que lanzamos; las clínicas fundadoras lo usan primero. Las cifras de la pantalla son de ejemplo.</aside>
+  <aside class="notes">Pregunten quién arma los reportes de la clínica y cuánto le toma: descargar de la agenda y de la caja, buscar el archivo bueno entre cinco versiones, pedir por WhatsApp lo que falta y cuadrar cifras que no cuadran. Se va un día entero, y el Excel no dice qué hacer. Clic: con odentIA le preguntas a Argos, con palabras, y él arma el reporte con las cifras de la clínica y lo que haría. Responde con las mismas cifras de Reportes y dice cómo lo calculó. Las cifras de la pantalla son de ejemplo.</aside>
 </section>
 
 <!-- ============ 8 · Buscador ============ -->
@@ -1283,9 +1364,9 @@ html.stacked body { margin: 0; }
     <span class="tag in">[ Con odentIA · El sistema completo ]</span>
     <h2 class="h2 in" style="--d:.1s; font-size:70px">Todo lo de siempre, incluido. Y no se cobra.</h2>
     <div class="mosaic" data-cur="{{cur}}">
-      <button type="button" class="mod" data-tap="mod" data-what="Citas por profesional y unidad dental, con recordatorios." style="--i:0"><i></i><span>Agenda</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod has-screen" data-tap="mod" data-screen="agenda" data-what="Citas por profesional y unidad dental, con recordatorios." style="--i:0"><i></i><span>Agenda</span><span class="z num">{{cur}} 0</span></button>
       <button type="button" class="mod" data-tap="mod" data-what="Antecedentes, alergias y atenciones, con firma." style="--i:1"><i></i><span>Historia clínica</span><span class="z num">{{cur}} 0</span></button>
-      <button type="button" class="mod" data-tap="mod" data-what="El arco completo y su evolución en el tiempo." style="--i:2"><i></i><span>Odontograma</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod has-screen" data-tap="mod" data-screen="odontograma" data-what="El arco completo y su evolución en el tiempo." style="--i:2"><i></i><span>Odontograma</span><span class="z num">{{cur}} 0</span></button>
       <button type="button" class="mod" data-tap="mod" data-what="Sondaje pieza por pieza y su clasificación." style="--i:3"><i></i><span>Periodontograma</span><span class="z num">{{cur}} 0</span></button>
       <button type="button" class="mod" data-tap="mod" data-what="La tomografía en el navegador, con cortes y panorámica." style="--i:4"><i></i><span>Visor de tomografías</span><span class="z num">{{cur}} 0</span></button>
       <button type="button" class="mod" data-tap="mod" data-what="Con aviso de alergias, y se envían al paciente." style="--i:5"><i></i><span>Recetas y órdenes</span><span class="z num">{{cur}} 0</span></button>
@@ -1308,6 +1389,11 @@ html.stacked body { margin: 0; }
       </div>
     </div>
     <div class="modtip" aria-live="polite"></div>
+    <div class="mscrim" data-tap="mclose"></div>
+    <div class="msc" role="dialog" aria-labelledby="mscTitle">
+      <div class="msc-h"><div><b class="msc-t" id="mscTitle"></b><span class="msc-s"></span></div><span class="msc-zero"></span><button type="button" class="msc-x" data-tap="mclose" aria-label="Cerrar">×</button></div>
+      <div class="msc-b"></div>
+    </div>
     <span class="tap">Toca un módulo para ver qué incluye</span>
   </div>
   <aside class="notes">Es la duda más común, y es justa. Clic: además de los agentes, odentIA tiene todo lo que ya usan: agenda, historia clínica con odontograma y periodontograma, caja, inventario, comisiones y más. Miren el precio de cada uno: cero. No cobramos el software, ni por módulo, ni por usuario, ni por sede. Lo único que se paga es el trabajo que hacen los agentes.</aside>
@@ -1463,12 +1549,12 @@ html.stacked body { margin: 0; }
       <div class="perk hero pop" style="--d:.3s"><span class="k num" data-count="{{giftN}}" data-prefix="{{cur}} ">{{gift}}</span><h3>Para tus agentes, de regalo</h3><p>Los primeros {{gift}} de conversaciones, consultas y citas recuperadas los pagamos nosotros. Tienes hasta {{giftDays}} para usarlos.</p></div>
       <div class="perk in" style="--d:.45s"><span class="k num" data-count="{{F.feeN}}" data-prefix="{{cur}} ">{{F.fee$}}</span><h3>Sin cuota mensual</h3><p>No pagas el plan. Solo lo que hacen los agentes.</p></div>
       <div class="perk in" style="--d:.6s"><span class="k num" data-count="{{discountN}}" data-suffix=" %">{{discount}}</span><h3>Menos en todo</h3><p>Conversaciones, consultas, citas recuperadas, preguntas a Argos y espacio.</p></div>
-      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante un año.</p></div>
+      <div class="perk in" style="--d:.75s"><span class="k num" data-count="{{monthsN}}" data-suffix=" meses">{{months}}</span><h3>Precio garantizado</h3><p>Tus condiciones no cambian durante {{months}}.</p></div>
       <div class="perk in" style="--d:.9s"><span class="k">Sin tarjeta</span><h3>Para empezar</h3><p>Abres tu clínica con la invitación.</p></div>
-      <div class="perk next in" style="--d:1.05s"><span class="k">Lo que viene, lo usas primero</span><p>Pregúntale a <b class="c-amber">Argos</b> con palabras y te responde con el gráfico:</p><q>¿Cuánto cobramos en septiembre por sede?</q></div>
+      <div class="perk next in" style="--d:1.05s"><span class="k">Sin límite</span><h3>De odontólogos, sedes ni usuarios</h3><p>Cada odontólogo con su agenda y su firma; cada sede con su equipo. No se cobra por ninguno.</p></div>
     </div>
   </div>
-  <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: {{gift}} para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por un año. Y lo próximo que lancemos, como preguntarle a Argos con palabras, lo usan primero ustedes.</aside>
+  <aside class="notes">Esto es lo que recibe una clínica fundadora. Lo más importante: {{gift}} para que los agentes trabajen desde el primer día, sin cuota mensual y con el precio garantizado por {{months}}. Y sin límite de odontólogos, sedes ni usuarios.</aside>
 </section>
 
 <!-- ============ 14 · Precio ============ -->

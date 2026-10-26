@@ -760,7 +760,7 @@
     const cur = layer.querySelector(".mosaic").dataset.cur;
     layer.querySelectorAll(".zfly, .ring").forEach(n => n.remove());
     layer.querySelectorAll(".mod.pick").forEach(n => n.classList.remove("pick"));
-    layer.querySelector(".modtip").classList.remove("on");
+    layer.querySelector(".modtip").classList.remove("on"); closeScreen(layer);
     big.classList.remove("on", "shut"); layer.classList.remove("ready");
     zs.forEach(z => { z.className = "z num pend"; z.textContent = cur + " 0"; });
     // Se encienden con el mosaico (0,4 s + 0,12 s por módulo) y cada uno gira un instante antes de caer en cero.
@@ -977,11 +977,36 @@
   // Dentro del escenario, lo que tiene data-tap responde al clic (o a Enter y Espacio) y no avanza la presentación.
   const taps = {};
   let tipHide = 0;
+  // Un módulo con pantalla de muestra abre su ventana al costado; los demás, el globo con lo que incluye.
+  let screenRun = 0;
+  function openScreen(layer, b, cur) {
+    const make = window.ModuleScreens?.[b.dataset.screen];
+    if (!make) return false;
+    const screen = make(), msc = layer.querySelector(".msc"), run = ++screenRun;
+    msc.querySelector(".msc-t").textContent = screen.title;
+    msc.querySelector(".msc-s").textContent = screen.sub;
+    msc.querySelector(".msc-zero").textContent = cur + " 0 al mes";
+    msc.querySelector(".msc-b").replaceChildren(screen.body);
+    layer.querySelector(".modtip").classList.remove("on");
+    layer.classList.add("mopen");
+    // Si se cierra o se abre otra antes de terminar, la anterior deja de avanzar.
+    screen.play((ms) => p6wait(ms).then(() => { if (run !== screenRun) throw 0; })).catch(() => {});
+    setTimeout(() => msc.querySelector(".msc-x").focus({ preventScroll: true }), 50);
+    return true;
+  }
+  function closeScreen(layer) {
+    if (!layer || !layer.classList.contains("mopen")) return false;
+    screenRun++; layer.classList.remove("mopen");
+    layer.querySelectorAll(".mod.pick").forEach(n => n.classList.remove("pick"));
+    return true;
+  }
+  taps.mclose = (b) => closeScreen(b.closest(".layer"));
   taps.mod = (b) => {
     const layer = b.closest(".layer"), tip = layer.querySelector(".modtip"), z = b.querySelector(".z");
     const cur = layer.querySelector(".mosaic").dataset.cur, mods = [...layer.querySelectorAll(".mod")];
     mods.forEach(m => m.classList.toggle("pick", m === b));
     rollZero(z, mods.indexOf(b), cur);
+    if (openScreen(layer, b, cur)) return;
     tip.innerHTML = `<b>${b.children[1].textContent}</b><span>${b.dataset.what}</span><em>${cur} 0 al mes</em>`;
     const p = within(b, layer), up = p.y > 420;
     tip.style.left = Math.max(140, Math.min(1920 - 140 - 420, p.x + p.w / 2 - 210)) + "px";
@@ -1007,11 +1032,21 @@
   const tapOf = (t) => t instanceof Element ? t.closest("[data-tap]") : null;
   stage.addEventListener("click", (e) => {
     const t = tapOf(e.target);
+    // Dentro de la ventana de un módulo, un clic no avanza la presentación.
+    if (!t && e.target instanceof Element && e.target.closest(".layer.cur .msc")) { e.stopPropagation(); return; }
     if (!t || !t.closest(".layer.cur")) return;
     e.stopPropagation(); taps[t.dataset.tap]?.(t);
   });
 
   /* ---------- Controles ---------- */
+  // Sin mover el puntero por un momento, los botones se apartan (de pie y con el guion abierto, siempre a la vista).
+  let idleT = 0;
+  const wake = () => {
+    document.body.classList.remove("idle"); clearTimeout(idleT);
+    idleT = setTimeout(() => { if (!stacked && document.getElementById("notesPanel").hidden) document.body.classList.add("idle"); }, 2500);
+  };
+  ["mousemove", "pointerdown", "keydown"].forEach(t => addEventListener(t, wake, { passive: true }));
+  wake();
   document.getElementById("next").addEventListener("click", (e) => { e.stopPropagation(); next(); });
   document.getElementById("prev").addEventListener("click", (e) => { e.stopPropagation(); prev(); });
   const notesBtn = document.getElementById("notesBtn"), notesPanel = document.getElementById("notesPanel");
@@ -1022,6 +1057,7 @@
     try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch (err) {}
   });
   addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && closeScreen(stage.querySelector(".layer.mopen"))) { e.preventDefault(); return; }
     const t = tapOf(e.target);
     if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); if (t.closest(".layer.cur")) taps[t.dataset.tap]?.(t); return; }
     if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); next(); }

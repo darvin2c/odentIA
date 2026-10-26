@@ -986,6 +986,14 @@
   });
 
   /* ---------- Controles ---------- */
+  // Sin mover el puntero por un momento, los botones se apartan (de pie y con el guion abierto, siempre a la vista).
+  let idleT = 0;
+  const wake = () => {
+    document.body.classList.remove("idle"); clearTimeout(idleT);
+    idleT = setTimeout(() => { if (!stacked && document.getElementById("notesPanel").hidden) document.body.classList.add("idle"); }, 2500);
+  };
+  ["mousemove", "pointerdown", "keydown"].forEach(t => addEventListener(t, wake, { passive: true }));
+  wake();
   document.getElementById("next").addEventListener("click", (e) => { e.stopPropagation(); next(); });
   document.getElementById("prev").addEventListener("click", (e) => { e.stopPropagation(); prev(); });
   const notesBtn = document.getElementById("notesBtn"), notesPanel = document.getElementById("notesPanel");
