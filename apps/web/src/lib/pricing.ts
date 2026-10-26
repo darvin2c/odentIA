@@ -4,7 +4,7 @@
 
 // Este archivo también lo importan las islas (por `money` y los tipos): nada de lo que lee la
 // configuración del servidor se evalúa al cargarlo.
-import { DEFAULT_DOMAIN } from "./product"
+import { DEFAULT_DOMAIN, MEDICAL } from "./product"
 
 const FRESH_MS = 30_000
 
@@ -185,9 +185,17 @@ export interface ValuePrices {
  * La mezcla de tipos de la clínica mediana del estudio de precios (ADR 0085):
  * de cada 100 conversaciones, 50 informan y 50 gestionan una cita, y 25 de
  * esas citas se dan; de cada 100 consultas, 40 son simples, 35 estándar y 25
- * completas. Es un promedio para la calculadora, no lo que se cobra.
+ * completas. En latidIA «Completa» es dejar indicada una prestación (un
+ * análisis, una ecografía), mucho más frecuente que un presupuesto dental:
+ * se supone 15 simples, 40 estándar y 45 completas hasta medir los pilotos.
+ * Es un promedio para la calculadora, no lo que se cobra.
  */
-export const MIX = { informa: 0.5, gestiona: 0.5, agenda: 0.25, simple: 0.4, estandar: 0.35, completa: 0.25 }
+export const MIX = {
+  informa: 0.5,
+  gestiona: 0.5,
+  agenda: 0.25,
+  ...(MEDICAL ? { simple: 0.15, estandar: 0.4, completa: 0.45 } : { simple: 0.4, estandar: 0.35, completa: 0.25 }),
+}
 
 /** Las cifras de un plan para las islas; null si alguna acción no tiene precio. */
 export function valuePricesOf(plan: PlanPrices | null): ValuePrices | null {
