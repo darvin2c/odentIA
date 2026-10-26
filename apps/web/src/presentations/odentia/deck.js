@@ -973,6 +973,13 @@
     });
   };
 
+  // Tu semana: fila por fila, lo de hoy se tacha y aparece lo que hace el producto.
+  scenes.week = (layer) => {
+    const rows = [...layer.querySelectorAll(".wkr:not(.head)")];
+    rows.forEach(r => r.classList.remove("on"));
+    rows.forEach((r, i) => later(() => r.classList.add("on"), 1400 + i * 650));
+  };
+
   /* ---------- Lo que se toca ---------- */
   // Dentro del escenario, lo que tiene data-tap responde al clic (o a Enter y Espacio) y no avanza la presentación.
   const taps = {};
