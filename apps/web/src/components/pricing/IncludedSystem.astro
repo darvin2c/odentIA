@@ -1,0 +1,110 @@
+---
+// «Todo el sistema, USD 0»: lo que trae el sistema, cada cosa a USD 0 y con su página, para que se
+// vea que no se cobra el software sino lo que hacen los agentes. Va bajo la portada de Precios.
+// Cada web lista lo suyo; en latidIA «Varias sedes» no tiene página propia. Lienzo «Precios: por lo que hizo».
+import { money, shownPlan } from "../../lib/pricing"
+import { MEDICAL, WORDS } from "../../lib/product"
+
+const plan = shownPlan(Astro.locals.pricing)
+const currency = plan?.currency ?? "USD"
+const zero = money(0, currency)
+const tiers = [plan?.tiers.informa, plan?.tiers.simple].filter((value): value is number => value != null)
+const from = tiers.length ? Math.min(...tiers) : null
+const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.slice(1)}, usuarios`
+const storage = plan?.storage
+
+type Item = { name: string; what: string; href?: string }
+const items: Item[] = MEDICAL
+  ? [
+      { name: "Agenda médica y controles", what: "Citas, salas, recordatorios y controles que se repiten", href: "/agenda-medica" },
+      { name: "Historia clínica y signos vitales", what: "Examen por sistemas, antecedentes y lista de problemas", href: "/historia-clinica-electronica" },
+      { name: "Receta y descanso médico", what: "Avisos de alergia y embarazo; se emiten con tu firma", href: "/receta-y-descanso-medico" },
+      { name: "Caja y cobros", what: "Pagos, saldos y deudas al día", href: "/caja-y-cobros" },
+      { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
+      { name: "Su enlace y QR", what: "El paciente reserva, se registra y ve lo suyo", href: "/portal-del-paciente" },
+      { name: "Reportes", what: `Pacientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
+      { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su hora" },
+      { name: "Seguridad y permisos por rol", what: "Recepción, médicos y caja ven solo lo suyo", href: "/seguridad" },
+    ]
+  : [
+      { name: "Agenda odontológica", what: "Citas, unidades dentales y recordatorios", href: "/agenda-odontologica" },
+      { name: "Historia clínica y odontograma", what: "Periodontograma, tomografías e imágenes", href: "/historia-clinica-y-odontograma" },
+      { name: "Presupuestos", what: "Hasta tres opciones, con su enlace para aceptar", href: "/presupuestos-dentales" },
+      { name: "Caja y cobros", what: "Pagos, saldos y deudas al día", href: "/caja-y-cobros" },
+      { name: "Omnicanal", what: "WhatsApp, Messenger, Instagram, correo y chat web en una bandeja", href: "/omnicanal" },
+      { name: "Su enlace y QR", what: "El paciente reserva, se registra y ve lo suyo", href: "/portal-del-paciente" },
+      { name: "Reportes", what: `Pacientes, citas, cobros y lo que te dejó ${WORDS.name}`, href: "/reportes" },
+      { name: "Varias sedes", what: "Cada sede con su agenda, su equipo y su hora", href: "/varias-sedes" },
+      { name: "Seguridad y permisos por rol", what: "Recepción, odontología y caja ven solo lo suyo", href: "/seguridad" },
+    ]
+const extra: Item = storage
+  ? {
+      name: `${people} y ${storage.includedGb} GB de archivos`,
+      what: `Sin límite de personas; desde el GB ${storage.includedGb + 1}, ${money(storage.perGb, currency).replace(`${currency} `, "")} al mes`,
+    }
+  : { name: `${people} y sedes`, what: "Sin límite de personas" }
+---
+<section class="section section-white" id="incluido">
+  <div class="wrap in">
+    <div class="side">
+      <span class="tag">[ El sistema, incluido ]</span>
+      <h2 class="h2 t">Todo el sistema, <span class="acc">{zero}.</span></h2>
+      <p class="lead">No cobramos por usuario, por sede ni por módulo. Usas todo desde el primer día y pagas solo cuando un agente hizo un trabajo.</p>
+      <div class="only">
+        <span class="only-k">Lo único que se paga</span>
+        <span class="only-t">Lo que hacen Sofi, Clío y Argos</span>
+        <span class="only-d">
+          {from !== null && plan ? <>Desde <b>{money(from, currency)}</b> una respuesta. </> : null}Si el agente no hizo nada útil, la fila dice {zero}.
+        </span>
+        {plan ? <a class="only-a" href="#precio">Ver cada precio ↓</a> : null}
+      </div>
+    </div>
+    <ul class="list">
+      {[...items, extra].map((item) => {
+        const body = (
+          <>
+            <span class="txt"><b>{item.name}</b><span class="what">{item.what}</span></span>
+            <span class="zero">{zero}{item.href ? <span aria-hidden="true"> →</span> : null}</span>
+          </>
+        )
+        return <li class:list={{ last: item === extra }}>{item.href ? <a class="it" href={item.href}>{body}</a> : <div class="it">{body}</div>}</li>
+      })}
+    </ul>
+  </div>
+</section>
+
+<style>
+  .section { padding: 96px 0; }
+  .in { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px; align-items: start; }
+  .side { display: flex; flex-direction: column; gap: 20px; }
+  .t { font-size: clamp(34px, 4vw, 46px); }
+  .acc { color: var(--teal); }
+  .only { border-radius: 18px; padding: 20px 22px; background: var(--teal-soft); display: flex; flex-direction: column; gap: 6px; }
+  .only-k { font-size: 15px; color: var(--ink-2); }
+  .only-t { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+  .only-d { font-size: 16px; line-height: 1.5; color: var(--ink-2); }
+  .only-d b { font-size: 20px; color: var(--ink); }
+  .only-a { align-self: flex-start; min-height: 44px; display: inline-flex; align-items: center; font-weight: 700; color: var(--teal); text-decoration: none; }
+  .only-a:hover { text-decoration: underline; }
+  .list { margin: 0; padding: 0; list-style: none; border-radius: 22px; box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; }
+  .list li + li { border-top: 1px solid var(--line); }
+  .it { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 20px; color: var(--ink); text-decoration: none; }
+  a.it:hover { background: var(--bg); }
+  .last .it { background: var(--bg); }
+  .txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .txt b { font-size: 16px; }
+  .what { font-size: 14px; line-height: 1.4; color: var(--muted); }
+  .zero { flex: none; font-family: var(--agent-font); font-weight: 500; color: var(--teal); white-space: nowrap; }
+  @media (max-width: 960px) {
+    .in { grid-template-columns: 1fr; gap: 32px; }
+  }
+  @media (max-width: 720px) {
+    .section { padding: 64px 0; }
+    .side { gap: 14px; }
+    .list { border-radius: 18px; }
+    .it { padding: 14px 16px; min-height: 44px; box-sizing: border-box; }
+    /* En teléfono cada fila deja solo el nombre; la explicación está en su página. */
+    .what { display: none; }
+    .txt b { font-size: 15px; }
+  }
+</style>

@@ -72,6 +72,8 @@ export interface Terms {
   trialDays: number
   /** Días hábiles para responder una solicitud de invitación. */
   waitlistAnswerDays: number
+  /** Días antes del fin de los meses de Fundadores en que se avisa; falta si la API es anterior. */
+  guaranteeNoticeDays?: number
 }
 
 interface ApiPlan {

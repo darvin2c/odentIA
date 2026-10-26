@@ -1,7 +1,9 @@
 ---
-// La tarjeta del plan que se muestra: la del Fundador (sin cuota, el regalo y el precio de lista
-// tachado) o la del plan de lista (su cuota vuelve como crédito). Va al lado de «Calcula tu mes».
-import { businessDays, money, shownPlan } from "../../lib/pricing"
+// La tarjeta del plan que se muestra: la del Fundador (aprovecha: cuánto menos, por qué y hasta
+// cuándo, sin decir cuántos lugares quedan) o la del plan de lista (su cuota vuelve como crédito).
+// Va al lado de «Calcula tu mes». Lienzo «Precios: por lo que hizo».
+import { businessDays, days, money, shownPlan } from "../../lib/pricing"
+import { MEDICAL, WORDS } from "../../lib/product"
 import { ctaOf } from "../../lib/site"
 
 const pricing = Astro.locals.pricing
@@ -9,26 +11,55 @@ const plan = shownPlan(pricing)
 const list = pricing.list
 const founder = plan !== null && plan === pricing.founders ? pricing.founders : null
 const cta = ctaOf(pricing)
+const discount = founder?.discountPercent ?? null
+const months = founder?.guaranteeMonths ?? null
+const gift = plan && plan.trialCredit > 0 ? money(plan.trialCredit, plan.currency) : null
+const notice = pricing.terms.guaranteeNoticeDays
+const firsts = MEDICAL ? "Los primeros consultorios" : "Las primeras clínicas"
+const share = discount === 50 ? "la mitad" : `${discount} % menos`
 ---
 {plan ? (
   <div class="plan">
-    <span class="tag tag-d">{founder ? "Programa Fundadores" : plan.name}</span>
-    <div class="amount">
-      <span class="big">{money(plan.plan, plan.currency)}</span><span class="per">al mes</span>
-      {founder && list && list.plan !== plan.plan ? <s class="per"><span class="sr">antes </span>{money(list.plan, list.currency)}</s> : null}
-    </div>
-    {founder ? (
-      <p class="back">
-        Sin cuota. Los primeros <b class="gift">{money(plan.trialCredit, plan.currency)}</b> de tus agentes los pagamos nosotros y, después,
-        pagas solo lo que hacen{founder.discountPercent ? `, con ${founder.discountPercent} % menos` : ""}{founder.discountPercent && founder.guaranteeMonths ? ` durante ${founder.guaranteeMonths} meses` : ""}.
-      </p>
+    {founder && discount ? (
+      <>
+        <div class="tags">
+          <span class="tag tag-d">Programa Fundadores</span>
+          <span class="grab">Aprovecha · lugares limitados</span>
+        </div>
+        <div class="amount">
+          <span class="big">{discount} % menos</span><span class="per">en todo{months ? `, ${months} meses` : ""}</span>
+        </div>
+        <p class="back">
+          <b>¿Por qué {share}?</b> {firsts} nos ayudan a afinar {WORDS.name} con lo que viven cada día. A cambio, pagan {share}
+          {months ? ` durante sus primeros ${months} meses` : ""}, entran sin cuota
+          {gift ? <> y los primeros <b class="gift">{gift}</b> de sus agentes los pagamos nosotros</> : null}.
+        </p>
+        {months ? (
+          <ol class="steps">
+            <li><span class="k">Hoy</span><span>Entras sin cuota{gift ? ` y con ${gift} de regalo` : ""}</span></li>
+            <li><span class="k">Meses 1 a {months}</span><span>{discount} % menos en cada trabajo</span></li>
+            <li><span class="k">Mes {months + 1}</span><span>Precio de lista.{notice ? ` Te avisamos ${days(notice)} antes` : ""}</span></li>
+          </ol>
+        ) : null}
+      </>
     ) : (
-      <p class="back">Te devolvemos los {money(plan.credit, plan.currency)} en crédito para lo que hagan tus agentes. Es lo mínimo que pagas en un mes.</p>
+      <>
+        <span class="tag tag-d">{founder ? "Programa Fundadores" : plan.name}</span>
+        <div class="amount">
+          <span class="big">{money(plan.plan, plan.currency)}</span><span class="per">al mes</span>
+          {founder && list && list.plan !== plan.plan ? <s class="per"><span class="sr">antes </span>{money(list.plan, list.currency)}</s> : null}
+        </div>
+        {founder ? (
+          <p class="back">Sin cuota. Los primeros <b class="gift">{money(plan.trialCredit, plan.currency)}</b> de tus agentes los pagamos nosotros y, después, pagas solo lo que hacen.</p>
+        ) : (
+          <p class="back">Te devolvemos los {money(plan.credit, plan.currency)} en crédito para lo que hagan tus agentes. Es lo mínimo que pagas en un mes.</p>
+        )}
+      </>
     )}
     <a class="btn btn-p cta" href={cta.href}>{cta.label}</a>
     <span class="mono trial">
       {founder
-        ? `Sin tarjeta. Se entra por invitación: respondemos en ${businessDays(pricing.terms.waitlistAnswerDays)}.`
+        ? `Sin tarjeta. Se entra por invitación: respondemos en ${businessDays(pricing.terms.waitlistAnswerDays)}. Cuando se llenan los lugares, el programa se cierra.`
         : <>{plan.trialDays} días gratis, con <span class="gift">{money(plan.trialCredit, plan.currency)}</span> de crédito para tus agentes.</>}
     </span>
   </div>
@@ -37,16 +68,26 @@ const cta = ctaOf(pricing)
 <style>
   .plan { border-radius: 26px; padding: 36px; background: var(--night); color: var(--on-night); display: flex; flex-direction: column; gap: 18px; }
   .tag { letter-spacing: .1em; }
+  .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .grab { border-radius: 8px; padding: 5px 9px; background: var(--amber); color: var(--night); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
   .amount { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; }
   .big { font-size: clamp(48px, 6vw, 72px); font-weight: 800; letter-spacing: -.05em; line-height: .9; }
-  .per { color: #9fb8bf; }
-  .back { font-size: 18px; line-height: 1.5; color: #d6e8ec; }
+  .per { color: var(--on-night-2); font-size: 18px; font-weight: 600; }
+  .back { font-size: 18px; line-height: 1.5; color: var(--on-night-2); }
+  .back b { color: var(--on-night); }
+  .back .gift { color: var(--amber); }
+  .steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .steps li { border-radius: 14px; padding: 14px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); display: flex; flex-direction: column; gap: 4px; font-size: 15px; line-height: 1.4; }
+  .k { font-family: var(--agent-font); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--sky-2); }
   .cta { align-self: flex-start; }
   .trial { font-size: 13px; line-height: 1.5; color: var(--on-night-3); }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (max-width: 720px) {
     .plan { border-radius: 20px; padding: 22px 20px; gap: 14px; }
     .back { font-size: 16px; }
+    .steps { grid-template-columns: 1fr; }
+    .steps li { flex-direction: row; align-items: baseline; gap: 10px; padding: 10px 12px; }
+    .k { flex: none; min-width: 92px; }
     .cta { align-self: stretch; }
   }
 </style>

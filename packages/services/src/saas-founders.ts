@@ -719,6 +719,8 @@ export interface PublicSaasTerms {
   /** Prueba cuando no hay un plan por defecto. */
   trialDays: number
   waitlistAnswerDays: number
+  /** Días antes del fin de los meses garantizados de una Fundadora en que se le avisa. */
+  guaranteeNoticeDays: number
 }
 
 function publicPlan(plan: typeof saasPlan.$inferSelect): PublicPlanPrices {
@@ -785,6 +787,7 @@ async function publicSaasTerms(tx: Db): Promise<PublicSaasTerms> {
     graceDays: terms.graceDays,
     trialDays: terms.trialDays,
     waitlistAnswerDays: terms.waitlistAnswerDays,
+    guaranteeNoticeDays: terms.guaranteeNoticeDays,
   }
 }
 

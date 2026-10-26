@@ -34,6 +34,8 @@ const DAY: Row[] = [
   { time: "17:00", agent: "argos", who: "Argos", what: ": Rosa volvió tras faltar y la atendieron", charge: "recovered" },
   // ADR 0085: si la cita recuperada cuenta, se cobra solo ella y la conversación se devuelve.
   { time: "17:00", agent: null, who: "", what: "Se devuelve la conversación de Rosa: cuenta la cita", charge: "refund" },
+  // El software no suma: la última fila del día lo dice en la misma cuenta.
+  { time: "24 h", agent: null, who: "", what: "El sistema, todo el día", charge: null },
 ]
 
 /** Una fila cada segundo y medio. */

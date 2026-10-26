@@ -42,6 +42,14 @@ const cards = plan && t
     <div class="sr hs-head">
       <span class="tag tag-d">{prices ? "[ El precio ]" : "[ 05 · El precio ]"}</span>
       <h2 class="h2">No pagas por el software. Pagas por el trabajo hecho.</h2>
+      {plan ? (
+        <div class="pchips">
+          <span class="pchip">Agenda, historia, odontograma, presupuestos, caja, omnicanal y reportes: <b>{m(0)}</b></span>
+          {founder && founder.discountPercent ? (
+            <span class="pchip pchip-grab"><b>Aprovecha:</b> Fundadores, {founder.discountPercent} % menos{founder.guaranteeMonths ? ` durante ${founder.guaranteeMonths} meses` : ""}. Lugares limitados.</span>
+          ) : null}
+        </div>
+      ) : null}
       {founder ? (
         <p class="lead lead-d">Fundadores: entras sin cuota. Los primeros <b class="gift">{m(plan!.trialCredit)}</b> de tus agentes los pagamos nosotros y, después, pagas solo lo que hacen{founder.discountPercent ? <>, con {founder.discountPercent} % menos</> : null}. Todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios.</p>
       ) : plan ? (
@@ -54,7 +62,11 @@ const cards = plan && t
       {cards.filter((card) => card.price !== null).map((card) => (
         <div class:list={["pcard", { hi: card.hi }]}>
           <span class="tag tag-d">{card.tag}</span>
-          <span class="pamt">{card.from ? <small class="pfrom">desde </small> : null}{m(card.price)}{card.before ? <s class="pwas"> {card.before}</s> : null}</span>
+          {/* «Desde» del tamaño de un titular, arriba del precio (lienzo «Precios: por lo que hizo»). */}
+          <span class="pprice">
+            <span class="pfrom">{card.from ? "Desde" : "Solo si viene"}</span>
+            <span class="pamt">{m(card.price)}{card.before ? <s class="pwas"> {card.before}</s> : null}</span>
+          </span>
           <span class="pdesc">{card.desc}</span>
         </div>
       ))}
