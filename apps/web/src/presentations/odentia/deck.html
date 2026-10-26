@@ -697,6 +697,9 @@ h1, h2, h3, p { margin: 0; }
 /* 9 · La ventana de un módulo: la ventana clara de la app, al costado, con su pantalla de muestra. */
 .mscrim { position: absolute; inset: 0; z-index: 8; background: rgba(6,19,24,.62); backdrop-filter: blur(3px); opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; }
 .msc { position: absolute; z-index: 9; left: 600px; top: 112px; width: 1180px; max-height: 840px; box-sizing: border-box; display: flex; flex-direction: column; border-radius: 26px; background: #fff; color: #0f172a; box-shadow: 0 50px 120px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08); overflow: hidden; opacity: 0; visibility: hidden; transform: translateX(80px) scale(.97); transition: opacity .35s, transform .55s cubic-bezier(.2,.8,.2,1), visibility 0s .55s; }
+/* Al cerrar, deja de recibir toques en el acto, aunque siga desvaneciéndose. */
+.mscrim, .msc { pointer-events: none; }
+.layer.mopen .mscrim, .layer.mopen .msc { pointer-events: auto; }
 .layer.mopen .mscrim { opacity: 1; visibility: visible; transition: opacity .35s; }
 .layer.mopen .msc { opacity: 1; visibility: visible; transform: none; transition: opacity .35s, transform .55s cubic-bezier(.2,.8,.2,1); }
 .layer.mopen .tap { opacity: 0; }
