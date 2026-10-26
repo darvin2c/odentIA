@@ -2,6 +2,7 @@
 import CtaBand from "../components/CtaBand.astro"
 import Faq from "../components/Faq.astro"
 import AgentPrices from "../components/pricing/AgentPrices.astro"
+import IncludedSystem from "../components/pricing/IncludedSystem.astro"
 import NeverCharged from "../components/pricing/NeverCharged.astro"
 import PricingHero from "../components/pricing/PricingHero.astro"
 import ValueSection from "../components/pricing/ValueSection.astro"
@@ -141,6 +142,7 @@ const jsonLd = [
 ---
 <Base title={title} description={description} jsonLd={jsonLd}>
   <PricingHero />
+  <IncludedSystem />
   <AgentPrices />
   <NeverCharged />
   <ValueSection />
