@@ -1,0 +1,60 @@
+/* El teléfono de Andrea (portada de /portal-del-paciente): marco oscuro, la pantalla clara y una tarjeta
+   blanca con borde por cosa, como la página real de Su enlace, con los botones en píldora. */
+.dpp { width: 380px; max-width: 100%; margin: 0 auto; background: #04131a; border-radius: 44px; padding: 12px; box-shadow: 0 40px 80px -30px rgba(0, 0, 0, .7), inset 0 0 0 1px rgba(255, 255, 255, .1); }
+.dpp-screen { background: var(--bg); color: var(--ink); border-radius: 34px; overflow: hidden; display: flex; flex-direction: column; }
+.dpp-status { display: flex; justify-content: space-between; align-items: center; padding: 8px 22px 4px; font-size: 12px; font-weight: 700; }
+.dpp-notch { width: 90px; height: 20px; border-radius: 999px; background: #04131a; }
+.dpp-body { padding: 2px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.dpp-hello { display: flex; flex-direction: column; padding: 2px 4px 0; }
+.dpp-org { font-size: 13px; font-weight: 700; color: var(--muted); }
+.dpp-hello b { font-size: 20px; letter-spacing: -.02em; }
+
+.dpp-card { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; transition: opacity .5s, transform .5s; }
+.dpp-card.dpp-hidden { opacity: 0; transform: translateY(10px); }
+.dpp-row-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.dpp-h { font-size: 15px; font-weight: 700; }
+.dpp-badge { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 9px; background: #eef2f6; color: var(--ink-2); }
+.dpp-badge.ok { background: #e4f6ee; color: #1a6b50; }
+.dpp-when { font-size: 17px; letter-spacing: -.01em; }
+.dpp-what { font-size: 14px; color: var(--ink-2); line-height: 1.4; }
+.dpp-sub { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.dpp-sub.small { font-size: 12px; }
+.dpp-q { font-size: 16px; }
+.dpp-ok { font-size: 12px; font-weight: 700; color: #1a6b50; background: #e4f6ee; border-radius: 999px; padding: 4px 9px; align-self: flex-start; }
+.dpp-row { display: flex; gap: 6px; flex-wrap: wrap; padding-top: 4px; }
+.dpp-btn { flex: 1 1 auto; min-height: 44px; border: 1px solid #cbd5e1; border-radius: 999px; background: var(--paper); color: var(--ink); font: 600 14px var(--font); padding: 0 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.dpp-btn.main { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 700; }
+.dpp-btn.main:disabled { background: #e2e8f0; border-color: #e2e8f0; color: #475569; cursor: default; }
+.dpp-btn.danger { background: #b42318; border-color: #b42318; color: #fff; font-weight: 700; }
+.dpp-btn.dpp-wide { margin-top: 4px; }
+.dpp-btn:not(:disabled):hover { filter: brightness(.96); }
+.dpp-pulse { animation: dpp-pulse 1.6s ease-out infinite; }
+@keyframes dpp-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 45%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
+.dpp-slots { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+.dpp-slots legend { padding: 0; margin-bottom: 2px; }
+.dpp-slot { min-height: 44px; border-radius: 14px; text-align: left; font: 600 14px var(--font); padding: 0 14px; cursor: pointer; border: 1px solid #cbd5e1; background: var(--paper); color: var(--ink); }
+.dpp-slot[aria-pressed="true"] { border: 2px solid var(--teal); background: var(--teal-soft); color: var(--teal-hover); }
+.dpp-opt { border: 1px solid #cbd5e1; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.dpp-opt.dpp-pick { border: 2px solid var(--teal); padding: 9px 11px; }
+.dpp-opt-row { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+
+.dpp-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid #eef2f6; }
+.dpp-line-t { display: flex; flex-direction: column; min-width: 0; }
+.dpp-line-t b { font-size: 14px; }
+.dpp-line-t span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.dpp-always { font-size: 13px; font-weight: 700; color: var(--ink-2); flex: 0 0 auto; }
+.dpp-chip-btn { flex: 0 0 auto; min-height: 44px; border: 1px solid #cbd5e1; border-radius: 999px; background: var(--paper); color: var(--ink); font: 700 13px var(--font); padding: 0 12px; cursor: pointer; }
+.dpp-chip-btn.ok { background: #e4f6ee; border-color: #e4f6ee; color: #1a6b50; }
+.dpp-paper { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 2px 0; border-top: 1px solid #eef2f6; }
+.dpp-paper-name { display: flex; flex-direction: column; min-width: 0; }
+.dpp-paper-name b { font-size: 14px; }
+.dpp-paper-name span { font-size: 12px; color: var(--muted); line-height: 1.35; }
+/* El interruptor de cada mensaje: un botón con aria-pressed, «Encendido» o «Apagado» escrito además del color. */
+.dpp-switch { flex: 0 0 auto; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; border: 0; background: none; cursor: pointer; font: 600 12px var(--font); color: var(--muted); padding: 0 2px; }
+.dpp-switch i { width: 38px; height: 22px; border-radius: 999px; background: #94a3b8; position: relative; transition: background-color .25s; }
+.dpp-switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .25s; }
+.dpp-switch[aria-pressed="true"] { color: var(--teal-hover); }
+.dpp-switch[aria-pressed="true"] i { background: var(--teal); }
+.dpp-switch[aria-pressed="true"] i::after { transform: translateX(16px); }
+@media (prefers-reduced-motion: reduce) { .dpp-card, .dpp-switch i, .dpp-switch i::after { transition: none; } .dpp-pulse { animation: none; } }
+@media (max-width: 420px) { .dpp { border-radius: 36px; padding: 8px; } .dpp-screen { border-radius: 28px; } .dpp-body { padding: 8px 12px 16px; } }

@@ -1,6 +1,6 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.agenda).
-import InnerPage from "../components/pages/InnerPage.astro"
-import { PAGES } from "../lib/pages-data"
+// /agenda-odontologica: solo de odentIA (latidIA tiene /agenda-medica y aquí el middleware responde 404).
+// Título, descripción y preguntas siguen en src/lib/pages-data.ts (PAGES.agenda).
+import AgendaPage from "../components/schedule/AgendaPage.astro"
 ---
-<InnerPage page={PAGES.agenda} />
+<AgendaPage />

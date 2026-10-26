@@ -1,0 +1,20 @@
+/* La ventana de 24 horas (odentIA): el interruptor de cuándo escribió, la barra con la marca de «ahora»
+   y lo que se puede hacer, en verde dentro y en ámbar fuera. */
+.ww { background: var(--bg); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.ww-title { font-size: 20px; letter-spacing: -.01em; }
+.ww-text { font-size: 15px; line-height: 1.55; color: var(--muted); }
+.ww-opts { display: flex; gap: 4px; background: var(--teal-soft); border-radius: 999px; padding: 4px; align-self: flex-start; flex-wrap: wrap; border: 0; margin: 0; }
+.ww-opts button { min-height: 44px; padding: 0 16px; border-radius: 999px; border: 0; cursor: pointer; font: 600 14px var(--font); background: transparent; color: var(--muted); }
+.ww-opts button[aria-pressed="true"] { background: var(--paper); color: var(--teal-hover); box-shadow: 0 1px 4px rgba(0, 0, 0, .1); }
+.ww-opts button:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.ww-bar-wrap { display: flex; flex-direction: column; gap: 6px; }
+.ww-bar { position: relative; height: 14px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }
+.ww-open { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; background: #b7e4cf; }
+.ww-now { position: absolute; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: var(--teal); transition: left .5s; }
+.ww-scale { display: flex; justify-content: space-between; font-family: var(--agent-font); font-size: 11px; color: var(--soft); }
+.ww-box { display: flex; flex-direction: column; gap: 4px; border-radius: 16px; padding: 14px 16px; background: #e4f6ee; border: 1px solid #b7e4cf; color: #145c43; }
+.ww-box.late { background: #fff8ea; border-color: #f3dfb2; color: #7a4a06; }
+.ww-box b { font-size: 15px; }
+.ww-box span { font-size: 14px; line-height: 1.5; }
+@media (max-width: 600px) { .ww { padding: 18px; } }
+@media (prefers-reduced-motion: reduce) { .ww-now { transition: none; } }

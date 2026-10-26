@@ -8,6 +8,8 @@
     "/historia-clinica-electronica",
     "/receta-y-descanso-medico",
     "/agenda-medica",
+    "/radiografias-y-ecografias",
+    "/buscador",
     "/omnicanal",
     "/caja-y-cobros",
     "/reportes",
@@ -25,5 +27,5 @@
     "/aviso-legal",
     "/pe/libro-de-reclamaciones"
   ],
-  "own": ["/historia-clinica-electronica", "/receta-y-descanso-medico", "/agenda-medica"]
+  "own": ["/historia-clinica-electronica", "/receta-y-descanso-medico", "/agenda-medica", "/radiografias-y-ecografias"]
 }

@@ -17,6 +17,7 @@ import {
   getOrganizationDetail,
   getOrganizationPendingCounts,
   getUserDetail,
+  listOrganizationProducts,
   listOrganizations,
   listRecoveryCases,
   type OrganizationBillingLoaders,
@@ -55,6 +56,8 @@ const pageQuery = z.object({
 const organizationQuery = pageQuery.extend({
   /** Solo las clínicas con precio negociado vigente (issue 168). */
   negotiated: z.enum(["1"]).optional(),
+  /** Solo las clínicas de un producto (odentIA o latidIA). */
+  product: z.enum(CLINICAL_PRODUCTS).optional(),
 })
 
 const userQuery = pageQuery.extend({
@@ -175,11 +178,17 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
         listOrganizations(
           tx,
           actor,
-          { q: parsed.data.q, limit: parsed.data.limit, offset: parsed.data.offset, negotiated: parsed.data.negotiated === "1" },
+          { q: parsed.data.q, limit: parsed.data.limit, offset: parsed.data.offset, negotiated: parsed.data.negotiated === "1", product: parsed.data.product },
           loaders,
         ),
       ),
     )
+  })
+
+  // El producto de cada clínica: cada pantalla marca y filtra sus filas con esto.
+  app.get("/products", async (c) => {
+    const actor = adminContextOf(c)
+    return runService(c, 200, () => owner((tx) => listOrganizationProducts(tx, actor)))
   })
 
   app.get("/pending-counts", async (c) => {

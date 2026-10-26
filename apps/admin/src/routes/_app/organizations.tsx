@@ -33,7 +33,8 @@ import { Building2, Plus } from "lucide-react"
 import { useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
-import { platformUrl } from "../../lib/host"
+import { domainOf, platformUrl } from "../../lib/host"
+import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { ClinicCostMarginSection } from "../../components/cost-margin"
 import { OrgBillingSection } from "../../components/org-billing"
 
@@ -76,6 +77,7 @@ const orgItemSchema = z.object({
   restricted: z.boolean(),
   /** Precio negociado vigente (issue 168). */
   negotiated: z.object({ discountBps: z.number(), endsAt: z.string().nullable() }).nullable().default(null),
+  product: z.enum(CLINICAL_PRODUCTS).default("dental"),
 })
 
 /** «20 % negociado · vence 30 abr»; en rojo si faltan 7 días o menos. */
@@ -91,11 +93,24 @@ function NegotiatedBadge({ deal }: { deal: { discountBps: number; endsAt: string
   return <Badge variant="warning">{`${percent} negociado · vence ${day}`}</Badge>
 }
 
-const orgListSchema = z.object({ items: z.array(orgItemSchema), total: z.number() })
+const orgListSchema = z.object({
+  items: z.array(orgItemSchema),
+  total: z.number(),
+  byProduct: z.object({ dental: z.number(), medical: z.number() }).default({ dental: 0, medical: 0 }),
+})
+
+/** El estado de la clínica como pastilla: verde si está activa, ámbar si algo falta, rojo si está restringida. */
+function statusVariant(status: string | null): "success" | "warning" | "destructive" | "secondary" {
+  if (status === "activa") return "success"
+  if (status === "gracia" || status === "pausada") return "warning"
+  if (status === "restringida") return "destructive"
+  return "secondary"
+}
 const orgDetailSchema = z.object({
   id: z.string(),
   name: z.string(),
   slug: z.string(),
+  product: z.enum(CLINICAL_PRODUCTS).default("dental"),
   provisioning: z.object({
     hasProfile: z.boolean(),
     hasBranch: z.boolean(),
@@ -272,11 +287,12 @@ function OrganizationsPage() {
   }
 
   const [onlyNegotiated, setOnlyNegotiated] = useState(false)
+  const [product, setProduct] = useState<ProductChoice>("todos")
   const listQuery = useQuery({
-    queryKey: ["admin-organizations", activeSearch, onlyNegotiated],
+    queryKey: ["admin-organizations", activeSearch, onlyNegotiated, product],
     queryFn: async () => {
       const raw = await api<unknown>(
-        `/api/admin/organizations?q=${encodeURIComponent(activeSearch)}&limit=30${onlyNegotiated ? "&negotiated=1" : ""}`,
+        `/api/admin/organizations?q=${encodeURIComponent(activeSearch)}&limit=30${onlyNegotiated ? "&negotiated=1" : ""}${product === "todos" ? "" : `&product=${product}`}`,
       )
       return orgListSchema.parse(raw)
     },
@@ -385,31 +401,48 @@ function OrganizationsPage() {
     <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Clínicas"
-        subtitle="Lista y ficha con suscripción, uso, miembros y actividad."
+        subtitle="Las de odentIA y las de latidIA, con suscripción, uso, miembros y actividad."
         primary={{ label: "Alta asistida", icon: <Plus aria-hidden />, onClick: () => setAssistedOpen(true) }}
       />
       <form
-        className="flex gap-2"
+        className="flex flex-wrap items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           setActiveSearch(search.trim())
         }}
       >
-        <Input
-          aria-label="Buscar clínicas"
-          placeholder="Buscar por nombre o slug"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+        <div className="flex min-w-64 flex-1 gap-2">
+          <Input
+            aria-label="Buscar clínicas"
+            placeholder="Buscar por nombre o slug"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <Button type="submit" variant="outline">
+            Buscar
+          </Button>
+        </div>
+        {/* Cuenta cada producto con la misma búsqueda, sin contar el filtro de producto. */}
+        <ProductFilter
+          value={product}
+          onChange={setProduct}
+          counts={
+            listQuery.data
+              ? {
+                  todos: listQuery.data.byProduct.dental + listQuery.data.byProduct.medical,
+                  dental: listQuery.data.byProduct.dental,
+                  medical: listQuery.data.byProduct.medical,
+                }
+              : undefined
+          }
         />
-        <Button type="submit" variant="outline">
-          Buscar
-        </Button>
         <Select
           value={onlyNegotiated ? "negociado" : "todas"}
           items={{ todas: "Todas", negociado: "Con precio negociado" }}
           onValueChange={(value) => setOnlyNegotiated(value === "negociado")}
         >
-          <SelectTrigger aria-label="Precio" className="w-56 shrink-0">
+          <SelectTrigger aria-label="Precio" className="w-60 shrink-0">
+            <span className="text-muted-foreground">Precio:</span>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -442,20 +475,24 @@ function OrganizationsPage() {
                   type="button"
                   onClick={() => setSelectedId(item.id)}
                   aria-pressed={selectedId === item.id}
-                  className={`flex w-full flex-col gap-1 rounded-lg border p-3 text-left text-sm ${
-                    selectedId === item.id ? "border-primary" : ""
+                  className={`flex w-full flex-col gap-1.5 rounded-xl border bg-card p-3 text-left text-sm ${
+                    selectedId === item.id ? "border-muted-foreground ring-1 ring-muted-foreground" : ""
                   }`}
                 >
-                  <span className="flex items-center gap-2 font-medium">
-                    <span className="truncate">{item.name}</span>
-                    {item.restricted ? <Badge variant="destructive">Restringida</Badge> : null}
+                  <ProductMark product={item.product} />
+                  <span className="flex flex-wrap items-center gap-2 font-medium">
+                    <span className="min-w-0 flex-1 truncate">{item.name}</span>
                     {item.negotiated ? <NegotiatedBadge deal={item.negotiated} /> : null}
                     {!item.hasProfile || !item.hasBranch ? (
-                      <Badge variant="outline">Alta incompleta</Badge>
-                    ) : null}
+                      <Badge variant="warning">Alta incompleta</Badge>
+                    ) : item.restricted ? (
+                      <Badge variant="destructive">Restringida</Badge>
+                    ) : (
+                      <Badge variant={statusVariant(item.billingStatus)}>{statusLabel(item.billingStatus)}</Badge>
+                    )}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {item.slug} · {item.memberCount} miembros · {statusLabel(item.billingStatus)}
+                    {item.slug} · {item.memberCount} miembros
                   </span>
                 </button>
               </li>
@@ -477,6 +514,7 @@ function OrganizationsPage() {
               <ErrorState error={detailQuery.error} onRetry={() => void detailQuery.refetch()} />
             ) : detail ? (
               <div className="flex flex-col gap-4 rounded-xl border bg-card p-4">
+                <ProductMark product={detail.product} kind className="text-sm" />
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="font-heading text-base font-medium">{detail.name}</h2>
                   <Badge variant={detail.billing?.restricted ? "destructive" : "outline"}>
@@ -485,11 +523,11 @@ function OrganizationsPage() {
                   {detail.billing?.isDemo ? <Badge variant="outline">Demo</Badge> : null}
                   <a
                     className="ml-auto text-sm underline"
-                    href={platformUrl(detail.slug, "/home")}
+                    href={platformUrl(detail.slug, "/home", detail.product)}
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Abrir clínica
+                    Abrir en {detail.slug}.{domainOf(detail.product)} ↗
                   </a>
                 </div>
                 {!detail.provisioning.complete ? (

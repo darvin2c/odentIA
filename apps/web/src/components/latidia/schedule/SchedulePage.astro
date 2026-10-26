@@ -20,7 +20,7 @@ const gift = giftOf(Astro.locals.pricing)
 const trail: [string, string][] = [["Inicio", "/"], ["Agenda médica", "/agenda-medica"]]
 
 const reminders = [
-  { title: "Antes de cada cita", text: "Un recordatorio por su canal, con la hora, el médico y la dirección." },
+  { title: "Antes de cada cita", text: "Un recordatorio por su canal, con la fecha, la hora, el médico y el consultorio." },
   { title: "Cambia o cancela sola", text: "Respondiendo el mensaje o desde Su enlace, y el horario se libera para otro.", link: true },
   { title: "Por sala y por médico", text: "Vista de día, de semana o en lista; un médico o todos; una sede o varias." },
   { title: "Cada servicio con quien lo atiende", text: "La agenda ofrece pediatría a quien atiende pediatría, en sus horarios libres." },
@@ -179,7 +179,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .sp-argos-copy { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
   .sp-argos-demo { flex: 1 1 440px; min-width: 0; }
   .sp-tag.argos { color: #9a6a12; }
-  .sp-link { font-weight: 700; align-self: flex-start; }
+  .sp-link { font-weight: 700; align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; }
 
   .sp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
   .sp-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }

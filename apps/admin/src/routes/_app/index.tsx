@@ -2,8 +2,10 @@ import { EmptyState, ErrorState, LoadingState, PageHeader, PageShell } from "@od
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowRight } from "lucide-react"
+import { useState } from "react"
 import { z } from "zod"
 import { api } from "../../lib/api"
+import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import { TodayBilling } from "../../components/today-billing"
 
 export const Route = createFileRoute("/_app/")({ component: AdminHome })
@@ -49,9 +51,15 @@ function AdminHome() {
     queryFn: async () => overviewSchema.parse(await api<unknown>("/api/admin/overview")),
   })
   const pending = overview.data?.items.filter((item) => item.count > 0) ?? []
+  // El filtro alcanza a lo que es de una clínica (vencimientos, pruebas, costo y margen); las colas
+  // de arriba suman los dos productos.
+  const [product, setProduct] = useState<ProductChoice>("todos")
+  const products = useOrgProducts().data ?? {}
+  const expiring = (overview.data?.expiring ?? []).filter((item) => matchesProduct(product, products[item.organizationId]))
   return (
     <PageShell className="space-y-6">
-      <PageHeader title="Hoy" subtitle="Lo que necesita atención del equipo de odentIA" />
+      <PageHeader title="Hoy" subtitle="Lo que necesita atención del equipo, en los dos productos." />
+      <ProductFilter value={product} onChange={setProduct} />
       {overview.isPending ? (
         <LoadingState message="Consultando pendientes…" />
       ) : overview.isError ? (
@@ -80,18 +88,21 @@ function AdminHome() {
           ))}
         </ul>
       )}
-      {overview.data && overview.data.expiring.length > 0 ? (
+      {expiring.length > 0 ? (
         <section aria-labelledby="vencen-pronto" className="space-y-3">
           <h2 id="vencen-pronto" className="text-base font-semibold">
             Precios especiales que vencen pronto
           </h2>
           <ul className="divide-y rounded-xl border bg-card">
-            {overview.data.expiring.map((item) => {
+            {expiring.map((item) => {
               const text = expiringText(item, new Date())
               return (
                 <li key={`${item.kind}-${item.organizationId}`} className="flex flex-wrap items-center gap-3 p-4">
                   <span className="min-w-0 flex-1">
-                    <span className="block font-medium">{item.organizationName}</span>
+                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                      {item.organizationName}
+                      {products[item.organizationId] ? <ProductMark product={products[item.organizationId]} /> : null}
+                    </span>
                     <span className="block text-sm text-muted-foreground">
                       {text.title} · <span className={text.soon ? "font-medium text-destructive" : undefined}>{text.tail}</span>
                     </span>
@@ -112,7 +123,7 @@ function AdminHome() {
           </p>
         </section>
       ) : null}
-      <TodayBilling />
+      <TodayBilling product={product} />
     </PageShell>
   )
 }

@@ -1,8 +1,8 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.seguridad). En latidIA, su propia página (components/latidia/security).
+// Contenido en src/lib/pages-data.ts (PAGES.seguridad). Cada web tiene su página, con la misma estructura:
+// odentIA (components/security) y latidIA (components/latidia/security).
 import SecurityPage from "../components/latidia/security/SecurityPage.astro"
-import InnerPage from "../components/pages/InnerPage.astro"
-import { PAGES } from "../lib/pages-data"
+import DentalSecurityPage from "../components/security/SecurityPage.astro"
 import { MEDICAL } from "../lib/product"
 ---
-{MEDICAL ? <SecurityPage /> : <InnerPage page={PAGES.seguridad} />}
+{MEDICAL ? <SecurityPage /> : <DentalSecurityPage />}

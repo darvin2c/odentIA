@@ -62,7 +62,8 @@ const systemMenu: NavMenu = MEDICAL
       columns: 2,
       items: [
         { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales", text: "Examen por sistemas, antecedentes y su presión en el tiempo." },
-        { href: "/historia-clinica-electronica#imagenes", label: "Radiografías y ecografías", text: "Las que trae la persona, en su historia: brillo, zoom y comparar." },
+        { href: "/radiografias-y-ecografias", label: "Radiografías y ecografías", text: "Las que trae la persona, en su historia: brillo, zoom y comparar." },
+        { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
         { href: "/receta-y-descanso-medico", label: "Receta y descanso médico", text: "Avisa embarazo y alergias; el descanso, firmado y numerado." },
         { href: "/agenda-medica", label: "Agenda y controles", text: "Por sala y por médico, con controles que se repiten." },
         { href: "/caja-y-cobros", label: "Caja y varias sedes", text: "Cada consulta cobrada, en cada sede." },
@@ -76,6 +77,7 @@ const systemMenu: NavMenu = MEDICAL
       items: [
         { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma", text: "Odontograma en herradura, periodontograma y cada atención en orden." },
         { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía", text: "Ábrelas en la ficha: brillo, medidas y comparar. Sin instalar nada." },
+        { href: "/buscador", label: "Buscador", text: "Escribe un nombre o lo que buscas y llegas en un toque." },
         { href: "/presupuestos-dentales", label: "Presupuestos", text: "Opciones claras con los precios de tu tarifario." },
         { href: "/agenda-odontologica", label: "Agenda", text: "Por odontólogo y unidad dental, con recordatorios solos." },
         { href: "/caja-y-cobros", label: "Caja y cobros", text: "Cobros, adelantos y el cierre de caja con su hoja." },
@@ -109,6 +111,8 @@ export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
         title: "El sistema",
         links: [
           { href: "/historia-clinica-electronica", label: "Historia clínica y signos vitales" },
+          { href: "/radiografias-y-ecografias", label: "Radiografías y ecografías" },
+          { href: "/buscador", label: "Buscador" },
           { href: "/receta-y-descanso-medico", label: "Receta y descanso médico" },
           { href: "/agenda-medica", label: "Agenda y controles" },
           { href: "/caja-y-cobros", label: "Caja y varias sedes" },
@@ -150,6 +154,7 @@ export const footerGroups: { title: string; links: NavLink[] }[] = MEDICAL
       { href: "/agenda-odontologica", label: "Agenda" },
       { href: "/historia-clinica-y-odontograma", label: "Historia y odontograma" },
       { href: "/radiografias-y-tomografia", label: "Radiografías y tomografía" },
+      { href: "/buscador", label: "Buscador" },
       { href: "/presupuestos-dentales", label: "Presupuestos" },
       { href: "/caja-y-cobros", label: "Caja y cobros" },
       { href: "/portal-del-paciente", label: "Su enlace" },

@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Fragment, useState } from "react"
 import { api } from "../lib/api"
+import { matchesProduct, type ProductChoice, ProductMark, useOrgProducts } from "./product"
 
 interface CostLine {
   key: string
@@ -367,16 +368,41 @@ export function ClinicCostMarginSection({ organizationId }: { organizationId: st
 }
 
 /** Costo y margen de todas las clínicas, con «Para revisar» arriba (tablero O3). */
-export function CostMarginOverviewSection() {
+/** Los totales de las clínicas que se ven, como los suma el servidor (`getCostMarginOverview`). */
+function summaryOf(clinics: ClinicCostMargin[]): Overview {
+  const charged = clinics.reduce((sum, item) => sum + item.chargedCents, 0)
+  const costTotal = clinics.reduce((sum, item) => sum + item.costMicros, 0)
+  const commission = clinics.reduce((sum, item) => sum + item.commissionCents, 0)
+  const pct = (base: number, spent: number) => (base > 0 ? Math.round((1 - spent / base) * 100) : null)
+  return {
+    clinics,
+    founders: clinics.filter((item) => item.founder).length,
+    chargedCents: charged,
+    costMicros: costTotal,
+    aiMicros: clinics.reduce((sum, item) => sum + item.aiMicros, 0),
+    storageMicros: clinics.reduce((sum, item) => sum + item.storageMicros, 0),
+    fixedMicros: clinics.reduce((sum, item) => sum + item.fixedMicros, 0),
+    marginPct: pct(charged * 10_000, costTotal),
+    marginAfterCommissionPct: pct(charged * 10_000, costTotal + commission * 10_000),
+  }
+}
+
+export function CostMarginOverviewSection({ product = "todos" }: { product?: ProductChoice }) {
   const [order, setOrder] = useState<"margen" | "costo">("margen")
   const query = useQuery({
     queryKey: ["admin", "billing", "cost-margin"],
     queryFn: () => api<Overview>("/api/admin/billing/cost-margin"),
     retry: false,
   })
+  const products = useOrgProducts().data ?? {}
   // Soporte no ve importes: sin acceso, la sección no aparece.
   if (!query.data || query.data.clinics.length === 0) return null
-  const data = query.data
+  // Con un producto elegido, los totales se suman solo de sus clínicas.
+  const data =
+    product === "todos"
+      ? query.data
+      : summaryOf(query.data.clinics.filter((item) => matchesProduct(product, products[item.organizationId])))
+  if (data.clinics.length === 0) return null
   const review = data.clinics.filter((item) => item.alarm || item.idle)
   const sorted = [...data.clinics].sort((a, b) =>
     order === "margen" ? (a.marginPct ?? -1) - (b.marginPct ?? -1) : b.costMicros - a.costMicros,
@@ -423,11 +449,10 @@ export function CostMarginOverviewSection() {
                 className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4 text-sm"
               >
                 <div className="min-w-0 flex-1 basis-60">
-                  <p className="font-medium">
-                    <Badge variant={stateOf(item).variant} className="mr-2">
-                      {stateOf(item).label}
-                    </Badge>
+                  <p className="flex flex-wrap items-center gap-2 font-medium">
+                    <Badge variant={stateOf(item).variant}>{stateOf(item).label}</Badge>
                     {item.organizationName}
+                    {products[item.organizationId] ? <ProductMark product={products[item.organizationId]} /> : null}
                   </p>
                   <p className="text-muted-foreground">{reviewReason(item)}</p>
                 </div>
@@ -490,6 +515,9 @@ export function CostMarginOverviewSection() {
                   >
                     {item.organizationName}
                   </Link>
+                  {products[item.organizationId] ? (
+                    <ProductMark product={products[item.organizationId]} className="mt-0.5 flex" />
+                  ) : null}
                 </th>
                 <td className="py-2">{item.planName ?? "—"}</td>
                 <td className="whitespace-nowrap py-2 pl-3 text-right tabular-nums">

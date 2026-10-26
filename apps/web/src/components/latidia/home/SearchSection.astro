@@ -17,12 +17,11 @@ import { MEDICAL_SEARCH } from "./search-data"
     </div>
     <div class="lf-more">
       <ul class="lf-points">
-        <li><b>Escribe como te salga.</b> «tomas» encuentra a Tomás, sin tildes ni mayúsculas y con solo el comienzo del nombre o del apellido.</li>
-        <li><b>Por teléfono, DNI o historia.</b> «987 654», un DNI, «HC-000002» o el número de un comprobante. Si una mamá y su hijo comparten teléfono, aparecen los dos.</li>
+        <li><b>Escribe como te salga.</b> «tomas» encuentra a Tomás, sin tildes ni mayúsculas y con solo el comienzo del nombre.</li>
         <li><b>Cada cosa con su paciente.</b> La receta, el diagnóstico, el hemograma y los mensajes, debajo de quien son. Un Enter y estás ahí.</li>
-        <li><b>¿Es una pregunta? Responde Argos.</b> Escribe «¿Cuántas consultas cobramos en octubre?» y Argos te contesta con los datos de tu consultorio.</li>
       </ul>
-      <p class="lf-note">Cada rol encuentra solo lo que puede abrir: recepción no ve la historia clínica y el médico no ve la caja. Los documentos e imágenes se encuentran por su nombre.</p>
+      <p class="lf-note">Cada rol encuentra solo lo que puede abrir.</p>
+      <a class="btn btn-g lf-link" href="/buscador">Ver el buscador</a>
     </div>
   </div>
 </section>
@@ -106,6 +105,9 @@ import { MEDICAL_SEARCH } from "./search-data"
   }
   .lf-points b {
     color: var(--on-night);
+  }
+  .lf-link {
+    align-self: flex-start;
   }
   .lf-note {
     padding-top: 14px;

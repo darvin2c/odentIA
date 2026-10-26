@@ -61,13 +61,13 @@ const checks = [
   "Los controlados no se emiten aquí: usa la receta oficial.",
 ]
 
-// Un día de consulta con los precios publicados: 20 consultas completas. Sin precios, no se pregunta.
-const completa = plan?.tiers.completa ?? null
+// Un día de consulta con los precios publicados: 20 consultas estándar. Sin precios, no se pregunta.
+const estandar = plan?.tiers.estandar ?? null
 const day =
-  plan && completa !== null
+  plan && estandar !== null
     ? {
         q: "¿Cuánto cuesta un día de consulta?",
-        a: `Con precios ${founder ? "de Fundadores" : "de lista"}, 20 consultas completas son ${money(20 * completa, plan.currency)}.`,
+        a: `Con precios ${founder ? "de Fundadores" : "de lista"}, 20 consultas estándar son ${money(20 * estandar, plan.currency)}.`,
       }
     : null
 const faq: AgentQuestion[] = [
@@ -232,7 +232,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq.map(({ q, a }
       agent="clio"
       white
       title="Una vez por consulta, y solo si confirmas."
-      text="Si descartas el borrador y escribes tú, no se cobra. Sin tope de pausas ni de minutos. La consulta de Rosa fue completa: dejó indicado el descanso."
+      text="Si descartas el borrador y escribes tú, no se cobra. Sin tope de pausas ni de minutos. La consulta de Rosa fue estándar: tuvo examen físico, diagnóstico y descanso médico."
     />
 
     <AgentFaq items={faq} />

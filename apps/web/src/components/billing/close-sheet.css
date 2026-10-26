@@ -1,0 +1,42 @@
+/* Cierre de caja (CloseSheet.tsx): el panel a la izquierda y la hoja de papel a la derecha. */
+.cs { --cs-line: color-mix(in srgb, var(--teal) 14%, #fff); display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.cs-panel { flex: 1 1 340px; min-width: 0; background: var(--bg); border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 16px; }
+.cs-title { font-size: 20px; }
+.cs-box { margin: 0; background: #eef0f4; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.cs-box > div { display: flex; justify-content: space-between; gap: 12px; }
+.cs-box dd { margin: 0; font-variant-numeric: tabular-nums; }
+.cs-total { border-top: 1px solid #cbd5e1; margin-top: 4px; padding-top: 8px; font-size: 16px; font-weight: 700; }
+.cs-pick { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.cs-pick legend { font-size: 14px; font-weight: 600; padding: 0; margin-bottom: 8px; }
+.cs-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.cs-opts button { min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); font: 600 14px var(--font); cursor: pointer; font-variant-numeric: tabular-nums; }
+.cs-opts button[aria-pressed="true"] { border-color: var(--teal); background: var(--teal-soft); color: var(--teal-hover); box-shadow: inset 0 0 0 1px var(--teal); }
+.cs-opts button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.cs-status { margin: 0; font-size: 14px; line-height: 1.45; }
+.cs-status.ok { color: #166534; }
+.cs-status.bad { color: #9b1c1c; }
+.cs-split { display: flex; flex-direction: column; gap: 8px; }
+.cs-split-k { font-size: 14px; font-weight: 600; }
+.cs-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cs-two > span { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.cs-two small { font-size: 12px; color: var(--muted); }
+.cs-two b { font-size: 17px; font-variant-numeric: tabular-nums; }
+.cs-hint { font-size: 13px; color: var(--muted); }
+.cs-others { font-size: 13px; line-height: 1.5; color: var(--muted); border-top: 1px solid var(--cs-line); padding-top: 12px; }
+
+.cs-sheet { flex: 0 1 320px; min-width: 260px; margin: 0 auto; background: #fffdf8; color: #1e293b; border-radius: 8px; padding: 22px 20px; box-shadow: 0 30px 60px -30px rgba(15, 23, 42, .4); font-family: var(--agent-font); font-size: 12.5px; line-height: 1.6; display: flex; flex-direction: column; gap: 2px; }
+.cs-c { text-align: center; }
+.cs-big { font-size: 15px; margin-top: 6px; }
+.cs-line { display: flex; justify-content: space-between; gap: 10px; }
+.cs-line > span:last-child { font-variant-numeric: tabular-nums; text-align: right; }
+.cs-strong { font-weight: 700; }
+.cs-deliver { font-size: 14px; border-top: 1px dashed #cbd5e1; margin-top: 4px; padding-top: 6px; }
+.cs-cut { border-top: 1px dashed #cbd5e1; margin: 6px 0; }
+.cs-dim { color: var(--muted); font-size: 11.5px; }
+.cs-sign { display: flex; justify-content: space-between; gap: 24px; margin-top: 34px; }
+.cs-sign span { flex: 1; border-top: 1px solid #94a3b8; padding-top: 4px; text-align: center; }
+
+@media (max-width: 720px) {
+  .cs-panel { padding: 16px; flex-basis: 100%; }
+  .cs-sheet { flex-basis: 100%; }
+}

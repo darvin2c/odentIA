@@ -1,7 +1,6 @@
 import {
   AppShell,
   type AppShellNavEntry,
-  Brand,
   type ShellLinkComponent,
   SideDockProvider,
   SideDockSlot,
@@ -23,6 +22,7 @@ import {
   Users,
 } from "lucide-react"
 import { z } from "zod"
+import { AdminBrand, AdminMark, ProductLogos } from "../components/admin-brand"
 import { api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
@@ -98,16 +98,9 @@ function AdminLayout() {
         { label: "Mi cuenta", icon: UserRound, href: panelUrl("/profile") },
         { label: "Seguridad de acceso", icon: ShieldCheck, to: "/security" },
       ]}
-      brand={<Brand />}
-      brandIcon={<Brand compact />}
-      switcher={
-        <div className="px-2 py-1">
-          <p className="text-sm font-semibold">Administración</p>
-          <p className="text-xs text-muted-foreground">
-            {adminSession.actor.role === "admin" ? "Personal administrador" : "Personal de soporte"}
-          </p>
-        </div>
-      }
+      brand={<AdminBrand />}
+      brandIcon={<AdminMark />}
+      switcher={<ProductLogos className="px-2 pt-1 pb-2" />}
       sidebarFooter={
         // Un ítem del menú como los demás: con el menú en íconos queda la flecha y su globo, no el
         // texto partido. Lleva al panel, otra app, así que es un enlace normal y no del router.

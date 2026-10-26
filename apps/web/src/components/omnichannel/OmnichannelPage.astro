@@ -1,0 +1,165 @@
+---
+// /omnicanal de odentIA (misma estructura que la de latidIA): la portada con los seis canales que llegan
+// a la ficha de Lucía, una sola persona aunque cambie de canal (y la mamá que escribe por su hija),
+// WhatsApp para clínicas con la ventana de 24 horas y el recordatorio aprobado, enlaces relacionados,
+// preguntas y cierre. Título, descripción, migas y relacionados son los de PAGES.omnicanal; las preguntas
+// se escriben aquí para quitar los marcadores «Por confirmar» que la plantilla genérica deja a la vista.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { giftOf, shownPlan } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import Related from "../pages/Related.astro"
+import ChannelsToRecord from "./ChannelsToRecord"
+import ReminderPhone from "./ReminderPhone.astro"
+import WhatsappWindow from "./WhatsappWindow"
+import "./om-page.css"
+
+const page = PAGES.omnicanal
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const gift = giftOf(pricing)
+const cta = ctaOf(pricing)
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  [page.crumb, page.path],
+]
+
+const onePerson: { title: string; text: string; link?: { href: string; label: string } }[] = [
+  { title: "Una ficha por persona", text: "Con todos sus canales y su única historia clínica. Sin fichas repetidas." },
+  { title: "Sin adivinar por el número", text: "Un número parecido no basta para dar datos de un paciente. Cuando se sabe quién es, se une a su ficha de siempre." },
+  { title: "Sofi responde en cada canal", text: "Donde le escriben, a cualquier hora.", link: { href: "/agentes/recepcion", label: "Conoce a Sofi" } },
+  { title: "Tu equipo, cuando hace falta", text: "Lo que necesita a una persona pasa a tu equipo, con un resumen de lo hablado." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Qué significa omnicanal?",
+    a: "Que atiendes por WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo, y todo queda en una sola ficha por persona.",
+  },
+  {
+    q: "¿Qué pasa si un paciente me escribe por otro canal?",
+    a: "La conversación sigue donde iba. Tu equipo y tus agentes ven todo lo que se habló, por cualquier canal, en la misma ficha.",
+  },
+  {
+    q: "¿Qué pasa si una mamá escribe por su hijo?",
+    a: "odentIA distingue al paciente de quien conversa y de quien responde por él. Todo queda en la ficha del paciente, sin crear otra persona.",
+  },
+  {
+    q: "¿Mi equipo puede responder también?",
+    a: "Sí, desde la Bandeja o desde la ficha de la persona, eligiendo por qué canal. Si alguien del equipo escribe, Sofi espera 15 minutos antes de volver a hablar.",
+  },
+  {
+    q: "¿Atienden llamadas o SMS?",
+    a: "No. odentIA atiende mensajes escritos: WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo.",
+  },
+  {
+    q: "¿Puedo usar el WhatsApp que ya tiene mi clínica?",
+    a: "Sí. Conectas el número de tu clínica desde tu cuenta de Meta, con pasos guiados dentro de odentIA, y tus pacientes siguen escribiendo al de siempre.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <div class="om">
+    <section class="hero om-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap om-hero-in">
+        <div class="om-top">
+          <div class="om-copy">
+            <span class="tag tag-d om-tag rise">[ Omnicanal ]</span>
+            <h1 class="om-h1 rise d1">Software omnicanal para clínicas: <span class="acc">todos tus canales, en la ficha de cada paciente.</span></h1>
+          </div>
+          <div class="om-side">
+            <p class="om-lead rise d2">WhatsApp, Instagram, Messenger, Telegram, el chat de tu web y el correo llegan a un solo lugar. Cada mensaje se une a la persona, con su historia y sus citas.</p>
+            <div class="om-ctas rise d3">
+              <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+              <a class="btn btn-g" href="#whatsapp">Cómo va WhatsApp</a>
+            </div>
+          </div>
+        </div>
+        <div class="rise d2">
+          <ChannelsToRecord client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="om-sec">
+      <div class="wrap om-in">
+        <div class="om-head">
+          <span class="tag om-tag">[ Una sola persona ]</span>
+          <h2 class="om-h2">Cambia de canal y la conversación sigue con ella.</h2>
+          <p class="om-p">Quien atiende ve lo que Lucía preguntó por Instagram el lunes y lo que pidió su mamá por WhatsApp hoy, sin buscar en el celular de recepción.</p>
+        </div>
+        <div class="om-split">
+          <div class="om-cards">
+            {onePerson.map((item) => (
+              <div class="om-card">
+                <h3>{item.title}</h3>
+                <p>{item.text}{item.link && <> <a href={item.link.href}>{item.link.label}</a></>}</p>
+              </div>
+            ))}
+          </div>
+          <div class="om-who">
+            <span class="om-who-tag">Quien escribe no siempre es el paciente</span>
+            <div class="om-who-row"><span>Escribe por WhatsApp</span><b>Carmen, su mamá</b></div>
+            <div class="om-who-row"><span>La paciente</span><b>Lucía Ramos, 14 años</b></div>
+            <p>La cita y la historia clínica quedan a nombre de Lucía; la conversación, con Carmen, que agenda y paga. Cada una en su ficha.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="om-sec white" id="whatsapp">
+      <div class="wrap om-in wa">
+        <div class="om-head">
+          <span class="tag om-tag">[ WhatsApp ]</span>
+          <h2 class="om-h2">WhatsApp para tu clínica, con tu número de siempre.</h2>
+          <p class="om-p">Conectas el número de la clínica desde tu cuenta de Meta, con pasos guiados. Tus pacientes siguen escribiendo donde siempre. <a href="/whatsapp-para-clinicas-dentales">Ver cómo se conecta</a></p>
+        </div>
+        <div class="om-wa">
+          <div class="om-window">
+            <WhatsappWindow client:visible />
+          </div>
+          <ReminderPhone />
+        </div>
+        <div class="om-grid">
+          <div class="om-card soft">
+            <h3>Recordatorio de cada cita</h3>
+            <p>Argos recuerda cada cita con la hora y el profesional. Si responde, lo atiende Sofi.</p>
+          </div>
+          <div class="om-card soft">
+            <h3>Su enlace en el mensaje</h3>
+            <p>Para elegir la hora, cambiar su cita o ver sus documentos. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+          </div>
+          <div class="om-card soft">
+            <h3>Lo que cobra Meta</h3>
+            <p>WhatsApp se lo cobra Meta a la clínica, con sus tarifas. Lo revisas en tu cuenta de Meta; odentIA no lo cobra ni lo estima.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} />
+    <div class="om-faq">
+      <Faq items={faq} />
+    </div>
+    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta.">
+      <Fragment slot="text">
+        {gift ? (
+          founder ? (
+            <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          ) : (
+            <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          )
+        ) : (
+          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>

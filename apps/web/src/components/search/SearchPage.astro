@@ -1,0 +1,230 @@
+---
+// /buscador (odentIA y latidIA): la portada con la demo grande y viva del buscador (SearchDemo, la misma
+// de las portadas), qué encuentra, cómo se abre en tres pasos, qué ve cada rol, lo que no es un nombre
+// (Ayuda y Argos), las preguntas y el cierre. Lo que dice cada tarjeta se comprobó en el producto:
+// `SEARCH_TYPE_PERMISSIONS` (clinic-app/lib/global-search.ts) y los permisos de packages/auth.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { MEDICAL } from "../../lib/product"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import SearchDemo from "../home/SearchDemo"
+import { DENTAL_SEARCH } from "../home/search-data"
+import { MEDICAL_SEARCH } from "../latidia/home/search-data"
+
+const cta = ctaOf(Astro.locals.pricing)
+const data = MEDICAL ? MEDICAL_SEARCH : DENTAL_SEARCH
+const clinicWord = MEDICAL ? "consultorio" : "clínica"
+const trail: [string, string][] = [["Inicio", "/"], ["Buscador", "/buscador"]]
+const histHref = MEDICAL ? "/historia-clinica-electronica" : "/historia-clinica-y-odontograma"
+const money = MEDICAL ? "cobros" : "pagos"
+
+const title = MEDICAL
+  ? "Buscador para tu consultorio: pacientes, citas, recetas y cobros en un paso"
+  : "Buscador para tu clínica dental: pacientes, citas, presupuestos y pagos en un paso"
+const description = MEDICAL
+  ? "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: pacientes, citas, recetas, mensajes y cobros aparecen juntos, cada uno debajo de su paciente. Cada rol encuentra solo lo que puede abrir."
+  : "Pulsa Ctrl K en cualquier pantalla y escribe lo que recuerdes: pacientes, citas, presupuestos, mensajes y pagos aparecen juntos, cada uno debajo de su paciente. Cada rol encuentra solo lo que puede abrir."
+
+const found = MEDICAL
+  ? [
+      { title: "Personas", text: "Por nombre, apellido, teléfono, documento o número de historia. Si una mamá y su hijo comparten teléfono, aparecen los dos." },
+      { title: "Citas y controles", text: "La próxima cita y los controles de cada paciente, con su fecha. Enter te lleva a la Agenda." },
+      { title: "Mensajes", text: "Lo que escribió el paciente por cualquier canal, debajo de quien es. Enter abre la conversación en la Bandeja." },
+      { title: "Historia clínica", text: "Atenciones, diagnósticos y recetas, debajo de su paciente. Solo para quien puede abrir la historia." },
+      { title: "Documentos e imágenes", text: "Informes, hemogramas y estudios, por su nombre. Solo para quien puede abrir la historia." },
+      { title: "Cobros", text: "Tickets y comprobantes por su número, y lo que debe cada paciente. Solo para quien ve cobros." },
+    ]
+  : [
+      { title: "Personas", text: "Por nombre, apellido, teléfono, DNI o número de historia. Si dos personas comparten un teléfono, aparecen las dos." },
+      { title: "Citas y controles", text: "La próxima cita y los controles de cada paciente, con su fecha. Enter te lleva a la Agenda." },
+      { title: "Mensajes", text: "Lo que escribió el paciente por cualquier canal, debajo de quien es. Enter abre la conversación en la Bandeja." },
+      { title: "Historia clínica", text: "Atenciones, diagnósticos y tratamientos, debajo de su paciente. Solo para quien puede abrir la historia." },
+      { title: "Documentos e imágenes", text: "Radiografías, consentimientos y estudios, por su nombre. Solo para quien puede abrir la historia." },
+      { title: "Presupuestos y pagos", text: "Presupuestos y comprobantes por su número, y lo que debe cada paciente. Solo para quien los puede ver." },
+    ]
+
+const steps = [
+  { n: "01", title: "Ábrelo donde estés", text: "Ctrl K (⌘ K en Mac) desde cualquier pantalla. En el teléfono, la lupa de arriba. El mismo atajo lo cierra." },
+  {
+    n: "02",
+    title: "Escribe lo que recuerdes",
+    text: `Sin tildes ni mayúsculas, y con solo el comienzo del nombre o del apellido: «${MEDICAL ? "tomas" : "lucia"}» encuentra a ${MEDICAL ? "Tomás" : "Lucía"}.`,
+  },
+  { n: "03", title: "Enter y estás ahí", text: "Con las flechas eliges y Enter te lleva a la pantalla que ya existe. Lo que abriste hace poco aparece al abrir el buscador." },
+]
+
+const roles = MEDICAL
+  ? [
+      { role: "Recepción", yes: "Pacientes, citas, mensajes, tareas y servicios.", no: "Historia clínica, documentos ni cobros." },
+      { role: "Médico", yes: "Pacientes, historia, documentos, citas y mensajes.", no: "Los cobros de caja." },
+      { role: "Caja", yes: "Pacientes y cobros.", no: "Historia clínica, citas ni mensajes." },
+    ]
+  : [
+      { role: "Recepción", yes: "Pacientes, citas, mensajes, presupuestos, tareas y servicios.", no: "Historia clínica, documentos ni pagos de caja." },
+      { role: "Odontólogo", yes: "Pacientes, historia, documentos, citas, mensajes y presupuestos.", no: "Los pagos de caja." },
+      { role: "Caja", yes: "Pacientes, pagos y presupuestos.", no: "Historia clínica, citas ni mensajes." },
+    ]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Dónde está el buscador?",
+    a: "En la cabecera de la aplicación, como «Buscar en todo». Ctrl K (⌘ K en Mac) lo abre desde cualquier pantalla y en el teléfono es la lupa de arriba.",
+  },
+  {
+    q: "¿Puede ver alguien lo que no debe?",
+    a: "No. Cada búsqueda se revisa en el servidor con los permisos del rol: recepción no ve la historia clínica y caja no ve citas ni mensajes. Si un tipo no es para ti, ni siquiera aparece en el filtro.",
+  },
+  {
+    q: "¿Encuentra por teléfono o por documento?",
+    a: "Sí. Por teléfono, por documento y por número de historia, además del nombre y el apellido. Si dos personas comparten un teléfono, aparecen las dos y tú eliges.",
+  },
+  {
+    q: "¿Y si no recuerdo el nombre?",
+    a: MEDICAL
+      ? "Escribe lo que recuerdes de lo que hicieron: una receta, un diagnóstico, el nombre de un informe. Cada resultado dice a qué paciente pertenece."
+      : "Escribe lo que recuerdes de lo que hicieron: un presupuesto, un tratamiento, el nombre de una radiografía. Cada resultado dice a qué paciente pertenece.",
+  },
+  {
+    q: "¿Puedo hacerle una pregunta, como «¿cuánto cobramos en octubre?»?",
+    a: `Sí, si tu rol ve Reportes. El buscador ofrece «Preguntarle a Argos», que responde con los datos de tu ${clinicWord}. Una pregunta de cómo se usa la aplicación se le hace a Ayuda.`,
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <section class="hero fh">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap fh-in">
+      <div class="fh-copy">
+        <span class="tag tag-d rise">[ El buscador ]</span>
+        <h1 class="fh-h1 rise d1">Escribe lo que recuerdes. <span class="acc">Llegas en un paso.</span></h1>
+        <p class="fh-lead rise d2">{`Pacientes, citas, mensajes, historia y ${money} aparecen juntos, cada cosa debajo de su paciente. Pruébalo aquí al lado con datos de ejemplo.`}</p>
+        <div class="fh-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="#como">Ver cómo se abre</a>
+        </div>
+      </div>
+      <div class="fh-demo rise d2" data-cta-room>
+        <SearchDemo client:visible={{ rootMargin: "200px" }} data={data} />
+      </div>
+    </div>
+  </section>
+
+  <section class="section fs">
+    <div class="wrap fs-in">
+      <div class="fs-head">
+        <span class="tag">[ Qué encuentra ]</span>
+        <h2 class="fs-h2">Todo lo de tu paciente, en una sola lista.</h2>
+        <p class="fs-lead">Cada cosa aparece debajo de su dueño y lleva la palabra de lo que es. Un filtro por tipo deja solo lo que buscas, y también encuentra las pantallas: escribe «agenda» y Enter.</p>
+      </div>
+      <div class="fs-grid">
+        {found.map((item) => (
+          <div class="fs-card">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-white" id="como">
+    <div class="wrap fs-in">
+      <div class="fs-head">
+        <span class="tag">[ Cómo se abre ]</span>
+        <h2 class="fs-h2">Tres toques, sin menús.</h2>
+      </div>
+      <ol class="fs-steps">
+        {steps.map((step) => (
+          <li class="fs-step">
+            <span class="fs-n">{step.n}</span>
+            <h3>{step.title}</h3>
+            <p>{step.text}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="section fs">
+    <div class="wrap fs-in">
+      <div class="fs-head">
+        <span class="tag">[ Cada rol ve lo suyo ]</span>
+        <h2 class="fs-h2">Encuentra solo lo que puedes abrir.</h2>
+        <p class="fs-lead">El servidor revisa los permisos de tu rol en cada búsqueda. Lo que no es para ti no aparece, ni en los resultados ni en el filtro.</p>
+      </div>
+      <div class="fs-grid">
+        {roles.map((r) => (
+          <div class="fs-card">
+            <h3>{r.role}</h3>
+            <p><strong>Encuentra:</strong> {r.yes}</p>
+            <p><strong>No ve:</strong> {r.no}</p>
+          </div>
+        ))}
+      </div>
+      <p class="fs-note">El propietario y el administrador ven todo. <a href={histHref}>Ver la historia clínica</a>.</p>
+    </div>
+  </section>
+
+  <section class="section section-white">
+    <div class="wrap fs-in">
+      <div class="fs-head">
+        <span class="tag">[ Si no es un nombre ]</span>
+        <h2 class="fs-h2">Una pregunta no se busca: se le hace a Argos.</h2>
+        <p class="fs-lead">{`Si lo que escribes es una pregunta de tu ${clinicWord}, como «${MEDICAL ? "¿Cuántas consultas cobramos en octubre?" : "¿Cuánto cobramos en octubre?"}», el buscador ofrece «Preguntarle a Argos» y responde con los datos de tu ${clinicWord}. Si es de cómo se usa la aplicación, la respuesta está en Ayuda. Argos solo se ofrece a quien ve Reportes.`}</p>
+        <a class="fs-link" href="/agentes/administrador">Conoce a Argos</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={faq} />
+  </div>
+  <CtaBand title="Lo que buscas, a un Ctrl K de distancia." />
+</Base>
+
+<style>
+  /* La cabecera del sitio va absoluta encima. En portátil, menos aire para que la ventana entera quepa. */
+  .fh { padding: 144px 0 88px; }
+  .fh-in { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 48px; align-items: center; }
+  .fh-copy { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  .fh-h1 { font-size: clamp(36px, 4.2vw, 52px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky-2); }
+  .fh-lead { font-size: 18px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .fh-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .fh-demo { min-width: 0; }
+
+  .fs { background: var(--bg); }
+  .fs-in { display: flex; flex-direction: column; gap: 36px; }
+  .fs-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .fs-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .fs-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .fs-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+  .fs-step, .fs-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .section-white .fs-step, .section-white .fs-card { background: var(--bg); }
+  .fs-n { font-family: var(--agent-font); font-size: 13px; color: var(--teal); letter-spacing: .08em; }
+  .fs-step h3, .fs-card h3 { font-size: 20px; line-height: 1.25; }
+  .fs-step p, .fs-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .fs-card strong { color: var(--ink); }
+  .fs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+  .fs-note { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .fs-note a, .fs-link { color: var(--teal); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+  .fs-link { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; }
+
+  .faqwrap { background: var(--bg); padding-bottom: 8px; }
+
+  @media (min-width: 1081px) and (max-height: 820px) {
+    .fh { padding-top: 108px; }
+  }
+  @media (max-width: 1080px) {
+    .fh-in { grid-template-columns: minmax(0, 1fr); }
+    .fh-copy { max-width: 640px; }
+  }
+  @media (max-width: 720px) {
+    .fh { padding: 104px 0 56px; }
+    .fh-in { gap: 32px; }
+    .fh-lead { font-size: 17px; }
+  }
+</style>
