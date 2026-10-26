@@ -10,6 +10,7 @@ import { z } from "zod"
 import { ownerDb, setupTestDb } from "./test-setup.js"
 import {
   acceptAdminInvitation,
+  ADMIN_TRUSTED_DEVICE_IDLE_MS,
   ADMIN_MFA_MAX_ATTEMPTS,
   bootstrapAdminStaff,
   canAcceptAdminInvitation,
@@ -27,7 +28,9 @@ import {
   normalizeStaffEmail,
   recordAdminSessionBinding,
   regenerateStaffBackupCodes,
+  resolveAdminVerification,
   setAdminStaffActive,
+  trustAdminDevice,
 } from "./admin-core.js"
 import { ServiceError } from "./errors.js"
 
@@ -162,6 +165,53 @@ describe("admin-core contra Postgres", () => {
     await expect(claimMfaCode(ownerDb, actor, { method: "totp", codeHash: hashMfaCode("f-test", "final") })).rejects.toMatchObject({
       code: "MFA_LOCKED",
     })
+  }, 60_000)
+
+  it("equipo reconocido: no pide el código salvo otro país, 30 días, otra contraseña u otro factor", async () => {
+    await makeUser("u-device", "device@example.test")
+    await makeStaff("u-device", "admin")
+    await ownerDb.execute(
+      sql`insert into two_factor (id,user_id,secret,backup_codes,verified) values ('tf-device','u-device','s','b',true)`,
+    )
+    await ownerDb.execute(
+      sql`insert into account (id,account_id,provider_id,user_id,password,created_at,updated_at) values ('acc-device','u-device','credential','u-device','hash-1',now(),now())`,
+    )
+    const now = new Date()
+    const resolve = (sessionId: string, deviceToken: string | null, country: string | null, at = now) =>
+      resolveAdminVerification(ownerDb, { userId: "u-device", sessionId, deviceToken, country, now: at })
+
+    // Sin equipo reconocido ni marca: se pide, sin motivo especial.
+    expect(await resolve("s-1", null, "PE")).toEqual({ verified: false, reason: null })
+
+    // Tras el código en Perú: otra sesión del mismo equipo en Perú entra sola.
+    const token = await trustAdminDevice(ownerDb, { userId: "u-device", factorId: "tf-device", country: "PE", currentToken: null })
+    const fromDevice = await resolve("s-2", token, "PE")
+    expect(fromDevice.verified && fromDevice.binding.method).toBe("device")
+    // Esa marca vale para la sesión mientras siga en Perú; desde Chile se pide, y dice por qué.
+    expect((await resolve("s-2", token, "PE")).verified).toBe(true)
+    expect(await resolve("s-2", token, "CL")).toEqual({ verified: false, reason: "country" })
+    expect(await resolve("s-3", token, "CL")).toEqual({ verified: false, reason: "country" })
+    // Poner el código en Chile reconoce el mismo equipo allí, con el mismo token.
+    expect(await trustAdminDevice(ownerDb, { userId: "u-device", factorId: "tf-device", country: "CL", currentToken: token })).toBe(token)
+    expect((await resolve("s-4", token, "CL")).verified).toBe(true)
+
+    // 30 días sin abrir la administración en ese equipo: se pide y el equipo deja de valer.
+    const later = new Date(now.getTime() + ADMIN_TRUSTED_DEVICE_IDLE_MS + 60_000)
+    expect(await resolve("s-5", token, "CL", later)).toEqual({ verified: false, reason: null })
+    expect((await resolve("s-6", token, "CL")).verified).toBe(false)
+
+    // Otra contraseña u otro factor dejan sin valor al equipo.
+    const second = await trustAdminDevice(ownerDb, { userId: "u-device", factorId: "tf-device", country: "PE", currentToken: null })
+    await ownerDb.execute(sql`update account set password='hash-2' where id='acc-device'`)
+    expect((await resolve("s-7", second, "PE")).verified).toBe(false)
+    const third = await trustAdminDevice(ownerDb, { userId: "u-device", factorId: "tf-device", country: "PE", currentToken: null })
+    expect((await resolve("s-8", third, "PE")).verified).toBe(true)
+    await ownerDb.execute(sql`update two_factor set id='tf-device-2' where id='tf-device'`)
+    expect((await resolve("s-9", third, "PE")).verified).toBe(false)
+
+    // Un token de otra persona no vale.
+    await makeUser("u-other", "other@example.test")
+    expect((await resolveAdminVerification(ownerDb, { userId: "u-other", sessionId: "s-10", deviceToken: third, country: "PE", now })).verified).toBe(false)
   }, 60_000)
 
   it("enrolamiento abandonado no cuenta y permite reiniciar", async () => {

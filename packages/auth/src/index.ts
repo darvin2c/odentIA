@@ -15,6 +15,7 @@ import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organ
 import { twoFactor } from "better-auth/plugins"
 import { sql } from "drizzle-orm"
 import { accessLink } from "./access-link.js"
+import { forgetAdminDeviceOnSignOut } from "./admin-device.js"
 import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
 import { legalAcceptance } from "./terms.js"
@@ -189,6 +190,7 @@ export function createAuth({
       accessLink({ mailer, webURL, brand }),
       passwordBreachCheck({ enabled: breachCheck }),
       legalAcceptance(),
+      forgetAdminDeviceOnSignOut(ownerDb),
       organization({
         // `permissions.ts` decida por dominio. Sin gestión de miembros ni
         // invitaciones (igual que `member`): solo owner/admin administran,
@@ -269,3 +271,4 @@ export { emailVerificationUrl, REMINDER_VERIFICATION_TTL_SECONDS } from "./email
 export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
 export { termsState } from "./terms.js"
 export * from "./permissions.js"
+export { ADMIN_DEVICE_COOKIE } from "./admin-device.js"

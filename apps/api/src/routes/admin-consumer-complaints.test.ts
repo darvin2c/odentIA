@@ -5,7 +5,7 @@ import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { adminAudit, adminSessionVerification, adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { consumerComplaint } from "@odentia/db/schema/consumer-complaints"
 import type { MailMessage } from "@odentia/mail"
-import { type Storage, secretsKeyFromEnv, submitConsumerComplaint } from "@odentia/services"
+import { type Storage, secretsKeyFromEnv, submitConsumerComplaint, trustAdminDevice } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Hono } from "hono"
@@ -168,6 +168,28 @@ it("solo el personal con su segundo factor y desde la administración", async ()
   expect(((await elsewhere.json()) as Err).error.code).toBe("ADMIN_ORIGIN_REQUIRED")
   const [row] = await ownerDb.select().from(consumerComplaint).where(eq(consumerComplaint.id, sheet.id))
   expect(row?.status).toBe("recibido")
+})
+
+it("un equipo reconocido abre la administración sin código, salvo desde otro país (ADR 0090)", async () => {
+  const app = buildApp(recordingMailer())
+  // «Sin factor» tiene factor sin marca de sesión: sin equipo reconocido se le pide.
+  const token = await trustAdminDevice(ownerDb, {
+    userId: "u-sin-factor",
+    factorId: "f-u-sin-factor",
+    country: "PE",
+    currentToken: null,
+  })
+  const fromDevice = (country: string) =>
+    call(app, "", "u-sin-factor", { headers: { cookie: `odentia_admin_device=${token}`, "cf-ipcountry": country } })
+  const home = await fromDevice("PE")
+  expect(home.status).toBe(200)
+  // Cada uso renueva la cookie del equipo por 30 días, solo para la API.
+  expect(home.headers.get("set-cookie")).toMatch(/odentia_admin_device=.+Path=\/api; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax/)
+  const abroad = await call(app, "", "u-sin-factor", {
+    headers: { cookie: `odentia_admin_device=${token}`, "cf-ipcountry": "CL" },
+  })
+  expect(abroad.status).toBe(403)
+  expect(((await abroad.json()) as Err).error.code).toBe("MFA_REQUIRED")
 })
 
 it("lista, resume y abre la hoja completa; abrirla queda auditado", async () => {

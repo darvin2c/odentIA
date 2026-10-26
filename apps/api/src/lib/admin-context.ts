@@ -1,10 +1,16 @@
-import type { Auth } from "@odentia/auth"
+import { ADMIN_DEVICE_COOKIE, type Auth } from "@odentia/auth"
 import { isAdminRole } from "@odentia/auth/admin-permissions"
 import type { Db } from "@odentia/db"
 import { adminStaff } from "@odentia/db/schema/admin-core"
-import { type AdminActor, getLiveSessionBinding, hasStaffFactor } from "@odentia/services"
+import {
+  ADMIN_TRUSTED_DEVICE_IDLE_MS,
+  type AdminActor,
+  hasStaffFactor,
+  resolveAdminVerification,
+} from "@odentia/services"
 import { eq, sql } from "drizzle-orm"
 import type { Context, Next } from "hono"
+import { getCookie } from "hono/cookie"
 import { errorBody } from "./error.js"
 
 export type { AdminActor }
@@ -21,6 +27,32 @@ export interface AdminSessionIdentity {
   email: string
   emailVerified: boolean
   sessionCreatedAt: Date
+}
+
+
+/** Token del equipo reconocido que trae el navegador, o nulo. */
+export function adminDeviceTokenOf(c: Context): string | null {
+  const token = getCookie(c, ADMIN_DEVICE_COOKIE)
+  return token && /^[A-Za-z0-9_-]{20,100}$/.test(token) ? token : null
+}
+
+/**
+ * País de la visita: la cabecera que pone Cloudflare delante de todo acceso.
+ * Sin ella (desarrollo, pruebas) es nulo, y nulo con nulo cuenta como el mismo.
+ */
+export function visitCountryOf(c: Context): string | null {
+  const country = c.req.header("cf-ipcountry")?.trim().toUpperCase()
+  return country && /^[A-Z0-9]{2}$/.test(country) ? country : null
+}
+
+/**
+ * `Set-Cookie` que reconoce este equipo por 30 días; cada uso la renueva. Va
+ * en `/api` y no solo en la administración: cerrar sesión (`/api/auth/sign-out`)
+ * la lee para olvidar el equipo.
+ */
+export function adminDeviceCookie(token: string): string {
+  const maxAge = Math.floor(ADMIN_TRUSTED_DEVICE_IDLE_MS / 1000)
+  return `${ADMIN_DEVICE_COOKIE}=${token}; Path=/api; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`
 }
 
 /**
@@ -106,11 +138,19 @@ export function requireAdminContext({ auth, ownerDb }: AdminContextDeps) {
         403,
       )
     }
-    const binding = await getLiveSessionBinding(ownerDb, identity.sessionId, new Date())
-    if (!binding) {
+    // El código vale por la marca de la sesión o por el equipo reconocido (ADR 0090).
+    const verification = await resolveAdminVerification(ownerDb, {
+      userId: identity.userId,
+      sessionId: identity.sessionId,
+      deviceToken: adminDeviceTokenOf(c),
+      country: visitCountryOf(c),
+      now: new Date(),
+    })
+    if (!verification.verified) {
       return c.json(errorBody(c, "MFA_REQUIRED", "Verifica tu segundo factor para continuar"), 403)
     }
-    c.set("adminBindingMethod", binding.method)
+    if (verification.deviceToken) c.header("set-cookie", adminDeviceCookie(verification.deviceToken), { append: true })
+    c.set("adminBindingMethod", verification.binding.method)
     await next()
   }
 }

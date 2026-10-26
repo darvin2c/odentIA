@@ -9,7 +9,6 @@ import {
   adminResetStaffFactor,
   claimMfaCode,
   clearPendingStaffFactor,
-  getLiveSessionBinding,
   getStaffFactorId,
   hashMfaCode,
   hasStaffFactor,
@@ -20,12 +19,14 @@ import {
   listPendingAdminInvitations,
   recordAdminSessionBinding,
   regenerateStaffBackupCodes,
+  resolveAdminVerification,
   resendAdminInvitation,
   revokeAdminInvitation,
   revokeStaffBindings,
   ServiceError,
   setAdminStaffActive,
   setAdminStaffRole,
+  trustAdminDevice,
   writeAdminAudit,
 } from "@odentia/services"
 import { staffInvitationTemplate } from "@odentia/mail"
@@ -33,7 +34,14 @@ import { and, eq } from "drizzle-orm"
 import { type Context, Hono, type Next } from "hono"
 import { z } from "zod"
 import type { AppDeps } from "../app.js"
-import { adminContextOf, adminIdentityOf, forbidUnlessManager } from "../lib/admin-context.js"
+import {
+  adminContextOf,
+  adminDeviceCookie,
+  adminDeviceTokenOf,
+  adminIdentityOf,
+  forbidUnlessManager,
+  visitCountryOf,
+} from "../lib/admin-context.js"
 import { errorBody } from "../lib/error.js"
 import { runService, serviceErrorResponse, validationError } from "./helpers.js"
 
@@ -190,8 +198,14 @@ export function createAdminCoreRoute(deps: CoreDeps) {
     const actor = adminContextOf(c)
     const identity = adminIdentityOf(c)
     const now = new Date()
-    const [binding, enrolled, credential] = await Promise.all([
-      getLiveSessionBinding(deps.ownerDb, identity.sessionId, now),
+    const [verification, enrolled, credential] = await Promise.all([
+      resolveAdminVerification(deps.ownerDb, {
+        userId: actor.userId,
+        sessionId: identity.sessionId,
+        deviceToken: adminDeviceTokenOf(c),
+        country: visitCountryOf(c),
+        now,
+      }),
       hasStaffFactor(deps.ownerDb, actor.userId),
       deps.ownerDb
         .select({ id: account.id })
@@ -200,6 +214,8 @@ export function createAdminCoreRoute(deps: CoreDeps) {
         .limit(1),
     ])
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
+    if (verification.verified && verification.deviceToken)
+      c.header("set-cookie", adminDeviceCookie(verification.deviceToken), { append: true })
     return runService(c, 200, async () => ({
       actor,
       user: {
@@ -210,10 +226,12 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       // Enrolar pide la contraseña solo a quien entra con ella (Google no tiene).
       hasPassword: credential.length > 0,
       enrolled,
-      // verified exige las tres: factor enrolado, prueba viva y credencial vigente
-      // (getLiveSessionBinding ya mata pruebas de factores retirados).
-      verified: enrolled && binding !== null,
-      method: enrolled ? (binding?.method ?? null) : null,
+      // verified exige factor enrolado y la marca de la sesión o el equipo
+      // reconocido (`resolveAdminVerification` ya mata pruebas de factores retirados).
+      verified: enrolled && verification.verified,
+      method: enrolled && verification.verified ? verification.binding.method : null,
+      // Por qué se pide el código, si hay algo que decir: «country», otro país.
+      challengeReason: verification.verified ? null : verification.reason,
     }))
   })
 
@@ -221,15 +239,20 @@ export function createAdminCoreRoute(deps: CoreDeps) {
   app.get("/mfa/status", async (c) => {
     const actor = adminContextOf(c)
     const identity = adminIdentityOf(c)
-    const now = new Date()
-    const [binding, enrolled] = await Promise.all([
-      getLiveSessionBinding(deps.ownerDb, identity.sessionId, now),
+    const [verification, enrolled] = await Promise.all([
+      resolveAdminVerification(deps.ownerDb, {
+        userId: actor.userId,
+        sessionId: identity.sessionId,
+        deviceToken: adminDeviceTokenOf(c),
+        country: visitCountryOf(c),
+        now: new Date(),
+      }),
       hasStaffFactor(deps.ownerDb, actor.userId),
     ])
     return runService(c, 200, async () => ({
       enrolled,
-      verified: enrolled && binding !== null,
-      method: enrolled ? (binding?.method ?? null) : null,
+      verified: enrolled && verification.verified,
+      method: enrolled && verification.verified ? verification.binding.method : null,
     }))
   })
 
@@ -318,12 +341,20 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       if (!factorId) throw new ServiceError("MFA_ENROLL", 500, "El factor no quedó registrado")
       // Confirmar enciende el factor también al iniciar sesión: se apaga, se pide aquí.
       await keepStaffSignInWithoutFactor(deps.ownerDb, actor.userId)
+      const country = visitCountryOf(c)
       const binding = await recordAdminSessionBinding(deps.ownerDb, {
         userId: actor.userId,
         sessionId: refreshed.sessionId,
         factorId,
         method: "totp",
         ttlMs: ADMIN_MFA_SESSION_TTL_MS,
+        country,
+      })
+      const deviceToken = await trustAdminDevice(deps.ownerDb, {
+        userId: actor.userId,
+        factorId,
+        country,
+        currentToken: adminDeviceTokenOf(c),
       })
       await writeAdminAudit(deps.ownerDb, actor, {
         action: "staff.mfa.enroll",
@@ -331,7 +362,7 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       })
       return verifiedJson(
         { verified: true, expiresAt: binding.expiresAt.toISOString() },
-        refreshed.setCookies,
+        [...refreshed.setCookies, adminDeviceCookie(deviceToken)],
       )
     } catch (e) {
       const mapped = serviceErrorResponse(c, e)
@@ -373,20 +404,37 @@ export function createAdminCoreRoute(deps: CoreDeps) {
       } catch (e) {
         throw authFailure("verify", e)
       }
+      const country = visitCountryOf(c)
       const binding = await recordAdminSessionBinding(deps.ownerDb, {
         userId: actor.userId,
         sessionId: refreshed.sessionId,
         factorId: challengeFactorId,
         method,
         ttlMs: method === "recovery" ? ADMIN_RECOVERY_SESSION_TTL_MS : ADMIN_MFA_SESSION_TTL_MS,
+        country,
       })
+      // Con el código de la app el equipo queda reconocido; un código de
+      // respaldo no lo reconoce: obliga a enrolar de nuevo.
+      const deviceCookies =
+        method === "totp"
+          ? [
+              adminDeviceCookie(
+                await trustAdminDevice(deps.ownerDb, {
+                  userId: actor.userId,
+                  factorId: challengeFactorId,
+                  country,
+                  currentToken: adminDeviceTokenOf(c),
+                }),
+              ),
+            ]
+          : []
       await writeAdminAudit(deps.ownerDb, actor, {
         action: method === "recovery" ? "staff.recovery.used" : "staff.mfa.challenge",
         metadata: { method, codeHash: hashMfaCode(challengeFactorId, code) },
       })
       return verifiedJson(
         { verified: true, method, expiresAt: binding.expiresAt.toISOString() },
-        refreshed.setCookies,
+        [...refreshed.setCookies, ...deviceCookies],
       )
     } catch (e) {
       const mapped = serviceErrorResponse(c, e)

@@ -16,9 +16,10 @@ import {
   adminInvitation,
   adminSessionVerification,
   adminStaff,
+  adminTrustedDevice,
   twoFactor,
 } from "@odentia/db/schema/admin-core"
-import { session, user } from "@odentia/db/schema/auth"
+import { account as authAccount, session, user } from "@odentia/db/schema/auth"
 import { generateRandomString, type SecretConfig, symmetricEncrypt } from "better-auth/crypto"
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
@@ -72,7 +73,9 @@ export interface AdminSessionBinding {
   userId: string
   sessionId: string
   factorId: string
-  method: "totp" | "recovery"
+  method: "totp" | "recovery" | "device"
+  /** País de la visita al verificar; otro país deja de contar (ADR 0090). */
+  country: string | null
   verifiedAt: Date
   expiresAt: Date
 }
@@ -609,8 +612,9 @@ export async function recordAdminSessionBinding(
     userId: string
     sessionId: string
     factorId: string
-    method: "totp" | "recovery"
+    method: "totp" | "recovery" | "device"
     ttlMs: number
+    country?: string | null
   },
 ): Promise<AdminSessionBinding> {
   await ownerDb
@@ -624,6 +628,7 @@ export async function recordAdminSessionBinding(
       sessionId: input.sessionId,
       factorId: input.factorId,
       method: input.method,
+      country: input.country ?? null,
       expiresAt,
     })
     .returning()
@@ -633,7 +638,8 @@ export async function recordAdminSessionBinding(
     userId: created.userId,
     sessionId: created.sessionId,
     factorId: created.factorId,
-    method: created.method === "recovery" ? "recovery" : "totp",
+    method: bindingMethod(created.method),
+    country: created.country,
     verifiedAt: created.verifiedAt,
     expiresAt: created.expiresAt,
   }
@@ -677,13 +683,18 @@ export async function getLiveSessionBinding(
     userId: row.userId,
     sessionId: row.sessionId,
     factorId: row.factorId,
-    method: row.method === "recovery" ? "recovery" : "totp",
+    method: bindingMethod(row.method),
+    country: row.country,
     verifiedAt: row.verifiedAt,
     expiresAt: row.expiresAt,
   }
 }
 
-/** Revoca todas las vinculaciones de un usuario (baja, reset o revocación de factor). */
+function bindingMethod(method: string): AdminSessionBinding["method"] {
+  return method === "recovery" || method === "device" ? method : "totp"
+}
+
+/** Revoca todas las vinculaciones y los equipos reconocidos de un usuario (baja, reset o revocación de factor). */
 export async function revokeStaffBindings(ownerDb: Db, userId: string): Promise<number> {
   const revoked = await ownerDb
     .update(adminSessionVerification)
@@ -692,7 +703,147 @@ export async function revokeStaffBindings(ownerDb: Db, userId: string): Promise<
       and(eq(adminSessionVerification.userId, userId), isNull(adminSessionVerification.revokedAt)),
     )
     .returning({ id: adminSessionVerification.id })
+  await ownerDb
+    .update(adminTrustedDevice)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(adminTrustedDevice.userId, userId), isNull(adminTrustedDevice.revokedAt)))
   return revoked.length
+}
+
+// --- Equipo reconocido (ADR 0090) -----------------------------------------------------------
+//
+// El código se pide al abrir la administración solo si hace falta: en un
+// equipo nuevo, desde otro país, tras 30 días sin abrirla en ese equipo o si
+// cambió la contraseña o el factor. Si no, el equipo reconocido basta.
+
+/** 30 días sin abrir la administración en un equipo y vuelve a pedir el código. Cada uso renueva el plazo. */
+export const ADMIN_TRUSTED_DEVICE_IDLE_MS = 30 * 24 * 60 * 60 * 1000
+/** La marca que deja un equipo reconocido dura una hora: así sus reglas se revisan seguido. */
+export const ADMIN_DEVICE_SESSION_TTL_MS = 60 * 60 * 1000
+
+function deviceTokenHash(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex")
+}
+
+/** Huella de la contraseña guardada (hash del hash): cambiarla deja sin valor los equipos. */
+async function passwordFingerprint(ownerDb: Db, userId: string): Promise<string | null> {
+  const [row] = await ownerDb
+    .select({ password: authAccount.password })
+    .from(authAccount)
+    .where(and(eq(authAccount.userId, userId), eq(authAccount.providerId, "credential")))
+    .limit(1)
+  return row?.password ? createHash("sha256").update(row.password, "utf8").digest("hex") : null
+}
+
+/**
+ * Reconoce este equipo tras un código correcto. Si el navegador ya traía un
+ * token suyo, lo pone al día (país, factor y contraseña de ahora); si no,
+ * crea uno. Devuelve el token que guarda el navegador; aquí solo queda su hash.
+ */
+export async function trustAdminDevice(
+  ownerDb: Db,
+  input: { userId: string; factorId: string; country: string | null; currentToken: string | null },
+): Promise<string> {
+  const fingerprint = await passwordFingerprint(ownerDb, input.userId)
+  const now = new Date()
+  if (input.currentToken) {
+    const [kept] = await ownerDb
+      .update(adminTrustedDevice)
+      .set({
+        factorId: input.factorId,
+        country: input.country,
+        passwordFingerprint: fingerprint,
+        lastUsedAt: now,
+        revokedAt: null,
+      })
+      .where(
+        and(
+          eq(adminTrustedDevice.tokenHash, deviceTokenHash(input.currentToken)),
+          eq(adminTrustedDevice.userId, input.userId),
+        ),
+      )
+      .returning({ id: adminTrustedDevice.id })
+    if (kept) return input.currentToken
+  }
+  const token = randomBytes(32).toString("base64url")
+  await ownerDb.insert(adminTrustedDevice).values({
+    userId: input.userId,
+    factorId: input.factorId,
+    tokenHash: deviceTokenHash(token),
+    country: input.country,
+    passwordFingerprint: fingerprint,
+    lastUsedAt: now,
+  })
+  return token
+}
+
+export type AdminVerification =
+  | {
+      verified: true
+      binding: AdminSessionBinding
+      /** El equipo reconocido que la dejó pasar, para renovar su cookie; nulo si fue el código. */
+      deviceToken: string | null
+    }
+  | {
+      verified: false
+      /** «country»: el código se pide porque la visita viene de otro país. */
+      reason: "country" | null
+    }
+
+/**
+ * ¿Pasó esta sesión el segundo factor? Vale la marca de la sesión si es del
+ * mismo país; si no, el equipo reconocido, con sus cuatro reglas: mismo país,
+ * usado en los últimos 30 días, la misma contraseña y el mismo factor. Un
+ * equipo que ya no vale por contraseña, factor o tiempo se retira; el de otro
+ * país se conserva y vuelve a valer al poner el código.
+ */
+export async function resolveAdminVerification(
+  ownerDb: Db,
+  input: { userId: string; sessionId: string; deviceToken: string | null; country: string | null; now: Date },
+): Promise<AdminVerification> {
+  const binding = await getLiveSessionBinding(ownerDb, input.sessionId, input.now)
+  if (binding && binding.country === input.country) return { verified: true, binding, deviceToken: null }
+  const otherCountry = binding !== null
+  if (!input.deviceToken) return { verified: false, reason: otherCountry ? "country" : null }
+  const [device] = await ownerDb
+    .select()
+    .from(adminTrustedDevice)
+    .where(
+      and(
+        eq(adminTrustedDevice.tokenHash, deviceTokenHash(input.deviceToken)),
+        eq(adminTrustedDevice.userId, input.userId),
+        isNull(adminTrustedDevice.revokedAt),
+      ),
+    )
+    .limit(1)
+  if (!device) return { verified: false, reason: otherCountry ? "country" : null }
+  const factorId = await getStaffFactorId(ownerDb, input.userId)
+  if (
+    factorId === null ||
+    device.factorId !== factorId ||
+    input.now.getTime() - device.lastUsedAt.getTime() > ADMIN_TRUSTED_DEVICE_IDLE_MS ||
+    device.passwordFingerprint !== (await passwordFingerprint(ownerDb, input.userId))
+  ) {
+    await ownerDb
+      .update(adminTrustedDevice)
+      .set({ revokedAt: input.now })
+      .where(eq(adminTrustedDevice.id, device.id))
+    return { verified: false, reason: otherCountry ? "country" : null }
+  }
+  if (device.country !== input.country) return { verified: false, reason: "country" }
+  await ownerDb
+    .update(adminTrustedDevice)
+    .set({ lastUsedAt: input.now })
+    .where(eq(adminTrustedDevice.id, device.id))
+  const fresh = await recordAdminSessionBinding(ownerDb, {
+    userId: input.userId,
+    sessionId: input.sessionId,
+    factorId,
+    method: "device",
+    ttlMs: ADMIN_DEVICE_SESSION_TTL_MS,
+    country: input.country,
+  })
+  return { verified: true, binding: fresh, deviceToken: input.deviceToken }
 }
 
 /**
@@ -884,6 +1035,10 @@ export async function adminResetStaffFactor(
     // Sesiones reales de Better Auth: sin esto la cookie robada/conservada
     // seguiría autenticada y podría enrolar factor nuevo (solo-OAuth fresca).
     await tx.delete(session).where(eq(session.userId, targetUserId))
+    await tx
+      .update(adminTrustedDevice)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(adminTrustedDevice.userId, targetUserId), isNull(adminTrustedDevice.revokedAt)))
     await tx
       .update(adminSessionVerification)
       .set({ revokedAt: new Date() })

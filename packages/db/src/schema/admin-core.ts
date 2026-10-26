@@ -8,6 +8,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core"
 import { user } from "./auth.js"
@@ -103,8 +104,10 @@ export const adminSessionVerification = adminSchema.table(
     sessionId: text("session_id").notNull(),
     /** two_factor.id que superó la prueba: si el factor cambia, la prueba vieja muere. */
     factorId: text("factor_id").notNull(),
-    /** totp | recovery (código de respaldo: caducidad corta). */
+    /** totp | recovery (código de respaldo: caducidad corta) | device (equipo reconocido, ADR 0090). */
     method: text("method").notNull(),
+    /** País de la visita al verificar (cabecera de Cloudflare); otro país vuelve a pedir el código. */
+    country: text("country"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -114,6 +117,39 @@ export const adminSessionVerification = adminSchema.table(
     index("admin_session_verification_user_idx").on(table.userId),
     foreignKey({
       name: "admin_session_verification_user_id_fkey",
+      columns: [table.userId],
+      foreignColumns: [user.id],
+    }).onDelete("cascade"),
+  ],
+)
+
+/**
+ * Equipo reconocido del personal (ADR 0090): tras poner el código, el
+ * navegador guarda un token y aquí queda solo su hash. Vuelve a pedirse con
+ * otro país, 30 días sin uso, otra contraseña u otro factor.
+ */
+export const adminTrustedDevice = adminSchema.table(
+  "admin_trusted_device",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: text("user_id").notNull(),
+    /** two_factor.id con que se reconoció: un factor nuevo lo deja sin valor. */
+    factorId: text("factor_id").notNull(),
+    /** SHA-256 del token del navegador; el token nunca se guarda. */
+    tokenHash: text("token_hash").notNull(),
+    /** País de la visita al reconocerlo; nulo sin cabecera (desarrollo). */
+    country: text("country"),
+    /** Huella de la contraseña al reconocerlo: cambiarla lo deja sin valor. Nula sin contraseña. */
+    passwordFingerprint: text("password_fingerprint"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("admin_trusted_device_token_uidx").on(table.tokenHash),
+    index("admin_trusted_device_user_idx").on(table.userId),
+    foreignKey({
+      name: "admin_trusted_device_user_id_fkey",
       columns: [table.userId],
       foreignColumns: [user.id],
     }).onDelete("cascade"),
