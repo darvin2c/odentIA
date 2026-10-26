@@ -9,7 +9,7 @@ import odentiaLogo from "../assets/logotipo-dark.svg?raw"
 import { ECG } from "../components/latidia/home/DictationDemo"
 import { MEDICAL, WORDS } from "../lib/product"
 import { contactHref } from "../lib/site"
-import { deckFigures, fillDeck } from "../presentations/figures"
+import { deckFigures, fillDeck, withoutGuide } from "../presentations/figures"
 import LatidiaScripts from "../presentations/LatidiaScripts.astro"
 import latidiaDeck from "../presentations/latidia/deck.html?raw"
 import OdentiaScripts from "../presentations/OdentiaScripts.astro"
@@ -26,9 +26,10 @@ const figures = deckFigures(
 const logo = (MEDICAL ? latidiaLogo : odentiaLogo)
   .replace(/<title>[^<]*<\/title>/, "")
   .replace("<svg ", `<svg aria-label="${WORDS.name}" role="img" `)
-const deck = figures
-  ? fillDeck(MEDICAL ? latidiaDeck : odentiaDeck, { ...figures, logo, ecg: ECG })
-  : null
+// El guion es para quien presenta: solo viene con /presentacion?guion.
+const guide = Astro.url.searchParams.has("guion")
+const source = MEDICAL ? latidiaDeck : odentiaDeck
+const deck = figures ? fillDeck(guide ? source : withoutGuide(source), { ...figures, logo, ecg: ECG }) : null
 ---
 <!doctype html>
 <html lang="es" data-brand={MEDICAL ? "latidia" : undefined}>

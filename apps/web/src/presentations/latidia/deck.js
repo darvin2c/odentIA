@@ -86,8 +86,10 @@
     document.getElementById("count").textContent = String(n + 1).padStart(2, "0") + " / " + String(slides.length).padStart(2, "0");
     document.getElementById("progress").style.width = ((n + (k + 1) / layers.length) / slides.length * 100) + "%";
     const notes = slides[n].querySelector(".notes");
-    document.getElementById("notesTitle").textContent = "Guion · parte " + (n + 1) + " de " + slides.length;
-    document.getElementById("notesText").textContent = notes ? notes.textContent : "";
+    // El guion solo viene con /presentacion?guion: la que reciben las clínicas no lo trae.
+    const notesTitle = document.getElementById("notesTitle"), notesText = document.getElementById("notesText");
+    if (notesTitle) notesTitle.textContent = "Guion · parte " + (n + 1) + " de " + slides.length;
+    if (notesText) notesText.textContent = notes ? notes.textContent : "";
     try { history.replaceState(null, "", "#p" + (n + 1)); } catch (e) {}
     // De pie, la parte nueva sube a la vista (salvo cuando fue el propio desplazamiento el que la eligió).
     if (stacked && slideChanged && !fromScroll) reveal(n, !fresh);
@@ -1024,15 +1026,15 @@
   let idleT = 0;
   const wake = () => {
     document.body.classList.remove("idle"); clearTimeout(idleT);
-    idleT = setTimeout(() => { if (!stacked && document.getElementById("notesPanel").hidden) document.body.classList.add("idle"); }, 2500);
+    idleT = setTimeout(() => { if (!stacked && (document.getElementById("notesPanel")?.hidden ?? true)) document.body.classList.add("idle"); }, 2500);
   };
   ["mousemove", "pointerdown", "keydown"].forEach(t => addEventListener(t, wake, { passive: true }));
   wake();
   document.getElementById("next").addEventListener("click", (e) => { e.stopPropagation(); next(); });
   document.getElementById("prev").addEventListener("click", (e) => { e.stopPropagation(); prev(); });
   const notesBtn = document.getElementById("notesBtn"), notesPanel = document.getElementById("notesPanel");
-  const toggleNotes = () => { notesPanel.hidden = !notesPanel.hidden; notesBtn.setAttribute("aria-pressed", String(!notesPanel.hidden)); };
-  notesBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleNotes(); });
+  const toggleNotes = () => { if (!notesPanel) return; notesPanel.hidden = !notesPanel.hidden; notesBtn.setAttribute("aria-pressed", String(!notesPanel.hidden)); };
+  notesBtn?.addEventListener("click", (e) => { e.stopPropagation(); toggleNotes(); });
   document.getElementById("full").addEventListener("click", async (e) => {
     e.stopPropagation();
     try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch (err) {}
