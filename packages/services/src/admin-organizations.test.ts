@@ -18,6 +18,8 @@ import {
   getUserDetail,
   leaveOrganization,
   listMyInvitations,
+  listOrganizationProducts,
+  listOrganizations,
   openRecoveryCase,
   resendOrganizationInvitation,
   searchUsers,
@@ -341,4 +343,36 @@ it("el producto de una cuenta: latidIA solo si todas sus clínicas lo son (entre
   )
   await seedMember(dental.organizationId, "t-cuenta", "clinician")
   expect(await accountProduct(ownerDb, "t-cuenta")).toBe("dental")
+})
+
+it("la administración distingue el producto de cada clínica: lo marca, lo cuenta y filtra por él (ADR 0091)", async () => {
+  const medical = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, { orgName: "Filtro Consultorio", slug: "t-filtro-latidia", email: "t-f1@example.test", countryCode: "PE", product: "medical" }),
+  )
+  const dental = await ownerDb.transaction((tx) =>
+    createAssistedOrganization(tx, admin, { orgName: "Filtro Clínica", slug: "t-filtro-odentia", email: "t-f2@example.test", countryCode: "PE" }),
+  )
+  // Sin perfil todavía: nace dental, como `org_profile.product` por defecto.
+  await ownerDb.insert(organization).values({ id: "t-filtro-sin-perfil", name: "Filtro Sin Perfil", slug: "t-filtro-sin-perfil", createdAt: new Date() })
+
+  const all = await listOrganizations(ownerDb, support, { q: "filtro" })
+  expect(all.byProduct).toEqual({ dental: 2, medical: 1 })
+  expect(Object.fromEntries(all.items.map((item) => [item.slug, item.product]))).toEqual({
+    "t-filtro-latidia": "medical",
+    "t-filtro-odentia": "dental",
+    "t-filtro-sin-perfil": "dental",
+  })
+
+  const onlyMedical = await listOrganizations(ownerDb, support, { q: "filtro", product: "medical" })
+  expect(onlyMedical.items.map((item) => item.slug)).toEqual(["t-filtro-latidia"])
+  expect(onlyMedical.total).toBe(1)
+  // La cuenta por producto no depende del producto elegido.
+  expect(onlyMedical.byProduct).toEqual({ dental: 2, medical: 1 })
+  const onlyDental = await listOrganizations(ownerDb, support, { q: "filtro", product: "dental" })
+  expect(onlyDental.items.map((item) => item.slug).sort()).toEqual(["t-filtro-odentia", "t-filtro-sin-perfil"])
+
+  const products = await listOrganizationProducts(ownerDb, support)
+  expect(products).toMatchObject({ [medical.organizationId]: "medical", [dental.organizationId]: "dental", "t-filtro-sin-perfil": "dental" })
+  expect((await getOrganizationDetail(ownerDb, support, medical.organizationId)).product).toBe("medical")
+  await expect(listOrganizationProducts(ownerDb, null)).rejects.toThrow()
 })

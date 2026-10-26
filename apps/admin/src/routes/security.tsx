@@ -12,7 +12,8 @@ import {
   Input,
   toast,
 } from "@odentia/ui"
-import { Brand, ErrorState, LoadingState, PasswordInput, SubmitButton } from "@odentia/ui-patterns"
+import { ErrorState, LoadingState, PasswordInput, SubmitButton } from "@odentia/ui-patterns"
+import { AdminBrand } from "../components/admin-brand"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Check, ChevronDown, Cloud, Smartphone } from "lucide-react"
@@ -217,8 +218,7 @@ function AccessLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col items-center bg-surface-muted px-4 py-6 md:justify-center md:py-10">
       <div className="mb-4 flex items-center gap-2.5 md:mb-5">
-        <Brand className="w-32" />
-        <Badge variant="secondary">Administración</Badge>
+        <AdminBrand />
       </div>
       <main className="w-full max-w-[30rem] rounded-2xl border bg-card p-5 shadow-xs md:p-8">
         {children}

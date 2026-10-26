@@ -110,11 +110,15 @@ export interface OrganizationListItem {
   restricted: boolean
   /** Precio negociado vigente (issue 168): para la etiqueta «20 % negociado · vence 30 abr». */
   negotiated: { discountBps: number; endsAt: Date | null } | null
+  /** El producto de la clínica; sin perfil todavía, el que nace por defecto (dental). */
+  product: ClinicalProduct
 }
 
 export interface OrganizationList {
   items: OrganizationListItem[]
   total: number
+  /** Cuántas hay de cada producto con la misma búsqueda, para el filtro «Producto». */
+  byProduct: Record<ClinicalProduct, number>
 }
 
 export interface OrgMemberItem {
@@ -169,6 +173,8 @@ export interface OrganizationDetail {
     locale: string
   } | null
   provisioning: { hasProfile: boolean; hasBranch: boolean; complete: boolean }
+  /** El producto de la clínica: su dominio y sus palabras (ADR 0087). */
+  product: ClinicalProduct
   members: OrgMemberItem[]
   invitations: OrgInvitationItem[]
   branches: OrgBranchItem[]
@@ -405,7 +411,7 @@ function auditInput(
 export async function listOrganizations(
   tx: Db,
   actor: AdminActor | null,
-  opts: { q?: string; limit?: number; offset?: number; negotiated?: boolean },
+  opts: { q?: string; limit?: number; offset?: number; negotiated?: boolean; product?: ClinicalProduct },
   loaders: OrganizationBillingLoaders = {},
 ): Promise<OrganizationList> {
   requireStaff(actor)
@@ -414,11 +420,22 @@ export async function listOrganizations(
   const offset = Math.max(opts.offset ?? 0, 0)
   const negotiatedSql = sql`${organization.id} in (select ${saasSubscription.organizationId} from ${saasSubscription}
     where ${saasSubscription.discountBps} > 0 and (${saasSubscription.discountEndsAt} is null or ${saasSubscription.discountEndsAt} > now()))`
-  const filters = [
+  // Sin perfil, la clínica todavía no eligió nada: nace dental (`org_profile.product` por defecto).
+  const productSql = sql<ClinicalProduct>`coalesce((select ${orgProfile.product} from ${orgProfile}
+    where ${orgProfile.organizationId} = ${organization.id}), 'dental')`
+  const searched = [
     ...(q ? [or(ilike(organization.name, `%${q}%`), ilike(organization.slug, `%${q}%`))] : []),
     ...(opts.negotiated ? [negotiatedSql] : []),
   ]
+  const filters = [...searched, ...(opts.product ? [sql`${productSql} = ${opts.product}`] : [])]
   const where = filters.length ? and(...filters) : undefined
+  const counted = await tx
+    .select({ product: productSql, n: sql<number>`count(*)::int` })
+    .from(organization)
+    .where(searched.length ? and(...searched) : undefined)
+    .groupBy(productSql)
+  const byProduct = Object.fromEntries(CLINICAL_PRODUCTS.map((product) => [product, 0])) as Record<ClinicalProduct, number>
+  for (const row of counted) if (isClinicalProduct(row.product)) byProduct[row.product] = row.n
 
   const rows = await tx
     .select({
@@ -426,6 +443,7 @@ export async function listOrganizations(
       name: organization.name,
       slug: organization.slug,
       createdAt: organization.createdAt,
+      product: productSql,
     })
     .from(organization)
     .where(where)
@@ -494,9 +512,24 @@ export async function listOrganizations(
       hasBranch: Boolean(sede),
       billingStatus,
       restricted,
+      product: isClinicalProduct(row.product) ? row.product : "dental",
     })
   }
-  return { items, total: total ?? 0 }
+  return { items, total: total ?? 0, byProduct }
+}
+
+/**
+ * El producto de cada clínica (odentIA o latidIA), para que cada pantalla de
+ * la administración marque y filtre sus filas sin pedirlo fila por fila. Sin
+ * perfil todavía, la clínica es dental, como nace.
+ */
+export async function listOrganizationProducts(tx: Db, actor: AdminActor | null): Promise<Record<string, ClinicalProduct>> {
+  requireStaff(actor)
+  const rows = await tx
+    .select({ id: organization.id, product: orgProfile.product })
+    .from(organization)
+    .leftJoin(orgProfile, eq(orgProfile.organizationId, organization.id))
+  return Object.fromEntries(rows.map((row) => [row.id, isClinicalProduct(row.product) ? row.product : "dental"]))
 }
 
 export async function getOrganizationDetail(
@@ -589,6 +622,7 @@ export async function getOrganizationDetail(
       hasBranch: branches.length > 0,
       complete: Boolean(profile) && branches.length > 0,
     },
+    product: isClinicalProduct(profile?.product) ? profile.product : "dental",
     members: memberships.map((m) => ({
       userId: m.userId,
       name: m.name,
