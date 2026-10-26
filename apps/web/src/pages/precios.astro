@@ -9,7 +9,7 @@ import ValueSection from "../components/pricing/ValueSection.astro"
 import Base from "../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../lib/faq"
 import { businessDays, days, giftOf, money, shownPlan } from "../lib/pricing"
-import { WORDS } from "../lib/product"
+import { MEDICAL, WORDS } from "../lib/product"
 
 const pricing = Astro.locals.pricing
 const plan = shownPlan(pricing)
@@ -45,7 +45,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Y WhatsApp?",
-    a: `WhatsApp lo cobra Meta directamente a tu clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. ${WORDS.name} no lo cobra ni lo estima.`,
+    a: `WhatsApp lo cobra Meta directamente a ${WORDS.yourClinic}, con sus propias tarifas, y lo revisas en tu cuenta de Meta. ${WORDS.name} no lo cobra ni lo estima.`,
   },
   {
     q: "¿Por qué no hay planes con más funciones?",
@@ -97,9 +97,9 @@ const faq: FaqItem[] = [
     a: `Tu mes empieza el día que activas el plan. Lo que pasa del crédito se factura al cerrar el mes o, si prefieres, dos veces: a los ${days(terms.halfCycleDays)} y al cerrar el mes.`,
   },
   {
-    q: "¿Y si mi clínica tiene mucho movimiento?",
+    q: `¿Y si ${MEDICAL ? "mi consultorio" : "mi clínica"} tiene mucho movimiento?`,
     // ADR 0085: solo se negocian Gestiona, Agenda, Completa y la cita recuperada; lo demás es fijo.
-    a: "Escríbenos. Revisamos tu caso y te proponemos un precio para tu volumen en las citas que Sofi gestiona, la consulta en la que Clío arma el presupuesto y la cita recuperada. Lo demás tiene un precio fijo.",
+    a: `Escríbenos. Revisamos tu caso y te proponemos un precio para tu volumen en las citas que Sofi gestiona, la consulta en la que Clío ${MEDICAL ? "deja indicado lo que sigue" : "arma el presupuesto"} y la cita recuperada. Lo demás tiene un precio fijo.`,
   },
 ]
 

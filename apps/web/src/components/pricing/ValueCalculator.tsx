@@ -59,7 +59,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
         lNew: `${r.lost} pacientes que escribieron, no recibieron respuesta a tiempo y se fueron`,
         lNoShow: `${r.recovered} pacientes que faltaron y nadie les ofreció otra cita`,
         lTime: `${v.teamHours} horas de tu equipo en mensajes y notas`,
-        tryIt: "Prueba con los números de tu clínica",
+        tryIt: `Prueba con los números de ${WORDS.yourClinic}`,
       }
   // La cuenta del mes: cada fila por su tipo, como llega en la cuenta de la clínica.
   const b = r.byType
@@ -110,7 +110,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
           <span className="tag">[ Calcula tu mes ]</span>
           <h2 className="vc-h2">Lo que pagas y lo que recuperas.</h2>
           <p className="vc-lead">
-            Cada fila se cobra por su tipo, como en tu cuenta. Pon abajo los números de tu clínica y compara con lo que
+            Cada fila se cobra por su tipo, como en tu cuenta. Pon abajo los números de {WORDS.yourClinic} y compara con lo que
             hoy pierdes sin agentes.
           </p>
           <div className="vc-sheet">
@@ -130,7 +130,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
       <div className="vc-panel">
         <div className="vc-edit">
           <div className="vc-in">
-            <span className="tag tag-d">Tu clínica, en un mes</span>
+            <span className="tag tag-d">{WORDS.YourClinic}, en un mes</span>
             <SizePicker current={sizeOf(v)} onPick={setV} />
             <label className="vc-l" htmlFor={fieldId("writers")}>
               <span>Personas que te escriben</span>
@@ -149,7 +149,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
             {range("consultations", 2000, 10, "Consultas que dictarías al mes")}
             <label className="vc-l" htmlFor={fieldId("appointmentValue")}>
               <span>
-                Lo que cobra tu clínica por una cita, en promedio, en dólares
+                Lo que cobra {WORDS.yourClinic} por una cita, en promedio, en dólares
                 <small>Si no lo sabes: lo facturado en el mes entre las citas atendidas.</small>
               </span>
               {num("appointmentValue", 2000)}
@@ -161,7 +161,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
                 {num("unansweredPct", 100)}
               </label>
               <label className="vc-l" htmlFor={fieldId("leavePct")}>
-                <span>De esos, % que se va a otra clínica</span>
+                <span>De esos, % que se va a {WORDS.anotherClinic}</span>
                 {num("leavePct", 100)}
               </label>
               <label className="vc-l" htmlFor={fieldId("returnPct")}>
@@ -255,7 +255,7 @@ export default function ValueCalculator({ prices, children }: { prices: ValuePri
             </span>
           </div>
           <span className="mono vc-note">
-            Ejemplo con números de prueba: pon los de tu clínica. No es una promesa de resultados.
+            Ejemplo con números de prueba: pon los de {WORDS.yourClinic}. No es una promesa de resultados.
           </span>
         </div>
       </div>

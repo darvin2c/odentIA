@@ -1,7 +1,7 @@
 // «Lo que pagas y lo que recuperas»: lo que se pierde sin agentes frente a lo que se paga,
 // con los números que pone cada clínica. Es un ejemplo, nunca una promesa de resultados.
 import { MIX, type ValuePrices } from "./pricing"
-import { WORDS } from "./product"
+import { PRODUCT, WORDS, type WebProduct } from "./product"
 
 export type ValueInput = {
   /** Personas que escriben al mes; cada una cuenta como conversación atendida. */
@@ -28,17 +28,39 @@ export type ValueInput = {
   hourCost: number
 }
 
-export const DEFAULT_VALUE_INPUT: ValueInput = {
-  writers: 300,
-  unansweredPct: 40,
-  leavePct: 20,
-  noShows: 60,
-  returnPct: 15,
-  consultations: 300,
-  appointmentValue: 40,
-  teamHours: 60,
-  hourCost: 4,
+/**
+ * Los números de ejemplo de la clínica mediana de cada producto.
+ * - odentIA: la Clínica Sonrisa del estudio de precios (ADR 0085).
+ * - latidIA: un consultorio de 4 médicos con unas 8 consultas al día cada uno en 22 días (~700); la
+ *   consulta particular a USD 25 (unos S/ 90) y faltan 1 de cada 10. Son supuestos hasta medir los
+ *   consultorios piloto; escribe más gente que en una clínica dental porque atiende a más pacientes.
+ */
+const MEDIAN_BY_PRODUCT: Record<WebProduct, ValueInput> = {
+  dental: {
+    writers: 300,
+    unansweredPct: 40,
+    leavePct: 20,
+    noShows: 60,
+    returnPct: 15,
+    consultations: 300,
+    appointmentValue: 40,
+    teamHours: 60,
+    hourCost: 4,
+  },
+  medical: {
+    writers: 500,
+    unansweredPct: 40,
+    leavePct: 20,
+    noShows: 70,
+    returnPct: 15,
+    consultations: 700,
+    appointmentValue: 25,
+    teamHours: 80,
+    hourCost: 4,
+  },
 }
+
+export const DEFAULT_VALUE_INPUT: ValueInput = MEDIAN_BY_PRODUCT[PRODUCT]
 
 /** La cuenta con los precios vigentes: la cuota más lo que pasa del crédito. */
 export function computeValue(i: ValueInput, prices: ValuePrices) {
@@ -94,26 +116,39 @@ export function computeValue(i: ValueInput, prices: ValuePrices) {
 
 export type ClinicSize = "pequena" | "mediana" | "grande"
 
+/** Lo que cambia de la mediana en los tamaños pequeño y grande de cada producto. */
+const SIZE_CHANGES: Record<WebProduct, Record<"pequena" | "grande", Partial<ValueInput>>> = {
+  dental: {
+    pequena: { writers: 120, noShows: 25, consultations: 120, teamHours: 25 },
+    grande: { writers: 800, noShows: 160, consultations: 800, teamHours: 160 },
+  },
+  // 1 o 2 médicos (~250 consultas) y 10 o más (~1.800), con la misma cuenta que la mediana.
+  medical: {
+    pequena: { writers: 200, noShows: 25, consultations: 250, teamHours: 30 },
+    grande: { writers: 1300, noShows: 180, consultations: 1800, teamHours: 200 },
+  },
+}
+
+/** «Tu consultorio es Pequeño»: el tamaño concuerda con la palabra del producto. */
+const SIZE_LABELS: Record<WebProduct, Record<ClinicSize, string>> = {
+  dental: { pequena: "Pequeña", mediana: "Mediana", grande: "Grande" },
+  medical: { pequena: "Pequeño", mediana: "Mediano", grande: "Grande" },
+}
+
 /** Tamaños de ejemplo para empezar sin escribir números; después se ajustan a mano. */
 export const CLINIC_SIZES: { id: ClinicSize; label: string; hint: string; input: ValueInput }[] = [
   {
     id: "pequena",
-    label: "Pequeña",
+    label: SIZE_LABELS[PRODUCT].pequena,
     hint: `1 o 2 ${WORDS.clinicians}`,
-    input: { ...DEFAULT_VALUE_INPUT, writers: 120, noShows: 25, consultations: 120, teamHours: 25 },
+    input: { ...DEFAULT_VALUE_INPUT, ...SIZE_CHANGES[PRODUCT].pequena },
   },
-  { id: "mediana", label: "Mediana", hint: `3 a 6 ${WORDS.clinicians}`, input: DEFAULT_VALUE_INPUT },
+  { id: "mediana", label: SIZE_LABELS[PRODUCT].mediana, hint: `3 a 6 ${WORDS.clinicians}`, input: DEFAULT_VALUE_INPUT },
   {
     id: "grande",
-    label: "Grande",
+    label: SIZE_LABELS[PRODUCT].grande,
     hint: "7 o más, o varias sedes",
-    input: {
-      ...DEFAULT_VALUE_INPUT,
-      writers: 800,
-      noShows: 160,
-      consultations: 800,
-      teamHours: 160,
-    },
+    input: { ...DEFAULT_VALUE_INPUT, ...SIZE_CHANGES[PRODUCT].grande },
   },
 ]
 
