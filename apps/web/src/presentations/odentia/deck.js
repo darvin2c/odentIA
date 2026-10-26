@@ -743,6 +743,44 @@
     }
   };
 
+  // Dónde queda un nodo dentro de otro, en pixeles del escenario (sin la escala de la ventana).
+  const within = (node, host) => { const r = node.getBoundingClientRect(), q = host.getBoundingClientRect(), s = stage.getBoundingClientRect().width / 1920; return { x: (r.left - q.left) / s, y: (r.top - q.top) / s, w: r.width / s, h: r.height / s }; };
+
+  // 9 · Respuesta: cada módulo marca su precio como un taxímetro y se queda en cero; los dieciséis
+  // ceros vuelan a uno solo y los corchetes se cierran sobre él.
+  const ROLL = [19, 25, 29, 35, 39, 45, 49, 59, 79, 99, 120, 150];
+  /** El precio de un módulo gira un instante y cae en cero. */
+  async function rollZero(z, i, cur) {
+    z.className = "z num roll";
+    for (let t = 0; t < 7; t++) { z.textContent = cur + " " + ROLL[(i * 5 + t * 7) % ROLL.length]; await p6wait(55); }
+    z.textContent = cur + " 0"; z.classList.remove("roll"); void z.offsetWidth; z.classList.add("set");
+  }
+  scenes.sys0 = async (layer) => {
+    const zs = [...layer.querySelectorAll(".mod .z")], big = layer.querySelector(".sys0"), br = big.querySelector(".zero-br");
+    const cur = layer.querySelector(".mosaic").dataset.cur;
+    layer.querySelectorAll(".zfly, .ring").forEach(n => n.remove());
+    layer.querySelectorAll(".mod.pick").forEach(n => n.classList.remove("pick"));
+    layer.querySelector(".modtip").classList.remove("on");
+    big.classList.remove("on", "shut"); layer.classList.remove("ready");
+    zs.forEach(z => { z.className = "z num pend"; z.textContent = cur + " 0"; });
+    // Se encienden con el mosaico (0,4 s + 0,12 s por módulo) y cada uno gira un instante antes de caer en cero.
+    await Promise.all(zs.map(async (z, i) => { await p6wait(500 + i * 120); await rollZero(z, i, cur); }));
+    await p6wait(500);
+    // Los ceros vuelan al grande.
+    const goal = within(br, layer);
+    zs.forEach((z, i) => {
+      const p = within(z, layer), f = el("span", "zfly", z.textContent);
+      f.style.left = p.x + "px"; f.style.top = p.y + "px"; layer.appendChild(f);
+      later(() => { f.style.left = goal.x + goal.w / 2 - p.w / 2 + "px"; f.style.top = goal.y + goal.h / 2 - p.h / 2 + "px"; f.style.opacity = "0"; f.style.transform = "scale(2.6)"; }, 30 + i * 35);
+      later(() => f.remove(), 950 + i * 35);
+    });
+    await p6wait(760);
+    big.classList.add("on");
+    await p6wait(380);
+    big.classList.add("shut"); br.appendChild(el("span", "ring"));
+    await p6wait(900); layer.classList.add("ready");
+  };
+
   // 10 · Respuesta: interruptores.
   scenes.switches = (layer) => {
     const sws = [...layer.querySelectorAll(".sw")];
@@ -752,17 +790,19 @@
 
   // 11 · El total del día que cuenta.
   // 11 · Cada cobro, con su moneda: los pasos se cumplen y recién ahí cae la moneda del agente.
+  const resReset = (c) => { c.classList.remove("paid"); c.querySelectorAll(".st").forEach(x => x.classList.remove("on")); c.querySelector(".coin11").classList.remove("on"); };
+  async function resPlay(c) {
+    const st = c.querySelectorAll(".st");
+    st[0].classList.add("on"); await p6wait(650);
+    st[1].classList.add("on"); await p6wait(550);
+    c.querySelector(".coin11").classList.add("on"); c.classList.add("paid");
+  }
   scenes.vals = async (layer) => {
     const cards = [...layer.querySelectorAll(".res")];
-    cards.forEach(c => { c.classList.remove("paid"); c.querySelectorAll(".st").forEach(x => x.classList.remove("on")); c.querySelector(".coin11").classList.remove("on"); });
+    cards.forEach(resReset); layer.classList.remove("ready");
     await p6wait(1300);
-    for (const c of cards) {
-      const st = c.querySelectorAll(".st");
-      st[0].classList.add("on"); await p6wait(650);
-      st[1].classList.add("on"); await p6wait(550);
-      c.querySelector(".coin11").classList.add("on"); c.classList.add("paid");
-      await p6wait(700);
-    }
+    for (const c of cards) { await resPlay(c); await p6wait(700); }
+    layer.classList.add("ready");
   };
 
   // 11 · Un día: solo las filas con resultado dejan moneda; cae en el total.
@@ -794,6 +834,28 @@
       await p6wait(200);
     }
   };
+
+  // 11 · Lo que nunca se cobra: en cada fila asoma la moneda del agente, gira y se apaga; el total
+  // la siente pasar y se queda en cero.
+  scenes.never = async (layer) => {
+    const rows = [...layer.querySelectorAll(".nvr:not(.total)")], total = layer.querySelector(".nvr.total");
+    const nv = layer.querySelector(".nv");
+    rows.forEach(r => r.classList.remove("ask", "no")); total.classList.remove("done"); nv.classList.remove("done");
+    await p6wait(1200);
+    layer.classList.remove("ready");
+    for (const r of rows) { await nvTry(r); await p6wait(380); }
+    total.classList.add("done"); nv.classList.add("done");
+    await p6wait(600); layer.classList.add("ready");
+  };
+  /** La moneda de la fila asoma, gira y se apaga; el total la siente pasar y sigue en cero. */
+  async function nvTry(r) {
+    const tot = r.parentElement.querySelector("#nvTotal");
+    r.classList.remove("ask", "no"); void r.offsetWidth;
+    r.classList.add("ask");
+    await p6wait(800);
+    r.classList.remove("ask"); r.classList.add("no");
+    tot.classList.remove("hit"); void tot.offsetWidth; tot.classList.add("hit");
+  }
 
   // 12 · El mismo caso: el software de registro frente a los agentes que orquestan.
   scenes.duo = () => {
@@ -853,6 +915,50 @@
     later(run, 900);
   };
 
+  const vsCells = (vs, n) => [...vs.querySelectorAll(".c" + n)];
+  function vsReset(vs, n) {
+    vsCells(vs, n).forEach(c => c.classList.remove("on", "replay"));
+    vs.querySelectorAll(".c" + n + " .vbill, .c" + n + " .vflow li").forEach(c => c.classList.remove("on"));
+    vs.querySelectorAll(".c" + n + " .sq").forEach(q => { q.innerHTML = "<i></i>".repeat(+q.dataset.n); });
+    if (n === 4) vs.classList.remove("win");
+  }
+  /** Una de las tres primeras: lo que pasa con Pedro, los pasos de tu equipo y la moneda que cae igual. */
+  async function vsCol(vs, n, slow) {
+    const [hd, what, who, pay] = vsCells(vs, n);
+    hd.classList.add("on"); await p6wait(260);
+    what.classList.add("on"); await p6wait(420);
+    who.classList.add("on");
+    const sq = [...who.querySelectorAll(".sq i")], cnt = who.querySelector(".vsteps b");
+    cnt.textContent = "0 pasos";
+    for (let i = 0; i < sq.length; i++) { await p6wait(slow ? 170 : 110); sq[i].classList.add("on"); cnt.textContent = (i + 1) + (i ? " pasos" : " paso"); }
+    pay.classList.add("on"); await p6wait(200);
+    pay.querySelector(".vbill").classList.add("on");
+  }
+  /** La última columna: los corchetes se cierran sobre ella y los agentes hacen el trabajo. */
+  async function vsWin(vs) {
+    const [hd, what, who, pay] = vsCells(vs, 4);
+    hd.classList.add("on"); await p6wait(200);
+    vs.classList.add("win"); await p6wait(450);
+    what.classList.add("on");
+    for (const li of what.querySelectorAll("li")) { await p6wait(420); li.classList.add("on"); }
+    await p6wait(250);
+    who.classList.add("on"); await p6wait(450);
+    pay.classList.add("on"); await p6wait(500);
+    pay.querySelector(".vbill").classList.add("on");
+  }
+  // 12 · ¿No es lo mismo que…? Columna por columna y, al final, la del producto entre corchetes.
+  scenes.vs = async (layer) => {
+    const vs = layer.querySelector(".vs");
+    vs.classList.remove("done"); layer.classList.remove("ready");
+    [1, 2, 3, 4].forEach(n => vsReset(vs, n));
+    await p6wait(1100);
+    for (const n of [1, 2, 3]) { await vsCol(vs, n, n === 1); await p6wait(n === 1 ? 650 : 420); }
+    await vsWin(vs);
+    await p6wait(500);
+    vs.classList.add("done");
+    await p6wait(700); layer.classList.add("ready");
+  };
+
   // 13 · Cifras que suben.
   scenes.perks = (layer) => {
     const nums = [...layer.querySelectorAll("[data-count]")], t0 = performance.now() + (reduce ? 0 : 400);
@@ -867,6 +973,44 @@
     });
   };
 
+  /* ---------- Lo que se toca ---------- */
+  // Dentro del escenario, lo que tiene data-tap responde al clic (o a Enter y Espacio) y no avanza la presentación.
+  const taps = {};
+  let tipHide = 0;
+  taps.mod = (b) => {
+    const layer = b.closest(".layer"), tip = layer.querySelector(".modtip"), z = b.querySelector(".z");
+    const cur = layer.querySelector(".mosaic").dataset.cur, mods = [...layer.querySelectorAll(".mod")];
+    mods.forEach(m => m.classList.toggle("pick", m === b));
+    rollZero(z, mods.indexOf(b), cur);
+    tip.innerHTML = `<b>${b.children[1].textContent}</b><span>${b.dataset.what}</span><em>${cur} 0 al mes</em>`;
+    const p = within(b, layer), up = p.y > 420;
+    tip.style.left = Math.max(140, Math.min(1920 - 140 - 420, p.x + p.w / 2 - 210)) + "px";
+    tip.style.top = up ? "" : p.y + p.h + 14 + "px";
+    tip.style.bottom = up ? 1080 - p.y + 14 + "px" : "";
+    tip.classList.remove("on"); void tip.offsetWidth; tip.classList.add("on");
+    clearTimeout(tipHide);
+    tipHide = setTimeout(() => { tip.classList.remove("on"); b.classList.remove("pick"); }, 4500);
+  };
+  taps.res = async (c) => { resReset(c); await p6wait(150); resPlay(c); };
+  taps.nvr = (r) => nvTry(r);
+  taps.vs = async (hd) => {
+    const vs = hd.closest(".vs"), n = +hd.dataset.col;
+    // Mientras se repite, ninguna columna queda atenuada; al terminar, vuelve el contraste si la del producto ya está.
+    vs.classList.remove("done");
+    vsReset(vs, n); hd.classList.add("replay");
+    await p6wait(120);
+    await (n === 4 ? vsWin(vs) : vsCol(vs, n, true));
+    await p6wait(600);
+    if (vs.classList.contains("win")) vs.classList.add("done");
+    hd.classList.remove("replay");
+  };
+  const tapOf = (t) => t instanceof Element ? t.closest("[data-tap]") : null;
+  stage.addEventListener("click", (e) => {
+    const t = tapOf(e.target);
+    if (!t || !t.closest(".layer.cur")) return;
+    e.stopPropagation(); taps[t.dataset.tap]?.(t);
+  });
+
   /* ---------- Controles ---------- */
   document.getElementById("next").addEventListener("click", (e) => { e.stopPropagation(); next(); });
   document.getElementById("prev").addEventListener("click", (e) => { e.stopPropagation(); prev(); });
@@ -878,6 +1022,8 @@
     try { document.fullscreenElement ? await document.exitFullscreen() : await document.documentElement.requestFullscreen(); } catch (err) {}
   });
   addEventListener("keydown", (e) => {
+    const t = tapOf(e.target);
+    if (t && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); if (t.closest(".layer.cur")) taps[t.dataset.tap]?.(t); return; }
     if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); next(); }
     else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(e.key)) { e.preventDefault(); prev(); }
     else if (e.key === "Home") show(0, 0);

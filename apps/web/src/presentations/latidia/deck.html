@@ -633,6 +633,53 @@ h1, h2, h3, p { margin: 0; }
 .layer.cur .mod i { animation: liti .5s both; animation-delay: calc(.4s + var(--i) * .12s); }
 @keyframes liti { to { background: var(--lila); box-shadow: 0 0 12px var(--lila); } }
 .free-line { font-size: 46px; font-weight: 800; letter-spacing: -0.02em; }
+/* 10 · Cada módulo marca su precio: gira como un taxímetro y se queda en cero. Los dieciséis ceros
+   vuelan a uno solo y los corchetes de la marca se cierran sobre él. */
+.mosaic .mod { padding: 15px 20px; font-size: 23px; min-height: 74px; box-sizing: border-box; }
+.layer[data-scene="sys0"] { gap: 28px; }
+.mod > span:first-of-type { flex: 1; min-width: 0; }
+.mod .z { font-family: var(--agent); font-size: 19px; font-weight: 600; color: var(--lila); white-space: nowrap; transition: color .2s, text-shadow .3s, opacity .2s; }
+.mod .z.pend { opacity: 0; }
+.mod .z.roll { color: var(--warn); }
+.mod .z.set { color: var(--lila); text-shadow: 0 0 16px rgba(183,156,240,.7); animation: zset .4s cubic-bezier(.3,1.6,.5,1); }
+@keyframes zset { from { transform: scale(1.6); } to { transform: none; } }
+.zfly { position: absolute; z-index: 6; font-family: var(--agent); font-size: 21px; font-weight: 600; color: var(--lila); text-shadow: 0 0 14px var(--lila); pointer-events: none; white-space: nowrap; transition: left .8s cubic-bezier(.6,0,.3,1), top .8s cubic-bezier(.6,0,.3,1), opacity .8s ease-in, transform .8s cubic-bezier(.6,0,.3,1); }
+.sys0 { display: flex; align-items: center; gap: 56px; margin-top: 6px; }
+.zero-br { position: relative; flex: none; padding: 4px 64px; }
+.zero-br::before, .zero-br::after { content: ""; position: absolute; top: 0; bottom: 0; width: 38px; border: 11px solid var(--lila); border-radius: 8px; filter: drop-shadow(0 0 16px rgba(183,156,240,.6)); opacity: 0; transition: transform .45s cubic-bezier(.3,1.7,.5,1), opacity .25s; }
+.zero-br::before { left: 0; border-right: none; transform: translateX(-90px); }
+.zero-br::after { right: 0; border-left: none; transform: translateX(90px); }
+.zero-br b { display: block; font-size: 104px; font-weight: 800; letter-spacing: -0.04em; line-height: 1.1; color: var(--lila); text-shadow: 0 0 60px rgba(183,156,240,.45); opacity: 0; transform: scale(.3); transition: opacity .3s, transform .5s cubic-bezier(.3,1.6,.5,1); white-space: nowrap; }
+.zero-br .ring { position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 3px solid var(--lila); pointer-events: none; animation: zring 1s ease-out forwards; }
+@keyframes zring { from { opacity: .9; transform: scale(.4); } to { opacity: 0; transform: scale(5); } }
+.sys0.on .zero-br b { opacity: 1; transform: none; }
+.sys0.shut .zero-br::before, .sys0.shut .zero-br::after { opacity: 1; transform: none; }
+.sys0-copy { display: flex; flex-direction: column; gap: 10px; opacity: 0; transform: translateX(-30px); transition: opacity .6s, transform .8s cubic-bezier(.2,.7,.2,1); }
+.sys0.shut .sys0-copy { opacity: 1; transform: none; }
+.sys0-k { font-size: 46px; font-weight: 800; letter-spacing: -0.02em; }
+.sys0-d { font-size: 27px; line-height: 1.45; color: var(--on-2); max-width: 900px; text-wrap: pretty; }
+/* Sin la escena (de pie, sin JS o con movimiento reducido) se ve el final. */
+.layer:not(.cur) .sys0 .zero-br b, .layer:not(.cur) .sys0-copy { opacity: 1; transform: none; }
+.layer:not(.cur) .sys0 .zero-br::before, .layer:not(.cur) .sys0 .zero-br::after { opacity: 1; transform: none; }
+
+/* Lo que se toca: no avanza la presentación y lo dice una pista abajo a la derecha, cuando la escena terminó. */
+[data-tap] { cursor: pointer; font: inherit; color: inherit; text-align: left; }
+button[data-tap] { appearance: none; -webkit-appearance: none; }
+[data-tap]:focus-visible { outline: 3px solid var(--lila); outline-offset: 4px; }
+.tap { position: absolute; right: 140px; bottom: 100px; font-family: var(--agent); font-size: 19px; color: var(--on-3); display: flex; align-items: center; gap: 10px; opacity: 0; transition: opacity .6s; pointer-events: none; }
+.tap::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--lila); box-shadow: 0 0 0 0 rgba(183,156,240,.55); animation: ping 2s infinite; }
+.layer.ready .tap { opacity: 1; }
+.mosaic .mod[data-tap]:hover, .mosaic .mod.pick { border-color: var(--lila) !important; box-shadow: 0 0 30px -10px var(--lila); }
+.modtip { position: absolute; z-index: 7; width: 420px; padding: 18px 22px; border-radius: 18px; background: rgba(18,6,42,.97); border: 1.5px solid var(--lila); box-shadow: 0 20px 60px -10px rgba(0,0,0,.7), 0 0 40px -12px var(--lila); display: flex; flex-direction: column; gap: 6px; opacity: 0; transform: translateY(10px) scale(.96); transition: opacity .25s, transform .35s cubic-bezier(.3,1.5,.5,1); pointer-events: none; }
+.modtip.on { opacity: 1; transform: none; }
+.modtip b { font-size: 26px; }
+.modtip span { font-size: 22px; line-height: 1.4; color: var(--on-2); }
+.modtip em { font-style: normal; font-family: var(--agent); font-size: 22px; font-weight: 600; color: var(--lila); }
+.res[data-tap]:hover, .nvr[data-tap]:hover { border-color: color-mix(in srgb, var(--c) 60%, transparent); }
+.nvr[data-tap]:hover { background: color-mix(in srgb, var(--c) 6%, transparent); }
+.vc.hd[data-tap] { border: none; border-radius: 0; }
+.vc.hd[data-tap]:not(.c4) { background: none; }
+.vc.hd[data-tap]:hover b, .vc.hd.replay b { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; }
 
 /* ===== 11 · Control ===== */
 .wild { position: absolute; inset: 0; }
@@ -723,6 +770,32 @@ h1, h2, h3, p { margin: 0; }
 .row .price { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
 .row .price.zero { color: var(--grey); font-weight: 600; }
 .row.total { background: rgba(183,156,240,.08); border-bottom: none; font-size: 29px; }
+/* 12 · Lo que nunca se cobra: la moneda aparece, gira y se apaga sin llegar al total. */
+.free b { font-weight: 800; }
+.nv { display: flex; flex-direction: column; border-radius: 26px; background: rgba(18,6,42,.78); border: 1px solid var(--line); overflow: hidden; }
+.nvr { display: grid; grid-template-columns: 1fr 240px 260px; gap: 24px; align-items: center; padding: 15px 34px; border-bottom: 1px solid var(--line); font-size: 25px; transition: background .4s, opacity .4s; }
+.nvr .what small { display: block; font-size: 19px; color: var(--on-3); margin-top: 2px; }
+.nvr .kind { font-family: var(--agent); font-size: 18px; display: flex; gap: 10px; align-items: center; color: var(--on-2); }
+.nvp { position: relative; display: flex; justify-content: flex-end; align-items: center; height: 54px; }
+.nvz { font-family: var(--agent); font-size: 26px; font-weight: 600; color: var(--grey); transition: opacity .3s; }
+.nvc { position: absolute; right: 10px; top: 0; width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; font: 800 30px var(--font); color: #06222a; background: radial-gradient(circle at 35% 30%, #fff, var(--c) 62%); box-shadow: 0 0 30px -4px var(--c); opacity: 0; transform: scale(.4); pointer-events: none; }
+.nvr.ask { background: color-mix(in srgb, var(--c) 9%, transparent); }
+.nvr.ask .nvz { opacity: 0; }
+.nvr.ask .nvc { animation: nvspin .9s linear both; }
+.nvr.no .nvc { animation: nvoff .5s cubic-bezier(.5,0,.8,.4) both; }
+.nvr.no .nvz { opacity: 1; animation: zset .4s cubic-bezier(.3,1.6,.5,1); }
+@keyframes nvspin { 0% { opacity: 0; transform: translateY(-30px) scale(.4) rotateY(0); } 25% { opacity: 1; transform: translateY(0) scale(1) rotateY(180deg); } 100% { opacity: 1; transform: rotateY(720deg); } }
+@keyframes nvoff { 0% { opacity: 1; transform: none; filter: grayscale(0); } 40% { opacity: 1; transform: scale(1.15) rotate(-12deg); filter: grayscale(1) brightness(.6); } 100% { opacity: 0; transform: translateY(40px) scale(.2) rotate(30deg); filter: grayscale(1) brightness(.4); } }
+.nvr.total { background: rgba(183,156,240,.08); border-bottom: none; font-size: 29px; }
+.nvr.total b.num { font-family: var(--agent); font-size: 40px; font-weight: 600; color: var(--lila); transition: text-shadow .4s; }
+.nvr.total .hit { animation: nvhold .4s; }
+@keyframes nvhold { 25% { transform: translateX(-8px); } 50% { transform: translateX(8px); } 75% { transform: translateX(-4px); } }
+.nvr.total.done b.num { text-shadow: 0 0 30px rgba(183,156,240,.8); }
+.nv { position: relative; }
+.nv::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, transparent 35%, rgba(183,156,240,.16) 50%, transparent 65%); transform: translateX(-100%); }
+.nv.done::after { animation: nvsheen 1.3s cubic-bezier(.4,0,.2,1) both; }
+@keyframes nvsheen { to { transform: translateX(100%); } }
+.nvr.no .nvz { color: var(--on-3); }
 .row.total .price { color: var(--lila); font-size: 40px; }
 
 /* ===== 13 · Dos formas de trabajar ===== */
@@ -765,6 +838,49 @@ h1, h2, h3, p { margin: 0; }
 .orch-log div { font-size: 20px; color: var(--on-2); display: flex; gap: 10px; align-items: center; animation: rise .4s both; }
 .orch-log .dot { width: 10px; height: 10px; }
 .team0 { margin-top: auto; display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; font-family: var(--agent); font-size: 19px; color: var(--mint); padding-top: 12px; border-top: 1px solid var(--line); }
+/* 13 · ¿No es lo mismo que…? El mismo Pedro en cada columna: en las tres primeras el trabajo lo hace
+   el equipo y la moneda cae igual; en odentIA los corchetes se cierran sobre la columna y la moneda
+   cae solo cuando Pedro llega. */
+.vs { position: relative; display: grid; grid-template-columns: 230px 1fr 1fr 1fr 1.22fr; grid-template-rows: auto auto auto auto; flex: 1; min-height: 0; align-content: start; }
+.vl { font-family: var(--agent); font-size: 19px; color: var(--on-3); padding: 22px 18px 22px 0; border-top: 1px solid var(--line); align-self: stretch; display: flex; align-items: center; }
+.vl.vcase { border-top: none; padding: 0 18px 12px 0; align-items: flex-end; }
+.vcase span { font-family: var(--font); font-size: 21px; font-weight: 700; line-height: 1.3; color: var(--on); padding: 12px 16px; border-radius: 16px; background: rgba(245,196,107,.1); border: 1px solid rgba(245,196,107,.45); }
+.vc { padding: 20px 26px; border-top: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; gap: 10px; opacity: 0; transform: translateY(18px); filter: blur(4px); transition: opacity .45s, transform .6s cubic-bezier(.2,.7,.2,1), filter .5s; position: relative; z-index: 1; }
+.vc.hd { border-top: none; padding-top: 6px; padding-bottom: 16px; gap: 2px; }
+.vc.on { opacity: 1; transform: none; filter: none; }
+.vc.hd b { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; color: var(--on-2); }
+.vc.hd small { font-size: 19px; color: var(--on-3); }
+.vc p { font-size: 25px; line-height: 1.35; color: var(--on-2); text-wrap: pretty; }
+.vc.c4 p { color: var(--on); font-weight: 700; }
+.vc.c4.hd b { color: var(--lila); font-size: 44px; text-shadow: 0 0 30px rgba(183,156,240,.5); }
+.vc.c4 { background: rgba(183,156,240,.05); }
+.vsteps { display: flex; align-items: center; gap: 12px; }
+.vsteps .sq { display: flex; gap: 6px; }
+.vsteps .sq i { width: 22px; height: 22px; border-radius: 5px; border: 2px solid var(--grey); transition: background .25s, border-color .25s, transform .25s; }
+.vsteps .sq i.on { background: var(--warn); border-color: var(--warn); transform: scale(1.12); box-shadow: 0 0 12px -2px var(--warn); }
+.vsteps b { font-family: var(--agent); font-size: 20px; font-weight: 600; color: var(--warn); }
+.vc.c4 .vsteps b { font-size: 34px; color: var(--mint); text-shadow: 0 0 20px rgba(166,240,216,.5); }
+.vbill { display: flex; align-items: center; gap: 12px; font-family: var(--agent); font-size: 19px; color: var(--warn); }
+.vcoin { width: 44px; height: 44px; flex: none; border-radius: 50%; display: grid; place-items: center; font: 800 24px var(--font); color: #3a1a10; background: radial-gradient(circle at 35% 30%, #ffd3c4, var(--warn) 60%, #b65a44); box-shadow: 0 0 20px rgba(232,146,124,.5); opacity: 0; transform: translateY(-60px) scale(.5); transition: opacity .2s, transform .55s cubic-bezier(.3,1.6,.5,1); }
+.vbill.on .vcoin { opacity: 1; transform: none; }
+.vbill > span:last-child { opacity: 0; transition: opacity .4s .25s; }
+.vbill.on > span:last-child { opacity: 1; }
+.vc.c4 .vbill { color: var(--amber); font-size: 30px; font-weight: 700; }
+.vc.c4 .vcoin { width: 56px; height: 56px; font-size: 30px; color: #06222a; background: radial-gradient(circle at 35% 30%, #fff, var(--amber) 62%); box-shadow: 0 0 30px -2px var(--amber); }
+.vflow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.vflow li { display: flex; align-items: center; gap: 12px; font-size: 23px; color: var(--on); opacity: 0; transform: translateX(-16px); transition: opacity .35s, transform .45s cubic-bezier(.3,1.5,.5,1); }
+.vflow li.on { opacity: 1; transform: none; }
+.vflow li .dot { color: var(--c); width: 12px; height: 12px; }
+.vflow li b { color: var(--c); font-weight: 800; }
+/* Fuera del acomodo automático de la rejilla: se posiciona sobre la columna 5 entera. */
+.vs-br { position: absolute; grid-column: 5; grid-row: 1 / -1; inset: -10px -6px -6px; pointer-events: none; z-index: 2; }
+.vs-br::before, .vs-br::after { content: ""; position: absolute; top: 0; bottom: 0; width: 34px; border: 10px solid var(--lila); border-radius: 8px; filter: drop-shadow(0 0 16px rgba(183,156,240,.6)); opacity: 0; transition: transform .5s cubic-bezier(.3,1.7,.5,1), opacity .25s; }
+.vs-br::before { left: 0; border-right: none; transform: translateX(-120px); }
+.vs-br::after { right: 0; border-left: none; transform: translateX(120px); }
+.vs.win .vs-br::before, .vs.win .vs-br::after { opacity: 1; transform: none; }
+.vs.done .vs-br::before, .vs.done .vs-br::after { animation: brpulse 2.4s ease-in-out infinite; }
+@keyframes brpulse { 50% { filter: drop-shadow(0 0 30px rgba(183,156,240,.95)); } }
+.vs.done .c1, .vs.done .c2, .vs.done .c3 { opacity: .4; filter: grayscale(.8); transition: opacity .8s, filter .8s; }
 .thesis { text-align: center; display: flex; flex-direction: column; gap: 28px; align-items: center; }
 .thesis .h1 { font-size: 112px; }
 .thesis .h1 span { display: block; }
@@ -1162,31 +1278,39 @@ html.stacked body { margin: 0; }
       </div>
     </div>
   </div>
-  <div class="layer">
+  <div class="layer" data-scene="sys0">
     <span class="was"><s>¿Y mi agenda?</s></span>
     <span class="tag in">[ Con latidIA · El sistema completo ]</span>
-    <h2 class="h2 in" style="--d:.1s">Y todo lo de siempre, incluido.</h2>
-    <div class="mosaic">
-      <div class="mod" style="--i:0"><i></i>Agenda por sala</div>
-      <div class="mod" style="--i:1"><i></i>Historia clínica</div>
-      <div class="mod" style="--i:2"><i></i>Signos vitales</div>
-      <div class="mod" style="--i:3"><i></i>Examen por sistemas</div>
-      <div class="mod" style="--i:4"><i></i>Antecedentes</div>
-      <div class="mod" style="--i:5"><i></i>Receta</div>
-      <div class="mod" style="--i:6"><i></i>Descanso médico</div>
-      <div class="mod" style="--i:7"><i></i>Órdenes y derivaciones</div>
-      <div class="mod" style="--i:8"><i></i>Consentimientos</div>
-      <div class="mod" style="--i:9"><i></i>Imágenes</div>
-      <div class="mod" style="--i:10"><i></i>Controles que se repiten</div>
-      <div class="mod" style="--i:11"><i></i>Caja y cobros</div>
-      <div class="mod" style="--i:12"><i></i>Su enlace del paciente</div>
-      <div class="mod" style="--i:13"><i></i>Todos tus canales</div>
-      <div class="mod" style="--i:14"><i></i>Reportes</div>
-      <div class="mod" style="--i:15"><i></i>Sedes, equipo y permisos</div>
+    <h2 class="h2 in" style="--d:.1s; font-size:70px">Todo lo de siempre, incluido. Y no se cobra.</h2>
+    <div class="mosaic" data-cur="{{cur}}">
+      <button type="button" class="mod" data-tap="mod" data-what="Citas por médico y por sala, con recordatorios." style="--i:0"><i></i><span>Agenda por sala</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Atenciones, notas y diagnósticos, con firma." style="--i:1"><i></i><span>Historia clínica</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Presión, peso y glucosa, con su evolución." style="--i:2"><i></i><span>Signos vitales</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Lo normal y lo que encontraste, en su lugar." style="--i:3"><i></i><span>Examen por sistemas</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Alergias, enfermedades y lo que toma." style="--i:4"><i></i><span>Antecedentes</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Con aviso de alergias y embarazo; sale con tu firma." style="--i:5"><i></i><span>Receta</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Numerado y firmado, y le llega al paciente." style="--i:6"><i></i><span>Descanso médico</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Exámenes e interconsultas, listos para enviar." style="--i:7"><i></i><span>Órdenes y derivaciones</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Se firman en la consulta o en papel." style="--i:8"><i></i><span>Consentimientos</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Resultados y fotos dentro de la historia." style="--i:9"><i></i><span>Imágenes</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="El próximo control queda programado." style="--i:10"><i></i><span>Controles que se repiten</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Pagos, saldos y deudas al día." style="--i:11"><i></i><span>Caja y cobros</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="El paciente reserva, se registra y ve lo suyo." style="--i:12"><i></i><span>Su enlace del paciente</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="WhatsApp, Instagram, correo y chat web en una bandeja." style="--i:13"><i></i><span>Todos tus canales</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Pacientes, citas, cobros y lo que te dejó latidIA." style="--i:14"><i></i><span>Reportes</span><span class="z num">{{cur}} 0</span></button>
+      <button type="button" class="mod" data-tap="mod" data-what="Sin límite de personas; cada rol ve lo suyo." style="--i:15"><i></i><span>Sedes, equipo y permisos</span><span class="z num">{{cur}} 0</span></button>
     </div>
-    <p class="free-line in" style="--d:2.4s">Sin pagar por módulos, médicos, salas ni sedes.</p>
+    <div class="sys0">
+      <div class="zero-br" aria-hidden="true"><b class="num">{{cur}} 0</b></div>
+      <div class="sys0-copy">
+        <p class="sys0-k">Todo el sistema, cada mes.</p>
+        <p class="sys0-d">Sin pagar por módulos, médicos, salas ni sedes. Lo único que se paga es lo que hacen <b class="c-sky">Sofi</b>, <b class="c-mint">Clío</b> y <b class="c-amber">Argos</b>.</p>
+      </div>
+    </div>
+    <div class="modtip" aria-live="polite"></div>
+    <span class="tap">Toca un módulo para ver qué incluye</span>
   </div>
-  <aside class="notes">Es la duda más común, y es justa. Clic: además de los agentes, latidIA tiene lo que ya usan: agenda por sala y por médico, historia clínica con signos vitales y examen por sistemas, receta, descanso médico, órdenes, consentimientos, controles que se repiten, caja y reportes. Y nada de esto se cobra por módulo, médico, sala ni sede.</aside>
+  <aside class="notes">Es la duda más común, y es justa. Clic: además de los agentes, latidIA tiene lo que ya usan: agenda por sala y por médico, historia clínica con signos vitales y examen por sistemas, receta, descanso médico, órdenes, consentimientos, controles que se repiten, caja y reportes. Miren el precio de cada uno: cero. No cobramos el software, ni por módulo, ni por médico, ni por sala, ni por sede. Lo único que se paga es el trabajo que hacen los agentes.</aside>
 </section>
 
 <!-- ============ 11 · Control ============ -->
@@ -1228,14 +1352,15 @@ html.stacked body { margin: 0; }
   </div>
   <div class="layer" data-scene="vals">
     <span class="was"><s>La cuota llega igual</s></span>
-    <span class="tag in">[ Con latidIA · Enfocados en el valor ]</span>
-    <h2 class="h2 in" style="--d:.1s">Solo cobramos cuando te damos valor.</h2>
+    <span class="tag in">[ Con latidIA · Por lo que hizo ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:58px; white-space:nowrap">No te cobramos el software. Te cobramos lo que hizo.</h2>
     <div class="results">
-      <div class="res in" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Rosa escribe a las 23:41</span><span class="st"><i></i>Sofi la agenda y Rosa viene</span><span class="coin11"><b>$</b><span>{{L.agenda$}}</span></span></div><p>Según lo que pasó: {{L.informa}} si informa, {{L.gestiona}} si reserva, mueve o cancela una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
-      <div class="res in" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone cada bloque</span><span class="st"><i></i>La Dra. Vela lo confirma</span><span class="coin11"><b>$</b><span>{{L.completa$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} la nota, {{L.estandar}} con examen o diagnóstico y {{L.completa}} si deja indicada la receta, una orden, el descanso o el control.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
-      <div class="res in" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Luis reserva su control</span><span class="st"><i></i>Luis llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Luis no tenía cita y volvió después del mensaje de Argos.</p><span class="when">Se cobra solo cuando el paciente viene.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Rosa escribe a las 23:41</span><span class="st"><i></i>Sofi la agenda y Rosa viene</span><span class="coin11"><b>$</b><span>{{L.agenda$}}</span></span></div><p>Según lo que pasó: {{L.informa}} si informa, {{L.gestiona}} si reserva, mueve o cancela una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone cada bloque</span><span class="st"><i></i>La Dra. Vela lo confirma</span><span class="coin11"><b>$</b><span>{{L.completa$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} la nota, {{L.estandar}} con examen o diagnóstico y {{L.completa}} si deja indicada la receta, una orden, el descanso o el control.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Luis reserva su control</span><span class="st"><i></i>Luis llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Luis no tenía cita y volvió después del mensaje de Argos.</p><span class="when">Se cobra solo cuando el paciente viene.</span></div>
     </div>
-    <div class="free in" style="--d:1s"><span>Incluido, sin cobro:</span><span class="chip">Recordatorios</span><span class="chip">Avisos de cita</span><span class="chip">Tareas al equipo</span><span class="chip">Todo el sistema</span></div>
+    <p class="free in" style="--d:1s">El sistema completo cuesta <b class="accent">{{cur}} 0</b>. En el plan, la cuota vuelve entera como crédito para tus agentes.</p>
+    <span class="tap">Toca una tarjeta para verla de nuevo</span>
   </div>
   <div class="layer" data-scene="day">
     <span class="tag in">[ Un día, fila por fila · ejemplo ]</span>
@@ -1249,12 +1374,26 @@ html.stacked body { margin: 0; }
       <div class="row total in" style="--d:1.95s"><span class="t"></span><span class="what"><b>Lo cobrado en el día</b></span><span class="kind">Precio de lista</span><span class="price num" id="dayTotal">{{L.day$}}</span></div>
     </div>
   </div>
-  <aside class="notes">La mayoría paga por médicos y módulos, use o no use el sistema. Clic: cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Estos son precios de lista; en un momento les muestro el precio de consultorio fundador.</aside>
+  <div class="layer" data-scene="never">
+    <span class="tag in">[ Con latidIA · Lo que nunca se cobra ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:66px">Si no fue un trabajo útil, no se cobra.</h2>
+    <div class="nv in" style="--d:.25s">
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--sky)"><span class="what">Bloqueó 3 mensajes de spam<small>Lo que no es para el consultorio</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Le recordó su cita a 12 pacientes<small>Recordatorios y avisos de cita</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--mint)"><span class="what">Propuso una nota que la Dra. Vela descartó<small>Borrador que no te sirvió</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Mateo reservó después de su mensaje, pero no vino<small>Cita recuperada sin asistencia</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">No encontró cómo responder una pregunta<small>Pregunta sin respuesta</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--on-2)"><span class="what">Tu equipo le respondió a Julia<small>Lo que hace tu equipo</small></span><span class="kind"><span class="dot" style="color:var(--on-2)"></span>Tu equipo</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr total"><span class="what"><b>Lo cobrado por todo esto</b></span><span class="kind"></span><span class="nvp"><b class="num" id="nvTotal">{{cur}} 0,00</b></span></div>
+    </div>
+    <span class="tap">Toca una fila para intentar cobrarla</span>
+  </div>
+  <aside class="notes">La mayoría paga por médicos y módulos, use o no use el sistema. Clic: no cobramos el software; cada agente cobra por lo que hizo, y lo simple cuesta poco. Clic: así se ve un día; los recordatorios y las tareas no se cobran. Clic: y esto nunca se cobra: el spam, los recordatorios, el borrador que descartaste, la cita si el paciente no vino, la pregunta que Argos no pudo responder y lo que hace tu equipo. Estos son precios de lista; en un momento les muestro el precio de consultorio fundador.</aside>
 </section>
 
 <!-- ============ 13 · Dos formas de trabajar ============ -->
 <section class="slide" aria-label="Un solo caso, dos formas de trabajar">
-  <div class="layer stay" data-scene="duo">
+  <div class="layer" data-scene="duo">
     <span class="tag in">[ Por qué latidIA ]</span>
     <h2 class="h2 in" style="--d:.1s; font-size:66px">Un solo caso, dos formas de trabajar.</h2>
     <div class="case in" style="--d:.3s">Luis no vino a su control de presión de los 3 meses.</div>
@@ -1279,13 +1418,41 @@ html.stacked body { margin: 0; }
       </div>
     </div>
   </div>
+  <div class="layer stay" data-scene="vs">
+    <span class="tag in">[ Por qué latidIA ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:64px; white-space:nowrap">¿No es lo mismo que un CRM o un chatbot?</h2>
+    <div class="vs in" id="vs" style="--d:.4s">
+      <span class="vl vcase"><span>Luis no vino a su control de presión de los 3 meses.</span></span>
+      <button type="button" class="vc hd c1" data-tap="vs" data-col="1"><b>CRM</b><small>Guarda contactos y ventas</small></button>
+      <button type="button" class="vc hd c2" data-tap="vs" data-col="2"><b>Chatbot</b><small>Responde mensajes</small></button>
+      <button type="button" class="vc hd c3" data-tap="vs" data-col="3"><b>Software de registro</b><small>Guarda la historia y la agenda</small></button>
+      <button type="button" class="vc hd c4" data-tap="vs" data-col="4"><b>latidIA</b><small>Agentes que hacen el trabajo</small></button>
+      <span class="vl">Qué pasa con Luis</span>
+      <div class="vc c1"><p>Queda como pendiente, si alguien lo anotó.</p></div>
+      <div class="vc c2"><p>Nada, hasta que Luis escriba primero.</p></div>
+      <div class="vc c3"><p>Su historia dice que le toca el control.</p></div>
+      <div class="vc c4"><ul class="vflow"><li style="--c:var(--amber)"><span class="dot"></span><span><b>Argos</b> lo invita a volver</span></li><li style="--c:var(--sky)"><span class="dot"></span><span><b>Sofi</b> le responde y lo agenda</span></li><li style="--c:var(--mint)"><span class="dot"></span><span>Luis llega el jueves 16:00</span></li></ul></div>
+      <span class="vl">Quién hace el trabajo</span>
+      <div class="vc c1"><p>Tu equipo lo sigue a mano</p><div class="vsteps"><span class="sq" data-n="4"></span><b class="num">4 pasos</b></div></div>
+      <div class="vc c2"><p>Tu equipo agenda y lo anota</p><div class="vsteps"><span class="sq" data-n="3"></span><b class="num">3 pasos</b></div></div>
+      <div class="vc c3"><p>Tu equipo busca, le escribe y agenda</p><div class="vsteps"><span class="sq" data-n="6"></span><b class="num">6 pasos</b></div></div>
+      <div class="vc c4"><p>Nadie de tu equipo</p><div class="vsteps"><b class="num">0 pasos</b></div></div>
+      <span class="vl">Cómo te cobra</span>
+      <div class="vc c1"><p>Por usuario, cada mes</p><div class="vbill"><span class="vcoin">$</span><span>Vuelva o no Luis</span></div></div>
+      <div class="vc c2"><p>Por mensaje o por mes</p><div class="vbill"><span class="vcoin">$</span><span>Vuelva o no Luis</span></div></div>
+      <div class="vc c3"><p>Cuota fija, cada mes</p><div class="vbill"><span class="vcoin">$</span><span>Vuelva o no Luis</span></div></div>
+      <div class="vc c4"><p>Solo si Luis vino</p><div class="vbill"><span class="vcoin">$</span><span class="num">{{L.recovered$}}</span></div></div>
+      <span class="vs-br" aria-hidden="true"></span>
+    </div>
+    <span class="tap">Toca CRM, Chatbot, Software de registro o latidIA para ver a Luis otra vez</span>
+  </div>
   <div class="layer overlay">
     <div class="thesis">
       <span class="tag in">[ La diferencia ]</span>
       <h2 class="h1 in" style="--d:.15s"><span>Ellos guardan lo que pasó.</span><span class="accent">latidIA hace que pase.</span></h2>
     </div>
   </div>
-  <aside class="notes">El mismo caso por los dos lados. A la izquierda, el software de registro: aunque tenga un botón de IA que sugiere un texto, alguien tiene que copiarlo, enviarlo y anotarlo, y mientras tanto la cola crece. A la derecha, Argos, Sofi y Clío, cada uno entre sus corchetes, se pasan el caso de Luis y su control vuelve a la agenda; mientras tanto ya resolvieron los siguientes, uno detrás de otro. Clic: ellos guardan lo que pasó; latidIA hace que pase.</aside>
+  <aside class="notes">El mismo caso por los dos lados. A la izquierda, el software de registro: aunque tenga un botón de IA que sugiere un texto, alguien tiene que copiarlo, enviarlo y anotarlo, y mientras tanto la cola crece. A la derecha, Argos, Sofi y Clío, cada uno entre sus corchetes, se pasan el caso de Luis y su control vuelve a la agenda; mientras tanto ya resolvieron los siguientes, uno detrás de otro. Clic: «¿y no es lo mismo que un CRM o un chatbot?». El mismo Luis en cada uno, con lo usual del mercado y sin nombrar a nadie: el CRM lo deja como pendiente, el chatbot espera a que Luis escriba y el software de registro guarda su historia; en los tres el trabajo lo hace tu equipo y la cuota llega igual. Con latidIA lo hacen los agentes y solo se cobra si Luis vino. Clic: ellos guardan lo que pasó; latidIA hace que pase.</aside>
 </section>
 
 <!-- ============ 14 · Fundador ============ -->
