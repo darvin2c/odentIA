@@ -2,7 +2,7 @@
 // pantalla pequeña que hace una sola cosa en unos segundos. Se parecen a las de la app (la ventana
 // clara del buscador de la parte 8; el arco y las piezas del odontograma son los de
 // @odentia/dental, como en la web). deck.js las toma de `window.ModuleScreens` y les pasa su espera,
-// para que se detengan al cambiar de parte.
+// para que se detengan al cambiar de parte. El motor es el de ../module-screens-core.
 import { type ArchRows, archLayout } from "@odentia/dental/odontogram-arch"
 import {
   CROWN_SQUARE,
@@ -12,21 +12,7 @@ import {
   toothTypeOf,
   zonesFor,
 } from "@odentia/dental/tooth-shapes"
-
-type Wait = (ms: number) => Promise<void>
-export interface ModuleScreen {
-  title: string
-  sub: string
-  body: HTMLElement
-  play: (wait: Wait) => Promise<void>
-}
-
-const html = (cls: string, inner: string) => {
-  const node = document.createElement("div")
-  node.className = cls
-  node.innerHTML = inner
-  return node
-}
+import { html, type ModuleScreen, pill, registerScreens, row, scripted, type Step, toast } from "../module-screens-core"
 
 /* ---------- Agenda: Sofi llena el hueco de las 10:00 ---------- */
 function agenda(): ModuleScreen {
@@ -165,44 +151,6 @@ function odontograma(): ModuleScreen {
     },
   }
 }
-
-/* ---------- Las demás: una pantalla y sus pasos ---------- */
-/**
- * Un paso de una pantalla: espera, a quién y qué clase le pone («-clase» la quita); con texto,
- * antes le cambia el contenido. Así cada pantalla es su dibujo y su guion, sin código propio.
- */
-type Step = [ms: number, sel: string, cls?: string, text?: string]
-
-function scripted(title: string, sub: string, cls: string, inner: string, steps: Step[]): () => ModuleScreen {
-  return () => {
-    const body = html(`ms-scr ${cls}`, inner)
-    return {
-      title,
-      sub,
-      body,
-      play: async (wait) => {
-        for (const [ms, sel, c = "on", text] of steps) {
-          await wait(ms)
-          const node = body.querySelector<HTMLElement>(sel)
-          if (!node) continue
-          if (text !== undefined) node.innerHTML = text
-          if (!c) continue
-          if (c.startsWith("-")) node.classList.remove(c.slice(1))
-          else {
-            node.classList.remove(c)
-            void node.offsetWidth
-            node.classList.add(c)
-          }
-        }
-      },
-    }
-  }
-}
-
-const row = (s: string, t: string, b: string, small: string, pill = "", extra = "") =>
-  `<div class="ms-row ms-in ${extra}" data-s="${s}"><span class="t">${t}</span><span class="x"><b>${b}</b><small>${small}</small></span>${pill}</div>`
-const pill = (text: string, tone = "") => `<span class="ms-pill ${tone}">${text}</span>`
-const toast = (text: string, dot = "sky") => `<div class="ms-toast" data-s="toast"><span class="ms-dot ${dot}"></span>${text}</div>`
 
 const historia = scripted(
   "Historia clínica",
@@ -444,7 +392,7 @@ const equipo = scripted(
   [[600, "[data-s=inv]", "press"], [300, "[data-s=t4]"], [150, "[data-s=t4]", "hl"], [700, "[data-s=clin]", "flag"], [500, "[data-s=free]"]],
 )
 
-;(window as unknown as { ModuleScreens: Record<string, () => ModuleScreen> }).ModuleScreens = {
+registerScreens({
   agenda,
   odontograma,
   periodontograma,
@@ -461,4 +409,4 @@ const equipo = scripted(
   oportunidades,
   reportes,
   equipo,
-}
+})
