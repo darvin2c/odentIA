@@ -1,4 +1,5 @@
 // «Tu clínica es…»: tres tamaños de ejemplo que llenan la calculadora; los números se siguen ajustando a mano.
+import { WORDS } from "../lib/product"
 import { CLINIC_SIZES, type ClinicSize, type ValueInput } from "../lib/value"
 import "./size-picker.css"
 
@@ -11,7 +12,7 @@ export default function SizePicker({
 }) {
   return (
     <fieldset className="sizes">
-      <legend>Tu clínica es</legend>
+      <legend>{WORDS.YourClinic} es</legend>
       <div className="sizes-row">
         {CLINIC_SIZES.map((s) => (
           <button

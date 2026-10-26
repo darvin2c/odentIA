@@ -21,6 +21,9 @@ export interface ProductWords {
   clinic: string
   theClinic: string
   yourClinic: string
+  /** «Tu clínica, en un mes», al empezar una frase. */
+  YourClinic: string
+  anotherClinic: string
   /** Las imágenes que más ocupan (odentIA: las tomografías). */
   heavyImages: string
   /** El color de la barra del navegador, el de la noche de la portada. */
@@ -36,6 +39,8 @@ const WORDS_BY_PRODUCT: Record<WebProduct, ProductWords> = {
     clinic: "clínica",
     theClinic: "la clínica",
     yourClinic: "tu clínica",
+    YourClinic: "Tu clínica",
+    anotherClinic: "otra clínica",
     heavyImages: "tomografías",
     themeColor: "#0a2129",
   },
@@ -47,6 +52,8 @@ const WORDS_BY_PRODUCT: Record<WebProduct, ProductWords> = {
     clinic: "consultorio",
     theClinic: "el consultorio",
     yourClinic: "tu consultorio",
+    YourClinic: "Tu consultorio",
+    anotherClinic: "otro consultorio",
     heavyImages: "imágenes",
     themeColor: "#1e0b3d",
   },

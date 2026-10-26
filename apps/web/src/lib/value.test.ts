@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { type PlanPrices, usd, type ValuePrices, valuePricesOf } from "./pricing"
 import { CLINIC_SIZES, computeValue, DEFAULT_VALUE_INPUT, sizeOf } from "./value"
 
@@ -91,5 +91,41 @@ describe("tamaños de clínica", () => {
     expect(p.withoutUs).toBeLessThan(m.withoutUs)
     expect(m.withoutUs).toBeLessThan(g.withoutUs)
     expect(p.withUs).toBeLessThan(g.withUs)
+  })
+})
+
+describe("los números de un consultorio de latidIA", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it("la mediana de 3 a 6 médicos: 700 consultas a USD 25, con más «Completa» porque indicar un análisis es frecuente", async () => {
+    vi.stubEnv("VITE_PRODUCT", "medical")
+    // Los de arriba ya cargaron la web de odentIA: el producto se lee al cargar.
+    vi.resetModules()
+    const { MIX } = await import("./pricing")
+    const value = await import("./value")
+    expect(MIX).toMatchObject({ simple: 0.15, estandar: 0.4, completa: 0.45 })
+    expect(value.DEFAULT_VALUE_INPUT).toMatchObject({ writers: 500, consultations: 700, appointmentValue: 25, noShows: 70 })
+    expect(value.CLINIC_SIZES.map((s) => `${s.label}: ${s.hint}`)).toEqual([
+      "Pequeño: 1 o 2 médicos",
+      "Mediano: 3 a 6 médicos",
+      "Grande: 7 o más, o varias sedes",
+    ])
+    const v = value.computeValue(value.DEFAULT_VALUE_INPUT, LIST)
+    expect(v.byType.simple.count).toBe(105)
+    expect(v.byType.completa.count).toBe(315)
+    // Sofi 212,50 + Clío 224 + 11 citas recuperadas a USD 2.
+    expect(v.withUs).toBeCloseTo(458.5)
+    // 40 pacientes perdidos y 11 que vuelven, a USD 25, más 80 horas a USD 4.
+    expect(v.withoutUs).toBe(1595)
+    expect(v.worthIt).toBe(true)
+    for (const size of value.CLINIC_SIZES) expect(value.sizeOf(size.input)).toBe(size.id)
+  })
+
+  it("odentIA no cambia: la Clínica Sonrisa del estudio", async () => {
+    const value = await import("./value")
+    expect(value.DEFAULT_VALUE_INPUT).toMatchObject({ writers: 300, consultations: 300, appointmentValue: 40 })
   })
 })
