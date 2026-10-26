@@ -29,8 +29,8 @@ function agenda(): ModuleScreen {
       <div class="ms-ap" style="grid-column:3; grid-row:2 / span 2"><b>Carla S. · Endodoncia</b><span class="ms-st teal">En atención · con el Dr. Ríos desde 09:35</span></div>
       <div class="ms-ap" style="grid-column:3; grid-row:5"><b>Pedro R. · Control</b><span class="ms-st">12:00 · confirmó</span></div>
     </div>
-    <div class="ms-wa" id="msWa"><span class="ms-wa-h">WhatsApp · Lucía T. · 22:47</span><p>Hola, ¿tienen cita mañana a las 10? Me duele una muela.</p></div>
-    <div class="ms-toast" id="msToast"><span class="ms-dot sky"></span>Sofi le confirmó la cita a Lucía por WhatsApp</div>`,
+    <div class="ms-wa" id="msWa"><span class="ms-wa-h">WhatsApp · Jorge P. · 21:30</span><p>Hola, ¿tienen cita mañana a las 10? Quiero hacerme un blanqueamiento.</p></div>
+    <div class="ms-toast" id="msToast"><span class="ms-dot sky"></span>Sofi le confirmó la cita a Jorge por WhatsApp</div>`,
   )
   const free = body.querySelector<HTMLElement>("#msFree")!
   const wa = body.querySelector<HTMLElement>("#msWa")!
@@ -48,7 +48,7 @@ function agenda(): ModuleScreen {
       await wait(1100)
       free.classList.remove("libre", "pending")
       free.classList.add("new")
-      free.innerHTML = `<b>Lucía T. · Evaluación</b><span class="ms-st sky">Agendó Sofi · por WhatsApp, a las 22:48</span>`
+      free.innerHTML = `<b>Jorge P. · Evaluación</b><span class="ms-st sky">Agendó Sofi · por WhatsApp, a las 21:31</span>`
       await wait(500)
       toast.classList.add("on")
     },
@@ -112,14 +112,15 @@ function odontograma(): ModuleScreen {
     "ms-odo",
     `<div class="ms-odo-l">${arch}<div class="ms-legend"><span><i style="background:${RED}"></i>Patología</span><span><i style="background:${BLUE}"></i>Buen estado</span></div></div>
     <div class="ms-odo-r">
-      <div class="ms-voice" id="msVoice"><span class="ms-dot mint"></span><span>Clío escuchó: <q>la dieciséis tiene caries oclusal</q></span></div>
+      <div class="ms-voice" id="msVoice"><span class="ms-dot mint"></span><span>Clío escuchó: <q>la dieciséis, caries oclusal; hacemos resina</q></span></div>
       <div class="ms-panel" id="msPanel">
-        <span class="ms-k">Sugerencia de Clío</span>
+        <span class="ms-k">Sugerencias de Clío</span>
         <b>Pieza 16 · primer molar superior derecho</b>
         <div class="ms-chips"><span class="on">Caries</span><span>Restauración</span><span>Corona</span><span>Ausente</span></div>
         <span class="ms-f">Cara <b>Oclusal</b></span>
         <span class="ms-f">Diagnóstico <b>CIE-10 · K02.1 Caries de la dentina</b></span>
-        <span class="ms-btn" id="msOk">Confirmar y agregar al plan</span>
+        <span class="ms-f">Tratamiento <b>Resina oclusal</b></span>
+        <span class="ms-btn" id="msOk">Confirmar</span>
       </div>
       <div class="ms-plan" id="msPlan"><span class="ms-k">Plan de Lucía</span><div><b>Resina oclusal · pieza 16</b><span>Por hacer · agregado hoy</span></div></div>
     </div>`,
@@ -168,7 +169,7 @@ const historia = scripted(
 )
 
 const PERIO: [number, number[]][] = [
-  [18, [3, 2, 3]], [17, [3, 3, 4]], [16, [5, 4, 6]], [15, [3, 2, 3]],
+  [18, [3, 2, 3]], [17, [3, 3, 4]], [16, [5, 4, 5]], [15, [3, 2, 3]],
   [14, [2, 2, 3]], [13, [3, 2, 2]], [12, [2, 1, 2]], [11, [2, 2, 2]],
 ]
 const periodontograma = scripted(
@@ -181,7 +182,7 @@ const periodontograma = scripted(
       .map((v) => `<i class="${v >= 4 ? "deep" : ""}">${v}</i>`)
       .join("")}</span><span class="bl">${mm.some((v) => v >= 4) ? "Sangra" : ""}</span></div>`,
   ).join("")}</div>
-  <div class="ms-card ms-in" data-s="prop"><span class="ms-k">Propuesta con lo medido</span><b>Periodontitis · estadio II, grado B</b><small>Bolsas de 4 a 6 mm en la 16 y la 17, con sangrado.</small><span class="ms-btn" data-s="ok">Confirmar diagnóstico</span></div>
+  <div class="ms-card ms-in" data-s="prop"><span class="ms-k">Propuesta con lo medido</span><b>Periodontitis · estadio II, grado B</b><small>Bolsas de 4 y 5 mm en la 16 y la 17, con sangrado.</small><span class="ms-btn" data-s="ok">Confirmar diagnóstico</span></div>
   ${toast("Diagnóstico confirmado por la Dra. Ana Paredes", "mint")}`,
   [
     ...PERIO.map((_, i): Step => [i === 0 ? 400 : 260, `[data-s=c${i}]`]),
@@ -221,7 +222,7 @@ const recetas = scripted(
     [1300, "[data-s=chg]", "press"],
     [300, "[data-s=al]", "-on"],
     [200, "[data-s=med]", "ok", "Clindamicina 300 mg"],
-    [10, "[data-s=dose]", "", "Una cápsula cada 8 horas · 7 días"],
+    [10, "[data-s=dose]", "", "La pauta que indica la Dra. Ana Paredes"],
     [200, "[data-s=why]"],
     [400, "[data-s=emit]"],
     [700, "[data-s=emit]", "press"],
@@ -254,8 +255,8 @@ const presupuestos = scripted(
     <div class="ms-opt ms-in" data-s="b"><span class="ms-k">Opción B · recomendada</span><b>Incrustación de cerámica</b><span class="p">USD 280</span><span class="ms-in" data-s="acc">${pill("Aceptada desde su enlace", "green")}</span></div>
     <div class="ms-opt ms-in" data-s="c"><span class="ms-k">Opción C</span><b>Corona de zirconio</b><span class="p">USD 450</span></div>
   </div>
-  <div class="ms-bar"><span class="ms-k">Lo envía Sofi por WhatsApp, con su enlace para aceptar</span><span class="ms-btn" data-s="send">Enviar a Lucía</span></div>
-  <div class="ms-wa" data-s="wa"><span class="ms-wa-h">WhatsApp · Lucía T. · 18:05</span><p>Acepto la opción B. ¿Me agendan?</p></div>`,
+  <div class="ms-bar"><span class="ms-k">Sale por WhatsApp, con su enlace para aceptar</span><span class="ms-btn" data-s="send">Enviar a Lucía</span></div>
+  <div class="ms-wa" data-s="wa"><span class="ms-wa-h">WhatsApp · Lucía T. · 18:05</span><p>Listo, acepté la opción B. ¿Me agendan?</p></div>`,
   [[300, "[data-s=a]"], [180, "[data-s=b]"], [180, "[data-s=c]"], [800, "[data-s=send]", "press"], [900, "[data-s=wa]"], [900, "[data-s=b]", "won"], [10, ".ms-opts", "decided"], [200, "[data-s=acc]"]],
 )
 
@@ -269,25 +270,25 @@ const caja = scripted(
     ${row("r3", "Hoy 10:50", "Pago · tarjeta", "Recibo 0187", `<span class="amt">− USD 180</span>`)}
   </div>
   <div class="ms-due"><span>Le falta pagar</span><b data-s="due">USD 180</b><span class="ms-in" data-s="ok">${pill("Al día", "green")}</span></div>
-  ${toast("Recibo enviado a Lucía por WhatsApp")}`,
+  ${toast("Comprobante enviado a Lucía por correo; también queda en su enlace")}`,
   [[700, "[data-s=r3]"], [150, "[data-s=r3]", "hl"], [500, "[data-s=due]", "zero", "USD 0"], [250, "[data-s=ok]"], [500, "[data-s=toast]"]],
 )
 
 const finanzas = scripted(
   "Finanzas y gastos",
-  "Sede Norte · octubre",
+  "Sede Centro · septiembre",
   "ms-fin",
   `<div class="ms-tiles">
-    <div class="ms-tile"><span>Entró</span><b>USD 18.420</b></div>
-    <div class="ms-tile"><span>Salió</span><b data-s="out">USD 6.150</b></div>
-    <div class="ms-tile main"><span>Te queda</span><b data-s="left">USD 12.270</b></div>
+    <div class="ms-tile"><span>Entró</span><b>USD 11.200</b></div>
+    <div class="ms-tile"><span>Salió</span><b data-s="out">USD 4.150</b></div>
+    <div class="ms-tile main"><span>Te queda</span><b data-s="left">USD 7.050</b></div>
   </div>
   <div class="ms-rows">
-    ${row("g1", "03 oct", "Alquiler del local", "Gasto fijo", `<span class="amt">USD 2.400</span>`, "on")}
-    ${row("g2", "15 oct", "Sueldos del equipo", "Gasto fijo", `<span class="amt">USD 3.100</span>`, "on")}
+    ${row("g1", "03 sep", "Alquiler del local", "Gasto fijo", `<span class="amt">USD 1.600</span>`, "on")}
+    ${row("g2", "15 sep", "Sueldos del equipo", "Gasto fijo", `<span class="amt">USD 2.550</span>`, "on")}
     ${row("g3", "Hoy", "Laboratorio dental · incrustación de Lucía", "Gasto del tratamiento", `<span class="amt">USD 240</span>`)}
   </div>`,
-  [[700, "[data-s=g3]"], [150, "[data-s=g3]", "hl"], [450, "[data-s=out]", "bump", "USD 6.390"], [250, "[data-s=left]", "bump", "USD 12.030"]],
+  [[700, "[data-s=g3]"], [150, "[data-s=g3]", "hl"], [450, "[data-s=out]", "bump", "USD 4.390"], [250, "[data-s=left]", "bump", "USD 6.810"]],
 )
 
 const comisiones = scripted(
@@ -326,7 +327,7 @@ const portal = scripted(
     <b class="hi">Hola, Lucía</b>
     <div class="ms-pcard"><span class="ms-k">Tu próxima cita</span><b>Viernes 23 · 10:00</b><small>Dra. Ana Paredes · Sede Norte</small><span class="lnk">Cambiar</span></div>
     <div class="ms-pcard" data-s="dec"><span class="ms-k">Por decidir</span><b data-s="dect">Tu presupuesto · 3 opciones</b><span class="ms-btn" data-s="go">Ver y aceptar</span></div>
-    <div class="ms-pcard"><span class="ms-k">Tus papeles</span><small>Receta · Consentimiento · Recibo</small></div>
+    <div class="ms-pcard"><span class="ms-k">Tus papeles</span><small>Receta · Consentimiento · Comprobante</small></div>
   </div>
   <div class="ms-side">
     <b>Entra con su huella o su cara.</b>
@@ -341,9 +342,9 @@ const oportunidades = scripted(
   "Ventas de la clínica · cada tarjeta dice por qué está ahí",
   "ms-pipe",
   `<div class="ms-cols">
-    <div class="ms-colp"><span class="ms-k">Nuevo</span><div class="ms-opp"><b>Jorge P.</b><small>Blanqueamiento · escribió ayer</small></div></div>
-    <div class="ms-colp"><span class="ms-k">Evaluación</span><div class="ms-opp"><b>Ana V.</b><small>Ortodoncia · cita el lunes</small></div></div>
-    <div class="ms-colp"><span class="ms-k">Presupuesto</span>
+    <div class="ms-colp"><span class="ms-k">Interesado</span><div class="ms-opp"><b>Jorge P.</b><small>Blanqueamiento · escribió ayer</small></div></div>
+    <div class="ms-colp"><span class="ms-k">Evaluación agendada</span><div class="ms-opp"><b>Ana V.</b><small>Ortodoncia · cita el lunes</small></div></div>
+    <div class="ms-colp"><span class="ms-k">Presupuesto enviado</span>
       <div class="ms-opp" data-s="rosa"><b>Rosa M.</b><small>Ortodoncia · USD 1.800</small><span class="ms-in" data-s="argos">${pill("Argos: 14 días sin respuesta", "amber")}</span><span class="ms-in" data-s="sofi">${pill("Sofi se lo recordó por WhatsApp", "teal")}</span></div>
       <div class="ms-opp"><b>Mario T.</b><small>Implante · enviado hoy</small></div></div>
     <div class="ms-colp"><span class="ms-k">Decidió</span><div class="ms-opp ms-in" data-s="won"><b>Rosa M.</b><small>Ortodoncia · USD 1.800</small>${pill("Ganada · aceptó por WhatsApp", "green")}</div></div>
@@ -354,15 +355,15 @@ const oportunidades = scripted(
 const SPARK = "0,60 40,52 80,56 120,40 160,44 200,30 240,34 280,18 320,22 360,8"
 const reportes = scripted(
   "Reportes",
-  "Toda la clínica · octubre frente a septiembre",
+  "Toda la clínica · septiembre frente a agosto",
   "ms-rep",
   `<div class="ms-tiles">
-    <div class="ms-tile"><span>Cobrado</span><b>USD 18.420</b><small>8 % más que en septiembre</small><svg class="ms-spark" data-s="sp" viewBox="0 0 360 70" aria-hidden="true"><polyline points="${SPARK}"/></svg></div>
-    <div class="ms-tile"><span>Citas atendidas</span><b>412</b><small>5 % más que en septiembre</small></div>
-    <div class="ms-tile"><span>Pacientes nuevos</span><b>37</b><small>3 menos que en septiembre</small></div>
+    <div class="ms-tile"><span>Cobrado</span><b>USD 18.420</b><small>8 % más que en agosto</small><svg class="ms-spark" data-s="sp" viewBox="0 0 360 70" aria-hidden="true"><polyline points="${SPARK}"/></svg></div>
+    <div class="ms-tile"><span>Citas atendidas</span><b>412</b><small>5 % más que en agosto</small></div>
+    <div class="ms-tile"><span>Pacientes nuevos</span><b>37</b><small>3 menos que en agosto</small></div>
   </div>
   <div class="ms-ask"><span class="ms-k">Pregúntale a Argos ›</span><b data-s="q">&nbsp;</b></div>
-  <div class="ms-card ms-in" data-s="ans"><span class="ms-k">Argos</span><b>14 pacientes no volvieron a su control este mes.</b><small>«Recordar el control» los puede invitar a volver. · Ver la lista</small></div>`,
+  <div class="ms-card ms-in" data-s="ans"><span class="ms-k">Argos</span><b>14 pacientes no volvieron a su control este mes.</b><small>Con «Avisar un control», Sofi les escribe. · Ver la lista</small></div>`,
   [
     [300, "[data-s=sp]"],
     [900, "[data-s=q]", "", "¿Quién no volvió"],
@@ -384,7 +385,7 @@ const equipo = scripted(
       ${row("t4", "", "Pedro Ruiz", "Recepción · Sede Centro", pill("Invitación enviada", "teal"))}
     </div>
     <div class="ms-card"><span class="ms-k">Lo que ve Recepción</span>
-      <span class="ms-perm">Agenda <i>✓</i></span><span class="ms-perm">Conversaciones <i>✓</i></span><span class="ms-perm">Cobros <i>✓</i></span>
+      <span class="ms-perm">Agenda <i>✓</i></span><span class="ms-perm">Conversaciones <i>✓</i></span><span class="ms-perm">Pacientes <i>✓</i></span>
       <span class="ms-perm no" data-s="clin">Historia clínica <i>✕</i></span>
     </div>
   </div>

@@ -1559,18 +1559,18 @@ html.stacked body { margin: 0; }
       <div class="switches" id="switches">
         <div class="sw in" style="--d:.25s; --c:var(--sky)"><span class="toggle"></span>Agendar citas<span class="who">Sofi</span></div>
         <div class="sw in" style="--d:.35s; --c:var(--sky)"><span class="toggle"></span>Mover y cancelar citas<span class="who">Sofi</span></div>
-        <div class="sw in" style="--d:.45s; --c:var(--sky)"><span class="toggle"></span>Enviar presupuestos<span class="who">Sofi</span></div>
+        <div class="sw in" style="--d:.45s; --c:var(--sky)"><span class="toggle"></span>Reenviar presupuestos<span class="who">Sofi</span></div>
         <div class="sw in" style="--d:.55s; --c:var(--amber)"><span class="toggle"></span>Avisar un control<span class="who">Argos</span></div>
         <div class="sw in" style="--d:.65s; --c:var(--mint)"><span class="toggle"></span>Proponer la nota de la consulta<span class="who">Clío</span></div>
       </div>
       <div class="promises">
         <div class="promise in" style="--d:.6s"><span class="ic">→</span><div><b>Si no sabe, te lo pasa</b><p>Con el resumen del caso: qué pidió, qué se le dijo y qué falta.</p></div></div>
         <div class="promise in" style="--d:.8s"><span class="ic">✓</span><div><b>Lo clínico lo firma el odontólogo</b><p>El dictado solo propone. Nada entra a la historia sin su confirmación.</p></div></div>
-        <div class="promise in" style="--d:1s"><span class="ic">◷</span><div><b>Escribe solo en tu horario</b><p>Tú eliges a qué horas pueden salir los mensajes de la clínica.</p></div></div>
+        <div class="promise in" style="--d:1s"><span class="ic">◷</span><div><b>Sofi responde siempre; escribe en tu horario</b><p>Contesta a cualquier hora. Los mensajes que inicia la clínica salen solo en el horario que eliges.</p></div></div>
       </div>
     </div>
   </div>
-  <aside class="notes">Respondan antes de que lo pregunten: ¿y si la IA hace algo que no quiero? Cada acción es un interruptor. Lo que el agente no sabe se lo pasa a una persona con el resumen del caso, y lo clínico siempre lo firma el odontólogo.</aside>
+  <aside class="notes">Respondan antes de que lo pregunten: ¿y si la IA hace algo que no quiero? Cada acción es un interruptor. Lo que el agente no sabe se lo pasa a una persona con el resumen del caso, y lo clínico siempre lo firma el odontólogo. Sofi responde a cualquier hora, pero los mensajes que inicia la clínica salen solo en el horario que ustedes eligen.</aside>
 </section>
 
 <!-- ============ 11 · Valor ============ -->
@@ -1593,7 +1593,7 @@ html.stacked body { margin: 0; }
     <div class="results">
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Lucía escribe a las 22:47</span><span class="st"><i></i>Sofi la atiende y agenda</span><span class="coin11"><b>$</b><span>{{L.gestiona$}}</span></span></div><p>Según lo que pasó en tu agenda: {{L.informa}} si responde, {{L.gestiona}} si mueve o reserva una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone la nota</span><span class="st"><i></i>La Dra. Ana la confirma</span><span class="coin11"><b>$</b><span>{{L.estandar$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} una receta, {{L.estandar}} la nota con diagnóstico y {{L.completa}} el presupuesto.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
-      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Pedro no tenía cita y volvió después del mensaje de Argos.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Pedro reserva su control</span><span class="st"><i></i>Pedro llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Pedro no tenía cita: Argos lo encontró y Sofi le escribió.</p><span class="when">Se cobra solo cuando el paciente asiste.</span></div>
     </div>
     <p class="free in" style="--d:1s">El sistema completo cuesta <b class="c-sky">{{cur}} 0</b>. En el plan, la cuota vuelve entera como crédito para tus agentes.</p>
     <span class="tap">Toca una tarjeta para verla de nuevo</span>
@@ -1606,18 +1606,18 @@ html.stacked body { margin: 0; }
       <div class="row in" style="--d:.75s"><span class="t">09:12</span><span class="what">Atendió a Lucía por Instagram y agendó su evaluación<small>Conversación que gestionó una cita</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price num">{{L.gestiona$}}</span></div>
       <div class="row in" style="--d:1.05s"><span class="t">10:40</span><span class="what">Nota y diagnóstico de Mario, confirmados por la Dra. Ana<small>Consulta estándar</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="price num">{{L.estandar$}}</span></div>
       <div class="row in" style="--d:1.35s"><span class="t">13:05</span><span class="what">Dejó a caja la tarea de llamar por un saldo pendiente<small>Tarea al equipo</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price zero">Incluido</span></div>
-      <div class="row in" style="--d:1.65s"><span class="t">17:30</span><span class="what">Pedro llegó a su control; reservó después del mensaje de Argos<small>Cita recuperada · el paciente asistió</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">{{L.recovered$}}</span></div>
+      <div class="row in" style="--d:1.65s"><span class="t">17:30</span><span class="what">Pedro llegó a su control; Argos lo encontró y Sofi le escribió<small>Cita recuperada · el paciente asistió</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">{{L.recovered$}}</span></div>
       <div class="row total in" style="--d:1.95s"><span class="t"></span><span class="what"><b>Lo cobrado en el día</b></span><span class="kind">Precio de lista</span><span class="price num" id="dayTotal">{{L.day$}}</span></div>
     </div>
   </div>
   <div class="layer" data-scene="never">
-    <span class="tag in">[ Con odentIA · Lo que nunca se cobra ]</span>
-    <h2 class="h2 in" style="--d:.1s; font-size:66px">Si no fue un trabajo útil, no se cobra.</h2>
+    <span class="tag in">[ Con odentIA · Sin sorpresas ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:66px">Esto nunca se cobra.</h2>
     <div class="nv in" style="--d:.25s">
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--sky)"><span class="what">Bloqueó 3 mensajes de spam<small>Lo que no es para la clínica</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--sky)"><span class="what">Recordó su cita a 14 pacientes<small>Recordatorios y avisos de cita</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--mint)"><span class="what">Propuso una nota que la Dra. Ana descartó<small>Borrador que no te sirvió</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
-      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Gabriel reservó después de su mensaje, pero no vino<small>Cita recuperada sin asistencia</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Gabriel reservó cuando Sofi le escribió, pero no vino<small>Cita recuperada sin asistencia</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">No encontró cómo responder una pregunta<small>Pregunta sin respuesta</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--on-2)"><span class="what">Recepción le respondió a Carla<small>Lo que hace tu equipo</small></span><span class="kind"><span class="dot" style="color:var(--on-2)"></span>Tu equipo</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr total"><span class="what"><b>Lo cobrado por todo esto</b></span><span class="kind"></span><span class="nvp"><b class="num" id="nvTotal">{{cur}} 0,00</b></span></div>

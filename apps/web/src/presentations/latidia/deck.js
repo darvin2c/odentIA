@@ -576,7 +576,7 @@
       if (slow) {
         const seen = el("span", "p6seen", "Argos lo vio"); seen.style.left = (cb.x - 10) + "px"; seen.style.top = (cb.y - 12) + "px"; w.sc.appendChild(seen);
         await p6wait(400);
-        const bub = el("div", "p6bubble", `<small>Argos · WhatsApp</small>Hola, ${c.querySelector("b").textContent.split(" ")[0]}. ${/control|sano/.test(c.querySelector("span:last-child").textContent) ? "Te toca tu control" : "Te guardé un horario"}: ¿te agendo el ${o.d} a las ${o.h}?`);
+        const bub = el("div", "p6bubble", `<small>Sofi · WhatsApp</small>Hola, ${c.querySelector("b").textContent.split(" ")[0]}. ${/control|sano/.test(c.querySelector("span:last-child").textContent) ? "Te toca tu control" : "Te guardé un horario"}: ¿te agendo el ${o.d} a las ${o.h}?`);
         bub.style.left = (cb.x - 400) + "px"; bub.style.top = (cb.y - 6) + "px"; w.sc.appendChild(bub);
         c.classList.remove("seen"); c.classList.add("warm");
         await p6wait(1100); bub.remove(); seen.remove();
@@ -657,7 +657,7 @@
     out.innerHTML = `<div class="p7rep"><div class="t"><b>Cobrado en septiembre, por sede</b><span>septiembre frente a agosto</span></div><div class="tot">S/ 18.420<small>8 % más que en agosto</small></div><div class="p7bars"><div><i data-h="92"></i><span>San Martín · 11.200</span></div><div><i class="hot" data-h="58"></i><span>Los Olivos · 7.220</span></div></div></div>`;
     await p6wait(120); out.querySelectorAll(".p7bars i").forEach(i => { i.style.height = i.dataset.h + "%"; });
     await p6wait(1200);
-    out.querySelector(".p7rep").insertAdjacentHTML("beforeend", `<div class="p7say"><span><b style="color:var(--amber)">Argos:</b> Los Olivos bajó 6 %: faltaron 9 pacientes y «Ofrecer otro horario» está apagada.</span><span class="go">Ver qué hacer</span></div><div class="p7calc">Así lo calculé · lo cobrado en caja del 1 al 30 de septiembre, por sede, frente a agosto</div>`);
+    out.querySelector(".p7rep").insertAdjacentHTML("beforeend", `<div class="p7say"><span><b style="color:var(--amber)">Argos:</b> Los Olivos bajó 6 %: faltaron 9 pacientes y «Reprogramar tras una inasistencia» está apagada.</span><span class="go">Ver qué hacer</span></div><div class="p7calc">Así lo calculé · lo cobrado en caja del 1 al 30 de septiembre, por sede, frente a agosto</div>`);
   };
 
   // 8 · Los signos vitales de Luis: cuatro controles, cada 3 meses. La presión se dibuja punto por punto.
@@ -858,11 +858,11 @@
       const n = el("div", "ag2", `<span class="glow2"></span><b>${name}</b><span>${role}</span>`); n.style.setProperty("--c", c); n.style.left = i * (220 + gap) + "px"; box.appendChild(n); nodes[k] = n;
     }
     const CASES = [
-      ["Luis", [["argos", "vio que le tocaba su control y lo invitó"], ["sofi", "le respondió y lo agendó el jueves 16:00"], ["clio", "ordenó su control dictado; la Dra. Vela lo confirmó"]]],
+      ["Luis", [["argos", "vio que le tocaba su control"], ["sofi", "le escribió y lo agendó el jueves 16:00"], ["clio", "ordenó su control dictado; la Dra. Vela lo confirmó"]]],
       ["Rosa", [["sofi", "contestó su mensaje de las 23:41 y la agendó"]]],
       ["Carla", [["sofi", "le dio el 106 y avisó al equipo"]]],
       ["Julia", [["clio", "propuso su nota; la Dra. Vela la confirmó"], ["argos", "dejó indicado su próximo control"]]],
-      ["Marta", [["argos", "vio 12 meses sin venir y la invitó a volver"]]],
+      ["Marta", [["argos", "vio que lleva 12 meses sin venir"], ["sofi", "la invitó a volver"]]],
       ["Pedro", [["sofi", "movió su cita al lunes"]]],
       ["Jorge", [["clio", "dejó indicado su descanso para firmar"]]],
     ];

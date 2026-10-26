@@ -38,7 +38,7 @@ const historia = scripted(
     ${row("r1", "12 mar", "Consulta · cefalea", "Dra. Elena Vela", pill("Firmada"))}
     ${row("r2", "04 jun", "Control · presión normal", "Dr. Andrés Ríos", pill("Firmada"))}
     ${row("r3", "04 jun", "Hemograma completo", "Resultado · laboratorio", pill("Documento"))}
-    ${row("r4", "Hoy 09:18", "Faringitis aguda · descanso de 3 días", "Dra. Elena Vela · dictada con Clío", pill("Firmada", "teal"))}
+    ${row("r4", "Hoy 09:18", "Amigdalitis aguda · descanso de 3 días", "Dra. Elena Vela · dictada con Clío", pill("Firmada", "teal"))}
   </div>
   ${toast("Consulta firmada: ya está en la historia de Rosa", "mint")}`,
   [[300, "[data-s=al]"], [350, "[data-s=r1]"], [250, "[data-s=r2]"], [250, "[data-s=r3]"], [900, "[data-s=r4]"], [150, "[data-s=r4]", "hl"], [500, "[data-s=toast]"]],
@@ -61,10 +61,10 @@ const examen = scripted(
   "Examen por sistemas",
   "Rosa Paredes · consulta de hoy",
   "",
-  `<div class="ms-voice" data-s="voice"><span class="ms-dot mint"></span><span>Clío escuchó: <q>faringe congestiva, con placas; lo demás, normal</q></span></div>
+  `<div class="ms-voice" data-s="voice"><span class="ms-dot mint"></span><span>Clío escuchó: <q>amígdalas aumentadas, con placas blanquecinas; lo demás, normal</q></span></div>
   <div class="ms-rows">
     ${row("s1", "", "Cabeza y cuello", "", pill("Normal"))}
-    ${row("s2", "", "Faringe", "Congestiva, con placas", pill("Hallazgo", "red"))}
+    ${row("s2", "", "Boca y garganta", "Amígdalas aumentadas, con placas blanquecinas", pill("Hallazgo", "red"))}
     ${row("s3", "", "Tórax y pulmones", "", pill("Normal"))}
     ${row("s4", "", "Cardiovascular", "", pill("Normal"))}
     ${row("s5", "", "Abdomen", "", pill("Normal"))}
@@ -179,8 +179,8 @@ const controles = scripted(
     ${row("c3", "jul", "Control de presión", "Vino · 138/88", pill("Hecho"), "on")}
     ${row("c4", "oct", "Control de presión", "Le toca esta semana · no tiene cita", `<span data-s="st">${pill("Por avisar", "amber")}</span>`, "on")}
   </div>
-  ${toast("Argos lo invitó a volver · Luis reservó el jueves 16:00", "amber")}`,
-  [[700, "[data-s=c4]", "low"], [900, "[data-s=st]", "", pill("Argos lo invitó", "amber")], [700, "[data-s=st]", "", pill("Reservó · jue 16:00", "green")], [0, "[data-s=c4]", "-low"], [0, "[data-s=c4]", "hl"], [300, "[data-s=toast]"]],
+  ${toast("Argos lo encontró y Sofi le escribió · Luis reservó el jueves 16:00", "amber")}`,
+  [[700, "[data-s=c4]", "low"], [900, "[data-s=st]", "", pill("Sofi le escribió", "teal")], [700, "[data-s=st]", "", pill("Reservó · jue 16:00", "green")], [0, "[data-s=c4]", "-low"], [0, "[data-s=c4]", "hl"], [300, "[data-s=toast]"]],
 )
 
 const caja = scripted(
@@ -188,12 +188,12 @@ const caja = scripted(
   "Rosa Paredes · su cuenta",
   "ms-cash",
   `<div class="ms-rows">
-    ${row("r1", "Hoy 09:00", "Consulta · Dra. Elena Vela", "Atendida", `<span class="amt">USD 40</span>`, "on")}
-    ${row("r2", "Hoy 09:25", "Pago · tarjeta", "Recibo 0231", `<span class="amt">− USD 40</span>`)}
+    ${row("r1", "Hoy 09:00", "Consulta · Dra. Elena Vela", "Atendida", `<span class="amt">S/ 80</span>`, "on")}
+    ${row("r2", "Hoy 09:25", "Pago · tarjeta", "Recibo 0231", `<span class="amt">− S/ 80</span>`)}
   </div>
-  <div class="ms-due"><span>Le falta pagar</span><b data-s="due">USD 40</b><span class="ms-in" data-s="ok">${pill("Al día", "green")}</span></div>
-  ${toast("Recibo enviado a Rosa por WhatsApp")}`,
-  [[700, "[data-s=r2]"], [150, "[data-s=r2]", "hl"], [500, "[data-s=due]", "zero", "USD 0"], [250, "[data-s=ok]"], [500, "[data-s=toast]"]],
+  <div class="ms-due"><span>Le falta pagar</span><b data-s="due">S/ 80</b><span class="ms-in" data-s="ok">${pill("Al día", "green")}</span></div>
+  ${toast("Comprobante enviado a Rosa por correo; también queda en su enlace")}`,
+  [[700, "[data-s=r2]"], [150, "[data-s=r2]", "hl"], [500, "[data-s=due]", "zero", "S/ 0"], [250, "[data-s=ok]"], [500, "[data-s=toast]"]],
 )
 
 const enlace = scripted(
@@ -205,7 +205,7 @@ const enlace = scripted(
     <b class="hi">Hola, Rosa</b>
     <div class="ms-pcard"><span class="ms-k">Tu próxima cita</span><b>Lunes 27 · 09:00</b><small>Control · Dra. Elena Vela</small><span class="lnk">Cambiar</span></div>
     <div class="ms-pcard" data-s="dec"><span class="ms-k">Tus papeles</span><b data-s="dect">Descanso médico · 3 días</b><span class="ms-btn" data-s="go">Descargar</span></div>
-    <div class="ms-pcard"><span class="ms-k">También</span><small>Receta · Recibo · Tus datos</small></div>
+    <div class="ms-pcard"><span class="ms-k">También</span><small>Receta · Comprobante · Tus datos</small></div>
   </div>
   <div class="ms-side">
     <b>Reserva, se registra y ve lo suyo.</b>
@@ -233,15 +233,15 @@ const canales = scripted(
 const SPARK = "0,60 40,52 80,56 120,40 160,44 200,30 240,34 280,18 320,22 360,8"
 const reportes = scripted(
   "Reportes",
-  "Consultorio San Martín · octubre frente a septiembre",
+  "Todo el consultorio · septiembre frente a agosto",
   "ms-rep",
   `<div class="ms-tiles">
-    <div class="ms-tile"><span>Cobrado</span><b>USD 9.840</b><small>6 % más que en septiembre</small><svg class="ms-spark" data-s="sp" viewBox="0 0 360 70" aria-hidden="true"><polyline points="${SPARK}"/></svg></div>
-    <div class="ms-tile"><span>Consultas atendidas</span><b>246</b><small>4 % más que en septiembre</small></div>
-    <div class="ms-tile"><span>Pacientes nuevos</span><b>31</b><small>2 más que en septiembre</small></div>
+    <div class="ms-tile"><span>Cobrado</span><b>S/ 18.420</b><small>8 % más que en agosto</small><svg class="ms-spark" data-s="sp" viewBox="0 0 360 70" aria-hidden="true"><polyline points="${SPARK}"/></svg></div>
+    <div class="ms-tile"><span>Consultas atendidas</span><b>246</b><small>4 % más que en agosto</small></div>
+    <div class="ms-tile"><span>Pacientes nuevos</span><b>31</b><small>2 más que en agosto</small></div>
   </div>
   <div class="ms-ask"><span class="ms-k">Pregúntale a Argos ›</span><b data-s="q">&nbsp;</b></div>
-  <div class="ms-card ms-in" data-s="ans"><span class="ms-k">Argos</span><b>12 pacientes con hipertensión no vinieron a su control.</b><small>«Avisar los controles» los puede invitar a volver. · Ver la lista</small></div>`,
+  <div class="ms-card ms-in" data-s="ans"><span class="ms-k">Argos</span><b>12 pacientes con hipertensión no vinieron a su control.</b><small>Con «Avisar un control», Sofi les escribe. · Ver la lista</small></div>`,
   [
     [300, "[data-s=sp]"],
     [900, "[data-s=q]", "", "¿Quién no vino"],
@@ -263,7 +263,7 @@ const equipo = scripted(
       ${row("t4", "", "Diego Soto", "Caja", pill("Invitación enviada", "teal"))}
     </div>
     <div class="ms-card"><span class="ms-k">Lo que ve Recepción</span>
-      <span class="ms-perm">Agenda <i>✓</i></span><span class="ms-perm">Conversaciones <i>✓</i></span><span class="ms-perm">Cobros <i>✓</i></span>
+      <span class="ms-perm">Agenda <i>✓</i></span><span class="ms-perm">Conversaciones <i>✓</i></span><span class="ms-perm">Pacientes <i>✓</i></span>
       <span class="ms-perm no" data-s="clin">Historia clínica <i>✕</i></span>
     </div>
   </div>

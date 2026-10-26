@@ -1163,7 +1163,7 @@ button[data-tap] { appearance: none; -webkit-appearance: none; }
   .layer.cur .mod i { background: var(--lila); }
   .kpi path { stroke-dashoffset: 0; }
 }
-/* En latidIA los pacientes que vuelven los invita Argos: su color en la agenda. */
+/* En latidIA los pacientes que vuelven los encuentra Argos: su color en la agenda. */
 .p6pt .av { background: var(--lila); color: var(--lila-ink); }
 .p6pt.warm { border-color: var(--amber); box-shadow: 0 0 26px -6px var(--amber); }
 .p6big.ans b { color: var(--amber); }
@@ -1458,7 +1458,7 @@ html.stacked body { margin: 0; }
     <span class="was"><s>Huecos en la agenda</s></span>
     <span class="tag in" style="color:var(--amber)">[ Con latidIA · Agente Argos ]</span>
     <div class="copy in" style="--d:.1s; flex:none; width:620px">
-      <h2 class="h2" style="font-size:70px"><span class="c-amber">Argos</span> los encuentra y los invita a volver.</h2>
+      <h2 class="h2" style="font-size:70px"><span class="c-amber">Argos</span> los encuentra. <span class="c-sky">Sofi</span> los invita a volver.</h2>
       <p class="lead">A quien le toca su control, a quien lleva 12 meses sin venir y a quien faltó o canceló. Cada uno vuelve a un hueco de la agenda.</p>
       <div class="p6big ans"><b class="num" data-p6count>0</b><span>pacientes de vuelta en la agenda</span></div>
       <span class="small">Ejemplo de una semana. Argos solo escribe si tú prendiste esa línea.</span>
@@ -1474,7 +1474,7 @@ html.stacked body { margin: 0; }
     </div>
     <div class="vit" id="vitals"></div>
   </div>
-  <aside class="notes">Aquí se va lo que el consultorio ya ganó una vez: Luis es hipertenso y debía volver cada 3 meses; nadie lo llamó. La semana no está llena y encima se caen citas. Clic: Argos mira el consultorio todo el día. Ve a quién le toca su control, a quién lleva 12 meses sin venir y a quién faltó o canceló, y le escribe con un horario libre hasta llenar la agenda. Si no puede escribirle, le deja a tu equipo una tarea de llamada. La cita recuperada solo se cobra si el paciente viene. Clic: y como cada control deja los signos vitales, ven la presión de Luis bajar de 152/96 a 132/84 en un año.</aside>
+  <aside class="notes">Aquí se va lo que el consultorio ya ganó una vez: Luis es hipertenso y debía volver cada 3 meses; nadie lo llamó. La semana no está llena y encima se caen citas. Clic: Argos mira el consultorio todo el día. Ve a quién le toca su control, a quién lleva 12 meses sin venir y a quién faltó o canceló, y Sofi le escribe con un horario libre hasta llenar la agenda. Si no puede escribirle, le deja a tu equipo una tarea de llamada. La cita recuperada solo se cobra si el paciente viene. Clic: y como cada control deja los signos vitales, ven la presión de Luis bajar de 152/96 a 132/84 en un año.</aside>
 </section>
 
 <!-- ============ 9 · Reportes ============ -->
@@ -1571,9 +1571,9 @@ html.stacked body { margin: 0; }
       <div class="switches" id="switches">
         <div class="sw in" style="--d:.25s; --c:var(--sky)"><span class="toggle"></span>Agendar citas<span class="who">Sofi</span></div>
         <div class="sw in" style="--d:.35s; --c:var(--mint)"><span class="toggle"></span>Ordenar la consulta dictada<span class="who">Clío</span></div>
-        <div class="sw in" style="--d:.45s; --c:var(--amber)"><span class="toggle"></span>Avisar los controles<span class="who">Argos</span></div>
+        <div class="sw in" style="--d:.45s; --c:var(--amber)"><span class="toggle"></span>Avisar un control<span class="who">Argos</span></div>
         <div class="sw in" style="--d:.55s; --c:var(--amber)"><span class="toggle"></span>Invitar a volver<span class="who">Argos</span></div>
-        <div class="sw in" style="--d:.65s; --c:var(--amber)"><span class="toggle"></span>Ofrecer otro horario<span class="who">Argos</span></div>
+        <div class="sw in" style="--d:.65s; --c:var(--amber)"><span class="toggle"></span>Reprogramar tras una inasistencia<span class="who">Argos</span></div>
       </div>
       <div class="promises">
         <div class="promise in" style="--d:.6s"><span class="ic">→</span><div><b>Si no sabe, te lo pasa</b><p>Con el resumen del caso: qué pidió, qué se le dijo y qué falta.</p></div></div>
@@ -1606,7 +1606,7 @@ html.stacked body { margin: 0; }
     <div class="results">
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--sky); --d:.3s"><span class="glow"></span><span class="who"><span class="dot c-sky"></span>Agente Sofi</span><h3>Una conversación atendida</h3><div class="demo"><span class="st"><i></i>Rosa escribe a las 23:41</span><span class="st"><i></i>Sofi la agenda y Rosa viene</span><span class="coin11"><b>$</b><span>{{L.agenda$}}</span></span></div><p>Según lo que pasó: {{L.informa}} si informa, {{L.gestiona}} si reserva, mueve o cancela una cita y {{L.agenda}} si el paciente viene.</p><span class="when">Una por persona cada {{window}}.</span></div>
       <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--mint); --d:.5s"><span class="glow"></span><span class="who"><span class="dot c-mint"></span>Agente Clío</span><h3>Una consulta dictada y confirmada</h3><div class="demo"><span class="st"><i></i>Clío propone cada bloque</span><span class="st"><i></i>La Dra. Vela lo confirma</span><span class="coin11"><b>$</b><span>{{L.completa$}}</span></span></div><p>Según lo que dejó hecho: {{L.simple}} la nota, {{L.estandar}} con examen o diagnóstico y {{L.completa}} si deja indicada la receta, una orden, el descanso o el control.</p><span class="when">Sin confirmación, no hay cobro.</span></div>
-      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Luis reserva su control</span><span class="st"><i></i>Luis llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Luis no tenía cita y volvió después del mensaje de Argos.</p><span class="when">Se cobra solo cuando el paciente viene.</span></div>
+      <div class="res in" data-tap="res" role="button" tabindex="0" style="--c:var(--amber); --d:.7s"><span class="glow"></span><span class="who"><span class="dot c-amber"></span>Agente Argos</span><h3>Una cita recuperada</h3><div class="demo"><span class="st"><i></i>Luis reserva su control</span><span class="st"><i></i>Luis llega a la cita</span><span class="coin11"><b>$</b><span>{{L.recovered$}}</span></span></div><p>Luis no tenía cita: Argos lo encontró y Sofi le escribió.</p><span class="when">Se cobra solo cuando el paciente viene.</span></div>
     </div>
     <p class="free in" style="--d:1s">El sistema completo cuesta <b class="accent">{{cur}} 0</b>. En el plan, la cuota vuelve entera como crédito para tus agentes.</p>
     <span class="tap">Toca una tarjeta para verla de nuevo</span>
@@ -1615,22 +1615,22 @@ html.stacked body { margin: 0; }
     <span class="tag in">[ Un día, fila por fila · ejemplo ]</span>
     <h2 class="h2 in" style="--d:.1s; font-size:66px">Ves cada cobro junto a lo que lo produjo.</h2>
     <div class="day in" style="--d:.25s">
-      <div class="row in" style="--d:.45s"><span class="t">08:00</span><span class="what">Le recordó su cita a Julia<small>Recordatorio por WhatsApp</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price zero">Incluido</span></div>
+      <div class="row in" style="--d:.45s"><span class="t">08:00</span><span class="what">Le recordó su cita a Julia<small>Recordatorio por WhatsApp</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price zero">Incluido</span></div>
       <div class="row in" style="--d:.75s"><span class="t">09:00</span><span class="what">Rosa llegó a la consulta que agendó anoche<small>Conversación · el paciente vino</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price num">{{L.agenda$}}</span></div>
       <div class="row in" style="--d:1.05s"><span class="t">09:18</span><span class="what">Consulta de Rosa con el descanso indicado, confirmada por la Dra. Vela<small>Consulta completa</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="price num">{{L.completa$}}</span></div>
       <div class="row in" style="--d:1.35s"><span class="t">11:05</span><span class="what">Le dio la dirección a un paciente nuevo<small>Conversación que informa</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="price num">{{L.informa$}}</span></div>
-      <div class="row in" style="--d:1.65s"><span class="t">16:00</span><span class="what">Luis llegó a su control; reservó después del mensaje de Argos<small>Cita recuperada · el paciente vino</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">{{L.recovered$}}</span></div>
+      <div class="row in" style="--d:1.65s"><span class="t">16:00</span><span class="what">Luis llegó a su control; Argos lo encontró y Sofi le escribió<small>Cita recuperada · el paciente vino</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="price num">{{L.recovered$}}</span></div>
       <div class="row total in" style="--d:1.95s"><span class="t"></span><span class="what"><b>Lo cobrado en el día</b></span><span class="kind">Precio de lista</span><span class="price num" id="dayTotal">{{L.day$}}</span></div>
     </div>
   </div>
   <div class="layer" data-scene="never">
-    <span class="tag in">[ Con latidIA · Lo que nunca se cobra ]</span>
-    <h2 class="h2 in" style="--d:.1s; font-size:66px">Si no fue un trabajo útil, no se cobra.</h2>
+    <span class="tag in">[ Con latidIA · Sin sorpresas ]</span>
+    <h2 class="h2 in" style="--d:.1s; font-size:66px">Esto nunca se cobra.</h2>
     <div class="nv in" style="--d:.25s">
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--sky)"><span class="what">Bloqueó 3 mensajes de spam<small>Lo que no es para el consultorio</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
-      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Le recordó su cita a 12 pacientes<small>Recordatorios y avisos de cita</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--sky)"><span class="what">Le recordó su cita a 12 pacientes<small>Recordatorios y avisos de cita</small></span><span class="kind"><span class="dot c-sky"></span>Sofi</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--mint)"><span class="what">Propuso una nota que la Dra. Vela descartó<small>Borrador que no te sirvió</small></span><span class="kind"><span class="dot c-mint"></span>Clío</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
-      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Mateo reservó después de su mensaje, pero no vino<small>Cita recuperada sin asistencia</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
+      <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">Mateo reservó cuando Sofi le escribió, pero no vino<small>Cita recuperada sin asistencia</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--amber)"><span class="what">No encontró cómo responder una pregunta<small>Pregunta sin respuesta</small></span><span class="kind"><span class="dot c-amber"></span>Argos</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr" data-tap="nvr" role="button" tabindex="0" style="--c:var(--on-2)"><span class="what">Tu equipo le respondió a Julia<small>Lo que hace tu equipo</small></span><span class="kind"><span class="dot" style="color:var(--on-2)"></span>Tu equipo</span><span class="nvp"><span class="nvc">$</span><span class="nvz num">{{cur}} 0</span></span></div>
       <div class="nvr total"><span class="what"><b>Lo cobrado por todo esto</b></span><span class="kind"></span><span class="nvp"><b class="num" id="nvTotal">{{cur}} 0,00</b></span></div>
@@ -1680,7 +1680,7 @@ html.stacked body { margin: 0; }
       <div class="vc c1"><p>Queda como pendiente, si alguien lo anotó.</p></div>
       <div class="vc c2"><p>Nada, hasta que Luis escriba primero.</p></div>
       <div class="vc c3"><p>Su historia dice que le toca el control.</p></div>
-      <div class="vc c4"><ul class="vflow"><li style="--c:var(--amber)"><span class="dot"></span><span><b>Argos</b> lo invita a volver</span></li><li style="--c:var(--sky)"><span class="dot"></span><span><b>Sofi</b> le responde y lo agenda</span></li><li style="--c:var(--mint)"><span class="dot"></span><span>Luis llega el jueves 16:00</span></li></ul></div>
+      <div class="vc c4"><ul class="vflow"><li style="--c:var(--amber)"><span class="dot"></span><span><b>Argos</b> ve que no vino</span></li><li style="--c:var(--sky)"><span class="dot"></span><span><b>Sofi</b> le escribe y lo agenda</span></li><li style="--c:var(--mint)"><span class="dot"></span><span>Luis llega el jueves 16:00</span></li></ul></div>
       <span class="vl">Quién hace el trabajo</span>
       <div class="vc c1"><p>Tu equipo lo sigue a mano</p><div class="vsteps"><span class="sq" data-n="4"></span><b class="num">4 pasos</b></div></div>
       <div class="vc c2"><p>Tu equipo agenda y lo anota</p><div class="vsteps"><span class="sq" data-n="3"></span><b class="num">3 pasos</b></div></div>
@@ -1716,7 +1716,7 @@ html.stacked body { margin: 0; }
       <div class="wkr" style="--c:var(--sky)"><span class="what">Fichas de la misma persona<small>Todos los canales</small></span><span class="old">3 fichas</span><span class="new">1 historia</span></div>
       <div class="wkr" style="--c:var(--mint)"><span class="what">Historias al cerrar el día<small>Clío</small></span><span class="old">18 a las 21:00</span><span class="new">0 pendientes</span></div>
       <div class="wkr" style="--c:var(--mint)"><span class="what">Receta en el embarazo<small>La receta lee la historia</small></span><span class="old">sin aviso</span><span class="new">te avisa antes</span></div>
-      <div class="wkr" style="--c:var(--amber)"><span class="what">Huecos en la agenda<small>Argos</small></span><span class="old">15 huecos</span><span class="new">15 de vuelta</span></div>
+      <div class="wkr" style="--c:var(--amber)"><span class="what">Huecos en la agenda<small>Argos y Sofi</small></span><span class="old">15 huecos</span><span class="new">15 de vuelta</span></div>
       <div class="wkr" style="--c:var(--amber)"><span class="what">Reporte del mes<small>Argos</small></span><span class="old">8 h 40 min</span><span class="new">0 h</span></div>
       <div class="wkr" style="--c:var(--lila)"><span class="what">Pasos de tu equipo por caso<small>Agentes que orquestan</small></span><span class="old">6 pasos</span><span class="new">0 pasos</span></div>
     </div>
