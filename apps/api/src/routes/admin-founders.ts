@@ -36,14 +36,14 @@ export interface AdminFoundersDeps {
 
 function staffOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
-  if (actor.role !== "admin" && actor.role !== "support") throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de odentIA")
+  if (actor.role !== "admin" && actor.role !== "support") throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de la administración")
   return actor
 }
 
 /** Invitar, descartar y cambiar el alta es de la administración; soporte solo mira y anota. */
 function adminOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
-  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo la administración de odentIA invita o descarta")
+  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración invita o descarta")
   return actor
 }
 

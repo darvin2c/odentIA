@@ -65,7 +65,7 @@ const grantInput = z.object({ grantId: z.uuid() })
 function staffOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
   if (actor.role !== "admin" && actor.role !== "support") {
-    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de odentIA")
+    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de la administración")
   }
   return actor
 }
@@ -77,7 +77,7 @@ function staffOf(c: Context): AdminActor {
 function adminOf(c: Context): AdminActor {
   const actor = staffOf(c)
   if (actor.role !== "admin") {
-    throw new ServiceError("FORBIDDEN", 403, "Solo un administrador de odentIA")
+    throw new ServiceError("FORBIDDEN", 403, "Solo alguien con el rol Administración")
   }
   return actor
 }

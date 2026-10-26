@@ -261,7 +261,7 @@ export function PlanDrawer({
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="plan-name">Nombre</Label>
-          <Input id="plan-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Plan odentIA" />
+          <Input id="plan-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Plan de lista" />
         </div>
         <div className="flex flex-col gap-1">
           <Label htmlFor="plan-currency">Moneda</Label>

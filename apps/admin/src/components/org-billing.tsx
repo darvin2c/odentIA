@@ -139,7 +139,7 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
   }, [terms.data])
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["admin", "organizations", organizationId] })
   const outcome = (result: { status: "aplicado" | "pendiente" }) =>
-    setMessage(result.status === "pendiente" ? "Quedó pedido: la administración de odentIA debe aprobarlo." : "Guardado.")
+    setMessage(result.status === "pendiente" ? "Quedó pedido: debe aprobarlo alguien con el rol Administración." : "Guardado.")
   const saveTrial = useMutation({
     mutationFn: () =>
       api<{ status: "aplicado" | "pendiente" }>(`/api/admin/organizations/${organizationId}/billing/trial`, {

@@ -248,7 +248,7 @@ export function SupportCaseReview({
             ) : null}
           </div>
         ) : (
-          <p className="text-muted-foreground">Decide quien tiene el rol admin de odentIA. Puedes dejar una nota interna en el caso.</p>
+          <p className="text-muted-foreground">Lo decide alguien con el rol Administración. Puedes dejar una nota interna en el caso.</p>
         )
       ) : review.answer ? (
         <p>

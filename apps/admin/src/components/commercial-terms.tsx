@@ -155,7 +155,7 @@ export function CommercialTermsSection() {
           <p className="text-xs text-muted-foreground">
             {terms.data.version.initial || !terms.data.version.effectiveFrom
               ? "Valores iniciales: los que estaban en el código."
-              : `Último cambio: ${when(terms.data.version.effectiveFrom)} · ${terms.data.version.createdByName ?? "odentIA"}.`}{" "}
+              : `Último cambio: ${when(terms.data.version.effectiveFrom)} · ${terms.data.version.createdByName ?? "la administración"}.`}{" "}
             El peor costo de cada acción y el mínimo del doble no se cambian aquí: salen de medir la
             IA y los usa «Comprobación antes de guardar» de cada plan.
           </p>
@@ -389,7 +389,7 @@ function TermsHistory({ open, onClose }: { open: boolean; onClose: () => void })
             ) : (
               <>
                 <span className="text-xs text-muted-foreground">
-                  {when(version.effectiveFrom)} · {version.createdByName ?? "odentIA"}
+                  {when(version.effectiveFrom)} · {version.createdByName ?? "la administración"}
                 </span>
                 {version.changes.map((change) => (
                   <span key={change.key} className="tabular-nums">
