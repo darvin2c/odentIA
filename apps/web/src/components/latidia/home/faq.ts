@@ -29,6 +29,10 @@ export function homeFaq(gift: string | null): FaqItem[] {
       a: `Por lo que hacen tus agentes, no por el software ni por usuario. Lo simple cuesta poco y lo que te trae pacientes cuesta más.${gift ? ` Los primeros ${gift} van por nuestra cuenta.` : ""}`,
     },
     {
+      q: "¿Cómo encuentro rápido a un paciente?",
+      a: "Con Ctrl K (⌘K en Mac) desde cualquier pantalla, o con la lupa en el teléfono. Escribe parte del nombre sin preocuparte por las tildes, el teléfono, el DNI o el número de historia, y aparece la persona con su próxima cita, su última conversación y lo que debe. Las recetas, los diagnósticos, los mensajes y los cobros también se encuentran por lo que dicen, cada uno debajo de su persona y según lo que tu rol puede ver. Los documentos e imágenes se encuentran por su nombre.",
+    },
+    {
       q: "¿Puedo traer a mis pacientes?",
       a: "Sí. Los registras con sus datos y, desde ese momento, lo que escriban por cualquier canal cae en su ficha. También se registran solos con el código QR o el enlace de registro, desde su celular.",
     },

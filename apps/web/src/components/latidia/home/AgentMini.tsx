@@ -1,6 +1,7 @@
 // La mini demo de cada agente de latidIA (lienzo «Inicio», sección 3; también en /agentes): un caso
 // corto en tres tiempos que se repite. Sofi reconoce la señal de alarma de Julia, Clío propone el
 // control que dicta la doctora y Argos le reserva a Luis su control de presión.
+import { VoiceBubble } from "../../agents/frame/AgentFrame"
 import { useLoop } from "./loop"
 import "./agent-mini.css"
 
@@ -35,10 +36,9 @@ export default function AgentMini({ agent }: Props) {
   if (agent === "clio")
     return (
       <div className="am clio">
-        <span className="am-meta">Dra. Vela dicta · consulta de Rosa</span>
-        <div className="am-said on">
-          <span aria-hidden="true">🎙</span> «Control en una semana.»
-        </div>
+        <span className="am-meta">Clío · consulta de Rosa</span>
+        {/* El mismo globo de voz de las páginas de Clío: se ve que la doctora le está hablando. */}
+        <VoiceBubble initials="EV" who="Dra. Vela" text="Control en una semana." speaking={step === 0} idle="dictó" />
         <div className={`am-sugg${on(1)}`}>
           <span>
             <b>Plan y controles</b>

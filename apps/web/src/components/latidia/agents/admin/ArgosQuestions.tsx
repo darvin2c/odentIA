@@ -4,6 +4,7 @@
 // la siguiente pregunta; tocar una la detiene ahí. Las cifras son del Consultorio San Martín de la demo.
 // Con movimiento reducido, la respuesta aparece entera y no pasa sola.
 import { useEffect, useRef, useState } from "react"
+import { AgentFoot, AgentHead } from "../../../agents/frame/AgentFrame"
 import "./argos-questions.css"
 
 type Question = {
@@ -21,7 +22,7 @@ type Question = {
 /** Datos de ejemplo: octubre en el Consultorio San Martín (tarifario de la demo en soles). */
 const QUESTIONS: Question[] = [
   {
-    label: "¿Quién no vino este mes?",
+    label: "Quién no vino",
     q: "¿Quién no vino este mes?",
     kind: "columns",
     figures: [
@@ -40,7 +41,7 @@ const QUESTIONS: Question[] = [
     max: 3,
   },
   {
-    label: "¿Cuánto cobramos en consultas?",
+    label: "Cuánto cobramos",
     q: "¿Cuánto cobramos en consultas en octubre?",
     kind: "bars",
     figures: [
@@ -59,7 +60,7 @@ const QUESTIONS: Question[] = [
     max: 3840,
   },
   {
-    label: "¿A quién le toca su control?",
+    label: "Controles de noviembre",
     q: "¿A quién le toca su control en noviembre?",
     kind: "bars",
     figures: [
@@ -145,16 +146,15 @@ export default function ArgosQuestions() {
   const pct = (v: number) => (shown ? Math.max(Math.round((v / cur.max) * 100), v > 0 ? 4 : 0) : 0)
 
   return (
-    <div className="laq">
-      <div className="laq-top">
-        <span className="laq-avatar" aria-hidden="true">
-          A
-        </span>
-        <span className="laq-who">
-          <b>Argos · Reportes</b>
-          <span>Consultorio San Martín · octubre, hasta hoy</span>
-        </span>
-      </div>
+    <div className="af-card laq">
+      <AgentHead
+        agent="argos"
+        name="Argos · tus cifras"
+        meta="Consultorio San Martín · octubre, hasta hoy"
+        state={phase === 0 ? "Leyendo…" : thinking ? "Calculando…" : "Respondió"}
+        live={!shown}
+        done={shown}
+      />
       <div className="laq-ask" aria-hidden="true">
         <span className="laq-typed">
           {cur.q.slice(0, chars)}
@@ -219,13 +219,17 @@ export default function ArgosQuestions() {
           <span className="laq-same">La misma cifra de Reportes</span>
         </div>
       </div>
-      <span className="laq-note">
-        {still
-          ? "Demostración con datos de ejemplo. Toca otra pregunta."
-          : auto
-            ? "Demostración con datos de ejemplo. Toca una pregunta para quedarte en ella."
-            : "Demostración con datos de ejemplo. Te quedaste en esta pregunta."}
-      </span>
+      <AgentFoot
+        note={
+          still
+            ? "Datos de ejemplo. Toca otra pregunta."
+            : auto
+              ? "Datos de ejemplo. Toca una pregunta para quedarte en ella."
+              : "Datos de ejemplo. Te quedaste en esta pregunta."
+        }
+        replay="Preguntar otra vez"
+        onReplay={() => play(pick, false)}
+      />
     </div>
   )
 }

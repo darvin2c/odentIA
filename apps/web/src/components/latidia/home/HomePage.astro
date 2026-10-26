@@ -1,7 +1,7 @@
 ---
 // Inicio de latidIA (lienzo de la web de latidIA, tableros «Inicio» e «InicioTel»): Clío dictando la
 // consulta de Rosa sobre la línea de pulso, Omnicanal, los tres agentes, un día del Consultorio San
-// Martín, el sistema, lo que decides tú y la confianza, cómo se cobra, preguntas y cierre.
+// Martín, el sistema, el buscador, lo que decides tú y la confianza, cómo se cobra, preguntas y cierre.
 // El documento (<Base>, título, descripción y datos estructurados) lo arma src/pages/index.astro.
 // Ninguna cifra de precio vive aquí: salen de Astro.locals.pricing; los soles son del tarifario de
 // ejemplo del consultorio de la demo.
@@ -16,6 +16,7 @@ import DictationDemo from "./DictationDemo"
 import { homeFaq } from "./faq"
 import FaqList from "./FaqList.astro"
 import OmniDemo from "./OmniDemo"
+import SearchSection from "./SearchSection.astro"
 import VitalsChart from "./VitalsChart"
 
 const pricing = Astro.locals.pricing
@@ -280,6 +281,9 @@ const trust = [
       </div>
     </div>
   </section>
+
+  <!-- El buscador: Ctrl K y cada cosa debajo de su paciente -->
+  <SearchSection />
 
   <!-- 6 · Tú decides y la confianza -->
   <section class="ls white">

@@ -56,3 +56,9 @@
   .ad-answer { padding: 14px; }
   .ad-text { font-size: 16px; }
 }
+
+/* Con la cabecera común de los agentes (/agentes/administrador): la misma tarjeta que Sofi y Clío. */
+.ad:has(> .af-head) { background: #e8f0f2; padding: 18px; gap: 12px; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .55); }
+.ad:has(> .af-head) .ad-soft { background: #fff; }
+.ad:has(> .af-head) .ad-answer { background: #fff; border-color: transparent; padding: 16px; }
+.ad:has(> .af-head) .ad-chip:not([aria-pressed="true"]) { background: transparent; }

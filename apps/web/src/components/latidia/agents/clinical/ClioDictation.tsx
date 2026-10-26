@@ -4,7 +4,8 @@
 // (38,5 → 38,4); «Dictado terminado», todo confirmado y el descanso médico, que no se confirma: se
 // emite con la firma. Parece la app real (sugerencias en lila suave). El botón «Volver a dictar» de la
 // portada vive en el HTML (`data-clio-replay`) y la reinicia. Con movimiento reducido, el estado final.
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { AgentFoot, AgentHead, prefersStill, VoiceBubble } from "../../../agents/frame/AgentFrame"
 import "./clio-dictation.css"
 
 const LAST = 9
@@ -28,18 +29,19 @@ export default function ClioDictation() {
   const [step, setStep] = useState(LAST)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  const play = useCallback(() => {
+    if (timer.current) clearInterval(timer.current)
+    setStep(0)
+    timer.current = setInterval(() => {
+      setStep((s) => {
+        if (s + 1 >= LAST && timer.current) clearInterval(timer.current)
+        return Math.min(LAST, s + 1)
+      })
+    }, STEP_MS)
+  }, [])
+
   useEffect(() => {
-    const play = () => {
-      if (timer.current) clearInterval(timer.current)
-      setStep(0)
-      timer.current = setInterval(() => {
-        setStep((s) => {
-          if (s + 1 >= LAST && timer.current) clearInterval(timer.current)
-          return Math.min(LAST, s + 1)
-        })
-      }, STEP_MS)
-    }
-    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) play()
+    if (!prefersStill()) play()
     // «Volver a dictar» lo pide quien mira: se repite aunque prefiera menos movimiento.
     const onClick = (event: MouseEvent) => {
       if ((event.target as HTMLElement | null)?.closest("[data-clio-replay]")) play()
@@ -49,7 +51,7 @@ export default function ClioDictation() {
       document.removeEventListener("click", onClick)
       if (timer.current) clearInterval(timer.current)
     }
-  }, [])
+  }, [play])
 
   const dictating = step <= 6
   const confirmed = step >= 8
@@ -91,53 +93,38 @@ export default function ClioDictation() {
         : { title: "Todo en la historia", sub: "Descanso médico emitido. Falta solo «Finalizar y firmar»." }
 
   return (
-    <div className="lcd">
-      <div className="lcd-top">
-        <span className="lcd-who">
-          <span className="lcd-crumbs">Pacientes › Rosa Paredes Luna › Atención</span>
-          <b>Rosa Paredes Luna</b>
-          <span className="lcd-meta">46 años · inicio 09:04 · Dra. Elena Vela</span>
-        </span>
-        <span className="lcd-saved">{step >= 8 ? "Guardado 09:16" : "Guardado 09:12"}</span>
-      </div>
-
-      <div className="lcd-bar">
-        <div className="lcd-bar-head">
-          <span className="lcd-mic" aria-hidden="true">
-            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-            </svg>
-          </span>
-          <span className="lcd-bar-text" role="status">
+    <div className="af-card lcd">
+      <AgentHead
+        agent="clio"
+        name="Clío · en la consulta"
+        meta="Rosa Paredes Luna · Dra. Vela · 09:04"
+        state={dictating ? "Escuchando…" : step === 7 ? "Listo para confirmar" : step === 8 ? "Falta el descanso" : "En la historia"}
+        live={dictating}
+        done={step >= 9}
+      />
+      {/* Lo que dice la Dra. Vela, en su globo: se ve que le está hablando a Clío. */}
+      <VoiceBubble
+        initials="EV"
+        who="Dra. Vela"
+        text={HEARD[Math.min(step, 6)].replace(/^«|»$/g, "")}
+        speaking={dictating}
+        idle="dictado terminado · 12 min"
+      />
+      {/* Al terminar, lo que falta; con todo en la historia lo dice el estado de arriba. */}
+      {!dictating && step < 9 && (
+        <div className="lcd-bar" role="status">
+          <span className="lcd-bar-text">
             <b>{banner.title}</b>
             <span>{banner.sub}</span>
           </span>
-          {dictating && (
-            <span className="lcd-rec" aria-hidden="true">
-              <i />
-              REC
-            </span>
+          {step === 7 && (
+            <div className="lcd-bulk" aria-hidden="true">
+              <span className="lcd-btn p">Confirmar las 4 listas</span>
+              <span className="lcd-btn g">Seguir dictando</span>
+            </div>
           )}
         </div>
-        {dictating && (
-          <div className="lcd-heard">
-            <span className="lcd-wave" aria-hidden="true">
-              {Array.from({ length: 18 }, (_, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: barras fijas de la onda, sin datos
-                <i key={i} />
-              ))}
-            </span>
-            <span className="lcd-quote">{HEARD[Math.min(step, 6)]}</span>
-          </div>
-        )}
-        {step === 7 && (
-          <div className="lcd-bulk" aria-hidden="true">
-            <span className="lcd-btn p">Confirmar las 4 listas</span>
-            <span className="lcd-btn g">Seguir dictando</span>
-          </div>
-        )}
-      </div>
+      )}
 
       {blocks.map((block) => {
         const items = block.items.filter((item) => step >= item.from)
@@ -174,7 +161,7 @@ export default function ClioDictation() {
           </div>
         )
       })}
-      <span className="lcd-note">Demostración con datos de ejemplo.</span>
+      <AgentFoot note="Datos de ejemplo." replay="Volver a dictar" onReplay={play} />
     </div>
   )
 }

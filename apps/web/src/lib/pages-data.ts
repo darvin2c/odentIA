@@ -140,6 +140,10 @@ export const LINKS: Record<string, { label: string; text: string }> = {
     label: "Historia y odontograma",
     text: "Odontograma FDI, diagnósticos codificados y cada atención en orden.",
   },
+  "/radiografias-y-tomografia": {
+    label: "Radiografías y tomografía",
+    text: "Panorámica, cortes y medidas en la ficha, sin instalar nada.",
+  },
   "/presupuestos-dentales": {
     label: "Presupuestos",
     text: "Hasta tres opciones claras y el seguimiento de lo pendiente.",
@@ -889,6 +893,37 @@ export const PAGES = {
       {
         q: "¿Puedo imprimir el odontograma y los documentos?",
         a: "Sí: el odontograma, las recetas, las órdenes y los consentimientos tienen su versión para imprimir.",
+      },
+    ],
+  },
+
+  imagenes: {
+    path: "/radiografias-y-tomografia",
+    title: "Visor de radiografías y tomografía dental en el navegador",
+    description:
+      "Abre radiografías y tomografías (CBCT) en la ficha del paciente, sin instalar programas: panorámica y cortes, medidas, brillo y contraste, y cada imagen con su pieza y su fecha de toma.",
+    crumb: "Radiografías y tomografía",
+    parent: ["Historia y odontograma", "/historia-clinica-y-odontograma"],
+    faq: [
+      {
+        q: "¿Qué archivos abre?",
+        a: "Radiografías en JPG, PNG o DICOM y tomografías en DICOM: la carpeta del CD del centro de imágenes, un ZIP o los archivos sueltos, hasta 1 GB por estudio. Lee las compresiones JPEG, JPEG-LS, JPEG 2000 y RLE.",
+      },
+      {
+        q: "¿Tengo que instalar un programa?",
+        a: "No. La tomografía se arma en el navegador, en la ficha del paciente. Si quieres verla en el programa del equipo, «Descargar» te la da en un ZIP.",
+      },
+      {
+        q: "¿Puedo planificar un implante con estas medidas?",
+        a: "Las medidas son orientativas: sirven para conversar el caso y dejarlo anotado. Para planificar una cirugía, confírmalas en el programa del equipo de tomografía.",
+      },
+      {
+        q: "¿Quién puede ver las imágenes?",
+        a: "Quien atiende y tiene permiso clínico. Recepción puede subir la tomografía que trae el paciente y ver que llegó, sin abrirla.",
+      },
+      {
+        q: "¿Se puede ver en el celular?",
+        a: "Sí, para mirar. Medir y ajustar el arco se hace en una pantalla más grande.",
       },
     ],
   },

@@ -8,6 +8,7 @@ import ControlSection from "../components/home/ControlSection.astro"
 import { homeFaq } from "../components/home/faqItems"
 import HomeHero from "../components/home/HomeHero"
 import OmniSection from "../components/home/OmniSection.astro"
+import SearchSection from "../components/home/SearchSection.astro"
 import StickyCta from "../components/home/StickyCta.astro"
 import SystemSection from "../components/home/SystemSection.astro"
 import TrustSection from "../components/home/TrustSection.astro"
@@ -59,8 +60,9 @@ const softwareLd = {
     <ControlSection />
     <ValueSection />
     <SystemSection />
+    <SearchSection />
     <TrustSection />
-    <Faq items={HOME_FAQ} tag="08 · Preguntas" />
+    <Faq items={HOME_FAQ} tag="09 · Preguntas" />
     <CtaBand
       text={plan
         ? `Pruébalo ${plan.trialDays} días: tus agentes trabajan en tu clínica desde el primer día, con el crédito de prueba. Sin límite de odontólogos, sedes ni usuarios.`

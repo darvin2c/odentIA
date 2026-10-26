@@ -10,6 +10,7 @@ import { WORDS } from "../../../lib/product"
 import { ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
+import ImagingDemo from "../../imaging/ImagingDemo"
 import ExamDemo from "./ExamDemo"
 import PatientChart from "./PatientChart"
 import SignDemo from "./SignDemo"
@@ -218,7 +219,25 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     </div>
   </section>
 
-  <section class="rs white">
+  <section class="rs white" id="imagenes">
+    <div class="wrap imgs">
+      <div class="imgs-copy">
+        <span class="tag">[ Radiografías y ecografías ]</span>
+        <h2 class="rs-h2 sm">Lo que trae la persona, en su historia. No en una bolsa.</h2>
+        <p class="rs-p">Subes su radiografía, ecografía, tomografía, resonancia, mamografía o una foto clínica, y queda con su fecha de toma junto a la consulta. La abres en la pantalla: zoom, brillo y contraste, y la comparas con la anterior. La tomografía se ve por cortes, sin instalar nada.</p>
+        <ul class="imgs-list">
+          <li><b>Sin programa ni CD.</b> La carpeta del CD o un ZIP, en el navegador.</li>
+          <li><b>Comparar con la anterior.</b> La de hoy al lado de la del control pasado.</li>
+          <li><b>Cada rol ve lo suyo.</b> Recepción sube la tomografía; el médico la abre.</li>
+        </ul>
+      </div>
+      <div class="imgs-demo">
+        <ImagingDemo client:visible variant="medical" />
+      </div>
+    </div>
+  </section>
+
+  <section class="rs alt">
     <div class="wrap spec">
       <div class="spec-copy">
         <span class="tag">[ Especialidades y códigos ]</span>
@@ -286,6 +305,15 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .split-head .head { flex: 1 1 460px; }
   .rs-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
   .rs-h2.sm { font-size: clamp(32px, 3.6vw, 44px); }
+  /* Radiografías y ecografías: el texto y, al lado, el visor con una tomografía real de ejemplo. */
+  .imgs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 48px; align-items: center; }
+  .imgs-copy { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .imgs-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .imgs-list b { color: var(--ink); }
+  .imgs-demo { min-width: 0; }
+  @media (max-width: 1080px) {
+    .imgs { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  }
   /* El texto al lado del título solo crece en la cabecera partida; en columna, flex-basis sería su alto. */
   .split-head .rs-p { flex: 1 1 380px; }
   .rs-p { min-width: 0; font-size: 17px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }

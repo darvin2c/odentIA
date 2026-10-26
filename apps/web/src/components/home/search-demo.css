@@ -1,0 +1,579 @@
+/* El buscador rápido de la portada (SearchDemo), en las dos webs: la ventana blanca del producto
+   sobre la banda oscura de su sección. Los colores de marca salen de las variables de la web
+   (--teal, --teal-soft, --sky…), así latidIA la ve en lila sin otra hoja. Lo angosto se decide por
+   el ancho de la ventana (consulta de contenedor), no por el de la pantalla. */
+
+.sd {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--font);
+}
+
+/* Fichas de ejemplo */
+.sd-try {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sd-try-l {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--on-night-3);
+  margin-right: 2px;
+}
+.sd-chip {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--on-night);
+  font: 600 14px / 1.2 var(--font);
+  cursor: pointer;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+.sd-chip:hover {
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.sd-chip.on {
+  background: var(--sky);
+  border-color: transparent;
+  color: var(--night);
+}
+.sd-chip:focus-visible {
+  outline: 2px solid var(--sky-2);
+  outline-offset: 2px;
+}
+
+/* La ventana */
+.sd-win {
+  position: relative;
+  container-type: inline-size;
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 18px;
+  overflow: clip;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 30px 80px -24px rgba(0, 0, 0, 0.6);
+  transition: box-shadow 0.2s ease;
+}
+.sd-win:focus-within {
+  box-shadow:
+    0 0 0 3px var(--sky),
+    0 30px 80px -24px rgba(0, 0, 0, 0.6);
+}
+.sd-win svg {
+  display: block;
+  flex: none;
+}
+
+/* La cabecera de la clínica, con su botón «Buscar · Ctrl K» */
+.sd-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 8px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.sd-clinic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sd-clinic i {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--teal);
+}
+.sd-open {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  font: 600 14px var(--font);
+  color: #0f172a;
+  cursor: pointer;
+}
+.sd-open:hover {
+  border-color: #cbd5e1;
+}
+.sd-open svg {
+  width: 16px;
+  height: 16px;
+}
+.sd-keys {
+  display: inline-flex;
+  gap: 3px;
+}
+.sd-keys kbd,
+.sd-esc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  color: #475569;
+  font: 600 11px var(--font);
+}
+
+/* El campo */
+.sd-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.sd-lens {
+  color: #64748b;
+}
+.sd-lens svg {
+  width: 18px;
+  height: 18px;
+}
+.sd-input {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: 500 17px var(--font);
+  color: #0f172a;
+}
+/* El foco del campo lo marca la ventana entera (`.sd-win:focus-within`), no un segundo anillo. */
+.sd-input:focus-visible {
+  outline: none;
+}
+.sd-input::placeholder {
+  color: #94a3b8;
+}
+.sd-filter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  font: 600 13px var(--font);
+  color: #334155;
+  cursor: pointer;
+}
+.sd-filter:hover,
+.sd-filter.on,
+.sd-filter[aria-expanded="true"] {
+  background: #f1f5f9;
+}
+.sd-filter svg {
+  width: 16px;
+  height: 16px;
+}
+.sd-open:focus-visible,
+.sd-filter:focus-visible,
+.sd-link:focus-visible,
+.sd-create:focus-visible,
+.sd-check input:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+/* El filtro por tipo */
+.sd-pop {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  right: 8px;
+  width: min(30rem, calc(100% - 16px));
+  max-height: 290px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 18px 40px -12px rgba(15, 23, 42, 0.3);
+}
+.sd-pop-h {
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+.sd-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 8px;
+}
+.sd-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sd-check:hover {
+  background: #f1f5f9;
+}
+.sd-check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+.sd-pop-f {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 4px 0;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #64748b;
+}
+.sd-link {
+  min-height: 32px;
+  padding: 4px;
+  border: 0;
+  background: none;
+  color: var(--teal);
+  font: 700 13px var(--font);
+  cursor: pointer;
+}
+.sd-link:hover {
+  text-decoration: underline;
+}
+.sd-hidden {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 8px;
+  padding: 2px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #475569;
+}
+
+.sd-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Los resultados: cada dueño con sus cosas debajo */
+.sd-list {
+  height: clamp(250px, 44vh, 340px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 4px 10px;
+  scrollbar-width: thin;
+}
+.sd-group + .sd-group,
+.sd-owner + .sd-group {
+  margin-top: 6px;
+}
+.sd-owner {
+  margin-top: 4px;
+}
+.sd-gh {
+  display: block;
+  padding: 8px 10px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+.sd-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #0f172a;
+  cursor: pointer;
+  animation: sd-in 0.22s ease both;
+}
+.sd-row.on {
+  background: #f1f5f9;
+}
+.sd-top {
+  padding: 6px 10px;
+}
+.sd-grow {
+  flex: 1;
+  min-width: 0;
+}
+.sd-strong,
+.sd-title,
+.sd-sub,
+.sd-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sd-strong,
+.sd-title {
+  font-weight: 600;
+}
+.sd-two {
+  display: flex;
+  flex-direction: column;
+}
+.sd-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.sd-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 12px;
+  font-weight: 500;
+  color: #475569;
+}
+.sd-row.on .sd-badge {
+  background: #e2e8f0;
+}
+.sd-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+.sd-child {
+  gap: 8px;
+  min-height: 32px;
+  padding: 3px 10px 3px 28px;
+}
+.sd-branch {
+  flex: none;
+  align-self: flex-start;
+  width: 14px;
+  height: 16px;
+  margin-top: -2px;
+  border-left: 2px solid #e2e8f0;
+  border-bottom: 2px solid #e2e8f0;
+  border-bottom-left-radius: 6px;
+}
+.sd-kind {
+  flex: none;
+  width: 92px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+}
+.sd-meta,
+.sd-kbd-hint {
+  flex: none;
+  font-size: 12px;
+  color: #64748b;
+}
+.sd-kbd-hint {
+  display: none;
+}
+.sd-row.on .sd-kbd-hint {
+  display: inline;
+}
+.sd-more {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--teal);
+}
+.sd-arrow {
+  color: #64748b;
+}
+.sd-arrow svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sd-tile {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+.sd-tile svg {
+  width: 18px;
+  height: 18px;
+}
+.sd-tile.sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+.sd-tile.sm svg {
+  width: 14px;
+  height: 14px;
+}
+.sd-tile.t-persona,
+.sd-tile.t-agent {
+  background: var(--teal-soft);
+  color: var(--teal-hover);
+}
+.sd-tile.t-dinero {
+  background: #fdf3df;
+  color: #7a4a00;
+}
+.sd-tile.t-help {
+  background: var(--teal);
+  color: #ffffff;
+}
+
+.sd-hint {
+  padding: 8px 14px 0;
+  font-size: 12px;
+  color: #64748b;
+}
+.sd-none {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 16px 14px 8px;
+  font-size: 14px;
+}
+.sd-mut {
+  font-size: 12px;
+  color: #64748b;
+}
+.sd-create {
+  min-height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--teal);
+  color: #ffffff;
+  font: 700 14px var(--font);
+  cursor: pointer;
+}
+
+.sd-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+  color: #64748b;
+}
+.sd-foot.said {
+  background: var(--teal-soft);
+  color: var(--teal-hover);
+}
+.sd-said b {
+  font-weight: 800;
+}
+.sd-label {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--on-night-3);
+}
+
+@keyframes sd-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-row {
+    animation: none;
+  }
+  .sd-chip,
+  .sd-win {
+    transition: none;
+  }
+}
+
+/* Ventana angosta (teléfono o columna estrecha): como el producto en el teléfono, sin atajos de
+   teclado ni la fecha de cada fila, y el texto de cada cosa en dos líneas si hace falta. */
+@container (max-width: 540px) {
+  .sd-keys,
+  .sd-esc,
+  .sd-filter-l,
+  .sd-kbd-hint,
+  .sd-row.on .sd-kbd-hint,
+  .sd-meta,
+  .sd-foot:not(.said) {
+    display: none;
+  }
+  .sd-kind {
+    width: auto;
+  }
+  .sd-item {
+    white-space: normal;
+  }
+  .sd-pop-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .sd-input {
+    font-size: 16px;
+  }
+  .sd-chip {
+    padding: 0 12px;
+    font-size: 13.5px;
+  }
+}
