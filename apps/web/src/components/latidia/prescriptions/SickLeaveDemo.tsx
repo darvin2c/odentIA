@@ -134,13 +134,13 @@ export default function SickLeaveDemo() {
           </span>
           <span className="sl-st">
             <b>
-              {doc === "draft" ? "Al emitirlo, se le envía" : doc === "emitted" ? "Enviado a Rosa por WhatsApp · 10:59" : "Anulado con motivo"}
+              {doc === "draft" ? "Al emitirlo, lo envías" : doc === "emitted" ? "Enviado a Rosa por WhatsApp · 10:59" : "Anulado con motivo"}
             </b>
             <span>
               {doc === "draft"
-                ? "Por el canal donde conversa contigo, y queda en Su enlace 30 días."
+                ? "Como PDF, por WhatsApp o por correo. También puedes imprimirlo."
                 : doc === "emitted"
-                  ? "También está en Su enlace para descargarlo."
+                  ? "También puedes imprimirlo."
                   : "Motivo: los días no eran los correctos. Emite uno nuevo con otro número."}
             </span>
           </span>

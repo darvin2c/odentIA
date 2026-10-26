@@ -1,0 +1,177 @@
+---
+// /whatsapp-para-clinicas-dentales (odentIA), con la misma estructura que /omnicanal: la portada con la
+// pantalla real de «Conectar WhatsApp», lo que hacen los agentes por WhatsApp con la ventana de 24 horas
+// y el recordatorio aprobado, lo que cobra Meta, enlaces relacionados, preguntas y cierre. Título,
+// descripción, migas y relacionados son los de PAGES.whatsapp; las preguntas se escriben aquí para quitar
+// los marcadores «Por confirmar» de la plantilla genérica.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { giftOf, shownPlan } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import Related from "../pages/Related.astro"
+import ReminderPhone from "./ReminderPhone.astro"
+import WhatsappConnect from "./WhatsappConnect"
+import WhatsappWindow from "./WhatsappWindow"
+import "./om-page.css"
+
+const page = PAGES.whatsapp
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const gift = giftOf(pricing)
+const cta = ctaOf(pricing)
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  page.parent ?? ["Omnicanal", "/omnicanal"],
+  [page.crumb, page.path],
+]
+
+const steps: { n: string; title: string; text: string }[] = [
+  { n: "01", title: "Conectas el número de tu clínica", text: "Desde tu cuenta de Meta, con pasos guiados dentro de odentIA. Cada paso se comprueba solo." },
+  { n: "02", title: "Eliges qué hace Sofi", text: "Responder, agendar o solo avisarle a tu equipo. Cada tarea se prende o se apaga." },
+  { n: "03", title: "Cada mensaje llega a la ficha de la persona", text: "Junto con lo que escribió por Instagram, el chat de tu web o el correo." },
+]
+
+const doing: { agent: string; tone: string; title: string; text: string; link?: { href: string; label: string } }[] = [
+  { agent: "Sofi", tone: "sofi", title: "Responde y agenda", text: "Informa precios y horarios, y agenda, mueve o cancela citas con el sí del paciente." },
+  { agent: "Argos", tone: "argos", title: "Recuerda y trae de vuelta", text: "Recuerda cada cita, avisa los controles y ofrece otra fecha a quien faltó." },
+  { agent: "Sofi", tone: "sofi", title: "Envía Su enlace", text: "Para que el paciente elija la hora, cambie su cita o vea sus documentos.", link: { href: "/portal-del-paciente", label: "Ver Su enlace" } },
+  { agent: "Tu equipo", tone: "team", title: "Entra cuando hace falta", text: "Lo que necesita a una persona pasa a tu equipo, con un resumen de lo que se habló." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Puedo usar el número que ya tiene mi clínica?",
+    a: "Sí. Conectas el número de tu clínica desde tu cuenta de Meta, con pasos guiados dentro de odentIA, y tus pacientes siguen escribiendo al de siempre.",
+  },
+  {
+    q: "¿Cuánto cuesta WhatsApp?",
+    a: "WhatsApp lo cobra Meta a la clínica, con sus propias tarifas, y lo revisas en tu cuenta de Meta. odentIA no lo cobra ni lo estima: cobra por el trabajo de sus agentes, no por mensaje.",
+  },
+  {
+    q: "¿Qué es la ventana de 24 horas?",
+    a: "Es la regla de Meta: cuando un paciente te escribe, durante las 24 horas siguientes puedes responderle libremente. Fuera de esa ventana, el primer mensaje tiene que ser una plantilla aprobada por Meta.",
+  },
+  {
+    q: "¿Mi equipo también puede responder?",
+    a: "Sí, desde la Bandeja o desde la ficha de la persona. Si alguien del equipo escribe, Sofi espera 15 minutos antes de volver a hablar.",
+  },
+  {
+    q: "¿Sofi responde de noche y los fines de semana?",
+    a: "Sí, siempre y en el canal donde le escriben. Lo que tú decides es cuándo puede escribir por su cuenta.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <div class="om">
+    <section class="hero om-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap om-hero-in">
+        <div class="om-top om-top-wa">
+          <div class="om-copy">
+            <span class="tag tag-d om-tag rise">[ WhatsApp ]</span>
+            <h1 class="om-h1 rise d1">WhatsApp Business para tu clínica dental, <span class="acc">con tu número de siempre.</span></h1>
+            <p class="om-lead rise d2">Conecta el número de tu clínica y atiende cada mensaje desde odentIA: Sofi, tu agente de recepción, contesta al momento, agenda con el sí del paciente y le pasa a tu equipo lo que necesita a una persona.</p>
+            <div class="om-ctas rise d3">
+              <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+              <a class="btn btn-g" href="/agentes/recepcion">Conoce a Sofi</a>
+            </div>
+          </div>
+          <div class="om-demo rise d2">
+            <WhatsappConnect client:load />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="om-sec">
+      <div class="wrap om-in">
+        <div class="om-head">
+          <span class="tag om-tag">[ Cómo se conecta ]</span>
+          <h2 class="om-h2">Tu número, en tres pasos.</h2>
+          <p class="om-p">Tus pacientes no cambian de número ni de costumbre: escriben donde siempre y su mensaje llega a su ficha.</p>
+        </div>
+        <ol class="om-steps">
+          {steps.map((s) => (
+            <li class="om-step">
+              <span class="n">{s.n}</span>
+              <b>{s.title}</b>
+              <span class="t">{s.text}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+
+    <section class="om-sec white" id="agentes">
+      <div class="wrap om-in wa">
+        <div class="om-head">
+          <span class="tag om-tag">[ Qué pasa en tu WhatsApp ]</span>
+          <h2 class="om-h2">Lo que hacen tus agentes por WhatsApp.</h2>
+          <p class="om-p">Responden dentro de la ventana de 24 horas y, pasada esa ventana, escriben solo con mensajes aprobados por Meta, como el recordatorio de una cita.</p>
+        </div>
+        <div class="om-grid om-grid-4">
+          {doing.map((d) => (
+            <div class="om-card soft">
+              <span class:list={["om-agent", d.tone]}>{d.agent}</span>
+              <h3>{d.title}</h3>
+              <p>{d.text}{d.link && <> <a href={d.link.href}>{d.link.label}</a></>}</p>
+            </div>
+          ))}
+        </div>
+        <div class="om-wa">
+          <div class="om-window">
+            <WhatsappWindow client:visible />
+          </div>
+          <ReminderPhone />
+        </div>
+      </div>
+    </section>
+
+    <section class="om-sec">
+      <div class="wrap om-in">
+        <div class="om-head">
+          <span class="tag om-tag">[ Lo que cobra Meta ]</span>
+          <h2 class="om-h2">Qué cuesta WhatsApp, sin letra chica.</h2>
+        </div>
+        <div class="om-grid">
+          <div class="om-card">
+            <h3>WhatsApp lo cobra Meta a la clínica</h3>
+            <p>Con sus propias tarifas: los mensajes de plantilla, como un recordatorio, y las respuestas cuando pasan de lo que Meta deja gratis.</p>
+          </div>
+          <div class="om-card">
+            <h3>Lo revisas en tu cuenta de Meta</h3>
+            <p>odentIA no lo cobra ni lo estima: en Plan y pagos tienes el enlace a tu cuenta de Meta.</p>
+          </div>
+          <div class="om-card">
+            <h3>Lo que cobra odentIA</h3>
+            <p>Pagas por el trabajo hecho, no por mensaje. Lo ves en la <a href="/precios">página de precios</a>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} white />
+    <div class="om-faq om-faq-bg">
+      <Faq items={faq} />
+    </div>
+    <CtaBand title="Que ningún mensaje de tus pacientes se quede sin respuesta.">
+      <Fragment slot="text">
+        {gift ? (
+          founder ? (
+            <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          ) : (
+            <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          )
+        ) : (
+          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>

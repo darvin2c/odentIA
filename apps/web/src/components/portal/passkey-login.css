@@ -1,0 +1,17 @@
+/* La entrada al portal (sección «Cómo entra»): la tarjeta centrada con la huella, que se pone verde al entrar. */
+.dpk { width: 340px; max-width: 100%; margin: 0 auto; background: var(--bg); border: 1px solid var(--line); border-radius: 30px; padding: 28px 22px; display: flex; flex-direction: column; align-items: center; gap: 16px; text-align: center; }
+.dpk-org { font-size: 13px; font-weight: 700; color: var(--muted); }
+.dpk-finger { width: 76px; height: 76px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--teal-soft); color: var(--teal); transition: background-color .4s, color .4s; }
+.dpk-finger.in { background: #e4f6ee; color: #1a6b50; }
+.dpk-say { display: flex; flex-direction: column; gap: 6px; }
+.dpk-say b { font-size: 20px; letter-spacing: -.02em; }
+.dpk-say span { font-size: 14px; color: var(--muted); }
+.dpk-main { width: 100%; min-height: 48px; border: 0; border-radius: 999px; background: var(--teal); color: #fff; font: 700 15px var(--font); cursor: pointer; }
+.dpk-main:hover { background: var(--teal-hover); }
+.dpk-help { font-size: 14px; color: var(--muted); }
+.dpk-list { width: 100%; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.dpk-list li { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; display: flex; flex-direction: column; }
+.dpk-list b { font-size: 14px; }
+.dpk-list span { font-size: 13px; color: var(--muted); }
+.dpk-reset { min-height: 44px; border: 0; background: none; color: var(--teal); font: 600 14px var(--font); cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .dpk-finger { transition: none; } }

@@ -1,0 +1,33 @@
+/* El control que se repite (sección «Controles»): la tarjeta como el bloque «Controles» de la pestaña
+   Plan, con su chip, la frecuencia en píldoras, sus botones y los realizados debajo. */
+.drc { --drc-line: color-mix(in srgb, var(--teal) 12%, #fff); background: var(--paper); border: 1px solid var(--drc-line); border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 60px -36px rgba(10, 33, 41, .35); }
+.drc-title { display: flex; flex-direction: column; gap: 2px; }
+.drc-title b { font-size: 18px; }
+.drc-title span { font-size: 13px; color: var(--muted); }
+.drc-card { border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.drc-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drc-line b { font-size: 16px; }
+.drc-chip { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 4px 9px; background: var(--teal-soft); color: var(--teal-hover); }
+.drc-chip.off { background: #eef2f6; color: var(--muted); }
+.drc-due { font-size: 13px; color: var(--soft); }
+.drc-ind { font-size: 14px; color: var(--ink-2); }
+.drc-book { font-size: 14px; color: var(--muted); }
+.drc-repeat { font-size: 14px; font-weight: 600; color: var(--teal-hover); }
+.drc-cad { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; border: 0; padding: 0; margin: 0; min-width: 0; }
+.drc-cad legend { float: left; font-size: 13px; color: var(--muted); margin-right: 4px; padding: 0; }
+.drc-cad button { min-height: 44px; padding: 0 12px; border-radius: 999px; border: 0; cursor: pointer; font: 600 13px var(--font); background: #eef2f6; color: var(--ink-2); }
+.drc-cad button[aria-pressed="true"] { background: var(--teal); color: #fff; }
+.drc-cad:disabled button { cursor: default; opacity: .55; }
+.drc-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+.drc-btn { min-height: 44px; border: 0; border-radius: 999px; background: #eef2f6; color: var(--ink); font: 600 14px var(--font); padding: 0 16px; cursor: pointer; }
+.drc-btn.drc-main { background: var(--teal); color: #fff; font-weight: 700; padding: 0 18px; }
+.drc-btn:hover { filter: brightness(.96); }
+.drc-done { display: flex; flex-direction: column; gap: 6px; }
+.drc-done-h { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
+.drc-done ul { margin: 0; padding: 0; list-style: none; }
+.drc-done li { display: flex; justify-content: space-between; gap: 4px 10px; flex-wrap: wrap; font-size: 14px; padding: 8px 0; border-top: 1px solid #eef2f6; }
+.drc-reset { align-self: flex-start; min-height: 44px; border: 0; background: none; color: var(--teal); font: 600 14px var(--font); padding: 0 4px; cursor: pointer; }
+.drc-pop { animation: drc-pop .5s ease-out; }
+@keyframes drc-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .drc-pop { animation: none; } }
+@media (max-width: 600px) { .drc { padding: 16px; } .drc-card { padding: 14px; } }

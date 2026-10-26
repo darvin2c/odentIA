@@ -1,0 +1,84 @@
+/* La caja del día (CashDay.tsx), en la portada de /caja-y-cobros de odentIA. Todo bajo .fc.
+   Los tintes salen de --teal, el primario de odentIA, como en las tarjetas de la aplicación. */
+.fc {
+  --fc-line: color-mix(in srgb, var(--teal) 14%, #fff);
+  --fc-tint: color-mix(in srgb, var(--teal) 6%, #fff);
+  --fc-tint-line: color-mix(in srgb, var(--teal) 24%, #fff);
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start;
+}
+.fc-card { flex: 1 1 360px; min-width: 0; background: var(--paper); color: var(--ink); border-radius: 24px; padding: 20px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6); }
+.fc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.fc-title { display: flex; flex-direction: column; gap: 2px; flex: 1 1 200px; min-width: 0; }
+.fc-title b { font-size: 18px; }
+.fc-title span { font-size: 13px; color: var(--muted); }
+.fc-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fc-replay { min-height: 44px; padding: 0 14px; border-radius: 999px; cursor: pointer; font: 700 13px var(--font); color: var(--teal-hover); background: var(--paper); border: 1px solid var(--fc-tint-line); }
+.fc-replay:hover { border-color: var(--teal); background: var(--fc-tint); }
+.fc-replay:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.fc-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 6px 10px; color: var(--muted); background: #eef0f4; }
+.fc-state i { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
+.fc-state[data-state="open"] { color: #166534; background: #e7f6ec; }
+.fc-state[data-state="open"] i { background: #16a34a; animation: fc-pulse 1.6s ease-in-out infinite; }
+.fc-state[data-state="ready"] { color: var(--teal-hover); background: var(--teal-soft); }
+.fc-state[data-state="ready"] i { background: var(--teal); }
+.fc-tabs { display: flex; gap: 4px; background: #eef0f4; border-radius: 999px; padding: 4px; align-self: flex-start; max-width: 100%; overflow: hidden; }
+.fc-tabs span { padding: 6px 12px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.fc-tabs span.on { background: var(--paper); border-radius: 999px; font-weight: 700; color: var(--ink); }
+.fc-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.fc-stat { flex: 1 1 96px; min-width: 0; border: 1px solid var(--fc-line); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.fc-stat-main { flex: 1 1 100%; background: var(--fc-tint); }
+.fc-k { font-size: 12px; font-weight: 600; color: var(--muted); }
+.fc-stat b { font-size: 17px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fc-stat-main b { font-size: 26px; }
+.fc-sub { font-size: 12px; color: var(--muted); }
+.fc-block { border: 1px solid var(--fc-line); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.fc-block-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.fc-block-head b { font-size: 15px; }
+.fc-block-head span { font-size: 12px; color: var(--muted); }
+.fc-owe { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.fc-owe > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fc-owe b { font-size: 15px; }
+.fc-owe > span > span { font-size: 13px; color: var(--muted); }
+.fc-owe-amount { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fc-none { margin: 0; font-size: 13px; color: var(--muted); }
+.fc-rows { display: flex; flex-direction: column; min-height: 170px; }
+.fc-row { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 6px; border-top: 1px solid var(--fc-line); border-radius: 12px; transition: background-color .4s ease; animation: fc-in .45s ease both; }
+.fc-row:first-child { border-top: 0; }
+.fc-row[data-now] { background: var(--fc-tint); }
+.fc-time { font-family: var(--agent-font); font-size: 13px; color: var(--soft); padding-top: 2px; }
+.fc-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fc-who b { font-size: 15px; }
+.fc-who > span:not(.fc-chip) { font-size: 13px; color: var(--muted); }
+.fc-chip { align-self: flex-start; margin-top: 2px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 3px 9px; color: var(--teal-hover); background: var(--teal-soft); }
+.fc-chip[data-owed] { color: #8a5a00; background: #fdf1d8; }
+.fc-amount { font-family: var(--agent-font); font-size: 15px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fc-amount[data-out] { color: #9b1c1c; }
+.fc-empty { border: 1px dashed var(--fc-tint-line); border-radius: 14px; padding: 18px; font-size: 14px; color: var(--muted); text-align: center; }
+.fc-close { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--fc-tint); border: 1px solid var(--fc-tint-line); border-radius: 14px; padding: 10px 12px; animation: fc-in .45s ease both; }
+.fc-close > span:first-child { font-size: 13px; color: var(--teal-hover); flex: 1 1 200px; }
+.fc-close-btn { font-size: 13px; font-weight: 700; color: #fff; background: var(--teal); border-radius: 999px; padding: 8px 14px; }
+.fc-note { font-size: 12px; color: var(--soft); }
+
+/* El ticket impreso: papel cálido, letra de máquina, cortes punteados. */
+.fc-ticket { flex: 0 1 236px; min-width: 210px; margin-top: 40px; background: #fffdf8; color: #1e293b; border-radius: 8px; padding: 18px 16px; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .6); font-family: var(--agent-font); font-size: 12.5px; line-height: 1.6; display: flex; flex-direction: column; gap: 2px; opacity: 0; visibility: hidden; transform: translateY(12px); transition: opacity .5s ease, transform .5s ease, visibility .5s; }
+.fc-ticket[data-on] { opacity: 1; visibility: visible; transform: none; }
+.fc-c { text-align: center; }
+.fc-dim { color: var(--muted); }
+.fc-line { display: flex; justify-content: space-between; gap: 8px; }
+.fc-cut { border-top: 1px dashed #cbd5e1; margin: 6px 0; }
+.fc-left { color: #8a5a00; background: #fdf1d8; margin: 2px -6px; padding: 2px 6px; border-radius: 4px; transition: background-color .4s ease, color .4s ease; }
+.fc-left[data-paid] { color: #166534; background: transparent; }
+.fc-fiscal { color: var(--muted); font-size: 11.5px; }
+
+@keyframes fc-pulse { 50% { opacity: .35; } }
+@keyframes fc-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 720px) {
+  .fc-card { padding: 16px; border-radius: 20px; }
+  .fc-rows { min-height: 0; }
+  .fc-ticket { flex: 1 1 100%; margin-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-state i, .fc-row, .fc-close { animation: none; }
+  .fc-ticket, .fc-row, .fc-left { transition: none; }
+}

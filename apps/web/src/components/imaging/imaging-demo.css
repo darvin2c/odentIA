@@ -96,7 +96,9 @@
   .iv-slider { font-size: 11px; gap: 6px; }
   .iv-slider input { width: 64px; }
   .iv-teeth { display: flex; overflow-x: auto; scrollbar-width: none; }
-  .iv-teeth button { flex: none; min-width: 40px; }
+  .iv-teeth button { flex: none; min-width: 44px; min-height: 44px; }
+  .iv-tabs button, .iv-planes button, .iv-tool { min-height: 44px; }
+  .iv-slider { min-height: 44px; }
   .iv-pano > .iv-panel + .iv-panel { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 6px 14px; }
   .iv-pano > .iv-panel + .iv-panel .iv-label { grid-column: 1 / -1; }
   .iv-cross { max-width: 112px; margin: 0; }

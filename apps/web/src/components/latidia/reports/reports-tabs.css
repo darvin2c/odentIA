@@ -107,3 +107,8 @@
   .lt-rtabs-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 4px; overflow: visible; }
   .lt-rtabs-tabs button { padding: 0 6px; min-height: 44px; font-size: 14px; }
 }
+
+/* Finanzas con una tarjeta más debajo (odentIA: lo cobrado por tratamiento). */
+.lt-rtabs-stack { display: flex; flex-direction: column; gap: 16px; }
+.lt-rtabs-detail { color: var(--muted); font-size: 13px; }
+.lt-rtabs-stack > .lt-rtabs-wide { flex: none; }

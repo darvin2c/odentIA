@@ -1,0 +1,74 @@
+/* Seis canales, una ficha (odentIA, /omnicanal): la tarjeta blanca con los canales, sus cables hacia la
+   ficha de Lucía, la línea de tiempo y «Responder por». Los tintes salen de --teal, el primario de odentIA. */
+.cr {
+  --cr-tint: color-mix(in srgb, var(--teal) 7%, #fff);
+  --cr-line: color-mix(in srgb, var(--teal) 16%, #fff);
+  background: var(--paper); color: var(--ink); border-radius: 26px; padding: 20px; display: flex; flex-wrap: wrap; align-items: center; box-shadow: 0 40px 80px -40px rgba(0, 0, 0, .6);
+}
+.cr-chs { width: 250px; flex: 0 0 250px; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.cr-ch { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-radius: 14px; background: #f8fafc; box-shadow: 0 0 0 1px #eef0f4; transition: box-shadow .3s, background-color .3s; }
+.cr-ch.used { background: var(--paper); box-shadow: 0 0 0 1px var(--cr-line); }
+.cr-ch.on { background: var(--cr-tint); box-shadow: 0 0 0 2px var(--teal); }
+.cr-ico { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 10px; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; transition: opacity .3s; }
+.cr-ch-text { display: flex; flex-direction: column; min-width: 0; }
+.cr-ch-text b { font-size: 14px; }
+.cr-ch-text span { font-size: 12px; color: var(--soft); }
+.cr-wire { flex: 0 0 80px; }
+.cr-wire path { transition: stroke .3s; }
+.cr-flow { stroke-dasharray: 6 8; animation: cr-flow .9s linear infinite; }
+@keyframes cr-flow { to { stroke-dashoffset: -14; } }
+
+.cr-rec { flex: 1 1 360px; min-width: 0; border: 1px solid var(--cr-line); border-radius: 20px; display: flex; flex-direction: column; background: var(--bg); }
+.cr-rec-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--cr-line); background: var(--paper); border-radius: 20px 20px 0 0; flex-wrap: wrap; }
+.cr-av { width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%; background: var(--teal-soft); color: var(--teal-hover); display: flex; align-items: center; justify-content: center; font-weight: 800; }
+.cr-who { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
+.cr-who b { font-size: 16px; }
+.cr-who span { font-size: 12px; color: var(--soft); }
+.cr-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.cr-pills span { font-size: 12px; font-weight: 600; background: #eef0f4; border-radius: 999px; padding: 5px 10px; }
+.cr-pills .cr-count { color: var(--teal-hover); background: var(--teal-soft); }
+.cr-thread { height: 470px; overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 48px); mask-image: linear-gradient(to bottom, transparent 0, #000 48px); display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; padding: 14px 16px; }
+.cr-msg { display: flex; flex-direction: column; gap: 3px; max-width: 86%; align-self: flex-start; animation: cr-pop .4s ease-out; }
+.cr-msg.out { align-self: flex-end; align-items: flex-end; }
+.cr-meta { font-family: var(--agent-font); font-size: 10.5px; }
+.cr-bubble { font-size: 14px; line-height: 1.45; border-radius: 14px; padding: 9px 12px; background: var(--paper); border: 1px solid var(--line); }
+.cr-msg.out .cr-bubble { background: #d6f1f6; border-color: #d6f1f6; }
+.cr-event { align-self: center; font-size: 12px; font-weight: 700; color: var(--teal-hover); background: var(--teal-soft); border-radius: 999px; padding: 7px 12px; text-align: center; animation: cr-pop .4s ease-out; }
+/* Lo mismo que dice la pestaña Conversaciones de la aplicación cuando la persona aún no ha escrito. */
+.cr-empty { align-self: center; margin: auto; max-width: 280px; display: flex; flex-direction: column; gap: 4px; text-align: center; border: 1px dashed var(--cr-line); border-radius: 14px; padding: 18px; background: var(--paper); }
+.cr-empty b { font-size: 15px; }
+.cr-empty span { font-size: 13px; color: var(--muted); line-height: 1.45; }
+@keyframes cr-pop { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.cr-reply { border-top: 1px solid var(--cr-line); background: var(--paper); padding: 10px 16px 12px; display: flex; flex-direction: column; gap: 8px; border-radius: 0 0 20px 20px; }
+.cr-by { position: relative; display: flex; align-items: center; gap: 4px 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.cr-by-trigger { min-height: 44px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 400 12px var(--font); cursor: pointer; }
+.cr-by-trigger b { font-weight: 600; }
+.cr-by-trigger span { color: var(--muted); }
+.cr-by-trigger:hover { background: #eef0f4; }
+.cr-by-trigger:focus-visible, .cr-menu button:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.cr-by-caret { font-size: 10px; }
+.cr-menu { position: absolute; left: 0; bottom: calc(100% - 4px); z-index: 3; margin: 0; padding: 4px; list-style: none; min-width: 250px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px -8px rgba(15, 23, 42, .25); }
+.cr-menu button { width: 100%; min-height: 44px; text-align: left; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; font: 400 13px var(--font); color: var(--muted); cursor: pointer; white-space: nowrap; }
+.cr-menu button b { color: var(--ink); font-weight: 600; }
+.cr-menu button:hover, .cr-menu button[aria-current] { background: #eef0f4; }
+.cr-box { display: flex; gap: 8px; align-items: center; }
+.cr-field { flex: 1 1 auto; min-width: 0; min-height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--paper); color: var(--soft); font-size: 14px; padding: 12px 14px; }
+.cr-field.off { background: #f1f5f9; }
+.cr-send { width: 44px; height: 44px; flex: 0 0 auto; border-radius: 12px; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+.cr-send.off { background: #cbd5e1; }
+.cr-note { font-size: 12px; color: var(--muted); }
+.cr-foot { flex: 1 1 100%; font-size: 12px; color: var(--muted); padding-top: 12px; }
+
+/* En el teléfono los canales van en dos columnas arriba y la ficha debajo, sin cables. */
+@media (max-width: 760px) {
+  .cr { padding: 14px; border-radius: 22px; }
+  .cr-wire { display: none; }
+  .cr-chs { flex: 1 1 100%; width: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-bottom: 16px; }
+  .cr-thread { height: 520px; }
+  .cr-menu { min-width: min(250px, calc(100vw - 80px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cr-flow { animation: none; }
+  .cr-msg, .cr-event { animation: none; }
+}

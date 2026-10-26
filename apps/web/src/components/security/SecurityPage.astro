@@ -1,0 +1,328 @@
+---
+// /seguridad de odentIA, con la misma estructura que la de latidIA (lienzo del tablero «Seguridad»):
+// «Entra como…» con lo que ve cada rol del mismo paciente, la historia clínica (nada entra sin
+// confirmar, firmada no se cambia, quién la consultó) con el cierre de la atención, tus datos, la persona
+// y sus datos, lo que todavía no podemos decir y las preguntas. Solo lo comprobado en el código: la
+// matriz de permisos (packages/auth/src/permissions.ts: recepción ve las alergias activas y sube la
+// tomografía que trae, sin abrirla), el registro de consultas de la historia (clinical_access_log), el
+// cierre con colegiatura y adendas inmutables (packages/clinic-app › encounter-editor), las claves de los
+// canales cifradas (services/secrets) y los pedidos sobre sus datos con su plazo de 10 días (ADR 0080).
+// Sin sellos ni certificaciones, y sin afirmar el cifrado de la base de datos.
+// La demostración de roles es la de latidIA con `variant="dental"` (components/latidia/security).
+// Título, descripción, migas y las preguntas de siempre salen de PAGES.seguridad (lib/pages-data.ts).
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { days, giftOf, shownPlan } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { contactHref, ctaOf } from "../../lib/site"
+import FeatureGrid from "../agents/FeatureGrid.astro"
+import SplitHero from "../agents/SplitHero.astro"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import RoleView from "../latidia/security/RoleView"
+
+const page = PAGES.seguridad
+const pricing = Astro.locals.pricing
+const cta = ctaOf(pricing)
+const gift = giftOf(pricing)
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const trail: [string, string][] = [
+  ["Inicio", "/"],
+  [page.crumb, page.path],
+]
+
+// Quién abrió la historia de Carlos: una línea por persona, parte de la ficha y hora.
+const log = [
+  ["24 oct. 09:40", "Dra. Mariana Paredes", "Abrió las atenciones"],
+  ["24 oct. 09:41", "Dra. Mariana Paredes", "Abrió el odontograma"],
+  ["25 oct. 08:10", "Dra. Mariana Paredes", "Abrió la atención para la adenda"],
+  ["25 oct. 09:02", "Dr. Ríos", "Abrió el resumen clínico"],
+]
+
+// Lo que pide el cierre de la atención, con las palabras de la app, y si ya está.
+const closing: [string, boolean][] = [
+  ["Motivo de consulta", true],
+  ["Al menos un diagnóstico con su tipo (presuntivo basta)", true],
+  ["Evolución", false],
+  ["Tu colegiatura en el perfil profesional", true],
+]
+
+const asks = [
+  { title: "Una copia", text: "En PDF para leer y en HL7 FHIR, un estándar que otro sistema puede cargar." },
+  { title: "Corregir un dato", text: "Lo corrige tu equipo y queda quién lo hizo." },
+  { title: "No recibir mensajes", text: "Se cumple al registrarlo; los avisos de sus citas siguen." },
+  { title: "Borrar", text: "Se borra lo que no es clínico y la historia queda bloqueada, porque se debe conservar." },
+]
+
+const faq: FaqItem[] = [
+  ...page.faq,
+  {
+    q: "¿Puedo saber quién abrió una historia?",
+    a: "Sí. Cada vez que alguien abre la historia de un paciente queda una línea con quién, qué parte y a qué hora.",
+  },
+  {
+    q: "¿Y si me equivoqué en una atención ya firmada?",
+    a: "Agregas una adenda que lo aclara, con tu nombre y la hora. Lo firmado no se borra ni se reescribe.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <div class="sec">
+  <SplitHero
+    tag="Seguridad"
+    color="var(--sky-2)"
+    h1="Seguridad y datos de salud en tu clínica dental: cada rol con su permiso, la historia firmada que no se cambia y el registro de quién la consultó."
+    lead="Recepción agenda sin abrir la historia clínica. Caja cobra sin ver el diagnóstico. Tú atiendes con todo lo clínico. Y Sofi, que responde a tus pacientes, tampoco ve la historia."
+    copyBasis={400}
+    demoBasis={540}
+  >
+    <p class="sh-title big">Cada quien ve <span class="accent">lo suyo.</span></p>
+    <Fragment slot="actions">
+      <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+      <a class="btn btn-g" href={contactHref}>Pregúntanos</a>
+    </Fragment>
+    <RoleView slot="demo" client:load variant="dental" />
+  </SplitHero>
+
+  <section class="section section-white">
+    <div class="wrap sp-in">
+      <div class="sp-head">
+        <span class="tag sp-tag">[ La historia clínica ]</span>
+        <h2 class="sp-h2">Lo que entra a la historia, lo decides tú.</h2>
+        <p class="sp-lead">Clío propone y tú confirmas. Al firmar, la atención queda fija. Si después algo cambia, se agrega una adenda, con tu nombre y la hora.</p>
+      </div>
+      <div class="sp-three">
+        <div class="sp-card">
+          <span class="sp-k sp-k-clio">1 · Nada entra sin confirmar</span>
+          <div class="sp-propose">
+            <span class="sp-propose-t">Clío propone · Odontograma</span>
+            <span class="sp-mono">36 · caries oclusal · resina</span>
+            <span class="sp-btns" aria-hidden="true"><span data-primary>Confirmar</span><span>Editar</span></span>
+          </div>
+          <p>Lo que no confirmas no queda en la historia. Ningún diagnóstico ni plan entra sin tu sí.</p>
+        </div>
+        <div class="sp-card">
+          <span class="sp-k">2 · Firmada no se cambia</span>
+          <div class="sp-doc">
+            <span class="sp-doc-top"><b>Atención · 24 oct., 09:40</b><span class="sp-signed">Firmada</span></span>
+            <span class="sp-sub">K02.1 Caries de la dentina · definitivo</span>
+            <span class="sp-by">Dra. Mariana Paredes · COP 24680</span>
+          </div>
+          <div class="sp-doc sp-addendum">
+            <b>Adenda · 25 oct., 08:10</b>
+            <span class="sp-sub">«Llamó el paciente: sigue con sensibilidad al frío. Se adelanta el control al lunes.»</span>
+            <span class="sp-by">Dra. Mariana Paredes</span>
+          </div>
+          <p>Las adendas tampoco se editan ni se eliminan: lo firmado queda como se firmó.</p>
+        </div>
+        <div class="sp-card">
+          <span class="sp-k">3 · Quién consultó la historia</span>
+          <ul class="sp-log">
+            {log.map(([when, who, what]) => (
+              <li><span class="sp-mono sp-when">{when}</span><span><b>{who}</b><span>{what}</span></span></li>
+            ))}
+          </ul>
+          <p>Abrir la ficha clínica ya deja su línea. Caja no aparece: no puede abrirla; recepción solo ve las alergias.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sp-split">
+    <div class="wrap sp-split-in">
+      <div class="sp-copy">
+        <span class="tag sp-tag">[ En la pantalla ]</span>
+        <h2 class="sp-h2 small">Antes de firmar, sabes qué falta.</h2>
+        <p class="sp-lead">El cierre de la atención dice lo que falta: el motivo, al menos un diagnóstico con su tipo, la evolución y tu colegiatura. Al firmar, la atención queda inmutable y después solo se agregan adendas.</p>
+        <p class="sp-text">Mientras atiendes, todo se guarda solo. Si cierras la pestaña, la atención te espera donde la dejaste.</p>
+      </div>
+      {/* Réplica del cierre de la atención de la app (encounter-editor), con datos de ejemplo. */}
+      <figure class="sp-shot">
+        <div class="sp-close" role="img" aria-label="Cierre de la atención: al cerrar se firma con tu colegiatura y la atención queda inmutable. Falta la evolución; el motivo, el diagnóstico y la colegiatura ya están.">
+          <b class="sp-close-t">Cierre de la atención</b>
+          <p class="sp-close-x">Al cerrar se firma con tu colegiatura y la atención queda inmutable: después solo se agregan adendas.</p>
+          <ul class="sp-reqs">
+            {closing.map(([label, done]) => (
+              <li data-done={done || undefined}>
+                <span class="sp-tick" aria-hidden="true">{done ? "✓" : ""}</span>
+                <span>{label}</span>
+                {!done && <span class="sp-missing">Falta</span>}
+              </li>
+            ))}
+          </ul>
+          <span class="sp-sign" aria-hidden="true">Finalizar y firmar</span>
+        </div>
+        <figcaption>Réplica del cierre de la atención, con datos de ejemplo.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <FeatureGrid
+    tag="Tus datos"
+    title="Tu clínica, separada de las demás."
+    lead="Esto es lo que hace el sistema hoy, sin adornos."
+    min={250}
+    small
+    white
+    items={[
+      { title: "Aislada por clínica", text: "Los datos de cada clínica están separados de los demás en la base de datos, también para los agentes." },
+      { title: "El permiso se revisa en el servidor", text: "No basta con esconder un botón: cada pedido se revisa contra el rol de quien lo hace." },
+      { title: "Conexión cifrada", text: `Todo viaja cifrado entre tu equipo y ${WORDS.name}. Las claves de tus canales se guardan cifradas.` },
+      { title: "Todo queda registrado", text: "Quién hizo qué y cuándo, sea una persona de tu equipo o un agente. Anular pide motivo." },
+      { title: "Los agentes, con límites", text: "Sofi dice que es asistente virtual y no ve la historia. Argos responde cifras sin que el modelo vea los nombres." },
+    ]}
+  />
+
+  <section class="sp-split">
+    <div class="wrap sp-split-in sp-top">
+      <div class="sp-copy">
+        <span class="tag sp-tag">[ La persona y sus datos ]</span>
+        <h2 class="sp-h2">Si un paciente pide sus datos, sabes qué hacer.</h2>
+        <p class="sp-lead">Registras el pedido en su ficha y el sistema te recuerda responder dentro de 10 días. Es un plazo más corto que el que piden las leyes de la región, así que sirve en cualquier país.</p>
+      </div>
+      <div class="sp-box">
+        <b class="sp-box-t">Lo que puede pedir</b>
+        <div class="sp-asks">
+          {asks.map((a) => (
+            <div><b>{a.title}</b><span>{a.text}</span></div>
+          ))}
+        </div>
+        <p class="sp-small">Comprobar que es la persona o su representante es un paso del pedido, nunca por el número de teléfono. Recepción envía la copia sin ver lo clínico.</p>
+        <div class="sp-leave">
+          <b>Si un día te vas</b>
+          <span>Cada historia sale en PDF y en HL7 FHIR.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-white">
+    <div class="wrap">
+      <div class="sp-truth">
+        <div class="sp-truth-h">
+          <span class="tag tag-d sp-tag">[ Con la verdad ]</span>
+          <h2>Lo que todavía no podemos decir.</h2>
+        </div>
+        <div class="sp-truth-t">
+          <p>No mostramos sellos ni certificaciones de seguridad: todavía no tenemos ninguna que mostrar, y no vamos a insinuarla.</p>
+          <p>Tu clínica es la responsable de los datos de sus pacientes y {WORDS.name} los trata por encargo suyo. Los textos de privacidad, de encargo de tratamiento y de subencargados están publicados: léelos antes de decidir.</p>
+          <p class="sp-legal"><a href="/privacidad">Privacidad</a><a href="/encargo-de-tratamiento">Encargo de tratamiento</a><a href="/subencargados">Subencargados</a></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={faq} title="Sobre tus datos." />
+  </div>
+  <CtaBand title="Tus pacientes confían en ti. Sus datos, también.">
+    <Fragment slot="text">
+      {gift ? (
+        founder ? (
+          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        ) : (
+          <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        )
+      ) : (
+        `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
+      )}
+    </Fragment>
+  </CtaBand>
+  </div>
+</Base>
+
+<style>
+  /* La frase grande del tablero: 64 px como máximo, no los 72 de SplitHero. */
+  .sec .big { font-size: clamp(42px, 4.6vw, 64px); line-height: .98; letter-spacing: -.045em; }
+  /* El texto de la portada arranca arriba, a la altura de la demostración, y no centrado contra ella:
+     así el botón principal queda a la vista en una pantalla de 1280 × 720. */
+  .sec :global(.sh-in) { align-items: flex-start; }
+  .accent { color: var(--sky); }
+  .sp-in { display: flex; flex-direction: column; gap: 36px; }
+  .sp-head { display: flex; flex-direction: column; gap: 14px; max-width: 820px; }
+  .sp-tag { font-size: 13px; letter-spacing: .12em; }
+  .sp-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .sp-h2.small { font-size: clamp(32px, 3.6vw, 44px); }
+  .sp-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .sp-text { font-size: 16px; line-height: 1.55; color: var(--muted); }
+
+  .sp-three { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: stretch; }
+  .sp-card { background: var(--bg); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .sp-card > p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+  .sp-k { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+  /* El verde de Clío, oscurecido para que se lea en chico sobre claro. */
+  .sp-k-clio { color: #1f7f63; }
+  .sp-mono { font-family: var(--agent-font); font-size: 14px; }
+  .sp-propose { background: var(--teal-soft); border: 1px solid color-mix(in srgb, var(--teal) 22%, #fff); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .sp-propose-t { font-size: 12px; font-weight: 700; color: var(--teal-hover); }
+  .sp-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sp-btns span { font-size: 13px; font-weight: 700; background: #eef0f4; border-radius: 999px; padding: 8px 14px; }
+  .sp-btns span[data-primary] { color: #fff; background: var(--teal); }
+  .sp-doc { background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 6px; }
+  .sp-doc b { font-size: 14px; }
+  .sp-doc-top { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .sp-signed { font-size: 12px; font-weight: 600; color: #166534; background: #e7f6ec; border-radius: 999px; padding: 3px 9px; }
+  .sp-sub { font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .sp-by { font-size: 12px; color: var(--soft); }
+  .sp-addendum { margin-left: 18px; border-style: dashed; border-color: var(--teal); }
+  .sp-log { list-style: none; margin: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 16px; padding: 6px 14px; display: flex; flex-direction: column; }
+  .sp-log li { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: 9px 0; }
+  .sp-log li + li { border-top: 1px solid var(--line); }
+  .sp-log li > span:last-child { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .sp-log b { font-size: 13px; }
+  .sp-log li > span:last-child span { font-size: 12px; color: var(--muted); }
+  .sp-when { font-size: 12px; color: var(--soft); }
+
+  .sp-split { padding: 104px 0; background: var(--bg); }
+  .sp-split-in { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .sp-top { align-items: flex-start; }
+  .sp-copy { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+  .sp-shot { flex: 1 1 460px; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+  .sp-shot figcaption { font-size: 13px; color: var(--soft); }
+  .sp-close { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 30px 60px -30px rgba(10, 33, 41, .35); }
+  .sp-close-t { font-size: 18px; }
+  .sp-close-x { font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .sp-reqs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+  .sp-reqs li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .sp-reqs li > span:not(.sp-tick):not(.sp-missing) { flex: 1 1 0; min-width: 0; }
+  .sp-tick { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid #cbd5e1; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: #fff; }
+  .sp-reqs li[data-done] .sp-tick { background: #15803d; border-color: #15803d; }
+  .sp-missing { font-size: 12px; font-weight: 700; color: #8a5a00; background: #fdf1d8; border-radius: 999px; padding: 3px 10px; }
+  .sp-sign { align-self: flex-start; font-size: 14px; font-weight: 700; color: var(--soft); background: #eef0f4; border-radius: 999px; padding: 12px 20px; }
+
+  .sp-box { flex: 1 1 520px; min-width: 0; background: var(--paper); border: 1px solid var(--line); border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+  .sp-box-t { font-size: 17px; }
+  .sp-asks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 10px; }
+  .sp-asks div { background: var(--bg); border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+  .sp-asks b { font-size: 15px; }
+  .sp-asks span { font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .sp-small { font-size: 14px; line-height: 1.5; color: var(--muted); }
+  .sp-leave { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .sp-leave b { font-size: 15px; }
+  .sp-leave span { font-size: 14px; line-height: 1.5; color: var(--muted); }
+
+  .sp-truth { background: radial-gradient(800px 400px at 80% 20%, #123f4d 0%, var(--night) 60%, var(--night-2) 100%); color: var(--on-night); border-radius: 26px; padding: clamp(24px, 4vw, 44px); display: flex; flex-wrap: wrap; gap: 32px; }
+  .sp-truth-h { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+  .sp-truth-h h2 { font-size: clamp(30px, 3.4vw, 40px); line-height: 1.06; letter-spacing: -.035em; font-weight: 800; }
+  .sp-truth-t { flex: 1.4 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 12px; font-size: 16px; line-height: 1.55; color: var(--on-night-2); }
+  .sp-legal { display: flex; flex-wrap: wrap; gap: 4px 20px; }
+  .sp-legal a { color: var(--sky-2); font-weight: 700; text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
+  .sp-legal a:hover { color: #fff; }
+
+  .faqwrap { background: var(--bg); }
+
+  @media (max-width: 720px) {
+    .sp-in { gap: 24px; }
+    .sp-lead { font-size: 16px; }
+    .sp-card { padding: 18px; }
+    .sp-split { padding: 64px 0; }
+    .sp-split-in { gap: 28px; }
+    .sp-copy, .sp-shot, .sp-box { flex-basis: 100%; }
+    .sp-box { padding: 16px; }
+    .sp-close { padding: 18px; }
+    .sp-truth-h, .sp-truth-t { flex-basis: 100%; }
+  }
+</style>

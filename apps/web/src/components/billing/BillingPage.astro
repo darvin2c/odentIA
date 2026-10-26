@@ -1,0 +1,135 @@
+---
+// /caja-y-cobros de odentIA (misma estructura que la de latidIA): la caja del día que se llena cobro a
+// cobro con el ticket de Carlos, lo que controla la caja, el cierre con su hoja para firmar, quién debe
+// y desde cuándo, enlaces relacionados, preguntas y cierre. Título, descripción, preguntas y enlaces son
+// los de PAGES.caja. Los montos en soles son del ejemplo de una clínica de Perú.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { giftOf, shownPlan } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { ctaOf } from "../../lib/site"
+import FeatureGrid from "../agents/FeatureGrid.astro"
+import SplitHero from "../agents/SplitHero.astro"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import Related from "../pages/Related.astro"
+import CashDay from "./CashDay"
+import CloseSheet from "./CloseSheet"
+import DebtsList from "./DebtsList"
+
+const page = PAGES.caja
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const gift = giftOf(pricing)
+const cta = ctaOf(pricing)
+const jsonLd = [
+  breadcrumbJsonLd(Astro.site, [
+    ["Inicio", "/"],
+    [page.crumb, page.path],
+  ]),
+  faqJsonLd(page.faq),
+]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <div class="bl">
+    <SplitHero
+      tag="Caja y cobros"
+      color="var(--sky-2)"
+      h1="Control de caja para tu clínica dental: cobros, adelantos, quién debe, el cierre del día y cada sede con lo suyo."
+      lead="Cobras desde la ficha de cada paciente con el tarifario de tu clínica. Lo que falta pagar queda a su nombre y, al final del mes, Reportes ya tiene las cuentas."
+      copyBasis={400}
+      demoBasis={560}
+    >
+      <p class="sh-title big">Cobras el tratamiento. <span class="accent">El mes se cuenta solo.</span></p>
+      <Fragment slot="actions">
+        <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+        <a class="btn btn-g" href="/reportes">Ver los reportes</a>
+      </Fragment>
+      <CashDay slot="demo" client:load />
+    </SplitHero>
+
+    <FeatureGrid
+      tag="La caja"
+      title="Lo que entra, lo que sale y lo que falta cobrar."
+      lead="Cada cobro sale del tarifario de tu clínica y de los tratamientos que ya se atendieron: no escribes precios a mano en cada ticket."
+      min={250}
+      small
+      white
+      items={[
+        { title: "Una caja por sede", text: "Se abre sola con el primer cobro del día. Nadie tiene que acordarse de abrirla." },
+        { title: "Cobros y adelantos", text: "Con los medios de pago que configura tu clínica. Un adelanto queda como saldo a favor del paciente." },
+        { title: "«Le falta pagar»", text: "Si paga una parte, el resto queda a su nombre, con la fecha, hasta que lo pague." },
+        { title: "El ticket", text: "Separa subtotal e impuesto y dice «Recibo interno. No es un documento fiscal.»" },
+        { title: "Gastos y efectivo", text: "Ingresos y retiros de efectivo con su motivo. Anular pide motivo y queda quién lo hizo." },
+        { title: "Saldos y devoluciones", text: "Cada movimiento queda en la cuenta del paciente, en su pestaña Cobros." },
+      ]}
+    >
+      <p class="more">Caja ve lo que necesita para cobrar, sin la historia clínica. <a href="/seguridad">Qué ve cada rol →</a></p>
+    </FeatureGrid>
+
+    <section class="bl-sec">
+      <div class="wrap bl-in">
+        <div class="bl-head">
+          <span class="tag bl-tag">[ Cierre de caja ]</span>
+          <h2 class="bl-h2">Cuentas el efectivo y la hoja sale lista para firmar.</h2>
+          <p class="bl-lead">Al cerrar, la caja te dice cuánto debe haber, tú cuentas lo que hay y ves al instante si cuadra. Elige cuánto contaste y mira qué cambia.</p>
+        </div>
+        <CloseSheet client:visible />
+        <p class="more">Si no cuadra, puedes cerrar igual: administración recibe un aviso. Tarjeta y transferencia no se cuentan aquí. <a href="/reportes">Ver Reportes →</a></p>
+      </div>
+    </section>
+
+    <section class="bl-sec white">
+      <div class="wrap bl-in">
+        <div class="bl-head">
+          <span class="tag bl-tag">[ Quién debe ]</span>
+          <h2 class="bl-h2">Quién debe y desde cuándo, para cobrar a tiempo.</h2>
+          <p class="bl-lead">Cuando se atiende un tratamiento con costo y queda saldo, la persona aparece sola, ordenada por antigüedad. Filtra por más de 30 o más de 90 días.</p>
+        </div>
+        <DebtsList client:visible />
+        <p class="more">Con varias sedes, cada una tiene su caja y su cierre; la historia del paciente es una sola. <a href="/varias-sedes">Cómo funcionan las sedes →</a></p>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} />
+    <div class="faqwrap">
+      <Faq items={page.faq} title="Sobre la caja y los cobros." />
+    </div>
+    <CtaBand title="Cobras el tratamiento. El mes se cuenta solo.">
+      <Fragment slot="text">
+        {gift ? (
+          founder ? (
+            <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          ) : (
+            <>Obtén <b class="gift">{gift}</b> de crédito y pruébalo sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          )
+        ) : (
+          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  .bl .big { font-size: clamp(42px, 4.6vw, 64px); line-height: .98; letter-spacing: -.045em; }
+  .bl :global(.sh-in) { align-items: flex-start; }
+  .accent { display: block; color: var(--sky); }
+  .more { font-size: 15px; color: var(--muted); }
+  .more a { font-weight: 700; display: inline-block; padding: 10px 0; }
+  .bl-sec { padding: 96px 0; background: var(--bg); }
+  .bl-sec.white { background: var(--paper); }
+  .bl-in { display: flex; flex-direction: column; gap: 32px; }
+  .bl-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .bl-tag { font-size: 13px; letter-spacing: .12em; }
+  .bl-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .bl-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .faqwrap { background: var(--paper); }
+  @media (max-width: 720px) {
+    .bl-sec { padding: 64px 0; }
+    .bl-lead { font-size: 16px; }
+    .bl-in { gap: 24px; }
+  }
+</style>

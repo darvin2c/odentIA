@@ -1,5 +1,5 @@
 // «Invitar a volver» de Argos (lienzo de latidIA, tablero «Agenda»): Rosa lleva 12 meses sin venir.
-// Si tiene WhatsApp, Argos le escribe dentro del horario de recontacto; si no hay cómo escribirle,
+// Si tiene WhatsApp, Argos decide y Sofi le escribe dentro del horario de recontacto; si no hay cómo escribirle,
 // deja a recepción una tarea de llamada. El interruptor cambia entre los dos casos.
 import { useState } from "react"
 import "./return-invite.css"
@@ -25,10 +25,9 @@ export default function ReturnInvite() {
       <div aria-live="polite">
         {canWrite ? (
           <div className="ri-msg">
-            <span className="ri-meta">ARGOS · WHATSAPP · 10:00</span>
+            <span className="ri-meta">SOFI · WHATSAPP · 10:00</span>
             <span>
-              Hola, Rosa. Ya pasó un año desde tu última consulta con la Dra. Elena Vela. Si quieres, te reservo un chequeo: el jueves
-              hay a las 09:30 y a las 11:00.
+              Hola, Rosa. Hace más de un año que no te vemos en Consultorio San Martín. ¿Te buscamos un horario para tu control?
             </span>
           </div>
         ) : (

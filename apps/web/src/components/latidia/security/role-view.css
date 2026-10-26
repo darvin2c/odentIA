@@ -48,3 +48,6 @@ li[data-ok] .lt-roles-see { color: var(--ink-2); font-style: normal; }
   .lt-roles { padding: 16px; border-radius: 20px; }
   .lt-roles-roles button { flex: 1 1 calc(50% - 6px); padding: 0 10px; }
 }
+
+/* «Lo ve en parte» (odentIA: recepción ve las alergias; sube la tomografía sin abrirla). */
+li[data-ok="some"] .lt-roles-icon { background: #fdf1d8; color: #8a5a00; }

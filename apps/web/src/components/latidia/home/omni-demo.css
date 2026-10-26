@@ -35,7 +35,11 @@
   .od-tabs { gap: 2px; font-size: 12px; flex-wrap: wrap; border-radius: 18px; }
   .od-tabs span { padding: 6px 7px; }
 }
-.od-feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-height: 148px; }
+.od-feed { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-height: 148px; }
+.od-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; border: 1px dashed #dccdf5; border-radius: 14px; padding: 12px; opacity: 0; transition: opacity .3s; pointer-events: none; }
+.od-empty.on { opacity: 1; }
+.od-empty b { font-size: 15px; }
+.od-empty span { font-size: 13px; color: var(--muted); }
 .od-item { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; font-size: 14px; line-height: 1.35; background: #faf8fe; border: 1px solid #f0ebf9; }
 .od-ico { width: 30px; height: 30px; border-radius: 9px; font-size: 11px; font-weight: 800; display: flex; align-items: center; justify-content: center; flex: none; }
 .od-ico.wa { background: #e4f5ea; color: #1d7a45; }

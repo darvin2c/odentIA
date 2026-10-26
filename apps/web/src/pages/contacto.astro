@@ -1,8 +1,7 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.contacto). En latidIA, su propia página (components/latidia/contact).
+// Contenido en src/lib/pages-data.ts (PAGES.contacto: título, descripción y migas). Una sola página para las
+// dos webs (components/latidia/contact): los dos caminos, lo que pasa después y las preguntas, con las
+// palabras de cada producto (`WORDS`).
 import ContactPage from "../components/latidia/contact/ContactPage.astro"
-import InnerPage from "../components/pages/InnerPage.astro"
-import { PAGES } from "../lib/pages-data"
-import { MEDICAL } from "../lib/product"
 ---
-{MEDICAL ? <ContactPage /> : <InnerPage page={PAGES.contacto} />}
+<ContactPage />

@@ -1,8 +1,8 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.omnicanal); latidIA tiene su propia página (OmnichannelPage).
-import InnerPage from "../components/pages/InnerPage.astro"
+// Título, descripción, migas y enlaces en src/lib/pages-data.ts (PAGES.omnicanal). Cada producto tiene su
+// página: la de latidIA (components/latidia/omnichannel) y la de odentIA (components/omnichannel).
 import OmnichannelPage from "../components/latidia/omnichannel/OmnichannelPage.astro"
-import { PAGES } from "../lib/pages-data"
+import DentalOmnichannelPage from "../components/omnichannel/OmnichannelPage.astro"
 import { MEDICAL } from "../lib/product"
 ---
-{MEDICAL ? <OmnichannelPage /> : <InnerPage page={PAGES.omnicanal} />}
+{MEDICAL ? <OmnichannelPage /> : <DentalOmnichannelPage />}

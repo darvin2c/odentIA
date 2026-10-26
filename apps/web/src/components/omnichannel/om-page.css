@@ -1,0 +1,88 @@
+/* Estilos de /omnicanal y /whatsapp-para-clinicas-dentales de odentIA. Todo bajo .om; lo comparten las dos páginas. */
+.om { background: var(--paper); }
+/* La cabecera del sitio va absoluta encima: 88 px de cabecera y 56 de aire. */
+.om-hero { padding: 144px 0 96px; }
+.om-hero-in { position: relative; display: flex; flex-direction: column; gap: 44px; }
+.om-top { display: flex; flex-wrap: wrap; gap: 24px 56px; align-items: flex-end; }
+.om-copy { flex: 1.3 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.om-side { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.om-tag { font-size: 13px; letter-spacing: .12em; }
+.om-h1 { font-size: clamp(36px, 4.2vw, 56px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+.om .acc { color: var(--sky); }
+.om-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+.om-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.om-sec { padding: 96px 0; background: var(--bg); }
+.om-sec.white { background: var(--paper); }
+.om-in { display: flex; flex-direction: column; gap: 40px; }
+.om-in.wa { gap: 44px; }
+.om-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+.om-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+.om-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+
+.om-split { display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch; }
+.om-cards { flex: 1.4 1 480px; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; }
+.om-card { background: var(--paper); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+.om-card h3 { font-size: 19px; line-height: 1.25; letter-spacing: -.01em; }
+.om-card p { font-size: 15px; line-height: 1.5; color: var(--muted); }
+.om-card a { font-weight: 700; }
+.om-card.soft { background: var(--bg); padding: 24px; }
+.om-card.soft h3 { font-size: 20px; }
+.om-card.soft p { font-size: 16px; }
+.om-who { flex: 1 1 340px; min-width: 0; background: var(--night); color: var(--on-night); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+.om-who-tag { font-family: var(--agent-font); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--sky-2); }
+.om-who-row { background: rgba(255, 255, 255, .07); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px; }
+.om-who-row span { font-size: 12px; color: var(--on-night-3); }
+.om-who-row b { font-size: 16px; }
+.om-who p { font-size: 15px; line-height: 1.55; color: var(--on-night-2); }
+
+.om-wa { display: flex; flex-wrap: wrap; gap: 28px; align-items: stretch; }
+.om-window { flex: 1.2 1 460px; min-width: 0; }
+/* El teléfono con el recordatorio: los colores de la conversación de WhatsApp, no los de la marca. */
+.om-phone { flex: 0 1 340px; width: 340px; max-width: 100%; margin: 0 auto; align-self: flex-start; background: #e9e4dc; border-radius: 30px; padding: 16px; display: flex; flex-direction: column; gap: 10px; color: var(--ink); }
+.om-phone-top { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(0, 0, 0, .08); }
+.om-phone-av { width: 36px; height: 36px; border-radius: 50%; background: var(--teal); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+.om-phone-who { display: flex; flex-direction: column; }
+.om-phone-who b { font-size: 14px; }
+.om-phone-who span { font-size: 11px; color: var(--muted); }
+.om-bub { font-size: 14px; line-height: 1.45; border-radius: 14px; padding: 10px 12px; }
+.om-bub.in { align-self: flex-start; max-width: 92%; background: var(--paper); display: flex; flex-direction: column; gap: 6px; }
+.om-bub.out { align-self: flex-end; max-width: 80%; background: #d9fdd3; }
+.om-bub-time { font-size: 11px; color: var(--soft); align-self: flex-end; }
+/* Los botones de la plantilla aprobada, tal como salen en WhatsApp. */
+.om-quick { align-self: flex-start; max-width: 92%; width: 100%; display: flex; flex-direction: column; gap: 4px; }
+.om-quick span { background: var(--paper); border-radius: 12px; padding: 9px 12px; text-align: center; font-size: 13px; font-weight: 600; color: #0b6e8a; }
+.om-phone-note { font-size: 12px; color: var(--muted); text-align: center; }
+.om-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+
+.om-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 14px; }
+.om-step { background: var(--paper); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px; }
+.om-step .n { font-family: var(--agent-font); font-size: 12px; letter-spacing: .06em; color: var(--teal); }
+.om-step b { font-size: 18px; line-height: 1.3; }
+.om-step span.t { font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+.om-faq { background: var(--paper); }
+
+@media (max-width: 720px) {
+  .om-hero { padding: 104px 0 56px; }
+  .om-hero-in { gap: 32px; }
+  .om-lead { font-size: 17px; }
+  .om-ctas .btn { flex: 1 1 100%; }
+  .om-sec { padding: 64px 0; }
+  .om-in, .om-in.wa { gap: 28px; }
+  .om-p { font-size: 16px; }
+  .om-copy, .om-side, .om-cards, .om-who, .om-window { flex-basis: 100%; }
+}
+
+/* /whatsapp-para-clinicas-dentales: la portada lleva el texto y, al lado, la pantalla «Conectar WhatsApp». */
+.om-top-wa { align-items: center; }
+.om-top-wa .om-copy { flex: 1 1 440px; }
+.om-demo { flex: 1 1 480px; min-width: 0; }
+.om-grid-4 { grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
+.om-agent { align-self: flex-start; font-family: var(--agent-font); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--teal); }
+.om-agent.argos { color: #9a6a12; }
+.om-agent.team { color: var(--muted); }
+.om-faq.om-faq-bg { background: var(--bg); }
+@media (max-width: 720px) {
+  .om-top-wa .om-copy, .om-demo { flex-basis: 100%; }
+}
