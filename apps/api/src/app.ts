@@ -276,7 +276,7 @@ export function createApp(deps: AppDeps) {
     const origin = c.req.header("origin")
     const readOnly = c.req.method === "GET" || c.req.method === "HEAD"
     if ((origin && origin !== adminOrigin) || (!readOnly && origin !== adminOrigin)) {
-      return c.json(errorBody(c, "ADMIN_ORIGIN_REQUIRED", "Abre esta operación desde la administración de odentIA"), 403)
+      return c.json(errorBody(c, "ADMIN_ORIGIN_REQUIRED", "Abre esta operación desde la administración"), 403)
     }
     c.header("Cache-Control", "no-store")
     await next()

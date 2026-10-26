@@ -130,7 +130,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
       .from(user)
       .where(eq(user.id, userId))
       .limit(1)
-    return row?.name?.trim() || "El equipo de odentIA"
+    return row?.name?.trim() || "Nuestro equipo"
   }
 
   async function sendInviteEmail(args: {

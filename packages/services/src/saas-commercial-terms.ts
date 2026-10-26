@@ -590,7 +590,7 @@ export function checkSaasTerms(values: SaasCommercialTerms): Array<{ key: SaasTe
  * vez de pisar su cambio.
  */
 export async function setSaasTerms(tx: Db, actor: AdminActor, input: SetSaasTermsInput, now = new Date()): Promise<SaasTermsView> {
-  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo la administración de odentIA cambia las condiciones comerciales")
+  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración cambia las condiciones comerciales")
   for (const key of Object.keys(input.values)) {
     if (!FIELD_BY_KEY.has(key as SaasTermKey)) throw validation(`No existe la condición «${key}»`)
   }

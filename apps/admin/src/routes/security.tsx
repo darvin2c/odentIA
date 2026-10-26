@@ -148,7 +148,7 @@ function SecurityPage() {
       notStaff && invitation ? (
         <div className="flex flex-col gap-4">
           <Heading
-            title="Te invitaron al equipo de odentIA"
+            title="Te invitaron al equipo de la administración"
             description="Inicia sesión con el correo invitado y verificado para aceptar."
           />
           <SubmitButton

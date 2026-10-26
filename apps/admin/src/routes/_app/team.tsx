@@ -209,7 +209,7 @@ function TeamPage() {
     (confirmReason.trim().length >= 8 && !apply.isPending)
 
   return (
-    <PageShell>
+    <PageShell className="flex flex-col gap-6">
       <PageHeader
         title="Equipo"
         subtitle="Personal interno: invitaciones nominales, roles y reactivación"
