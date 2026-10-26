@@ -33,12 +33,12 @@ export const COOKIES: LegalDoc = {
               [
                 "Cookie de sesión",
                 "Mantener iniciada la sesión del usuario de forma segura.",
-                "[Por completar: duración exacta]",
+                "7 días; se renueva mientras el usuario usa la aplicación y se borra al cerrar sesión.",
               ],
               [
-                "Cookie de seguridad de la sesión",
-                "Proteger el inicio de sesión frente a solicitudes falsificadas [Por confirmar: si existe esta cookie].",
-                "[Por completar: duración exacta]",
+                "Cookie del segundo paso de verificación",
+                "Recordar, mientras se inicia sesión, que falta el código del segundo paso.",
+                "10 minutos.",
               ],
               [
                 "Almacenamiento local: preferencias",

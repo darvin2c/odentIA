@@ -20,7 +20,7 @@ const names = Object.fromEntries(FDI_ADULT.map((tooth) => [tooth, toothNameOf(to
 const includes = [
   { title: "Odontograma en herradura", text: "Permanente, mixta y temporal, con su historial: «Ver estado al» cualquier fecha." },
   { title: "Periodontograma", text: "Seis sitios por pieza, sangrado, placa, clasificación y la comparación entre fechas." },
-  { title: "Tomografía en el navegador", text: "Subes la carpeta del CD y la ves en panorámica y cortes, con medidas." },
+  { title: "Tomografía en el navegador", text: "Subes la carpeta del CD y la ves en panorámica y cortes, con medidas. Sin instalar nada." },
   { title: "Diagnósticos con su código", text: "De la lista que eliges: CIE-10 o CIE-11 de la OMS." },
   { title: "Documentos e imágenes", text: "Recetas, consentimientos firmados y radiografías en una sola lista, por pieza." },
   { title: "Alergias que avisan", text: "Una receta con un medicamento al que es alérgico avisa antes de emitirse." },
@@ -101,19 +101,20 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <div class="shot rev">
         <figure>
           <img
-            src="/img/product/cbct-viewer.jpg"
-            width="1000"
-            height="562"
+            src="/img/imaging/pano-hueso.jpg"
+            width="576"
+            height="513"
             loading="lazy"
             decoding="async"
-            alt="Visor de tomografía con tres cortes, desde arriba, de frente y de lado, con los botones de brillo, Medir y Ángulo y la nota de medidas guardadas."
+            alt="Panorámica reconstruida de una tomografía real de ejemplo: los dos maxilares con todas las piezas y sus brackets."
           />
-          <figcaption>Captura real del producto, con datos de prueba.</figcaption>
+          <figcaption>Panorámica de una tomografía real de ejemplo (3D Slicer), como la arma odentIA.</figcaption>
         </figure>
         <div class="shot-copy">
-          <span class="tag">[ Tomografía ]</span>
+          <span class="tag">[ Radiografías y tomografía ]</span>
           <h2 class="shot-h2">La tomografía, sin instalar un programa.</h2>
-          <p>Recepción sube el CD del centro de imágenes; el odontólogo la abre en la ficha, mide y guarda la vista en la atención.</p>
+          <p>Recepción sube el CD del centro de imágenes; el odontólogo la abre en la ficha con su panorámica y sus cortes, mide y guarda la vista en la atención.</p>
+          <a class="shot-link" href="/radiografias-y-tomografia">Pruébalo en el visor <span aria-hidden="true">→</span></a>
         </div>
       </div>
     </div>
@@ -154,6 +155,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
   .shot figure { flex: 1.6 1 560px; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
   .shot img { width: 100%; height: auto; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(10, 33, 41, .35); }
   .shot figcaption { font-size: 13px; color: var(--soft); }
+  .shot-link { align-self: flex-start; padding: 8px 0; font-weight: 700; color: var(--teal); }
 
   .faqwrap { background: var(--bg); padding-bottom: 8px; }
 

@@ -4,7 +4,7 @@ import { contactEmail } from "../site"
 import { type LegalDoc, TITULAR } from "./types"
 
 const ENTRENAMIENTO =
-  "odentIA no usa los datos de las clínicas ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial tratan los datos que reciben según sus condiciones de uso de API [Por confirmar con el proveedor de IA y el abogado: si los proveedores usan o no los datos para entrenar]."
+  "odentIA no usa los datos de las clínicas ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso."
 
 export const PRIVACIDAD: LegalDoc = {
   path: "/privacidad",
@@ -67,7 +67,7 @@ export const PRIVACIDAD: LegalDoc = {
             "Datos de identificación y contacto: nombre, correo electrónico, teléfono y rol en la clínica.",
             "Datos de acceso: credenciales (la contraseña se guarda cifrada de forma irreversible) y sesiones.",
             "Registro de actividad: qué acciones realiza cada usuario en la cuenta, con fecha y hora.",
-            "Datos de la clínica para facturar: razón social, número de contribuyente, domicilio y medio de pago [Por completar: proveedor de pagos y qué datos de la tarjeta recibe odentIA].",
+            "Datos de la clínica para facturar: razón social, número de contribuyente, domicilio y el medio con el que paga. odentIA no recibe ni guarda datos de tarjetas.",
           ],
         },
       ],
@@ -117,11 +117,11 @@ export const PRIVACIDAD: LegalDoc = {
       blocks: [
         {
           list: [
-            "Datos de usuarios: mientras la cuenta esté activa y, después de cancelarla, durante [Por completar: plazo de conservación tras la cancelación] días para permitir la exportación.",
-            "Registros del servidor: [Por completar: plazo de conservación de registros del servidor].",
-            "Registro de actividad de la cuenta: [Por completar: plazo de conservación del registro de actividad].",
+            "Datos de usuarios: mientras la cuenta esté activa y, después de cancelarla, durante 30 días para permitir la exportación.",
+            "Registros del servidor: 90 días.",
+            "Registro de actividad de la cuenta: mientras la cuenta esté activa y los 30 días siguientes a su cancelación.",
             "Datos de facturación: el plazo que exija la normativa tributaria.",
-            "Consultas recibidas: el tiempo necesario para atenderlas y hasta [Por completar: plazo] después.",
+            "Consultas recibidas: el tiempo necesario para atenderlas y hasta un año después.",
           ],
         },
         "Vencidos esos plazos, los datos se eliminan o se anonimizan.",
@@ -132,7 +132,7 @@ export const PRIVACIDAD: LegalDoc = {
       title: "Con quién los compartimos y flujo transfronterizo",
       blocks: [
         "No vendemos datos personales. Los compartimos solo con proveedores que nos ayudan a prestar el servicio (alojamiento, almacenamiento, correo, modelos de inteligencia artificial, transcripción de audios y sugerencia de direcciones) y con las autoridades cuando la ley lo exige. La lista de proveedores, lo que hace cada uno y su país está en la página de [subencargados](/subencargados).",
-        "Varios de esos proveedores están fuera del Perú, por ejemplo en los Estados Unidos. Esos envíos constituyen flujo transfronterizo de datos personales. odentIA los realiza con proveedores que ofrecen niveles de protección adecuados o garantías contractuales suficientes, conforme a la Ley 29733 y su Reglamento [Por confirmar: garantías contractuales con cada proveedor y comunicación a la ANPD si corresponde].",
+        "Varios de esos proveedores están fuera del Perú, por ejemplo en los Estados Unidos. Esos envíos constituyen flujo transfronterizo de datos personales. odentIA los realiza con proveedores que ofrecen niveles de protección adecuados o garantías contractuales suficientes, conforme a la Ley 29733 y su Reglamento. Las garantías son las condiciones de protección de datos que cada proveedor aplica a sus clientes empresariales.",
         ENTRENAMIENTO,
       ],
     },
@@ -146,8 +146,8 @@ export const PRIVACIDAD: LegalDoc = {
             "Aislamiento de cada clínica en la base de datos: una clínica no puede ver los datos de otra.",
             "Acceso por roles: cada usuario ve solo lo que su rol le permite.",
             "Registro de actividad de los usuarios.",
-            "Comunicaciones cifradas en tránsito [Por confirmar: cifrado en reposo de la base de datos y del almacenamiento].",
-            "Copias de seguridad [Por completar: frecuencia y ubicación de las copias de seguridad].",
+            "Comunicaciones cifradas en tránsito, y archivos y copias de seguridad cifrados en reposo.",
+            "Copias de seguridad diarias de la base de datos, guardadas en Cloudflare R2; se conservan las 14 más recientes.",
           ],
         },
         "Ningún sistema es invulnerable. Si se produce un incidente de seguridad que afecte a sus datos, se lo comunicaremos conforme a la ley.",
@@ -159,7 +159,7 @@ export const PRIVACIDAD: LegalDoc = {
       blocks: [
         "Usted puede ejercer, de forma gratuita, los derechos de información, acceso, rectificación, cancelación (supresión) y oposición, así como los demás reconocidos por la Ley 29733 y su Reglamento, incluido el de revocar el consentimiento que haya dado.",
         `Para ejercerlos, escriba a ${TITULAR.correoPrivacidad} indicando su nombre, el derecho que ejerce, lo que solicita y un medio para responderle. Podemos pedirle que acredite su identidad o, si actúa por otra persona, su representación.`,
-        "Responderemos en los plazos que establece la normativa peruana: [Por confirmar: plazos vigentes del Reglamento D.S. 016-2024-JUS para cada derecho; como referencia, el reglamento anterior fijaba 8 días hábiles para información, 20 para acceso y 10 para rectificación, cancelación y oposición].",
+        "Responderemos en los plazos del Reglamento (D.S. 016-2024-JUS, artículo 69), contados en días hábiles desde el día siguiente a su solicitud: 8 días para el derecho de información, 20 para el de acceso y 10 para los de rectificación, cancelación y oposición.",
         "Si considera que no hemos atendido su solicitud correctamente, puede presentar una reclamación ante la Autoridad Nacional de Protección de Datos Personales (ANPD) del Ministerio de Justicia y Derechos Humanos.",
         "Si usted es paciente de una clínica que usa odentIA, diríjase primero a la clínica, que es la responsable de sus datos. Si nos escribe a nosotros, trasladaremos su solicitud a la clínica.",
       ],

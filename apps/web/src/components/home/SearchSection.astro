@@ -1,0 +1,30 @@
+---
+// 07 · El buscador: Ctrl K desde cualquier pantalla y cada cosa debajo de su persona. La demo se
+// escribe sola con datos de ejemplo y quien mira puede buscar en ella (SearchDemo).
+import SearchDemo from "./SearchDemo"
+import { DENTAL_SEARCH } from "./search-data"
+import "./search-section.css"
+---
+<section id="buscador" class="hs hs-night hs-find">
+  <div class="grain" aria-hidden="true"></div>
+  <div class="wrap find">
+    <div class="sr hs-head find-head">
+      <span class="tag tag-d">[ 07 · El buscador ]</span>
+      <h2 class="h2">Llegas a lo que buscas en un paso.</h2>
+      <p class="lead lead-d">Pulsa Ctrl K en cualquier pantalla, o la lupa en el teléfono, y escribe lo que recuerdes. Pacientes, citas, mensajes, historia clínica, presupuestos y pagos aparecen juntos, cada cosa debajo de su persona.</p>
+    </div>
+    {/* `data-cta-room`: en el teléfono la barra fija se aparta para que se vea la ventana entera. */}
+    <div class="find-demo" data-cta-room>
+      <SearchDemo client:visible={{ rootMargin: "200px" }} data={DENTAL_SEARCH} />
+    </div>
+    <div class="find-more">
+      <ul class="find-points">
+        <li><strong>Escribe como te salga.</strong> «lucia» encuentra a Lucía, sin tildes ni mayúsculas y con solo el comienzo del nombre o del apellido.</li>
+        <li><strong>Por teléfono, DNI o historia.</strong> «987 654», un DNI, «HC-000123» o el número de un comprobante. Si dos personas comparten un teléfono, aparecen las dos.</li>
+        <li><strong>Cada cosa con su dueño.</strong> La cita, el presupuesto, la radiografía y los mensajes, debajo de su persona. Un Enter y estás ahí.</li>
+        <li><strong>¿Es una pregunta? Responde Argos.</strong> Escribe «¿Cuánto cobramos en octubre?» y Argos te contesta con los datos de tu clínica.</li>
+      </ul>
+      <p class="find-note">Cada rol encuentra solo lo que puede abrir: recepción no ve la historia clínica y el odontólogo no ve la caja. Los documentos e imágenes se encuentran por su nombre.</p>
+    </div>
+  </div>
+</section>

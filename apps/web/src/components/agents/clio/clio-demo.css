@@ -1,25 +1,48 @@
-/* La demo de Clío sobre la portada oscura: la consulta, el odontograma en claro y las líneas del dictado. */
-.cd { background: #0d2a33; border-radius: 26px; padding: 16px 18px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1); display: flex; flex-direction: column; gap: 12px; }
-.cd-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-.cd-who, .cd-state { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
-.cd-who { color: var(--on-night-3); }
-.cd-state { display: flex; align-items: center; gap: 8px; color: var(--mint); letter-spacing: .02em; text-transform: none; }
-.cd-state i { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); }
-.cd-state.live i { animation: cd-pulse 1.2s ease-in-out infinite; }
-.cd-arch { padding: 14px 16px; background: var(--bg); border-radius: 18px; }
-/* El arco se achica con el alto de la ventana para que la demo entera se vea sin bajar la página
-   (≈ 333 px fijos de cabecera, líneas y rellenos más el arco de 10 × 9 y su leyenda). */
-.cd-arch .oa { max-width: clamp(280px, calc((100svh - 470px) * 1.1), 520px); }
-.cd-lines { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
-.cd-lines li { display: flex; gap: 12px; align-items: baseline; padding: 7px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.35; opacity: .25; color: var(--on-night-3); transition: opacity .5s ease, background-color .5s ease, color .5s ease; }
-.cd-lines li.on { opacity: 1; background: rgba(166, 240, 216, .08); color: #e2eef1; }
-.cd-block { flex: none; min-width: 92px; font-family: var(--agent-font); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--on-night-3); }
-@keyframes cd-pulse { 50% { opacity: .35; } }
+/* La demo de Clío (ClioDemo.tsx): la tarjeta común de los agentes con el globo de voz, el odontograma
+   y lo que Clío propone al lado. Todo bajo .cl-* para no tocar el resto. */
+.cl { gap: 12px; }
+.cl-work { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 12px; align-items: start; }
+.cl-label { display: block; margin-bottom: 8px; font-family: var(--agent-font); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.cl-arch, .cl-props { background: var(--paper); border-radius: 16px; padding: 12px; min-width: 0; }
+/* La leyenda del arco se queda en la página del odontograma: aquí ocupa alto que no hace falta. */
+.cl-arch .oa-legend { display: none; }
+.cl-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+/* Una fila por cosa: el bloque, lo que propone y un círculo que se vuelve ✓ al confirmar. */
+.cl-item { display: grid; grid-template-columns: minmax(0, 1fr) 20px; gap: 1px 8px; align-items: center; padding: 6px 10px; border-radius: 12px; background: var(--bg); opacity: .32; transition: opacity .45s ease, background-color .45s ease, box-shadow .45s ease; }
+.cl-item.on { opacity: 1; }
+.cl-item.new { background: #e3f6ef; box-shadow: 0 0 0 1.5px #1f9d7a; }
+.cl-block { grid-column: 1; font: 700 11.5px var(--font); letter-spacing: .01em; color: #157a5c; }
+.cl-text { grid-column: 1; font-size: 13.5px; line-height: 1.3; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-item:not(.on) .cl-text { color: transparent; background: color-mix(in srgb, var(--ink) 8%, transparent); border-radius: 6px; }
+.cl-chip { grid-column: 2; grid-row: 1 / 3; width: 20px; height: 20px; border-radius: 50%; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--ink) 22%, transparent); display: flex; align-items: center; justify-content: center; font: 800 12px var(--font); color: #fff; transition: background-color .3s ease, box-shadow .3s ease; }
+.cl-chip.ok { background: #1f9d7a; box-shadow: none; }
+.cl-item:not(.on) .cl-chip { visibility: hidden; }
+
+.cl-bulk { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; min-height: 44px; }
+.cl-confirm { min-height: 44px; padding: 0 20px; border: 0; border-radius: 999px; background: #1f9d7a; color: #fff; font: 700 14.5px var(--font); cursor: pointer; transition: opacity .3s ease, transform .3s ease, box-shadow .3s ease; }
+.cl-confirm:disabled { opacity: .4; cursor: default; }
+.cl-confirm:focus-visible { outline: 2px solid #157a5c; outline-offset: 2px; }
+.cl-bulk[data-ready] .cl-confirm { box-shadow: 0 0 0 4px rgba(31, 157, 122, .22); animation: cl-ready 1.4s ease-in-out infinite; }
+.cl-hint { flex: 1 1 220px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.cl-done { font: 700 14px/1.4 var(--font); color: #157a5c; }
+
+/* El arco se achica con el alto de la ventana para que la demo entera quepa sin bajar la página. */
+.cl-arch .oa { max-width: clamp(220px, calc((100svh - 520px) * 1.25), 420px); margin: 0 auto; }
+
+@keyframes cl-ready { 50% { transform: scale(1.04); } }
+@media (prefers-reduced-motion: reduce) {
+  .cl-bulk[data-ready] .cl-confirm { animation: none; }
+}
+/* Teléfono: el arco más chico y una línea por propuesta, para que la tarjeta entera quepa en la pantalla. */
 @media (max-width: 720px) {
-  .cd { padding: 12px; gap: 10px; border-radius: 20px; }
-  .cd-arch { padding: 10px 8px; }
-  .cd-lines li { flex-direction: column; gap: 2px; }
-  /* Las líneas van en dos renglones: el arco cede ese alto (360 × 740 la muestra entera). Más
-     angosto no sirve: la leyenda del arco pasa a tres renglones. */
-  .cd-arch .oa { max-width: clamp(260px, calc((100svh - 500px) * 1.1), 520px); }
+  .cl-work { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .cl-arch, .cl-props { padding: 8px 10px; }
+  .cl-label { margin-bottom: 4px; }
+  .cl { gap: 8px; }
+  .cl-arch .oa { max-width: clamp(180px, calc((100svh - 620px) * 1.1), 215px); }
+  .cl-item { grid-template-columns: 84px minmax(0, 1fr) 18px; padding: 5px 8px; }
+  .cl-block { grid-column: 1; grid-row: 1; }
+  .cl-text { grid-column: 2; grid-row: 1; font-size: 13px; }
+  .cl-chip { grid-column: 3; grid-row: 1; width: 18px; height: 18px; }
+  .cl-hint { display: none; }
 }

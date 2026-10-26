@@ -2,6 +2,7 @@
 // Clío arma la nota a partir del dictado y Argos trae de vuelta a Rosa.
 // Las tres pestañas quedan en el HTML generado; solo se ve la elegida.
 import { useEffect, useRef, useState } from "react"
+import { AgentFoot, AgentHead, VoiceBubble } from "../agents/frame/AgentFrame"
 import { prefersReducedMotion, useInterval, useMoving } from "./motion"
 
 type Tab = "rec" | "cli" | "adm"
@@ -39,8 +40,6 @@ const LINES = [
   "En la 36 hay caries oclusal profunda. La percusión es negativa.",
   "Hoy hacemos una resina en la 36 y control en seis meses.",
 ]
-// Barras de la onda del dictado, con una clave fija para cada una.
-const WAVE_BARS = Array.from({ length: 20 }, (_, i) => `barra-${i}`)
 
 const ADM = [
   {
@@ -103,7 +102,8 @@ export default function AgentTabs() {
         } else setWait(wait + 1)
       } else if (chat < 7) setChat(chat + 1)
     }
-    if (tab === "cli" && note > 0 && note < 5) setNote(note + 1)
+    // Clío va más lento: cada frase se escribe palabra por palabra mientras la doctora habla.
+    if (tab === "cli" && note > 0 && note < 5 && n.current % 2 === 0) setNote(note + 1)
     if (tab === "adm" && adm > 0 && adm < 5 && n.current % 2 === 0) setAdm(adm + 1)
   }, 1150)
 
@@ -221,19 +221,14 @@ export default function AgentTabs() {
         <div className="ag-panel" hidden={tab !== "rec"}>
           <div className="ag-grid">
             <div className="chatbox">
-              <div className="chathead">
-                <span className="chatav" aria-hidden="true">
-                  S
-                </span>
-                <span className="stack">
-                  <strong>Sofi · Clínica Sonrisa Norte</strong>
-                  <span className="mono">Miércoles · 23:40 · la clínica está cerrada</span>
-                </span>
-                {/* Arriba, junto a la conversación que vuelve a empezar. */}
-                <button type="button" className="mono replay" onClick={() => replay("rec")}>
-                  Volver a ver
-                </button>
-              </div>
+              <AgentHead
+                agent="sofi"
+                name="Sofi · Clínica Sonrisa Norte"
+                meta="WhatsApp · miércoles 23:40 · cerrado"
+                state={booked ? "Cita agendada" : "Escribiendo…"}
+                live={!booked}
+                done={booked}
+              />
               <div className="voice">
                 <fieldset className="tones" aria-label="Tono del asistente">
                   {TONE_OPTS.map(([id, label]) => (
@@ -289,6 +284,8 @@ export default function AgentTabs() {
                   </div>
                 )}
               </div>
+              {/* Abajo, como en las demás demos: la conversación vuelve a empezar. */}
+              <AgentFoot note="A las 23:40, con la clínica cerrada." replay="Volver a ver" onReplay={() => replay("rec")} />
             </div>
             <div className="ag-side">
               <div className="card agenda d-only">
@@ -331,31 +328,30 @@ export default function AgentTabs() {
         {/* Clío */}
         <div className="ag-panel" hidden={tab !== "cli"}>
           <div className="ag-grid">
-            <div className="dict">
-              <div className="dict-h">
-                <span className="stack dict-who">
-                  <span className="tag tag-d">Consulta de Carlos Medina</span>
-                  <span className="mono">Dra. Paredes · 09:40</span>
-                </span>
-                <button type="button" className="mono dict-replay" onClick={() => replay("cli")}>
-                  Volver a escuchar
-                </button>
-              </div>
-              {note >= 1 && note < 4 && (
-                <div className="wave" aria-hidden="true">
-                  {WAVE_BARS.map((b) => (
-                    <span key={b}></span>
-                  ))}
-                </div>
-              )}
-              <div className="dict-lines">
-                {LINES.slice(0, Math.min(Math.max(note, 0), 3)).map((l) => (
-                  <p key={l} className="line">
-                    «{l}»
-                  </p>
+            <div className="chatbox dict">
+              <AgentHead
+                agent="clio"
+                name="Clío · en la consulta"
+                meta="Carlos Medina · Dra. Paredes · 09:40"
+                state={note < 4 ? "Escuchando…" : noteDone === "ok" ? "En la historia" : noteReady ? "Listo para confirmar" : "Ordenando…"}
+                live={note >= 1 && note < 4}
+                done={noteDone === "ok"}
+              />
+              {/* Cada frase, en el globo de la doctora: se ve que le está hablando a Clío. */}
+              <div className="dict-lines" aria-live="polite">
+                {LINES.slice(0, Math.min(Math.max(note, 0), 3)).map((l, i) => (
+                  <VoiceBubble
+                    key={l}
+                    initials="DP"
+                    who="Dra. Paredes"
+                    text={l}
+                    speaking={note < 4 && i === Math.min(note, 3) - 1}
+                    idle="dictado"
+                  />
                 ))}
               </div>
-              {note === 4 && <p className="mono dict-org">Ordenando la nota…</p>}
+              {note === 4 && <p className="mono dict-org">Clío está ordenando la nota…</p>}
+              <AgentFoot note="Hablas como siempre. Clío escucha y propone." replay="Volver a escuchar" onReplay={() => replay("cli")} />
             </div>
             <div className="card sugg">
               <div className="sugg-h">
@@ -436,12 +432,14 @@ export default function AgentTabs() {
         <div className="ag-panel" hidden={tab !== "adm"}>
           <div className="ag-grid">
             <div className="card admc">
-              <div className="admc-h">
-                <span className="tag">Rosa Vega · faltó a su cita</span>
-                <button type="button" className="mono replay" onClick={() => replay("adm")}>
-                  Volver a ver
-                </button>
-              </div>
+              <AgentHead
+                agent="argos"
+                name="Argos · Clínica Sonrisa Norte"
+                meta="Rosa Vega faltó a su limpieza"
+                state={adm >= 5 ? "Cita recuperada" : "Trabajando…"}
+                live={adm < 5}
+                done={adm >= 5}
+              />
               <ol className="steps">
                 {ADM.map((a, i) => (
                   <li
@@ -459,6 +457,7 @@ export default function AgentTabs() {
                   </li>
                 ))}
               </ol>
+              <AgentFoot note="Sin listas ni llamadas de tu equipo." replay="Volver a ver" onReplay={() => replay("adm")} />
             </div>
             <div className="ag-side">
               <div className="counts">

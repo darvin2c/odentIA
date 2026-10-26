@@ -48,7 +48,7 @@ export const SUBENCARGADOS: LegalDoc = {
       id: "entrenamiento",
       title: "Uso de los datos para entrenar modelos",
       blocks: [
-        "odentIA no usa los datos de las clínicas ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial tratan los datos que reciben según sus condiciones de uso de API [Por confirmar con el proveedor de IA y el abogado: si los proveedores usan o no los datos para entrenar].",
+        "odentIA no usa los datos de las clínicas ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso.",
       ],
     },
     {

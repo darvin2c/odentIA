@@ -40,10 +40,10 @@
 .lsc-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 14px;
+  gap: 10px;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
+  padding: 10px 14px;
   background: #f7f5fc;
   border-bottom: 1px solid #e9e2f7;
 }
@@ -56,7 +56,7 @@
 }
 .lsc-scene {
   min-height: 44px;
-  padding: 0 16px;
+  padding: 0 13px;
   border-radius: 999px;
   border: 0;
   cursor: pointer;
@@ -82,7 +82,7 @@
 }
 .lsc-tone {
   min-height: 44px;
-  padding: 0 12px;
+  padding: 0 9px;
   border-radius: 999px;
   border: 0;
   cursor: pointer;
@@ -100,7 +100,7 @@
   box-shadow: 0 1px 4px rgba(30, 11, 61, 0.12);
 }
 .lsc-emoji {
-  margin-left: 4px;
+  margin-left: 0;
   min-height: 44px;
   padding: 0 4px;
   border: 0;
@@ -143,8 +143,8 @@
 
 .lsc-chat {
   background: #efeaf7;
-  padding: 18px;
-  min-height: 452px;
+  padding: 12px 16px;
+  min-height: 380px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -167,11 +167,11 @@
 }
 .lsc-msg[data-kind="in"],
 .lsc-msg[data-kind="out"] {
-  max-width: 84%;
+  max-width: 86%;
   border-radius: 16px;
-  padding: 10px 12px 8px;
-  font-size: 15px;
-  line-height: 1.45;
+  padding: 8px 12px 6px;
+  font-size: 14.5px;
+  line-height: 1.4;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -338,3 +338,6 @@
     opacity: 0.6;
   }
 }
+
+/* La cabecera y el pie comunes de los agentes (AgentFrame), dentro de las franjas de esta tarjeta. */
+.lsc-top .af-head { flex: 1; min-width: 0; padding-bottom: 0; border-bottom: 0; }

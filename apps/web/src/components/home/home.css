@@ -1234,14 +1234,9 @@
 .home .ag-link:hover {
   text-decoration: underline;
 }
+/* Clío, en la misma tarjeta clara que Sofi: la cabecera común y los globos de voz de la doctora. */
 .home .dict {
-  background: #0a2129;
-  color: #e2eef1;
-  border-radius: 26px;
-  padding: 20px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 .home .dict-h {
   display: flex;
@@ -1304,7 +1299,7 @@
 }
 .home .dict-org {
   font-size: 13px;
-  color: #7fd6e4;
+  color: #157a5c;
 }
 .home .dict-replay {
   flex: none;
@@ -2429,7 +2424,7 @@
   background: #eef2f6;
 }
 
-/* ——— 07 · La confianza ——— */
+/* ——— 08 · La confianza ——— */
 .home #confianza .hs-head {
   max-width: 860px;
   gap: 20px;
@@ -3117,7 +3112,7 @@
     color: #475569;
   }
 
-  /* 07 */
+  /* 08 */
   .home .trust {
     gap: 14px;
   }

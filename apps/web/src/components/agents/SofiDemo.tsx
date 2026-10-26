@@ -2,7 +2,8 @@
 // conversación se escribe sola —Andrea pregunta, «Sofi está escribiendo…» dentro de la burbuja, la
 // respuesta, Andrea elige, la confirmación y la cita marcada en la agenda— y se puede cambiar el tono
 // (cercano, neutro o formal de usted) y los emojis. Con movimiento reducido se ve el estado final.
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { AgentFoot, AgentHead, prefersStill } from "./frame/AgentFrame"
 import "./sofi-demo.css"
 
 type Tone = "cercano" | "neutro" | "formal"
@@ -38,17 +39,25 @@ export default function SofiDemo() {
   // Se arma en el servidor con la conversación completa: sin JavaScript o con movimiento reducido, se lee entera.
   const [step, setStep] = useState(LAST)
 
-  useEffect(() => {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return
+  const timer = useRef<number | null>(null)
+
+  const play = useCallback(() => {
+    if (timer.current) window.clearInterval(timer.current)
     setStep(0)
-    const timer = window.setInterval(() => {
+    timer.current = window.setInterval(() => {
       setStep((s) => {
-        if (s >= LAST - 1) window.clearInterval(timer)
+        if (s >= LAST - 1 && timer.current) window.clearInterval(timer.current)
         return Math.min(s + 1, LAST)
       })
     }, 1400)
-    return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    if (!prefersStill()) play()
+    return () => {
+      if (timer.current) window.clearInterval(timer.current)
+    }
+  }, [play])
 
   const [reply, confirm] = TEXTS[tone]
   // «Pocos» emojis: uno como mucho, y nunca cuando hablan de dolor, urgencias, pagos o reclamos;
@@ -58,13 +67,14 @@ export default function SofiDemo() {
 
   return (
     <div className="sd">
-      <div className="sd-top">
-        <span className="sd-avatar" aria-hidden="true">S</span>
-        <span className="sd-who">
-          <b>Sofi · Clínica Sonrisa Norte</b>
-          <span className="sd-meta">WhatsApp · miércoles 23:40 · la clínica está cerrada</span>
-        </span>
-      </div>
+      <AgentHead
+        agent="sofi"
+        name="Sofi · Clínica Sonrisa Norte"
+        meta="WhatsApp · miércoles 23:40 · cerrado"
+        state={step >= LAST ? "Cita agendada" : step === 1 || step === 4 ? "Escribiendo…" : "Conversando"}
+        live={step < LAST}
+        done={step >= LAST}
+      />
       <div className="sd-controls">
         <div className="sd-tones">
           {TONES.map(([id, label]) => (
@@ -100,7 +110,7 @@ export default function SofiDemo() {
           <span className="sd-booked">reservada · 23:41</span>
         </div>
       </div>
-      <span className="sd-note">Demostración con datos de ejemplo. Cambia el tono y los emojis.</span>
+      <AgentFoot note="Datos de ejemplo. Cambia el tono y los emojis." replay="Volver a ver" onReplay={play} />
     </div>
   )
 }

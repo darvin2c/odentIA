@@ -7,6 +7,7 @@
 //
 // Las cifras (S/ 4.820, Dr. Ríos 18 %…) son de una clínica de ejemplo, no precios de odentIA.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { AgentFoot, AgentHead } from "./frame/AgentFrame"
 import "./argos-demo.css"
 
 export type ArgosQuestion = {
@@ -34,6 +35,8 @@ interface Props {
   auto?: boolean
   /** Cabecera de Reportes: título y el periodo con la sede. */
   head?: { title: string; scope: string }
+  /** Cabecera común de los agentes (la de Sofi y Clío): Argos, dónde está y en qué anda. */
+  agent?: { name: string; meta: string }
   actions: ArgosAction[]
   /** De dónde sale la cifra, junto a los botones. */
   source?: string
@@ -68,6 +71,7 @@ export default function ArgosDemo({
   chips = false,
   auto = false,
   head,
+  agent,
   actions,
   source,
   field = "soft",
@@ -140,7 +144,17 @@ export default function ArgosDemo({
 
   return (
     <div className="ad" ref={box}>
-      {(head || replay) && (
+      {agent && (
+        <AgentHead
+          agent="argos"
+          name={agent.name}
+          meta={agent.meta}
+          state={phase === 0 ? "Leyendo…" : phase === 1 ? "Calculando…" : "Respondió"}
+          live={phase < 2}
+          done={phase === 2}
+        />
+      )}
+      {!agent && (head || replay) && (
         <div className="ad-head">
           {head && <b>{head.title}</b>}
           {head && <span className="ad-scope">{head.scope}</span>}
@@ -227,7 +241,11 @@ export default function ArgosDemo({
         </div>
       </div>
       </div>
-      <span className="ad-note">{note}</span>
+      {agent ? (
+        <AgentFoot note={note} replay={replay} onReplay={again} />
+      ) : (
+        <span className="ad-note">{note}</span>
+      )}
     </div>
   )
 }

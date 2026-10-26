@@ -1,4 +1,4 @@
-// Preguntas del inicio (sección 08). Los textos vienen del lienzo aprobado.
+// Preguntas del inicio (sección 09). Los textos vienen del lienzo aprobado.
 import type { FaqItem } from "../../lib/faq"
 import { hours, type PlanPrices, type Terms } from "../../lib/pricing"
 
@@ -33,12 +33,16 @@ export const homeFaq = (plan: PlanPrices | null, terms: Terms, founder = false):
   // Pendiente de confirmar: se muestra con su marcador y queda fuera de los datos estructurados.
   {
     q: "¿Usan los datos de mi clínica para entrenar la IA?",
-    a: "[Por confirmar con el proveedor de IA y el abogado antes de publicar] No. Los datos de tu clínica se usan solo para atender a tus pacientes y no se usan para entrenar modelos de inteligencia artificial.",
+    a: "No. Los datos de tu clínica se usan solo para atender a tus pacientes. odentIA no los usa para entrenar modelos, y los proveedores de inteligencia artificial que usa por API (OpenAI y TypeSafe) tampoco.",
     pending: true,
   },
   {
     q: "¿Y si el agente no sabe qué responder o se equivoca?",
     a: "Si no sabe, le dice a la persona que alguien de tu equipo la va a atender y te deja el caso con todo lo que se habló. Todo lo que hace queda registrado, así que si se equivoca lo ves y lo corriges. Y nada clínico entra a la historia sin el sí del odontólogo.",
+  },
+  {
+    q: "¿Cómo encuentro rápido a un paciente?",
+    a: "Con Ctrl K (⌘K en Mac) desde cualquier pantalla, o con la lupa en el teléfono. Escribe parte del nombre sin preocuparte por las tildes, el teléfono, el DNI o el número de historia, y aparece la persona con su próxima cita, su última conversación, lo que debe y el presupuesto por aceptar. Las citas, los mensajes, la historia clínica, los presupuestos y los pagos también se encuentran por lo que dicen, cada uno debajo de su persona y según lo que tu rol puede ver. Los documentos e imágenes se encuentran por su nombre.",
   },
   {
     q: "¿Tengo que pagarle algo más a WhatsApp?",

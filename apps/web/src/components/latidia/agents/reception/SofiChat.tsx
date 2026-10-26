@@ -5,6 +5,7 @@
 // «Te lo pasó el agente» avisa al equipo. Se escribe sola; cambiar de escena la empieza de nuevo. El
 // tono y los emojis cambian las respuestas. Con movimiento reducido se ve la conversación completa.
 import { useEffect, useRef, useState } from "react"
+import { AgentFoot, AgentHead } from "../../../agents/frame/AgentFrame"
 import "./sofi-chat.css"
 
 type Scene = "agenda" | "urgencia"
@@ -117,13 +118,14 @@ export default function SofiChat() {
   return (
     <div className="lsc">
       <div className="lsc-top">
-        <span className="lsc-avatar" aria-hidden="true">
-          S
-        </span>
-        <span className="lsc-who">
-          <b>Sofi · Consultorio San Martín</b>
-          <span className="lsc-meta">WhatsApp · viernes 22:40 · cerrado</span>
-        </span>
+        <AgentHead
+          agent="sofi"
+          name="Sofi · Consultorio San Martín"
+          meta="WhatsApp · viernes 22:40 · cerrado"
+          state={step < LAST ? "Escribiendo…" : scene === "agenda" ? "Cita agendada" : "Avisó al equipo"}
+          live={step < LAST}
+          done={step >= LAST}
+        />
       </div>
       <div className="lsc-controls">
         <fieldset className="lsc-scenes" aria-label="Escena">
@@ -173,11 +175,17 @@ export default function SofiChat() {
           </div>
         ))}
       </div>
-      <p className="lsc-note">
-        {scene === "urgencia"
-          ? "Demostración con datos de ejemplo. En una señal de alarma no usa emojis ni ofrece una cita: primero, el 106."
-          : "Demostración con datos de ejemplo. Cambia la escena, el tono y los emojis."}
-      </p>
+      <div className="lsc-note">
+        <AgentFoot
+          note={
+            scene === "urgencia"
+              ? "En una alarma no ofrece cita ni emojis: primero, el 106."
+              : "Datos de ejemplo. Cambia escena, tono y emojis."
+          }
+          replay="Volver a ver"
+          onReplay={() => play(scene)}
+        />
+      </div>
     </div>
   )
 }
