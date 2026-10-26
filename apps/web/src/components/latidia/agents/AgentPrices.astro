@@ -42,11 +42,11 @@ const rows: Row[] = !plan || !t
       ]
     : agent === "clio"
       ? [
-          { label: "Simple", text: "La nota: el motivo y lo que te contó el paciente.", price: t.simple, before: struck(t.simple, lt?.simple) },
-          { label: "Estándar", text: "La nota con el examen físico o un diagnóstico.", price: t.estandar, before: struck(t.estandar, lt?.estandar) },
+          { label: "Simple", text: "Una sola parte: la nota, los signos vitales, una receta o un control.", price: t.simple, before: struck(t.simple, lt?.simple) },
+          { label: "Estándar", text: "Con el examen físico, un diagnóstico o varias partes.", price: t.estandar, before: struck(t.estandar, lt?.estandar) },
           {
             label: "Completa",
-            text: "Además dejó indicado lo que sigue: la receta, una orden, el descanso o el próximo control.",
+            text: "Además dejó indicado lo que sigue: los servicios del plan.",
             price: t.completa,
             before: struck(t.completa, lt?.completa),
           },

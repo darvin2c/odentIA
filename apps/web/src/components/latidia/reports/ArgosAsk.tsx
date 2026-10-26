@@ -1,9 +1,9 @@
-// Argos responde en la portada de /reportes de latidIA: la pregunta se escribe letra a letra, Argos dice
+// Argos responde en la portada de /reportes (latidIA y, con `variant="dental"`, odentIA): la pregunta se escribe letra a letra, Argos dice
 // sus pasos («Leyendo la pregunta», «Consultando…»), responde con las cifras destacadas, el dibujo crece y
 // debajo dice «Así lo calculé», con sus botones. Tres preguntas que pasan solas hasta que la persona
 // elige una; «Preguntar otra vez» va arriba, en la propia ventana de Reportes. Con movimiento reducido se ve la
-// respuesta sin animar. Las cifras son las del Consultorio San Martín de ejemplo (las mismas de las
-// pestañas de Reportes), en soles: no son precios de latidIA.
+// respuesta sin animar. Las cifras son de ejemplo (las mismas de las pestañas de Reportes): en latidIA,
+// las del Consultorio San Martín; en odentIA, las de Clínica Sonrisa Norte. En soles: no son precios.
 import { Fragment, useCallback, useEffect, useRef, useState } from "react"
 import "./argos-ask.css"
 
@@ -22,7 +22,9 @@ type Question = {
   action: string
 }
 
-const QUESTIONS: Question[] = [
+type Variant = "medical" | "dental"
+
+const MEDICAL_QUESTIONS: Question[] = [
   {
     label: "Qué se cobró más",
     q: "¿Qué servicio se cobró más este mes?",
@@ -64,6 +66,52 @@ const QUESTIONS: Question[] = [
   },
 ]
 
+// Las de odentIA: las cifras de Clínica Sonrisa Norte, las mismas que publican la portada de Argos y las
+// pestañas de Reportes (lo que te deben, lo más cobrado por servicio y las inasistencias por profesional).
+const DENTAL_QUESTIONS: Question[] = [
+  {
+    label: "Qué se vendió más",
+    q: "¿Qué se vendió más este mes?",
+    answer: "**Limpieza dental**: 40 atenciones, **S/ 3.200**. Le siguen la resina simple y la endodoncia.",
+    steps: ["Consultando lo cobrado de octubre por servicio"],
+    how: "lo cobrado por servicio en octubre, sin impuestos, de todas las sedes. Cifra oficial · la misma cuenta de Reportes.",
+    bars: [
+      ["Limpieza dental", 3200, "S/ 3.200"],
+      ["Resina simple", 2450, "S/ 2.450"],
+      ["Endodoncia", 1800, "S/ 1.800"],
+    ],
+    action: "Fijar en Resumen",
+  },
+  {
+    label: "Cuánto me deben",
+    q: "¿Cuánto me deben y desde cuándo?",
+    answer: "Te deben **S/ 4.820** de 23 personas. **S/ 1.150** llevan más de 60 días.",
+    steps: ["Consultando los cargos sin pagar, por su fecha"],
+    how: "cargos sin pagar a hoy, por la fecha del cargo. Todas las sedes. Cifra oficial · la misma cuenta de Reportes.",
+    bars: [
+      ["0 a 30 días", 2600, "S/ 2.600"],
+      ["31 a 60 días", 1070, "S/ 1.070"],
+      ["Más de 60 días", 1150, "S/ 1.150"],
+    ],
+    action: "Ver quiénes",
+  },
+  {
+    label: "Quién falta más",
+    q: "¿Qué profesional tiene más inasistencias?",
+    answer: "El **Dr. Ríos**: 18 % este mes (9 de 50 citas). En toda la clínica fue **11 %**.",
+    steps: ["Consultando las citas de octubre por profesional"],
+    how: "citas a las que el paciente no vino ÷ citas que ya pasaron, octubre hasta hoy, de todas las sedes. Cifra oficial · la misma cuenta de Reportes.",
+    bars: [
+      ["Dr. Ríos", 18, "18 %"],
+      ["Dra. Paredes", 9, "9 %"],
+      ["Dra. Vega", 6, "6 %"],
+    ],
+    action: "Ver quiénes",
+  },
+]
+
+const QUESTION_SETS: Record<Variant, Question[]> = { medical: MEDICAL_QUESTIONS, dental: DENTAL_QUESTIONS }
+
 const TYPE_MS = 45
 const THINK_MS = 1400
 const NEXT_MS = 6500
@@ -80,7 +128,8 @@ function Rich({ text }: { text: string }) {
   )
 }
 
-export default function ArgosAsk() {
+export default function ArgosAsk({ variant = "medical" }: { variant?: Variant }) {
+  const QUESTIONS = QUESTION_SETS[variant]
   // Se arma en el servidor con la primera respuesta completa: sin JavaScript se lee igual.
   const [pick, setPick] = useState(0)
   const [chars, setChars] = useState(Number.POSITIVE_INFINITY)
@@ -123,7 +172,7 @@ export default function ArgosAsk() {
       }, TYPE_MS)
       timers.current.push(typing)
     },
-    [stop],
+    [stop, QUESTIONS],
   )
 
   useEffect(() => {

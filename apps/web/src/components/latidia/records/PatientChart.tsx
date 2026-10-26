@@ -297,7 +297,7 @@ export default function PatientChart() {
             </div>
             <div className="pc-card">
               <b>Hábitos</b>
-              <span>Tabaco: fuma, 10 cigarrillos al día · Alcohol: ocasional · Actividad física: camina</span>
+              <span>Tabaco: fuma, 10 cigarrillos al día · Alcohol: ocasional · Actividad física: ligera</span>
             </div>
             <div className="pc-card pc-problems">
               <b>Lista de problemas</b>

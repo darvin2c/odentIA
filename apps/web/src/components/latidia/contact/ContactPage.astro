@@ -1,6 +1,8 @@
 ---
-// /contacto de latidIA (lienzo de latidIA, tablero «Contacto»): los dos caminos (pedir la invitación o
-// escribirnos un correo), lo que pasa después, cómo escribirnos y las preguntas de antes de empezar.
+// /contacto de latidIA y de odentIA (lienzo de latidIA, tablero «Contacto»): los dos caminos (pedir la
+// invitación o escribirnos un correo), lo que pasa después, cómo escribirnos y las preguntas de antes de
+// empezar. Una sola página para las dos webs: las palabras de cada producto salen de `WORDS` y lo que
+// cambia de verdad (unidades dentales, presupuestos, el ejemplo del correo) de `MEDICAL`.
 // Sin formulario: la web solo envía la lista de espera y el Libro de Reclamaciones (apps/AGENTS.md), así
 // que el tablero «Cuatro datos y tu mensaje» queda como un correo con lo que conviene contarnos.
 // El regalo, la invitación y los días hábiles para responder salen de Astro.locals.pricing; el correo,
@@ -8,7 +10,9 @@
 import Base from "../../../layouts/Base.astro"
 import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
 import { TITULAR } from "../../../lib/legal/types"
+import { PAGES } from "../../../lib/pages-data"
 import { businessDays, giftOf, shownPlan } from "../../../lib/pricing"
+import { MEDICAL, WORDS } from "../../../lib/product"
 import { contactEmail, ctaOf } from "../../../lib/site"
 import CtaBand from "../../CtaBand.astro"
 import Faq from "../../Faq.astro"
@@ -22,9 +26,12 @@ const founders = plan !== null && plan === pricing.founders
 const answer = businessDays(pricing.terms.waitlistAnswerDays)
 // «Sin cuota» solo si el plan que se muestra no la cobra.
 const noFee = plan !== null && plan.plan === 0
-const title = "Habla con nosotros"
-const description =
-  "¿Quieres saber si latidIA le sirve a tu consultorio médico? Pide tu invitación o escríbenos: te responde una persona del equipo."
+const title = MEDICAL ? "Habla con nosotros" : PAGES.contacto.title
+const description = MEDICAL
+  ? "¿Quieres saber si latidIA le sirve a tu consultorio médico? Pide tu invitación o escríbenos: te responde una persona del equipo."
+  : PAGES.contacto.description
+// Lo que se crea al empezar: la sede y los lugares donde se atiende («salas» en un consultorio, «unidades dentales» en una clínica).
+const setup = MEDICAL ? "Tu sede, tus salas, tu horario y tu tarifario." : "Tus sedes, tus unidades dentales, tu horario y tu tarifario."
 const trail: [string, string][] = [
   ["Inicio", "/"],
   ["Habla con nosotros", "/contacto"],
@@ -35,20 +42,23 @@ const steps: [string, string][] = invite
   ? [
       ["Pides tu invitación", "O nos escribes con tu duda."],
       ["Te respondemos", `En ${answer}, una persona del equipo.`],
-      ["Creas tu consultorio", "Tu sede, tus salas, tu horario y tu tarifario."],
+      [`Creas ${WORDS.yourClinic}`, setup],
       ["Tus agentes empiezan", gift ? `Con los ${gift} que pagamos nosotros.` : "Desde el primer día."],
     ]
   : [
       ["Creas tu cuenta", "O nos escribes con tu duda."],
-      ["Creas tu consultorio", "Tu sede, tus salas, tu horario y tu tarifario."],
+      [`Creas ${WORDS.yourClinic}`, setup],
       ["Conectas tus canales", "WhatsApp, Instagram, Messenger, Telegram, el chat de tu web o el correo."],
       ["Tus agentes empiezan", gift ? `Con ${gift} de crédito.` : "Desde el primer día."],
     ]
 
 const tell = [
-  { title: "Cuántos son", text: "Cuántos médicos y sedes tienen, y si hay alguien en la recepción." },
+  { title: "Cuántos son", text: `Cuántos ${WORDS.clinicians} y sedes tienen, y si hay alguien en la recepción.` },
   { title: "Por dónde te escriben", text: "WhatsApp, Instagram, Messenger, el correo… o todos a la vez." },
-  { title: "Qué te gustaría resolver", text: "La agenda, la historia clínica, la receta, los controles o los cobros." },
+  {
+    title: "Qué te gustaría resolver",
+    text: MEDICAL ? "La agenda, la historia clínica, la receta, los controles o los cobros." : "La agenda, la historia y el odontograma, los presupuestos o los cobros.",
+  },
 ]
 
 const faq: FaqItem[] = [
@@ -59,16 +69,16 @@ const faq: FaqItem[] = [
   {
     q: "¿Cuánto tarda empezar?",
     a: invite
-      ? `Te respondemos en ${answer}. Con la invitación, la puesta en marcha te guía paso a paso: tu sede, tus salas, tu horario y tu tarifario.`
-      : "Te registras y la puesta en marcha te guía paso a paso: tu sede, tus salas, tu horario y tu tarifario.",
+      ? `Te respondemos en ${answer}. Con la invitación, la puesta en marcha te guía paso a paso: ${setup.charAt(0).toLowerCase()}${setup.slice(1)}`
+      : `Te registras y la puesta en marcha te guía paso a paso: ${setup.charAt(0).toLowerCase()}${setup.slice(1)}`,
   },
   {
     q: "¿Necesito WhatsApp Business?",
-    a: "No para empezar: Sofi responde también por Instagram, Messenger, Telegram, el chat de tu web y el correo. Para WhatsApp conectas el número de tu consultorio a través de Meta, con pasos guiados. Lo que cobra Meta se le paga a Meta.",
+    a: "No para empezar: Sofi responde también por Instagram, Messenger, Telegram, el chat de tu web y el correo. Para WhatsApp conectas el número de ${WORDS.yourClinic} a través de Meta, con pasos guiados. Lo que cobra Meta se le paga a Meta.",
   },
   {
     q: "¿Sirve en mi país?",
-    a: "Está hecho para consultorios de habla hispana. La moneda, la zona horaria, el número de emergencias que da Sofi y los diagnósticos (CIE-10 o CIE-11) van según tu país.",
+    a: `Está hecho para ${WORDS.audience} de habla hispana. La moneda, la zona horaria, el número de emergencias que da Sofi y los diagnósticos (CIE-10 o CIE-11) van según tu país.`,
   },
 ]
 const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
@@ -81,7 +91,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
         <div class="cp-head">
           <span class="tag tag-d cp-tag rise">[ Contacto ]</span>
           <h1 class="cp-h1 rise d1">Habla con <span class="accent">nosotros.</span></h1>
-          <p class="cp-lead rise d2">¿Quieres saber si latidIA le sirve a tu consultorio? {invite ? "Pide tu invitación" : "Crea tu cuenta"} o escríbenos. Te responde una persona del equipo.</p>
+          <p class="cp-lead rise d2">¿Quieres saber si {WORDS.name} le sirve a {WORDS.yourClinic}? {invite ? "Pide tu invitación" : "Crea tu cuenta"} o escríbenos. Te responde una persona del equipo.</p>
         </div>
         <div class="cp-paths rise d2">
           <div class="cp-path">
@@ -104,7 +114,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           <div class="cp-path">
             <span class="cp-k">Camino 2 · Una duda</span>
             <p class="cp-path-t">Escríbenos y te contamos si te sirve.</p>
-            <p class="cp-path-x">Cuéntanos cuántos médicos y sedes tienen, y por dónde te escriben tus pacientes.</p>
+            <p class="cp-path-x">Cuéntanos cuántos {WORDS.clinicians} y sedes tienen, y por dónde te escriben tus pacientes.</p>
             <a class="btn btn-g" href={mailto}>{contactEmail}</a>
           </div>
         </div>
@@ -139,7 +149,9 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           </ul>
           <figure class="cp-example">
             <figcaption>Un correo de ejemplo</figcaption>
-            <blockquote>Somos dos médicos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para medicina familiar?</blockquote>
+            <blockquote>{MEDICAL
+              ? "Somos dos médicos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para medicina familiar?"
+              : "Somos dos odontólogos y una recepcionista. Nos escriben casi todo por WhatsApp. ¿Clío sirve para armar los presupuestos?"}</blockquote>
           </figure>
           <a class="btn btn-d" href={mailto}>Escribir un correo</a>
         </div>
@@ -149,12 +161,12 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
     <div class="faqwrap">
       <Faq items={faq} title="Antes de empezar." />
     </div>
-    <CtaBand title="Cuéntanos de tu consultorio.">
+    <CtaBand title={`Cuéntanos de ${WORDS.yourClinic}.`}>
       <Fragment slot="text">
         {gift ? (
-          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de médicos, salas ni usuarios.</>
+          <>Los primeros <b class="gift">{gift}</b> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, {MEDICAL ? "salas" : "unidades dentales"} ni usuarios.</>
         ) : (
-          <>Tus agentes trabajan en tu consultorio desde el primer día. Sin límite de médicos, salas ni usuarios.</>
+          <>Tus agentes trabajan en {WORDS.yourClinic} desde el primer día. Sin límite de {WORDS.clinicians}, {MEDICAL ? "salas" : "unidades dentales"} ni usuarios.</>
         )}
       </Fragment>
     </CtaBand>

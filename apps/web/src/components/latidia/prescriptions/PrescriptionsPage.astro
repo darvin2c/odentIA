@@ -22,7 +22,7 @@ const founder = plan !== null && plan === pricing.founders
 const path = "/receta-y-descanso-medico"
 const title = "Receta médica y descanso médico para consultorio"
 const description =
-  "Receta médica y descanso médico firmados desde la historia clínica de tu consultorio: avisa alergias y embarazo, pide el peso de un niño y deja fuera los controlados. El descanso sale numerado y le llega a la persona por WhatsApp."
+  "Receta médica y descanso médico firmados desde la historia clínica de tu consultorio: avisa alergias y embarazo, pide el peso de un niño y deja fuera los controlados. El descanso sale numerado y se lo envías a la persona por WhatsApp o correo."
 const trail: [string, string][] = [["Inicio", "/"], ["Receta y descanso médico", path]]
 
 const rules = [
@@ -51,7 +51,7 @@ const faq: FaqItem[] = [
   },
   {
     q: "¿Cómo le llega a la persona?",
-    a: "Por el canal donde conversa con tu consultorio, como WhatsApp, y queda en Su enlace 30 días para descargarlo. También lo puedes imprimir.",
+    a: "Lo envías tú desde el documento, en PDF, por WhatsApp o por correo, a la persona o a su representante. Si no hay por dónde enviarlo, lo imprimes.",
   },
   {
     q: "¿Y los medicamentos controlados?",
@@ -71,7 +71,7 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
       <div class="ph-copy">
         <span class="tag tag-d rise">[ Receta y descanso médico ]</span>
         <h1 class="ph-h1 rise d1">Receta médica y descanso médico <span class="acc">firmados, sin escribirlos a mano.</span></h1>
-        <p class="ph-lead rise d2">La receta te recuerda el embarazo, te pide el peso de un niño y no deja pasar un controlado. El descanso médico sale numerado y le llega a la persona por WhatsApp.</p>
+        <p class="ph-lead rise d2">La receta te recuerda el embarazo, te pide el peso de un niño y no deja pasar un controlado. El descanso médico sale numerado y se lo envías a la persona por WhatsApp o correo.</p>
         <div class="ph-ctas rise d3">
           <a class="btn btn-p" href={cta.href}>{cta.label}</a>
           <a class="btn btn-g" href="#descanso">Ver el descanso médico</a>
@@ -164,8 +164,8 @@ const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
           </div>
         ))}
         <div class="card-l">
-          <h3>En Su enlace, 30 días</h3>
-          <p>La receta y el descanso médico, para que la persona los descargue. <a href="/portal-del-paciente">Ver Su enlace</a></p>
+          <h3>La receta, en Su enlace 30 días</h3>
+          <p>La receta, para que la persona la descargue. <a href="/portal-del-paciente">Ver Su enlace</a></p>
         </div>
       </div>
     </div>

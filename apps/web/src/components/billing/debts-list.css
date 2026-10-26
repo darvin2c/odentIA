@@ -1,0 +1,23 @@
+/* Quién debe (DebtsList.tsx): la pestaña Deudas de Finanzas. */
+.dl { background: var(--bg); border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.dl-total { background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.dl-total span { font-size: 13px; font-weight: 600; color: var(--muted); }
+.dl-total b { font-size: 28px; font-variant-numeric: tabular-nums; }
+.dl-tabs { display: flex; flex-wrap: wrap; gap: 4px; background: #e2e8f0; border-radius: 999px; padding: 4px; align-self: flex-start; border: 0; margin: 0; }
+.dl-tabs button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 600 14px var(--font); cursor: pointer; }
+.dl-tabs button span { font-size: 12px; margin-left: 4px; }
+.dl-tabs button[aria-pressed="true"] { background: var(--paper); color: var(--ink); box-shadow: 0 1px 4px rgba(0, 0, 0, .1); }
+.dl-tabs button:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.dl-list { margin: 0; padding: 0 16px; list-style: none; background: var(--paper); border: 1px solid var(--line); border-radius: 14px; }
+.dl-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 0; }
+.dl-row + .dl-row { border-top: 1px solid var(--line); }
+.dl-who { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dl-who b { font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dl-who > span { font-size: 13px; color: var(--muted); }
+.dl-badge { font-size: 12px; font-weight: 700; color: #8a5a00; background: #fdf1d8; border-radius: 999px; padding: 2px 9px; }
+.dl-amount { margin-left: auto; font-size: 16px; font-variant-numeric: tabular-nums; }
+.dl-acts { display: flex; gap: 8px; font-size: 13px; font-weight: 600; }
+.dl-acts span { padding: 8px 12px; border-radius: 10px; color: var(--muted); }
+.dl-acts .dl-pay { background: var(--teal); color: #fff; }
+.dl-foot { margin: 0; font-size: 13px; color: var(--muted); }
+@media (max-width: 720px) { .dl { padding: 16px; } .dl-acts { display: none; } }

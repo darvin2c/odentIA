@@ -1,0 +1,179 @@
+---
+// /varias-sedes de odentIA: portada con la demostración de sedes (agenda, caja, historia y reportes
+// cambian con la sede), qué es de cada sede y qué es de todas, los roles, las preguntas y el cierre.
+// Título, descripción, migas, enlaces relacionados y preguntas son los de PAGES.sedes; la pregunta que
+// traía un marcador «[Por confirmar…]» se publica solo con lo que ya es cierto (cada rol ve lo que su
+// permiso le da).
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { days, giftOf, shownPlan } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import Related from "../pages/Related.astro"
+import SitesDemo from "./SitesDemo"
+
+const page = PAGES.sedes
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const gift = giftOf(pricing)
+const cta = ctaOf(pricing)
+const faq: FaqItem[] = page.faq.map((item) =>
+  item.a.includes("[Por confirmar") ? { ...item, a: "Cada persona ve lo que su rol le permite: recepción coordina, los odontólogos atienden con la historia y caja cobra." } : item,
+)
+const jsonLd = [
+  breadcrumbJsonLd(Astro.site, [
+    ["Inicio", "/"],
+    [page.crumb, page.path],
+  ]),
+  faqJsonLd(faq),
+]
+
+const perSite = [
+  { title: "Una agenda por sede", text: "Con sus unidades dentales, sus odontólogos y sus horarios.", href: "/agenda-odontologica", label: "Ver la agenda" },
+  { title: "Una caja por sede", text: "Con su propio cierre de caja, y todas juntas en los reportes.", href: "/caja-y-cobros", label: "Ver caja y cobros" },
+]
+const forAll = [
+  { title: "Un paciente, una historia", text: "Si se atiende en otra sede, su historia va con él: lo que se hizo en una se ve en la otra." },
+  { title: "Los agentes, en todas las sedes", text: "Sofi ofrece los horarios de la sede que le conviene al paciente." },
+  { title: "Reportes por sede o de todas", text: "Eliges la sede y el periodo, o las ves juntas, con los mismos datos.", href: "/reportes", label: "Ver los reportes" },
+]
+const roles = [
+  { title: "Recepción", text: "La agenda y las conversaciones." },
+  { title: "Odontólogos", text: "Sus pacientes y la historia clínica." },
+  { title: "Caja", text: "Los cobros, los gastos y el cierre." },
+  { title: "Dirección", text: "Los reportes de todas las sedes y la configuración." },
+]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <div class="sd">
+    <section class="hero sd-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap sd-hero-in">
+        <div class="sd-copy">
+          <span class="tag tag-d sd-tag rise">[ Varias sedes ]</span>
+          <h1 class="sd-h1 rise d1">Software para cadena de clínicas dentales: <span class="acc">varias sedes, un solo equipo.</span></h1>
+          <p class="sd-lead rise d2">Cada sede con su agenda, sus unidades dentales y su caja; cada paciente con una sola historia en todas; y cada rol con lo que le toca ver.</p>
+          <div class="sd-ctas rise d3">
+            <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+            <a class="btn btn-g" href="/precios">Ver los precios</a>
+          </div>
+        </div>
+        <div class="sd-demo rise d2">
+          <SitesDemo client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="sd-sec">
+      <div class="wrap sd-in">
+        <div class="sd-head">
+          <span class="tag sd-tag">[ Cómo se organiza ]</span>
+          <h2 class="sd-h2">Cada sede con lo suyo. El paciente, uno solo.</h2>
+          <p class="sd-p">La agenda y la caja son de cada sede. La historia del paciente, los agentes y los reportes son de toda la clínica.</p>
+        </div>
+        <div class="sd-two">
+          <div class="sd-col">
+            <span class="sd-col-h">De cada sede</span>
+            {perSite.map((item) => (
+              <div class="sd-card">
+                <h3>{item.title}</h3>
+                <p>{item.text} <a href={item.href}>{item.label}</a></p>
+              </div>
+            ))}
+          </div>
+          <div class="sd-col">
+            <span class="sd-col-h">De todas las sedes</span>
+            {forAll.map((item) => (
+              <div class="sd-card">
+                <h3>{item.title}</h3>
+                <p>{item.text}{item.href && <> <a href={item.href}>{item.label}</a></>}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sd-sec white">
+      <div class="wrap sd-in">
+        <div class="sd-head">
+          <span class="tag sd-tag">[ Roles ]</span>
+          <h2 class="sd-h2">Cada quien ve lo que le toca.</h2>
+          <p class="sd-p">Recepción coordina, los odontólogos atienden con la historia y caja cobra. Cada rol ve solo lo que necesita.</p>
+        </div>
+        <div class="sd-roles">
+          {roles.map((item) => (
+            <div class="sd-role">
+              <h3>{item.title}</h3>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+        <p class="sd-more">Crecer no cambia tu plan: todo el sistema incluido, sin límite de odontólogos, sedes ni usuarios. <a href="/precios">Ver los precios →</a></p>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} />
+    <div class="sd-faq"><Faq items={faq} /></div>
+    <CtaBand title="Más sedes, el mismo sistema.">
+      <Fragment slot="text">
+        {gift ? (
+          founder ? (
+            <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          ) : (
+            <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          )
+        ) : (
+          `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  .sd { background: var(--paper); }
+  .sd-hero { padding: 144px 0 96px; }
+  .sd-hero-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .sd-copy { flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .sd-demo { flex: 1.4 1 560px; min-width: 0; }
+  .sd-tag { font-size: 13px; letter-spacing: .12em; }
+  .sd-h1 { font-size: clamp(34px, 3.6vw, 48px); line-height: 1.04; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky-2); }
+  .sd-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .sd-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+
+  .sd-sec { padding: 96px 0; background: var(--bg); }
+  .sd-sec.white { background: var(--paper); }
+  .sd-in { display: flex; flex-direction: column; gap: 36px; }
+  .sd-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .sd-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .sd-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+  .sd-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 24px; align-items: start; }
+  .sd-col { display: flex; flex-direction: column; gap: 12px; }
+  .sd-col-h { font-family: var(--agent-font); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+  .sd-card { background: var(--paper); border-radius: 20px; padding: 22px 24px; display: flex; flex-direction: column; gap: 6px; }
+  .sd-card h3, .sd-role h3 { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
+  .sd-card p, .sd-role p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .sd-card a { font-weight: 700; }
+  .sd-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 16px; }
+  .sd-role { background: var(--bg); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .sd-more { font-size: 16px; color: var(--muted); }
+  .sd-more a { font-weight: 700; display: inline-block; padding: 10px 0; }
+  .sd-faq { background: var(--paper); padding-bottom: 8px; }
+
+  @media (max-width: 720px) {
+    .sd-hero { padding: 104px 0 56px; }
+    .sd-hero-in { gap: 32px; }
+    .sd-lead { font-size: 17px; }
+    .sd-ctas :global(.btn) { flex: 1 1 100%; }
+    .sd-copy, .sd-demo { flex-basis: 100%; }
+    .sd-sec { padding: 64px 0; }
+    .sd-in { gap: 28px; }
+    .sd-p { font-size: 16px; }
+  }
+</style>

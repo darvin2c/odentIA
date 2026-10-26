@@ -1,0 +1,161 @@
+---
+// /radiografias-y-ecografias, solo de latidIA: la portada con el visor de demostración (una radiografía
+// y una tomografía de senos reales de ejemplo), cómo llega una imagen a la historia en tres pasos, lo que
+// puedes hacer con cada una, las preguntas y el cierre. Misma forma que la de odentIA
+// (`components/imaging/ImagingPage.astro`), con palabras de consultorio médico. Lo que dice sale de la
+// app: los tipos de imagen de `@odentia/medical` (radiografía, ecografía, tomografía, resonancia,
+// mamografía y foto clínica), el visor de DICOM (zoom, brillo, contraste, invertir y medir) y la
+// tomografía por cortes. La panorámica del arco es dental y no se nombra.
+import Base from "../../../layouts/Base.astro"
+import { breadcrumbJsonLd, type FaqItem, faqJsonLd } from "../../../lib/faq"
+import { ctaOf } from "../../../lib/site"
+import CtaBand from "../../CtaBand.astro"
+import Faq from "../../Faq.astro"
+import ImagingDemo from "../../imaging/ImagingDemo"
+
+const cta = ctaOf(Astro.locals.pricing)
+const path = "/radiografias-y-ecografias"
+const title = "Visor de radiografías, ecografías y tomografía para consultorio médico"
+const description =
+  "Guarda en la historia clínica las radiografías, ecografías, tomografías, resonancias, mamografías y fotos clínicas de tu paciente y ábrelas en el navegador: zoom, brillo y contraste, y compáralas con la anterior."
+const trail: [string, string][] = [["Inicio", "/"], ["Historia clínica electrónica", "/historia-clinica-electronica"], ["Radiografías y ecografías", path]]
+
+const steps = [
+  { n: "01", title: "La subes", text: "Una foto o PDF del informe, un archivo DICOM o la carpeta del CD de una tomografía. Recepción puede subir la tomografía que trae el paciente." },
+  { n: "02", title: "Queda en su historia", text: "Con su tipo (radiografía, ecografía, resonancia, mamografía…) y su fecha de toma, en Documentos junto a las consultas. Nada se pierde en una bolsa." },
+  { n: "03", title: "La abres en la consulta", text: "En el navegador, sin instalar nada. Guardas la imagen en la atención y se la muestras al paciente." },
+]
+
+const can = [
+  { title: "Cada imagen con su tipo", text: "Radiografía, ecografía, tomografía computarizada, resonancia magnética, mamografía y foto clínica, cada una con su fecha de toma." },
+  { title: "Zoom, brillo y contraste", text: "Acercas, aclaras u oscureces hasta ver el detalle. En DICOM también inviertes la imagen y mides en milímetros." },
+  { title: "Tomografía por cortes", text: "Se arma en el navegador y la recorres desde arriba, de frente y de lado, con la rueda o las flechas." },
+  { title: "Comparar con la anterior", text: "La imagen de hoy al lado de la del control pasado, para ver si cambió." },
+  { title: "Sin programa ni CD", text: "La carpeta del CD o un ZIP se sube a la historia. Si quieres verla en el programa del equipo de imágenes, la descargas." },
+  { title: "Cada rol ve lo suyo", text: "El médico abre la imagen; recepción sube la tomografía y ve que llegó, sin abrirla." },
+]
+
+const faq: FaqItem[] = [
+  {
+    q: "¿Qué tipos de imagen puedo guardar?",
+    a: "Radiografía, ecografía, tomografía computarizada, resonancia magnética, mamografía y foto clínica. Aceptan JPG, PNG, WebP, PDF y DICOM.",
+  },
+  {
+    q: "¿Tengo que instalar un programa?",
+    a: "No. Las imágenes y la tomografía se abren en el navegador, en la historia del paciente. Si prefieres verla en el programa del equipo de imágenes, la descargas en un ZIP.",
+  },
+  {
+    q: "¿Puedo subir la carpeta del CD de una tomografía?",
+    a: "Sí: la carpeta entera, un ZIP o los archivos DICOM. La app reconoce el estudio y, si el nombre del archivo no es el del paciente, te avisa antes de guardarlo.",
+  },
+  {
+    q: "¿Las medidas sirven para decidir un tratamiento?",
+    a: "Son orientativas: sirven para conversar el caso y dejarlo anotado. Para una decisión que dependa de la medida, confírmala en el programa de tu equipo de imágenes.",
+  },
+  {
+    q: "¿Quién puede ver las imágenes?",
+    a: "Quien atiende y tiene permiso clínico. Recepción puede subir la tomografía que trae el paciente y ver que llegó, sin abrirla.",
+  },
+]
+const jsonLd = [breadcrumbJsonLd(Astro.site, trail), faqJsonLd(faq)]
+---
+<Base title={title} description={description} jsonLd={jsonLd}>
+  <section class="hero ih">
+    <div class="grain" aria-hidden="true"></div>
+    <div class="wrap ih-in">
+      <div class="ih-copy">
+        <span class="tag tag-d rise">[ Radiografías y ecografías ]</span>
+        <h1 class="ih-h1 rise d1">Lo que trae tu paciente, <span class="acc">abierto en su historia.</span></h1>
+        <p class="ih-lead rise d2">Radiografías, ecografías, tomografías y más, sin instalar programas ni buscar el CD. Zoom, brillo y contraste en el navegador, junto a la consulta. Pruébalo aquí: es una tomografía real.</p>
+        <div class="ih-ctas rise d3">
+          <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+          <a class="btn btn-g" href="/historia-clinica-electronica">Ver la historia clínica</a>
+        </div>
+      </div>
+      <div class="ih-demo rise d2">
+        <ImagingDemo client:visible variant="medical" />
+      </div>
+    </div>
+  </section>
+
+  <section class="section is">
+    <div class="wrap is-in">
+      <div class="is-head">
+        <span class="tag">[ Cómo llega a la historia ]</span>
+        <h2 class="is-h2">De la bolsa del paciente a la consulta, en tres pasos.</h2>
+      </div>
+      <ol class="is-steps">
+        {steps.map((step) => (
+          <li class="is-step">
+            <span class="is-n">{step.n}</span>
+            <h3>{step.title}</h3>
+            <p>{step.text}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <section class="section section-white">
+    <div class="wrap is-in">
+      <div class="is-head">
+        <span class="tag">[ Lo que puedes hacer ]</span>
+        <h2 class="is-h2">Todo lo que necesitas para explicar el caso.</h2>
+        <p class="is-lead">El paciente entiende mejor lo que ve. Con la imagen en pantalla, la indicación se conversa sola.</p>
+      </div>
+      <div class="is-grid">
+        {can.map((item) => (
+          <div class="is-card">
+            <h3>{item.title}</h3>
+            <p>{item.text}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <div class="faqwrap">
+    <Faq items={faq} />
+  </div>
+  <CtaBand title="Tus imágenes, en la historia desde hoy." />
+</Base>
+
+<style>
+  /* La cabecera del sitio va absoluta encima. En portátil, menos aire para que el visor entero quepa. */
+  .ih { padding: 144px 0 88px; }
+  .ih-in { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 44px; align-items: center; }
+  .ih-copy { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+  .ih-h1 { font-size: clamp(36px, 4.2vw, 52px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky); }
+  .ih-lead { font-size: 18px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .ih-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .ih-demo { min-width: 0; }
+
+  .is { background: var(--bg); }
+  .is-in { display: flex; flex-direction: column; gap: 36px; }
+  .is-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .is-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .is-lead { font-size: 18px; line-height: 1.55; color: var(--muted); }
+  .is-steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 16px; }
+  .is-step { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .is-n { font-family: var(--agent-font); font-size: 13px; color: var(--teal); letter-spacing: .08em; }
+  .is-step h3, .is-card h3 { font-size: 20px; line-height: 1.25; }
+  .is-step p, .is-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .is-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; }
+  .is-card { background: var(--bg); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+
+  .faqwrap { background: var(--bg); padding-bottom: 8px; }
+
+  @media (min-width: 1081px) and (max-height: 820px) {
+    .ih { padding-top: 108px; }
+  }
+  @media (max-width: 1080px) {
+    .ih-in { grid-template-columns: minmax(0, 1fr); }
+    .ih-copy { max-width: 640px; }
+  }
+  @media (max-width: 720px) {
+    .ih { padding: 104px 0 56px; }
+    .ih-in { gap: 32px; }
+    .ih-lead { font-size: 17px; }
+  }
+</style>

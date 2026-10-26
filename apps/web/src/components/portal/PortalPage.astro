@@ -1,0 +1,193 @@
+---
+// /portal-del-paciente de odentIA: la misma estructura que la de latidIA, con la pantalla de Su enlace de
+// la app dental. Portada con el teléfono de Andrea, cómo entra, lo que resuelve cada paciente, las
+// preguntas y el cierre. Título, descripción, migas, enlaces relacionados y preguntas son los de
+// PAGES.enlace. Lo que se promete es lo que hacen hoy Su enlace (`/reserva`) y el portal (`/portal`):
+// reservar, cambiar o cancelar, responder el presupuesto, leer y firmar el consentimiento, la receta y
+// el comprobante 30 días y «Tus mensajes»; el portal lo da recepción y se vuelve con la huella o la cara.
+import Base from "../../layouts/Base.astro"
+import { breadcrumbJsonLd, faqJsonLd } from "../../lib/faq"
+import { PAGES } from "../../lib/pages-data"
+import { days, giftOf, shownPlan } from "../../lib/pricing"
+import { WORDS } from "../../lib/product"
+import { ctaOf } from "../../lib/site"
+import CtaBand from "../CtaBand.astro"
+import Faq from "../Faq.astro"
+import Related from "../pages/Related.astro"
+import PasskeyLogin from "./PasskeyLogin"
+import PatientPhone from "./PatientPhone"
+
+const page = PAGES.enlace
+const pricing = Astro.locals.pricing
+const plan = shownPlan(pricing)
+const founder = plan !== null && plan === pricing.founders
+const gift = giftOf(pricing)
+const cta = ctaOf(pricing)
+const jsonLd = [
+  breadcrumbJsonLd(Astro.site, [
+    ["Inicio", "/"],
+    [page.crumb, page.path],
+  ]),
+  faqJsonLd(page.faq),
+]
+
+const steps = [
+  {
+    title: "Le llega por su canal",
+    text: "Sofi se lo envía cuando pide una cita, y Argos cuando le toca su control.",
+  },
+  { title: "Lo abre en el navegador", text: "No descarga nada ni crea una contraseña." },
+  {
+    title: "Vuelve con su huella o su cara",
+    text: "Si tu clínica le da acceso al portal, la primera vez guarda su acceso en el teléfono. Si su enlace venció, responde el mensaje y recibe uno nuevo.",
+  },
+]
+
+const decides: { title: string; text: string; link?: { href: string; label: string } }[] = [
+  { title: "Su cita", text: "Reserva, cambia o cancela en los horarios libres. Si es su primera cita, después de elegir se le piden unos datos. El horario que deja se libera para otro." },
+  {
+    title: "Su presupuesto",
+    text: "Ve las opciones, acepta la que prefiere o solo una parte, y elige el horario ahí mismo.",
+    link: { href: "/presupuestos-dentales", label: "Ver los presupuestos" },
+  },
+  { title: "Sus consentimientos y datos", text: "Lee y firma el consentimiento con calma y completa sus datos y su salud antes de llegar. Lo que declara queda como declarado por él." },
+  { title: "Sus papeles", text: "La receta y el comprobante, para descargar durante 30 días." },
+  { title: "Sus mensajes", text: "Elige qué mensajes recibe: recordatorios, controles y novedades. Los avisos de su cita y sus papeles le llegan siempre." },
+  {
+    title: "Su cita, en tu agenda",
+    text: "Lo que reserva o cambia aparece en la agenda de la sede, con su unidad dental y su odontólogo.",
+    link: { href: "/agenda-odontologica", label: "Ver la agenda" },
+  },
+]
+---
+<Base title={page.title} description={page.description} jsonLd={jsonLd}>
+  <div class="pt">
+    <section class="hero pt-hero">
+      <div class="grain" aria-hidden="true"></div>
+      <div class="wrap pt-hero-in">
+        <div class="pt-copy">
+          <span class="tag tag-d pt-tag rise">[ Su enlace ]</span>
+          <h1 class="pt-h1 rise d1">Reserva de citas online para dentistas, <span class="acc">con Su enlace.</span></h1>
+          <p class="pt-lead rise d2">Cada paciente tiene su propio enlace: reserva y cambia su cita, responde su presupuesto, completa sus datos y descarga sus papeles. Sin llamar y sin contraseña.</p>
+          <div class="pt-ctas rise d3">
+            <a class="btn btn-p" href={cta.href}>{cta.label}</a>
+            <a class="btn btn-g" href="#entrar">Cómo entra</a>
+          </div>
+          <span class="pt-hint rise d3">Toca los botones del teléfono: es una demostración con datos de ejemplo.</span>
+        </div>
+        <div class="pt-phone rise d2">
+          <PatientPhone client:load />
+        </div>
+      </div>
+    </section>
+
+    <section class="pt-sec white" id="entrar">
+      <div class="wrap pt-enter">
+        <div class="pt-enter-copy">
+          <div class="pt-head">
+            <span class="tag pt-tag">[ Cómo entra ]</span>
+            <h2 class="pt-h2">Un enlace propio, sin aplicación y sin contraseña.</h2>
+          </div>
+          <ol class="pt-steps">
+            {steps.map((step, i) => (
+              <li>
+                <span class="pt-n">{String(i + 1).padStart(2, "0")}</span>
+                <span class="pt-step"><b>{step.title}</b><span>{step.text}</span></span>
+              </li>
+            ))}
+          </ol>
+        </div>
+        <div class="pt-login">
+          <PasskeyLogin client:visible />
+        </div>
+      </div>
+    </section>
+
+    <section class="pt-sec">
+      <div class="wrap pt-in">
+        <div class="pt-head">
+          <span class="tag pt-tag">[ Qué resuelve ]</span>
+          <h2 class="pt-h2">Lo que antes era una llamada, ahora es un toque.</h2>
+          <p class="pt-p">Desde recepción se le da acceso al portal; tu clínica decide qué ve cada paciente: sus citas, sus presupuestos o sus documentos.</p>
+        </div>
+        <div class="pt-grid">
+          {decides.map((item) => (
+            <div class="pt-card">
+              <h3>{item.title}</h3>
+              <p>{item.text}{item.link && <> <a href={item.link.href}>{item.link.label}</a></>}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <Related hrefs={page.related} white />
+    <div class="pt-faq"><Faq items={page.faq} /></div>
+    <CtaBand title="Que tus pacientes resuelvan sin llamar.">
+      <Fragment slot="text">
+        {gift ? (
+          founder ? (
+            <>Los primeros <span class="gift">{gift}</span> de tus agentes los pagamos nosotros. Sin tarjeta y sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          ) : (
+            <>Obtén <span class="gift">{gift}</span> de crédito y pruébalo {days(plan?.trialDays ?? pricing.terms.trialDays)} sin tarjeta, sin límite de {WORDS.clinicians}, sedes ni usuarios.</>
+          )
+        ) : (
+          `Tus agentes trabajan en ${WORDS.yourClinic} desde el primer día, sin tarjeta y sin límite de ${WORDS.clinicians}, sedes ni usuarios.`
+        )}
+      </Fragment>
+    </CtaBand>
+  </div>
+</Base>
+
+<style>
+  .pt { background: var(--paper); }
+  /* La cabecera del sitio va absoluta encima: 88 px de cabecera y 56 de aire. */
+  .pt-hero { padding: 144px 0 96px; }
+  .pt-hero-in { position: relative; display: flex; flex-wrap: wrap; gap: 48px 64px; align-items: center; justify-content: center; }
+  .pt-copy { flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .pt-phone { flex: 0 1 380px; min-width: 0; max-width: 100%; }
+  .pt-tag { font-size: 13px; letter-spacing: .12em; }
+  .pt-h1 { font-size: clamp(36px, 4.2vw, 56px); line-height: 1.02; letter-spacing: -.045em; font-weight: 800; text-wrap: balance; }
+  .acc { color: var(--sky-2); }
+  .pt-lead { font-size: 19px; line-height: 1.55; color: var(--on-night-2); text-wrap: pretty; }
+  .pt-ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+  .pt-hint { font-size: 14px; color: var(--on-night-3); }
+
+  .pt-sec { padding: 96px 0; background: var(--bg); }
+  .pt-sec.white { background: var(--paper); }
+  .pt-in { display: flex; flex-direction: column; gap: 36px; }
+  .pt-head { display: flex; flex-direction: column; gap: 14px; max-width: 860px; }
+  .pt-h2 { font-size: clamp(34px, 4vw, 48px); line-height: 1.04; letter-spacing: -.035em; font-weight: 800; text-wrap: balance; }
+  .pt-p { font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
+
+  .pt-enter { display: flex; flex-wrap: wrap; gap: 48px; align-items: center; }
+  .pt-enter-copy { flex: 1.3 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+  .pt-login { flex: 0 1 340px; min-width: 0; max-width: 100%; margin: 0 auto; }
+  .pt-steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .pt-steps li { display: flex; gap: 16px; align-items: flex-start; background: var(--bg); border-radius: 18px; padding: 18px 20px; }
+  .pt-n { font-family: var(--agent-font); font-size: 12px; color: var(--teal); padding-top: 3px; }
+  .pt-step { display: flex; flex-direction: column; gap: 4px; }
+  .pt-step b { font-size: 17px; }
+  .pt-step span { font-size: 15px; line-height: 1.5; color: var(--muted); }
+
+  .pt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+  .pt-card { background: var(--paper); border-radius: 20px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+  .pt-card h3 { font-size: 20px; line-height: 1.25; letter-spacing: -.01em; }
+  .pt-card p { font-size: 16px; line-height: 1.5; color: var(--muted); }
+  .pt-card a { font-weight: 700; }
+
+  .pt-faq { background: var(--paper); padding-bottom: 8px; }
+
+  @media (max-width: 720px) {
+    .pt-hero { padding: 104px 0 56px; }
+    .pt-hero-in { gap: 32px; }
+    .pt-lead { font-size: 17px; }
+    .pt-ctas :global(.btn) { flex: 1 1 100%; }
+    .pt-copy, .pt-phone, .pt-enter-copy, .pt-login { flex-basis: 100%; }
+    .pt-sec { padding: 64px 0; }
+    .pt-in { gap: 28px; }
+    .pt-enter { gap: 32px; }
+    .pt-p { font-size: 16px; }
+    .pt-steps li { padding: 16px; gap: 12px; }
+  }
+</style>

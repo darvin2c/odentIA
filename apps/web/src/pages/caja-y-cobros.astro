@@ -1,8 +1,8 @@
 ---
-// Contenido en src/lib/pages-data.ts (PAGES.caja). En latidIA, su propia página (components/latidia/billing).
+// Título, descripción y preguntas en src/lib/pages-data.ts (PAGES.caja). Cada producto tiene su página:
+// la de latidIA (components/latidia/billing) y la de odentIA (components/billing).
+import DentalBillingPage from "../components/billing/BillingPage.astro"
 import BillingPage from "../components/latidia/billing/BillingPage.astro"
-import InnerPage from "../components/pages/InnerPage.astro"
-import { PAGES } from "../lib/pages-data"
 import { MEDICAL } from "../lib/product"
 ---
-{MEDICAL ? <BillingPage /> : <InnerPage page={PAGES.caja} />}
+{MEDICAL ? <BillingPage /> : <DentalBillingPage />}

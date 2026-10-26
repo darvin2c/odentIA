@@ -59,6 +59,11 @@ export default function OmniDemo() {
           <span>Cobros</span>
         </div>
         <ul className="od-feed">
+          {/* Mientras no llega el primer mensaje, la pestaña dice lo mismo que la aplicación en vez de verse vacía. */}
+          <li className={`od-empty${step < 2 ? " on" : ""}`} aria-hidden={step >= 2 ? true : undefined}>
+            <b>Todavía no ha escrito</b>
+            <span>Cuando escriba, o le escriba el equipo, su conversación aparece aquí.</span>
+          </li>
           <li className={`od-item${on(2)}`}>
             <span className="od-ico wa" aria-hidden="true">
               WA
