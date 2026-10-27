@@ -219,14 +219,15 @@ function AgendaPage() {
   const sede = useActiveBranch()
   const resourcesQuery = useQuery({
     queryKey: ["agenda-resources", sede.branchId ?? null],
-    enabled: sede.ready,
     queryFn: () =>
       apiFetch<{ data: AgendaResources }>(
         `/api/agenda/resources${sede.branchId ? `?branchId=${encodeURIComponent(sede.branchId)}` : ""}`,
       ),
   })
   const resources = resourcesQuery.data?.data
-  const branchId = resources?.branchId
+  // Con la sede ya elegida, las citas se piden a la vez que las fichas, sin esperarlas;
+  // sin ella, la elige el servidor y llega con las fichas.
+  const branchId = resources?.branchId ?? sede.branchId
   const TZ = resources?.timeZone ?? activeOrgTimeZone()
 
   const now = useScheduleNow()
@@ -446,8 +447,9 @@ function AgendaPage() {
   )
   const conflicts = React.useMemo(
     () =>
+      // Las pruebas no chocan con las reales (ADR 0094): una real no se marca por tener una prueba al lado.
       findScheduleConflicts(
-        appointments.map((item) => ({
+        appointments.filter((item) => !item.test).map((item) => ({
           id: item.id,
           start: item.startsAt,
           end: item.endsAt,
@@ -535,7 +537,9 @@ function AgendaPage() {
       end: item.endsAt,
       status: item.status,
       ...stateOf(item),
-      warning: conflictLabel(conflicts.get(item.id), appWords().room.one) ?? insideAbsence(item),
+      // Una prueba no ocupa el horario de nadie (ADR 0094): no es un choque.
+      warning: item.test ? undefined : (conflictLabel(conflicts.get(item.id), appWords().room.one) ?? insideAbsence(item)),
+      test: Boolean(item.test),
     }),
   )
   const active = entries.filter((entry) => occupies(entry.status))
@@ -798,6 +802,7 @@ function AgendaPage() {
         end: item.endsAt,
         status: item.status,
         ...stateOf(item),
+        test: Boolean(item.test),
       },
       resourceLabel: item.professionalName,
       resourceShortLabel: shortName(item.professionalName),

@@ -309,6 +309,51 @@ export interface AgentOverview {
 /** Estado de una conversación de prueba; el servidor lo devuelve y vuelve tal cual en el turno siguiente. */
 export type SandboxState = Record<string, unknown>
 
+/** «Probar» (ADR 0094): un mensaje de la conversación de prueba. */
+export interface ProbarMessage {
+  id: string
+  from: "paciente" | "sofi" | "equipo"
+  text: string
+  at: string
+}
+
+/** Lo que hizo el agente con un mensaje del paciente: la corrida real de ese mensaje. */
+export interface ProbarTurn {
+  triggerMessageId: string
+  /** `ok`, `handoff`, `error`, `omitida` o `sin_respuesta`. */
+  status: string
+  toolsUsed: string[]
+  did: string[]
+  model: string
+  answers: Array<{ outcome: string; text: string | null; basis: AnswerBasisItem[]; checks: AnswerCheck[] }>
+  error: string | null
+}
+
+export interface ProbarCreated {
+  appointmentId: string
+  startsAt: string
+  createdAt: string
+  status: string
+  professionalName: string
+  branchName: string
+  timeZone: string | null
+  roomName: string
+  serviceName: string | null
+}
+
+export interface ProbarState {
+  conversationId: string | null
+  deletesAt: string | null
+  personaName: string
+  messages: ProbarMessage[]
+  turns: ProbarTurn[]
+  waiting: Array<{ id: string; action: string; summary: string | null }>
+  created: ProbarCreated[]
+  typing: boolean
+  /** «Lo que hizo» del último mensaje aún no llega: se sigue mirando. */
+  busy: boolean
+}
+
 export interface SandboxResult {
   reply: string
   replied: boolean

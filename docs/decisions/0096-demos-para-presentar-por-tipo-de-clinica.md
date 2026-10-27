@@ -32,7 +32,7 @@ En producción había una sola demo, «Dental Smile», y solo se creaba con un c
 
 ## Referencias
 
-- `packages/db/src/schema/admin-demos.ts` y la migración 0007.
+- `packages/db/src/schema/admin-demos.ts` y la migración 0010.
 - `packages/services/src/demo-recipes.ts`, `demo-build.ts` (`buildDemo`, `advanceDemo`, `purgeDemoOrganization`), `saas-demos.ts`, `dental/demo-kinds.ts` y `medical/demo-kinds.ts`.
 - `packages/services/src/seed-reports.ts` (`ReportsSeedRecipe`).
 - `apps/worker/src/demos.ts`, `apps/api/src/routes/admin-demos.ts`.

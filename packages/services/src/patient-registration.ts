@@ -443,7 +443,8 @@ export async function createPatientRegistrationLink(
   if (!thread || thread.contactId !== input.contactId) {
     throw validation("La conversación no pertenece al contacto")
   }
-  if (thread.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba del chat web: no se envían enlaces ni se reserva o registra a nadie de verdad.")
+  // En una prueba se registra a su persona de prueba (ADR 0094); nunca a una real.
+  if (thread.isTest && !person.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.")
   if (!await directConversation(tx, orgId, thread.id, person.id)) throw validation("El registro requiere una conversación directa con identidad resuelta")
   const token = randomBytes(32).toString("base64url")
   const expiresAt = new Date(Date.now() + LINK_TTL_MS)

@@ -187,5 +187,13 @@ export const auditEvent = pgTable(
   (table) => [
     // Replay SSE: eventos de una org ordenados por tiempo.
     index("audit_event_org_created_idx").on(table.organizationId, table.createdAt),
+    // Lo último que pasó con una cosa (la invitación a volver de un paciente, la
+    // confirmación de una cita): sin él, cada consulta recorre lo de toda la clínica.
+    index("audit_event_org_entity_id_created_idx").on(
+      table.organizationId,
+      table.entity,
+      table.entityId,
+      table.createdAt.desc(),
+    ),
   ],
 )

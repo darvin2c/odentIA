@@ -23,7 +23,7 @@ import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
-import { listPatientsByContact, patientOrganizationToday } from "./patients.js"
+import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
 import { refreshConversationTier } from "./saas-actions.js"
 import { contactDecides } from "./responsibilities.js"
@@ -105,12 +105,14 @@ export async function issuePersonalLink(
 ): Promise<IssuedPersonalLink> {
   const patientId = input.patientId ?? null
   if (input.conversationId) {
+    // Una prueba envía su enlace de verdad: lo que reserve es de su persona de prueba (ADR 0094).
     const [conv] = await tx
-      .select({ isTest: conversation.isTest })
+      .select({ isTest: conversation.isTest, personIsTest: contact.isTest })
       .from(conversation)
+      .innerJoin(contact, and(eq(contact.organizationId, conversation.organizationId), eq(contact.id, conversation.contactId)))
       .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
       .limit(1)
-    if (conv?.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba del chat web: no se envían enlaces ni se reserva o registra a nadie de verdad.")
+    if (conv?.isTest && !conv.personIsTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.")
   }
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext(${`su-enlace:${orgId}:${input.contactId}:${patientId ?? ""}`}))`,
@@ -192,13 +194,14 @@ export async function createBookingLink(
   deps: { secretsKey: Buffer },
 ): Promise<{ token: string; expiresAt: Date; patientName: string | null; needsRegistration: boolean }> {
   const [conv] = await tx
-    .select({ contactId: conversation.contactId, isTest: conversation.isTest })
+    .select({ contactId: conversation.contactId, isTest: conversation.isTest, personIsTest: contact.isTest })
     .from(conversation)
+    .innerJoin(contact, and(eq(contact.organizationId, conversation.organizationId), eq(contact.id, conversation.contactId)))
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
     .limit(1)
   if (!conv) throw notFound("Conversación")
-  // Una prueba del chat web no reserva ni crea a nadie (fase 6 del pulido).
-  if (conv.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba del chat web: no se envían enlaces ni se reserva o registra a nadie de verdad.")
+  // En una prueba se reserva de verdad, para su persona de prueba (ADR 0094); nunca para una real.
+  if (conv.isTest && !conv.personIsTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.")
   const linked = (await listPatientsByContact(tx, orgId, conv.contactId)).filter((item) => item.isActive)
   // Quien recién se contacta aún no tiene ficha: la crea él mismo en la página,
   // con el registro de pacientes de la clínica. Sin ese registro activo no hay
@@ -577,7 +580,7 @@ export interface BookingLinkSlot {
 export async function listWeekSlots(
   tx: Db,
   orgId: string,
-  input: { branchId: string; from: string; to: string; serviceId?: string | null; durationMin?: number | null },
+  input: { branchId: string; from: string; to: string; serviceId?: string | null; durationMin?: number | null; forTest?: boolean },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   const from = new Date(input.from)
   const to = new Date(input.to)
@@ -598,6 +601,7 @@ export async function listWeekSlots(
       from: new Date(start).toISOString(),
       to: new Date(Math.min(start + 86_400_000, to.getTime())).toISOString(),
       notBefore,
+      ...(input.forTest ? { forTest: true } : {}),
     })
     timeZone = day.timeZone
     truncated ||= day.truncated
@@ -619,20 +623,22 @@ export async function listBookingLinkSlots(
   input: { branchId: string; from: string; to: string },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
+  // El enlace de una persona de prueba ve ocupadas también las otras pruebas (ADR 0094).
+  const forTest = await personIsTest(tx, orgId, link.row.contactId)
   if (link.canBook) {
     if (link.row.branchId && link.row.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
-    return listWeekSlots(tx, orgId, { ...input, serviceId: link.row.serviceId })
+    return listWeekSlots(tx, orgId, { ...input, serviceId: link.row.serviceId, forTest })
   }
   const current = link.appointment
   if (current && isChangeable(current)) {
     if (current.branchId !== input.branchId) throw validation("La cita es en otra sede")
     const view = await appointmentView(tx, orgId, current.id)
-    return listWeekSlots(tx, orgId, { ...input, durationMin: view?.durationMin ?? null })
+    return listWeekSlots(tx, orgId, { ...input, durationMin: view?.durationMin ?? null, forTest })
   }
   // Lo aceptado de un presupuesto se reserva desde el mismo enlace («Elegir horario»):
   // solo quien decide por el paciente y mientras el enlace esté vigente.
   if (link.patientId && link.decides && !link.expired && (await hasSchedulableItems(tx, orgId, link.patientId))) {
-    return listWeekSlots(tx, orgId, input)
+    return listWeekSlots(tx, orgId, { ...input, forTest })
   }
   throw linkExpired()
 }

@@ -429,6 +429,11 @@ export interface AvailabilityCheck {
   ignoreAppointmentId?: string
   /** Urgencia: se reserva aunque el horario del profesional no cubra ese momento. */
   allowOutsideSchedule?: boolean
+  /**
+   * Cita de prueba (ADR 0094): choca con todo, como en real. Una real solo
+   * choca con las reales: una prueba no ocupa el horario de nadie.
+   */
+  forTest?: boolean
 }
 
 async function overlappingBlocks(
@@ -479,9 +484,14 @@ async function overlappingAppointment(
   const [row] = await tx
     .select()
     .from(appointment)
-    .where(and(...conditions))
+    .where(
+      and(
+        ...conditions,
+        check.forTest ? undefined : eq(appointment.isTest, false),
+        check.ignoreAppointmentId ? ne(appointment.id, check.ignoreAppointmentId) : undefined,
+      ),
+    )
     .limit(1)
-  if (row && check.ignoreAppointmentId && row.id === check.ignoreAppointmentId) return undefined
   return row
 }
 
@@ -576,6 +586,8 @@ export interface SlotsQuery {
    * lista corta no se la queda una sola persona (decisión 16 de la fase 4).
    */
   perProfessionalPerDay?: number
+  /** Para una persona de prueba (ADR 0094): sus huecos descuentan también las otras pruebas. */
+  forTest?: boolean
 }
 
 export interface AvailableSlot {
@@ -729,6 +741,7 @@ export async function listAvailableSlots(
           inArray(appointment.status, ["programada", "confirmada"]),
           lt(appointment.startsAt, to),
           gte(appointment.endsAt, from),
+          input.forTest ? undefined : eq(appointment.isTest, false),
         ),
       ),
     tx
@@ -1030,6 +1043,8 @@ export async function getAgendaAvailability(
           lt(appointment.startsAt, to),
           gt(appointment.endsAt, from),
           input.ignoreAppointmentId ? ne(appointment.id, input.ignoreAppointmentId) : undefined,
+          // La Agenda muestra libre lo que una prueba tiene: no ocupa el horario (ADR 0094).
+          eq(appointment.isTest, false),
         ),
       ),
     tx

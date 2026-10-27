@@ -213,34 +213,46 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(page.getByRole("link", { name: /^Modelo del agente/ })).toHaveCount(0)
   await expect(page.getByRole("link", { name: /^Ajustes técnicos/ })).toHaveCount(0)
 
-  // --- Probar: dos turnos, nada se envía; los ejemplos siguen a la vista con el usado marcado ---
-  const sandbox = page.getByRole("region", { name: "Probar" })
-  await expect(sandbox).toContainText("Todavía no guardaste ningún caso de prueba.")
-  await expect(sandbox.getByRole("button", { name: "Guardar esta como caso" })).toBeDisabled()
+  // --- Probar (ADR 0094): una conversación real con Sofi, en la columna de la derecha, con la caja al pie ---
+  const sandbox = page.getByRole("complementary", { name: "Probar" })
+  await expect(sandbox).toContainText("Prueba · Sofi es real, pero no se envía nada y se borra en 7 días")
+  const sandboxField = sandbox.getByRole("textbox", { name: "Mensaje de prueba" })
+  await insideViewport(page, sandboxField)
+  // Con Sofi apagada, la prueba responde igual: se prueba antes de encenderla.
   await sandbox.getByRole("button", { name: "Pregunta un precio" }).click()
-  await expect(sandbox.getByRole("listitem").filter({ hasText: FAKE_REPLY })).toHaveCount(1)
-  await expect(sandbox.getByRole("button", { name: "Pregunta un precio" })).toHaveAttribute("aria-pressed", "true")
-  await expect(sandbox.getByRole("button", { name: "Quiere una cita" })).toHaveAttribute("aria-pressed", "false")
+  await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(1)
+  // Los ejemplos son para empezar: con la conversación en marcha ya no están.
+  await expect(sandbox.getByRole("group", { name: "Ejemplos" })).toHaveCount(0)
+  // «Lo que hizo» va plegado bajo cada respuesta, para seguir la conversación.
+  const detail = sandbox.getByRole("button", { name: /^Lo que hizo/ }).first()
+  await expect(detail).toHaveAttribute("aria-expanded", "false")
+  await expect(sandbox).not.toContainText("Modelo de demostración")
+  await detail.click()
   // El modelo de las pruebas responde siempre lo mismo, y la pantalla lo dice.
   await expect(sandbox).toContainText("Modelo de demostración")
-  await sandbox.getByRole("textbox", { name: "Mensaje de prueba" }).fill("¿Y atienden los sábados?")
+  await sandboxField.fill("¿Y atienden los sábados?")
   await sandbox.getByRole("button", { name: "Enviar el mensaje de prueba" }).click()
   await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(2)
   await expect.poll(async () => (await overview()).readiness.sandboxTurns).toBe(2)
+  // Es una conversación real, pero de prueba: no aparece en la Bandeja.
   expect(await call<unknown[]>(page, "GET", "/api/conversations", org.slug)).toHaveLength(0)
+  // Con la conversación en marcha, la caja sigue al pie.
+  await insideViewport(page, sandboxField)
 
   // Guardar la prueba como caso: queda la pregunta que la abrió con su respuesta, una sola vez.
-  await sandbox.getByRole("button", { name: "Guardar esta como caso" }).click()
-  await expect(sandbox.getByRole("status").filter({ hasText: "Guardada: «Hola, ¿cuánto cuesta una limpieza?»" })).toBeVisible()
-  await expect(sandbox).toContainText("1 caso de prueba guardado.")
+  await sandbox.getByRole("button", { name: "Más opciones de Probar" }).click()
+  await page.getByRole("menuitem", { name: "Guardar como caso de prueba" }).click()
+  await expect(sandbox.getByRole("status").filter({ hasText: "Guardada como caso de prueba: «Hola, ¿cuánto cuesta una limpieza?»" })).toBeVisible()
   expect(await call<Array<{ question: string; expected: string; lessonId: string | null }>>(page, "GET", "/api/agent/learning/cases", org.slug)).toEqual([
     expect.objectContaining({ question: "Hola, ¿cuánto cuesta una limpieza?", expected: FAKE_REPLY, lessonId: null }),
   ])
   expect(await overflow(page)).toBeLessThanOrEqual(0)
-  await info.attach("recepcion", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await info.attach("recepcion", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  // «Empezar de nuevo» borra la prueba con lo que creó y vuelve a los ejemplos.
   await sandbox.getByRole("button", { name: "Empezar de nuevo" }).click()
-  await expect(sandbox.getByRole("button", { name: "Pregunta un precio" })).toHaveAttribute("aria-pressed", "false")
   await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(0)
+  await expect(sandbox.getByRole("button", { name: "Pregunta un precio" })).toBeVisible()
+  await expect(sandboxField).toBeFocused()
 
   // --- Encender: ya hay canal y ya se probó; no hay nivel que elegir ---
   await page.getByRole("switch", { name: "Encender a Sofi" }).click()
@@ -308,36 +320,33 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await mobileLimits.getByRole("button", { name: "Cancelar" }).click()
   await expect(mobileLimits).toBeHidden()
 
-  // Probar en teléfono es una pantalla propia: cabecera con volver, ejemplos en una fila y el campo fijo abajo.
+  // Probar en teléfono es el cajón a todo el alto: la caja al pie y los ejemplos en una fila.
   await testButton.click()
-  await expect(page.getByRole("heading", { level: 1, name: "Probar" })).toBeVisible()
-  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeHidden()
-  await expect(does).toBeHidden()
-  const back = sandbox.getByRole("button", { name: "Volver a Sofi" })
-  await expect(back).toBeFocused()
-  const field = sandbox.getByRole("textbox", { name: "Mensaje de prueba" })
-  const sendButton = sandbox.getByRole("button", { name: "Enviar el mensaje de prueba" })
+  const phoneTest = page.getByRole("dialog", { name: "Probar" })
+  await expect(phoneTest).toBeVisible()
+  const close = phoneTest.getByRole("button", { name: "Cerrar Probar" })
+  const field = phoneTest.getByRole("textbox", { name: "Mensaje de prueba" })
+  const sendButton = phoneTest.getByRole("button", { name: "Enviar el mensaje de prueba" })
   await insideViewport(page, field)
   await insideViewport(page, sendButton)
   expect((await sendButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
-  expect((await back.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  expect((await close.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   // Los ejemplos van en una sola fila que se desplaza sin ensanchar la página.
-  const examples = sandbox.getByRole("group", { name: "Ejemplos" }).getByRole("button")
+  const examples = phoneTest.getByRole("group", { name: "Ejemplos" }).getByRole("button")
   const tops = await examples.evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)))
   expect(new Set(tops).size).toBe(1)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
-  await sandbox.getByRole("button", { name: "Pide una persona" }).click()
-  await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(1)
+  await phoneTest.getByRole("button", { name: "Pregunta un precio" }).click()
+  await expect(phoneTest.getByText(FAKE_REPLY)).toHaveCount(1)
   await field.fill("¿Y cuánto demora?")
   await sendButton.click()
-  await expect(sandbox.getByText(FAKE_REPLY)).toHaveCount(2)
+  await expect(phoneTest.getByText(FAKE_REPLY)).toHaveCount(2)
   // Con la conversación más larga que la pantalla, el campo sigue a la vista.
   await insideViewport(page, field)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("probar-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await back.click()
-  await expect(page.getByRole("heading", { level: 1, name: "Sofi, tu agente de recepción" })).toBeVisible()
-  await expect(sandbox).toBeHidden()
+  await close.click()
+  await expect(phoneTest).toBeHidden()
   await expect(testButton).toBeFocused()
 
   // Apagar se confirma y dice qué pasa con lo que quedó a medias.
@@ -351,6 +360,6 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   // Quien solo decide por el agente (recepción) no lo administra: lo decide el servidor.
   await fixtureDb.update(member).set({ role: "reception" })
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
-  expect((await api(page, "POST", "/api/agent/sandbox", org.slug, { message: "Hola" })).status).toBe(403)
+  expect((await api(page, "POST", "/api/agent/probar/messages", org.slug, { text: "Hola", clientMessageId: crypto.randomUUID() })).status).toBe(403)
   expect((await api(page, "PUT", "/api/agent/config", org.slug, { disabledFunctions: [] })).status).toBe(403)
 })

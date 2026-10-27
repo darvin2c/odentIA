@@ -1,5 +1,5 @@
 {
-  "id": "f00b111d-cb43-4b6c-9d36-085616e5b2a2",
+  "id": "d17e81d7-7128-4985-b595-b819ae42ad09",
   "prevId": "8f14dae1-053e-417e-9a8d-48f27cfb845f",
   "version": "7",
   "dialect": "postgresql",
@@ -606,260 +606,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "admin.saas_demo": {
-      "name": "saas_demo",
-      "schema": "admin",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size": {
-          "name": "size",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "months": {
-          "name": "months",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "country_code": {
-          "name": "country_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "presenter_user_id": {
-          "name": "presenter_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "seed": {
-          "name": "seed",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pendiente'"
-        },
-        "progress": {
-          "name": "progress",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "history_through": {
-          "name": "history_through",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "advanced_on": {
-          "name": "advanced_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "opened_at": {
-          "name": "opened_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "heartbeat_at": {
-          "name": "heartbeat_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ready_at": {
-          "name": "ready_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "saas_demo_organization_uidx": {
-          "name": "saas_demo_organization_uidx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_demo_slug_uidx": {
-          "name": "saas_demo_slug_uidx",
-          "columns": [
-            {
-              "expression": "slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "saas_demo_status_idx": {
-          "name": "saas_demo_status_idx",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "saas_demo_organization_id_fkey": {
-          "name": "saas_demo_organization_id_fkey",
-          "tableFrom": "saas_demo",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "saas_demo_presenter_user_id_fkey": {
-          "name": "saas_demo_presenter_user_id_fkey",
-          "tableFrom": "saas_demo",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "presenter_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "saas_demo_created_by_fkey": {
-          "name": "saas_demo_created_by_fkey",
-          "tableFrom": "saas_demo",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "saas_demo_product_check": {
-          "name": "saas_demo_product_check",
-          "value": "\"admin\".\"saas_demo\".\"product\" IN ('dental','medical')"
-        },
-        "saas_demo_size_check": {
-          "name": "saas_demo_size_check",
-          "value": "\"admin\".\"saas_demo\".\"size\" IN ('pequeno','mediano','grande')"
-        },
-        "saas_demo_months_check": {
-          "name": "saas_demo_months_check",
-          "value": "\"admin\".\"saas_demo\".\"months\" IN (6, 12, 24)"
-        },
-        "saas_demo_status_check": {
-          "name": "saas_demo_status_check",
-          "value": "\"admin\".\"saas_demo\".\"status\" IN ('pendiente','creando','lista','fallida')"
-        }
-      },
       "isRLSEnabled": false
     },
     "admin.account_lifecycle_notice": {
@@ -25467,6 +25213,28 @@
           "method": "btree",
           "with": {}
         },
+        "message_org_external_idx": {
+          "name": "message_org_external_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"external_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "message_org_created_idx": {
           "name": "message_org_created_idx",
           "columns": [
@@ -29087,6 +28855,39 @@
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_event_org_entity_id_created_idx": {
+          "name": "audit_event_org_entity_id_created_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],

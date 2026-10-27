@@ -157,13 +157,22 @@ export function uncountedSql(conv: SQL): SQL {
 }
 
 /**
- * Una persona que solo existe por una prueba del chat web: no sale en
- * Pacientes ni en el buscador (fase 6 del pulido). `person` es el alias de `contact`.
+ * Una persona de prueba (ADR 0094): nace de «Probar» o de la prueba del chat
+ * web y no cambia. Ni ella ni lo que se creó para ella (ficha, citas,
+ * oportunidades, tareas) sale en listas ni cuenta en números. `person` es el
+ * alias de `contact`.
  */
 export function testOnlyPersonSql(person: SQL): SQL {
-  return sql`(exists (select 1 from conversation t_only where t_only.organization_id = ${person}.organization_id and t_only.contact_id = ${person}.id and t_only.is_test)
-    and not exists (select 1 from conversation t_real where t_real.organization_id = ${person}.organization_id and t_real.contact_id = ${person}.id and not t_real.is_test))`
+  return sql`${person}.is_test`
 }
+
+/** Lo de esta persona es de prueba: `contactId` es la columna que apunta a `contact`. */
+export function testContactSql(contactId: SQL): SQL {
+  return sql`exists (select 1 from contact t_person where t_person.id = ${contactId} and t_person.is_test)`
+}
+
+/** Una prueba se borra sola a los 7 días, con todo lo que creó (ADR 0094). */
+export const TEST_KEEP_MS = 7 * 24 * 3_600_000
 
 /** Días de la lista de Spam: lo más viejo queda en la persona, no en la lista. */
 export const SPAM_VIEW_DAYS = 30

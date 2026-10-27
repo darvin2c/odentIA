@@ -1253,7 +1253,12 @@ export async function getAdminRecommendations(
   tx: Db,
   orgId: string,
   can: (permission: string) => boolean,
-  opts: { preview?: boolean; all?: boolean; actionable?: boolean } = {},
+  /**
+   * `onlyShown`: deja de buscar al llenar las que se muestran, sin contar las
+   * demás (`more` sale en 0). Inicio solo pinta esas tres, y cada línea recorre
+   * su parte de la clínica: «Cobranza vencida» sola tardaba más que el resto de Inicio.
+   */
+  opts: { preview?: boolean; all?: boolean; actionable?: boolean; onlyShown?: boolean } = {},
 ): Promise<AdminAdvice> {
   const settings = await getAdminSettings(tx, orgId)
   if (!settings.enabled && !opts.preview) return { enabled: false, recommendations: [], more: 0 }
@@ -1261,6 +1266,7 @@ export async function getAdminRecommendations(
   const rules = new Map((await listLineRules(tx, orgId)).map((rule) => [rule.kind, rule]))
   const found: AdminRecommendation[] = []
   for (const line of ADMIN_LINES) {
+    if (opts.onlyShown && !opts.all && found.length >= ADMIN_MAX_RECOMMENDATIONS) break
     const rule = rules.get(line.key) ?? null
     if (rule?.enabled || rule?.noRecommend || !can(line.permission)) continue
     if (opts.actionable && !canActOnLine(line, rule, can)) continue

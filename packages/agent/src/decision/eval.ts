@@ -16,6 +16,8 @@ import { agentTextsFor } from "@odentia/services"
 import { triageOutcome, triageQuestions, triageState } from "./points.js"
 
 interface Example {
+  /** El producto de la clínica (`dental` u `medical`): sus palabras en las preguntas. Sin indicar, odentIA. */
+  product?: "dental" | "medical"
   previous?: Array<{ direction: "in" | "out"; body: string }>
   /** Mensajes que el contacto envió seguidos antes del último, del más antiguo al más reciente. */
   burst?: string[]
@@ -70,7 +72,7 @@ for (const example of examples) {
   const state = triageState(example.previous ?? [], example.latest, example.burst ?? [])
   let first: string | null = null
   for (let i = 0; i < repeats; i += 1) {
-    const result = await decision.decide(state, triageQuestions(agentTextsFor("dental")))
+    const result = await decision.decide(state, triageQuestions(agentTextsFor(example.product ?? "dental")))
     latencies.push(result.latencyMs)
     // Mismos umbrales que la sombra (triageOutcome): se mide lo que se haría.
     const outcome = triageOutcome(result)

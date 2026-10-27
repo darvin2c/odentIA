@@ -26,7 +26,7 @@ import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
 import { daysAgo, longDay, waitingKey } from "../../lib/home"
 import { mutationErrorMessage } from "../../lib/query-error"
-import { useOrgEvents } from "../../lib/org-events"
+import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import type { WaitingRow, WorkspaceCash, WorkspaceHome } from "../../lib/workspace"
 
 export const Route = createFileRoute("/_org/home")({
@@ -74,14 +74,14 @@ function HomePage() {
   const query = useQuery({
     queryKey: ["workspace-home", sede.branchId ?? null],
     queryFn: () => apiFetch<{ data: WorkspaceHome }>(`/api/workspace/home${sede.branchId ? `?branch=${encodeURIComponent(sede.branchId)}` : ""}`),
-    // Hasta saber si la sede recordada sigue existiendo no se pide nada: evita pedir dos veces.
-    enabled: sede.ready,
     // Al cambiar de sede se conserva lo anterior a la vista mientras llega lo nuevo.
     placeholderData: keepPreviousData,
     refetchInterval: 300_000,
   })
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["workspace-home"] })
-  useOrgEvents(HOME_EVENTS, refresh)
+  useOrgEvents(HOME_EVENTS, (kind, data) => {
+    if (!isReceiptOnly(kind, data)) refresh()
+  })
 
   const canDoTasks = usePermission("tasks.write")
   // «Tomar este tema» desde la fila: la misma acción que en la Bandeja y el panel (toma el tema, no la conversación).

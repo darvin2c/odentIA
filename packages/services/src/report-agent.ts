@@ -118,7 +118,7 @@ export async function agentBookedMany(tx: Db, orgId: string, branchId: string | 
       count(*)::int as "all"
     from ${spansSql(spans)}
     join appointment a on a.organization_id = ${orgId} and a.created_at >= b.start_at and a.created_at < b.end_at
-      ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
+      and not a.is_test ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
     group by b.idx`)
   return bySpan(spans, [...rows], () => ({ booked: 0, attended: 0, all: 0 }), (_, row) => ({ booked: row.booked, attended: row.attended, all: row.all }))
 }
@@ -610,7 +610,7 @@ async function agentSince(tx: Db, orgId: string): Promise<Date | null> {
   const [row] = await tx.execute<{ since: string | null }>(sql`
     with known as (
       select least(
-        (select min(created_at) from appointment where organization_id = ${orgId} and source in (${agentSources()})),
+        (select min(created_at) from appointment where organization_id = ${orgId} and not is_test and source in (${agentSources()})),
         (select min(occurred_at) from saas_action where organization_id = ${orgId})
       ) as at
     )
@@ -730,7 +730,7 @@ export async function getAgentReportList(tx: Db, orgId: string, query: ReportQue
       join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
       join branch br on br.id = a.branch_id and br.organization_id = ${orgId}
       join "user" u on u.id = a.professional_user_id
-      where a.organization_id = ${orgId} and a.created_at >= ${at(window.start)} and a.created_at < ${at(window.end)}
+      where a.organization_id = ${orgId} and not a.is_test and a.created_at >= ${at(window.start)} and a.created_at < ${at(window.end)}
         and a.source in (${agentSources()}) ${scope.branch ? sql`and a.branch_id = ${scope.branch.id}` : sql``}
       order by a.created_at desc, a.id limit ${limit}`)
     const paid = await appointmentsPaid(tx, orgId, [...booked].map((row) => row.id), now)

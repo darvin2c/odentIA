@@ -135,7 +135,7 @@ import {
   useContactScreenActions,
 } from "../../components/inbox-contact-screen"
 import { screenReasonWords } from "../../lib/contact-screen"
-import { useOrgEvents } from "../../lib/org-events"
+import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { filiationGapsText } from "../../lib/patients"
 import { activeOrgLocale } from "../../lib/locale"
@@ -351,8 +351,13 @@ function InboxPage() {
   const selectedRef = useRef<string | null>(null)
   selectedRef.current = selectedId
   const handleOrgEvent = useCallback(
-    (kind: string) => {
+    (kind: string, data: unknown) => {
       const current = selectedRef.current
+      if (isReceiptOnly(kind, data)) {
+        // Solo el acuse: la lista no cambia; el hilo abierto muestra «Entregado» o «Leído».
+        if (current) void queryClient.invalidateQueries({ queryKey: ["conversation"] })
+        return
+      }
       if (kind === "stream.reconnected") {
         // Reconexión: refrescar todo lo visible, no solo el hilo.
         void queryClient.invalidateQueries({ queryKey: ["crm-context"] })

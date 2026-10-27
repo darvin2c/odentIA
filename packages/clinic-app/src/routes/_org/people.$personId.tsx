@@ -24,19 +24,13 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { CalendarDays } from "lucide-react"
-import { type ReactNode, useEffect } from "react"
+import { lazy, type ReactNode, Suspense, useEffect } from "react"
 import { AccesosPanel } from "../../components/patient/accesos-panel"
-import { AccountTab } from "../../components/patient/account-tab"
-import { AntecedentesTab } from "../../components/patient/antecedentes-tab"
 import { CitasPanel } from "../../components/patient/citas-panel"
 import { DataRequestsPanel } from "../../components/patient/data-requests-panel"
 import { SectionSideNav } from "../../components/person/section-side-nav"
 import { dataRequestsKey, fetchDataRequests } from "../../lib/data-requests"
-import { DocumentosSection } from "../../components/patient/documentos-panel"
-import { HistoriaTab } from "../../components/patient/historia-tab"
 import { PersonHeader } from "../../components/patient/patient-header"
-import { PlanTab } from "../../components/patient/plan-tab"
-import { ResponsablesTab } from "../../components/patient/responsables-tab"
 import { PersonChannels } from "../../components/person/person-channels"
 import { PersonConversations } from "../../components/person/person-conversations"
 import { PersonData } from "../../components/person/person-data"
@@ -66,10 +60,25 @@ import {
   visibleSections,
 } from "../../lib/patient-areas"
 import type { PatientFull, PatientSummary } from "../../lib/patients"
-import { personOfPatientKey, rememberPatientSection, usePerson } from "../../lib/people"
+import { personOfPatientKey, rememberPatientSection, rememberPersonOfPatient, usePerson } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 import { isRecordLocked, LockedRecordNotice, LockedRecordPage } from "../../components/person/locked-record"
 import { productUi } from "../../product/product-ui"
+
+// Cada pestaña grande se baja al abrirla: la ficha abre con lo que se ve
+// (resumen y datos) y no con el visor de documentos, la cuenta o el plan.
+const AccountTab = lazy(() => import("../../components/patient/account-tab").then((m) => ({ default: m.AccountTab })))
+const AntecedentesTab = lazy(() =>
+  import("../../components/patient/antecedentes-tab").then((m) => ({ default: m.AntecedentesTab })),
+)
+const DocumentosSection = lazy(() =>
+  import("../../components/patient/documentos-panel").then((m) => ({ default: m.DocumentosSection })),
+)
+const HistoriaTab = lazy(() => import("../../components/patient/historia-tab").then((m) => ({ default: m.HistoriaTab })))
+const PlanTab = lazy(() => import("../../components/patient/plan-tab").then((m) => ({ default: m.PlanTab })))
+const ResponsablesTab = lazy(() =>
+  import("../../components/patient/responsables-tab").then((m) => ({ default: m.ResponsablesTab })),
+)
 
 const areaLabel = (id: string) => PATIENT_AREAS.find((area) => area.id === id)?.label ?? id
 
@@ -159,7 +168,9 @@ function PersonPageRoute() {
   const section = resolveSection(tab, can, pageOf)
   // Los enlaces internos de la ficha conocen al paciente: su persona queda en caché.
   useEffect(() => {
-    if (patientId) queryClient.setQueryData(personOfPatientKey(patientId), { data: { personId } })
+    if (!patientId) return
+    queryClient.setQueryData(personOfPatientKey(patientId), { data: { personId } })
+    rememberPersonOfPatient(patientId, personId)
   }, [patientId, personId, queryClient])
   // La miga de una atención vuelve a la pestaña donde estaba quien la abrió.
   useEffect(() => {
@@ -287,7 +298,8 @@ function PersonPageRoute() {
       node
     )
 
-  const content = (): ReactNode => {
+  const content = (): ReactNode => <Suspense fallback={<LoadingState message="Cargando…" />}>{sectionContent()}</Suspense>
+  const sectionContent = (): ReactNode => {
     switch (section) {
       case "resumen":
         return (

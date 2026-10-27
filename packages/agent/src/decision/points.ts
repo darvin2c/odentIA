@@ -7,7 +7,7 @@ import { clinicWord, type ProductAgentTexts } from "@odentia/services"
  * proveedores) con el estado en español; versionadas para que un cambio
  * de redacción u orden de opciones invalide los umbrales calibrados.
  */
-export const TRIAGE_VERSION = "triage.v4"
+export const TRIAGE_VERSION = "triage.v5"
 
 /** Las preguntas de cada mensaje, con las palabras del producto (odentIA: «dental clinic», la boca). */
 export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] => [
@@ -21,7 +21,9 @@ export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] =>
     id: "handoff",
     kind: "yesno",
     instructions:
-      "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains, is upset, or describes pain, bleeding, swelling or any clinical situation.",
+      // Contar un síntoma para pedir cita no es pedir una persona (triage.v5): medido con
+      // eval/sintomas-y-cita.json, la versión anterior derivaba a casi todo paciente con un síntoma.
+      "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains or is upset, asks for clinical advice that only a professional can give (what to take, whether something is serious, what to do about a symptom, test results), or describes something that needs care right now: severe pain, bleeding that does not stop, swelling, high fever in a baby, chest pain, trouble breathing, an accident or distress. No if the contact mentions a symptom only to ask for an appointment, a price or availability: the assistant books that visit.",
   },
   {
     id: "urgency",
@@ -41,7 +43,11 @@ export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] =>
       { value: "appointment_request", description: "Wants to book an appointment or asks what dates or times are available." },
       { value: "reschedule_or_cancel", description: "Wants to move or cancel an existing appointment." },
       { value: "price_or_service_info", description: "Asks for general information about the clinic or how it works: prices, treatments offered, locations, hours, payment methods, instalments, insurance, parking, whether walk-ins are accepted or what to bring. A question to answer, not a request to book or to do something for them." },
-      { value: "clinical_question", description: "Describes symptoms or asks for clinical advice." },
+      {
+        value: "clinical_question",
+        description:
+          "Asks for clinical advice (what to take, whether it is serious, what to do about a symptom) or describes an emergency. Mentioning a symptom while asking for an appointment, a price or availability is not this: choose that request.",
+      },
       { value: "complaint", description: "Complains about the service or the clinic." },
       { value: "unsubscribe", description: "Asks to stop receiving messages." },
       { value: "greeting_or_thanks", description: "Greeting, thanks or closing with no request." },

@@ -88,6 +88,12 @@ export const appointment = pgTable(
     source: text("source").notNull().default("recepcion"),
     conversationId: uuid("conversation_id").references(() => conversation.id),
     /**
+     * Cita de prueba (ADR 0094): la pone la base desde la persona del paciente
+     * (`appointment_is_test`). No ocupa el horario de pacientes reales pero sí
+     * choca con otra prueba (las exclusiones van por separado).
+     */
+    isTest: boolean("is_test").notNull().default(false),
+    /**
      * «Llegó» (ADR 0032): cuándo llegó la persona y quién lo marcó. Es un hecho
      * con hora, no un estado: solo lo tiene una cita confirmada o atendida, y no
      * cambia lo que ocupa (la exclusión de solapamientos no lo mira).

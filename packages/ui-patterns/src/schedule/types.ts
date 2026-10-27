@@ -37,6 +37,8 @@ export interface ScheduleEntry {
   resourceLabel?: string
   /** Conflicto calculado por el consumidor sobre todas las reservas, antes de filtrar. */
   warning?: string
+  /** Cita de prueba: se ve rayada y marcada, y no ocupa el horario de nadie. */
+  test?: boolean
 }
 
 /**

@@ -21,6 +21,7 @@
     "./lib/org": "./src/lib/org.ts",
     "./lib/patient-areas": "./src/lib/patient-areas.ts",
     "./lib/patients": "./src/lib/patients.ts",
+    "./lib/query-client": "./src/lib/query-client.ts",
     "./lib/query-error": "./src/lib/query-error.tsx",
     "./lib/route-tree-checks": "./src/lib/route-tree-checks.ts",
     "./lib/services": "./src/lib/services.ts",

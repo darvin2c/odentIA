@@ -54,8 +54,29 @@
     {
       "idx": 7,
       "version": "7",
-      "when": 1793117673375,
-      "tag": "0007_demos_para_presentar",
+      "when": 1793115986253,
+      "tag": "0007_indices_de_rendimiento",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793117054174,
+      "tag": "0008_probar_igual_que_lo_real",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793117056686,
+      "tag": "0009_probar_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793123765390,
+      "tag": "0010_demos_para_presentar",
       "breakpoints": true
     }
   ]

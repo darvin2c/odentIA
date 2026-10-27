@@ -119,6 +119,8 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`insert into "organization" ("id", "name", "slug", "created_at") values ('org_a', 'Clínica', 'norte', now())`,
   )
+  // Quien prueba existe: «Probar» guarda quién abrió la prueba (ADR 0094).
+  await ownerDb.execute(sql`insert into "user" (id, name, email, email_verified) values ('u-1', 'Dueña', 'u-1@crm.test', true) on conflict do nothing`)
   const wa = await withOrgContext(appDb, "org_a", (tx) =>
     createConnection(
       tx,
@@ -801,25 +803,30 @@ it("fichas, resumen y prueba del agente", async () => {
   expect(before.data.readiness.channels).toContain("whatsapp")
   expect((await member.request("/agent/overview")).status).toBe(403)
 
-  // Probar no escribe mensajes: solo cuenta que la clínica ya probó.
-  const [{ count: messagesBefore }] = await ownerDb.execute<{ count: number }>(sql`select count(*)::int as count from message`)
-  const sandbox = await app.request("/agent/sandbox", {
+  // «Probar» (ADR 0094): el mensaje entra por el recorrido real del chat web, en
+  // una conversación de prueba de quien prueba, fuera de la Bandeja.
+  const queued = await app.request("/agent/probar/messages", {
     method: "POST",
     headers: json,
-    body: JSON.stringify({ message: "Hola, ¿atienden los sábados?" }),
+    body: JSON.stringify({ text: "Hola, ¿atienden los sábados?", clientMessageId: crypto.randomUUID() }),
   })
-  expect(sandbox.status).toBe(200)
-  const result = (await sandbox.json()) as { data: { reply: string; state: unknown; did: string[]; waiting: string[] } }
-  expect(result.data.reply.length).toBeGreaterThan(0)
-  expect(result.data.state).toMatchObject({ pending: expect.any(Array), notes: expect.any(Array) })
-  const [{ count: messagesAfter }] = await ownerDb.execute<{ count: number }>(sql`select count(*)::int as count from message`)
-  expect(messagesAfter).toBe(messagesBefore)
-  const after = (await (await app.request("/agent/overview")).json()) as { data: { readiness: { sandboxTurns: number } } }
-  expect(after.data.readiness.sandboxTurns).toBe(before.data.readiness.sandboxTurns + 1)
+  expect(queued.status).toBe(201)
+  const probar = (await (await app.request("/agent/probar")).json()) as { data: { conversationId: string | null; deletesAt: string | null } }
+  expect(probar.data.conversationId).toEqual(expect.any(String))
+  expect(probar.data.deletesAt).toEqual(expect.any(String))
+  const [thread] = await ownerDb.execute<{ is_test: boolean; test_by_user_id: string | null; person_test: boolean }>(
+    sql`select c.is_test, c.test_by_user_id, p.is_test as person_test from conversation c join contact p on p.id = c.contact_id where c.id = ${probar.data.conversationId}`,
+  )
+  expect(thread).toMatchObject({ is_test: true, test_by_user_id: expect.any(String), person_test: true })
+  const inbox = (await (await app.request("/conversations")).json()) as { data: Array<{ id: string }> }
+  expect(inbox.data.some((item) => item.id === probar.data.conversationId)).toBe(false)
+  // «Empezar de nuevo» la borra con todo lo que creó.
+  expect((await app.request("/agent/probar", { method: "DELETE" })).status).toBe(200)
+  expect(((await (await app.request("/agent/probar")).json()) as { data: { conversationId: string | null } }).data.conversationId).toBeNull()
 
-  const empty = await app.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "" }) })
+  const empty = await app.request("/agent/probar/messages", { method: "POST", headers: json, body: JSON.stringify({ text: "", clientMessageId: crypto.randomUUID() }) })
   expect(empty.status).toBe(400)
-  const noAccess = await member.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })
+  const noAccess = await member.request("/agent/probar/messages", { method: "POST", headers: json, body: JSON.stringify({ text: "Hola", clientMessageId: crypto.randomUUID() }) })
   expect(noAccess.status).toBe(403)
 
   await app.request("/agent/level", { method: "PUT", headers: json, body: JSON.stringify({ level: "equilibrado" }) })
@@ -850,17 +857,14 @@ it("sin un modelo que responda no se enciende, «Probar» no cuenta y odentIA re
   // Otros ajustes se guardan igual.
   expect((await app.request("/agent/config", { method: "PUT", headers: json, body: JSON.stringify({ maxTurns: 10 }) })).status).toBe(200)
 
-  // «Probar» sin modelo: un texto para la clínica, sin variables, y no cuenta como prueba.
+  // «Probar» sin modelo: el mensaje entra igual (lo atiende el worker, que pasa el caso
+  // a una persona) y no cuenta como prueba mientras Sofi no responda.
   const turns = async () => ((await (await app.request("/agent/overview")).json()) as { data: { readiness: { sandboxTurns: number } } }).data.readiness.sandboxTurns
   const before = await turns()
-  const failed = await app.request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })
-  expect(failed.status).toBe(409)
-  const message = ((await failed.json()) as { error: { message: string } }).error.message
-  expect(message).toBe("Sofi no puede responder ahora: el modelo no está disponible. Ya avisamos a odentIA.")
+  const queued = await app.request("/agent/probar/messages", { method: "POST", headers: json, body: JSON.stringify({ text: "Hola", clientMessageId: crypto.randomUUID() }) })
+  expect(queued.status).toBe(201)
   expect(await turns()).toBe(before)
-  // Con un modelo que responde, la prueba sí cuenta.
-  expect((await buildApp("owner").request("/agent/sandbox", { method: "POST", headers: json, body: JSON.stringify({ message: "Hola" }) })).status).toBe(200)
-  expect(await turns()).toBe(before + 1)
+  await app.request("/agent/probar", { method: "DELETE" })
 
   // Soporte de odentIA tiene un solo caso por motivo, con el motivo técnico.
   const cases = await ownerDb.execute<{ question: string; detail: string }>(

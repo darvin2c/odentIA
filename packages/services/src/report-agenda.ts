@@ -166,7 +166,7 @@ export async function agendaMinutes(tx: Db, orgId: string, span: Span, options: 
   const booked = await tx.execute<{ branchId: string; professionalUserId: string; start: Date | string; end: Date | string }>(sql`
     select a.branch_id as "branchId", a.professional_user_id as "professionalUserId", a.starts_at as start, a.ends_at as end
     from appointment a
-    where a.organization_id = ${orgId} and a.starts_at < ${at(span.end)} and a.ends_at > ${at(span.start)} and a.status <> 'cancelada'
+    where a.organization_id = ${orgId} and not a.is_test and a.starts_at < ${at(span.end)} and a.ends_at > ${at(span.start)} and a.status <> 'cancelada'
       ${branchFilter("a.branch_id")} ${professionalFilter("a.professional_user_id")}
     order by a.starts_at`)
 
@@ -312,7 +312,7 @@ export async function appointmentsByProfessional(tx: Db, orgId: string, span: Sp
       count(*) filter (where a.status = 'cancelada')::int as cancelled,
       count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
     from appointment a join "user" u on u.id = a.professional_user_id
-    where a.organization_id = ${orgId} and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
+    where a.organization_id = ${orgId} and not a.is_test and a.starts_at >= ${at(span.start)} and a.starts_at < ${at(span.end)}
       and (a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))
       ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
     group by a.professional_user_id, u.name`)

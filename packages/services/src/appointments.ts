@@ -29,6 +29,7 @@ import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-o
 import { foldedWordsMatch } from "./search-text.js"
 import { alias } from "drizzle-orm/pg-core"
 import { validateAvailability } from "./availability.js"
+import { TEST_KEEP_MS } from "./conversation-state.js"
 import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
 import {
   appointmentConfirmationPlan,
@@ -166,6 +167,11 @@ export interface AppointmentItem {
    * («Recordar la cita»). Ausente en las lecturas.
    */
   notice?: { queued: boolean }
+  /**
+   * Cita de prueba (ADR 0094): de qué prueba salió, quién la hizo en «Probar»
+   * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.
+   */
+  test: { conversationId: string | null; byUserId: string | null; byName: string | null; deletesAt: string | null } | null
 }
 
 export interface ScheduleResources {
@@ -333,6 +339,9 @@ async function audit(
 
 /** Quien lleva la atención unida a la cita (otro alias de `user`). */
 const encounterProfessional = alias(user, "encounter_professional")
+/** La prueba de la que salió una cita de prueba y quién la abrió en «Probar». */
+const testConversation = alias(conversation, "test_conversation")
+const testAuthor = alias(user, "test_author")
 
 /** La cita con sus nombres y su atención no anulada (a lo sumo una: índice único). */
 function appointmentRows(tx: Db, orgId: string) {
@@ -350,6 +359,9 @@ function appointmentRows(tx: Db, orgId: string) {
         professionalUserId: encounter.professionalUserId,
       },
       encounterProfessionalName: encounterProfessional.name,
+      testCreatedAt: testConversation.createdAt,
+      testByUserId: testConversation.testByUserId,
+      testByName: testAuthor.name,
     })
     .from(appointment)
     .innerJoin(
@@ -368,6 +380,15 @@ function appointmentRows(tx: Db, orgId: string) {
       ),
     )
     .leftJoin(encounterProfessional, eq(encounterProfessional.id, encounter.professionalUserId))
+    .leftJoin(
+      testConversation,
+      and(
+        eq(testConversation.organizationId, appointment.organizationId),
+        eq(testConversation.id, appointment.conversationId),
+        eq(testConversation.isTest, true),
+      ),
+    )
+    .leftJoin(testAuthor, eq(testAuthor.id, testConversation.testByUserId))
 }
 
 export async function getAppointment(tx: Db, orgId: string, id: string): Promise<AppointmentItem> {
@@ -482,6 +503,9 @@ function toItem(row: {
   roomName: string
   encounter: { id: string; status: string; startedAt: Date; endedAt: Date | null; professionalUserId: string } | null
   encounterProfessionalName: string | null
+  testCreatedAt?: Date | null
+  testByUserId?: string | null
+  testByName?: string | null
 }): AppointmentItem {
   const rowAppointment = row.appointment
   const linked = row.encounter?.id ? row.encounter : null
@@ -505,6 +529,14 @@ function toItem(row: {
     conversationId: rowAppointment.conversationId,
     version: rowAppointment.version,
     arrivedAt: rowAppointment.arrivedAt?.toISOString() ?? null,
+    test: rowAppointment.isTest
+      ? {
+          conversationId: row.testCreatedAt ? rowAppointment.conversationId : null,
+          byUserId: row.testByUserId ?? null,
+          byName: row.testByName ?? null,
+          deletesAt: row.testCreatedAt ? new Date(row.testCreatedAt.getTime() + TEST_KEEP_MS).toISOString() : null,
+        }
+      : null,
     visit: appointmentVisit({
       status: rowAppointment.status,
       arrivedAt: rowAppointment.arrivedAt,
@@ -681,6 +713,27 @@ export async function setBranchDefaultDuration(
 }
 
 /**
+ * Una cita de prueba se ve, se mueve, se cancela y se borra con su prueba,
+ * pero nadie llega a ella ni se atiende (ADR 0094): no hay paciente.
+ */
+function assertNotAttendingTest(current: { isTest: boolean }, next: string): void {
+  if (current.isTest && (next === "atendida" || next === "no_asistio")) {
+    throw conflict("TEST_APPOINTMENT", "Es una cita de prueba: no se atiende. Bórrala con su prueba.")
+  }
+}
+
+/** Paciente de una persona de prueba (ADR 0094): su cita también lo será. */
+export async function patientIsTest(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ isTest: contact.isTest })
+    .from(patient)
+    .innerJoin(contact, and(eq(contact.organizationId, patient.organizationId), eq(contact.id, patient.personId)))
+    .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
+    .limit(1)
+  return row?.isTest ?? false
+}
+
+/**
  * Primera unidad dental libre de la sede para ese tramo: quien reserva elige persona y
  * hora, y la unidad dental la pone la agenda.
  */
@@ -693,6 +746,8 @@ async function pickFreeRoom(
   endsAt: Date,
   /** Al mover una cita: no cuenta su propia ocupación y, si sigue libre, conserva su unidad dental. */
   moving?: { appointmentId: string; roomId: string },
+  /** Cita de prueba (ADR 0094): también evita las otras pruebas; una real, solo las reales. */
+  forTest = false,
 ): Promise<string> {
   const rooms = await tx
     .select({ id: scheduleRoom.id })
@@ -719,6 +774,7 @@ async function pickFreeRoom(
           lt(appointment.startsAt, endsAt),
           gt(appointment.endsAt, startsAt),
           moving ? ne(appointment.id, moving.appointmentId) : undefined,
+          forTest ? undefined : eq(appointment.isTest, false),
         ),
       ),
     tx
@@ -858,9 +914,10 @@ export async function createAppointment(
     await tx.execute(sql`select pg_advisory_xact_lock(
       hashtext(${lockScope}), hashtext(${"professional:" + input.professionalUserId}))`)
   }
+  const forTest = await patientIsTest(tx, orgId, input.patientId)
   const roomId =
     room?.id ??
-    (await pickFreeRoom(tx, orgId, resolved.id, input.professionalUserId, startsAt, endsAt))
+    (await pickFreeRoom(tx, orgId, resolved.id, input.professionalUserId, startsAt, endsAt, undefined, forTest))
   if (standing) {
     await tx.execute(sql`select pg_advisory_xact_lock(
       hashtext(${lockScope}), hashtext(${"room:" + roomId}))`)
@@ -871,6 +928,7 @@ export async function createAppointment(
       startsAt,
       endsAt,
       allowOutsideSchedule: input.outsideSchedule === true,
+      forTest,
     })
   }
 
@@ -918,8 +976,9 @@ export async function createAppointment(
       ...(input.outsideSchedule ? { outsideSchedule: true } : {}),
       ...(planItemIds.length > 0 ? { planItemIds } : {}),
     })
+    // Una cita de prueba no sale hacia afuera: ni aviso ni recordatorios (ADR 0094).
     const notice =
-      input.notice === false || !standing ? null : await enqueueAppointmentNotice(tx, orgId, created.id, "reservada")
+      input.notice === false || !standing || forTest ? null : await enqueueAppointmentNotice(tx, orgId, created.id, "reservada")
     // Su oportunidad «Interesado» pasa sola a «Evaluación agendada» (ADR 0028).
     if (standing && startsAt.getTime() > Date.now()) {
       await advanceForAppointment(tx, orgId, { patientId: input.patientId, serviceId: service?.id ?? null, startsAt, source: input.source })
@@ -997,7 +1056,7 @@ export async function moveAppointment(
       ? await pickFreeRoom(tx, orgId, current.branchId, professionalUserId, startsAt, endsAt, {
           appointmentId: id,
           roomId: current.roomId,
-        })
+        }, current.isTest)
       : current.roomId)
   if (professionalUserId !== current.professionalUserId) await requireProfessional(tx, orgId, professionalUserId)
   if (roomId !== current.roomId) {
@@ -1014,6 +1073,7 @@ export async function moveAppointment(
       startsAt,
       endsAt,
       ignoreAppointmentId: id,
+      forTest: current.isTest,
     })
   }
   // Llegó hoy: si la cita pasa a otro día, esa llegada ya no es de ella.
@@ -1140,6 +1200,7 @@ export async function updateAppointment(
       startsAt: current.startsAt,
       endsAt,
       ignoreAppointmentId: id,
+      forTest: current.isTest,
     })
   }
   // La palabra va antes del intento: si la base lo rechaza, la transacción ya no admite consultas.
@@ -1245,6 +1306,7 @@ export async function setAppointmentArrival(
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (arrived) {
     if (current.arrivedAt) return getAppointment(tx, orgId, id)
+    assertNotAttendingTest(current, "atendida")
     if (current.status === "atendida") throw conflict("APPOINTMENT_ATTENDED", "La cita ya se atendió")
     if (current.status === "cancelada") {
       throw conflict("APPOINTMENT_CANCELLED", "La cita está cancelada: reserva otra con «Reagendar»")
@@ -1332,6 +1394,7 @@ export async function markArrivedOnAttend(
 ): Promise<boolean> {
   const current = await requireAppointment(tx, orgId, appointmentId, { lock: true })
   if (current.arrivedAt) return false
+  assertNotAttendingTest(current, "atendida")
   if (current.status !== "programada" && current.status !== "confirmada") return false
   if (!(await isToday(tx, orgId, current, now))) return false
   await tx
@@ -1369,6 +1432,7 @@ export async function setAppointmentStatus(
   const next = assertStatus(status)
   const current = await requireAppointment(tx, orgId, id, { lock: true })
   if (current.status === next) return getAppointment(tx, orgId, id)
+  assertNotAttendingTest(current, next)
   await assertStatusTransition(tx, orgId, current, next)
   const metadata: Record<string, unknown> = { from: current.status }
   if (detail?.via) metadata.via = detail.via
@@ -1402,7 +1466,7 @@ export async function setAppointmentStatus(
     await cancelPendingForAppointment(tx, orgId, id, `cita ${next}`)
     await invalidateAppointmentTokens(tx, orgId, id)
     const notice =
-      next === "cancelada" && detail?.notice !== false
+      next === "cancelada" && detail?.notice !== false && !current.isTest
         ? await enqueueAppointmentNotice(tx, orgId, id, "cancelada")
         : null
     // Cancelar la evaluación que llevó su oportunidad a «Evaluación agendada»

@@ -264,7 +264,7 @@ export async function searchEverything(
       join patient p on p.organization_id = a.organization_id and p.id = a.patient_id
       join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
       left join "user" u on u.id = a.professional_user_id
-      where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada')
+      where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada') and not a.is_test
         and a.starts_at >= ${new Date(now.getTime() - 86_400_000).toISOString()}
         and ${foldedWordsMatch([sql`a.service_name`, sql`a.reason`], q)}
       order by a.starts_at limit ${PER_TYPE}`)

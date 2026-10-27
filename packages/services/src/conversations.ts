@@ -19,7 +19,7 @@ import {
 import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, lt, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
@@ -272,6 +272,8 @@ export async function ingestInbound(
       .values({
         organizationId: orgId,
         displayName: event.senderDisplayName ?? event.senderExternalId,
+        // Quien escribe en una prueba es una persona de prueba (ADR 0094).
+        ...(event.test ? { isTest: true } : {}),
       })
       .returning({ id: contact.id })
     if (!created) throw new Error("No se pudo crear el contacto")
@@ -657,6 +659,9 @@ export async function applyStatus(
         kind: "message.updated",
         conversationId: updated.conversationId,
         messageId: updated.id,
+        // Entregado o leído no cambia a quién le toca (`acceptedOutSql` ya lo
+        // cuenta desde «enviado»): Inicio y la lista de la Bandeja no se recalculan.
+        ...(status === "delivered" || status === "read" ? { receipt: true } : {}),
         at: new Date().toISOString(),
       })
     }
@@ -1035,7 +1040,8 @@ export interface ConversationFilters {
 
 /** Filtros de la bandeja sobre `conversation` + `contact` + `channel_connection`. */
 export function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
-  const conditions: SQL[] = [eq(conversation.organizationId, orgId)]
+  // «Probar» se sigue en su panel, no en la Bandeja (ADR 0094); la prueba del chat web sí sale.
+  const conditions: SQL[] = [eq(conversation.organizationId, orgId), isNull(conversation.testByUserId)]
   if (input.status) {
     if (!(CONVERSATION_STATUSES as readonly string[]).includes(input.status)) {
       throw validation(`Estado inválido (${CONVERSATION_STATUSES.join("|")})`)

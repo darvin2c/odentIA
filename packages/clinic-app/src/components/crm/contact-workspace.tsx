@@ -30,7 +30,7 @@ import {
   nextAppointmentSaid,
   type CrmActivityItem,
 } from "../../lib/crm-workspace"
-import { useOrgEvents } from "../../lib/org-events"
+import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { dueWords, isOverdue } from "./crm-helpers"
 import { PersonMemoryDrawer } from "../agent/person-memory"
@@ -240,7 +240,9 @@ export function ContactWorkspace({
   })
 
   const handleOrgEvent = useCallback(
-    (kind: string) => {
+    (kind: string, data: unknown) => {
+      // El acuse de un mensaje no cambia el contexto de la persona.
+      if (isReceiptOnly(kind, data)) return
       const ids = idsRef.current
       void queryClient.invalidateQueries({ queryKey: ["crm-context", ids.contactId] })
       void queryClient.invalidateQueries({ queryKey: ["crm-activity", ids.contactId] })
