@@ -112,7 +112,8 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                 ) : null}
                 {!session.dictating ? (
                   <Button type="button" variant="outline" size="sm" className="max-sm:hidden" disabled={busy} onClick={() => session.openEdit(item)}>
-                    Editar
+                    {/* Incompleta, se completa (la nota dice qué falta); lista, se edita. */}
+                    {ready ? "Editar" : "Completar"}
                   </Button>
                 ) : null}
                 <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-8" aria-label={`Descartar: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "discard" })}>
