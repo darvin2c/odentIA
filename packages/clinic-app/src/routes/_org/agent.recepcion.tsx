@@ -372,6 +372,9 @@ function ReceptionPage() {
   const { today, knows } = overview
   const gaps = overview.needsYou.gaps
   const status = overview.enabled ? "Encendido" : "Apagado"
+  /** Al cerrar el cajón, el foco vuelve al botón que lo abre: el del resumen o, en el teléfono, el del pie. */
+  const openerOfTest = () => [phoneTestButtonRef.current, testButtonRef.current].find((button) => button?.offsetParent) ?? null
+
   /** «Probar» desde otra superficie: en su columna, al campo; si no, abre su cajón. */
   function openTest() {
     if (docked) document.getElementById(PROBAR_INPUT)?.focus()
@@ -653,8 +656,8 @@ function ReceptionPage() {
       </div>
       </div>
 
-      {/* Teléfono: «Probar» queda a mano, fijo al pie, y abre su cajón. */}
-      {canWrite && !testing ? (
+      {/* Teléfono: «Probar» queda a mano, fijo al pie, y abre su cajón; sigue montado para recibir el foco al cerrarlo. */}
+      {canWrite ? (
         <div className="fixed inset-x-0 bottom-0 z-10 border-t bg-canvas px-4 py-3 sm:hidden">
           <Button ref={phoneTestButtonRef} type="button" className="h-12 w-full" onClick={() => setTesting(true)}>
             Probar
@@ -663,21 +666,11 @@ function ReceptionPage() {
       ) : null}
 
       {canWrite && docked ? (
-        <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} />}>
+        <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />}>
           <TestColumn />
         </SideDockPortal>
       ) : canWrite ? (
-        <TestDrawer
-          open={testing}
-          onClose={() => {
-            setTesting(false)
-            // El foco vuelve al botón que lo abrió: el del resumen o, en el teléfono, el del pie.
-            requestAnimationFrame(() => {
-              const visible = [phoneTestButtonRef.current, testButtonRef.current].find((button) => button?.offsetParent)
-              visible?.focus()
-            })
-          }}
-        />
+        <TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />
       ) : null}
 
       <FunctionNoteDrawer fn={noteFor} config={config} onClose={() => setNoteFor(null)} />
@@ -745,7 +738,16 @@ function TestColumn() {
 }
 
 /** «Probar» donde no cabe la columna: el cajón estándar, a todo el alto en el teléfono. */
-function TestDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+function TestDrawer({
+  open,
+  onClose,
+  returnFocus,
+}: {
+  open: boolean
+  onClose: () => void
+  /** Adónde vuelve el foco al cerrar: el botón visible que abre «Probar». */
+  returnFocus: () => HTMLElement | null
+}) {
   const isMobile = useIsMobile()
   return (
     <Drawer
@@ -758,6 +760,7 @@ function TestDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
     >
       <DrawerContent
         aria-labelledby="probar-titulo"
+        finalFocus={() => returnFocus() ?? true}
         className="overflow-hidden data-[swipe-axis=x]:sm:[--drawer-content-width:min(28rem,calc(100vw-2rem))] data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem-env(safe-area-inset-top))] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem-env(safe-area-inset-top))]"
       >
         {open ? <AgentTestChat titleId="probar-titulo" onClose={onClose} /> : null}
