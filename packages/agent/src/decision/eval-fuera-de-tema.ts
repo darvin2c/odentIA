@@ -19,7 +19,7 @@ import { answerOf, type DecisionQuestion } from "./port.js"
 import { agentTextsFor } from "@odentia/services"
 import { ROUTE_HANDOFF, routeQuestions } from "./route.js"
 
-/** La pregunta de intención en producción ya trae la opción `off_topic` (triage.v4). */
+/** La pregunta de intención en producción ya trae la opción `off_topic` (desde triage.v4). */
 const CANDIDATE_QUESTIONS: DecisionQuestion[] = routeQuestions(agentTextsFor("dental"))
 
 function arg(name: string, fallback: string): string {
