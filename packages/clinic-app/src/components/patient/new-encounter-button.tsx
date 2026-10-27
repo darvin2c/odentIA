@@ -113,7 +113,7 @@ function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppoint
  * pestaña) y en los vacíos que lo piden (ADR 0035). Un solo nombre por caso:
  * con una atención en curso, «Continuar la atención» (lo escrito no se
  * pierde); con una cita hoy, «Atender (10:00)»; sin cita, «Atender». Siempre un
- * clic (ADR 0096): abre la atención a nombre de quien pulsa y en la sede
+ * clic (ADR 0098): abre la atención a nombre de quien pulsa y en la sede
  * activa; el motivo se escribe dentro, en «Consulta», que se abre sola si falta
  * (lo exige el cierre). Solo se ofrece a quien escribe en la historia clínica.
  * La cita se marca atendida al cerrar.

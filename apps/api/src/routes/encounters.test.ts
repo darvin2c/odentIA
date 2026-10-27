@@ -891,7 +891,7 @@ it("encounters: PATCH guarda el examen clínico con forma validada y lo limpia c
   expect(clearedDetail.data.encounter.examination).toBeNull()
 })
 
-it("encounters: sin cita también se abre sin motivo y el motivo se escribe dentro (ADR 0096)", async () => {
+it("encounters: sin cita también se abre sin motivo y el motivo se escribe dentro (ADR 0098)", async () => {
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Sin Motivo")
   const res = await postEncounter(app, patientId, {})

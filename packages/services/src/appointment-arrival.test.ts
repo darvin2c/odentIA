@@ -178,7 +178,7 @@ it("«Atender» desde la cita abre sin pedir motivo, marca la llegada a la hora 
   expect((await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, blank.id))).missing).toContain("reason")
   await f.run((tx) => voidEncounter(tx, ...f.args, blank.id, { reason: "Prueba" }))
   // Anulada la atención, la llegada sigue (vino) y se puede deshacer. Sin cita
-  // también se abre sin motivo (ADR 0096): el cierre lo pide igual.
+  // también se abre sin motivo (ADR 0098): el cierre lo pide igual.
   expect((await f.run((tx) => getAppointment(tx, "org_a", plain.id))).visit).toBe("llego")
   await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, plain.id, false))
   await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, plain.id, "cancelada"))

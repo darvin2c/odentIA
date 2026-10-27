@@ -80,7 +80,7 @@ export interface CreateEncounterInput {
   /**
    * Motivo de la visita (hasta 2000 caracteres). No se pide al abrir: desde
    * una cita toma el motivo escrito en ella; si no, queda vacío y se exige al
-   * cerrar (ADR 0032 y 0096).
+   * cerrar (ADR 0032 y 0098).
    */
   reason?: string | null
   /**
@@ -527,7 +527,7 @@ export async function createEncounter(
       .limit(2)
     if (active.length === 1) branchId = active[0]!.id
   }
-  // El motivo no se pide al abrir (ADR 0032 y 0096): desde una cita vale el que
+  // El motivo no se pide al abrir (ADR 0032 y 0098): desde una cita vale el que
   // se escribió al reservar; si no, queda vacío y el cierre lo exige.
   let reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
   if (!reason && fromAppointment) {
