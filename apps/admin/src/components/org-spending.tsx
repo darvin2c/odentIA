@@ -4,7 +4,7 @@
  * por día, la tabla por agente y tipo y cada acción, que se abre para ver de
  * qué se compone. Solo lo ve el rol admin (ADR 0094).
  */
-import { Badge, Button, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { Badge, Button, ScrollArea, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
 import { ColumnChart, EmptyState, ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { ReceiptText } from "lucide-react"
@@ -336,8 +336,8 @@ function ActionDetail({
         </dl>
       ) : null}
       {data.steps.length ? (
-        <div className="relative overflow-x-auto">
-          <table className="w-full text-sm">
+        <ScrollArea horizontal className="max-w-full">
+          <table className="relative w-full text-sm">
             <caption className="sr-only">
               {item.agent === "clio"
                 ? "Pausas de la atención"
@@ -399,7 +399,7 @@ function ActionDetail({
               </tr>
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
       ) : (
         <p className="text-sm text-muted-foreground">
           {data.spread
@@ -482,8 +482,8 @@ function ActionList({
   const toggle = (key: string) => setOpen((current) => (current === key ? null : key))
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative hidden overflow-x-auto rounded-xl border bg-card px-2 md:block">
-        <table className="w-full text-sm">
+      <ScrollArea horizontal className="hidden max-w-full rounded-xl border bg-card px-2 md:block">
+        <table className="relative w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
               <th className="w-10 px-2 py-2 font-medium">
@@ -547,7 +547,7 @@ function ActionList({
             })}
           </tbody>
         </table>
-      </div>
+      </ScrollArea>
       <ul className="flex flex-col gap-2 md:hidden">
         {data.items.map((item) => {
           const isOpen = open === item.key
@@ -657,8 +657,8 @@ function ByTypeTable({
       <h2 id="por-tipo" className="px-1 text-base font-medium">
         Por agente y tipo
       </h2>
-      <div className="relative overflow-x-auto">
-        <table className="w-full text-sm">
+      <ScrollArea horizontal className="max-w-full">
+        <table className="relative w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
               <th scope="col" className="px-2 py-2 font-medium">
@@ -751,7 +751,7 @@ function ByTypeTable({
             </tr>
           </tbody>
         </table>
-      </div>
+      </ScrollArea>
       <p className="px-1 text-xs text-muted-foreground">
         La cuota vuelve como crédito: ya está dentro de lo cobrado. El costo de IA es lo que reportó
         cada proveedor en cada llamada. WhatsApp lo paga la clínica a Meta y no aparece aquí.
@@ -1038,15 +1038,17 @@ export function OrgSpending({
                     onSearch({ profesional: value === "todos" ? undefined : value, pagina: 1 })
                   }
                 >
-                  <TabsList aria-label="Profesional" className="max-w-full overflow-x-auto">
-                    <TabsTrigger value="todos">Todos</TabsTrigger>
-                    {actions.professionals.map((item) => (
-                      <TabsTrigger
-                        key={item.id}
-                        value={item.id}
-                      >{`${item.name} · ${item.count}`}</TabsTrigger>
-                    ))}
-                  </TabsList>
+                  <ScrollArea horizontal className="min-w-0 max-w-full">
+                    <TabsList aria-label="Profesional" className="max-w-full justify-start">
+                      <TabsTrigger value="todos">Todos</TabsTrigger>
+                      {actions.professionals.map((item) => (
+                        <TabsTrigger
+                          key={item.id}
+                          value={item.id}
+                        >{`${item.name} · ${item.count}`}</TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </ScrollArea>
                 </Tabs>
               ) : null}
               {search.agente === "sofi" && (actions.channels.length > 1 || search.canal) ? (
@@ -1057,15 +1059,17 @@ export function OrgSpending({
                     onSearch({ canal: value === "todos" ? undefined : value, pagina: 1 })
                   }
                 >
-                  <TabsList aria-label="Canal" className="max-w-full overflow-x-auto">
-                    <TabsTrigger value="todos">Todos</TabsTrigger>
-                    {actions.channels.map((item) => (
-                      <TabsTrigger
-                        key={item.channel}
-                        value={item.channel}
-                      >{`${CHANNEL_NAMES[item.channel] ?? item.channel} · ${item.count}`}</TabsTrigger>
-                    ))}
-                  </TabsList>
+                  <ScrollArea horizontal className="min-w-0 max-w-full">
+                    <TabsList aria-label="Canal" className="max-w-full justify-start">
+                      <TabsTrigger value="todos">Todos</TabsTrigger>
+                      {actions.channels.map((item) => (
+                        <TabsTrigger
+                          key={item.channel}
+                          value={item.channel}
+                        >{`${CHANNEL_NAMES[item.channel] ?? item.channel} · ${item.count}`}</TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </ScrollArea>
                 </Tabs>
               ) : null}
             </div>

@@ -7,7 +7,16 @@
  */
 
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
-import { Badge, Button, Skeleton, Tabs, TabsList, TabsTrigger, toast } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  ScrollArea,
+  Skeleton,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  toast,
+} from "@odentia/ui"
 import { ConfirmDialog, common, ErrorState, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -290,13 +299,15 @@ function OrganizationPage() {
       </header>
 
       <Tabs value={tab} onValueChange={(value) => go({ tab: value as Tab })}>
-        <TabsList aria-label="Secciones de la clínica" className="max-w-full overflow-x-auto">
-          {tabs.map((item) => (
-            <TabsTrigger key={item} value={item}>
-              {TAB_NAMES[item]}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <ScrollArea horizontal className="min-w-0 max-w-full">
+          <TabsList aria-label="Secciones de la clínica" className="max-w-full justify-start">
+            {tabs.map((item) => (
+              <TabsTrigger key={item} value={item}>
+                {TAB_NAMES[item]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </ScrollArea>
       </Tabs>
 
       {session.isPending ? <Skeleton className="h-64 w-full" /> : null}
