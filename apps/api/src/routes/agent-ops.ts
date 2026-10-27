@@ -32,7 +32,6 @@ import {
   listAnswerTraces,
   listAwaitingAnswer,
   listHandoffs,
-  noteSandboxTurn,
   claimHandoff,
   getCaseBrief,
   listProposals,
@@ -426,8 +425,6 @@ const simulateInput = z.object({
       const session = await withOrgContext(deps.db, orgId, async (tx) => {
         await assertAgentTestBudget(tx, orgId)
         const found = (await probarSession(tx, orgId, userId)) ?? (await openProbar(tx, orgId, userId, { secretsKey: deps.secretsKey }))
-        // «Lo probaste» en la puesta en marcha de Sofi.
-        await noteSandboxTurn(tx, orgId)
         return { sessionId: found.sessionId, connectionId: found.connectionId }
       })
       const event = buildWebchatInbound(session.sessionId, { text: parsed.data.text, clientMessageId: parsed.data.clientMessageId })

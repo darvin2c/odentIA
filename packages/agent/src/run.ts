@@ -37,6 +37,7 @@ import {
   type SearchEmbedder,
   type Storage,
   createTestConversation,
+  noteSandboxTurn,
   ingestInbound,
   LESSON_PERSON_NAME,
   reportAgentNoReply,
@@ -243,10 +244,14 @@ export async function processAgentRun(
   // Una prueba del chat web (fase 6 del pulido) gasta como «probar», con su
   // tope de 30 días: pasado el tope, Sofi no responde la prueba.
   const test = await withOrgContext(db, orgId, async (tx) => {
-    const [thread] = await tx.select({ isTest: conversation.isTest }).from(conversation).where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId))).limit(1)
+    const [thread] = await tx
+      .select({ isTest: conversation.isTest, probar: conversation.testByUserId })
+      .from(conversation)
+      .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
     if (!thread?.isTest) return false
     await assertAgentTestBudget(tx, orgId)
-    return true
+    return { probar: thread.probar !== null }
   }).catch((error: unknown) => {
     if (error instanceof ServiceError && error.code === "AGENT_TEST_LIMIT") return null
     throw error
@@ -254,7 +259,21 @@ export async function processAgentRun(
   if (test === null) return "done"
   // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0031),
   // también si falla o se reintenta.
-  return meterAiUse(db, orgId, test ? "probar" : "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+  const verdict = await meterAiUse(db, orgId, test ? "probar" : "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+  // «Lo probaste» de la puesta en marcha cuenta solo lo que Sofi respondió en «Probar»
+  // (ADR 0094): no la prueba del chat web ni «Probar una lección».
+  if (test && test.probar && !runtime.lessonOverrides) {
+    await withOrgContext(db, orgId, async (tx) => {
+      const [run] = await tx
+        .select({ status: agentRunLedger.status })
+        .from(agentRunLedger)
+        .where(and(eq(agentRunLedger.organizationId, orgId), eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.triggerMessageId, msg.message.messageId)))
+        .orderBy(desc(agentRunLedger.startedAt))
+        .limit(1)
+      if (run?.status === "ok") await noteSandboxTurn(tx, orgId)
+    }).catch(() => undefined)
+  }
+  return verdict
 }
 
 async function attendAgentRun(
