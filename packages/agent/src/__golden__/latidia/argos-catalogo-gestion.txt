@@ -55,7 +55,7 @@ promociones: Las promociones de la clínica. Abiertas, vigentes o activas hoy = 
   nombre, inicio, fin (timestamptz o null), activa (bool), vigente_hoy (bool: activa y dentro de sus fechas)
 
 promociones_uso: Cada vez que alguien usó una promoción: en un presupuesto entregado o en un cobro.
-  promocion, paciente, paciente_id, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día)
+  promocion, paciente, paciente_id, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día), profesional (en un presupuesto, quien indicó el tratamiento; en un cobro, quien lo atendió; null en la venta de un producto)
 
 lotes: Los lotes con existencias, por sede, a hoy.
   producto, unidad, sede, lote, vence (date o null), cantidad, estado ('vigente'|'por_vencer': vence en 30 días o menos|'vencido'|'sin_vencimiento')
