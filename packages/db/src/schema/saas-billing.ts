@@ -114,7 +114,12 @@ export const saasPlan = adminSchema.table(
     trialDays: integer("trial_days").notNull().default(30),
     trialMaxCreditCents: integer("trial_max_credit_cents").notNull().default(0),
     trialMaxDays: integer("trial_max_days").notNull().default(60),
-    /** El plan con que se cuenta y se prueba si la clínica aún no eligió uno. Uno como mucho. */
+    /**
+     * El producto del plan (ADR 0093): lo usan solo las clínicas de ese producto
+     * y su web. Se elige al crearlo y no cambia.
+     */
+    product: text("product").notNull().default("dental"),
+    /** El plan con que se cuenta y se prueba si la clínica aún no eligió uno. Uno como mucho por producto. */
     isDefault: boolean("is_default").notNull().default(false),
     /** La web lo publica (decisión 14 de Fundadores); un plan nuevo nace sin publicar. */
     showOnWeb: boolean("show_on_web").notNull().default(false),
@@ -126,7 +131,8 @@ export const saasPlan = adminSchema.table(
   },
   (table) => [
     unique("saas_plan_code_uidx").on(table.code),
-    uniqueIndex("saas_plan_default_uidx").on(table.isDefault).where(sql`${table.isDefault}`),
+    uniqueIndex("saas_plan_default_uidx").on(table.product).where(sql`${table.isDefault}`),
+    check("saas_plan_product_check", sql`${table.product} IN ('dental','medical')`),
     check(
       "saas_plan_founders_check",
       sql`(${table.seatLimit} IS NULL OR ${table.seatLimit} > 0) AND (${table.guaranteeMonths} IS NULL OR ${table.guaranteeMonths} BETWEEN 1 AND 120)`,
@@ -778,8 +784,9 @@ export const SAAS_SIGNUP_MODES = ["invitacion", "abierta"] as const
 export type SaasSignupMode = (typeof SAAS_SIGNUP_MODES)[number]
 
 /**
- * Cómo se abren clínicas nuevas: «solo con invitación» o «abierta». Una sola
- * fila (`id = 1`) que escribe la administración; la lee el guard de
+ * Cómo se abren clínicas nuevas: «solo con invitación» o «abierta», una por
+ * producto (ADR 0093): `mode` es el de odentIA y `medical_mode` el de latidIA.
+ * Una sola fila (`id = 1`) que escribe la administración; la lee el guard de
  * `organization/create`. Global, sin `organization_id`: solo `ownerDb`.
  */
 export const saasSignupPolicy = adminSchema.table(
@@ -787,12 +794,14 @@ export const saasSignupPolicy = adminSchema.table(
   {
     id: integer("id").primaryKey().default(1),
     mode: text("mode").notNull().default("invitacion"),
+    medicalMode: text("medical_mode").notNull().default("invitacion"),
     updatedBy: text("updated_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
     check("saas_signup_policy_singleton_check", sql`${table.id} = 1`),
     check("saas_signup_policy_mode_check", sql`${table.mode} IN ('invitacion','abierta')`),
+    check("saas_signup_policy_medical_mode_check", sql`${table.medicalMode} IN ('invitacion','abierta')`),
   ],
 )
 

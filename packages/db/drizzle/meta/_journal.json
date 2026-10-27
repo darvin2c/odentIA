@@ -36,6 +36,13 @@
       "when": 1793069169126,
       "tag": "0004_whatsapp_app_propia",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793073481673,
+      "tag": "0005_planes_por_producto",
+      "breakpoints": true
     }
   ]
 }

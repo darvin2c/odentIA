@@ -19,6 +19,8 @@ import { planPrices } from "./saas-actions.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { orgProduct } from "./locale.js"
+import { defaultPlanOf } from "./saas-plan-product.js"
 
 /**
  * Fundadores (issue 165): mientras dure el programa, se abren clínicas solo con
@@ -41,20 +43,39 @@ export { founderInvitationEmail, moneyText, waitlistReceivedEmail } from "./saas
 
 /* ---------- Cómo se abren clínicas ---------- */
 
-/** «Solo con invitación» si no hay fila: lo seguro mientras no se diga otra cosa. */
-export async function getSignupMode(tx: Db): Promise<SaasSignupMode> {
-  const [row] = await tx.select({ mode: saasSignupPolicy.mode }).from(saasSignupPolicy).where(eq(saasSignupPolicy.id, 1)).limit(1)
-  return row?.mode === "abierta" ? "abierta" : "invitacion"
+/**
+ * Cómo se abren las clínicas de un producto (ADR 0093). «Solo con invitación»
+ * si no hay fila: lo seguro mientras no se diga otra cosa.
+ */
+export async function getSignupMode(tx: Db, product: ClinicalProduct = "dental"): Promise<SaasSignupMode> {
+  const [row] = await tx
+    .select({ mode: saasSignupPolicy.mode, medicalMode: saasSignupPolicy.medicalMode })
+    .from(saasSignupPolicy)
+    .where(eq(saasSignupPolicy.id, 1))
+    .limit(1)
+  const mode = product === "medical" ? row?.medicalMode : row?.mode
+  return mode === "abierta" ? "abierta" : "invitacion"
 }
 
-export async function setSignupMode(tx: Db, actor: AdminActor, mode: SaasSignupMode): Promise<SaasSignupMode> {
+/** Cómo se abren las clínicas de cada producto, para la administración. */
+export async function getSignupModes(tx: Db): Promise<Record<ClinicalProduct, SaasSignupMode>> {
+  return { dental: await getSignupMode(tx, "dental"), medical: await getSignupMode(tx, "medical") }
+}
+
+export async function setSignupMode(
+  tx: Db,
+  actor: AdminActor,
+  mode: SaasSignupMode,
+  product: ClinicalProduct = "dental",
+): Promise<SaasSignupMode> {
   if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración cambia cómo se abren clínicas")
   if (mode !== "invitacion" && mode !== "abierta") throw validation("Elige «Solo con invitación» o «Abierta»")
+  const column = product === "medical" ? { medicalMode: mode } : { mode }
   await tx
     .insert(saasSignupPolicy)
-    .values({ id: 1, mode, updatedBy: actor.userId })
-    .onConflictDoUpdate({ target: saasSignupPolicy.id, set: { mode, updatedBy: actor.userId, updatedAt: new Date() } })
-  await writeAdminAudit(tx, actor, { action: "saas.signup_mode_set", metadata: { mode } })
+    .values({ id: 1, ...column, updatedBy: actor.userId })
+    .onConflictDoUpdate({ target: saasSignupPolicy.id, set: { ...column, updatedBy: actor.userId, updatedAt: new Date() } })
+  await writeAdminAudit(tx, actor, { action: "saas.signup_mode_set", metadata: { mode, product } })
   return mode
 }
 
@@ -182,9 +203,10 @@ export interface WaitlistFilter {
 export interface WaitlistPage {
   rows: WaitlistRow[]
   counts: Record<SaasWaitlistStatus, number>
-  /** Lugares del plan por invitación con tope, el que se usa al invitar. */
-  seats: FounderSeats | null
-  mode: SaasSignupMode
+  /** Lugares del plan por invitación de cada producto, el que se usa al invitar (ADR 0093). */
+  seats: Record<ClinicalProduct, FounderSeats | null>
+  /** Cómo se abren las clínicas de cada producto. */
+  modes: Record<ClinicalProduct, SaasSignupMode>
   /** Días hábiles que se prometen hoy para responder una solicitud. */
   answerDays: number
 }
@@ -215,12 +237,12 @@ export async function founderSeats(tx: Db, planId: string, now = new Date()): Pr
   return { planId: plan.id, planName: plan.name, used: row?.used ?? 0, limit: plan.seatLimit }
 }
 
-/** El plan por invitación que se ofrece al invitar: el activo con lugares, o null si no hay. */
-export async function invitationPlan(tx: Db): Promise<{ id: string; name: string } | null> {
+/** El plan por invitación de un producto: el activo con lugares, o null si no hay (ADR 0093). */
+export async function invitationPlan(tx: Db, product: ClinicalProduct = "dental"): Promise<{ id: string; name: string } | null> {
   const [plan] = await tx
     .select({ id: saasPlan.id, name: saasPlan.name })
     .from(saasPlan)
-    .where(and(eq(saasPlan.isActive, true), sql`${saasPlan.seatLimit} IS NOT NULL`))
+    .where(and(eq(saasPlan.isActive, true), eq(saasPlan.product, product), sql`${saasPlan.seatLimit} IS NOT NULL`))
     .orderBy(asc(saasPlan.sortOrder), asc(saasPlan.createdAt))
     .limit(1)
   return plan ?? null
@@ -257,13 +279,16 @@ export async function listWaitlist(tx: Db, filter: WaitlistFilter = {}, now = ne
     .groupBy(saasWaitlistRequest.status)
   const counts = Object.fromEntries(SAAS_WAITLIST_STATUSES.map((s) => [s, 0])) as Record<SaasWaitlistStatus, number>
   for (const entry of countRows) counts[entry.status as SaasWaitlistStatus] = entry.n
-  const plan = await invitationPlan(tx)
   const timeline = await loadSaasTermsTimeline(tx)
+  const seatsOf = async (product: ClinicalProduct) => {
+    const plan = await invitationPlan(tx, product)
+    return plan ? await founderSeats(tx, plan.id, now) : null
+  }
   return {
     rows: rows.map(({ row, planName, organizationName, decidedByName }) => toWaitlistRow(row, planName, organizationName, decidedByName, timeline)),
     counts,
-    seats: plan ? await founderSeats(tx, plan.id, now) : null,
-    mode: await getSignupMode(tx),
+    seats: { dental: await seatsOf("dental"), medical: await seatsOf("medical") },
+    modes: await getSignupModes(tx),
     answerDays: timeline.at(now).waitlistAnswerDays,
   }
 }
@@ -366,10 +391,17 @@ export async function inviteFromWaitlist(
   if (row.status === "entro") throw new ServiceError("WAITLIST_ENTERED", 409, "Esa clínica ya entró")
   if (row.status === "descartada") throw new ServiceError("WAITLIST_DISCARDED", 409, "Esa solicitud está descartada")
   if (row.claimedAt) throw new ServiceError("WAITLIST_IN_USE", 409, "La invitación se está usando en este momento: intenta en un minuto")
-  const planId = input.planId ?? row.planId ?? (await invitationPlan(tx))?.id
-  if (!planId) throw new ServiceError("SAAS_NO_INVITATION_PLAN", 409, "No hay un plan por invitación: crea uno con lugares en Cobros y planes")
+  const requestProduct: ClinicalProduct = isClinicalProduct(row.product) ? row.product : "dental"
+  const planId = input.planId ?? row.planId ?? (await invitationPlan(tx, requestProduct))?.id
+  if (!planId) {
+    throw new ServiceError("SAAS_NO_INVITATION_PLAN", 409, `No hay un plan por invitación de ${productWords(requestProduct).name}: crea uno con lugares en Cobros y planes`)
+  }
   const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1).for("update")
   if (!plan || !plan.isActive) throw notFound("Plan")
+  // La clínica entra con un plan de su producto (ADR 0093).
+  if (plan.product !== requestProduct) {
+    throw validation(`${plan.name} es de ${productWords(plan.product as ClinicalProduct).name}: esta solicitud es de ${productWords(requestProduct).name}`)
+  }
   // Reenviar una invitación vigente del mismo plan no ocupa otro lugar.
   const holdsSeat = row.status === "invitada" && row.planId === planId && row.inviteExpiresAt !== null && row.inviteExpiresAt > now
   if (plan.seatLimit !== null && !holdsSeat) {
@@ -448,7 +480,9 @@ function discountAgainst(plan: typeof saasPlan.$inferSelect, list: typeof saasPl
 }
 
 export async function founderOffer(tx: Db, plan: typeof saasPlan.$inferSelect): Promise<FounderOffer> {
-  const [list] = await tx.select().from(saasPlan).where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))).limit(1)
+  // Se compara con el plan de lista de su mismo producto (ADR 0093).
+  const product: ClinicalProduct = isClinicalProduct(plan.product) ? plan.product : "dental"
+  const [list] = await tx.select().from(saasPlan).where(defaultPlanOf(product)).limit(1)
   return {
     planName: plan.name,
     currency: plan.currency,
@@ -577,8 +611,15 @@ function addMonths(date: Date, months: number): Date {
  * acciones congelan su precio al contarse. Devuelve las clínicas movidas.
  */
 export async function endFounderGuarantees(tx: Db, now = new Date()): Promise<string[]> {
-  const [list] = await tx.select({ id: saasPlan.id }).from(saasPlan).where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))).limit(1)
-  if (!list) return []
+  // Cada clínica pasa al plan de lista de su producto (ADR 0093).
+  const lists = new Map<ClinicalProduct, string | null>()
+  const listOf = async (product: ClinicalProduct) => {
+    if (!lists.has(product)) {
+      const [plan] = await tx.select({ id: saasPlan.id }).from(saasPlan).where(defaultPlanOf(product)).limit(1)
+      lists.set(product, plan?.id ?? null)
+    }
+    return lists.get(product) ?? null
+  }
   const due = await tx
     .select({ organizationId: saasSubscription.organizationId, planId: saasSubscription.planId })
     .from(saasSubscription)
@@ -586,14 +627,16 @@ export async function endFounderGuarantees(tx: Db, now = new Date()): Promise<st
     .for("update")
   const moved: string[] = []
   for (const sub of due) {
+    const list = await listOf(await orgProduct(tx, sub.organizationId))
+    if (!list) continue
     await tx
       .update(saasSubscription)
-      .set({ planId: list.id, guaranteedUntil: null, updatedAt: now })
+      .set({ planId: list, guaranteedUntil: null, updatedAt: now })
       .where(eq(saasSubscription.organizationId, sub.organizationId))
     await writeAdminAudit(tx, null, {
       action: "saas.guarantee_ended",
       organizationId: sub.organizationId,
-      metadata: { fromPlanId: sub.planId, toPlanId: list.id },
+      metadata: { fromPlanId: sub.planId, toPlanId: list },
     })
     moved.push(sub.organizationId)
   }
@@ -753,25 +796,25 @@ function publicPlan(plan: typeof saasPlan.$inferSelect): PublicPlanPrices {
 }
 
 /**
- * Lo que la web publica (decisión 14): solo los planes activos con «Mostrar
- * en la web». Nunca los lugares que quedan (decisión 9) ni planes de una
- * sola clínica.
+ * Lo que la web de un producto publica (decisión 14, ADR 0093): solo sus
+ * planes activos con «Mostrar en la web». Nunca los lugares que quedan
+ * (decisión 9) ni planes de una sola clínica.
  */
-export async function getPublicPricing(tx: Db): Promise<PublicPricing> {
+export async function getPublicPricing(tx: Db, product: ClinicalProduct = "dental"): Promise<PublicPricing> {
   const plans = await tx
     .select()
     .from(saasPlan)
-    .where(and(eq(saasPlan.isActive, true), eq(saasPlan.showOnWeb, true)))
+    .where(and(eq(saasPlan.isActive, true), eq(saasPlan.showOnWeb, true), eq(saasPlan.product, product)))
     .orderBy(asc(saasPlan.sortOrder), asc(saasPlan.createdAt))
   const list = plans.find((plan) => plan.isDefault) ?? null
   const founders = plans.find((plan) => plan.seatLimit !== null) ?? null
-  const [defaultPlan] = list ? [list] : await tx.select().from(saasPlan).where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))).limit(1)
+  const [defaultPlan] = list ? [list] : await tx.select().from(saasPlan).where(defaultPlanOf(product)).limit(1)
   return {
     list: list ? publicPlan(list) : null,
     founders: founders
       ? { ...publicPlan(founders), discountPercent: discountAgainst(founders, defaultPlan), guaranteeMonths: founders.guaranteeMonths }
       : null,
-    signupMode: await getSignupMode(tx),
+    signupMode: await getSignupMode(tx, product),
     terms: await publicSaasTerms(tx),
   }
 }
@@ -791,7 +834,7 @@ async function publicSaasTerms(tx: Db): Promise<PublicSaasTerms> {
   }
 }
 
-/** Para el panel: ¿esta persona puede abrir una clínica sin invitación? */
-export async function canOpenClinicWithoutInvitation(tx: Db): Promise<boolean> {
-  return (await getSignupMode(tx)) === "abierta"
+/** Para el panel: ¿esta persona puede abrir una clínica de este producto sin invitación? */
+export async function canOpenClinicWithoutInvitation(tx: Db, product: ClinicalProduct = "dental"): Promise<boolean> {
+  return (await getSignupMode(tx, product)) === "abierta"
 }

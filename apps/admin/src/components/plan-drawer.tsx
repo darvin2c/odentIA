@@ -4,17 +4,22 @@
  * hasta dónde. La comprobación contra el peor costo, tipo por tipo, se ve
  * antes de guardar; el servidor la exige igual.
  */
-import { Checkbox, Input, Label } from "@odentia/ui"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
+import { Checkbox, Input, Label, RadioGroup, RadioGroupItem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ApiError, api } from "../lib/api"
+import { domainOf } from "../lib/host"
 import { CurrencySelect, centsToMajor, majorToCents } from "./billing-fields"
+import { ProductMark } from "./product"
 
 export interface AdminPlan {
   id: string
   code: string
   name: string
+  /** De qué producto es (ADR 0093): lo usan sus clínicas y su web. */
+  product: ClinicalProduct
   description: string | null
   currency: string
   priceCents: number
@@ -125,42 +130,78 @@ function againstList(own: number | null, list: number | null | undefined): strin
 /** Un número entero positivo o vacío (null); NaN si no lo es. */
 const optionalInt = (text: string) => (text.trim() ? (Number.isInteger(Number(text.trim())) ? Number(text.trim()) : Number.NaN) : null)
 
+const NO_TEMPLATE = "ninguno"
+
 export function PlanDrawer({
   plan,
-  listPlan,
+  plans = [],
+  product: initialProduct = "dental",
   onClose,
   onSaved,
 }: {
   plan?: AdminPlan
-  /** El plan por defecto (la lista), para decir cuánto menos cuesta cada acción en este. */
-  listPlan?: AdminPlan
+  /** Todos los planes: el de lista de cada producto y los que se pueden copiar al crear uno. */
+  plans?: AdminPlan[]
+  /** El producto con que empieza un plan nuevo: el que se está mirando. */
+  product?: ClinicalProduct
   onClose: () => void
   onSaved: () => void
 }) {
+  // El producto se elige al crear y no cambia después (ADR 0093).
+  const [product, setProduct] = useState<ClinicalProduct>(plan?.product ?? initialProduct)
+  // Un plan nuevo empieza con los precios del de lista de su producto, o de otro si se elige.
+  const listOf = (of: ClinicalProduct) => plans.find((item) => item.product === of && item.isDefault && item.isActive)
+  const listPlan = listOf(product)
+  const [template, setTemplate] = useState(plan ? NO_TEMPLATE : (listOf(initialProduct)?.id ?? NO_TEMPLATE))
+  const seed = plan ?? plans.find((item) => item.id === template)
   const [code, setCode] = useState(plan?.code ?? "")
   const [name, setName] = useState(plan?.name ?? "")
-  const [currency, setCurrency] = useState(plan?.currency ?? "USD")
-  const [price, setPrice] = useState(plan ? centsToMajor(plan.priceCents, plan.currency) : "")
-  const [credit, setCredit] = useState(plan ? centsToMajor(plan.creditCents, plan.currency) : "")
+  const [currency, setCurrency] = useState(seed?.currency ?? "USD")
+  const [price, setPrice] = useState(seed ? centsToMajor(seed.priceCents, seed.currency) : "")
+  const [credit, setCredit] = useState(seed ? centsToMajor(seed.creditCents, seed.currency) : "")
   const [prices, setPrices] = useState<Record<PriceKey, string>>(
-    () => Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(plan?.[item.field] ?? null)])) as Record<PriceKey, string>,
+    () => Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(seed?.[item.field] ?? null)])) as Record<PriceKey, string>,
   )
-  const [fixed, setFixed] = useState<ReadonlySet<string>>(() => new Set(plan?.fixedPriceTiers ?? ["informa", "simple", "estandar", "preguntas", "almacenamiento"]))
-  const [included, setIncluded] = useState(String(plan?.argosIncludedQuestions ?? 300))
-  const [packQuestions, setPackQuestions] = useState(String(plan?.argosPackQuestions ?? 100))
-  const [includedGb, setIncludedGb] = useState(String(plan?.storageIncludedGb ?? 20))
-  const [maxDiscount, setMaxDiscount] = useState(String((plan?.maxDiscountBps ?? 6000) / 100))
-  const [sellerDiscount, setSellerDiscount] = useState(String((plan?.sellerDiscountBps ?? 1000) / 100))
-  const [trialCredit, setTrialCredit] = useState(plan ? centsToMajor(plan.trialCreditCents, plan.currency) : "")
-  const [trialDays, setTrialDays] = useState(String(plan?.trialDays ?? 30))
-  const [trialMaxCredit, setTrialMaxCredit] = useState(plan ? centsToMajor(plan.trialMaxCreditCents, plan.currency) : "")
-  const [trialMaxDays, setTrialMaxDays] = useState(String(plan?.trialMaxDays ?? 60))
+  const [fixed, setFixed] = useState<ReadonlySet<string>>(() => new Set(seed?.fixedPriceTiers ?? ["informa", "simple", "estandar", "preguntas", "almacenamiento"]))
+  const [included, setIncluded] = useState(String(seed?.argosIncludedQuestions ?? 300))
+  const [packQuestions, setPackQuestions] = useState(String(seed?.argosPackQuestions ?? 100))
+  const [includedGb, setIncludedGb] = useState(String(seed?.storageIncludedGb ?? 20))
+  const [maxDiscount, setMaxDiscount] = useState(String((seed?.maxDiscountBps ?? 6000) / 100))
+  const [sellerDiscount, setSellerDiscount] = useState(String((seed?.sellerDiscountBps ?? 1000) / 100))
+  const [trialCredit, setTrialCredit] = useState(seed ? centsToMajor(seed.trialCreditCents, seed.currency) : "")
+  const [trialDays, setTrialDays] = useState(String(seed?.trialDays ?? 30))
+  const [trialMaxCredit, setTrialMaxCredit] = useState(seed ? centsToMajor(seed.trialMaxCreditCents, seed.currency) : "")
+  const [trialMaxDays, setTrialMaxDays] = useState(String(seed?.trialMaxDays ?? 60))
   const [isDefault, setIsDefault] = useState(plan?.isDefault ?? false)
   // Un plan nuevo nace sin publicar en la web (decisión 14 de Fundadores).
   const [showOnWeb, setShowOnWeb] = useState(plan?.showOnWeb ?? false)
-  const [seatLimit, setSeatLimit] = useState(plan?.seatLimit ? String(plan.seatLimit) : "")
-  const [guaranteeMonths, setGuaranteeMonths] = useState(plan?.guaranteeMonths ? String(plan.guaranteeMonths) : "")
+  const [seatLimit, setSeatLimit] = useState(seed?.seatLimit ? String(seed.seatLimit) : "")
+  const [guaranteeMonths, setGuaranteeMonths] = useState(seed?.guaranteeMonths ? String(seed.guaranteeMonths) : "")
   const [error, setError] = useState<string | null>(null)
+
+  /** «Empezar con los precios de»: copia los precios y la prueba de otro plan; nombre y código no. */
+  function copyFrom(id: string) {
+    setTemplate(id)
+    const from = plans.find((item) => item.id === id)
+    if (!from) return
+    setCurrency(from.currency)
+    setPrice(centsToMajor(from.priceCents, from.currency))
+    setCredit(centsToMajor(from.creditCents, from.currency))
+    setPrices(Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(from[item.field])])) as Record<PriceKey, string>)
+    setFixed(new Set(from.fixedPriceTiers))
+    setIncluded(String(from.argosIncludedQuestions))
+    setPackQuestions(String(from.argosPackQuestions))
+    setIncludedGb(String(from.storageIncludedGb))
+    setMaxDiscount(String(from.maxDiscountBps / 100))
+    setSellerDiscount(String(from.sellerDiscountBps / 100))
+    setTrialCredit(centsToMajor(from.trialCreditCents, from.currency))
+    setTrialDays(String(from.trialDays))
+    setTrialMaxCredit(centsToMajor(from.trialMaxCreditCents, from.currency))
+    setTrialMaxDays(String(from.trialMaxDays))
+    setSeatLimit(from.seatLimit ? String(from.seatLimit) : "")
+    setGuaranteeMonths(from.guaranteeMonths ? String(from.guaranteeMonths) : "")
+  }
+  const words = productWords(product)
   const compareTo = listPlan && listPlan.id !== plan?.id && listPlan.currency === currency.trim().toUpperCase() ? listPlan : undefined
 
   const terms = {
@@ -201,6 +242,8 @@ export function PlanDrawer({
       const body = {
         code: code.trim(),
         name: name.trim(),
+        // Solo al crear: el servidor no deja cambiarlo después.
+        ...(plan ? {} : { product }),
         currency: currency.trim().toUpperCase(),
         priceCents,
         creditCents: terms.creditCents,
@@ -247,13 +290,71 @@ export function PlanDrawer({
     <FormDrawer
       open
       title={plan ? "Editar plan" : "Nuevo plan"}
-      description="Planes y precios se configuran aquí, sin tocar código. Cambiar un precio rige desde ahora: lo ya contado y los cargos emitidos no cambian."
-      submitLabel="Guardar"
+      description={
+        plan
+          ? "Cambiar un precio rige desde ahora: lo ya contado y los cargos emitidos no cambian."
+          : "Cada plan es de un producto: lo usan sus clínicas y su web."
+      }
+      submitLabel={plan ? "Guardar" : "Crear plan"}
       onSubmit={() => save.mutate()}
       onClose={onClose}
       isSubmitting={save.isPending}
       error={error}
     >
+      {plan ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <ProductMark product={plan.product} /> · {domainOf(plan.product)}
+        </p>
+      ) : (
+        <>
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-sm font-medium">Producto</legend>
+            <RadioGroup
+              aria-label="Producto"
+              value={product}
+              onValueChange={(value) => {
+                if (value !== "dental" && value !== "medical") return
+                setProduct(value)
+                // Se marca por defecto o se publica en la web del producto nuevo, no del anterior.
+                setIsDefault(false)
+              }}
+              className="flex flex-wrap gap-2"
+            >
+              {CLINICAL_PRODUCTS.map((option) => (
+                <Label
+                  key={option}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 font-normal has-data-checked:border-foreground"
+                >
+                  <RadioGroupItem value={option} />
+                  <ProductMark product={option} className="text-sm" />
+                </Label>
+              ))}
+            </RadioGroup>
+            <p className="text-xs text-muted-foreground">No se cambia después: sus clínicas y su web son de ese producto.</p>
+          </fieldset>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="plan-template">Empezar con los precios de</Label>
+            <Select
+              value={template}
+              onValueChange={(value) => (value === null || value === NO_TEMPLATE ? setTemplate(NO_TEMPLATE) : copyFrom(String(value)))}
+              items={{ [NO_TEMPLATE]: "Ninguno: en blanco", ...Object.fromEntries(plans.map((item) => [item.id, `${item.name} · ${productWords(item.product).name}`])) }}
+            >
+              <SelectTrigger id="plan-template" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {plans.map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name} · {productWords(item.product).name}
+                  </SelectItem>
+                ))}
+                <SelectItem value={NO_TEMPLATE}>Ninguno: en blanco</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Copia precios, crédito y prueba; después cambias lo que quieras.</p>
+          </div>
+        </>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1">
           <Label htmlFor="plan-code">Código</Label>
@@ -360,15 +461,21 @@ export function PlanDrawer({
       <div className="flex items-start gap-2">
         <Checkbox id="plan-web" checked={showOnWeb} onCheckedChange={(value) => setShowOnWeb(value === true)} />
         <Label htmlFor="plan-web" className="flex flex-col items-start gap-0.5 font-normal">
-          <span>Mostrar en la web</span>
-          <span className="text-xs text-muted-foreground">Apagado al crear un plan. Al guardar, la web lo muestra en menos de un minuto.</span>
+          <span>Mostrar en {domainOf(product)}</span>
+          <span className="text-xs text-muted-foreground">
+            Sus precios salen en la web de {words.name}. Apagado al crear un plan; al guardar, la web lo muestra en menos de un minuto.
+          </span>
         </Label>
       </div>
 
       <div className="flex items-start gap-2">
         <Checkbox id="plan-default" checked={isDefault} onCheckedChange={(value) => setIsDefault(value === true)} />
-        <Label htmlFor="plan-default" className="font-normal">
-          Plan por defecto: con él se cuenta y se prueba mientras la clínica no elige otro.
+        <Label htmlFor="plan-default" className="flex flex-col items-start gap-0.5 font-normal">
+          <span>Plan por defecto de {words.name}</span>
+          <span className="text-xs text-muted-foreground">
+            Con él abren, prueban y se cuentan las clínicas de {words.name} que no eligen otro. El de{" "}
+            {productWords(product === "dental" ? "medical" : "dental").name} no cambia.
+          </span>
         </Label>
       </div>
 

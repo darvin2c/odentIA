@@ -309,7 +309,7 @@ export function createApp(deps: AppDeps) {
     return next()
   })
 
-  app.use("/api/auth/organization/*", createSaasPreAuthGuard(deps))
+  app.use("/api/auth/organization/*", createSaasPreAuthGuard({ ...deps, productOf: productOfRequest }))
   app.use("/api/auth/*", createAdminFactorBoundary(deps))
 
   // Better Auth: montado ANTES de los guards.
@@ -359,7 +359,7 @@ export function createApp(deps: AppDeps) {
     }),
   )
   // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.
-  app.route("/api/public/sign-up", createPublicSignUpRoute({ ownerDb: deps.ownerDb }))
+  app.route("/api/public/sign-up", createPublicSignUpRoute({ ownerDb: deps.ownerDb, productOf: productOfRequest }))
   // Fundadores (issue 165): precios que publica la web, solicitudes de la lista de espera y la invitación.
   app.route(
     "/api/public/founders",

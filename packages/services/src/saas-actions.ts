@@ -17,6 +17,7 @@ import { adminLineOf } from "./admin-lines.js"
 import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { ServiceError } from "./errors.js"
 import { orgProduct } from "./locale.js"
+import { defaultPlanOf } from "./saas-plan-product.js"
 import { SAAS_TERMS_INITIAL, saasTermsAt } from "./saas-commercial-terms.js"
 
 /* ---------- Lo que hicieron los agentes, por acción (ADR 0031 y 0085) ---------- */
@@ -151,11 +152,7 @@ export async function getActionPricing(tx: Db, orgId: string, now = new Date()):
     .limit(1)
   const [plan] = sub?.planId
     ? await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-    : await tx
-        .select()
-        .from(saasPlan)
-        .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
-        .limit(1)
+    : await tx.select().from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
   const prices = planPrices(plan)
   return {
     planId: plan?.id ?? null,

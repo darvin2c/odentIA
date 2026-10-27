@@ -26,7 +26,7 @@ import {
   PageShell,
 } from "@odentia/ui-patterns"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
-import { useForm } from "@tanstack/react-form"
+import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Building2, Plus } from "lucide-react"
@@ -242,6 +242,8 @@ function OrganizationsPage() {
       priceCents: z.number(),
       trialDays: z.number(),
       isDefault: z.boolean(),
+      isActive: z.boolean(),
+      product: z.enum(CLINICAL_PRODUCTS),
     }),
   )
   const plansQuery = useQuery({
@@ -249,23 +251,13 @@ function OrganizationsPage() {
     enabled: isAdmin && assistedOpen,
     queryFn: async () => plansSchema.parse(await api<unknown>("/api/admin/billing/plans")),
   })
-  // La prueba del alta dura lo que dice el plan por defecto; sin él, las
-  // condiciones comerciales (la base decide igual al crear la clínica).
+  // La prueba del alta dura lo que dice el plan por defecto de su producto;
+  // sin él, las condiciones comerciales (la base decide igual al crear la clínica).
   const termsQuery = useQuery({
     queryKey: ["admin", "billing", "terms"],
     enabled: isAdmin && assistedOpen,
     queryFn: () => api<{ values: { trialDays: number } }>("/api/admin/billing/terms"),
   })
-  const trialDays = plansQuery.data?.find((plan) => plan.isDefault)?.trialDays ?? termsQuery.data?.values.trialDays
-  const trialLabel = trialDays ? `Prueba de ${trialDays} días` : "Prueba"
-  const plans = (plansQuery.data ?? []).map((plan) => ({
-    code: plan.code,
-    label: `${plan.name} · ${plan.currency} ${(plan.priceCents / 100).toFixed(2)}`,
-  }))
-  function planNameOf(code: string): string {
-    if (code === "__none") return "Sin plan (prueba)"
-    return plans.find((plan) => plan.code === code)?.label ?? "Plan"
-  }
 
   const countries = useMemo(
     () =>
@@ -393,6 +385,19 @@ function OrganizationsPage() {
       }
     },
   })
+  // Solo los planes del producto elegido (ADR 0093).
+  const assistedProduct = useStore(form.store, (state) => state.values.product)
+  const productPlans = (plansQuery.data ?? []).filter((plan) => plan.product === assistedProduct)
+  const trialDays = productPlans.find((plan) => plan.isDefault && plan.isActive)?.trialDays ?? termsQuery.data?.values.trialDays
+  const trialLabel = trialDays ? `Prueba de ${trialDays} días` : "Prueba"
+  const plans = productPlans.map((plan) => ({
+    code: plan.code,
+    label: `${plan.name} · ${plan.currency} ${(plan.priceCents / 100).toFixed(2)}`,
+  }))
+  function planNameOf(code: string): string {
+    if (code === "__none") return "Sin plan (prueba)"
+    return plans.find((plan) => plan.code === code)?.label ?? "Plan"
+  }
 
   const items = listQuery.data?.items ?? []
   const detail: OrgDetail | undefined = detailQuery.data
@@ -650,7 +655,10 @@ function OrganizationsPage() {
                 <Select<ClinicalProduct>
                   value={field.state.value}
                   onValueChange={(next) => {
-                    if (next) field.handleChange(next)
+                    if (!next) return
+                    field.handleChange(next)
+                    // El plan elegido era del otro producto: se vuelve a elegir.
+                    form.setFieldValue("planCode", "")
                   }}
                 >
                   <SelectTrigger id="assisted-product">
