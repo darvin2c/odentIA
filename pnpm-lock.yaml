@@ -164,6 +164,9 @@ importers:
       postgres:
         specifier: 3.4.9
         version: 3.4.9
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
       zod:
         specifier: 4.6.2
         version: 4.6.2
@@ -177,9 +180,6 @@ importers:
       testcontainers:
         specifier: 12.1.0
         version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
-      tsx:
-        specifier: 4.23.13
-        version: 4.23.13
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -613,6 +613,9 @@ importers:
       postgres:
         specifier: 3.4.9
         version: 3.4.9
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
       zod:
         specifier: 4.6.2
         version: 4.6.2
@@ -623,9 +626,6 @@ importers:
       testcontainers:
         specifier: 12.1.0
         version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
-      tsx:
-        specifier: 4.23.13
-        version: 4.23.13
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -915,6 +915,9 @@ importers:
       postgres:
         specifier: 3.4.9
         version: 3.4.9
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
     devDependencies:
       '@types/node':
         specifier: 22.20.2
@@ -925,9 +928,6 @@ importers:
       testcontainers:
         specifier: 12.1.0
         version: 12.1.0(patch_hash=f5kmca7lyl5dyed43ncv5o3kpq)
-      tsx:
-        specifier: 4.23.13
-        version: 4.23.13
       typescript:
         specifier: 7.0.2
         version: 7.0.2
