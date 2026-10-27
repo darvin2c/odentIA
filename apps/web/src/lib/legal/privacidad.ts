@@ -59,7 +59,7 @@ export const PRIVACIDAD: LegalDoc = {
       title: "Qué datos tratamos",
       blocks: [
         { h: "Visitantes de la web" },
-        "La web de odentIA no usa cookies ni herramientas de analítica de terceros. El servidor registra datos técnicos de cada visita (dirección IP, fecha y hora, página solicitada, navegador) para mantener la web segura y medir el tráfico de forma agregada.",
+        "Las webs de odentIA y latidIA no usan cookies ni cargan herramientas de analítica, publicidad o tipografías de terceros. El servidor registra datos técnicos de cada visita (dirección IP, fecha y hora, página solicitada, navegador) para mantener la web segura y medir el tráfico de forma agregada.",
         "Si nos escribe, tratamos los datos que nos envíe: nombre, correo electrónico, teléfono, clínica y el contenido del mensaje.",
         { h: "Usuarios de la cuenta" },
         {
@@ -132,6 +132,7 @@ export const PRIVACIDAD: LegalDoc = {
       title: "Con quién los compartimos y flujo transfronterizo",
       blocks: [
         "No vendemos datos personales. Los compartimos solo con proveedores que nos ayudan a prestar el servicio (alojamiento, almacenamiento, correo, modelos de inteligencia artificial, transcripción de audios y sugerencia de direcciones) y con las autoridades cuando la ley lo exige. La lista de proveedores, lo que hace cada uno y su país está en la página de [subencargados](/subencargados).",
+        "Si un usuario entra con su cuenta de Google, Google confirma su identidad según sus propias condiciones y odentIA recibe solo su nombre, su correo y su foto de perfil.",
         "Varios de esos proveedores están fuera del Perú, por ejemplo en los Estados Unidos. Esos envíos constituyen flujo transfronterizo de datos personales. odentIA los realiza con proveedores que ofrecen niveles de protección adecuados o garantías contractuales suficientes, conforme a la Ley 29733 y su Reglamento. Las garantías son las condiciones de protección de datos que cada proveedor aplica a sus clientes empresariales.",
         ENTRENAMIENTO,
       ],

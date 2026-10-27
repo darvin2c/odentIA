@@ -44,7 +44,7 @@ export { founderInvitationEmail, moneyText, waitlistReceivedEmail } from "./saas
 /* ---------- Cómo se abren clínicas ---------- */
 
 /**
- * Cómo se abren las clínicas de un producto (ADR 0092). «Solo con invitación»
+ * Cómo se abren las clínicas de un producto (ADR 0093). «Solo con invitación»
  * si no hay fila: lo seguro mientras no se diga otra cosa.
  */
 export async function getSignupMode(tx: Db, product: ClinicalProduct = "dental"): Promise<SaasSignupMode> {
@@ -203,7 +203,7 @@ export interface WaitlistFilter {
 export interface WaitlistPage {
   rows: WaitlistRow[]
   counts: Record<SaasWaitlistStatus, number>
-  /** Lugares del plan por invitación de cada producto, el que se usa al invitar (ADR 0092). */
+  /** Lugares del plan por invitación de cada producto, el que se usa al invitar (ADR 0093). */
   seats: Record<ClinicalProduct, FounderSeats | null>
   /** Cómo se abren las clínicas de cada producto. */
   modes: Record<ClinicalProduct, SaasSignupMode>
@@ -237,7 +237,7 @@ export async function founderSeats(tx: Db, planId: string, now = new Date()): Pr
   return { planId: plan.id, planName: plan.name, used: row?.used ?? 0, limit: plan.seatLimit }
 }
 
-/** El plan por invitación de un producto: el activo con lugares, o null si no hay (ADR 0092). */
+/** El plan por invitación de un producto: el activo con lugares, o null si no hay (ADR 0093). */
 export async function invitationPlan(tx: Db, product: ClinicalProduct = "dental"): Promise<{ id: string; name: string } | null> {
   const [plan] = await tx
     .select({ id: saasPlan.id, name: saasPlan.name })
@@ -398,7 +398,7 @@ export async function inviteFromWaitlist(
   }
   const [plan] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1).for("update")
   if (!plan || !plan.isActive) throw notFound("Plan")
-  // La clínica entra con un plan de su producto (ADR 0092).
+  // La clínica entra con un plan de su producto (ADR 0093).
   if (plan.product !== requestProduct) {
     throw validation(`${plan.name} es de ${productWords(plan.product as ClinicalProduct).name}: esta solicitud es de ${productWords(requestProduct).name}`)
   }
@@ -480,7 +480,7 @@ function discountAgainst(plan: typeof saasPlan.$inferSelect, list: typeof saasPl
 }
 
 export async function founderOffer(tx: Db, plan: typeof saasPlan.$inferSelect): Promise<FounderOffer> {
-  // Se compara con el plan de lista de su mismo producto (ADR 0092).
+  // Se compara con el plan de lista de su mismo producto (ADR 0093).
   const product: ClinicalProduct = isClinicalProduct(plan.product) ? plan.product : "dental"
   const [list] = await tx.select().from(saasPlan).where(defaultPlanOf(product)).limit(1)
   return {
@@ -611,7 +611,7 @@ function addMonths(date: Date, months: number): Date {
  * acciones congelan su precio al contarse. Devuelve las clínicas movidas.
  */
 export async function endFounderGuarantees(tx: Db, now = new Date()): Promise<string[]> {
-  // Cada clínica pasa al plan de lista de su producto (ADR 0092).
+  // Cada clínica pasa al plan de lista de su producto (ADR 0093).
   const lists = new Map<ClinicalProduct, string | null>()
   const listOf = async (product: ClinicalProduct) => {
     if (!lists.has(product)) {
@@ -796,7 +796,7 @@ function publicPlan(plan: typeof saasPlan.$inferSelect): PublicPlanPrices {
 }
 
 /**
- * Lo que la web de un producto publica (decisión 14, ADR 0092): solo sus
+ * Lo que la web de un producto publica (decisión 14, ADR 0093): solo sus
  * planes activos con «Mostrar en la web». Nunca los lugares que quedan
  * (decisión 9) ni planes de una sola clínica.
  */

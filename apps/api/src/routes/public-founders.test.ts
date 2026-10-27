@@ -226,7 +226,7 @@ it("con el alta abierta, se abre sin invitación y con el plan por defecto", asy
   await ownerDb.update(saasSignupPolicy).set({ mode: "invitacion" })
 })
 
-it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0092)", async () => {
+it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0093)", async () => {
   await createSaasPlan(ownerDb, ADMIN.userId, {
     code: "api-lista-latidia",
     name: "Plan latidIA",

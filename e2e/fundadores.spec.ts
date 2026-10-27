@@ -184,7 +184,7 @@ test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", asyn
   // Plan y alta en Cobros y planes: los campos de Fundadores y el interruptor de alta.
   await gotoHydrated(page, hostUrl("admin", "/billing"))
   await expect(page.getByRole("heading", { name: "Cobros y planes", level: 1 })).toBeVisible()
-  // Cada producto decide su alta y tiene su lista (ADR 0092).
+  // Cada producto decide su alta y tiene su lista (ADR 0093).
   const alta = page.locator("#alta")
   await expect(alta.getByRole("radiogroup")).toHaveCount(2)
   await expect(alta.getByRole("radio", { name: /Cualquiera abre su consultorio con el plan por defecto de latidIA/ })).toBeVisible()

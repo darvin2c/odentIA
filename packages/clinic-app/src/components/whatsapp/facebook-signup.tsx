@@ -121,12 +121,10 @@ export function FacebookSignupPending({
 }
 
 /**
- * Botón «Conectar con Facebook». No se dibuja si la instalación no tiene la app
- * de odentIA configurada (`GET /api/channels/whatsapp/signup` → `enabled`).
- * Lleva, en la misma pestaña, a la página del panel que abre la ventana de
- * Meta; al terminar, el panel vuelve aquí.
+ * Si esta instalación tiene «Conectar con Facebook» (la app de odentIA en Meta)
+ * y la página es de una clínica. `loading`: aún no se sabe.
  */
-export function FacebookSignupButton({ reconnectConnectionId }: FacebookSignupButtonProps) {
+export function useFacebookSignupAvailable(): { available: boolean; loading: boolean } {
   const config = useQuery({
     queryKey: ["whatsapp-signup"],
     queryFn: () => apiFetch<{ data: SignupConfig }>("/api/channels/whatsapp/signup"),
@@ -134,7 +132,19 @@ export function FacebookSignupButton({ reconnectConnectionId }: FacebookSignupBu
     retry: false,
   })
   const slug = orgSlugFromHostname(requestHostname())
-  if (!config.data?.data.enabled || !slug) return null
+  return { available: Boolean(config.data?.data.enabled && slug), loading: config.isPending }
+}
+
+/**
+ * Botón «Conectar con Facebook». No se dibuja si la instalación no tiene la app
+ * de odentIA configurada (`GET /api/channels/whatsapp/signup` → `enabled`).
+ * Lleva, en la misma pestaña, a la página del panel que abre la ventana de
+ * Meta; al terminar, el panel vuelve aquí.
+ */
+export function FacebookSignupButton({ reconnectConnectionId }: FacebookSignupButtonProps) {
+  const { available } = useFacebookSignupAvailable()
+  const slug = orgSlugFromHostname(requestHostname())
+  if (!available || !slug) return null
   const search = new URLSearchParams({ org: slug, ...(reconnectConnectionId ? { reconectar: reconnectConnectionId } : {}) })
   return (
     <div className="flex flex-wrap items-center gap-3">

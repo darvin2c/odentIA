@@ -625,6 +625,22 @@ export interface ConnectionItem {
     registeredAt: string | null
     pending: { step: string; title: string; problem: string | null }[]
   } | null
+  /** Solo en WhatsApp con la app propia de la clínica: lo que odentIA hizo en Meta y sabe de sus claves. */
+  ownApp?: OwnAppState | null
+}
+
+/** WhatsApp con la app propia: lo que odentIA hizo en Meta por la conexión y lo que sabe de sus claves. */
+export interface OwnAppState {
+  registeredAt: string | null
+  subscribedAt: string | null
+  /** Qué pasó en el último intento de cada paso pendiente, con las palabras del servidor. */
+  problems: { suscribir?: string; registrar?: string }
+  /** El número ya tenía un PIN: hay que escribirlo para registrarlo. */
+  pinNeeded: boolean
+  tokenExpiresAt: string | null
+  /** Meta confirmó la clave y la clave secreta; nulo: no se pudo preguntar. */
+  keysCheckedAt: string | null
+  signatureRejectedAt: string | null
 }
 
 export interface AgentConfig {

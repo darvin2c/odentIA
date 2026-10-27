@@ -3,7 +3,7 @@ import { saasPlan } from "@odentia/db/schema/saas-billing"
 import { and, eq } from "drizzle-orm"
 
 /**
- * El plan de lista de un producto (ADR 0092): con él abre y se cuenta una
+ * El plan de lista de un producto (ADR 0093): con él abre y se cuenta una
  * clínica de ese producto que no tiene plan propio. Uno como mucho por
  * producto (`saas_plan_default_uidx`).
  */

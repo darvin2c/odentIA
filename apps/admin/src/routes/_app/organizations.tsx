@@ -385,7 +385,7 @@ function OrganizationsPage() {
       }
     },
   })
-  // Solo los planes del producto elegido (ADR 0092).
+  // Solo los planes del producto elegido (ADR 0093).
   const assistedProduct = useStore(form.store, (state) => state.values.product)
   const productPlans = (plansQuery.data ?? []).filter((plan) => plan.product === assistedProduct)
   const trialDays = productPlans.find((plan) => plan.isDefault && plan.isActive)?.trialDays ?? termsQuery.data?.values.trialDays

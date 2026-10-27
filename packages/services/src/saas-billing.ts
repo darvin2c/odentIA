@@ -309,7 +309,7 @@ async function notifyOrg(tx: Db, orgId: string, kind: string): Promise<void> {
 export interface SaasPlanInput {
   code: string
   name: string
-  /** El producto del plan (ADR 0092): se elige al crearlo y no cambia. Sin decirlo, odentIA. */
+  /** El producto del plan (ADR 0093): se elige al crearlo y no cambia. Sin decirlo, odentIA. */
   product?: ClinicalProduct
   description?: string | null
   currency: string
@@ -351,7 +351,7 @@ export interface SaasPlanRow {
   id: string
   code: string
   name: string
-  /** El producto del plan (ADR 0092). */
+  /** El producto del plan (ADR 0093). */
   product: ClinicalProduct
   description: string | null
   currency: string
@@ -518,7 +518,7 @@ function assertPlanTerms(plan: Pick<typeof saasPlan.$inferSelect, keyof typeof P
   assertActionPricingFloor(plan)
 }
 
-/** Un solo plan por defecto por producto: marcar uno desmarca el anterior de ese producto (ADR 0092). */
+/** Un solo plan por defecto por producto: marcar uno desmarca el anterior de ese producto (ADR 0093). */
 async function clearOtherDefaults(tx: Db, keepId: string | null, product: ClinicalProduct): Promise<void> {
   const ofProduct = and(eq(saasPlan.isDefault, true), eq(saasPlan.product, product))
   await tx
@@ -569,7 +569,7 @@ export async function listSaasPlans(
  */
 export async function listClinicPlans(tx: Db, orgId: string): Promise<SaasPlanRow[]> {
   const sub = await getSaasSubscription(tx, orgId)
-  // El de lista es el de su producto: un consultorio de latidIA no ve el de odentIA (ADR 0092).
+  // El de lista es el de su producto: un consultorio de latidIA no ve el de odentIA (ADR 0093).
   const listPlan = defaultPlanOf(await orgProduct(tx, orgId))
   const rows = await tx
     .select()
@@ -639,7 +639,7 @@ export async function updateSaasPlan(
   Object.assign(patch, actionTerms(input))
   const [current] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
   if (!current) throw notFound("Plan")
-  // El producto se elige al crearlo: sus clínicas y su web son de ese producto (ADR 0092).
+  // El producto se elige al crearlo: sus clínicas y su web son de ese producto (ADR 0093).
   if (input.product !== undefined && input.product !== current.product) {
     throw validation("El producto de un plan no se cambia: crea un plan nuevo con sus precios")
   }
@@ -835,7 +835,7 @@ export async function startSaasTrial(
     sellerId?: string
     isDemo?: boolean
     billingStart?: SaasBillingStart
-    /** El producto de la clínica cuando su perfil aún no existe (el alta por el dominio, ADR 0092). */
+    /** El producto de la clínica cuando su perfil aún no existe (el alta por el dominio, ADR 0093). */
     product?: ClinicalProduct
   } = {},
   now = new Date(),
@@ -848,7 +848,7 @@ export async function startSaasTrial(
   const product = input.product ?? (await orgProduct(tx, orgId))
   if (input.planCode) {
     plan = await planByCode(tx, input.planCode)
-    // Una clínica entra con un plan de su producto (ADR 0092).
+    // Una clínica entra con un plan de su producto (ADR 0093).
     if (plan.product !== product) {
       throw validation(`${plan.name} es de ${productWords(plan.product).name}: esta clínica es de ${productWords(product).name}`)
     }
@@ -883,7 +883,7 @@ export async function startSaasTrial(
       patch.currentPeriodEnd = addMonth(now)
     }
     // La prueba que abre el disparador al crear la clínica dura lo del plan de odentIA (aún no
-    // sabe el producto); en otro producto manda su propio plan de lista (ADR 0092).
+    // sabe el producto); en otro producto manda su propio plan de lista (ADR 0093).
     if (existing.status === "prueba" && !existing.planId && !plan && existing.trialStartedAt && product !== "dental") {
       const [own] = await tx.select({ trialDays: saasPlan.trialDays }).from(saasPlan).where(defaultPlanOf(product)).limit(1)
       const ends = own ? addDays(existing.trialStartedAt, own.trialDays) : null
@@ -1030,7 +1030,7 @@ export async function chooseSaasPlan(
 ): Promise<SaasSubscriptionRow> {
   const plan = await planByCode(tx, planCode)
   const current = await getSaasSubscription(tx, orgId)
-  // Solo los planes de su producto (ADR 0092).
+  // Solo los planes de su producto (ADR 0093).
   if (plan.product !== (await orgProduct(tx, orgId)) && current?.planId !== plan.id) {
     throw new ServiceError("SAAS_PLAN_NOT_OFFERED", 409, "Ese plan es de otro producto")
   }

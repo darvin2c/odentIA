@@ -16,7 +16,7 @@ export function createPublicSignUpRoute(deps: { ownerDb: Db; productOf?: (c: Con
   const app = new Hono()
   app.get("/", async (c) => {
     c.header("Cache-Control", "public, max-age=60")
-    // La oferta y cómo se entra son los del producto del dominio (ADR 0092).
+    // La oferta y cómo se entra son los del producto del dominio (ADR 0093).
     const product = deps.productOf?.(c) ?? "dental"
     const offer = await getPublicTrialOffer(deps.ownerDb, product)
     const signupMode = await getSignupMode(deps.ownerDb, product)

@@ -1,7 +1,7 @@
 /**
  * Cobros y planes (admin): suscripciones con saldo, comprobantes pendientes
  * de confirmación, cargos manuales, los planes y el alta de cada producto
- * (ADR 0092) y medios por moneda.
+ * (ADR 0093) y medios por moneda.
  */
 import { CLINICAL_PRODUCTS, type ClinicalProduct, formatMoney, productWords } from "@odentia/clinical"
 import {
@@ -149,7 +149,7 @@ function errorMessage(error: unknown): string {
 function BillingPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState("")
-  // El producto filtra las clínicas, los planes y el alta de esta página (ADR 0092); los medios son de los dos.
+  // El producto filtra las clínicas, los planes y el alta de esta página (ADR 0093); los medios son de los dos.
   const [product, setProduct] = useState<ProductChoice>("todos")
   const products = useOrgProducts().data ?? {}
   const ofProduct = <T extends { organizationId: string }>(rows: readonly T[] | undefined): T[] =>
@@ -447,7 +447,7 @@ function BillingPage() {
             onAction={() => setPlanDrawer({})}
           />
         ) : (
-          // Una lista por producto (ADR 0092): sus clínicas y su web usan solo esos planes.
+          // Una lista por producto (ADR 0093): sus clínicas y su web usan solo esos planes.
           (product === "todos" ? CLINICAL_PRODUCTS : [product]).map((of) => (
             <div key={of} className="flex flex-col gap-2">
               <h3 className="flex items-center gap-1.5 text-sm">
@@ -1168,7 +1168,7 @@ function HistorySection({
 
 type SignupMode = "invitacion" | "abierta"
 
-/** Las dos formas de abrir clínicas de un producto, con el nombre de su web y de su plan (ADR 0092). */
+/** Las dos formas de abrir clínicas de un producto, con el nombre de su web y de su plan (ADR 0093). */
 function signupModes(product: ClinicalProduct) {
   const { name } = productWords(product)
   const place = product === "medical" ? "su consultorio" : "su clínica"
@@ -1184,7 +1184,7 @@ function signupModes(product: ClinicalProduct) {
 
 /**
  * «Alta de clínicas nuevas» (Fundadores, decisión 2): cada producto decide si
- * se entra con invitación o libre (ADR 0092). Cambiarla rige al instante.
+ * se entra con invitación o libre (ADR 0093). Cambiarla rige al instante.
  */
 function SignupModeSection({ products }: { products: readonly ClinicalProduct[] }) {
   const queryClient = useQueryClient()

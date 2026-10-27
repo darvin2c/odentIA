@@ -18,7 +18,7 @@ export interface AdminPlan {
   id: string
   code: string
   name: string
-  /** De qué producto es (ADR 0092): lo usan sus clínicas y su web. */
+  /** De qué producto es (ADR 0093): lo usan sus clínicas y su web. */
   product: ClinicalProduct
   description: string | null
   currency: string
@@ -147,7 +147,7 @@ export function PlanDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
-  // El producto se elige al crear y no cambia después (ADR 0092).
+  // El producto se elige al crear y no cambia después (ADR 0093).
   const [product, setProduct] = useState<ClinicalProduct>(plan?.product ?? initialProduct)
   // Un plan nuevo empieza con los precios del de lista de su producto, o de otro si se elige.
   const listOf = (of: ClinicalProduct) => plans.find((item) => item.product === of && item.isDefault && item.isActive)

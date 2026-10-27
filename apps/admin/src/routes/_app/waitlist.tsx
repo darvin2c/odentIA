@@ -110,7 +110,7 @@ const row = z.object({
 type Row = z.infer<typeof row>
 const seatsShape = z.object({ planId: z.string(), planName: z.string(), used: z.number(), limit: z.number().nullable() }).nullable()
 const modeShape = z.enum(["invitacion", "abierta"])
-// Lugares y alta de cada producto (ADR 0092): cada uno tiene su Fundadores.
+// Lugares y alta de cada producto (ADR 0093): cada uno tiene su Fundadores.
 const pagePayload = z.object({
   rows: z.array(row),
   counts: z.record(z.string(), z.number()),

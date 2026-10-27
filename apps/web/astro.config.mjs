@@ -8,8 +8,9 @@ import react from "@astrojs/react"
 import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
-// La presentación de Fundadores es para mostrarla o enviarla, no para buscadores (lleva noindex).
-const FUERA_DEL_MAPA = /\/presentacion$/
+// Las presentaciones (/presentacion y cada una debajo) son para mostrarlas o enviarlas, no para
+// buscadores (llevan noindex).
+const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
 
 // La web de latidIA la publica el mismo servidor con VITE_PRODUCT=medical: su dominio y solo sus
 // páginas en el mapa del sitio (`src/lib/latidia-pages.json`); las propias de latidIA no van en el de odentIA.

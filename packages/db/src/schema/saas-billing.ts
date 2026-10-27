@@ -115,7 +115,7 @@ export const saasPlan = adminSchema.table(
     trialMaxCreditCents: integer("trial_max_credit_cents").notNull().default(0),
     trialMaxDays: integer("trial_max_days").notNull().default(60),
     /**
-     * El producto del plan (ADR 0092): lo usan solo las clínicas de ese producto
+     * El producto del plan (ADR 0093): lo usan solo las clínicas de ese producto
      * y su web. Se elige al crearlo y no cambia.
      */
     product: text("product").notNull().default("dental"),
@@ -785,7 +785,7 @@ export type SaasSignupMode = (typeof SAAS_SIGNUP_MODES)[number]
 
 /**
  * Cómo se abren clínicas nuevas: «solo con invitación» o «abierta», una por
- * producto (ADR 0092): `mode` es el de odentIA y `medical_mode` el de latidIA.
+ * producto (ADR 0093): `mode` es el de odentIA y `medical_mode` el de latidIA.
  * Una sola fila (`id = 1`) que escribe la administración; la lee el guard de
  * `organization/create`. Global, sin `organization_id`: solo `ownerDb`.
  */

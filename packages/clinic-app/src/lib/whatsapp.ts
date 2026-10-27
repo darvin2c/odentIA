@@ -1,4 +1,4 @@
-import type { ConnectionItem } from "./crm"
+import type { ConnectionItem, OwnAppState } from "./crm"
 import { type ChannelField, channelAccount } from "./integrations"
 import { ADMIN_NAME } from "./agent-names"
 import { appWords } from "./product-words"
@@ -101,6 +101,8 @@ export interface ConnectResult {
   templates?: ConnectionMessagesReport | null
   /** Solo al conectar a mano: la clave con la que Meta verifica la dirección. */
   webhookSecret?: string
+  /** Solo con la app propia: lo que odentIA hizo en Meta y comprobó de las claves. */
+  ownApp?: OwnAppState | null
 }
 
 export interface ConnectionSetup {
@@ -192,8 +194,115 @@ export function setupStep(state: { webhookVerifiedAt?: string | null; lastInboun
   return state.webhookVerifiedAt === null ? 2 : 3
 }
 
-/** Lo que le falta a una conexión activa para estar terminada. */
-export type ConnectionPending = "address" | "first-message" | "signup" | null
+/** Lo que le falta a una conexión activa para estar terminada. `own-app`: algo que odentIA no pudo hacer en Meta. */
+export type ConnectionPending = "address" | "first-message" | "signup" | "own-app" | null
+
+/* ---------- La app propia de la clínica en Meta ---------- */
+
+/** Un mensaje firmado con otra clave llegó después del último que se pudo leer. */
+export function ownAppSignatureProblem(state: OwnAppState | null | undefined, lastInboundAt?: string | null): boolean {
+  const rejected = state?.signatureRejectedAt
+  if (!rejected) return false
+  return !lastInboundAt || Date.parse(rejected) > Date.parse(lastInboundAt)
+}
+
+/** Lo que odentIA no pudo hacer en Meta por la conexión: registrar el número o suscribir la app. */
+export function ownAppUnfinished(state: OwnAppState | null | undefined): boolean {
+  return Boolean(state && (!state.registeredAt || !state.subscribedAt))
+}
+
+export type OwnAppCheckState = "ok" | "warn" | "problem"
+
+export interface OwnAppCheck {
+  key: string
+  state: OwnAppCheckState
+  /** Lo que se comprobó, en negrita. */
+  title: string
+  /** Lo que sigue: qué significa o qué hacer. */
+  text: string
+}
+
+/**
+ * La lista de «Comprobar» con la app propia: cada cosa que odentIA comprobó o
+ * hizo en Meta, con las palabras del servidor cuando algo falló. `day` pone la
+ * fecha en palabras de la clínica.
+ */
+export function ownAppChecks(
+  state: OwnAppState,
+  { found, day, lastInboundAt = null }: { found: string | null; day: (iso: string) => string; lastInboundAt?: string | null },
+): OwnAppCheck[] {
+  const checks: OwnAppCheck[] = []
+  if (found) checks.push({ key: "numero", state: "ok", title: "Encontramos el número", text: found })
+  if (state.keysCheckedAt) {
+    checks.push(
+      state.tokenExpiresAt
+        ? {
+            key: "vence",
+            state: "warn",
+            title: `La clave vence el ${day(state.tokenExpiresAt)}.`,
+            text: "Funciona, pero ese día dejará de enviar. Mejor genera una con caducidad «Nunca» y usa «Cambiar la clave».",
+          }
+        : { key: "vence", state: "ok", title: "La clave es permanente:", text: "no vence." },
+      { key: "permisos", state: "ok", title: "La clave puede enviar y pedir mensajes.", text: "" },
+      { key: "secreta", state: "ok", title: "La clave secreta es de la misma app.", text: "" },
+    )
+  } else {
+    checks.push({
+      key: "secreta",
+      state: "warn",
+      title: "No pudimos preguntarle a Meta por las claves.",
+      text: "Lo comprobará el primer mensaje que llegue.",
+    })
+  }
+  if (ownAppSignatureProblem(state, lastInboundAt)) {
+    checks.push({
+      key: "firma",
+      state: "problem",
+      title: "Llegó un mensaje, pero no pudimos leerlo.",
+      text: "Meta lo firmó con otra clave secreta. Pega la «Clave secreta de la app» de la misma app con «Cambiar la clave».",
+    })
+  }
+  checks.push(
+    state.registeredAt
+      ? { key: "registro", state: "ok", title: "El número quedó registrado en WhatsApp.", text: "Su PIN, si lo pusimos nosotros, queda guardado cifrado." }
+      : {
+          key: "registro",
+          state: "problem",
+          title: "Falta registrar el número en WhatsApp.",
+          text: state.problems.registrar ?? "Vuelve a comprobar.",
+        },
+    state.subscribedAt
+      ? { key: "suscripcion", state: "ok", title: "Tu app recibe los avisos de esta cuenta.", text: "" }
+      : {
+          key: "suscripcion",
+          state: "problem",
+          title: "Falta que tu app reciba los avisos de la cuenta.",
+          text: state.problems.suscribir ?? "Vuelve a comprobar.",
+        },
+  )
+  return checks
+}
+
+/** Días antes del vencimiento de la clave en que la tarjeta lo dice (lo mismo que avisa la campana). */
+export const OWN_APP_TOKEN_WARN_DAYS = 7
+
+/** «La clave vence el 25 de diciembre.» si vence dentro de 7 días o ya venció; nulo si no. */
+export function ownAppExpiryWords(state: OwnAppState | null | undefined, now: number, day: (iso: string) => string): string | null {
+  const at = state?.tokenExpiresAt
+  if (!at) return null
+  const left = Date.parse(at) - now
+  if (left > OWN_APP_TOKEN_WARN_DAYS * 86_400_000) return null
+  return left <= 0 ? "La clave de WhatsApp venció: los mensajes ya no salen." : `La clave de WhatsApp vence el ${day(at)}.`
+}
+
+/** El texto que se lleva «Pedir ayuda a odentIA»: en qué paso está y lo que encontró, nunca las claves. */
+export function ownAppHelpText(step: number, checks: OwnAppCheck[] = []): string {
+  const problems = checks.filter((check) => check.state !== "ok").map((check) => `- ${check.title} ${check.text}`.trim())
+  return [
+    `Me trabé conectando WhatsApp con mi propia app de Meta, en el paso ${step} de 3.`,
+    ...(problems.length > 0 ? ["Lo que dice la pantalla:", ...problems] : []),
+  ].join("\n")
+}
 
 /**
  * Qué falta, según cómo se conectó: con el botón de Facebook, los pasos que el
@@ -206,6 +315,9 @@ export function connectionPending(
 ): ConnectionPending {
   if (connection.status !== "active") return null
   if (connection.signup) return connection.signup.pending.length > 0 ? "signup" : null
+  if (ownAppUnfinished(connection.ownApp) || ownAppSignatureProblem(connection.ownApp, setup?.lastInboundAt ?? connection.lastInboundAt)) {
+    return "own-app"
+  }
   const step = setupStep(setup ?? connection)
   return step === 2 ? "address" : step === 3 ? "first-message" : null
 }
@@ -270,6 +382,17 @@ export function connectionWords(connection: ConnectionItem, since: Since, pendin
       tone: "pending",
       status: many ? "Faltan pasos." : "Falta un paso.",
       detail: "Todavía no quedó terminada de conectar: lo que falta está aquí abajo.",
+      facts,
+    }
+  }
+  if (pending === "own-app") {
+    return {
+      title,
+      tone: "pending",
+      status: "Necesita atención.",
+      detail: ownAppSignatureProblem(connection.ownApp, connection.lastInboundAt)
+        ? "Llegó un mensaje firmado con otra clave secreta: lo que falta está aquí abajo."
+        : `Falta algo que ${appWords().name} no pudo hacer en Meta: está aquí abajo.`,
       facts,
     }
   }

@@ -9,6 +9,7 @@ import type { Db } from "@odentia/db"
 import {
   channelConnection,
   type ConnectionHealth,
+  type ConnectionOwnApp,
   type ConnectionSignup,
   conversation,
 } from "@odentia/db/schema/crm"
@@ -27,6 +28,7 @@ import {
 } from "./clinic-messages.js"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
+import { checkOwnAppKeys, freshOwnApp, type OwnAppKeysChecked, settleOwnApp } from "./whatsapp-own-app.js"
 
 type ConnectionRow = typeof channelConnection.$inferSelect
 
@@ -62,6 +64,25 @@ export interface ConnectionSignupView {
   pending: SignupPending[]
 }
 
+/**
+ * Cómo va una conexión de WhatsApp hecha con la app propia de la clínica: lo
+ * que odentIA hizo en Meta por ella y lo que sabe de sus claves.
+ */
+export interface ConnectionOwnAppView {
+  registeredAt: string | null
+  subscribedAt: string | null
+  /** Qué pasó en el último intento de cada paso pendiente, en palabras. */
+  problems: { suscribir?: string; registrar?: string }
+  /** El número ya tenía un PIN: hay que escribirlo para registrarlo. */
+  pinNeeded: boolean
+  /** Cuándo vence la clave; nulo: no vence o no se supo. */
+  tokenExpiresAt: string | null
+  /** Meta confirmó la clave y la clave secreta; nulo: no se pudo preguntar. */
+  keysCheckedAt: string | null
+  /** Último aviso que llegó firmado con otra clave secreta; nulo: ninguno. */
+  signatureRejectedAt: string | null
+}
+
 export interface ConnectionPublic {
   id: string
   channel: string
@@ -78,6 +99,8 @@ export interface ConnectionPublic {
    * pasos. Nulo en las hechas a mano. Con algo en `pending`, necesita atención.
    */
   signup: ConnectionSignupView | null
+  /** Solo en WhatsApp con la app propia de la clínica; nulo en las demás o si aún no se comprobó. */
+  ownApp: ConnectionOwnAppView | null
   createdAt: string
   updatedAt: string
 }
@@ -108,6 +131,24 @@ function signupView(signup: ConnectionSignup | null): ConnectionSignupView | nul
   }
 }
 
+function ownAppView(ownApp: ConnectionOwnApp | null): ConnectionOwnAppView | null {
+  if (!ownApp) return null
+  return {
+    registeredAt: ownApp.registeredAt,
+    subscribedAt: ownApp.subscribedAt,
+    problems: ownApp.problems ?? {},
+    pinNeeded: ownApp.pinNeeded ?? false,
+    tokenExpiresAt: ownApp.tokenExpiresAt ?? null,
+    keysCheckedAt: ownApp.keysCheckedAt ?? null,
+    signatureRejectedAt: ownApp.signatureRejectedAt ?? null,
+  }
+}
+
+/** WhatsApp a mano con un proveedor de verdad: odentIA comprueba las claves y hace en Meta lo que falta. */
+function usesOwnApp(provider: string, deps: ConnectionDeps, signup: unknown = null): boolean {
+  return provider === "whatsapp_cloud_api" && deps.validateExternal !== false && !signup
+}
+
 function toPublic(row: ConnectionRow): ConnectionPublic {
   return {
     id: row.id,
@@ -119,6 +160,7 @@ function toPublic(row: ConnectionRow): ConnectionPublic {
     webhookVerifiedAt: row.webhookVerifiedAt?.toISOString() ?? null,
     health: row.health ?? null,
     signup: signupView(row.signup ?? null),
+    ownApp: ownAppView(row.ownApp ?? null),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -585,6 +627,7 @@ export async function createConnection(
     account = checked.account ?? null
     foundName = checked.displayName
   }
+  const ownAppKeys = !origin && usesOwnApp(input.provider, deps) ? await checkOwnAppKeys(input.config, deps) : null
   const displayName =
     input.displayName?.trim() || foundName || MANUAL_PROVIDERS[input.provider]?.label
   if (!displayName) throw validation("El nombre de la conexión es obligatorio")
@@ -627,6 +670,7 @@ export async function createConnection(
           configEncrypted: encryptJson(secretsKey, input.config),
           webhookSecret: crypto.randomUUID(),
           status: "active",
+          ...(ownAppKeys ? { ownApp: freshOwnApp(ownAppKeys) } : {}),
           ...(origin
             ? {
                 accountExternalId: origin.accountId,
@@ -656,6 +700,7 @@ export async function createConnection(
     return { ...toPublic(created), account, templates: null, webhookSecret: created.webhookSecret }
   }
   await registerTelegramWebhook(created, input.config, deps)
+  created = await settleOwnApp(tx, created, input.config, secretsKey, deps)
   const settled = await settleAccount(
     tx,
     orgId,
@@ -783,7 +828,84 @@ export async function testConnection(
   }
   const account = checked.account ?? { name: checked.displayName, number: null }
   await refreshHealth(tx, row, adapter, config, account, deps)
+  if (usesOwnApp(row.provider, deps, row.signup)) {
+    // Con la app propia se repite todo: las claves, la suscripción y el registro del número.
+    const problem = await recheckOwnApp(tx, row, config, secretsKey, deps)
+    if (problem) return { ok: false, checkedAt, account, problem }
+  }
   return { ok: true, checkedAt, account, problem: null }
+}
+
+/**
+ * Vuelve a revisar las claves de una conexión con la app propia y a hacer en
+ * Meta lo que falte. Devuelve lo primero que impide que funcione, en palabras;
+ * nulo si nada. Una conexión anterior a estas comprobaciones las recibe aquí.
+ */
+async function recheckOwnApp(
+  tx: Db,
+  row: ConnectionRow,
+  config: Record<string, unknown>,
+  secretsKey: Buffer,
+  deps: ConnectionDeps,
+  pin?: string,
+): Promise<string | null> {
+  let keys: OwnAppKeysChecked
+  try {
+    keys = await checkOwnAppKeys(config, deps)
+  } catch (error) {
+    if (error instanceof ServiceError) return error.message
+    throw error
+  }
+  const known = row.ownApp
+  const ownApp: ConnectionOwnApp = known
+    ? {
+        ...known,
+        tokenExpiresAt: keys.checked ? (keys.tokenExpiresAt?.toISOString() ?? null) : known.tokenExpiresAt,
+        keysCheckedAt: keys.checked ? new Date().toISOString() : (known.keysCheckedAt ?? null),
+      }
+    : freshOwnApp(keys)
+  const [current] = await tx
+    .update(channelConnection)
+    .set({ ownApp })
+    .where(and(eq(channelConnection.id, row.id), eq(channelConnection.organizationId, row.organizationId)))
+    .returning()
+  const settled = await settleOwnApp(tx, current ?? row, config, secretsKey, deps, pin ? { pin } : {})
+  const after = settled.ownApp
+  if (!after) return null
+  if (after.signatureRejectedAt) {
+    return "Llegó un mensaje, pero no pudimos leerlo: Meta lo firmó con otra clave secreta. Pega la «Clave secreta de la app» de la misma app con «Cambiar la clave»."
+  }
+  return after.problems.registrar ?? after.problems.suscribir ?? null
+}
+
+/**
+ * «Volver a comprobar» y «Registrar el número» de una conexión con la app
+ * propia: revisa de nuevo las claves y hace en Meta lo que falte; con `pin`,
+ * registra el número con el PIN que escribió la clínica (se guarda cifrado).
+ */
+export async function retryOwnApp(
+  tx: Db,
+  orgId: string,
+  id: string,
+  secretsKey: Buffer,
+  input: { pin?: string },
+  deps: ConnectionDeps,
+): Promise<ConnectionPublic & { problem: string | null }> {
+  const { row, config } = await getConnectionSecrets(tx, orgId, id, secretsKey)
+  if (row.provider !== "whatsapp_cloud_api" || row.signup) {
+    throw validation("Solo una conexión de WhatsApp hecha con la app propia de la clínica se comprueba así.")
+  }
+  if (input.pin !== undefined && !/^\d{6}$/.test(input.pin)) throw validation("El PIN tiene 6 dígitos.")
+  if (deps.validateExternal === false) {
+    return { ...toPublic(row), problem: "En este entorno no se llama a Meta: no se puede comprobar." }
+  }
+  const problem = await recheckOwnApp(tx, row, config, secretsKey, deps, input.pin)
+  const [current] = await tx
+    .select()
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
+    .limit(1)
+  return { ...toPublic(current ?? row), problem }
 }
 
 /**
@@ -849,12 +971,15 @@ export async function changeConnectionCredentials(
     externalId = checked.externalId
     account = checked.account ?? null
   }
+  // Clave nueva: lo que se sabía de la anterior (vencimiento, firma rechazada) ya no vale.
+  const ownAppKeys = !origin && usesOwnApp(row.provider, deps, row.signup) ? await checkOwnAppKeys(config, deps) : null
   const [updated] = await tx
     .update(channelConnection)
     .set({
       configEncrypted: encryptJson(secretsKey, config),
       externalId,
       updatedAt: new Date(),
+      ...(ownAppKeys ? { ownApp: freshOwnApp(ownAppKeys, row.ownApp) } : {}),
       ...(origin && row.signup
         ? {
             accountExternalId: origin.accountId,
@@ -875,8 +1000,9 @@ export async function changeConnectionCredentials(
   if (!updated) throw notFound("Conexión")
   if (origin) return { ...toPublic(updated), account, templates: null }
   await registerTelegramWebhook(updated, config, deps)
+  const withOwnApp = await settleOwnApp(tx, updated, config, secretsKey, deps)
   // Con la clave nueva pueden pedirse los mensajes que antes no se pudo.
-  const settled = await settleAccount(tx, orgId, updated, adapter, config, account, secretsKey, deps)
+  const settled = await settleAccount(tx, orgId, withOwnApp, adapter, config, account, secretsKey, deps)
   return { ...toPublic(settled.row), account, templates: settled.templates }
 }
 

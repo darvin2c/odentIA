@@ -77,7 +77,7 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
     )
   })
 
-  // Cómo se abren las clínicas de cada producto (ADR 0092).
+  // Cómo se abren las clínicas de cada producto (ADR 0093).
   app.get("/signup-mode", (c) => {
     staffOf(c)
     return runService(c, 200, async () => ({ modes: await deps.ownerDb.transaction((tx) => getSignupModes(tx)) }))

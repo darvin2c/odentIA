@@ -25,6 +25,8 @@ describe("las páginas de cada web", () => {
       "/agenda-medica",
       "/reportes",
       "/contacto",
+      "/presentacion",
+      "/presentacion/fundadores",
     ]) {
       expect(servesPage(path), path).toBe(true)
     }

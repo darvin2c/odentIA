@@ -1,4 +1,4 @@
-# 0092 · Una lista de precios por producto
+# 0093 · Una lista de precios por producto
 
 Fecha: 2026-10-26 · Estado: aceptada · Sigue a [0085](0085-cobro-por-tipo-de-accion.md) y [0087](0087-dos-dominios-y-el-producto-de-la-clinica.md). Lienzo «Planes por producto», aprobado el 2026-10-26.
 
@@ -24,4 +24,4 @@ odentIA y latidIA usaban una sola lista: «Plan odentIA» era el único plan por
 
 ## Referencias
 
-`packages/db/src/schema/saas-billing.ts` y `packages/db/drizzle/0004_planes_por_producto.sql`, `packages/services/src/saas-plan-product.ts` (`defaultPlanOf`), `saas-billing.ts`, `saas-founders.ts`, `saas-terms.ts`, `saas-actions.ts`, `apps/admin/src/routes/_app/billing.tsx` y `components/plan-drawer.tsx`, `apps/web/src/lib/pricing.ts`.
+`packages/db/src/schema/saas-billing.ts` y `packages/db/drizzle/0005_planes_por_producto.sql`, `packages/services/src/saas-plan-product.ts` (`defaultPlanOf`), `saas-billing.ts`, `saas-founders.ts`, `saas-terms.ts`, `saas-actions.ts`, `apps/admin/src/routes/_app/billing.tsx` y `components/plan-drawer.tsx`, `apps/web/src/lib/pricing.ts`.

@@ -4,11 +4,11 @@ ALTER TABLE "admin"."saas_signup_policy" ADD COLUMN "medical_mode" text DEFAULT 
 CREATE UNIQUE INDEX "saas_plan_default_uidx" ON "admin"."saas_plan" USING btree ("product") WHERE "admin"."saas_plan"."is_default";--> statement-breakpoint
 ALTER TABLE "admin"."saas_plan" ADD CONSTRAINT "saas_plan_product_check" CHECK ("admin"."saas_plan"."product" IN ('dental','medical'));--> statement-breakpoint
 ALTER TABLE "admin"."saas_signup_policy" ADD CONSTRAINT "saas_signup_policy_medical_mode_check" CHECK ("admin"."saas_signup_policy"."medical_mode" IN ('invitacion','abierta'));--> statement-breakpoint
--- latidIA empieza como odentIA: cómo se abren sus clínicas, lo mismo que hoy (ADR 0092).
+-- latidIA empieza como odentIA: cómo se abren sus clínicas, lo mismo que hoy (ADR 0093).
 UPDATE admin.saas_signup_policy SET medical_mode = mode;--> statement-breakpoint
 -- La prueba que abre el disparador usa el plan de lista de odentIA: al crear la
 -- clínica aún no se sabe su producto. Para otro producto la corrige
--- `startSaasTrial` con su propio plan de lista (ADR 0092).
+-- `startSaasTrial` con su propio plan de lista (ADR 0093).
 CREATE OR REPLACE FUNCTION public.saas_trial_on_org_create() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'catalog', 'auth', 'admin', 'dental'

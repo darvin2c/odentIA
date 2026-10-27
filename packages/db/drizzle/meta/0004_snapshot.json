@@ -1,5 +1,5 @@
 {
-  "id": "0817313e-e00e-4e7d-af36-f46a9b0e33d0",
+  "id": "9f890615-f0d5-4a0f-a140-7149ab57d6ee",
   "prevId": "51d55ff3-f92e-450b-b5e3-9fa94ceb89b9",
   "version": "7",
   "dialect": "postgresql",
@@ -22960,6 +22960,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "own_app": {
+          "name": "own_app",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "templates_synced_at": {
           "name": "templates_synced_at",
           "type": "timestamp with time zone",
@@ -37789,13 +37795,6 @@
           "notNull": true,
           "default": 60
         },
-        "product": {
-          "name": "product",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'dental'"
-        },
         "is_default": {
           "name": "is_default",
           "type": "boolean",
@@ -37842,7 +37841,7 @@
           "name": "saas_plan_default_uidx",
           "columns": [
             {
-              "expression": "product",
+              "expression": "is_default",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -37889,10 +37888,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "saas_plan_product_check": {
-          "name": "saas_plan_product_check",
-          "value": "\"admin\".\"saas_plan\".\"product\" IN ('dental','medical')"
-        },
         "saas_plan_founders_check": {
           "name": "saas_plan_founders_check",
           "value": "(\"admin\".\"saas_plan\".\"seat_limit\" IS NULL OR \"admin\".\"saas_plan\".\"seat_limit\" > 0) AND (\"admin\".\"saas_plan\".\"guarantee_months\" IS NULL OR \"admin\".\"saas_plan\".\"guarantee_months\" BETWEEN 1 AND 120)"
@@ -38231,13 +38226,6 @@
           "notNull": true,
           "default": "'invitacion'"
         },
-        "medical_mode": {
-          "name": "medical_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'invitacion'"
-        },
         "updated_by": {
           "name": "updated_by",
           "type": "text",
@@ -38287,10 +38275,6 @@
         "saas_signup_policy_mode_check": {
           "name": "saas_signup_policy_mode_check",
           "value": "\"admin\".\"saas_signup_policy\".\"mode\" IN ('invitacion','abierta')"
-        },
-        "saas_signup_policy_medical_mode_check": {
-          "name": "saas_signup_policy_medical_mode_check",
-          "value": "\"admin\".\"saas_signup_policy\".\"medical_mode\" IN ('invitacion','abierta')"
         }
       },
       "isRLSEnabled": false

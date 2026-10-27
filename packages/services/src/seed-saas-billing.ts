@@ -144,7 +144,7 @@ const FOUNDERS_PLAN = {
 } as const
 
 /**
- * La lista de latidIA (ADR 0092): una copia exacta de la de odentIA, con su
+ * La lista de latidIA (ADR 0093): una copia exacta de la de odentIA, con su
  * propio plan por defecto y sus propios 20 lugares de Fundadores.
  */
 const MEDICAL_ACTION_PLAN = {
@@ -357,7 +357,7 @@ const DEMO_WAITLIST = [
   { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", professionals: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 1 },
   { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", professionals: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
   { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 3 },
-  // Una de latidIA: se invita con Fundadores latidIA y gasta sus propios lugares (ADR 0092).
+  // Una de latidIA: se invita con Fundadores latidIA y gasta sus propios lugares (ADR 0093).
   { email: "latido-demo@example.test", firstName: "Elena", lastName: "Torres (ficticia)", clinicName: "Consultorio Latido (ficticio)", countryCode: "PE", city: "Lima", professionals: "1", currentTool: "cuaderno_excel", phone: "+51923456789", status: "por_revisar", ageDays: 2, product: "medical" },
   { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", professionals: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8 },
 ] as const

@@ -142,7 +142,7 @@ const planInput = z
   .object({
     code: z.string().trim().min(1).max(80),
     name: z.string().trim().min(1).max(120),
-    // El producto del plan (ADR 0092): se elige al crearlo; al editar, solo puede repetirse.
+    // El producto del plan (ADR 0093): se elige al crearlo; al editar, solo puede repetirse.
     product: z.enum(CLINICAL_PRODUCTS).optional(),
     description: z.string().max(2000).nullish(),
     currency,
@@ -1390,7 +1390,7 @@ export const FOUNDER_INVITATION_HEADER = "x-odentia-invitation"
 export interface SaasPreAuthDeps {
   auth: Auth
   ownerDb: Db
-  /** El producto del dominio donde se abre la clínica (ADR 0087 y 0092). */
+  /** El producto del dominio donde se abre la clínica (ADR 0087 y 0093). */
   productOf?: (c: Context) => ClinicalProduct
 }
 const PRE_AUTH_PREFIX = "/api/auth/organization/"
@@ -1420,7 +1420,7 @@ export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
     if (!session) return next()
     const token = c.req.header(FOUNDER_INVITATION_HEADER)?.trim() || null
-    // Cada producto decide si se entra con invitación o libre (ADR 0092).
+    // Cada producto decide si se entra con invitación o libre (ADR 0093).
     const product = deps.productOf?.(c) ?? "dental"
     let claimed: string | null = null
     if (token) {

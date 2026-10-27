@@ -64,7 +64,7 @@ export function createPublicFoundersRoute(deps: {
 
   app.get("/pricing", async (c) => {
     c.header("Cache-Control", `public, max-age=${PRICING_MAX_AGE_S}`)
-    // La lista de cada producto (ADR 0092): la web la pide con `?product=`, porque llama a la
+    // La lista de cada producto (ADR 0093): la web la pide con `?product=`, porque llama a la
     // API por la red interna; sin decirlo, la del dominio de la petición.
     const asked = c.req.query("product")
     const product = isClinicalProduct(asked) ? asked : (deps.productOf?.(c) ?? "dental")

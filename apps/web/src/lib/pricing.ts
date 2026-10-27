@@ -128,7 +128,7 @@ let cached: { at: number; value: Pricing } | null = null
 let inflight: Promise<Pricing> | null = null
 
 async function fetchPricing(): Promise<Pricing> {
-  // La lista de este producto (ADR 0092): la red interna no lleva el dominio, así que se dice.
+  // La lista de este producto (ADR 0093): la red interna no lleva el dominio, así que se dice.
   const res = await fetch(`${apiBase()}/api/public/founders/pricing?product=${MEDICAL ? "medical" : "dental"}`, {
     signal: AbortSignal.timeout(3000),
   })

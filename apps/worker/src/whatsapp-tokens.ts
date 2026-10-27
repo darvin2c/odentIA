@@ -7,9 +7,11 @@ import {
 } from "@odentia/channels"
 import { type Db, withOrgContext } from "@odentia/db"
 import {
+  listOwnAppTokensExpiring,
   listSignupTokensDue,
   noteSignupTokenProblem,
   noteSignupTokenState,
+  notifyOwnAppTokenExpiring,
   reportSignupTokenFailure,
   SIGNUP_TOKEN_RENEW_DAYS,
   saveRenewedSignupToken,
@@ -135,4 +137,23 @@ function detailOf(error: unknown): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "error desconocido"
+}
+
+/**
+ * La clave de una conexión hecha con la app propia de la clínica no se puede
+ * renovar sola: la genera la clínica en Meta. Si vence en los próximos días,
+ * se avisa en la campana a quien administra las integraciones; el aviso se
+ * retira solo cuando se pega una clave que no vence.
+ */
+export async function runOwnAppTokenTick(ownerDb: Db, appDb: Db, now = new Date()): Promise<{ notified: number; errors: string[] }> {
+  const result = { notified: 0, errors: [] as string[] }
+  for (const due of await listOwnAppTokensExpiring(ownerDb, now)) {
+    try {
+      await withOrgContext(appDb, due.orgId, (tx) => notifyOwnAppTokenExpiring(tx, due.orgId, due.connectionId, due.expiresAt, now))
+      result.notified += 1
+    } catch (error) {
+      result.errors.push(`Aviso de clave ${due.connectionId}: ${messageOf(error)}`)
+    }
+  }
+  return result
 }

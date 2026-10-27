@@ -279,7 +279,7 @@ describe("precio negociado con vencimiento", () => {
   })
 })
 
-describe("una lista de precios por producto (ADR 0092)", () => {
+describe("una lista de precios por producto (ADR 0093)", () => {
   let medicalListId: string
   let medicalFoundersId: string
   async function consultorio(over: Partial<typeof saasSubscription.$inferInsert> = {}) {

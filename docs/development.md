@@ -141,6 +141,8 @@ del worker; cambiar de modelo vuelve a vectorizar todo de a poco. `pnpm --filter
 
 WhatsApp se conecta de dos maneras. A mano, con los datos de la app de Meta de
 cada clínica: funciona desde el primer día y no necesita nada de esta sección.
+En ese camino el sistema registra el número, suscribe la app de la clínica y
+comprueba sus claves con la clave de la clínica (ADR 0092).
 Con el botón «Conectar con Facebook» (Embedded Signup de Meta, versión 4): la
 clínica entra con su Facebook y vuelve conectada. El botón necesita que odentIA
 tenga su propia app aprobada por Meta; motivos en

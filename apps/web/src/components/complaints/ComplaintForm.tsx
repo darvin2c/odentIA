@@ -11,6 +11,7 @@ import {
   LIMITS,
   RESPONSE_DAYS,
 } from "../../lib/complaints"
+import { WORDS } from "../../lib/product"
 import "./complaints.css"
 
 type Values = {
@@ -547,7 +548,7 @@ export default function ComplaintForm() {
               onChange={(e) => set("itemDescription", e.target.value)}
             />
             <p className="lr-hint" id="itemDescription-hint">
-              Por ejemplo: «Plan mensual de odentIA» o «Soporte técnico».
+              Por ejemplo: «Plan mensual de {WORDS.name}» o «Soporte técnico».
             </p>
             <FieldError id="itemDescription-error" message={errors.itemDescription} />
           </div>
@@ -648,7 +649,7 @@ export default function ComplaintForm() {
       <Block
         n="4"
         title="Observaciones y acciones adoptadas por el proveedor"
-        note={`Este bloque lo completa odentIA al responder. Te llegará por correo en un plazo no mayor a quince (${RESPONSE_DAYS}) días hábiles improrrogables.`}
+        note={`Este bloque lo completa ${WORDS.name} al responder. Te llegará por correo en un plazo no mayor a quince (${RESPONSE_DAYS}) días hábiles improrrogables.`}
       />
 
       <ul className="lr-notices">
