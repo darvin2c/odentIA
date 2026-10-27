@@ -86,7 +86,7 @@
     document.getElementById("count").textContent = String(n + 1).padStart(2, "0") + " / " + String(slides.length).padStart(2, "0");
     document.getElementById("progress").style.width = ((n + (k + 1) / layers.length) / slides.length * 100) + "%";
     const notes = slides[n].querySelector(".notes");
-    // El guion solo viene con /presentacion?guion: la que reciben las clínicas no lo trae.
+    // El guion solo viene con /presentacion/fundadores?guion: la que reciben las clínicas no lo trae.
     const notesTitle = document.getElementById("notesTitle"), notesText = document.getElementById("notesText");
     if (notesTitle) notesTitle.textContent = "Guion · parte " + (n + 1) + " de " + slides.length;
     if (notesText) notesText.textContent = notes ? notes.textContent : "";
