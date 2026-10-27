@@ -5,10 +5,12 @@ on:
   push:
     branches: [main]
 
+# Las pruebas de cada push a main corren en su propio grupo y no esperan al
+# deploy del commit anterior (antes un merge seguido de otro sumaba ~18 min de
+# cola). La cola está solo en el job `deploy`.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
-  # No cancelar un deploy productivo.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Tests unitarios y de integración repartidos en partes paralelas; los
@@ -132,19 +134,41 @@ jobs:
     # Un deploy que reconstruye todos los servicios (admin, panel, platform, web,
     # api, worker) puede superar los 20 minutos; el CLI espera hasta 40.
     timeout-minutes: 45
+    # Un solo deploy a la vez y sin cancelar el que está en curso. Si llegan
+    # varios, GitHub descarta los pendientes más viejos y deja el más reciente.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     env:
       OPENSHIP_URL: ${{ vars.OPENSHIP_URL }}
       OPENSHIP_PROJECT_ID: ${{ vars.OPENSHIP_PROJECT_ID }}
       OPENSHIP_DEPLOY_TOKEN: ${{ secrets.OPENSHIP_DEPLOY_TOKEN }}
     steps:
-      - uses: actions/setup-node@v4
+      # Las pruebas ya no se serializan: si un commit más viejo termina después
+      # de uno más nuevo, desplegarlo devolvería producción atrás. Solo se
+      # despliega la punta de main; el commit más nuevo incluye a los anteriores.
+      - name: Comprobar que es la punta de main
+        id: punta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          punta=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
+          if [ "$punta" != "$GITHUB_SHA" ]; then
+            echo "main ya avanzó a $punta; la corrida de ese commit desplegará."
+            echo "omitir=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.punta.outputs.omitir != 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: 24
       - name: Instalar CLI oficial de OpenShip
+        if: steps.punta.outputs.omitir != 'true'
         run: npm install --global openship@0.8.1
       # `login` valida listando tokens, operación que un token scoped no tiene
       # (falla con «Could not validate the token»); `deploy` comprueba el acceso real.
       - name: Conectar con OpenShip
+        if: steps.punta.outputs.omitir != 'true'
         run: openship context add ci --api-url "$OPENSHIP_URL/api/proxy" --dashboard-url "$OPENSHIP_URL" --token "$OPENSHIP_DEPLOY_TOKEN" --use
       - name: Desplegar el commit verificado
+        if: steps.punta.outputs.omitir != 'true'
         run: openship deploy --project "$OPENSHIP_PROJECT_ID" --branch main --commit "$GITHUB_SHA" --env production --smart-route --watch --timeout 2400000
