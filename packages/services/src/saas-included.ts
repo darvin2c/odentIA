@@ -18,7 +18,7 @@ import { getAgentSpendGate } from "./saas-terms.js"
 /* ---------- Argos: preguntas incluidas y paquetes (ADR 0085) ---------- */
 
 /** Lo que no gasta preguntas: lo que Argos no pudo responder y lo que fue a la Ayuda o a otra cosa. */
-const FREE_OUTCOMES = ["no_pudo", "ayuda", "otro"]
+export const FREE_OUTCOMES = ["no_pudo", "ayuda", "otro"]
 
 export interface ArgosAllowance {
   /** false: el plan no cobra paquetes; Argos responde sin contar. */
@@ -42,7 +42,7 @@ export interface ArgosAllowance {
 export const ARGOS_PACK_CARRY_DAYS = 7
 
 /** Las preguntas que gastan en un tramo. */
-async function questionsUsed(tx: Db, orgId: string, from: Date, to: Date): Promise<number> {
+export async function questionsUsed(tx: Db, orgId: string, from: Date, to: Date): Promise<number> {
   const [row] = await tx
     .select({ n: sql<number>`count(*)::int` })
     .from(reportQuestion)

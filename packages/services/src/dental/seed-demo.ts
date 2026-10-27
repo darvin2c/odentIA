@@ -201,6 +201,7 @@ import { seedAdminOrganizations } from "../seed-admin-organizations.js"
 import { seedAdminSupport } from "../seed-admin-support.js"
 import { respondConsumerComplaint, submitConsumerComplaint } from "../consumer-complaints.js"
 import { seedClinicNoticesDemo, seedSaasBillingDemo } from "../seed-saas-billing.js"
+import { seedSaasCostDemo } from "../seed-saas-cost.js"
 import { createService, quickAddServices, updateService } from "../service-catalog.js"
 import { librarySpecialtyIds } from "../specialties.js"
 import type { DentalFinalizeParts } from "./hooks.js"
@@ -4134,9 +4135,12 @@ await db.transaction(async (tx) => {
 // Uso de IA del mes para la ficha de la clínica en la administración (ADR 0031).
 // Cifras de ejemplo con el costo que da la tabla de precios del agente; no
 // salen de ningún proveedor. Jev queda sin costo: no tiene precio cargado.
+// Lo de cada acción (pausas de Clío, respuestas de Sofi y preguntas a Argos)
+// lo pone `seedSaasCostDemo`, para ver «Gastos» acción por acción.
+const saasCost = await db.transaction((tx) =>
+  seedSaasCostDemo(tx, { orgId: ORG_A, askers: [{ userId: ANA_ID, weight: 6 }, { userId: CAJA_ID, weight: 3 }, { userId: LUIS_ID, weight: 1 }] }),
+)
 await db.insert(aiUsage).values([
-  { organizationId: ORG_A, origin: "recepcion", provider: "openai", model: "gpt-6-luna", calls: 120, inputTokens: 360_000, cachedInputTokens: 240_000, cacheWriteTokens: 12_000, outputTokens: 6_000, costMicros: 17_700 },
-  { organizationId: ORG_A, origin: "dictado", provider: "openai", model: "gpt-6-luna", calls: 14, inputTokens: 28_000, outputTokens: 4_200, costMicros: 4_900 },
   { organizationId: ORG_A, origin: "probar", provider: "openai", model: "gpt-6-luna", calls: 9, inputTokens: 27_000, outputTokens: 900, costMicros: 3_150 },
   { organizationId: ORG_A, origin: "transcripcion", provider: "transcripcion", model: "whisper-1", calls: 6, audioSeconds: 240, costMicros: 24_000 },
   { organizationId: ORG_A, origin: "vectores", provider: "vectores", model: "text-embedding-3-small", calls: 3, inputTokens: 15_000, costMicros: 300 },
@@ -4185,6 +4189,7 @@ console.log(
   `Reportes › Finanzas y Agenda (dental-smile): ${reportsFinance.settlements} pagos de comisiones, ${reportsFinance.orders} compras, ${reportsFinance.budgets} presupuestos con promoción`,
   `historia de Pacientes (dental-smile): ${patientsHistory.moved} primeras visitas tras su mensaje, ${patientsHistory.channels} conversaciones por canal, ${patientsHistory.referrals} «cómo nos conoció», ${patientsHistory.controls} controles, ${patientsHistory.invitations} invitaciones a volver`,
   `Argos en Reportes (dental-smile): ${reportsArgos.pins} respuestas fijadas en el Resumen, meta de cobrado ${reportsArgos.goalText} desde este mes`,
+  `gastos del mes (dental-smile): ${saasCost.pauses} pausas de Clío, ${saasCost.runs} respuestas de Sofi y ${saasCost.questions} preguntas a Argos con su costo`,
   `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress).map(([status, count]) => `${count} ${status}`).join(", ")}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
 )
 console.log(
