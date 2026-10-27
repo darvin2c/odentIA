@@ -13,7 +13,7 @@
 export const COMPLAINTS_PROVIDER = {
   legalName: "SALLCA GROUP E.I.R.L.",
   ruc: "20603338741",
-  address: "Av. Mariscal Andrés de Santa Cruz 176, Urb. Fundo Oyague, Jesús María, Lima, Perú",
+  address: "Av. General Andrés de Santa Cruz 176, Urb. Fundo Oyague, Jesús María, Lima, Perú",
 } as const
 
 /** ¿Falta algún dato real del proveedor? Entonces la página no se indexa. */
