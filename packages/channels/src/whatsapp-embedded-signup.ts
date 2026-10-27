@@ -20,8 +20,11 @@ export interface MetaPlatformApp {
   graphVersion: string
 }
 
-/** «renovar» y «revisar» son de la clave ya guardada, no del alta (darvin2c/odentIA#121). */
-export type MetaSignupStep = "canjear" | "suscribir" | "registrar" | "renovar" | "revisar"
+/**
+ * «renovar» y «revisar» son de la clave ya guardada, no del alta (darvin2c/odentIA#121).
+ * «comprobar» y «leer» son de una conexión hecha con la app propia de la clínica.
+ */
+export type MetaSignupStep = "canjear" | "suscribir" | "registrar" | "renovar" | "revisar" | "comprobar" | "leer"
 
 /** Meta no aceptó un paso. Lleva lo que respondió, sin interpretarlo. */
 export class MetaSignupError extends Error {
@@ -43,7 +46,7 @@ export class MetaSignupError extends Error {
   }
 }
 
-interface GraphAnswer {
+export interface GraphAnswer {
   status: number
   /** La respuesta leída como JSON; nulo si no lo era. */
   json: unknown
@@ -51,7 +54,7 @@ interface GraphAnswer {
   raw: string
 }
 
-async function graph(
+export async function graph(
   step: MetaSignupStep,
   url: string,
   init: { method: "GET" | "POST"; token?: string; body?: unknown },
@@ -85,7 +88,7 @@ async function graph(
  * Forma del error del Graph API: `{ error: { message, type, code, error_data: { details } } }`.
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
  */
-function failure(step: MetaSignupStep, answer: GraphAnswer): MetaSignupError {
+export function failure(step: MetaSignupStep, answer: GraphAnswer): MetaSignupError {
   const error =
     answer.json && typeof answer.json === "object" && "error" in answer.json ? answer.json.error : null
   if (!error || typeof error !== "object") {
@@ -104,7 +107,7 @@ function succeeded(json: unknown): boolean {
   return json.success === true || json.success === "true"
 }
 
-const base = (app: Pick<MetaPlatformApp, "graphVersion">) => `https://graph.facebook.com/${app.graphVersion}`
+export const base = (app: Pick<MetaPlatformApp, "graphVersion">) => `https://graph.facebook.com/${app.graphVersion}`
 
 /** La clave de la clínica y en cuántos segundos vence, si Meta lo dijo. */
 export interface SignupToken {

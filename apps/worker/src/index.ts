@@ -19,7 +19,7 @@ import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runReportDigestTick } from "./report-digests.js"
-import { runSignupTokenTick } from "./whatsapp-tokens.js"
+import { runOwnAppTokenTick, runSignupTokenTick } from "./whatsapp-tokens.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -304,6 +304,19 @@ if (metaApp) {
 } else if (env.META_APP_ID.trim() || env.META_APP_SECRET.trim()) {
   console.warn("worker: falta META_APP_ID o META_APP_SECRET; la clave de «Conectar con Facebook» no se renovará sola.")
 }
+
+// La clave de una conexión con la app propia de la clínica no se renueva sola: se avisa antes de que venza.
+let nextOwnAppTokenPoll = 0
+queues.push({
+  name: "whatsapp_own_app_tokens",
+  poll: async () => {
+    if (Date.now() < nextOwnAppTokenPoll) return false
+    nextOwnAppTokenPoll = Date.now() + 12 * 3_600_000
+    const result = await runOwnAppTokenTick(ownerDb, db)
+    for (const error of result.errors) console.error(`worker: whatsapp_own_app_tokens ${error}`)
+    return false
+  },
+})
 
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 while (!stopping) {

@@ -198,6 +198,12 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
         or (n.subject like 'clave-meta:%' and not exists (select 1 from channel_connection c
           where c.organization_id = n.organization_id and c.id::text = ${subjectId("clave-meta")}
             and c.status = 'active' and c.signup->>'tokenProblem' is not null))
+        or (n.subject like 'firma-meta:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("firma-meta")}
+            and c.status = 'active' and c.own_app->>'signatureRejectedAt' is not null))
+        or (n.subject like 'vence-clave-meta:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("vence-clave-meta")}
+            and c.status = 'active' and (c.own_app->>'tokenExpiresAt')::timestamptz <= now() + interval '7 days'))
       )`)
 }
 

@@ -11,6 +11,7 @@ import {
   listClinicMessages,
   listConnections,
   listConnectionsOverview,
+  retryOwnApp,
   revertMessageText,
   saveMessageText,
   setConnectionStatus,
@@ -40,6 +41,8 @@ const createInput = z.object({
 })
 
 const credentialsInput = z.object({ config: z.record(z.string(), z.unknown()) })
+
+const ownAppInput = z.object({ pin: z.string().regex(/^\d{6}$/, "El PIN tiene 6 dígitos.").optional() })
 
 // Los límites del texto los dice el servicio con sus palabras; aquí solo se
 // acota el tamaño de lo que entra.
@@ -191,6 +194,23 @@ export function createConnectionsRoute(deps: CrmDeps) {
           parsed.data,
           providerDeps,
         ),
+      ),
+    )
+  })
+
+  /**
+   * WhatsApp con la app propia de la clínica: «Volver a comprobar» y
+   * «Registrar el número» (con el PIN que ya tenía). Hace en Meta lo que falte.
+   */
+  app.post("/:id/own-app", async (c) => {
+    const denied = forbidden(c, "settings.write")
+    if (denied) return denied
+    const { orgId } = orgContextOf(c)
+    const parsed = ownAppInput.safeParse(await c.req.json().catch(() => ({})))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        retryOwnApp(tx, orgId, c.req.param("id"), deps.secretsKey, parsed.data, providerDeps),
       ),
     )
   })

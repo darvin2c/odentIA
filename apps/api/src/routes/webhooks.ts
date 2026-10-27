@@ -8,7 +8,15 @@ import {
 } from "@odentia/channels"
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
-import { applyStatus, applyTemplateCategories, applyTemplateUpdates, decryptConfig, markWebhookVerified } from "@odentia/services"
+import {
+  applyStatus,
+  applyTemplateCategories,
+  applyTemplateUpdates,
+  clearOwnAppSignatureRejected,
+  decryptConfig,
+  markWebhookVerified,
+  noteOwnAppSignatureRejected,
+} from "@odentia/services"
 import { and, eq, isNotNull } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -292,8 +300,21 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       config,
       webhookSecret: connection.webhookSecret,
     })
+    // WhatsApp con la app propia: un aviso firmado (Meta siempre firma) con otra clave es casi
+    // siempre una clave secreta de otra app; se anota para decírselo a la clínica.
+    const ownApp = provider === "whatsapp_cloud_api" && connection.ownApp !== null && connection.signup === null
     if (!verified) {
+      if (ownApp && c.req.header("x-hub-signature-256")) {
+        await withOrgContext(deps.db, connection.organizationId, (tx) =>
+          noteOwnAppSignatureRejected(tx, connection.organizationId, connection.id),
+        ).catch(() => {})
+      }
       return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
+    }
+    if (ownApp && connection.ownApp?.signatureRejectedAt) {
+      await withOrgContext(deps.db, connection.organizationId, (tx) =>
+        clearOwnAppSignatureRejected(tx, connection.organizationId, connection.id),
+      )
     }
 
     await ingest(provider, connection, adapter.parseWebhook({ headers: c.req.header(), rawBody, config }))
