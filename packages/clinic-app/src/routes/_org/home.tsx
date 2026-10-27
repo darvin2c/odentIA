@@ -71,8 +71,6 @@ function HomePage() {
   const query = useQuery({
     queryKey: ["workspace-home", sede.branchId ?? null],
     queryFn: () => apiFetch<{ data: WorkspaceHome }>(`/api/workspace/home${sede.branchId ? `?branch=${encodeURIComponent(sede.branchId)}` : ""}`),
-    // Hasta saber si la sede recordada sigue existiendo no se pide nada: evita pedir dos veces.
-    enabled: sede.ready,
     // Al cambiar de sede se conserva lo anterior a la vista mientras llega lo nuevo.
     placeholderData: keepPreviousData,
     refetchInterval: 300_000,

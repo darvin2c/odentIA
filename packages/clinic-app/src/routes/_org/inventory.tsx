@@ -192,7 +192,7 @@ function InventoryWorkspace() {
             message="Comprueba tu conexión y vuelve a intentarlo."
             onRetry={() => void branchesQuery.refetch()}
           />
-        ) : branchesQuery.isPending || !sede.ready ? (
+        ) : branchesQuery.isPending ? (
           <LoadingState message="Cargando la sede…" />
         ) : (
           <EmptyState

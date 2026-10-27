@@ -1429,10 +1429,11 @@ export async function dismissExpenseGap(
 export async function getReceivables(
   tx: Db,
   orgId: string,
-  query: { patientId?: string; branchId?: string; outstandingOnly?: boolean } = {},
+  query: { patientId?: string; patientIds?: string[]; branchId?: string; outstandingOnly?: boolean } = {},
 ) {
   const chargeFilter = [eq(patientCharge.organizationId, orgId), isNull(patientCharge.voidedAt)]
   if (query.patientId) chargeFilter.push(eq(patientCharge.patientId, query.patientId))
+  if (query.patientIds) chargeFilter.push(inArray(patientCharge.patientId, query.patientIds))
   if (query.branchId) chargeFilter.push(eq(patientCharge.branchId, query.branchId))
   if (query.outstandingOnly)
     chargeFilter.push(sql`${patientCharge.amountCents} > coalesce((
@@ -2502,9 +2503,13 @@ export interface DebtRow {
 export async function getDebts(
   tx: Db,
   orgId: string,
-  query: { branchId?: string } = {},
+  query: { branchId?: string; patientIds?: string[] } = {},
 ): Promise<DebtRow[]> {
-  const rows = await getReceivables(tx, orgId, { outstandingOnly: true })
+  if (query.patientIds?.length === 0) return []
+  const rows = await getReceivables(tx, orgId, {
+    outstandingOnly: true,
+    ...(query.patientIds ? { patientIds: query.patientIds } : {}),
+  })
   const live = rows.filter((r) => r.outstandingCents > 0)
   if (live.length === 0) return []
   const groups: Record<string, DebtRow & { latestCharge: string | null }> = {}
@@ -2696,7 +2701,17 @@ export async function getCashToday(tx: Db, orgId: string, query: { branchId: str
   const { movements } = await getDayMovements(tx, orgId, { branchId: branchRow.id, day: today, timezone, currency: unit })
   const cobros = movements.filter((m) => m.direction === "ingreso" && m.kind === "cobro")
   const seen = new Set(cobros.map((m) => (m.ticketId ? `ticket:${m.ticketId}` : m.patientPaymentId ? `pago:${m.patientPaymentId}` : `mov:${m.id}`)))
-  const toCollect = (await getDebts(tx, orgId, { branchId: branchRow.id }))
+  // Solo puede estar «atendido hoy» quien tiene un cargo de hoy o una atención
+  // cerrada hoy: las deudas se calculan de esas personas, no de toda la clínica
+  // (con años de cargos, Inicio los traía todos para quedarse con los de hoy).
+  // Dos días de margen cubren cualquier zona horaria; el día lo decide `getDebts`.
+  const recent = await tx.execute<{ patient_id: string }>(sql`
+    select distinct c.patient_id from patient_charge c
+      left join encounter_procedure ep on ep.organization_id = c.organization_id and ep.id = c.encounter_procedure_id
+      left join encounter e on e.organization_id = ep.organization_id and e.id = ep.encounter_id
+    where c.organization_id = ${orgId} and c.voided_at is null
+      and (c.created_at >= now() - interval '2 days' or e.finalized_at >= now() - interval '2 days')`)
+  const toCollect = (await getDebts(tx, orgId, { branchId: branchRow.id, patientIds: recent.map((row) => row.patient_id) }))
     .filter((row): row is DebtRow & { attendedTodayAt: Date } => row.attendedTodayAt !== null)
     .sort((a, b) => a.attendedTodayAt.getTime() - b.attendedTodayAt.getTime())
   return {

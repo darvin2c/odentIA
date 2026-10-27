@@ -43,6 +43,13 @@
       "when": 1793073481673,
       "tag": "0005_planes_por_producto",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793114826453,
+      "tag": "0006_indices_de_rendimiento",
+      "breakpoints": true
     }
   ]
 }

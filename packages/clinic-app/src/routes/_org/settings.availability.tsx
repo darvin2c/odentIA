@@ -126,7 +126,7 @@ function AvailabilityPage() {
   const sede = useActiveBranch()
   const resourcesQuery = useQuery({
     queryKey: ["agenda-resources", sede.branchId ?? null],
-    enabled: canRead && sede.ready,
+    enabled: canRead,
     queryFn: () =>
       apiFetch<{ data: AgendaResources }>(
         `/api/agenda/resources${sede.branchId ? `?branchId=${encodeURIComponent(sede.branchId)}` : ""}`,
