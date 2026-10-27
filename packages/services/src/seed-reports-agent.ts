@@ -75,6 +75,8 @@ export interface ReportsAgentSeedInput {
    * falta); la demo de producción pasa el plan real y no crea planes.
    */
   planCode?: string
+  /** Meses de la historia (los de `seedReports`); sin él, dos años. */
+  months?: number
 }
 
 /** Un número de 0 a 1 que depende solo del texto: la misma historia da las mismas decisiones. */
@@ -114,7 +116,7 @@ export async function seedReportsAgent(tx: Db, input: ReportsAgentSeedInput): Pr
   // --- La suscripción: prueba al empezar la historia y un mes por tramo -------------------
   const { timezone } = await getOrgLocale(tx, orgId)
   const now = new Date()
-  const first = addMonths(currentMonthIn(timezone), -MONTHS_BACK)
+  const first = addMonths(currentMonthIn(timezone), -(input.months ?? MONTHS_BACK))
   const historyStart = monthStart(timezone, first.year, first.month)
   const activatedAt = new Date(historyStart.getTime() + TRIAL_DAYS * DAY)
   let periodStart = activatedAt

@@ -50,6 +50,13 @@
       "when": 1793076457931,
       "tag": "0006_promociones_uso_profesional",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793117673375,
+      "tag": "0007_demos_para_presentar",
+      "breakpoints": true
     }
   ]
 }

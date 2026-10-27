@@ -15,9 +15,12 @@ import { appointment } from "@odentia/db/schema/agenda"
 import { scheduleBlock } from "@odentia/db/schema/availability"
 import {
   encounter,
+  encounterDiagnosis,
   encounterProcedure,
   orgCounter,
   patient,
+  patientContact,
+  patientResponsibility,
   patientCharge,
   patientPayment,
   patientPaymentApplication,
@@ -29,7 +32,7 @@ import {
 } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { expense } from "@odentia/db/schema/finance"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, inArray, sql } from "drizzle-orm"
 import { getOrgLocale } from "./locale.js"
 import { includedTaxCents } from "@odentia/clinical"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
@@ -46,6 +49,50 @@ export interface ReportsSeedProfessional {
   afternoonOnly?: boolean
   /** Cuánto de su agenda se llena en un mes normal, de 0 a 1. */
   occupancy: number
+  /** Cómo firma su título; sin él, «Cirujano dentista». */
+  signerTitle?: string
+}
+
+/** Lo que se escribe en una atención cerrada de la historia. */
+export interface ReportsSeedNote {
+  evolution: string
+  /** Código de la lista de la clínica (con `ReportsSeedRecipe.diagnosisSystem`). */
+  diagnosisCode?: string
+  vitals?: Record<string, unknown>
+  examination?: Record<string, unknown>
+}
+
+/** Una persona nueva: de qué edad y sexo, y si es menor, quién la trae. */
+export interface ReportsSeedPerson {
+  birthDate: string
+  sex: "F" | "M"
+  guardian?: { givenNames: string; familyName: string; kinship: "MTH" | "FTH" }
+}
+
+/**
+ * Cómo es la clínica de la historia (demos para presentar, ADR 0096). Sin
+ * receta rige la de Dental Smile: dos años, Perú, odontología y presupuestos.
+ */
+export interface ReportsSeedRecipe {
+  months?: number
+  seed?: number
+  /** Mes-día sin atención (los del país). */
+  holidays?: ReadonlySet<string>
+  /** Qué parte de las visitas son de una persona nueva. */
+  firstVisitShare?: number
+  /** Quién es cada persona nueva (edad, sexo, responsable). */
+  person?: (random: Random) => ReportsSeedPerson
+  /** Lo que queda escrito en cada atención. */
+  note?: (service: ReportsSeedInput["services"][number], random: Random, person: ReportsSeedPerson | null) => ReportsSeedNote
+  diagnosisSystem?: string
+  /** El primer mensaje de quien escribe y la respuesta. */
+  inbound?: readonly string[]
+  reply?: readonly string[]
+  budgets?: boolean
+  paymentMethods?: ReadonlyArray<{ name: string; typeCode: string; weight: number }>
+  /** Los gastos de cada mes y sede: el alquiler de la sede, un monto (más uno por profesional) o una parte de lo cobrado. */
+  expenses?: ReadonlyArray<{ category: string; concept: string; rent?: boolean; cents?: number; perStaffCents?: number; revenueShare?: number; day: number }>
+  names?: { given: readonly string[]; surnames: readonly string[]; bySex?: { F: readonly string[]; M: readonly string[] } }
 }
 
 export interface ReportsSeedInput {
@@ -58,6 +105,7 @@ export interface ReportsSeedInput {
   services: Array<{ id: string; name: string; priceCents: number; durationMin: number; weight: number; firstVisit?: boolean }>
   /** Pacientes que ya existían: vuelven en la historia. */
   patientIds: string[]
+  recipe?: ReportsSeedRecipe
 }
 
 /** Meses de historia hacia atrás: dos años, para comparar cada mes con el mismo del año anterior. */
@@ -145,15 +193,20 @@ interface PlannedVisit {
 
 export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ patients: number; appointments: number; conversations: number; budgets: number }> {
   const { timezone, currency } = await getOrgLocale(tx, input.orgId)
-  const random = generator(20_261_018)
+  const recipe = input.recipe ?? {}
+  const monthsBack = recipe.months ?? MONTHS_BACK
+  const holidaySet = recipe.holidays ?? HOLIDAYS
+  const given = recipe.names?.given ?? GIVEN
+  const surnames = recipe.names?.surnames ?? SURNAMES
+  const random = generator(recipe.seed ?? 20_261_018)
   const current = currentMonthIn(timezone)
   const historyEnd = Date.now() - 2 * 86_400_000
-  const first = addMonths(current, -MONTHS_BACK)
+  const first = addMonths(current, -monthsBack)
   const firstStart = monthStart(timezone, first.year, first.month).getTime()
   const totalDays = Math.floor((historyEnd - firstStart) / 86_400_000)
 
   // --- Pacientes nuevos: cada uno llega por su primera visita ------------------------------
-  type NewPatient = { given: string; paternal: string; maternal: string }
+  type NewPatient = { given: string; paternal: string; maternal: string; person: ReportsSeedPerson | null }
   const fresh: NewPatient[] = []
   // Quien tiene una atención en borrador no entra en la historia: la base admite
   // un solo borrador por persona y aquí cada atención nace como borrador.
@@ -168,7 +221,14 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   const pool: number[] = input.patientIds.flatMap((id, index) => (drafts.has(id) ? [] : [index]))
   const patientCount = (): number => input.patientIds.length + fresh.length
   const newPatient = (): number => {
-    fresh.push({ given: random.pick(GIVEN), paternal: random.pick(SURNAMES), maternal: random.pick(SURNAMES) })
+    const person = recipe.person ? recipe.person(random) : null
+    const bySex = person ? recipe.names?.bySex?.[person.sex] : undefined
+    fresh.push({
+      given: random.pick(bySex ?? given),
+      paternal: random.pick(surnames),
+      maternal: random.pick(surnames),
+      person,
+    })
     const index = patientCount() - 1
     pool.push(index)
     return index
@@ -183,7 +243,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
     const dayStart = new Date(firstStart + day * 86_400_000)
     const { weekday, monthDay, month } = localDay(new Date(dayStart.getTime() + 12 * 3_600_000), timezone)
     if (weekday === 0) continue
-    if (HOLIDAYS.has(monthDay)) {
+    if (holidaySet.has(monthDay)) {
       for (const branch of input.branches) holidays.push({ branchId: branch.id, day: dayStart })
       continue
     }
@@ -200,7 +260,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         const afternoonDip = hour >= 15 && hour < 18 ? 0.72 : 1
         if (!random.chance(Math.min(0.97, professional.occupancy * growth * season * afternoonDip))) continue
         // La primera visita es una evaluación de una persona nueva.
-        const isFirst = random.chance(0.11)
+        const isFirst = random.chance(recipe.firstVisitShare ?? 0.11)
         const patientIndex = isFirst || pool.length < 30 ? newPatient() : (pool[Math.max(0, pool.length - 1 - Math.floor(random.next() ** 2 * pool.length))] as number)
         const service = isFirst && firstVisitServices.length > 0 ? random.weighted(firstVisitServices) : random.weighted(followUpServices)
         const roll = random.next()
@@ -235,6 +295,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   const firstNumber = (counter?.value ?? fresh.length) - fresh.length + 1
   const patientIds = [...input.patientIds]
   const personIds: Array<string | null> = input.patientIds.map(() => null)
+  // Quien escribe por cada paciente: él mismo o, si es menor, su responsable.
+  const writerIds: Array<string | null> = input.patientIds.map(() => null)
   for (const [batchIndex, batch] of chunks(fresh).entries()) {
     const people = await tx
       .insert(contact)
@@ -245,9 +307,28 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           // Los apellidos van juntos en un campo (ADR 0058).
           familyName: `${person.paternal} ${person.maternal}`,
           displayName: `${person.given} ${person.paternal} ${person.maternal}`,
+          ...(person.person ? { birthDate: person.person.birthDate, sex: person.person.sex } : {}),
         })),
       )
       .returning({ id: contact.id })
+    // El responsable es otra persona: el paciente no se confunde con quien lo trae.
+    const guarded = batch.flatMap((person, index) => (person.person?.guardian ? [{ index, guardian: person.person.guardian }] : []))
+    const guardianRows =
+      guarded.length > 0
+        ? await tx
+            .insert(contact)
+            .values(
+              guarded.map(({ guardian }) => ({
+                organizationId: input.orgId,
+                givenNames: guardian.givenNames,
+                familyName: guardian.familyName,
+                displayName: `${guardian.givenNames} ${guardian.familyName}`,
+                sex: guardian.kinship === "MTH" ? ("F" as const) : ("M" as const),
+              })),
+            )
+            .returning({ id: contact.id })
+        : []
+    const guardianOf = new Map(guarded.map((item, position) => [item.index, { contactId: (guardianRows[position] as { id: string }).id, kinship: item.guardian.kinship }]))
     const rows = await tx
       .insert(patient)
       .values(
@@ -258,12 +339,47 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         })),
       )
       .returning({ id: patient.id, personId: patient.personId })
-    for (const row of rows) {
+    const links = rows.flatMap((row, index) => {
+      const guardian = guardianOf.get(index)
+      return guardian ? [{ patientId: row.id, ...guardian }] : []
+    })
+    if (links.length > 0) {
+      // Con quien se habla es el responsable: deja de serlo el propio menor.
+      await tx
+        .update(patientContact)
+        .set({ isPreferred: false })
+        .where(and(eq(patientContact.organizationId, input.orgId), inArray(patientContact.patientId, links.map((link) => link.patientId))))
+      await tx.insert(patientContact).values(
+        links.map((link) => ({
+          organizationId: input.orgId,
+          patientId: link.patientId,
+          contactId: link.contactId,
+          relationship: "guardian" as const,
+          kinship: link.kinship,
+          isPreferred: true,
+          createdBy: input.ownerUserId,
+        })),
+      )
+      await tx.insert(patientResponsibility).values(
+        links.map((link) => ({
+          organizationId: input.orgId,
+          patientId: link.patientId,
+          contactId: link.contactId,
+          kind: "representante_legal" as const,
+          startsAt: new Date(firstStart).toISOString().slice(0, 10),
+          createdBy: input.ownerUserId,
+        })),
+      )
+    }
+    for (const [index, row] of rows.entries()) {
       patientIds.push(row.id)
       personIds.push(row.personId)
+      writerIds.push(guardianOf.get(index)?.contactId ?? row.personId)
     }
   }
   const patientOf = (index: number): string => patientIds[index] as string
+  const personOf = (index: number): ReportsSeedPerson | null =>
+    index >= input.patientIds.length ? (fresh[index - input.patientIds.length]?.person ?? null) : null
 
   // --- Conversaciones: cómo llegó cada persona nueva y las consultas que no reservaron ------
   const connections = await tx
@@ -305,9 +421,9 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
         .insert(contact)
         .values(
           batch.map(() => {
-            const given = random.pick(GIVEN)
-            const paternal = random.pick(SURNAMES)
-            return { organizationId: input.orgId, givenNames: given, familyName: paternal, displayName: `${given} ${paternal}` }
+            const name = random.pick(given)
+            const paternal = random.pick(surnames)
+            return { organizationId: input.orgId, givenNames: name, familyName: paternal, displayName: `${name} ${paternal}` }
           }),
         )
         .returning({ id: contact.id })),
@@ -318,7 +434,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   let inquiryCursor = 0
   if (connections.length > 0) {
     const threadRows = allThreads.map((thread, index) => {
-      const contactId = thread.personIndex === null ? (inquiryPeople[inquiryCursor++]?.id as string) : (personIds[thread.personIndex] as string)
+      const contactId = thread.personIndex === null ? (inquiryPeople[inquiryCursor++]?.id as string) : (writerIds[thread.personIndex] as string)
       const sentAt = thread.reply ? new Date(thread.inboundAt.getTime() + thread.reply.seconds * 1000) : null
       return {
         thread,
@@ -353,7 +469,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
             direction: "in",
             senderKind: "contact",
             status: "received",
-            body: "Hola, quisiera una cita",
+            body: recipe.inbound ? random.pick(recipe.inbound) : "Hola, quisiera una cita",
             createdAt: thread.inboundAt,
           },
           ...(thread.reply && sentAt
@@ -364,7 +480,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
                   direction: "out",
                   senderKind: thread.reply.by,
                   status: "sent",
-                  body: "Con gusto, ¿qué día le acomoda?",
+                  body: recipe.reply ? random.pick(recipe.reply) : "Con gusto, ¿qué día le acomoda?",
                   externalId: `seed-reportes-${row.externalThreadId}`,
                   createdAt: sentAt,
                   sentAt,
@@ -423,7 +539,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       const rows = batch.map((visit) => {
         // La llegada es anterior al inicio: la espera en sala queda medida.
         const startedAt = new Date(visit.startsAt.getTime() + Math.max(1, visit.waitMinutes - 5) * 60_000)
-        return { visit, id: randomUUID(), procedureId: randomUUID(), startedAt, endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000) }
+        const note = recipe.note ? recipe.note(visit.service, random, personOf(visit.patientIndex)) : null
+        return { visit, note, id: randomUUID(), procedureId: randomUUID(), startedAt, endedAt: new Date(startedAt.getTime() + visit.service.durationMin * 60_000) }
       })
       for (const row of rows) done.push({ visit: row.visit, encounterId: row.id, procedureId: row.procedureId, endedAt: row.endedAt })
       await tx.insert(encounter).values(
@@ -435,13 +552,32 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           professionalUserId: row.visit.professional.userId,
           appointmentId: row.visit.id,
           reason: row.visit.service.name,
-          evolution: "Procedimiento sin complicaciones.",
+          evolution: row.note?.evolution ?? "Procedimiento sin complicaciones.",
+          ...(row.note?.vitals ? { vitals: row.note.vitals } : {}),
+          ...(row.note?.examination ? { examination: row.note.examination } : {}),
           startedAt: row.startedAt,
           signerName: row.visit.professional.signerName,
-          signerTitle: "Cirujano dentista",
+          signerTitle: row.visit.professional.signerTitle ?? "Cirujano dentista",
           signerRegistration: row.visit.professional.registration,
         })),
       )
+      const diagnosed = rows.filter((row) => row.note?.diagnosisCode && recipe.diagnosisSystem)
+      if (diagnosed.length > 0) {
+        await tx.insert(encounterDiagnosis).values(
+          diagnosed.map((row) => ({
+            organizationId: input.orgId,
+            patientId: patientOf(row.visit.patientIndex),
+            encounterId: row.id,
+            diagnosisSystem: recipe.diagnosisSystem as string,
+            diagnosisCode: row.note?.diagnosisCode as string,
+            diagnosisType: "confirmed",
+            status: "resuelto",
+            resolvedAt: row.endedAt,
+            createdBy: row.visit.professional.userId,
+            createdAt: row.endedAt,
+          })),
+        )
+      }
       await tx.insert(encounterProcedure).values(
         rows.map((row) => ({
           id: row.procedureId,
@@ -478,7 +614,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   const tax = chargeTaxOf(await orgTaxes(tx, input.orgId), false)
   const pay = (visit: PlannedVisit, chargeId: string, cents: number, paidAt: Date): void => {
     if (paidAt.getTime() > historyEnd || cents <= 0) return
-    const method = random.weighted(PAYMENT_METHODS)
+    const method = random.weighted(recipe.paymentMethods ?? PAYMENT_METHODS)
     const id = randomUUID()
     payments.push({
       id,
@@ -529,7 +665,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   for (const batch of chunks(applications)) await tx.insert(patientPaymentApplication).values(batch)
 
   // --- Presupuestos: tres de cada cuatro evaluaciones de personas nuevas terminan en uno -----
-  const budgets = await seedBudgets(tx, {
+  const budgets = recipe.budgets === false ? 0 : await seedBudgets(tx, {
     orgId: input.orgId,
     currency,
     random,
@@ -548,19 +684,32 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   }
   const expenses: Array<typeof expense.$inferInsert> = []
   // Del mes en curso, solo lo que ya se pagó (hasta donde llega la historia).
-  for (let back = MONTHS_BACK; back >= 0; back -= 1) {
+  for (let back = monthsBack; back >= 0; back -= 1) {
     const month: YearMonth = addMonths(current, -back)
     const start = monthStart(timezone, month.year, month.month).getTime()
     for (const branch of input.branches) {
       const revenue = income.get(`${branch.id}:${new Date(start + 15 * 86_400_000).toISOString().slice(0, 7)}`) ?? 0
       const staff = input.professionals.filter((professional) => professional.branchId === branch.id).length
-      for (const item of [
-        { category: "Personal", concept: "Planilla del mes", cents: 4_200_00 + staff * 2_100_00, day: 28 },
-        { category: "Alquiler", concept: "Alquiler del local", cents: branch.rent, day: 1 },
-        { category: "Laboratorio", concept: "Coronas y prótesis", cents: Math.round((revenue * 0.09) / 100) * 100, day: 20 },
-        { category: "Materiales", concept: "Insumos", cents: Math.round((revenue * 0.06) / 100) * 100, day: 12 },
-        { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00 + random.int(0, 30) * 1_000, day: 18 },
-      ]) {
+      const monthly = recipe.expenses
+        ? recipe.expenses.map((item) => ({
+            category: item.category,
+            concept: item.concept,
+            cents:
+              item.revenueShare !== undefined
+                ? Math.round((revenue * item.revenueShare) / 100) * 100
+                : item.rent
+                  ? branch.rent
+                  : (item.cents ?? 0) + staff * (item.perStaffCents ?? 0),
+            day: item.day,
+          }))
+        : [
+            { category: "Personal", concept: "Planilla del mes", cents: 4_200_00 + staff * 2_100_00, day: 28 },
+            { category: "Alquiler", concept: "Alquiler del local", cents: branch.rent, day: 1 },
+            { category: "Laboratorio", concept: "Coronas y prótesis", cents: Math.round((revenue * 0.09) / 100) * 100, day: 20 },
+            { category: "Materiales", concept: "Insumos", cents: Math.round((revenue * 0.06) / 100) * 100, day: 12 },
+            { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00 + random.int(0, 30) * 1_000, day: 18 },
+          ]
+      for (const item of monthly) {
         const spentAt = new Date(start + (item.day - 1) * 86_400_000 + 15 * 3_600_000)
         if (item.cents <= 0 || spentAt.getTime() > historyEnd) continue
         expenses.push({
@@ -598,7 +747,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   return { patients: fresh.length, appointments: visits.length, conversations: connections.length > 0 ? allThreads.length : 0, budgets }
 }
 
-type Random = ReturnType<typeof generator>
+export type Random = ReturnType<typeof generator>
 
 /**
  * Presupuestos presentados tras una evaluación, con su respuesta: aceptados,
