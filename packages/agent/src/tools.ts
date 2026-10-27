@@ -34,6 +34,7 @@ import {
   topicKindOf,
   recordTopicAskedAgain,
   latestOpenTopic,
+  getProposal,
   createProposal,
   createTask,
   findFreeGaps,
@@ -1280,6 +1281,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  /** Chat web sin WhatsApp ni correo, con una clínica que podría avisar por alguno. */
+  const webchatNeedsContact = async () =>
+    (await conversationChannel(ctx)) === "webchat" &&
+    (await inOrg((tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "aqui" as const)) === "preguntar"
+
   const proposeBooking = tool(
     async (input: {
       patientId: string
@@ -1293,14 +1299,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       // Lo mismo en una prueba y en una conversación real: solo se propone un hueco consultado.
       if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
-      // En el chat web, si cierra la pestaña no le llega nada: sin su WhatsApp o
-      // su correo no hay cómo recordarle ni avisarle un cambio de la cita.
-      if (
-        (await conversationChannel(ctx)) === "webchat" &&
-        (await inOrg((tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId))) === "preguntar"
-      ) {
-        return "Aún no hay cómo avisarle de la cita: en el chat web, si cierra la pestaña no le llega nada. Antes de proponerla pídele su WhatsApp o su correo; cuando lo escriba, guárdalo con guardar_contacto y vuelve a proponer este mismo horario."
-      }
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`
       }
@@ -1308,7 +1306,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
       const { reason, ...payload } = { ...input, professionalUserId }
-      return propose("reservar_cita", payload, "proponer_cita", reason)
+      const proposed = await propose("reservar_cita", payload, "proponer_cita", reason)
+      // En el chat web, si cierra la pestaña no le llega nada: la propuesta queda
+      // creada y la reserva espera a tener dónde avisarle (se exige al confirmar).
+      return (await webchatNeedsContact())
+        ? `${proposed} En el chat web, antes de reservar hace falta su WhatsApp o su correo para avisarle de la cita: pídeselo en este mismo mensaje junto con su sí.`
+        : proposed
     },
     {
       name: "proponer_cita",
@@ -1641,6 +1644,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const confirmProposal = tool(
     async ({ proposalId }: { proposalId: string }) => {
       if (ctx.dryRun) return `[SIMULACIÓN] Se confirmaría la propuesta ${proposalId}.`
+      // Una cita del chat web se reserva cuando ya hay dónde avisarle; la propuesta sigue
+      // esperando y se confirma esta misma, sin volver a proponerla (ADR 0097).
+      if (await webchatNeedsContact()) {
+        const target = await inOrg((tx) => getProposal(tx, ctx.orgId, proposalId)).catch(() => null)
+        if (target?.action === "reservar_cita" && target.status === "propuesta") {
+          return `Todavía no hay dónde avisarle de la cita. La propuesta ${proposalId} sigue esperando: pídele su WhatsApp o su correo. Cuando lo escriba, guárdalo con guardar_contacto y confirma esta misma propuesta con confirmar_propuesta; no la vuelvas a proponer.`
+        }
+      }
       // El sí se entiende por su intención (ADR 0023): «perfecto», «sí, gracias», «me sirve, ahí estaré».
       const pending = await inOrg((tx) => proposalReplyOf(tx, ctx.orgId, ctx.contactId, proposalId)).catch(() => null)
       const understoodMessageId =
@@ -1981,7 +1992,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       try {
         const saved = await inOrg((tx) => saveWebchatContactForConversation(tx, ctx.orgId, ctx.conversationId, { whatsapp: whatsapp ?? null, email: email ?? null }))
         const where = [saved?.whatsapp ? `WhatsApp ${saved.whatsapp}` : null, saved?.email ? `correo ${saved.email}` : null].filter(Boolean).join(" y ")
-        return `Guardado: le avisaremos por ${where || "lo que dejó"}. Sigue con lo que pidió.`
+        return `Guardado: le avisaremos por ${where || "lo que dejó"}. Si ya dijo que sí a una cita propuesta, confírmala ahora con confirmar_propuesta (la del «Estado del caso»); si no, pídele su sí.`
       } catch (error) {
         if (error instanceof ServiceError) return `No se guardó: ${error.message} Díselo con esas palabras y pídeselo de nuevo.`
         throw error

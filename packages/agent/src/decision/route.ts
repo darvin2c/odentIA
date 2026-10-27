@@ -152,7 +152,8 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // «Sí» a la pregunta del permiso general tras reservar también: responder_permiso_mensajes.
   // «Ya no me manden recordatorios» como respuesta a uno: elegir_mensajes.
   saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes", "elegir_mensajes"],
-  clinico: [...ALWAYS],
+  // Quien cuenta un problema sin pedir consejo recibe una cita, no un pase (ADR 0097).
+  clinico: [...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "ver_contexto_paciente", "guardar_contacto"],
   cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
     "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato", "guardar_contacto",
@@ -383,7 +384,9 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
   }
   if (path === "clinico") {
-    return `${head} una consulta clínica. No des consejo clínico ni diagnóstico. En este mismo paso, pasa el caso a una persona con request_human_handoff y avisa al interlocutor en su campo message.`
+    // Jev marca «clínico» también a quien solo cuenta un problema («tengo un problema en el
+    // diente»): pasarlo sin preguntar lo dejaba sin atención (ADR 0097). Solo el consejo va al equipo.
+    return `${head} puede ser una consulta clínica. No des consejo clínico ni diagnóstico. Si pide un consejo (qué tomar, si es grave, qué hacer), pasa el caso a una persona con request_human_handoff y avísale en message${has("buscar_huecos") ? "; si además quiere cita, búscale horarios antes y ofréceselos en ese aviso" : ""}. Si solo cuenta un problema o un síntoma sin pedir consejo, no lo pases: pregúntale qué le pasa en una línea y ofrécele una cita${has("buscar_huecos") ? " con los horarios más próximos (buscar_huecos)" : ""}.`
   }
   if (path === "cita" && !has("buscar_huecos")) {
     // Con «Agendar» apagado no hay huecos ni propuestas: la cita la elige la persona en su enlace.
