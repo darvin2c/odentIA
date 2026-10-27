@@ -46,7 +46,7 @@ export async function appointmentTotalsMany(tx: Db, orgId: string, scope: Pick<R
       count(*) filter (where a.status in ('programada','confirmada'))::int as unmarked
     from ${spansSql(spans)}
     join appointment a on a.organization_id=${orgId} and a.starts_at >= b.start_at and a.starts_at < b.end_at
-      and ${settledAppointment(scope.now)}
+      and not a.is_test and ${settledAppointment(scope.now)}
       ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
     group by b.idx`)
   return bySpan(
@@ -327,7 +327,7 @@ export async function getReportList(
         join patient p on p.id=a.patient_id and p.organization_id=${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         join branch b on b.id=a.branch_id and b.organization_id=${orgId}
         join "user" u on u.id=a.professional_user_id
-        where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
+        where a.organization_id=${orgId} and not a.is_test and a.starts_at >= ${start} and a.starts_at < ${end} and ${status}
           ${scope.branch ? sql`and a.branch_id=${scope.branch.id}` : sql``}
         order by a.starts_at desc, a.id limit ${limit}`)),
     ]

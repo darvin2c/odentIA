@@ -231,13 +231,17 @@ export function createAgentLearningRoute(deps: AgentLearningDeps) {
    * modelo (dos conversaciones por caso): solo a pedido, nunca al listar.
    */
   app.post("/lessons/:id/preview", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.write")) return forbidden(c)
     try {
       return await runService(c, 200, async () => {
         await withOrgContext(deps.db, orgId, (tx) => assertAgentTestBudget(tx, orgId))
         return meterAiUse(deps.db, orgId, "vista_previa", () =>
-          previewLesson(deps.db, { secretsKey: deps.secretsKey, platform: deps.llm }, { orgId, lessonId: c.req.param("id") }),
+          previewLesson(
+            deps.db,
+            { secretsKey: deps.secretsKey, platform: deps.llm, storage: deps.storage },
+            { orgId, userId, lessonId: c.req.param("id") },
+          ),
         )
       })
     } catch (error) {

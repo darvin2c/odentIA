@@ -6,6 +6,7 @@ import { opportunity } from "@odentia/db/schema/opportunities"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
+import { testContactSql } from "./conversation-state.js"
 import { resolveAfterHandoffTask } from "./conversation-close.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -345,7 +346,8 @@ export async function pageTasks(
   const limit = Math.min(Math.max(input.limit ?? TASK_PAGE, 1), 100)
   const q = input.q?.trim() ?? ""
   const areas = input.viewer.areas.filter((area) => (TASK_AREAS as readonly string[]).includes(area))
-  const conditions: SQL[] = [eq(crmTask.organizationId, orgId)]
+  // Las tareas de una persona de prueba se ven en «Probar», no en Tareas (ADR 0094).
+  const conditions: SQL[] = [eq(crmTask.organizationId, orgId), sql`not ${testContactSql(sql`${crmTask.contactId}`)}`]
   if (!input.viewer.all) {
     conditions.push(
       or(

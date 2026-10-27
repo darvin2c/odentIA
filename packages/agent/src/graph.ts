@@ -13,7 +13,6 @@ import {
   type AgentServicesShown,
   GENERAL_PERMISSION_QUESTION,
   PRICES_PER_CONVERSATION,
-  CASE_LOOKUP_CHARS,
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
   formatKnowledgeForPrompt,
@@ -65,14 +64,11 @@ import { channelFormatRule } from "./channel-format.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
-  type AgentSandbox,
   type AgentToolCtx,
   conversationChannel,
   makeAgentTools,
   noticeAfterHandoff,
   performHandoff,
-  SANDBOX_PATIENT_ID,
-  SANDBOX_PERSON,
   TOOL_SOURCES,
   agentTexts,
   roomWord,
@@ -710,34 +706,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   }
 
   /**
-   * Hilo de una conversación de prueba: una persona ficticia vinculada a sí
-   * misma, el historial que trae quien prueba y el estado que dejaron los
-   * turnos anteriores de la misma prueba. No lee ni escribe nada del hilo.
-   */
-  function sandboxThread(sandbox: AgentSandbox, zone: OrgLocale): ThreadContext {
-    const at = new Date().toISOString()
-    toolCtx.casePending = sandbox.state.pending.length > 0
-    return {
-      contactBlock: [
-        `Interlocutor: ${SANDBOX_PERSON}. Etiquetas: sin etiquetas. Oportunidades abiertas: sin oportunidades abiertas. Seguimientos: sin seguimientos pendientes.`,
-        `Pacientes vinculados a este interlocutor: ${SANDBOX_PERSON} (id ${SANDBOX_PATIENT_ID}, vínculo: self). Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente.`,
-      ].join("\n\n"),
-      crossBlock: null,
-      caseBlock: formatAgentCaseForPrompt(
-        { ...sandbox.state, totalMessages: sandbox.transcript.length },
-        zone,
-        HISTORY_LIMIT,
-      ),
-      items: sandbox.transcript.slice(-HISTORY_LIMIT).map((turn) => ({
-        direction: turn.role === "contact" ? "in" : "out",
-        senderKind: turn.role === "contact" ? "contact" : "agent",
-        body: turn.text,
-        createdAt: at,
-      })),
-    }
-  }
-
-  /**
    * Citas, presupuestos y saldo del paciente del interlocutor, traídos por el
    * código cuando el camino es cambiar una cita. Usa la misma herramienta que
    * usaría el modelo, con su misma autorización, y solo cuando hay un único
@@ -747,7 +715,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const name = "ver_resumen_paciente"
     const summary = tools.find((item) => item.name === name)
     const source = TOOL_SOURCES[name]
-    if (!summary || !source || toolCtx.sandbox) return null
+    if (!summary || !source) return null
     try {
       const linked = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
         listAgentContextCandidates(tx, toolCtx.orgId, toolCtx.contactId),
@@ -764,9 +732,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
 
   async function loadContext(): Promise<{ messages: BaseMessage[] }> {
     const zone = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getOrgLocale(tx, toolCtx.orgId))
-    const { contactBlock, crossBlock, caseBlock, items } = toolCtx.sandbox
-      ? sandboxThread(toolCtx.sandbox, zone)
-      : await readThread(zone)
+    const { contactBlock, crossBlock, caseBlock, items } = await readThread(zone)
     const draft = toolCtx.draftText?.trim().slice(0, 4000)
     const latestInbound = draft ?? [...items].reverse().find((item) => item.direction === "in")?.body ?? null
     toolCtx.lastInboundText = latestInbound ?? undefined
@@ -800,7 +766,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       },
     )
     // Un uso cuenta cuando la lección toca el tema del mensaje; una prueba no cuenta.
-    if (!toolCtx.dryRun && lessons.matchedIds.length > 0) {
+    if (!toolCtx.dryRun && !toolCtx.testConversation && lessons.matchedIds.length > 0) {
       await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
         noteLessonUse(tx, toolCtx.orgId, { lessonIds: lessons.matchedIds }),
       ).catch(() => undefined)
@@ -991,14 +957,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       // segunda sede no borran los de la primera, que ya se le ofrecieron.
       const remembered = [...(consulted.get(name) ?? []), text]
       consulted.set(name, remembered)
-      if (toolCtx.sandbox) {
-        // En una prueba la consulta se recuerda dentro de la propia prueba.
-        const state = toolCtx.sandbox.state
-        state.lookups = [
-          ...state.lookups.filter((item) => item.tool !== name),
-          { tool: name, text: remembered.join("\n").slice(0, CASE_LOOKUP_CHARS), at: new Date().toISOString() },
-        ]
-      }
       if (!toolCtx.dryRun) {
         await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
           recordAgentCaseLookup(tx, toolCtx.orgId, toolCtx.conversationId, { tool: name, text: remembered.join("\n") }),

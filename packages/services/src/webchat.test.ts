@@ -503,17 +503,13 @@ describe("la prueba de Configuración no se cobra ni cuenta", () => {
     ).toBe(false)
     const people = await c.run((tx) => listPeople(tx, c.orgId, { view: "todos" }, () => true))
     expect(people.items.some((item) => item.id === thread!.contactId)).toBe(false)
-    // Una prueba no envía su enlace: no reserva ni crea a nadie de verdad.
+    // Quien escribe es una persona de prueba (ADR 0094) y su enlace sigue las reglas
+    // de siempre: sin ficha ni registro en línea no hay enlace, como con alguien real.
+    const [person] = await ownerDb.select({ isTest: contact.isTest }).from(contact).where(eq(contact.id, thread!.contactId))
+    expect(person?.isTest).toBe(true)
     await expect(
-      c.run((tx) =>
-        createBookingLink(
-          tx,
-          c.orgId,
-          { conversationId: said.conversationId },
-          { secretsKey: KEY },
-        ),
-      ),
-    ).rejects.toMatchObject({ code: "TEST_CONVERSATION" })
+      c.run((tx) => createBookingLink(tx, c.orgId, { conversationId: said.conversationId }, { secretsKey: KEY })),
+    ).rejects.toMatchObject({ code: "BOOKING_NEEDS_PATIENT" })
     // Lo que dejó al corregir a Sofi (un caso por revisar y su lección) no impide borrarla; la lección queda.
     const [trace] = await ownerDb
       .insert(agentAnswerTrace)

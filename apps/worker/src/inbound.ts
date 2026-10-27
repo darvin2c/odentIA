@@ -147,7 +147,7 @@ export async function processInbound(
         if (handled) return
       }
       const [conv] = await tx
-        .select({ agentStatus: conversation.agentStatus, status: conversation.status })
+        .select({ agentStatus: conversation.agentStatus, status: conversation.status, isTest: conversation.isTest })
         .from(conversation)
         .where(eq(conversation.id, result.conversationId))
         .limit(1)
@@ -158,7 +158,8 @@ export async function processInbound(
         .limit(1)
       // El agente nunca responde en una conversación cerrada (ADR 0024); la ingesta ya la reabrió.
       // Un correo que escribió una máquina queda en la bandeja sin gastar una corrida (ADR 0031).
-      if (conv?.status === "open" && conv.agentStatus === "on" && cfg?.enabled && !msg.message.event.automated) {
+      // Una prueba responde aunque Sofi esté apagada: se prueba antes de encenderla (ADR 0094).
+      if (conv?.status === "open" && conv.agentStatus === "on" && (cfg?.enabled || conv.isTest) && !msg.message.event.automated) {
         await sendAgentRun(
           tx,
           {

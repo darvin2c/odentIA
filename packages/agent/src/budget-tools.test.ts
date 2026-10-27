@@ -47,7 +47,7 @@ import { GenericContainer, type StartedTestContainer, Wait } from "testcontainer
 import { afterAll, beforeAll, expect, it } from "vitest"
 import { ROUTE_TOOLS, routeInstruction, widenDescription } from "./decision/route.js"
 import { type AgentRuntime, processAgentRun } from "./run.js"
-import { type AgentSandbox, type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
+import { type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
 import { insertTestPatients } from "@odentia/services/test-patient"
 
 const IMAGE = "dentalagent-postgres:18.6"
@@ -549,12 +549,6 @@ it("en una simulación o en «Probar» nada se envía, nada se propone de verdad
   const dry = toolCtx(conversationId, contactId, { dryRun: true, storage: storageStub })
   expect(await call(dry, "reenviar_presupuesto", { patientId, budgetId })).toContain("[SIMULACIÓN]")
   expect(await call(dry, "anotar_respuesta_presupuesto", { patientId, budgetId, decisions })).toContain("[SIMULACIÓN]")
-  const sandbox: AgentSandbox = { transcript: [], state: { pending: [], recent: [], notes: [], lookups: [] } }
-  const trial = toolCtx(randomUUID(), randomUUID(), { dryRun: true, sandbox })
-  expect(await call(trial, "ver_presupuesto", { patientId: randomUUID() })).toContain("no tiene presupuestos entregados")
-  expect(await call(trial, "reenviar_presupuesto", { patientId: randomUUID() })).toContain("[SIMULACIÓN]")
-  await call(trial, "anotar_respuesta_presupuesto", { patientId: randomUUID(), budgetId: randomUUID(), decisions })
-  expect(sandbox.state.pending).toMatchObject([{ action: "decidir_presupuesto", status: "propuesta" }])
   expect(await count()).toEqual(before)
   expect((await getBudgetDetailOf(patientId, budgetId)).status).toBe("presentado")
 })

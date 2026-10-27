@@ -106,7 +106,9 @@ async function agentOutcomes(tx: Db, orgId: string, since: Date): Promise<AgentO
            (select count(*)::int from passed) as passed,
            (select count(*)::int from agent_proposal p
              where p.organization_id = ${orgId} and p.action = 'reservar_cita' and p.status = 'ejecutada'
-               and p.executed_at >= ${at}::timestamptz and (p.decided_by = 'agent' or p.decided_by like 'contact:%')) as booked`)
+               and p.executed_at >= ${at}::timestamptz and (p.decided_by = 'agent' or p.decided_by like 'contact:%')
+               -- Lo que reservó una prueba no es una cita (ADR 0094).
+               and p.conversation_id not in (select id from conversation where organization_id = ${orgId} and is_test)) as booked`)
   const attended = Number(row?.attended ?? 0)
   const corrected = Number(row?.corrected ?? 0)
   const passed = Number(row?.passed ?? 0)

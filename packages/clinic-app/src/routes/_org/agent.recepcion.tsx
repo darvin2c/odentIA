@@ -10,9 +10,24 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
+  Drawer,
+  DrawerContent,
+  useIsMobile,
 } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ConfirmDialog, ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  PageShell,
+  SideColumn,
+  type SideColumnWidth,
+  SideDockPortal,
+  useDetailMode,
+  useSideColumnWidth,
+  useSideDock,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link } from "@tanstack/react-router"
 import { ArrowRight, ChevronDown, ChevronRight, Lock, Plus } from "lucide-react"
@@ -24,7 +39,7 @@ import {
   LimitsDrawer,
   type LimitsSection,
 } from "../../components/agent/reception-drawers"
-import { AgentSandbox } from "../../components/agent/sandbox"
+import { AgentTestChat, PROBAR_INPUT } from "../../components/agent/test-chat"
 import { TurnOnDrawer } from "../../components/agent/turn-on-drawer"
 import { useAgentPanel } from "../../components/agent-panel"
 import {
@@ -54,7 +69,6 @@ const TREATMENT_LABEL = { tu: "de tú", usted: "de usted" } as const
 const TONE_LABEL = { cercano: "cercano", neutro: "neutro", formal: "formal" } as const
 const EMOJIS_LABEL = { no: "sin emojis", pocos: "pocos emojis" } as const
 /** El mismo corte que `sm` de los estilos: por debajo, «Probar» es una pantalla propia. */
-const PHONE = "(max-width: 639.98px)"
 
 const count = (total: number, one: string, many: string) => `${total} ${total === 1 ? one : many}`
 
@@ -255,21 +269,19 @@ function ReceptionPage() {
   const [turnOnOpen, setTurnOnOpen] = useState(false)
   const [turnOffOpen, setTurnOffOpen] = useState(false)
   const [behaviorOpen, setBehaviorOpen] = useState(false)
-  // Teléfono: «Probar» abierto como pantalla propia.
+  // «Probar» (ADR 0094): en ventana ancha, columna fija a la derecha; si no cabe, cajón.
   const [testing, setTesting] = useState(false)
   const testButtonRef = useRef<HTMLButtonElement>(null)
+  const phoneTestButtonRef = useRef<HTMLButtonElement>(null)
+  const dock = useSideDock()
+  const docked = useDetailMode() === "panel" && dock.available
 
-  // Quien llega desde el resumen con «Probar» (`#probar`) entra, en teléfono, a esa pantalla.
-  // Al ensanchar la ventana «Probar» vuelve a su sitio junto a la página.
+  // Quien llega desde el resumen con «Probar» (`#probar`) lo encuentra abierto.
+  // Al ensanchar la ventana el cajón se cierra: «Probar» ya está en su columna.
   useEffect(() => {
-    const phone = window.matchMedia(PHONE)
-    if (phone.matches && window.location.hash === "#probar") setTesting(true)
-    const onChange = () => {
-      if (!phone.matches) setTesting(false)
-    }
-    phone.addEventListener("change", onChange)
-    return () => phone.removeEventListener("change", onChange)
-  }, [])
+    if (docked) setTesting(false)
+    else if (window.location.hash === "#probar") setTesting(true)
+  }, [docked])
 
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
@@ -360,13 +372,10 @@ function ReceptionPage() {
   const { today, knows } = overview
   const gaps = overview.needsYou.gaps
   const status = overview.enabled ? "Encendido" : "Apagado"
-  // En la pantalla de «Probar» del teléfono lo demás no se muestra.
-  const besideTest = testing ? "max-sm:hidden" : ""
-
-  /** «Probar» desde otra superficie: en teléfono abre su pantalla; al lado de la página, la acerca. */
+  /** «Probar» desde otra superficie: en su columna, al campo; si no, abre su cajón. */
   function openTest() {
-    if (window.matchMedia(PHONE).matches) setTesting(true)
-    else document.getElementById("probar")?.scrollIntoView({ block: "start" })
+    if (docked) document.getElementById(PROBAR_INPUT)?.focus()
+    else setTesting(true)
   }
 
   const gapNotice =
@@ -387,11 +396,10 @@ function ReceptionPage() {
   return (
     <PageShell className={`flex flex-col gap-6 ${canWrite && !testing ? "max-sm:pb-24" : ""}`}>
       <PageHeader
-        className={besideTest}
         title={title}
         subtitle={
           <>
-            <Breadcrumb className={besideTest}>
+            <Breadcrumb>
               <BreadcrumbList>
                 <BreadcrumbItem>
                   <BreadcrumbLink render={<Link to="/agent" />} className="inline-flex min-h-11 items-center sm:min-h-0">
@@ -430,14 +438,14 @@ function ReceptionPage() {
 
       {/* El modelo dejó de responder: los casos pasan al equipo y odentIA ya tiene el caso. Se va solo cuando vuelve a responder. */}
       {overview.enabled && overview.provider.problem ? (
-        <p role="alert" className={`rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm font-semibold ${besideTest}`}>
+        <p role="alert" className={`rounded-xl border border-destructive/30 bg-danger-soft px-4 py-3 text-sm font-semibold`}>
           {agentModelDown(receptionName).line}
         </p>
       ) : null}
 
       {/* Sin teléfono para urgencias Sofi solo da el número de emergencias del país: se dice con su acción (ADR 0050 y 0084). */}
       {orgProfile.data && !orgProfile.data.emergencyPhone ? (
-        <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm ${besideTest}`}>
+        <p className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-warning/30 bg-warning-soft px-4 py-3 text-sm`}>
           <span className="font-semibold">Sin teléfono para urgencias.</span>
           <span className="min-w-0 flex-1">Ante una urgencia, {receptionName} solo puede decir a qué número de emergencias llamar o que vaya a la emergencia más cercana.</span>
           {canEditClinic ? (
@@ -451,7 +459,7 @@ function ReceptionPage() {
       {/* Hoy: lo que pasó en conversaciones, no en mensajes. En teléfono va resumido en la cabecera. */}
       <section
         aria-label="Hoy"
-        className={`elevated flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border bg-card px-4 py-3 text-sm max-sm:hidden sm:px-6 ${besideTest}`}
+        className={`elevated flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl border bg-card px-4 py-3 text-sm max-sm:hidden sm:px-6`}
       >
         <h2 className="font-heading text-base font-semibold">Hoy</h2>
         <p>
@@ -470,12 +478,17 @@ function ReceptionPage() {
           Ver qué hizo
           <ArrowRight aria-hidden />
         </Button>
+        {canWrite && !docked ? (
+          <Button ref={testButtonRef} type="button" size="sm" className="min-h-8" onClick={() => setTesting(true)}>
+            Probar
+          </Button>
+        ) : null}
       </section>
 
-      {/* Dos columnas según el ancho del contenido, no de la ventana: con la columna lateral abierta vuelve a una. */}
-      <div className="@container min-w-0">
-      <div className="grid min-w-0 items-start gap-6 @5xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
-        <div className={`flex min-w-0 flex-col gap-6 max-sm:gap-4 ${besideTest}`}>
+      {/* «Probar» va aparte, en la columna lateral o en su cajón: la página es una sola columna. */}
+      <div className="min-w-0">
+      <div className="grid min-w-0 items-start gap-6">
+        <div className="flex min-w-0 flex-col gap-6 max-sm:gap-4">
           <Card title="Qué hace" hint="Sus funciones. Apaga la que no quieras que haga: pierde esa capacidad, no solo la instrucción.">
             <ul className="flex flex-col divide-y">
               {role.functions.map((fn) => (
@@ -637,29 +650,34 @@ function ReceptionPage() {
           <AgentGuidance canWrite={canWrite} />
         </div>
 
-        {canWrite ? (
-          <div className="min-w-0 @5xl:sticky @5xl:top-4">
-            <AgentSandbox
-              screen={testing}
-              onLeaveScreen={() => {
-                setTesting(false)
-                // El foco vuelve al botón que abrió la pantalla, ya visible otra vez.
-                requestAnimationFrame(() => testButtonRef.current?.focus())
-              }}
-              onTested={() => void queryClient.invalidateQueries({ queryKey: ["agent-overview"] })}
-            />
-          </div>
-        ) : null}
       </div>
       </div>
 
-      {/* Teléfono: «Probar» queda a mano, fijo al pie, y abre su propia pantalla. */}
+      {/* Teléfono: «Probar» queda a mano, fijo al pie, y abre su cajón. */}
       {canWrite && !testing ? (
         <div className="fixed inset-x-0 bottom-0 z-10 border-t bg-canvas px-4 py-3 sm:hidden">
-          <Button ref={testButtonRef} type="button" className="h-12 w-full" onClick={() => setTesting(true)}>
+          <Button ref={phoneTestButtonRef} type="button" className="h-12 w-full" onClick={() => setTesting(true)}>
             Probar
           </Button>
         </div>
+      ) : null}
+
+      {canWrite && docked ? (
+        <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} />}>
+          <TestColumn />
+        </SideDockPortal>
+      ) : canWrite ? (
+        <TestDrawer
+          open={testing}
+          onClose={() => {
+            setTesting(false)
+            // El foco vuelve al botón que lo abrió: el del resumen o, en el teléfono, el del pie.
+            requestAnimationFrame(() => {
+              const visible = [phoneTestButtonRef.current, testButtonRef.current].find((button) => button?.offsetParent)
+              visible?.focus()
+            })
+          }}
+        />
       ) : null}
 
       <FunctionNoteDrawer fn={noteFor} config={config} onClose={() => setNoteFor(null)} />
@@ -702,5 +720,48 @@ function ReceptionPage() {
         ) : null}
       </ConfirmDialog>
     </PageShell>
+  )
+}
+
+/** La columna de «Probar»: ancho de un chat, que se puede cambiar como el de cualquier panel. */
+const TEST_COLUMN: SideColumnWidth = { initial: 416, min: 352, max: 560 }
+
+/** «Probar» en la columna lateral (ADR 0094): fija a la derecha, a todo el alto; la página sigue al lado. */
+function TestColumn() {
+  const [width, resize] = useSideColumnWidth("odentia.side-panel.probar", TEST_COLUMN)
+  return (
+    <SideColumn
+      aria-labelledby="probar-titulo"
+      width={width}
+      onResize={resize}
+      bounds={TEST_COLUMN}
+      // Lo que la columna deja siempre a la página, como el detalle de una lista.
+      pageMinWidth={512}
+      resizeLabel="Cambiar el ancho de Probar"
+    >
+      <AgentTestChat titleId="probar-titulo" />
+    </SideColumn>
+  )
+}
+
+/** «Probar» donde no cabe la columna: el cajón estándar, a todo el alto en el teléfono. */
+function TestDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const isMobile = useIsMobile()
+  return (
+    <Drawer
+      open={open}
+      swipeDirection={isMobile ? "down" : "right"}
+      showSwipeHandle={isMobile}
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
+      <DrawerContent
+        aria-labelledby="probar-titulo"
+        className="overflow-hidden data-[swipe-axis=x]:sm:[--drawer-content-width:min(28rem,calc(100vw-2rem))] data-[swipe-axis=y]:[--drawer-content-height:calc(100dvh-1rem-env(safe-area-inset-top))] data-[swipe-axis=y]:[--drawer-content-max-height:calc(100dvh-1rem-env(safe-area-inset-top))]"
+      >
+        {open ? <AgentTestChat titleId="probar-titulo" onClose={onClose} /> : null}
+      </DrawerContent>
+    </Drawer>
   )
 }

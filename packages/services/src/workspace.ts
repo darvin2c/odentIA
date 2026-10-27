@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
 import { encounter, patient } from "@odentia/db/schema/clinical"
-import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
+import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm"
 import { getAdminRecommendations, getAdminUnreached } from "./agent-admin.js"
@@ -13,7 +13,7 @@ import { adminRuntime, remindedUnconfirmedSql } from "./automation.js"
 import { budgetAwaitsAnswerSql } from "./budget-awaiting.js"
 import { listRecategorizedMessages } from "./clinic-messages.js"
 import { listConsentsToPublish } from "./clinical-forms.js"
-import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, unansweredSinceSql } from "./conversation-state.js"
+import { handoffOpenExistsSql, screenedSql, stillOpenWithPersonSql, testContactSql, unansweredSinceSql } from "./conversation-state.js"
 import { dueDataRequests } from "./data-requests.js"
 import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
@@ -90,6 +90,8 @@ export interface WorkspaceNoticeInput {
   permission: string
   subject?: string | null
   actorUserId?: string | null
+  /** La persona de la que trata: si es de prueba, no se avisa (ADR 0094). */
+  contactId?: string | null
 }
 
 /**
@@ -131,13 +133,18 @@ async function checkNotice(tx: Db, orgId: string, input: WorkspaceNoticeInput): 
   if (input.subject && !NOTICE_SUBJECTS.some((kind) => input.subject === kind || input.subject?.startsWith(`${kind}:`)))
     throw validation("El asunto del aviso no es de una clase conocida")
   if (input.actorUserId && input.actorUserId === input.userId) return false
+  if (input.contactId) {
+    const [person] = await tx.select({ isTest: contact.isTest }).from(contact)
+      .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId))).limit(1)
+    if (person?.isTest) return false
+  }
   const [recipient] = await tx.select({ id: member.id }).from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, input.userId))).limit(1)
   if (!recipient) throw notFound("Destinatario")
   return true
 }
 
-function noticeRow(orgId: string, { actorUserId: _actor, subject, ...input }: WorkspaceNoticeInput) {
+function noticeRow(orgId: string, { actorUserId: _actor, contactId: _contact, subject, ...input }: WorkspaceNoticeInput) {
   return { organizationId: orgId, ...input, subject: subject ?? null }
 }
 
@@ -358,7 +365,7 @@ async function hasOwnAppointmentsToday(tx: Db, orgId: string, userId: string, ti
   const { start, end } = dayBounds(timezone)
   const [row] = await tx.execute<{ found: boolean }>(sql`
     select exists(select 1 from appointment a where a.organization_id=${orgId} and a.professional_user_id=${userId}
-      and a.starts_at >= ${start} and a.starts_at < ${end}
+      and not a.is_test and a.starts_at >= ${start} and a.starts_at < ${end}
       and a.status in ('programada','confirmada','atendida','no_asistio')) as found`)
   return row?.found ?? false
 }
@@ -399,7 +406,7 @@ async function workspaceToday(
     join "user" u on u.id=a.professional_user_id
     left join encounter e on e.organization_id=a.organization_id and e.appointment_id=a.id and e.status<>'anulada'
     left join "user" eu on eu.id=e.professional_user_id
-    where a.organization_id=${orgId} and a.starts_at >= ${start} and a.starts_at < ${end}
+    where a.organization_id=${orgId} and not a.is_test and a.starts_at >= ${start} and a.starts_at < ${end}
       and a.status in ('programada','confirmada','atendida','no_asistio')
       and ${own ? sql`a.professional_user_id=${userId}` : sql`a.branch_id=${branch?.id ?? null}`}
     order by a.starts_at, a.id limit 300`)
@@ -558,7 +565,7 @@ async function waitingConversations(tx: Db, orgId: string, withoutCases: boolean
   const [row] = await tx.execute<{ waiting: number; oldestAt: string | null }>(sql`
     with pending as (
       select ${unansweredSinceSql(conv)} as since from conversation c where c.organization_id=${orgId} and c.status='open'
-        and not ${screenedSql(conv)}
+        and not ${screenedSql(conv)} and c.test_by_user_id is null
         ${withoutCases ? sql`and not ${handoffOpenExistsSql(conv)}` : sql``}
     ) select count(since)::int as waiting, ${iso(sql`min(since)`)} as "oldestAt" from pending`)
   return row ?? { waiting: 0, oldestAt: null }
@@ -581,7 +588,7 @@ async function waitingStillOpen(tx: Db, orgId: string, userId: string, access: W
       ${iso(sql`greatest(coalesce(c.last_message_at, '-infinity'::timestamptz), c.attention_started_at)`)} as "quietSince",
       count(*) over ()::int as total
     from conversation c join contact ct on ct.id = c.contact_id and ct.organization_id = c.organization_id
-    where c.organization_id = ${orgId} and ${scope} and ${stillOpenWithPersonSql(conv)}
+    where c.organization_id = ${orgId} and ${scope} and ${stillOpenWithPersonSql(conv)} and c.test_by_user_id is null
     order by greatest(coalesce(c.last_message_at, '-infinity'::timestamptz), c.attention_started_at), c.id limit 1`)
   const first = rows[0]
   if (!first) return null
@@ -611,7 +618,7 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
     cross join lateral (select max(e.created_at) as at from audit_event e
       where e.organization_id = a.organization_id and e.action = 'personal_link.data_sent' and e.entity_id = a.patient_id::text
         and (e.created_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date) sent
-    where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada') and a.arrived_at is null
+    where a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada') and a.arrived_at is null
       and (a.starts_at at time zone coalesce(b.timezone, 'UTC'))::date = (now() at time zone coalesce(b.timezone, 'UTC'))::date
       and sent.at is not null
     order by sent.at desc, a.id limit ${WAITING_LIMITS.otherCases}`)
@@ -658,7 +665,7 @@ async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: Waiti
       count(*) over ()::int as total
     from appointment a join patient p on p.id = a.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     join branch b on b.id = a.branch_id and b.organization_id = ${orgId}
-    where a.organization_id = ${orgId}
+    where a.organization_id = ${orgId} and not a.is_test
       and (${remindedUnconfirmedSql(appt)} or ${noRemindersTomorrowSql(orgId)})
     order by a.starts_at, a.id limit ${WAITING_LIMITS.unconfirmed}`)
   return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
@@ -692,7 +699,9 @@ async function waitingTasks(tx: Db, orgId: string, userId: string, access: Works
     ? sql`and not exists (select 1 from agent_handoff h where h.organization_id = t.organization_id and h.task_id = t.id)`
     : sql``
   // Lo que dejó el sistema con su propia fila (`task.kind`) no se repite como tarea.
-  const scope = sql`t.organization_id=${orgId} and t.status='open' and t.kind is null and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}`
+  // Lo de una persona de prueba se ve en «Probar», no en «Te espera» (ADR 0094).
+  const scope = sql`t.organization_id=${orgId} and t.status='open' and t.kind is null and (${access.allTasks} or t.assignee_user_id=${userId} ${areas}) ${cases}
+    and not ${testContactSql(sql`t.contact_id`)}`
   type Row = Omit<WaitingTask, "href"> & { conversationId: string | null }
   const select = sql`select t.id, t.title, ${iso(sql`t.due_at`)} as "dueAt",
       case when t.due_at is null then 'none' when t.due_at < now() then 'overdue'
@@ -751,7 +760,7 @@ async function waitingSystemTasks(
     left join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join contact ct on ct.id = t.contact_id and ct.organization_id = t.organization_id
     where t.organization_id = ${orgId} and t.status = 'open' and t.kind is not null
-      and (t.patient_id is not null or t.contact_id is not null)
+      and (t.patient_id is not null or t.contact_id is not null) and not ${testContactSql(sql`t.contact_id`)}
       and (${access.allTasks} or t.assignee_user_id = ${userId} ${areas})
     order by t.created_at, t.id limit 20`)
   const SOURCE: Record<string, WaitingPossibleDuplicate["source"]> = {
@@ -933,14 +942,15 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   const [setup] = access.configure ? await tx.execute<{ availability: boolean; rooms: boolean; patients: boolean }>(sql`
     select exists(select 1 from professional_schedule where organization_id=${orgId} and is_active) as availability,
       exists(select 1 from schedule_room where organization_id=${orgId} and is_active) as rooms,
-      exists(select 1 from patient where organization_id=${orgId}) as patients`) : []
+      exists(select 1 from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+        where p.organization_id=${orgId} and not pp.is_test) as patients`) : []
   // Sin Recepción ni el Administrador no sale «Recordar la cita» ni ningún aviso:
   // es un paso más de la puesta en marcha para quien puede encenderlos.
   const agentStep = setup && options.can?.("agent.write") ? await adminRuntime(tx, orgId) : null
   // Con trabajo ya registrado, Inicio deja de ofrecer la puesta en marcha.
   const [activity] = await tx.execute<{ recorded: boolean }>(sql`
     select (
-      ${access.appointments} and exists(select 1 from appointment where organization_id=${orgId})
+      ${access.appointments} and exists(select 1 from appointment where organization_id=${orgId} and not is_test)
       or ${access.tasks} and exists(select 1 from task where organization_id=${orgId} and (${access.allTasks} or assignee_user_id=${userId}))
       or ${access.conversations} and exists(select 1 from conversation where organization_id=${orgId})
       or ${access.finance} and exists(select 1 from patient_payment where organization_id=${orgId} and voided_at is null)

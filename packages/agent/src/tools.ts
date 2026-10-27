@@ -1,13 +1,12 @@
-import { createHash, randomUUID } from "node:crypto"
+import { createHash } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import { and, eq } from "drizzle-orm"
-import type { AgentCaseNote, AnswerBasisItem, AnswerCheck, AnswerTraceOutcome, ProposalAction } from "@odentia/db/schema/agent"
+import type { AnswerBasisItem, AnswerCheck, AnswerTraceOutcome } from "@odentia/db/schema/agent"
 import {
   addAgentCaseNote,
   addPersonFact,
-  type AgentCaseProposal,
   type AgentPatientBudgets,
   budgetAnswerQuestion,
   budgetLineWords,
@@ -38,7 +37,6 @@ import {
   createTask,
   findFreeGaps,
   getAgentPatientSummary,
-  autonomyModeOf,
   getContact,
   getClinicInfoSnapshot,
   getOpportunity,
@@ -63,7 +61,6 @@ import {
   listTasks,
   noteLessonUse,
   operationAgentSchema,
-  PROPOSAL_ACTION_LABEL,
   recordAnswerTrace,
   recordKnowledgeGap,
   requireContact,
@@ -97,10 +94,10 @@ export interface AgentEvidence extends Evidence {
 }
 
 /** Cómo ve el equipo cada herramienta de lectura cuando una respuesta se apoya en ella. */
-/** El canal de la conversación, leído una vez por corrida. Una prueba se ve como WhatsApp, el canal principal. */
+/** El canal de la conversación, leído una vez por corrida. Una simulación se ve como WhatsApp, el canal principal. */
 export async function conversationChannel(ctx: AgentToolCtx): Promise<string | null> {
   if (ctx.channel !== undefined) return ctx.channel
-  if (ctx.sandbox || ctx.dryRun) {
+  if (ctx.dryRun) {
     ctx.channel = "whatsapp"
     return ctx.channel
   }
@@ -138,28 +135,6 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   // Propone (no anota), pero devuelve la lista con lo que suma lo aceptado: es lo que se le pregunta.
   anotar_respuesta_presupuesto: { kind: "persona", label: "Respuesta al presupuesto por confirmar" },
 }
-
-/**
- * Conversación de prueba: no existe hilo ni persona real. El historial lo trae
- * quien prueba y lo que el agente «propone», anota o consulta vive solo en
- * `state`, que vuelve en el turno siguiente; nada toca la base.
- */
-export interface AgentSandbox {
-  transcript: Array<{ role: "contact" | "agent"; text: string }>
-  state: AgentSandboxState
-}
-
-export interface AgentSandboxState {
-  pending: AgentCaseProposal[]
-  recent: AgentCaseProposal[]
-  notes: AgentCaseNote[]
-  lookups: Array<{ tool: string; text: string; at: string }>
-}
-
-/** Persona ficticia de una prueba; no coincide con ninguna fila. */
-export const SANDBOX_NIL_ID = "00000000-0000-4000-8000-000000000000"
-export const SANDBOX_PATIENT_ID = "00000000-0000-4000-8000-0000000000aa"
-export const SANDBOX_PERSON = "Paciente de prueba"
 
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
@@ -257,10 +232,10 @@ export interface AgentToolCtx {
   dryRun: boolean
   /** Mensaje hipotético solo para simulación (no se persiste). */
   draftText?: string
-  /** Conversación de prueba sin hilo real (implica `dryRun`). */
-  sandbox?: AgentSandbox
   /** Probar cómo respondería con una lección aún sin aprobar, o sin una activa. */
   lessonOverrides?: LessonOverrides
+  /** Conversación de prueba (ADR 0094): todo es real, pero no cuenta como uso de lo que aprendió. */
+  testConversation?: boolean
   /** Camino que eligió el modelo de decisión para este turno; ausente = camino abierto. */
   route?: AgentRoute | null
   /** Lo que escribió trae una señal de alarma (`hasAlarmSignal`, ADR 0084): el aviso empieza por el número de emergencias. */
@@ -643,39 +618,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   }
 
   /**
-   * En una conversación de prueba el acto no se crea: queda en el estado de la
-   * prueba con el mismo recorrido que tendría (ejecutado o esperando el sí del
-   * interlocutor) para que el turno siguiente lo vea.
-   */
-  const sandboxPropose = async (action: ProposalAction, summary: string): Promise<string> => {
-    const sandbox = ctx.sandbox
-    if (!sandbox) return ""
-    const mode = autonomyModeOf(action)
-    const now = new Date()
-    const proposal: AgentCaseProposal = {
-      id: randomUUID(),
-      action,
-      label: PROPOSAL_ACTION_LABEL[action],
-      summary,
-      status: mode === "directo" ? "ejecutada" : "propuesta",
-      detail: null,
-      at: now.toISOString(),
-      expiresAt: mode === "directo" ? null : new Date(now.getTime() + 48 * 3_600_000).toISOString(),
-    }
-    if (mode === "directo") {
-      sandbox.state.recent = [proposal, ...sandbox.state.recent].slice(0, 5)
-      return `[SIMULACIÓN] Ejecutado en modo directo (propuesta ${proposal.id}).`
-    }
-    sandbox.state.pending = [...sandbox.state.pending, proposal]
-    return `[SIMULACIÓN] Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
-  }
-
-  const sandboxWhen = async (iso: string): Promise<string> => {
-    const date = new Date(iso)
-    return Number.isNaN(date.getTime()) ? iso : formatZoned(date, await orgZone())
-  }
-
-  /**
    * Elige una oportunidad abierta del contacto de ctx. La selección explícita
    * se verifica directa (pertenencia al contacto y estado abierto) para no
    * rechazarla por truncación de la lista. Sin id y con varias abiertas,
@@ -882,11 +824,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const farewellAndClose = tool(
     async ({ text: written }: { text: string }) => {
-      if (ctx.sandbox) {
-        if (ctx.sandbox.state.pending.length > 0) {
-          return "[SIMULACIÓN] No se cerraría: hay una propuesta esperando el sí del interlocutor. Responde con send_reply."
-        }
-      }
       const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
       if (pending) return `No cerrado. ${pending}`
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
@@ -1091,7 +1028,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         .filter((lesson) => lesson.kind === "respuesta_oficial")
         .map((lesson) => ({ id: lesson.id, title: lesson.title, body: lesson.body, branchName: null as string | null }))
       const hits = [...trial, ...found]
-      if (found.length && !ctx.dryRun) {
+      if (found.length && !ctx.dryRun && !ctx.testConversation) {
         await inOrg((tx) => noteLessonUse(tx, ctx.orgId, { entryIds: found.map((hit) => hit.id) })).catch(() => null)
       }
       if (!hits.length) {
@@ -1123,11 +1060,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const patientContext = tool(
     async ({ patientId }: { patientId?: string }) => {
-      if (ctx.sandbox) {
-        return patientId
-          ? `Paciente: ${SANDBOX_PERSON} (vínculo self, autorización self). Solo filiación mínima: nunca pidas ni reveles historia clínica.`
-          : `- ${SANDBOX_PERSON} (id ${SANDBOX_PATIENT_ID}, vínculo: self)`
-      }
       if (!patientId) {
         const candidates = await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))
         if (!candidates.length) return "El interlocutor no está vinculado a ningún paciente: pide sus datos o deriva."
@@ -1148,7 +1080,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const patientSummary = tool(
     async ({ patientId, desde }: { patientId: string; desde?: string }) => {
-      if (ctx.sandbox) return `Paciente: ${SANDBOX_PERSON} (vínculo self).\nSin citas próximas.\nSin saldo pendiente.`
       const from = desde ? new Date(`${desde}T00:00:00Z`) : undefined
       const summary = await inOrg((tx) =>
         getAgentPatientSummary(tx, ctx.orgId, ctx.contactId, patientId, from && !Number.isNaN(from.getTime()) ? { from } : {}),
@@ -1217,7 +1148,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       const { profesional, ...rest } = input
       const { gaps, truncated, timeZone, attending, professionalNotAttending } = await inOrg((tx) =>
-        findFreeGaps(tx, ctx.orgId, { ...rest, ...(profesional ? { professionalRef: profesional } : {}) }),
+        findFreeGaps(tx, ctx.orgId, {
+          ...rest,
+          ...(profesional ? { professionalRef: profesional } : {}),
+          // En una prueba, los huecos descuentan las otras pruebas: lo que ofrece se puede reservar.
+          ...(ctx.testConversation ? { forTest: true } : {}),
+        }),
       )
       // Quién atiende ese servicio: la agenda solo ofrece sus horas (ADR 0039).
       const who = attending
@@ -1322,7 +1258,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const portalReentry = tool(
     async () => {
-      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se dejaría a recepción el pedido de volver a entrar al portal."
+      if (ctx.dryRun) return "[SIMULACIÓN] Se dejaría a recepción el pedido de volver a entrar al portal."
       const result = await inOrg((tx) =>
         requestPortalReentry(tx, ctx.orgId, { contactId: ctx.contactId, conversationId: ctx.conversationId }),
       )
@@ -1355,7 +1291,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       // Lo mismo en una prueba y en una conversación real: solo se propone un hueco consultado.
       if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
-      if (ctx.sandbox) return sandboxPropose("reservar_cita", await sandboxWhen(input.startsAt))
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`
       }
@@ -1382,7 +1317,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       roomId?: string
       reason?: string
     }) => {
-      if (ctx.sandbox) return sandboxPropose("reprogramar_cita", await sandboxWhen(input.startsAt))
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reprogramar la cita ${input.appointmentId} al ${input.startsAt}.`
       }
@@ -1404,7 +1338,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const cancelAppointmentProposal = tool(
     async (input: { appointmentId: string; reason?: string }) => {
-      if (ctx.sandbox) return sandboxPropose("cancelar_cita", "Cancelar la cita")
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría cancelar la cita ${input.appointmentId}.`
       }
@@ -1429,7 +1362,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const confirmAppointment = tool(
     async ({ appointmentId }: { appointmentId?: string }) => {
-      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se confirmaría la cita de la persona."
+      if (ctx.dryRun) return "[SIMULACIÓN] Se confirmaría la cita de la persona."
       let result: Awaited<ReturnType<typeof confirmAppointmentByContact>>
       try {
         result = await inOrg((tx) =>
@@ -1480,7 +1413,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const answerPermission = tool(
     async ({ granted }: { granted: boolean }) => {
-      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se anotaría su respuesta sobre las novedades y promociones."
+      if (ctx.dryRun) return "[SIMULACIÓN] Se anotaría su respuesta sobre las novedades y promociones."
       const outcome = await inOrg((tx) => answerGeneralPermission(tx, ctx.orgId, { conversationId: ctx.conversationId, granted }))
       if (outcome === "no_preguntado") return "No se le hizo esa pregunta: no hay nada que anotar. Sigue la conversación."
       if (outcome === "ya_respondio") return "Ya había respondido antes; no cambia nada. Sigue la conversación."
@@ -1503,7 +1436,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const chooseMessages = tool(
     async ({ tipo, recibir }: { tipo?: string; recibir?: boolean }) => {
-      if (ctx.sandbox || ctx.dryRun) {
+      if (ctx.dryRun) {
         return tipo
           ? `[SIMULACIÓN] Se anotaría que ${recibir ? "vuelve a recibir" : "deja de recibir"} ese tipo de mensaje.`
           : "[SIMULACIÓN] Se le daría su página «Tus mensajes»."
@@ -1533,7 +1466,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const budgetsView = tool(
     async ({ patientId }: { patientId: string }) => {
-      if (ctx.sandbox) return `${SANDBOX_PERSON} no tiene presupuestos entregados.`
       let found: AgentPatientBudgets
       try {
         found = await inOrg((tx) => getAgentPatientBudgets(tx, ctx.orgId, ctx.contactId, patientId))
@@ -1565,7 +1497,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const sendReceipt = tool(
     async ({ patientId }: { patientId: string }) => {
-      if (ctx.sandbox || ctx.dryRun) return "[SIMULACIÓN] Se le enviaría aquí el comprobante de su último pago."
+      if (ctx.dryRun) return "[SIMULACIÓN] Se le enviaría aquí el comprobante de su último pago."
       if (!ctx.storage) return "No se pudo preparar el comprobante: pasa el caso a una persona."
       const storage = ctx.storage
       const sent = await inOrg((tx) =>
@@ -1587,7 +1519,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const resendBudget = tool(
     async ({ patientId, budgetId }: { patientId: string; budgetId?: string }) => {
-      if (ctx.sandbox || ctx.dryRun) {
+      if (ctx.dryRun) {
         return "[SIMULACIÓN] Se le reenviaría el último presupuesto que la clínica le entregó; si aún no estuviera listo, quedaría una tarea a recepción para enviárselo."
       }
       // Reentregar el mismo mensaje no lo envía ni deja la tarea dos veces.
@@ -1665,7 +1597,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       optionId?: string
       decisions: Array<{ planItemId: string; decision: "aceptado" | "pospuesto" | "rechazado" }>
     }) => {
-      if (ctx.sandbox) return sandboxPropose("decidir_presupuesto", "Respuesta al presupuesto")
       if (ctx.dryRun) return "[SIMULACIÓN] Se propondría anotar su respuesta al presupuesto; se anota solo con su sí."
       let planned: Awaited<ReturnType<typeof planBudgetAnswer>>
       try {
@@ -1699,14 +1630,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const confirmProposal = tool(
     async ({ proposalId }: { proposalId: string }) => {
-      if (ctx.sandbox) {
-        const state = ctx.sandbox.state
-        const pending = state.pending.find((item) => item.id === proposalId)
-        if (!pending) return "[SIMULACIÓN] Esa propuesta no está pendiente en esta prueba."
-        state.pending = state.pending.filter((item) => item.id !== proposalId)
-        state.recent = [{ ...pending, status: "ejecutada", at: new Date().toISOString(), expiresAt: null }, ...state.recent].slice(0, 5)
-        return `[SIMULACIÓN] Confirmado y ejecutado (propuesta ${proposalId}).`
-      }
       if (ctx.dryRun) return `[SIMULACIÓN] Se confirmaría la propuesta ${proposalId}.`
       // El sí se entiende por su intención (ADR 0023): «perfecto», «sí, gracias», «me sirve, ahí estaré».
       const pending = await inOrg((tx) => proposalReplyOf(tx, ctx.orgId, ctx.contactId, proposalId)).catch(() => null)
@@ -1758,14 +1681,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
   const noteCase = tool(
     async ({ nota }: { nota: string }) => {
-      if (ctx.sandbox) {
-        const text = nota.replace(/[ \t\n]+/g, " ").trim().slice(0, 300)
-        const notes = ctx.sandbox.state.notes
-        if (text && !notes.some((note) => note.text === text)) {
-          ctx.sandbox.state.notes = [...notes, { text, at: new Date().toISOString() }].slice(-12)
-        }
-        return "[SIMULACIÓN] Anotado en el caso."
-      }
       if (ctx.dryRun) return `[SIMULACIÓN] Se anotaría en el caso: ${nota}`
       await inOrg((tx) => addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, nota))
       return "Anotado en el caso."
@@ -1780,7 +1695,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const rememberFact = tool(
     async ({ text, replacesId }: { text: string; replacesId?: string }) => {
-      if (ctx.sandbox || ctx.dryRun) return `[SIMULACIÓN] Se recordaría de esta persona: ${text}`
+      if (ctx.dryRun) return `[SIMULACIÓN] Se recordaría de esta persona: ${text}`
       try {
         const fact = await inOrg((tx) =>
           addPersonFact(tx, ctx.orgId, { userId: null, source: "agente" }, {
@@ -1813,7 +1728,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       interestText?: string | null
       reason?: string
     }) => {
-      if (ctx.sandbox) return sandboxPropose("crear_oportunidad", `Nueva oportunidad: ${input.title}`)
       if (ctx.dryRun) return `[SIMULACIÓN] Se propondría crear la oportunidad: ${input.title}.`
       const { reason, ...payload } = input
       return propose("crear_oportunidad", payload, "create_opportunity", reason)
@@ -1828,7 +1742,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const updateFollowup = tool(
     async (input: { opportunityId?: string; nextActionAt?: string | null; nextActionNote?: string; reason?: string }) => {
-      if (ctx.sandbox) return sandboxPropose("actualizar_seguimiento", input.nextActionNote?.trim() || "Nueva tarea")
       if (ctx.dryRun) return "[SIMULACIÓN] Se propondría dejar la tarea de la oportunidad."
       if (input.nextActionAt === undefined && input.nextActionNote === undefined) {
         return "Indica qué hay que hacer (nextActionNote) o cuándo (nextActionAt ISO)."
@@ -1850,7 +1763,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const closeOpportunityTool = tool(
     async (input: { opportunityId?: string; outcome: "won" | "lost"; reason: string; note?: string | null }) => {
-      if (ctx.sandbox) return sandboxPropose("cerrar_oportunidad", input.outcome === "won" ? "Ganada" : "Perdida")
       if (ctx.dryRun) return `[SIMULACIÓN] Se propondría cerrar la oportunidad (${input.outcome}).`
       const chosen = await chooseOpportunity(input.opportunityId)
       if ("message" in chosen) return chosen.message
@@ -1869,7 +1781,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const commercialContext = tool(
-    async ({ notesCursor }: { notesCursor?: string }) => ctx.sandbox ? { name: SANDBOX_PERSON, tags: [], customFields: {}, operationalNotes: [], nextNotesCursor: null } : inOrg(async tx => {
+    async ({ notesCursor }: { notesCursor?: string }) => inOrg(async tx => {
       const full = await getContact(tx, ctx.orgId, ctx.contactId)
       const notes = await listContactNotes(tx, ctx.orgId, ctx.contactId, { cursor: notesCursor })
       return {
@@ -1889,7 +1801,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const crossChannelHistory = tool(
     async ({ cursor }: { cursor?: string }) => {
-      if (ctx.sandbox) return "No hay historial en otros canales con ese filtro."
       const { items, nextCursor } = await inOrg((tx) =>
         listContactChannelHistory(tx, ctx.orgId, {
           contactId: ctx.contactId,
@@ -1923,7 +1834,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const listOpportunitiesTool = tool(
     async ({ status, cursor, limit }: { status?: "open" | "won" | "lost"; cursor?: string; limit?: number }) => {
-      if (ctx.sandbox) return "El contacto no tiene oportunidades con ese filtro."
       const { items, nextCursor } = await inOrg((tx) =>
         listOpportunities(tx, ctx.orgId, {
           contactId: ctx.contactId,
@@ -1955,7 +1865,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   const listTasksTool = tool(
     async ({ status }: { status?: "open" | "done" | "cancelled" }) => {
-      if (ctx.sandbox) return "El contacto no tiene tareas con ese filtro."
       const items = await inOrg((tx) =>
         listTasks(tx, ctx.orgId, { contactId: ctx.contactId, ...(status ? { status } : {}) }),
       )

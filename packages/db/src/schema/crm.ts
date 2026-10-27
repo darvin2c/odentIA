@@ -367,6 +367,13 @@ export const contact = pgTable("contact", {
   /** Archivada entera, con su ficha si es paciente (`setPersonArchived`). */
   isActive: boolean("is_active").notNull().default(true),
   /**
+   * Persona de prueba (ADR 0094): nace de «Probar» o de la prueba del chat web
+   * y no cambia después. Lo que se crea para ella (su ficha, sus citas, su
+   * oportunidad, sus tareas) es de prueba: no ocupa horarios de pacientes
+   * reales, no sale hacia afuera, no cuenta en números y se borra con la prueba.
+   */
+  isTest: boolean("is_test").notNull().default(false),
+  /**
    * Spam o bloqueada (`CONTACT_SCREENS`): el agente no la atiende y no sale
    * en las pestañas de la Bandeja. Desde cuándo, quién (nulo = el agente; un
    * bloqueo siempre tiene autor), por qué y, si se bloqueó, qué pasó. Lo
@@ -509,6 +516,12 @@ export const conversation = pgTable(
      * se borra a los 7 días.
      */
     isTest: boolean("is_test").notNull().default(false),
+    /**
+     * «Probar» de la página de Sofi (ADR 0094): quién la abrió. Nula en la
+     * prueba del chat web y en toda conversación real. Una prueba de «Probar»
+     * se sigue en su panel, no en la Bandeja.
+     */
+    testByUserId: text("test_by_user_id").references(() => user.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (table) => [

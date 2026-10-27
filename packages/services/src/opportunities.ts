@@ -22,6 +22,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
+import { testContactSql } from "./conversation-state.js"
 import { CHANNEL_NAME } from "./agent-person-memory.js"
 import { requireContact } from "./contacts.js"
 import { notFound, ServiceError, validation } from "./errors.js"
@@ -618,8 +619,14 @@ async function notifyAssignee(
   opts: { actorUserId: string | null; opportunityId?: string; link: string },
 ): Promise<void> {
   if (!assignedUserId) return
+  const [opp] = await tx
+    .select({ contactId: opportunity.contactId })
+    .from(opportunity)
+    .where(and(eq(opportunity.organizationId, orgId), eq(opportunity.id, opts.link)))
+    .limit(1)
   await createWorkspaceNotification(tx, orgId, {
     userId: assignedUserId,
+    contactId: opp?.contactId ?? null,
     dedupeKey,
     title,
     body,
@@ -653,7 +660,8 @@ function decodeCursor(cursor: string): { ts: string; id: string; f: string } | n
 
 /** Las condiciones de los filtros: las mismas para la lista y para su resumen. */
 function filterConditions(orgId: string, input: Omit<OpportunityFilters, "cursor" | "limit">): SQL[] {
-  const conditions: SQL[] = [eq(opportunity.organizationId, orgId)]
+  // La oportunidad de una persona de prueba se ve en «Probar», no en la lista (ADR 0094).
+  const conditions: SQL[] = [eq(opportunity.organizationId, orgId), sql`not ${testContactSql(sql`${opportunity.contactId}`)}`]
   const q = input.q?.trim() ?? ""
   if (input.status && !OPPORTUNITY_STATUSES.includes(input.status)) throw validation("Estado de oportunidad inválido")
   if (q) {
@@ -1184,9 +1192,9 @@ export async function noteServiceInterest(
   orgId: string,
   input: { contactId: string; conversationId: string | null; serviceId: string; said: string },
 ): Promise<{ outcome: ServiceInterestOutcome; opportunityId: string | null }> {
-  await requireContact(tx, orgId, input.contactId)
-  // Una prueba del chat web no crea oportunidades (fase 6 del pulido de la Bandeja).
-  if (input.conversationId) {
+  const person = await requireContact(tx, orgId, input.contactId)
+  // En una prueba se anota de verdad, para su persona de prueba (ADR 0094); nunca para una real.
+  if (input.conversationId && !person.isTest) {
     const [thread] = await tx
       .select({ isTest: conversation.isTest })
       .from(conversation)

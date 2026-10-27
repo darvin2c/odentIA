@@ -22,6 +22,7 @@ import { findClinicName } from "./automation-routing.js"
 import { createConnection, setConnectionStatus } from "./connections.js"
 import { updateContact } from "./contacts.js"
 import { notFound, ServiceError, validation } from "./errors.js"
+import { TEST_KEEP_MS } from "./conversation-state.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgCountry } from "./locale.js"
 import { clinicOriginOf } from "./public-links.js"
@@ -49,8 +50,6 @@ export type { WebchatConnectionConfig }
 
 const DEFAULT_COLOR = "#0f766e"
 export const WEBCHAT_DEFAULT_GREETING = "Hola, ¿en qué podemos ayudarte?"
-/** Una prueba se borra sola a los 7 días. */
-const TEST_KEEP_MS = 7 * 24 * 3_600_000
 /** «escribiendo…» mientras Sofi atiende lo último que escribió, como mucho este rato. */
 const TYPING_MS = 90_000
 const SETTINGS_HREF = "/settings/integrations/webchat"
@@ -82,6 +81,15 @@ async function requireClinicWebchat(tx: Db, orgId: string) {
   const row = await clinicWebchatRow(tx, orgId)
   if (!row) throw notFound("Chat web")
   return row
+}
+
+/**
+ * La conexión del chat web de la clínica, creada si aún no existe: «Probar» va
+ * por ella, como la prueba del chat web, aunque el chat esté desactivado (ADR 0094).
+ */
+export async function ensureClinicWebchatConnection(tx: Db, orgId: string, secretsKey: Buffer, actorUserId: string | null): Promise<string> {
+  await getClinicWebchat(tx, orgId, secretsKey, actorUserId)
+  return (await requireClinicWebchat(tx, orgId)).id
 }
 
 // ------------------------------------------------------------ Configuración ---
@@ -524,6 +532,7 @@ async function sessionConversation(tx: Db, orgId: string, connectionId: string, 
     .select({
       id: conversation.id,
       agentStatus: conversation.agentStatus,
+      isTest: conversation.isTest,
       contactId: conversation.contactId,
       phone: contact.phone,
       email: contact.email,
@@ -608,7 +617,8 @@ export async function pollWebchatVisitor(
     )
   }
   const last = rows.at(-1)
-  const attends = cfg.enabled && conv.agentStatus === "on"
+  // Una prueba responde aunque Sofi esté apagada (ADR 0094).
+  const attends = (cfg.enabled || conv.isTest) && conv.agentStatus === "on"
   const [topic] = await tx
     .select({ id: sql<string>`h.id` })
     .from(sql`agent_handoff h`)
