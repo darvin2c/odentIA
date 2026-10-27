@@ -43,7 +43,7 @@ import { addDays, dayStart, reportDayOf } from "./report-periods.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 import { seedChannelTemplates } from "./seed-automation.js"
 import { seedConversationIn, seedMessageIn } from "./seed-common.js"
-import { chunks, generator, type Random, seedReports } from "./seed-reports.js"
+import { chunks, generator, knownDiagnosisCodes, type Random, seedReports } from "./seed-reports.js"
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
@@ -568,7 +568,8 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         signerRegistration: row.professional?.registration ?? null,
       })),
     )
-    const diagnosed = rows.filter((row) => row.note.diagnosisCode)
+    const known = await knownDiagnosisCodes(tx, "ICD-11", rows.map((row) => row.note.diagnosisCode))
+    const diagnosed = rows.filter((row) => row.note.diagnosisCode && known.has(row.note.diagnosisCode))
     if (diagnosed.length > 0)
       await tx.insert(encounterDiagnosis).values(
         diagnosed.map((row) => ({
@@ -877,7 +878,10 @@ export async function purgeDemoOrganization(tx: Db, demoId: string, orgId: strin
   for (const table of ["saas_commission_settlement_line", "saas_commission_adjustment", "saas_seller_commission", "saas_negotiation"])
     await tx.execute(sql`delete from admin.${sql.identifier(table)} where organization_id = ${orgId}`)
   await tx.execute(sql`update admin.saas_waitlist_request set organization_id = null where organization_id = ${orgId}`)
-  await tx.update(saasDemo).set({ organizationId: null }).where(eq(saasDemo.id, demoId))
+  // La fila de la demo no se toca aquí: mientras se vuelve a armar, el avance la
+  // escribe por otra conexión, y bloquearla en esta transacción la dejaría
+  // esperando hasta el final. Quien llama la borra (borrar) o le pone la
+  // clínica nueva (volver a empezar) antes de confirmar.
   await tx.delete(organization).where(eq(organization.id, orgId))
   await tx.execute(sql`set local session_replication_role = origin`)
   // El equipo inventado se va con su clínica; si algo lo nombra todavía, la base lo dice aquí.

@@ -266,7 +266,8 @@ function OrganizationPage() {
     org.slug,
     isAdmin && org.billing?.plan ? org.billing.plan.name : null,
     isAdmin && terms ? (terms.seller ? `vendedor: ${terms.seller.name}` : "sin vendedor") : null,
-    isAdmin ? cycle : null,
+    // Una demo no se factura (ADR 0096): el ciclo no aplica.
+    isAdmin && !org.billing?.isDemo ? cycle : null,
     plural(org.usage.members, "miembro", "miembros"),
     plural(org.usage.patients, "paciente", "pacientes"),
     plural(org.usage.branches, "sede", "sedes"),

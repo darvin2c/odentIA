@@ -15,6 +15,7 @@ import { appointment } from "@odentia/db/schema/agenda"
 import { scheduleBlock } from "@odentia/db/schema/availability"
 import {
   encounter,
+  diagnosisCatalog,
   encounterDiagnosis,
   encounterProcedure,
   orgCounter,
@@ -162,6 +163,17 @@ export function generator(seed: number) {
       return items[items.length - 1] as T
     },
   }
+}
+
+/** Los códigos que la base tiene en su lista: un código que falta no se escribe (la clave foránea lo rechazaría). */
+export async function knownDiagnosisCodes(tx: Db, system: string | undefined, codes: Array<string | undefined>): Promise<Set<string>> {
+  const wanted = [...new Set(codes.filter((code): code is string => Boolean(code)))]
+  if (!system || wanted.length === 0) return new Set()
+  const rows = await tx
+    .select({ code: diagnosisCatalog.code })
+    .from(diagnosisCatalog)
+    .where(and(eq(diagnosisCatalog.systemKey, system), inArray(diagnosisCatalog.code, wanted)))
+  return new Set(rows.map((row) => row.code))
 }
 
 export function chunks<T>(items: T[], size = 500): T[][] {
@@ -561,7 +573,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
           signerRegistration: row.visit.professional.registration,
         })),
       )
-      const diagnosed = rows.filter((row) => row.note?.diagnosisCode && recipe.diagnosisSystem)
+      const known = await knownDiagnosisCodes(tx, recipe.diagnosisSystem, rows.map((row) => row.note?.diagnosisCode))
+      const diagnosed = rows.filter((row) => row.note?.diagnosisCode && known.has(row.note.diagnosisCode))
       if (diagnosed.length > 0) {
         await tx.insert(encounterDiagnosis).values(
           diagnosed.map((row) => ({

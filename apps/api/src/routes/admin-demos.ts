@@ -59,7 +59,7 @@ export function createAdminDemosRoute(deps: Pick<AppDeps, "ownerDb" | "storage">
       const purged = await owner((tx) => deleteDemo(tx, actor, c.req.param("id"), parsed.data.confirmName))
       // Ya confirmado el borrado: lo que la clínica tenía guardado se quita después.
       for (const key of purged.storageKeys) await deps.storage.deleteAttachment(key).catch(() => undefined)
-      return c.json({ ok: true })
+      return c.json({ data: { ok: true } })
     } catch (error) {
       const response = serviceErrorResponse(c, error)
       if (response) return response

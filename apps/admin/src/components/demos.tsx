@@ -6,7 +6,7 @@ import { Check } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../lib/api"
-import { domainOf, platformUrl } from "../lib/host"
+import { platformUrl } from "../lib/host"
 import { ProductMark } from "./product"
 
 /**
@@ -168,7 +168,7 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
       ),
     onSuccess: (created) => {
       void queryClient.invalidateQueries({ queryKey: ["admin-demos"] })
-      toast.success("La demo se está armando: tarda unos minutos")
+      toast.success("La demo se está armando")
       onCreated(created.id)
     },
     onError: (error) => toast.error(messageOf(error)),
@@ -180,7 +180,7 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
       open={open}
       onClose={onClose}
       title="Crear demo"
-      description="Una clínica inventada, con historia, para presentar el producto. Tarda unos minutos y puedes cerrar esto."
+      description="Una clínica inventada, con historia, para presentar el producto. Se arma sola en menos de un par de minutos y puedes cerrar esto."
       isSubmitting={create.isPending}
       submitLabel="Crear demo"
       cancelLabel={common.actions.cancel}
@@ -239,15 +239,15 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
 
           <fieldset className="flex flex-col gap-2">
             <legend className="pb-2 text-sm font-medium">Tamaño</legend>
-            <RadioGroup aria-label="Tamaño" value={size} onValueChange={(value) => setSize(String(value))} className="grid gap-2 sm:grid-cols-3">
+            <RadioGroup aria-label="Tamaño" value={size} onValueChange={(value) => setSize(String(value))} className="grid gap-2">
               {(options.data?.sizes ?? []).map((option) => (
                 <Label key={option.key} className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground">
                   <RadioGroupItem value={option.key} className="mt-0.5" />
-                  <span className="flex flex-col">
+                  <span className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-sm font-medium">{option.name}</span>
                     <span className="text-xs text-muted-foreground">
                       {option.professionals} {option.professionals === 1 ? "profesional" : "profesionales"}
-                      {option.branches > 1 ? ` · ${option.branches} sedes` : ""} · ~{option.patients.toLocaleString("es")}
+                      {option.branches > 1 ? ` · ${option.branches} sedes` : ""} · unos {option.patients.toLocaleString("es")} pacientes
                     </span>
                   </span>
                 </Label>
@@ -371,7 +371,7 @@ export function DemoProgressDrawer({ demoId, onClose }: { demoId: string | null;
             <div className="flex flex-col gap-2">
               <p className="flex justify-between text-sm">
                 <b>{ready ? "Lista" : `Paso ${Math.min(done + 1, total)} de ${total}`}</b>
-                <span className="text-muted-foreground">{ready ? "" : "unos minutos"}</span>
+                <span className="text-muted-foreground">{ready ? "" : "menos de un par de minutos"}</span>
               </p>
               <div role="progressbar" aria-label="Avance" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="h-2 overflow-hidden rounded-full bg-muted">
                 <div className="h-full bg-foreground transition-[width]" style={{ width: `${percent}%` }} />
@@ -428,7 +428,7 @@ export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdm
     mutationFn: async () => api(`/api/admin/demos/${demo.id}/reset`, { method: "POST" }),
     onSuccess: () => {
       setConfirm(null)
-      toast.success("Se vuelve a armar: tarda unos minutos")
+      toast.success("Se vuelve a armar")
       void queryClient.invalidateQueries({ queryKey: ["admin-demos"] })
       void queryClient.invalidateQueries({ queryKey: ["admin-demo-of", demo.organizationId] })
     },
@@ -481,7 +481,7 @@ export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdm
       <ConfirmDialog
         open={confirm === "reset"}
         title={`¿Volver a empezar «${demo.name}»?`}
-        description={`Se borra lo que se hizo en las presentaciones (citas reservadas, cobros, mensajes a Sofi) y se arma otra vez: ${demo.kindName}, ${demo.sizeName.toLowerCase()}, ${demo.months} meses, hasta hoy. La dirección y quien la presenta siguen iguales. Tarda unos minutos.`}
+        description={`Se borra lo que se hizo en las presentaciones (citas reservadas, cobros, mensajes a Sofi) y se arma otra vez: ${demo.kindName}, ${demo.sizeName.toLowerCase()}, ${demo.months} meses, hasta hoy. La dirección y quien la presenta siguen iguales.`}
         confirmLabel="Volver a empezar"
         variant="default"
         pending={reset.isPending}
@@ -540,7 +540,7 @@ export function DemoShowcase({ demo }: { demo: DemoDetail }) {
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        Se abre en {demo.slug}.{domainOf(demo.product)}. La historia inventada no gasta IA: «Nos costó» suma lo que hicieron Sofi y Clío de verdad en las presentaciones, más el espacio y el servidor.
+        La historia inventada no gasta IA: «Nos costó» suma lo que Sofi y Clío hicieron de verdad en las presentaciones, más el espacio y el servidor.
       </p>
     </section>
   )

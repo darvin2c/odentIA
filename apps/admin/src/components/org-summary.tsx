@@ -259,7 +259,7 @@ export function OrgSummary({
             <p className="text-xs text-muted-foreground">
               Del {longDay(c.period.start, c.timezone)} al {lastDay(c.period.end, c.timezone)} · van{" "}
               {plural(days, "día", "días")}
-              {trial ? "" : ` · se factura el ${longDay(c.period.end, c.timezone)}`}
+              {trial ? "" : m?.demo ? " · demo: no se factura" : ` · se factura el ${longDay(c.period.end, c.timezone)}`}
             </p>
           </div>
           {isAdmin ? (
@@ -278,9 +278,11 @@ export function OrgSummary({
           <div className="grid gap-2 sm:grid-cols-3">
             <Stat
               label="Lo que paga, sin impuestos"
-              value={money(m.chargedCents, currency)}
+              value={m.demo ? "Sin cobro" : money(m.chargedCents, currency)}
               detail={
-                trial
+                m.demo
+                  ? "Es una demo: no se cobra"
+                  : trial
                   ? "La prueba es de regalo"
                   : over > 0
                     ? `Cuota y ${money(over, currency)} sobre el crédito`
@@ -299,7 +301,7 @@ export function OrgSummary({
             />
           </div>
         ) : null}
-        {b?.consumption.priced ? <CreditBar billing={b} /> : null}
+        {b?.consumption.priced && !m?.demo ? <CreditBar billing={b} /> : null}
         {!isAdmin ? (
           <p className="text-xs text-muted-foreground">Los importes los ve la administración.</p>
         ) : null}
