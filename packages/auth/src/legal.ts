@@ -14,8 +14,23 @@
  * por correo un mes antes.
  */
 export const LEGAL = {
-  terms: { version: "2026-10-17", effectiveAt: "2026-10-17", changes: [] as string[] },
-  agreement: { version: "2026-10-17", effectiveAt: "2026-10-17", changes: [] as string[] },
+  terms: {
+    version: "2026-10-26",
+    effectiveAt: "2026-10-26",
+    changes: [
+      "Un solo contrato para odentIA y latidIA, con el titular: SALLCA GROUP E.I.R.L.",
+      "El cobro es por lo que hace cada agente, pospago, con presupuesto mensual.",
+      "Cómo se cancela, qué datos se descargan y qué pasa si un pago se atrasa.",
+    ] as string[],
+  },
+  agreement: {
+    version: "2026-10-26",
+    effectiveAt: "2026-10-26",
+    changes: [
+      "La lista de proveedores que tratan los datos, con su país.",
+      "Copia y borrado de los datos de un paciente desde su ficha.",
+    ] as string[],
+  },
 } as const
 
 export const LEGAL_VERSION = LEGAL.terms.version

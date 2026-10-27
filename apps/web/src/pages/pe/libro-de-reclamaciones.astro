@@ -6,6 +6,7 @@ import ComplaintForm from "../../components/complaints/ComplaintForm"
 import Base from "../../layouts/Base.astro"
 import { providerPending, RESPONSE_DAYS } from "../../lib/complaints"
 import { breadcrumbJsonLd } from "../../lib/faq"
+import { WORDS } from "../../lib/product"
 
 const path = "/pe/libro-de-reclamaciones"
 const title = "Libro de Reclamaciones"
@@ -17,7 +18,7 @@ const jsonLd = breadcrumbJsonLd(Astro.site, trail)
 ---
 <Base
   title={title}
-  description="Libro de Reclamaciones virtual de odentIA (Perú): registra un reclamo o una queja y recibe la copia de tu hoja en tu correo."
+  description={`Libro de Reclamaciones virtual de ${WORDS.name} (Perú): registra un reclamo o una queja y recibe la copia de tu hoja en tu correo.`}
   jsonLd={jsonLd}
   header="light"
   noindex={providerPending}
@@ -35,7 +36,7 @@ const jsonLd = breadcrumbJsonLd(Astro.site, trail)
       <h1 class="h2">Libro de Reclamaciones</h1>
       <p class="lead">
         Conforme al Código de Protección y Defensa del Consumidor, puedes registrar aquí un reclamo o una queja
-        sobre odentIA. Te responderemos por correo en un plazo no mayor a quince ({RESPONSE_DAYS}) días hábiles.
+        sobre {WORDS.name}. Te responderemos por correo en un plazo no mayor a quince ({RESPONSE_DAYS}) días hábiles.
       </p>
     </header>
     <ComplaintForm client:load />
