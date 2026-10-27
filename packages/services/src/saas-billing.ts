@@ -9,7 +9,7 @@
  * abren el contexto. Dinero en enteros de la unidad menor, moneda ISO 4217.
  * Sin pasarela ni precios en código: los planes y métodos los configura admin.
  */
-import { isClinicalProduct, productWords } from "@odentia/clinical"
+import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { MailBrand, MailTemplate } from "@odentia/mail"
 import { agentRunLedger } from "@odentia/db/schema/agent"
@@ -34,9 +34,10 @@ import {
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { sniffFileContent } from "./file-content.js"
-import { getOrgLocale } from "./locale.js"
+import { getOrgLocale, orgProduct } from "./locale.js"
 import { panelOrigin } from "./public-links.js"
 import { assertActionPricingFloor } from "./saas-actions.js"
+import { defaultPlanOf } from "./saas-plan-product.js"
 import { getSaasAlerts } from "./saas-terms.js"
 import { loadSaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
 import {
@@ -308,6 +309,8 @@ async function notifyOrg(tx: Db, orgId: string, kind: string): Promise<void> {
 export interface SaasPlanInput {
   code: string
   name: string
+  /** El producto del plan (ADR 0092): se elige al crearlo y no cambia. Sin decirlo, odentIA. */
+  product?: ClinicalProduct
   description?: string | null
   currency: string
   priceCents: number
@@ -348,6 +351,8 @@ export interface SaasPlanRow {
   id: string
   code: string
   name: string
+  /** El producto del plan (ADR 0092). */
+  product: ClinicalProduct
   description: string | null
   currency: string
   priceCents: number
@@ -387,6 +392,7 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     id: row.id,
     code: row.code,
     name: row.name,
+    product: isClinicalProduct(row.product) ? row.product : "dental",
     description: row.description,
     currency: row.currency,
     priceCents: row.priceCents,
@@ -512,12 +518,13 @@ function assertPlanTerms(plan: Pick<typeof saasPlan.$inferSelect, keyof typeof P
   assertActionPricingFloor(plan)
 }
 
-/** Un solo plan por defecto: marcar uno desmarca el anterior. */
-async function clearOtherDefaults(tx: Db, keepId: string | null): Promise<void> {
+/** Un solo plan por defecto por producto: marcar uno desmarca el anterior de ese producto (ADR 0092). */
+async function clearOtherDefaults(tx: Db, keepId: string | null, product: ClinicalProduct): Promise<void> {
+  const ofProduct = and(eq(saasPlan.isDefault, true), eq(saasPlan.product, product))
   await tx
     .update(saasPlan)
     .set({ isDefault: false, updatedAt: new Date() })
-    .where(keepId ? and(eq(saasPlan.isDefault, true), sql`${saasPlan.id} <> ${keepId}`) : eq(saasPlan.isDefault, true))
+    .where(keepId ? and(ofProduct, sql`${saasPlan.id} <> ${keepId}`) : ofProduct)
 }
 
 function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
@@ -525,9 +532,11 @@ function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
   const name = value.name.trim()
   if (!code || code.length > 80) throw validation("El código del plan debe tener 1–80 caracteres")
   if (!name || name.length > 120) throw validation("El nombre del plan debe tener 1–120 caracteres")
+  if (value.product !== undefined && !isClinicalProduct(value.product)) throw validation("El producto del plan no es válido")
   return {
     code,
     name,
+    product: value.product ?? "dental",
     description: value.description?.trim() ? value.description.trim().slice(0, 2000) : null,
     currency: currency(value.currency),
     priceCents: assertCents(value.priceCents, "El precio", false),
@@ -560,7 +569,8 @@ export async function listSaasPlans(
  */
 export async function listClinicPlans(tx: Db, orgId: string): Promise<SaasPlanRow[]> {
   const sub = await getSaasSubscription(tx, orgId)
-  const listPlan = and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))
+  // El de lista es el de su producto: un consultorio de latidIA no ve el de odentIA (ADR 0092).
+  const listPlan = defaultPlanOf(await orgProduct(tx, orgId))
   const rows = await tx
     .select()
     .from(saasPlan)
@@ -576,11 +586,12 @@ export async function listClinicPlans(tx: Db, orgId: string): Promise<SaasPlanRo
  */
 export async function getPublicTrialOffer(
   tx: Db,
+  product: ClinicalProduct = "dental",
 ): Promise<{ currency: string; creditCents: number; days: number } | null> {
   const [plan] = await tx
     .select({ currency: saasPlan.currency, creditCents: saasPlan.trialCreditCents, days: saasPlan.trialDays })
     .from(saasPlan)
-    .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
+    .where(defaultPlanOf(product))
     .limit(1)
   if (!plan) return null
   return { currency: plan.currency, creditCents: plan.creditCents, days: plan.days }
@@ -593,7 +604,7 @@ export async function createSaasPlan(
 ): Promise<SaasPlanRow> {
   const values = { ...planInput(input), ...actionTerms(input) }
   assertPlanTerms({ ...PLAN_TERM_DEFAULTS, ...values, currency: values.currency })
-  if (input.isDefault) await clearOtherDefaults(tx, null)
+  if (input.isDefault) await clearOtherDefaults(tx, null, values.product as ClinicalProduct)
   const [row] = await tx.insert(saasPlan).values(values).returning()
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo crear el plan")
   return toPlanRow(row)
@@ -628,8 +639,12 @@ export async function updateSaasPlan(
   Object.assign(patch, actionTerms(input))
   const [current] = await tx.select().from(saasPlan).where(eq(saasPlan.id, planId)).limit(1)
   if (!current) throw notFound("Plan")
+  // El producto se elige al crearlo: sus clínicas y su web son de ese producto (ADR 0092).
+  if (input.product !== undefined && input.product !== current.product) {
+    throw validation("El producto de un plan no se cambia: crea un plan nuevo con sus precios")
+  }
   assertPlanTerms({ ...current, ...patch })
-  if (input.isDefault) await clearOtherDefaults(tx, planId)
+  if (input.isDefault) await clearOtherDefaults(tx, planId, current.product as ClinicalProduct)
   // Cambiar un precio rige lo que se cuenta desde ahora: lo ya contado y los cargos emitidos lo congelaron.
   const [row] = await tx
     .update(saasPlan)
@@ -820,6 +835,8 @@ export async function startSaasTrial(
     sellerId?: string
     isDemo?: boolean
     billingStart?: SaasBillingStart
+    /** El producto de la clínica cuando su perfil aún no existe (el alta por el dominio, ADR 0092). */
+    product?: ClinicalProduct
   } = {},
   now = new Date(),
 ): Promise<SaasSubscriptionRow> {
@@ -828,7 +845,14 @@ export async function startSaasTrial(
   if (billingStart !== "trial" && billingStart !== "now")
     throw validation("Inicio de facturación inválido")
   let plan: SaasPlanRow | null = null
-  if (input.planCode) plan = await planByCode(tx, input.planCode)
+  const product = input.product ?? (await orgProduct(tx, orgId))
+  if (input.planCode) {
+    plan = await planByCode(tx, input.planCode)
+    // Una clínica entra con un plan de su producto (ADR 0092).
+    if (plan.product !== product) {
+      throw validation(`${plan.name} es de ${productWords(plan.product).name}: esta clínica es de ${productWords(product).name}`)
+    }
+  }
   let sellerSnapshot: { id: string; rateBps: number; windowDays: number } | null = null
   if (input.sellerId) {
     const [seller] = await tx
@@ -857,6 +881,16 @@ export async function startSaasTrial(
       patch.activatedAt = now
       patch.currentPeriodStart = now
       patch.currentPeriodEnd = addMonth(now)
+    }
+    // La prueba que abre el disparador al crear la clínica dura lo del plan de odentIA (aún no
+    // sabe el producto); en otro producto manda su propio plan de lista (ADR 0092).
+    if (existing.status === "prueba" && !existing.planId && !plan && existing.trialStartedAt && product !== "dental") {
+      const [own] = await tx.select({ trialDays: saasPlan.trialDays }).from(saasPlan).where(defaultPlanOf(product)).limit(1)
+      const ends = own ? addDays(existing.trialStartedAt, own.trialDays) : null
+      if (ends && ends.getTime() !== existing.trialEndsAt?.getTime()) {
+        patch.trialEndsAt = ends
+        patch.currentPeriodEnd = ends
+      }
     }
     if (Object.keys(patch).length === 0) return existing
     await tx
@@ -901,11 +935,7 @@ export async function startSaasTrial(
   // La prueba dura lo que dice el plan (o el plan por defecto); sin ninguno, lo de siempre.
   const [trialPlan] = plan
     ? await tx.select({ trialDays: saasPlan.trialDays }).from(saasPlan).where(eq(saasPlan.id, plan.id)).limit(1)
-    : await tx
-        .select({ trialDays: saasPlan.trialDays })
-        .from(saasPlan)
-        .where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
-        .limit(1)
+    : await tx.select({ trialDays: saasPlan.trialDays }).from(saasPlan).where(defaultPlanOf(product)).limit(1)
   const trialEndsAt = addDays(now, trialPlan?.trialDays ?? (await saasTermsAt(tx, now)).trialDays)
   const [row] = await tx
     .insert(saasSubscription)
@@ -1000,6 +1030,10 @@ export async function chooseSaasPlan(
 ): Promise<SaasSubscriptionRow> {
   const plan = await planByCode(tx, planCode)
   const current = await getSaasSubscription(tx, orgId)
+  // Solo los planes de su producto (ADR 0092).
+  if (plan.product !== (await orgProduct(tx, orgId)) && current?.planId !== plan.id) {
+    throw new ServiceError("SAAS_PLAN_NOT_OFFERED", 409, "Ese plan es de otro producto")
+  }
   if (plan.seatLimit !== null && current?.planId !== plan.id) {
     throw new ServiceError("SAAS_PLAN_BY_INVITATION", 409, "Ese plan es solo por invitación")
   }

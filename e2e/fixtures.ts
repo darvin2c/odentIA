@@ -51,10 +51,10 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   }, { scope: "worker" }],
   passwordHash: [async ({}, use) => { await use(await hashPassword(PASSWORD)) }, { scope: "worker" }],
   // La migración deja el alta «solo con invitación» (Fundadores, issue 165). Los recorridos abren
-  // clínicas desde el alta sin invitación: el run la deja abierta. La política es global, así que
+  // clínicas desde el alta sin invitación: el run la deja abierta en los dos productos (ADR 0092). La política es global, así que
   // ningún caso la cambia; el de Fundadores usa una invitación, que sirve con cualquiera de las dos.
   signupOpen: [async ({ fixtureDb }, use) => {
-    await fixtureDb.update(saasSignupPolicy).set({ mode: "abierta", updatedAt: new Date() })
+    await fixtureDb.update(saasSignupPolicy).set({ mode: "abierta", medicalMode: "abierta", updatedAt: new Date() })
     await use()
   }, { scope: "worker", auto: true }],
   nextEventId: [async ({}, use, workerInfo) => {

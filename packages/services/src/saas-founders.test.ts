@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { user } from "@odentia/db/schema/auth"
+import { orgProfile } from "@odentia/db/schema/org"
 import { saasCommercialTerms, saasPlan, saasSignupPolicy, saasSubscription, saasWaitlistRequest } from "@odentia/db/schema/saas-billing"
 import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { getActionPricing } from "./saas-actions.js"
-import { chooseSaasPlan, createSaasPlan } from "./saas-billing.js"
+import { chooseSaasPlan, createSaasPlan, getPublicTrialOffer, listClinicPlans, startSaasTrial, updateSaasPlan } from "./saas-billing.js"
 import { SAAS_TERMS_INITIAL } from "./saas-commercial-terms.js"
 import {
   claimFounderInvitation,
@@ -14,6 +15,7 @@ import {
   endFounderGuarantees,
   getPublicPricing,
   getSignupMode,
+  getSignupModes,
   inviteFromWaitlist,
   listExpiringTerms,
   readFounderInvitation,
@@ -274,6 +276,122 @@ describe("precio negociado con vencimiento", () => {
     const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
     expect(sub?.discountBps).toBe(3000)
     expect(sub?.discountEndsAt?.getTime()).toBe(endsAt.getTime())
+  })
+})
+
+describe("una lista de precios por producto (ADR 0092)", () => {
+  let medicalListId: string
+  let medicalFoundersId: string
+  async function consultorio(over: Partial<typeof saasSubscription.$inferInsert> = {}) {
+    const orgId = await clinic(over)
+    await ownerDb.update(orgProfile).set({ product: "medical" }).where(eq(orgProfile.organizationId, orgId))
+    return orgId
+  }
+
+  beforeAll(async () => {
+    // latidIA empieza con una copia de la lista de odentIA; la prueba distinta deja ver de cuál sale.
+    const list = await createSaasPlan(ownerDb, admin.userId, {
+      code: "founders-lista-latidia",
+      name: "Plan latidIA",
+      product: "medical",
+      currency: "USD",
+      priceCents: 2900,
+      creditCents: 2900,
+      conversationMicros: 500_000,
+      consultationMicros: 400_000,
+      recoveryMicros: 4_000_000,
+      trialCreditCents: 10_000,
+      trialMaxCreditCents: 10_000,
+      trialDays: 45,
+      trialMaxDays: 60,
+      isDefault: true,
+      showOnWeb: true,
+    })
+    medicalListId = list.id
+    const founders = await createSaasPlan(ownerDb, admin.userId, {
+      code: "founders-fundadores-latidia",
+      name: "Fundadores latidIA",
+      product: "medical",
+      currency: "USD",
+      priceCents: 0,
+      creditCents: 0,
+      conversationMicros: 250_000,
+      consultationMicros: 200_000,
+      recoveryMicros: 2_000_000,
+      maxDiscountBps: 0,
+      sellerDiscountBps: 0,
+      trialCreditCents: 10_000,
+      trialMaxCreditCents: 10_000,
+      trialDays: 90,
+      trialMaxDays: 90,
+      seatLimit: 1,
+      guaranteeMonths: 12,
+      showOnWeb: true,
+    })
+    medicalFoundersId = founders.id
+  })
+
+  it("cada producto tiene su plan por defecto: marcar el de latidIA no desmarca el de odentIA", async () => {
+    const defaults = await ownerDb.select({ code: saasPlan.code, product: saasPlan.product }).from(saasPlan).where(eq(saasPlan.isDefault, true))
+    expect(defaults).toEqual(expect.arrayContaining([
+      { code: "founders-lista", product: "dental" },
+      { code: "founders-lista-latidia", product: "medical" },
+    ]))
+    expect(defaults).toHaveLength(2)
+    // El producto se elige al crear y no cambia.
+    await expect(updateSaasPlan(ownerDb, admin.userId, medicalListId, { product: "dental" })).rejects.toMatchObject({ code: "VALIDATION" })
+  })
+
+  it("cada web publica su lista y su oferta, con el descuento contra su propio plan de lista", async () => {
+    const medical = await getPublicPricing(ownerDb, "medical")
+    expect(medical.list?.code).toBe("founders-lista-latidia")
+    expect(medical.founders).toMatchObject({ code: "founders-fundadores-latidia", discountPercent: 50 })
+    const dental = await getPublicPricing(ownerDb, "dental")
+    expect(dental.list?.code).toBe("founders-lista")
+    expect(dental.founders).toMatchObject({ code: "founders-fundadores", discountPercent: 40 })
+    expect((await getPublicTrialOffer(ownerDb, "medical"))?.days).toBe(45)
+    expect((await getPublicTrialOffer(ownerDb, "dental"))?.days).toBe(30)
+  })
+
+  it("cada producto decide si se entra con invitación o libre", async () => {
+    await setSignupMode(ownerDb, admin, "abierta", "medical")
+    expect(await getSignupModes(ownerDb)).toEqual({ dental: "invitacion", medical: "abierta" })
+    expect((await getPublicPricing(ownerDb, "medical")).signupMode).toBe("abierta")
+    await setSignupMode(ownerDb, admin, "invitacion", "medical")
+  })
+
+  it("la solicitud de latidIA entra con Fundadores latidIA y gasta sus propios lugares", async () => {
+    const a = await submitWaitlistRequest(ownerDb, request("lugar-a@latido.test"), "medical")
+    const b = await submitWaitlistRequest(ownerDb, request("lugar-b@latido.test"), "medical")
+    // Con un plan de odentIA no se invita a una solicitud de latidIA.
+    await expect(inviteFromWaitlist(ownerDb, admin, a.id, { planId: foundersPlanId })).rejects.toMatchObject({ code: "VALIDATION" })
+    const invited = await inviteFromWaitlist(ownerDb, admin, a.id)
+    expect(invited.request.planId).toBe(medicalFoundersId)
+    // Su único lugar está ocupado; los de odentIA no cuentan.
+    await expect(inviteFromWaitlist(ownerDb, admin, b.id)).rejects.toMatchObject({ code: "SAAS_SEATS_FULL" })
+    const dental = await submitWaitlistRequest(ownerDb, request("sigue@sonrisa.test"))
+    expect((await inviteFromWaitlist(ownerDb, admin, dental.id)).request.planId).toBe(foundersPlanId)
+  })
+
+  it("un consultorio de latidIA prueba, ve y elige solo los planes de latidIA", async () => {
+    const orgId = await consultorio()
+    // El disparador abre la prueba con la de odentIA (aún no sabe el producto); el alta la corrige.
+    const sub = await startSaasTrial(ownerDb, orgId, { product: "medical" })
+    expect(Math.round(((sub.trialEndsAt?.getTime() ?? 0) - (sub.trialStartedAt?.getTime() ?? 0)) / DAY)).toBe(45)
+    expect((await listClinicPlans(ownerDb, orgId)).map((plan) => plan.code)).toEqual(["founders-lista-latidia"])
+    await expect(chooseSaasPlan(ownerDb, orgId, admin.userId, "founders-lista")).rejects.toMatchObject({ code: "SAAS_PLAN_NOT_OFFERED" })
+    await chooseSaasPlan(ownerDb, orgId, admin.userId, "founders-lista-latidia")
+    // Y una clínica dental no entra con un plan de latidIA.
+    const dentalOrg = `founders-${randomUUID().slice(0, 8)}`
+    await insertOrg(ownerDb, dentalOrg, dentalOrg)
+    await expect(startSaasTrial(ownerDb, dentalOrg, { planCode: "founders-lista-latidia" })).rejects.toMatchObject({ code: "VALIDATION" })
+  })
+
+  it("al terminar Fundadores latidIA pasa al Plan latidIA", async () => {
+    const orgId = await consultorio({ planId: medicalFoundersId, guaranteedUntil: new Date(Date.now() - 60_000) })
+    expect(await endFounderGuarantees(ownerDb)).toContain(orgId)
+    const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, orgId))
+    expect(sub).toMatchObject({ planId: medicalListId, guaranteedUntil: null })
   })
 })
 

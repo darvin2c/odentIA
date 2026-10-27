@@ -1,5 +1,5 @@
 import { getConnInfo } from "@hono/node-server/conninfo"
-import { type ClinicalProduct, productWords } from "@odentia/clinical"
+import { type ClinicalProduct, isClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -64,7 +64,11 @@ export function createPublicFoundersRoute(deps: {
 
   app.get("/pricing", async (c) => {
     c.header("Cache-Control", `public, max-age=${PRICING_MAX_AGE_S}`)
-    return c.json(await deps.ownerDb.transaction((tx) => getPublicPricing(tx)))
+    // La lista de cada producto (ADR 0092): la web la pide con `?product=`, porque llama a la
+    // API por la red interna; sin decirlo, la del dominio de la petición.
+    const asked = c.req.query("product")
+    const product = isClinicalProduct(asked) ? asked : (deps.productOf?.(c) ?? "dental")
+    return c.json(await deps.ownerDb.transaction((tx) => getPublicPricing(tx, product)))
   })
 
   app.get("/invitation/:token", async (c) => {

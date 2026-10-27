@@ -1,8 +1,9 @@
 /**
- * Facturación SaaS (admin): suscripciones con saldo, comprobantes pendientes
- * de confirmación, cargos manuales, planes y medios por moneda.
+ * Cobros y planes (admin): suscripciones con saldo, comprobantes pendientes
+ * de confirmación, cargos manuales, los planes y el alta de cada producto
+ * (ADR 0092) y medios por moneda.
  */
-import { formatMoney } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, formatMoney, productWords } from "@odentia/clinical"
 import {
   Button,
   FieldLabel,
@@ -33,6 +34,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useState } from "react"
 import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
 import { ApiError, api } from "../../lib/api"
+import { domainOf } from "../../lib/host"
 import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { NegotiationsSection } from "../../components/billing-terms"
@@ -147,12 +149,12 @@ function errorMessage(error: unknown): string {
 function BillingPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState("")
-  // El producto filtra las listas de clínicas de esta página; planes y medios son de los dos.
+  // El producto filtra las clínicas, los planes y el alta de esta página (ADR 0092); los medios son de los dos.
   const [product, setProduct] = useState<ProductChoice>("todos")
   const products = useOrgProducts().data ?? {}
   const ofProduct = <T extends { organizationId: string }>(rows: readonly T[] | undefined): T[] =>
     (rows ?? []).filter((row) => matchesProduct(product, products[row.organizationId]))
-  const [planDrawer, setPlanDrawer] = useState<null | { plan?: Plan }>(null)
+  const [planDrawer, setPlanDrawer] = useState<null | { plan?: Plan; product?: ClinicalProduct }>(null)
   const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string }>(null)
   const [methodDrawer, setMethodDrawer] = useState(false)
   const [reverseTarget, setReverseTarget] = useState<PendingPayment | null>(null)
@@ -255,9 +257,13 @@ function BillingPage() {
   return (
     <PageShell className="flex flex-col gap-6">
       <PageHeader
-        title="Facturación"
+        title="Cobros y planes"
         subtitle="Suscripciones, comprobantes por confirmar, cargos, planes y medios"
-        primary={{ label: "Nuevo plan", icon: <Plus aria-hidden />, onClick: () => setPlanDrawer({}) }}
+        primary={{
+          label: "Nuevo plan",
+          icon: <Plus aria-hidden />,
+          onClick: () => setPlanDrawer({ product: product === "todos" ? undefined : product }),
+        }}
         menu={[
           { label: "Nuevo medio", onSelect: () => setMethodDrawer(true) },
           { label: "Registrar pago", onSelect: () => setManualOpen(true) },
@@ -419,7 +425,7 @@ function BillingPage() {
         onDone={refresh}
       />
 
-      <SignupModeSection />
+      <SignupModeSection products={product === "todos" ? CLINICAL_PRODUCTS : [product]} />
 
       <section aria-labelledby="planes" className="flex flex-col gap-2">
         <h2 id="planes" className="text-base font-semibold">
@@ -441,8 +447,23 @@ function BillingPage() {
             onAction={() => setPlanDrawer({})}
           />
         ) : (
+          // Una lista por producto (ADR 0092): sus clínicas y su web usan solo esos planes.
+          (product === "todos" ? CLINICAL_PRODUCTS : [product]).map((of) => (
+            <div key={of} className="flex flex-col gap-2">
+              <h3 className="flex items-center gap-1.5 text-sm">
+                <ProductMark product={of} className="text-sm" />
+                <span className="text-muted-foreground">· {domainOf(of)}</span>
+              </h3>
+              {plans.data.some((plan) => plan.product === of) ? null : (
+                <EmptyState
+                  title={`Sin planes de ${productWords(of).name}`}
+                  description={`Sus clínicas y su web necesitan un plan por defecto de ${productWords(of).name}.`}
+                  actionLabel="Nuevo plan"
+                  onAction={() => setPlanDrawer({ product: of })}
+                />
+              )}
           <ul className="flex flex-col gap-2">
-            {plans.data.map((plan) => (
+            {plans.data.filter((plan) => plan.product === of).map((plan) => (
               <li
                 key={plan.id}
                 className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
@@ -473,6 +494,8 @@ function BillingPage() {
               </li>
             ))}
           </ul>
+            </div>
+          ))
         )}
       </section>
 
@@ -519,7 +542,8 @@ function BillingPage() {
       {planDrawer ? (
         <PlanDrawer
           plan={planDrawer.plan}
-          listPlan={plans.data?.find((plan) => plan.isDefault && plan.isActive)}
+          plans={plans.data ?? []}
+          product={planDrawer.product}
           onClose={() => setPlanDrawer(null)}
           onSaved={refresh}
         />
@@ -1142,62 +1166,85 @@ function HistorySection({
   )
 }
 
-const SIGNUP_MODES = [
-  {
-    value: "invitacion",
-    label: "Solo con invitación",
-    hint: "La web pide invitación y la solicitud entra a la lista de espera. Quien ya tiene cuenta no puede abrir una clínica sin invitación.",
-  },
-  { value: "abierta", label: "Abierta", hint: "Cualquiera abre su clínica con el plan por defecto." },
-] as const
+type SignupMode = "invitacion" | "abierta"
 
-/** «Alta de clínicas nuevas» (Fundadores, decisión 2): cambiarla rige al instante, sin programar nada. */
-function SignupModeSection() {
+/** Las dos formas de abrir clínicas de un producto, con el nombre de su web y de su plan (ADR 0092). */
+function signupModes(product: ClinicalProduct) {
+  const { name } = productWords(product)
+  const place = product === "medical" ? "su consultorio" : "su clínica"
+  return [
+    {
+      value: "invitacion",
+      label: "Solo con invitación",
+      hint: `La web de ${name} pide invitación y la solicitud entra a la lista de espera. Quien ya tiene cuenta no puede abrir ${place} sin invitación.`,
+    },
+    { value: "abierta", label: "Abierta", hint: `Cualquiera abre ${place} con el plan por defecto de ${name}.` },
+  ] as const
+}
+
+/**
+ * «Alta de clínicas nuevas» (Fundadores, decisión 2): cada producto decide si
+ * se entra con invitación o libre (ADR 0092). Cambiarla rige al instante.
+ */
+function SignupModeSection({ products }: { products: readonly ClinicalProduct[] }) {
   const queryClient = useQueryClient()
   const mode = useQuery({
     queryKey: ["admin", "signup-mode"],
-    queryFn: () => api<{ mode: "invitacion" | "abierta" }>("/api/admin/waitlist/signup-mode"),
+    queryFn: () => api<{ modes: Record<ClinicalProduct, SignupMode> }>("/api/admin/waitlist/signup-mode"),
   })
   const save = useMutation({
-    mutationFn: (next: "invitacion" | "abierta") =>
-      api<{ mode: "invitacion" | "abierta" }>("/api/admin/waitlist/signup-mode", { method: "PUT", body: JSON.stringify({ mode: next }) }),
-    onSuccess: (data) => {
-      queryClient.setQueryData(["admin", "signup-mode"], data)
+    mutationFn: (next: { mode: SignupMode; product: ClinicalProduct }) =>
+      api<{ mode: SignupMode }>("/api/admin/waitlist/signup-mode", { method: "PUT", body: JSON.stringify(next) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin", "signup-mode"] })
       void queryClient.invalidateQueries({ queryKey: ["admin", "waitlist"] })
     },
   })
-  const [confirming, setConfirming] = useState<null | "invitacion" | "abierta">(null)
+  const [confirming, setConfirming] = useState<null | { mode: SignupMode; product: ClinicalProduct }>(null)
+  const confirmName = confirming ? productWords(confirming.product).name : ""
   return (
-    <section id="alta" aria-labelledby="alta-titulo" className="flex flex-col gap-2 rounded-xl border bg-card p-4">
-      <h2 id="alta-titulo" className="text-base font-semibold">
-        Alta de clínicas nuevas
-      </h2>
+    <section id="alta" aria-labelledby="alta-titulo" className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+      <div className="flex flex-col gap-0.5">
+        <h2 id="alta-titulo" className="text-base font-semibold">
+          Alta de clínicas nuevas
+        </h2>
+        <p className="text-sm text-muted-foreground">Cada producto decide si se entra solo con invitación o libre.</p>
+      </div>
       {mode.isPending ? (
         <LoadingState message="Cargando…" />
       ) : mode.isError ? (
         <ErrorState title="No se pudo leer cómo se abren clínicas" message={errorMessage(mode.error)} onRetry={() => void mode.refetch()} />
       ) : (
-        <RadioGroup
-          aria-labelledby="alta-titulo"
-          value={mode.data.mode}
-          onValueChange={(value) => {
-            if (value !== mode.data.mode) setConfirming(value as "invitacion" | "abierta")
-          }}
-          className="gap-3"
-        >
-          {SIGNUP_MODES.map((option) => (
-            <FieldLabel
-              key={option.value}
-              className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal has-data-checked:border-primary"
-            >
-              <RadioGroupItem value={option.value} className="mt-0.5" />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium">{option.label}</span>
-                <span className="text-sm text-muted-foreground">{option.hint}</span>
-              </span>
-            </FieldLabel>
+        <div className="grid gap-4 md:grid-cols-2">
+          {products.map((product) => (
+            <div key={product} className="flex flex-col gap-2">
+              <h3 id={`alta-${product}`}>
+                <ProductMark product={product} className="text-sm" />
+              </h3>
+              <RadioGroup
+                aria-labelledby={`alta-${product}`}
+                value={mode.data.modes[product]}
+                onValueChange={(value) => {
+                  if (value !== mode.data.modes[product]) setConfirming({ mode: value as SignupMode, product })
+                }}
+                className="gap-3"
+              >
+                {signupModes(product).map((option) => (
+                  <FieldLabel
+                    key={option.value}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 font-normal has-data-checked:border-primary"
+                  >
+                    <RadioGroupItem value={option.value} className="mt-0.5" />
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-sm font-medium">{option.label}</span>
+                      <span className="text-sm text-muted-foreground">{option.hint}</span>
+                    </span>
+                  </FieldLabel>
+                ))}
+              </RadioGroup>
+            </div>
           ))}
-        </RadioGroup>
+        </div>
       )}
       {save.isError ? (
         <p role="alert" className="text-sm text-destructive">
@@ -1206,13 +1253,13 @@ function SignupModeSection() {
       ) : null}
       <ConfirmDialog
         open={confirming !== null}
-        title={confirming === "abierta" ? "¿Abrir el alta de clínicas?" : "¿Pedir invitación para abrir clínicas?"}
+        title={confirming?.mode === "abierta" ? `¿Abrir el alta de ${confirmName}?` : `¿Pedir invitación en ${confirmName}?`}
         description={
-          confirming === "abierta"
-            ? "Desde ahora cualquiera con cuenta puede abrir su clínica con el plan por defecto, sin pasar por la lista de espera."
-            : "Desde ahora abrir una clínica pide una invitación. Las clínicas que ya existen no cambian."
+          confirming?.mode === "abierta"
+            ? `Desde ahora cualquiera con cuenta puede abrir una clínica de ${confirmName} con su plan por defecto, sin pasar por la lista de espera. El otro producto no cambia.`
+            : `Desde ahora abrir una clínica de ${confirmName} pide una invitación. Las clínicas que ya existen y el otro producto no cambian.`
         }
-        confirmLabel={confirming === "abierta" ? "Abrir el alta" : "Pedir invitación"}
+        confirmLabel={confirming?.mode === "abierta" ? "Abrir el alta" : "Pedir invitación"}
         variant="default"
         pending={save.isPending}
         onConfirm={() => {

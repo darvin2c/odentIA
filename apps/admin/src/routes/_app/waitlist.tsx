@@ -27,7 +27,7 @@ import {
   SearchInput,
   SubmitButton,
 } from "@odentia/ui-patterns"
-import { CLINICAL_PRODUCTS, productWords, upperFirst } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords, upperFirst } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable, type VisibilityState } from "@tanstack/react-table"
@@ -108,13 +108,18 @@ const row = z.object({
   answerBy: z.string().nullable(),
 })
 type Row = z.infer<typeof row>
+const seatsShape = z.object({ planId: z.string(), planName: z.string(), used: z.number(), limit: z.number().nullable() }).nullable()
+const modeShape = z.enum(["invitacion", "abierta"])
+// Lugares y alta de cada producto (ADR 0092): cada uno tiene su Fundadores.
 const pagePayload = z.object({
   rows: z.array(row),
   counts: z.record(z.string(), z.number()),
-  seats: z.object({ planId: z.string(), planName: z.string(), used: z.number(), limit: z.number().nullable() }).nullable(),
-  mode: z.enum(["invitacion", "abierta"]),
+  seats: z.object({ dental: seatsShape, medical: seatsShape }),
+  modes: z.object({ dental: modeShape, medical: modeShape }),
   answerDays: z.number(),
 })
+type Seats = z.infer<typeof seatsShape>
+const seatsText = (seats: Seats) => (seats ? (seats.limit === null ? `${seats.used}` : `${seats.used} de ${seats.limit}`) : "—")
 const invitePayload = z.object({ url: z.string(), expiresAt: z.string(), emailSent: z.boolean(), validDays: z.number() })
 
 const dayFormat = new Intl.DateTimeFormat("es", { weekday: "short", day: "numeric", month: "short" })
@@ -220,7 +225,10 @@ function WaitlistPage() {
   const columnVisibility: VisibilityState = compact ? { product: false, where: false, professionals: false, tool: false, asked: false, who: false } : {}
   const table = useReactTable({ data: rows, columns, state: { columnVisibility }, getCoreRowModel: getCoreRowModel() })
   const counts = list.data?.counts ?? {}
-  const seats = list.data?.seats ?? null
+  // Los productos que se miran: los dos en «Todos».
+  const shown: readonly ClinicalProduct[] = product === "todos" ? CLINICAL_PRODUCTS : [product]
+  const seatsOf = list.data?.seats
+  const withoutSeats = seatsOf ? shown.filter((of) => !seatsOf[of]) : []
   const expiringSoon = rows.filter(
     (r) => r.status === "invitada" && r.inviteExpiresAt && new Date(r.inviteExpiresAt).getTime() - now.getTime() <= 3 * 86_400_000,
   ).length
@@ -234,7 +242,7 @@ function WaitlistPage() {
             <>
               Clínicas que pidieron entrar. Se responde en {list.data.answerDays}{" "}
               {list.data.answerDays === 1 ? "día hábil" : "días hábiles"}. Alta de clínicas:{" "}
-              {list.data.mode === "invitacion" ? "solo con invitación" : "abierta"}
+              {shown.map((of) => `${productWords(of).name} ${list.data.modes[of] === "invitacion" ? "solo con invitación" : "abierta"}`).join(" · ")}
               {isAdmin ? (
                 <>
                   {" · "}
@@ -252,16 +260,25 @@ function WaitlistPage() {
       {list.data ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <KpiCard title="Por revisar" value={counts.por_revisar ?? 0} />
-          <KpiCard
-            title={seats ? "Lugares usados" : "Lugares por invitación"}
-            value={seats ? (seats.limit === null ? `${seats.used}` : `${seats.used} de ${seats.limit}`) : "—"}
-          />
+          {product !== "todos" ? (
+            <KpiCard
+              title={seatsOf?.[product] ? "Lugares usados" : "Lugares por invitación"}
+              value={seatsText(seatsOf?.[product] ?? null)}
+            />
+          ) : (
+            <KpiCard
+              title="Lugares usados"
+              value={shown.reduce<number>((sum, of) => sum + (seatsOf?.[of]?.used ?? 0), 0)}
+              description={shown.map((of) => `${productWords(of).name} ${seatsText(seatsOf?.[of] ?? null)}`).join(" · ")}
+            />
+          )}
           <KpiCard title={status === "invitada" ? "Invitaciones por vencer" : "Invitadas"} value={status === "invitada" ? expiringSoon : (counts.invitada ?? 0)} />
         </div>
       ) : null}
-      {list.data && !seats ? (
+      {list.data && withoutSeats.length > 0 ? (
         <PageNotice tone="aviso" label="Sin plan por invitación">
-          Para invitar hace falta un plan con lugares (por ejemplo, Fundadores).{" "}
+          Para invitar a {withoutSeats.map((of) => productWords(of).name).join(" y ")} hace falta un plan con lugares de ese producto (por
+          ejemplo, Fundadores).{" "}
           {isAdmin ? (
             <Link to="/billing" hash="planes" className="font-medium underline">
               Crearlo en Cobros y planes
@@ -336,7 +353,11 @@ function WaitlistPage() {
           item={rows.find((r) => r.id === search.solicitud) ?? null}
           isLoading={list.isPending}
           isAdmin={isAdmin}
-          seats={seats}
+          seats={(() => {
+            // Se invita con el plan por invitación del producto de la solicitud.
+            const item = rows.find((r) => r.id === search.solicitud)
+            return item && seatsOf ? seatsOf[item.product] : null
+          })()}
           onClose={() => open(undefined)}
         />
       ) : null}
@@ -377,7 +398,7 @@ function RequestDrawer({
   item: Row | null
   isLoading: boolean
   isAdmin: boolean
-  seats: z.infer<typeof pagePayload>["seats"]
+  seats: Seats
   onClose: () => void
 }) {
   const queryClient = useQueryClient()

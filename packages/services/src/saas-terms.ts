@@ -7,7 +7,8 @@ import { and, desc, eq, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { formatMoney } from "@odentia/clinical"
-import { findOrgLocale } from "./locale.js"
+import { findOrgLocale, orgProduct } from "./locale.js"
+import { defaultPlanOf } from "./saas-plan-product.js"
 import { currentSaasTerms, saasTermsAt } from "./saas-commercial-terms.js"
 import { activeDiscountBps, getSaasConsumption, planPrices, type SaasConsumption, type SaasPriceKey } from "./saas-actions.js"
 
@@ -26,7 +27,7 @@ async function subscriptionAndPlan(tx: Db, orgId: string) {
   if (!sub) throw notFound("Suscripción")
   const [plan] = sub.planId
     ? await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-    : await tx.select().from(saasPlan).where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))).limit(1)
+    : await tx.select().from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
   if (!plan) throw new ServiceError("SAAS_NO_PLAN", 409, "No hay un plan con precios por acción: configúralo en Facturación › Planes")
   return { sub, plan }
 }
@@ -568,7 +569,7 @@ export async function getOrganizationBillingTerms(tx: Db, orgId: string, now = n
   if (!sub) return null
   const [plan] = sub.planId
     ? await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
-    : await tx.select().from(saasPlan).where(and(eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true))).limit(1)
+    : await tx.select().from(saasPlan).where(defaultPlanOf(await orgProduct(tx, orgId))).limit(1)
   const notices = await tx
     .select({ kind: saasNotice.kind, sentAt: saasNotice.sentAt, emailTo: saasNotice.emailTo })
     .from(saasNotice)

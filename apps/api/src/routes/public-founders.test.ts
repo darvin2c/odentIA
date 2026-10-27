@@ -58,6 +58,7 @@ function buildApp(auth: Auth, mailer = recordingMailer()): Hono {
     adminURL: "https://admin.odentia.localhost",
     mailer,
     listenUrl: "postgres://localhost:5432/dentalagent",
+    productDomains: { medical: "latidia.localhost" },
     registrationRemoteAddress: () => `10.0.0.${Math.floor(Math.random() * 250)}`,
   })
 }
@@ -67,8 +68,8 @@ function recordingMailer() {
   return { sent, send: async (m: MailMessage) => void sent.push(m) }
 }
 
-function createOrg(app: Hono, slug: string, invitation?: string) {
-  return app.request("/api/auth/organization/create", {
+function createOrg(app: Hono, slug: string, invitation?: string, origin = "") {
+  return app.request(`${origin}/api/auth/organization/create`, {
     method: "POST",
     headers: { "content-type": "application/json", ...(invitation ? { "x-odentia-invitation": invitation } : {}) },
     body: JSON.stringify({ name: `Clínica ${slug}`, slug }),
@@ -223,4 +224,42 @@ it("con el alta abierta, se abre sin invitación y con el plan por defecto", asy
   const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-libre"))
   expect(sub?.planId).not.toBe(plan?.id)
   await ownerDb.update(saasSignupPolicy).set({ mode: "invitacion" })
+})
+
+it("cada producto tiene su lista y su alta: latidIA por su dominio (ADR 0092)", async () => {
+  await createSaasPlan(ownerDb, ADMIN.userId, {
+    code: "api-lista-latidia",
+    name: "Plan latidIA",
+    product: "medical",
+    currency: "USD",
+    priceCents: 2900,
+    creditCents: 2900,
+    conversationMicros: 500_000,
+    consultationMicros: 400_000,
+    recoveryMicros: 4_000_000,
+    trialCreditCents: 10_000,
+    trialMaxCreditCents: 10_000,
+    trialDays: 45,
+    isDefault: true,
+    showOnWeb: true,
+  })
+  const app = buildApp(authFor(null, { calls: 0 }))
+  // La web la pide con `?product=` por la red interna; sin decirlo, la del dominio.
+  const asked = (await (await app.request("/api/public/founders/pricing?product=medical")).json()) as { list: { code: string } }
+  expect(asked.list.code).toBe("api-lista-latidia")
+  const byDomain = (await (await app.request("https://api.latidia.localhost/api/public/founders/pricing")).json()) as { list: { code: string } }
+  expect(byDomain.list.code).toBe("api-lista-latidia")
+  expect(((await (await app.request("/api/public/founders/pricing")).json()) as { list: { code: string } }).list.code).toBe("api-lista")
+
+  // Se abre latidIA y odentIA sigue pidiendo invitación.
+  await ownerDb.update(saasSignupPolicy).set({ medicalMode: "abierta" })
+  const created = { calls: 0 }
+  const dental = await createOrg(buildApp(authFor("dental@clinica.test", created)), "sigue-cerrada")
+  expect(dental.status).toBe(403)
+  const medical = await createOrg(buildApp(authFor("libre@latido.test", created)), "latido", undefined, "https://api.latidia.localhost")
+  expect(medical.status).toBe(200)
+  // Nace con la prueba del Plan latidIA, no con la de odentIA.
+  const [sub] = await ownerDb.select().from(saasSubscription).where(eq(saasSubscription.organizationId, "org-latido"))
+  expect(Math.round(((sub?.trialEndsAt?.getTime() ?? 0) - (sub?.trialStartedAt?.getTime() ?? 0)) / 86_400_000)).toBe(45)
+  await ownerDb.update(saasSignupPolicy).set({ medicalMode: "invitacion" })
 })

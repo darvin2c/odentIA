@@ -89,6 +89,7 @@ import {
   writeAdminAudit,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
@@ -141,6 +142,8 @@ const planInput = z
   .object({
     code: z.string().trim().min(1).max(80),
     name: z.string().trim().min(1).max(120),
+    // El producto del plan (ADR 0092): se elige al crearlo; al editar, solo puede repetirse.
+    product: z.enum(CLINICAL_PRODUCTS).optional(),
     description: z.string().max(2000).nullish(),
     currency,
     priceCents: cents,
@@ -1387,6 +1390,8 @@ export const FOUNDER_INVITATION_HEADER = "x-odentia-invitation"
 export interface SaasPreAuthDeps {
   auth: Auth
   ownerDb: Db
+  /** El producto del dominio donde se abre la clínica (ADR 0087 y 0092). */
+  productOf?: (c: Context) => ClinicalProduct
 }
 const PRE_AUTH_PREFIX = "/api/auth/organization/"
 export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
@@ -1415,12 +1420,18 @@ export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
     const session = await deps.auth.api.getSession({ headers: c.req.raw.headers })
     if (!session) return next()
     const token = c.req.header(FOUNDER_INVITATION_HEADER)?.trim() || null
+    // Cada producto decide si se entra con invitación o libre (ADR 0092).
+    const product = deps.productOf?.(c) ?? "dental"
     let claimed: string | null = null
     if (token) {
       claimed = await deps.ownerDb.transaction((tx) => claimFounderInvitation(tx, token, session.user.email))
-    } else if ((await deps.ownerDb.transaction((tx) => getSignupMode(tx))) === "invitacion") {
+    } else if ((await deps.ownerDb.transaction((tx) => getSignupMode(tx, product))) === "invitacion") {
       return c.json(
-        errorBody(c, "INVITATION_REQUIRED", "Por ahora se abren clínicas solo con invitación. Pide la tuya desde la web de odentIA."),
+        errorBody(
+          c,
+          "INVITATION_REQUIRED",
+          `Por ahora se abren clínicas solo con invitación. Pide la tuya desde la web de ${productWords(product).name}.`,
+        ),
         403,
       )
     }
@@ -1439,7 +1450,7 @@ export function createSaasPreAuthGuard(deps: SaasPreAuthDeps) {
     }
     try {
       if (claimed) await deps.ownerDb.transaction((tx) => completeFounderInvitation(tx, claimed, createdId))
-      else await startSaasTrial(deps.ownerDb, createdId, {})
+      else await startSaasTrial(deps.ownerDb, createdId, { product })
     } catch (e) {
       console.error(`saas-billing: no se pudo iniciar la prueba de ${createdId}`, e)
     }

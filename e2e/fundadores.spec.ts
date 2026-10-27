@@ -183,8 +183,26 @@ test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", asyn
 
   // Plan y alta en Cobros y planes: los campos de Fundadores y el interruptor de alta.
   await gotoHydrated(page, hostUrl("admin", "/billing"))
-  await expect(page.getByRole("heading", { name: "Alta de clínicas nuevas" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Cobros y planes", level: 1 })).toBeVisible()
+  // Cada producto decide su alta y tiene su lista (ADR 0092).
+  const alta = page.locator("#alta")
+  await expect(alta.getByRole("radiogroup")).toHaveCount(2)
+  await expect(alta.getByRole("radio", { name: /Cualquiera abre su consultorio con el plan por defecto de latidIA/ })).toBeVisible()
+  await alta.scrollIntoViewIfNeeded()
+  await shot("alta-por-producto")
+  await page.getByRole("heading", { name: "Planes", exact: true }).scrollIntoViewIfNeeded()
+  await shot("planes-por-producto")
   await page.getByRole("listitem").filter({ hasText: `Fundadores ${tag}` }).getByRole("button", { name: "Editar" }).click()
   await expect(page.getByLabel("Condiciones garantizadas (meses)")).toHaveValue("12")
   await shot("plan-fundadores")
+  await page.keyboard.press("Escape")
+
+  // Un plan nuevo elige su producto y empieza con los precios de otro.
+  await page.getByRole("button", { name: "Nuevo plan" }).first().click()
+  await page.getByRole("radiogroup", { name: "Producto" }).getByRole("radio", { name: "latidIA", exact: true }).click()
+  await expect(page.getByText("Plan por defecto de latidIA", { exact: true })).toBeVisible()
+  await page.getByRole("combobox", { name: "Empezar con los precios de" }).click()
+  await page.getByRole("option", { name: new RegExp(`Fundadores ${tag}`) }).click()
+  await expect(page.getByLabel("Condiciones garantizadas (meses)")).toHaveValue("12")
+  await shot("nuevo-plan-latidia")
 })
