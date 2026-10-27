@@ -639,7 +639,7 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise
     join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
     join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
     left join "user" u on u.id = a.professional_user_id
-    where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada') and a.arrived_at is null
+    where a.organization_id = ${orgId} and not a.is_test and a.status in ('programada', 'confirmada') and a.arrived_at is null
       and (a.starts_at at time zone coalesce(b.timezone, ${timezone}))::date < (now() at time zone coalesce(b.timezone, ${timezone}))::date
       -- Con su atención empezada no está sin cerrar: está en atención (y su borrador ya sale aparte).
       and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
