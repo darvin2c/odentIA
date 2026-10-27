@@ -884,7 +884,7 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
   // y solo las que quien mira puede atender. Quien atiende solo ve lo suyo, y las
   // recomendaciones son de toda la clínica: no las recibe.
   const admin = options.can && !access.ownAppointments
-    ? await getAdminRecommendations(tx, orgId, options.can, { actionable: true })
+    ? await getAdminRecommendations(tx, orgId, options.can, { actionable: true, onlyShown: true })
     : { enabled: false, recommendations: [] }
   const advice = admin.recommendations
   // Las personas a las que el agente no pudo escribir: un motivo que alguien puede corregir.
