@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import {
   clinicalFollowUp,
   clinicalNote,
+  diagnosisCatalog,
   encounter,
   encounterPlanItem,
   encounterDiagnosis,
@@ -385,13 +386,20 @@ export async function getPatientSummary(tx: Db, orgId: string, patientId: string
       loadPlannedForEncounters(tx, orgId, [lastEncounter.id]),
       loadDocsForEncounters(tx, orgId, patientId, [lastEncounter.id]),
     ])
+    // Por su nombre en el catálogo («Caries dental»), como en la atención; sin nombre, el código.
+    const coded = [
+      ...procedures.map((p) => ({ system: p.diagnosisSystem, code: p.diagnosisCode })),
+      ...encounterNotes.map((n) => ({ system: n.diagnosisSystem, code: n.diagnosisCode })),
+    ].filter((row): row is { system: string; code: string } => !!row.code && !!row.system)
+    const titled = coded.length
+      ? await tx
+          .select({ system: diagnosisCatalog.systemKey, code: diagnosisCatalog.code, title: diagnosisCatalog.title })
+          .from(diagnosisCatalog)
+          .where(inArray(diagnosisCatalog.code, [...new Set(coded.map((row) => row.code))]))
+      : []
+    const titleOf = new Map(titled.map((row) => [`${row.system}|${row.code}`, row.title]))
     const diagnoses = [
-      ...new Set(
-        [
-          ...procedures.map((p) => (p.diagnosisCode ? diagnosisCodeLabel(p.diagnosisSystem, p.diagnosisCode) : null)),
-          ...encounterNotes.map((n) => diagnosisCodeLabel(n.diagnosisSystem, n.diagnosisCode)),
-        ].filter((code): code is string => !!code),
-      ),
+      ...new Set(coded.map((row) => titleOf.get(`${row.system}|${row.code}`) ?? diagnosisCodeLabel(row.system, row.code))),
     ].sort()
     lastVisit = {
       encounterId: lastEncounter.id,
