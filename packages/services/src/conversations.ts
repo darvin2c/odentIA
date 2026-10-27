@@ -657,6 +657,9 @@ export async function applyStatus(
         kind: "message.updated",
         conversationId: updated.conversationId,
         messageId: updated.id,
+        // Entregado o leído no cambia a quién le toca (`acceptedOutSql` ya lo
+        // cuenta desde «enviado»): Inicio y la lista de la Bandeja no se recalculan.
+        ...(status === "delivered" || status === "read" ? { receipt: true } : {}),
         at: new Date().toISOString(),
       })
     }

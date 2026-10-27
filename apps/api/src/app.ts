@@ -186,6 +186,8 @@ interface NotifyPayload {
   taskId?: string | number
   conversationId?: string
   messageId?: string
+  /** Solo cambió el acuse (entregado, leído): el hilo lo muestra, las listas no cambian. */
+  receipt?: boolean
   at: string
 }
 
@@ -267,6 +269,10 @@ export function createApp(deps: AppDeps) {
       credentials: true,
       // El nombre de un archivo que se descarga (un CSV de Reportes, un papel en PDF) lo dice el servidor.
       exposeHeaders: ["Content-Disposition"],
+      // La pantalla está en otro origen: sin esto el navegador repite la consulta
+      // previa (OPTIONS) cada pocos segundos y cada pedido cuesta dos viajes.
+      // Chrome no guarda más de 2 horas.
+      maxAge: 7200,
     }),
   )
 
