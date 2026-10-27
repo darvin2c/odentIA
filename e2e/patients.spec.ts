@@ -269,7 +269,7 @@ test("paciente: control indicado, programado y completado", async ({ owner }) =>
   // «Reservar» toma un hueco real del profesional y lo vincula al control.
   await page
     .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar", exact: true })
+    .getByRole("button", { name: "Reservar cita", exact: true })
     .first()
     .click()
   const schedule = surface(page, { name: "Programar control" })
@@ -606,7 +606,7 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
   // Reserva un hueco real: misma operación que la vía clínica.
   await page
     .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar", exact: true })
+    .getByRole("button", { name: "Reservar cita", exact: true })
     .click()
   const dialog = surface(page, { name: "Programar control" })
   // El mismo «cuándo» de Nueva cita: el bloque ya viene puesto en el primer hueco.

@@ -66,7 +66,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   await gotoHydrated(page, tenant(slug, `${patientPath}?tab=plan`))
   await page
     .getByRole("region", { name: "Controles" })
-    .getByRole("button", { name: "Reservar", exact: true })
+    .getByRole("button", { name: "Reservar cita", exact: true })
     .first()
     .click()
   const dialog = surface(page, { name: "Programar control" })

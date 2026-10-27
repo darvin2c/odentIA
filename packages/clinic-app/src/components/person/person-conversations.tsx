@@ -31,6 +31,8 @@ export function PersonConversations({ person }: { person: PersonPage }) {
   const queryClient = useQueryClient()
   const [writing, setWriting] = useState(false)
   const [newOpportunity, setNewOpportunity] = useState(false)
+  // La oportunidad se abre en su cajón, sin ir al embudo.
+  const [viewingOpportunity, setViewingOpportunity] = useState<string | null>(null)
   const conversations = usePersonConversations(person.id)
   const opportunities = useQuery({
     queryKey: ["person-opportunities", person.id, "all"],
@@ -163,13 +165,14 @@ export function PersonConversations({ person }: { person: PersonPage }) {
               {(opportunities.data?.data ?? []).map((row) => (
                 <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
                   <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-                    <Link
-                      to="/pipeline"
-                      search={{ oportunidad: row.id }}
-                      className="font-medium text-primary hover:underline"
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 font-medium"
+                      onClick={() => setViewingOpportunity(row.id)}
                     >
                       {row.title}
-                    </Link>
+                    </Button>
                     <Badge variant="secondary">{row.stageName}</Badge>
                     {row.status !== "open" ? (
                       <Badge variant={row.status === "won" ? "default" : "outline"}>
@@ -189,6 +192,15 @@ export function PersonConversations({ person }: { person: PersonPage }) {
         onClose={() => setWriting(false)}
         people={[{ contactId: person.id, displayName: person.displayName }]}
       />
+      {viewingOpportunity ? (
+        <OpportunityDrawer
+          open
+          opportunityId={viewingOpportunity}
+          contactId={person.id}
+          onClose={() => setViewingOpportunity(null)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["person-opportunities", person.id] })}
+        />
+      ) : null}
       <OpportunityDrawer
         open={newOpportunity}
         contactId={person.id}

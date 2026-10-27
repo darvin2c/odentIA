@@ -122,6 +122,8 @@ export function PatientPendingCard({
   const [completing, setCompleting] = useState<FiliacionSectionKey | null>(null)
   // Una tarea de la persona se crea con el mismo cajón que en Tareas (vence con «Día y hora»).
   const [newTask, setNewTask] = useState(false)
+  // «Ver tarea» la abre en ese mismo cajón, sin ir a Tareas.
+  const [viewingTask, setViewingTask] = useState<string | null>(null)
 
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -269,13 +271,9 @@ export function PatientPendingCard({
       title: `Tarea: ${task.title}`,
       detail: task.dueAt ? `Vence el ${formatDate(task.dueAt)}.` : "Sin fecha límite.",
       action: (
-        <Link
-          to="/tasks"
-          search={{ task: task.id }}
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-        >
+        <Button size="sm" variant="outline" onClick={() => setViewingTask(task.id)}>
           Ver tarea
-        </Link>
+        </Button>
       ),
     })
 
@@ -291,6 +289,15 @@ export function PatientPendingCard({
       }
     >
       <PendingList pending={pending} />
+      {viewingTask ? (
+        <TaskDrawer
+          open
+          taskId={viewingTask}
+          patientId={patientId}
+          onClose={() => setViewingTask(null)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["patient-tasks", patientId] })}
+        />
+      ) : null}
       {canWriteTasks ? (
         <TaskDrawer
           open={newTask}

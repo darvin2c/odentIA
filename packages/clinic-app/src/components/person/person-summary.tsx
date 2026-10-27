@@ -1,5 +1,5 @@
 import { formatMoney } from "@odentia/clinical"
-import { Alert, AlertDescription, AlertTitle, Button, buttonVariants } from "@odentia/ui"
+import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
 import { internationalText } from "@odentia/ui-patterns"
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -33,6 +33,7 @@ import {
 } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relationshipText } from "../../lib/people"
+import { OpportunityDrawer } from "../crm/opportunity-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { NewEncounterButton } from "../patient/new-encounter-button"
@@ -119,6 +120,8 @@ export function PersonSummary({
   const [registering, setRegistering] = useState(false)
   const registerTarget: NewPatientTarget = { kind: "person", person }
   const [newTask, setNewTask] = useState(false)
+  const [viewingTask, setViewingTask] = useState<string | null>(null)
+  const [viewingOpportunity, setViewingOpportunity] = useState<string | null>(null)
   const canTaskWrite = usePermission("tasks.write")
   const queryClient = useQueryClient()
   const [sendingLink, setSendingLink] = useState(false)
@@ -362,13 +365,14 @@ export function PersonSummary({
           {canCrm ? (
             <Fact label="Oportunidad">
               {openOpportunity ? (
-                <Link
-                  to="/pipeline"
-                  search={{ oportunidad: openOpportunity.id }}
-                  className="text-primary hover:underline"
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0"
+                  onClick={() => setViewingOpportunity(openOpportunity.id)}
                 >
                   {openOpportunity.title} · {openOpportunity.stageName}
-                </Link>
+                </Button>
               ) : (
                 "Ninguna abierta"
               )}
@@ -394,7 +398,8 @@ export function PersonSummary({
                     size="sm"
                     onClick={() => setSendingLink(true)}
                   >
-                    Enviarle su enlace
+                    {/* Abre su conversación con «Su enlace» preparado para revisarlo: no lo envía desde aquí. */}
+                    Escribirle con su enlace
                   </Button>
                 ) : null}
                 {canRegister ? (
@@ -445,13 +450,10 @@ export function PersonSummary({
                       className="flex flex-wrap items-center justify-between gap-2 py-2"
                     >
                       <span className="text-sm font-medium">{task.title}</span>
-                      <Link
-                        to="/tasks"
-                        search={{ task: task.id }}
-                        className={buttonVariants({ size: "sm", variant: "outline" })}
-                      >
+                      {/* La tarea se abre al lado, en el cajón de siempre. */}
+                      <Button type="button" size="sm" variant="outline" onClick={() => setViewingTask(task.id)}>
                         Ver tarea
-                      </Link>
+                      </Button>
                     </li>
                   ))}
                 </ul>
@@ -470,6 +472,24 @@ export function PersonSummary({
         onClose={() => setRegistering(false)}
         target={registerTarget}
       />
+      {viewingOpportunity ? (
+        <OpportunityDrawer
+          open
+          opportunityId={viewingOpportunity}
+          contactId={person.id}
+          onClose={() => setViewingOpportunity(null)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["person-opportunities", person.id] })}
+        />
+      ) : null}
+      {viewingTask ? (
+        <TaskDrawer
+          open
+          taskId={viewingTask}
+          contactId={person.id}
+          onClose={() => setViewingTask(null)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["person-tasks", person.id] })}
+        />
+      ) : null}
       {!patientId ? (
         <TaskDrawer
           open={newTask}

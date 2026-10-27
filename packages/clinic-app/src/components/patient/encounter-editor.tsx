@@ -508,10 +508,13 @@ export function EncounterEditor({
   const drain = (): Promise<void> => {
     if (drainRef.current) return drainRef.current
     const run = (async () => {
+      // Sin nada enviado, «Guardado» conserva su hora: cerrar un bloque sin cambios no es guardar.
+      let sentAny = false
       try {
         if (mountedRef.current) setSaveState("saving")
         for (;;) {
           if (dirtyRef.current.size === 0) break
+          sentAny = true
           const sendable = [...dirtyRef.current]
           dirtyRef.current.clear()
           for (const key of sendable) inflightRef.current.add(key)
@@ -540,7 +543,7 @@ export function EncounterEditor({
         if (mountedRef.current) {
           setSaveError(null)
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
-          setSavedAt(new Date().toISOString())
+          if (sentAny) setSavedAt(new Date().toISOString())
         }
       } catch (err) {
         if (mountedRef.current) {

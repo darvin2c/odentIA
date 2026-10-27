@@ -317,7 +317,7 @@ export function ControlesPanel({
                         setScheduling(row)
                       }}
                     >
-                      Reservar
+                      Reservar cita
                     </Button>
                   ) : null}
                   {row.status === "pendiente" || row.status === "programado" ? (

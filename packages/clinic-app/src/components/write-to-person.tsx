@@ -114,7 +114,7 @@ export function WriteToPersonDialog({
     if (only) go(only)
   }, [open])
 
-  const title = prepareRegistration ? "Enviarle su enlace" : "Escribirle"
+  const title = prepareRegistration ? "Escribirle con su enlace" : "Escribirle"
   const name = chosen?.displayName ?? ""
   const working = write.isPending && !needsPhone
   const choosing = people.length > 1 && !chosen
