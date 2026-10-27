@@ -3,11 +3,13 @@
  * resolverlo. Tiene tantas filas como dice la cifra (hasta 200 a la vista).
  */
 import { formatMoney } from "@odentia/clinical"
-import { Badge, Button, buttonVariants } from "@odentia/ui"
+import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { DetailDrawer, EmptyState } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import type { AgendaAppointment } from "../../lib/agenda"
+import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
 import {
   fetchReportList,
@@ -19,6 +21,8 @@ import {
   type ReportQuery,
   spanLabel,
 } from "../../lib/reports"
+import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
+import { PatientQuickView, type QuickViewContext } from "../patient/patient-quick-view"
 import { DownloadButton, during } from "./report-parts"
 import { ADMIN_NAME } from "../../lib/agent-names"
 import { downloadReportList } from "../../lib/reports-ask"
@@ -320,8 +324,34 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
     enabled: list !== null,
     retry: false,
   })
+  const canBook = usePermission("appointments.write")
+  // Lo reservado desde esta lista se queda en ella, marcado, hasta que se cierra: así se ve el avance.
+  const [booked, setBooked] = useState<Record<string, AgendaAppointment>>({})
+  const [quick, setQuick] = useState<QuickViewContext | null>(null)
+  const queryClient = useQueryClient()
+  // Otra lista (o la misma vuelta a abrir) empieza sin marcas ni vista rápida.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se reinicia al cambiar de lista.
+  useEffect(() => {
+    setBooked({})
+    setQuick(null)
+  }, [list])
+  // Solo una cita en pie y por venir la saca de «no tienen cita»: «No vino» o cancelar no la agendan.
+  useAppointmentSaved((appointment) => {
+    if (!bookedNow(appointment)) return
+    setBooked((current) => ({ ...current, [appointment.patientId]: appointment }))
+    // Las cifras de Reportes («No tienen cita: 76») ya no valen; la lista abierta se queda con sus marcas.
+    void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "report" && query.queryKey[1] !== `list:${list}` })
+  })
+  const bookFor = (context: QuickViewContext) =>
+    openBookingAnywhere({
+      patient: { id: context.patientId, name: context.name },
+      lockedPatient: true,
+      ...(context.planItemIds?.length ? { planItemIds: context.planItemIds } : {}),
+      ...(context.serviceId ? { serviceId: context.serviceId } : {}),
+    })
 
   if (list === null) return null
+  const bookable = list === "upcoming_unbooked"
   const copy = LISTS[list]
   const data = report.data?.data
   const period = data ? spanLabel(data.period, data.locale) : ""
@@ -370,6 +400,45 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                   ]
                     .filter(Boolean)
                     .join(" · ")
+                  if (bookable && row.patientId) {
+                    const patientId = row.patientId
+                    const done = booked[patientId]
+                    const amount = row.cents !== null && row.currency ? formatMoney(row.cents, row.currency, data.locale) : null
+                    const context: QuickViewContext = {
+                      patientId,
+                      name: row.personName,
+                      pending: row.title,
+                      amount,
+                      planItemIds: row.planItemIds ?? null,
+                      serviceId: row.serviceId ?? null,
+                    }
+                    // Agendar sin salir de la lista (tablero 10): la reserva se abre al lado y la fila dice cómo quedó.
+                    return (
+                      <li key={row.id} className={cn("flex min-h-[60px] min-w-0 items-center gap-3 py-2", done && "-mx-2 rounded-lg bg-success-soft px-2")}>
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <Button type="button" variant="link" className="h-auto min-h-0 justify-start truncate p-0 text-left font-semibold text-foreground" onClick={() => setQuick(context)}>
+                            {row.personName}
+                          </Button>
+                          {done ? (
+                            <span className="text-[13px] font-semibold text-success">
+                              Cita el {bookedLabel(done.startsAt, data.locale, data.timezone)} · {done.professionalName}
+                            </span>
+                          ) : (
+                            <span className="text-[13px] text-muted-foreground">{[row.title, amount].filter(Boolean).join(" · ")}</span>
+                          )}
+                        </span>
+                        {done ? (
+                          <Badge variant="success" className="shrink-0">
+                            Agendada
+                          </Badge>
+                        ) : canBook ? (
+                          <Button type="button" size="sm" className="min-h-11 shrink-0 sm:min-h-8" onClick={() => bookFor(context)}>
+                            Agendar
+                          </Button>
+                        ) : null}
+                      </li>
+                    )
+                  }
                   return (
                     <li key={row.id} className="flex min-h-[60px] min-w-0 items-center gap-3 py-2">
                       <span className="w-[84px] shrink-0 text-[13px] leading-tight text-muted-foreground">
@@ -428,8 +497,22 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
             <span className="font-bold">Cómo se calcula</span>
             <span>{copy.how(period, data)}</span>
           </div>
+          {quick ? <PatientQuickView context={quick} onClose={() => setQuick(null)} /> : null}
         </div>
       ) : null}
     </DetailDrawer>
   )
+}
+
+/** Una cita que deja a la persona con algo por venir: en pie y aún no empieza. */
+function bookedNow(appointment: AgendaAppointment): boolean {
+  return (appointment.status === "programada" || appointment.status === "confirmada") && Date.parse(appointment.startsAt) > Date.now()
+}
+
+/** «jue 29 oct, 10:00»: el día y la hora de la cita recién reservada. */
+function bookedLabel(iso: string, locale: string, timeZone: string): string {
+  const date = new Date(iso)
+  const day = new Intl.DateTimeFormat(locale, { weekday: "short", day: "numeric", month: "short", timeZone }).format(date).replace(/\./g, "")
+  const hour = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone }).format(date)
+  return `${day}, ${hour}`
 }

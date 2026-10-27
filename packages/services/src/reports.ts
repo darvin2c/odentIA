@@ -276,6 +276,10 @@ export type ReportListRow = {
   currency: string | null
   /** La fila lleva a esta conversación en la Bandeja en vez de a la ficha. */
   conversationId?: string | null
+  /** «Aceptaron y no tienen cita»: lo aceptado por hacer, para agendarlo desde la fila. */
+  planItemIds?: string[] | null
+  /** El servicio de eso, si es uno solo: la reserva lo trae elegido. */
+  serviceId?: string | null
 }
 
 const REPORT_LIST_LIMIT = 200

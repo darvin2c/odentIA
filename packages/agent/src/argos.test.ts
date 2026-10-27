@@ -410,8 +410,15 @@ describe("Argos sobre las vistas", () => {
       { calculo: "c1", frase: "{periodo} se cobró así: {lista}.", frase_vacia: "{periodo} no se cobró nada.", titulo: "Lo cobrado por medio", pantalla: "finanzas" },
     ])
     const steps: string[] = []
-    const answer = await askArgos(appDb, { ...deps(model), onStep: (text) => steps.push(text) }, { orgId: ORG, userId: OWNER, memberRole: "owner", text: "¿Cómo nos pagaron este mes?" })
+    const asked: string[] = []
+    const answer = await askArgos(
+      appDb,
+      { ...deps(model), onStep: (text) => steps.push(text), onQuestion: (id) => asked.push(id) },
+      { orgId: ORG, userId: OWNER, memberRole: "owner", text: "¿Cómo nos pagaron este mes?" },
+    )
     if (answer.kind !== "respuesta") throw new Error(answer.kind)
+    // Con el id de la pregunta se guarda lo que costó (ADR 0085): llega una vez, el mismo de la respuesta.
+    expect(asked).toEqual([answer.questionId])
     expect(answer.source).toBe("oficial")
     expect(answer.text).toMatch(/se cobró así: Efectivo \(S\/\s?1,250\.50\)\.$/)
     expect(answer.how).toMatch(/^Pagos del periodo menos lo anulado y lo devuelto\..* Separado por medio de pago\.$/)
@@ -550,7 +557,8 @@ describe("Argos sobre las vistas", () => {
     ])
     const answer = await ask(model, "¿Cómo nos pagan?")
     if (answer.kind !== "respuesta") throw new Error(answer.kind)
-    expect(answer.text).toMatch(/^Se cobró S\/\s?1,250\.50; el primero es Efectivo\. Por medio: Efectivo \(S\/\s?1,250\.50\); Yape \(S\/\s?0\.00\)\.$/)
+    // La lista va debajo, en la tabla: la frase no la repite.
+    expect(answer.text).toMatch(/^Se cobró S\/\s?1,250\.50; el primero es Efectivo\. Por medio:$/)
     expect(answer.query).toMatch(/^with c2 as \(.+\), c1 as \(.+\) select c2\.\*, c1\.total_dinero as c1_total_dinero from c2 left join c1 on true$/)
   })
 })

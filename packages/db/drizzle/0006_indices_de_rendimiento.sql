@@ -1,2 +1,0 @@
-CREATE INDEX "message_org_external_idx" ON "message" USING btree ("organization_id","external_id") WHERE "external_id" is not null;--> statement-breakpoint
-CREATE INDEX "audit_event_org_entity_id_created_idx" ON "audit_event" USING btree ("organization_id","entity","entity_id","created_at" DESC NULLS LAST);

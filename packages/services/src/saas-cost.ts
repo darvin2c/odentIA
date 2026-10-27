@@ -10,7 +10,7 @@ import {
   saasSubscription,
   storageUsageDay,
 } from "@odentia/db/schema/saas-billing"
-import { and, desc, eq, gte, inArray, lt, notInArray, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, lt, notInArray, sql } from "drizzle-orm"
 import { AGENT_TEST_ORIGINS } from "./ai-usage.js"
 import { previousSaasPeriod } from "./saas-action-review.js"
 import {
@@ -23,6 +23,7 @@ import {
   STORAGE_GB_BYTES,
 } from "./saas-actions.js"
 import { clinicCommissionCutoff } from "./saas-billing.js"
+import { FREE_OUTCOMES } from "./saas-included.js"
 import { saasTermsAt } from "./saas-commercial-terms.js"
 
 /**
@@ -116,30 +117,40 @@ const TIER_LABEL: Record<SaasActionTier, string> = {
   estandar: "Estándar",
   completa: "Completa",
 }
-const SUPPORT_ORIGINS: AiUsageOrigin[] = ["vectores", "comprobacion", "transcripcion"]
 /** Lo que Argos hace sin cobrar: los pedidos al Administrador y el «¿ya avisó algo?» antes de un seguimiento. */
 const ARGOS_ORIGINS: AiUsageOrigin[] = ["administrador", "ya_aviso"]
 
-interface UsageRow {
+/** Un gasto de IA del tramo, con la persona de su conversación. */
+export interface CostUsageRow {
+  id: string
   origin: string
   provider: string
+  model: string
   calls: number
+  inputTokens: number | null
+  outputTokens: number | null
   costMicros: number | null
   createdAt: Date
   conversationId: string | null
   encounterId: string | null
+  reportQuestionId: string | null
   contactId: string | null
 }
 
+/** Adónde va cada gasto: a una acción del cobro o a un cubo de lo que no se cobra. */
+export type CostTarget = { action: string } | { bucket: string }
+
 /**
- * Costo y margen de una clínica en su tramo de hoy o en el anterior (tablero
- * O2). Con owner: lo llama la administración.
+ * Lo que comparten el resumen (tablero O2) y la lista de cada acción: el
+ * tramo, la suscripción, las acciones y cada gasto de IA unido a su acción.
+ * El dictado va por su atención y Sofi por la persona y la ventana de su
+ * conversación; lo que no tiene acción va a su cubo.
  */
-export async function getClinicCostMargin(
+export async function loadClinicCostContext(
   tx: Db,
   orgId: string,
   input: { which?: "actual" | "anterior"; now?: Date } = {},
-): Promise<ClinicCostMargin> {
+) {
   const now = input.now ?? new Date()
   const current = await currentSaasPeriod(tx, orgId, now)
   const previous = input.which === "anterior" ? await previousSaasPeriod(tx, orgId, current) : null
@@ -175,25 +186,25 @@ export async function getClinicCostMargin(
     ? await tx.select().from(saasPlan).where(eq(saasPlan.id, sub.planId)).limit(1)
     : []
 
-  const actions = (await listPeriodActions(tx, orgId, period)).filter(
+  const all = await listPeriodActions(tx, orgId, period)
+  const actions = all.filter(
     (row) => row.state !== "anulada" && row.state !== "dentro_de_cita" && row.state !== "devuelta",
   )
-  const subtotalMicros = actions.reduce((sum, row) => sum + netMicros(row), 0)
-  // Lo cobrado: la cuota y lo que pasó del crédito, sin impuesto. La prueba es de regalo.
-  const chargedCents =
-    period.credit === "prueba"
-      ? 0
-      : (plan?.priceCents ?? 0) + Math.max(0, microsToCents(subtotalMicros) - period.creditCents)
 
   const usage = (await tx
     .select({
+      id: aiUsage.id,
       origin: aiUsage.origin,
       provider: aiUsage.provider,
+      model: aiUsage.model,
       calls: aiUsage.calls,
+      inputTokens: aiUsage.inputTokens,
+      outputTokens: aiUsage.outputTokens,
       costMicros: aiUsage.costMicros,
       createdAt: aiUsage.createdAt,
       conversationId: aiUsage.conversationId,
       encounterId: aiUsage.encounterId,
+      reportQuestionId: aiUsage.reportQuestionId,
       contactId: conversation.contactId,
     })
     .from(aiUsage)
@@ -210,17 +221,21 @@ export async function getClinicCostMargin(
         gte(aiUsage.createdAt, period.start),
         lt(aiUsage.createdAt, period.end),
       ),
-    )) as UsageRow[]
+    )
+    .orderBy(asc(aiUsage.createdAt), asc(aiUsage.id))) as CostUsageRow[]
 
   const windowMs = (await saasTermsAt(tx, period.start)).conversationWindowHours * 3_600_000
   /** Lo que costó cada acción, y lo que no tiene acción por cubo. */
   const actionCost = new Map<string, { micros: number; calls: number }>()
   const bucket = new Map<string, { micros: number; calls: number }>()
-  const add = (map: Map<string, { micros: number; calls: number }>, key: string, row: UsageRow) => {
+  /** Cada gasto, con su acción o su cubo: lo usa el detalle de cada acción. */
+  const targets = new Map<string, CostTarget>()
+  const add = (map: Map<string, { micros: number; calls: number }>, key: string, row: CostUsageRow) => {
     const item = map.get(key) ?? { micros: 0, calls: 0 }
     item.micros += row.costMicros ?? 0
     item.calls += row.calls
     map.set(key, item)
+    targets.set(row.id, map === actionCost ? { action: key } : { bucket: key })
   }
   const byEncounter = new Map(
     actions
@@ -240,22 +255,54 @@ export async function getClinicCostMargin(
       if (action) add(actionCost, action.id, row)
       else add(bucket, "clio_sin_cobro", row)
     } else if (row.origin === "recepcion") {
-      const at = row.createdAt.getTime()
-      const action =
-        conversations.find(
-          (item) =>
-            item.contactId === row.contactId &&
-            item.occurredAt.getTime() <= at &&
-            at < item.occurredAt.getTime() + windowMs,
-        ) ??
-        citas.find((item) => item.contactId === row.contactId && item.occurredAt.getTime() >= at)
+      const action = sofiActionOf(conversations, citas, row, windowMs)
       if (action) add(actionCost, action.id, row)
       else add(bucket, "sofi_sin_cobro", row)
     } else if (row.origin === "reportes") add(bucket, "preguntas", row)
     else if ((ARGOS_ORIGINS as string[]).includes(row.origin)) add(bucket, "argos_mensajes", row)
-    else if ((SUPPORT_ORIGINS as string[]).includes(row.origin)) add(bucket, "soporte", row)
     else add(bucket, "soporte", row)
   }
+  return { now, period, sub, plan, all, actions, usage, windowMs, actionCost, bucket, targets }
+}
+
+/**
+ * La acción de Sofi a la que pertenece un gasto: la conversación de esa
+ * persona cuya ventana lo contiene o, si no, la cita recuperada que vino
+ * después. La misma regla para el costo y para el detalle de cada acción.
+ */
+export function sofiActionOf(
+  conversations: SaasActionRow[],
+  citas: SaasActionRow[],
+  row: { contactId: string | null; createdAt: Date },
+  windowMs: number,
+): SaasActionRow | undefined {
+  const at = row.createdAt.getTime()
+  return (
+    conversations.find(
+      (item) =>
+        item.contactId === row.contactId &&
+        item.occurredAt.getTime() <= at &&
+        at < item.occurredAt.getTime() + windowMs,
+    ) ?? citas.find((item) => item.contactId === row.contactId && item.occurredAt.getTime() >= at)
+  )
+}
+
+/**
+ * Costo y margen de una clínica en su tramo de hoy o en el anterior (tablero
+ * O2). Con owner: lo llama la administración.
+ */
+export async function getClinicCostMargin(
+  tx: Db,
+  orgId: string,
+  input: { which?: "actual" | "anterior"; now?: Date } = {},
+): Promise<ClinicCostMargin> {
+  const { now, period, sub, plan, actions, usage, actionCost, bucket } = await loadClinicCostContext(tx, orgId, input)
+  const subtotalMicros = actions.reduce((sum, row) => sum + netMicros(row), 0)
+  // Lo cobrado: la cuota y lo que pasó del crédito, sin impuesto. La prueba es de regalo.
+  const chargedCents =
+    period.credit === "prueba"
+      ? 0
+      : (plan?.priceCents ?? 0) + Math.max(0, microsToCents(subtotalMicros) - period.creditCents)
 
   const lineOf = (
     key: string,
@@ -317,7 +364,7 @@ export async function getClinicCostMargin(
       and(
         eq(reportQuestion.organizationId, orgId),
         eq(reportQuestion.usedModel, true),
-        notInArray(reportQuestion.outcome, ["no_pudo", "ayuda", "otro"]),
+        notInArray(reportQuestion.outcome, FREE_OUTCOMES),
         gte(reportQuestion.createdAt, period.start),
         lt(reportQuestion.createdAt, period.end),
       ),

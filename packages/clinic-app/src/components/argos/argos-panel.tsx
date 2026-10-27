@@ -34,13 +34,16 @@ import {
   openArgos,
   pinArgos,
   rerunArgos,
+  setArgosLastQuestion,
 } from "../../lib/argos"
+import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { askHelp, canOpenHref } from "../../lib/global-search"
 import { useOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage } from "../../lib/query-error"
 import type { ReportQuery } from "../../lib/reports"
 import { PINS_KEY } from "../../lib/reports-ask"
+import { openAppointmentAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
 import { PersonLink } from "../person-link"
 import { ArgosPeriodRow } from "./argos-period"
 
@@ -180,9 +183,20 @@ function personOf(row: ArgosTable["rows"][number]): { patientId: string | null; 
   return patientId || contactId ? { patientId, contactId } : null
 }
 
-/** La tabla cuando no hay dibujo y hay más de una cifra que leer; cada nombre abre su página (`PersonLink`). */
+/** La cita de una fila, por el id que la tabla trae y no muestra. */
+function appointmentOf(row: ArgosTable["rows"][number]): string | null {
+  return typeof row.cita_id === "string" ? row.cita_id : null
+}
+
+/**
+ * La tabla cuando no hay dibujo y hay más de una cifra que leer. Una fila de
+ * cita abre la cita al lado y, al volver, dice cómo quedó (tablero 1); una de
+ * persona abre su página (`PersonLink`).
+ */
 function AnswerRows({ table }: { table: ArgosTable }) {
   const [all, setAll] = useState(false)
+  const [changed, setChanged] = useState<Record<string, AgendaAppointment>>({})
+  useAppointmentSaved((appointment) => setChanged((current) => ({ ...current, [appointment.id]: appointment })))
   // Sin filas, la frase ya lo dice («En setiembre no se cobró nada»): una tabla vacía no agrega nada.
   if (drawingOf(table) || table.columns.length === 0 || table.rows.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
   const rows = all ? table.rows : table.rows.slice(0, ROWS_SHOWN)
@@ -202,13 +216,32 @@ function AnswerRows({ table }: { table: ArgosTable }) {
           </thead>
           <tbody>
             {rows.map((row, index) => {
-              const person = lead?.kind === "text" ? personOf(row) : null
+              const appointmentId = appointmentOf(row)
+              const person = lead?.kind === "text" && !appointmentId ? personOf(row) : null
               const display = table.display[index] ?? {}
+              const state = appointmentId ? changed[appointmentId] : undefined
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: las filas de una respuesta no se reordenan.
-                <tr key={index} className="border-t">
+                <tr key={index} className={cn("border-t", state && "bg-muted/50")}>
                   <td className="px-2.5 py-1.5">
-                    {person && lead ? (
+                    {appointmentId && lead ? (
+                      <span className="flex flex-col items-start gap-1">
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="h-auto min-h-0 justify-start p-0 text-left text-[13px] font-semibold whitespace-normal text-primary-soft-foreground underline underline-offset-2"
+                          onClick={() => openAppointmentAnywhere(appointmentId)}
+                        >
+                          {display[lead.name]}
+                        </Button>
+                        {state ? (
+                          // Verde solo lo que salió bien; «No vino» o «Cancelada» van neutras.
+                          <Badge variant={state.visit === "atendida" || state.visit === "confirmada" || state.visit === "llego" ? "success" : "secondary"} className="text-[11px]">
+                            {visitName(state.visit)}
+                          </Badge>
+                        ) : null}
+                      </span>
+                    ) : person && lead ? (
                       <PersonLink
                         patientId={person.patientId}
                         contactId={person.contactId}
@@ -693,9 +726,11 @@ export function ArgosPanel() {
   useEffect(() => {
     function onAsk(event: Event) {
       const detail = (event as CustomEvent<ArgosAskEvent>).detail
+      setOpen(true)
+      // «Volver a la conversación» del buscador: tal como quedó.
+      if (detail?.resume) return
       const question = detail?.question?.trim() ?? ""
       setScreen(detail?.screen ? { query: detail.screen, label: detail.screenLabel ?? "" } : null)
-      setOpen(true)
       if (question.length >= 3) pushRef.current(question, { screen: detail?.screen, ...(detail?.routed ? { routed: true } : {}) })
       else setDraft(question)
     }
@@ -704,6 +739,14 @@ export function ArgosPanel() {
   }, [])
 
   const last = exchanges[exchanges.length - 1]
+  const lastAsked = last?.question
+  // El buscador ofrece volver a esta conversación mientras exista.
+  const lastId = last?.id
+  useEffect(() => {
+    setArgosLastQuestion(lastAsked ? { question: lastAsked, at: new Date().toISOString() } : null)
+  }, [lastAsked, lastId])
+  // Al salir de la clínica (o cerrar sesión) no queda una conversación que ofrecer.
+  useEffect(() => () => setArgosLastQuestion(null), [])
   // biome-ignore lint/correctness/useExhaustiveDependencies: baja a la última respuesta cuando llega.
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" })
@@ -743,6 +786,9 @@ export function ArgosPanel() {
         allowance.data?.limited ? `${DESCRIPTION} · ${allowance.data.used} de ${allowance.data.total} preguntas de ${allowance.data.month}` : DESCRIPTION
       }
       onClose={() => setOpen(false)}
+      footer={
+        <ArgosAsk screen={screen} onDropScreen={() => setScreen(null)} draft={draft} onDraft={setDraft} pending={pending} onSubmit={submit} />
+      }
     >
       <div className="flex flex-col gap-4">
         {exchanges.length === 0 ? (
@@ -812,56 +858,76 @@ export function ArgosPanel() {
         <p role="status" className="sr-only">
           {live}
         </p>
-        <div className="flex flex-col gap-2 border-t pt-3.5">
-          {screen ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
-              <span className="min-w-0">
-                Con lo de Reportes{screen.label ? <>: <span className="font-semibold text-foreground">{screen.label}</span></> : null}
-              </span>
-              <Button type="button" variant="link" className="min-h-11 px-1 text-[13px] sm:min-h-8" onClick={() => setScreen(null)}>
-                Quitar
-              </Button>
-            </div>
-          ) : null}
-          <form onSubmit={submit}>
-            <FieldLabel htmlFor="argos-otra" className="sr-only">
-              Escribe otra pregunta
-            </FieldLabel>
-            <InputGroup className="border-input bg-card">
-              <InputGroupTextarea
-                id="argos-otra"
-                rows={1}
-                maxLength={500}
-                className="max-h-32 min-h-11"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault()
-                    event.currentTarget.form?.requestSubmit()
-                  }
-                }}
-                placeholder="Escribe otra pregunta"
-              />
-              <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
-                <InputGroupButton
-                  type="submit"
-                  variant="default"
-                  size="icon-sm"
-                  className="size-11 rounded-xl sm:size-9"
-                  aria-label="Preguntar"
-                  disabled={draft.trim().length < 3 || pending}
-                  aria-busy={pending}
-                >
-                  <ArrowRight aria-hidden />
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          </form>
-          <p className="text-[13px] text-muted-foreground">Ve lo mismo que tú. Nunca cambia nada.</p>
-        </div>
       </div>
     </DetailDrawer>
+  )
+}
+
+/** La caja de pregunta: fija en el pie mientras la conversación se desplaza encima. */
+function ArgosAsk({
+  screen,
+  onDropScreen,
+  draft,
+  onDraft,
+  pending,
+  onSubmit,
+}: {
+  screen: { label: string } | null
+  onDropScreen: () => void
+  draft: string
+  onDraft: (value: string) => void
+  pending: boolean
+  onSubmit: (event: FormEvent) => void
+}) {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      {screen ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+          <span className="min-w-0">
+            Con lo de Reportes{screen.label ? <>: <span className="font-semibold text-foreground">{screen.label}</span></> : null}
+          </span>
+          <Button type="button" variant="link" className="min-h-11 px-1 text-[13px] sm:min-h-8" onClick={onDropScreen}>
+            Quitar
+          </Button>
+        </div>
+      ) : null}
+      <form onSubmit={onSubmit}>
+        <FieldLabel htmlFor="argos-otra" className="sr-only">
+          Escribe otra pregunta
+        </FieldLabel>
+        <InputGroup className="border-input bg-card">
+          <InputGroupTextarea
+            id="argos-otra"
+            rows={1}
+            maxLength={500}
+            className="max-h-32 min-h-11"
+            value={draft}
+            onChange={(event) => onDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              }
+            }}
+            placeholder="Escribe otra pregunta"
+          />
+          <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
+            <InputGroupButton
+              type="submit"
+              variant="default"
+              size="icon-sm"
+              className="size-11 rounded-xl sm:size-9"
+              aria-label="Preguntar"
+              disabled={draft.trim().length < 3 || pending}
+              aria-busy={pending}
+            >
+              <ArrowRight aria-hidden />
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
+      <p className="text-[13px] text-muted-foreground">Ve lo mismo que tú. Nunca cambia nada.</p>
+    </div>
   )
 }
 

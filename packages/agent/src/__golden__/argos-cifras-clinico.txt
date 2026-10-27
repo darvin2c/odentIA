@@ -28,6 +28,8 @@
 - atendidas: Citas atendidas. Cuántas citas se atendieron; por profesional, sede, servicio, día de la semana u hora. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio)
 - horas_atendidas: Horas clínicas. Cuántas horas de citas se atendieron (la duración de las citas atendidas); por profesional, sede o servicio. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio)
 - citas: Citas agendadas. Cuántas citas hay o hubo, sin las canceladas: las de hoy, las de la semana, las que vienen. (en un periodo, también por venir; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio)
+- citas_por_confirmar: Citas por confirmar. Cuántas citas por venir siguen sin confirmar, hoy: las que aún se pueden confirmar. (a hoy, sin periodo; se separa y filtra por sede, profesional, servicio)
+- citas_sin_cerrar: Citas sin cerrar. Cuántas citas ya pasaron sin que nadie dijera si la persona vino, hoy: siguen por confirmar o confirmadas, sin llegada. (a hoy, sin periodo; se separa y filtra por sede, profesional, servicio)
 - asistieron: Asistieron. La asistencia: qué parte de las citas que ya pasaron se atendió. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio)
 - no_vinieron: No vinieron. La inasistencia: qué parte de las citas que ya pasaron terminó en «no vino». (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio)
 - canceladas: Canceladas. Qué parte de las citas que ya pasaron se canceló. (en un periodo; se separa y filtra por mes, semana, dia, dia_semana, hora, sede, profesional, servicio)

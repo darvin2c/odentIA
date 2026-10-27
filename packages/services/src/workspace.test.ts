@@ -660,3 +660,36 @@ it("Inicio: lo que hace falta y lo vencido del inventario es una fila por sede p
   await ownerDb.update(productLot).set({ quantityOnHand: 0 }).where(eq(productLot.id, vencido!.id))
   expect(await inventoryRows(() => true)).toEqual([])
 })
+
+it("«Te espera» pide cerrar las citas de días anteriores sin llegada ni atención, no las de hoy ni las que se atienden", async () => {
+  const orgId = randomUUID()
+  await insertOrg(ownerDb, orgId, `sin-cerrar-${orgId.slice(0, 8)}`)
+  const ana = randomUUID()
+  await ownerDb.insert(user).values({ id: ana, name: "Dra. Ana Torres", email: `${ana}@sin-cerrar.test`, emailVerified: true })
+  const [centro] = await ownerDb.insert(branch).values({ organizationId: orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+  const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: orgId, branchId: centro!.id, name: "Unidad dental 1" }).returning({ id: scheduleRoom.id })
+  // Cada una a su hora: dos citas en pie no comparten la unidad dental.
+  let slot = 0
+  const visit = async (name: string, daysAgo: number, status: string) => {
+    const [person] = await insertTestPatients(ownerDb, { organizationId: orgId, displayName: name, patientNumber: Math.floor(Math.random() * 1_000_000) })
+    slot += 1
+    const startsAt = new Date(Date.now() - daysAgo * 86_400_000 - slot * 3_600_000)
+    const [row] = await ownerDb.insert(appointment).values({
+      organizationId: orgId, patientId: person!.id, professionalUserId: ana, status, serviceName: "Control",
+      branchId: centro!.id, roomId: room!.id, startsAt, endsAt: new Date(startsAt.getTime() + 30_000), durationMin: 1,
+    }).returning({ id: appointment.id })
+    return { patientId: person!.id, appointmentId: row!.id }
+  }
+  await visit("Sin cerrar", 2, "programada")
+  await visit("Confirmada sin cerrar", 3, "confirmada")
+  await visit("Atendida", 2, "atendida")
+  const attending = await visit("En atención", 2, "confirmada")
+  // El odontólogo empezó su atención sin que recepción marcara «Llegó»: está en atención, no sin cerrar.
+  await ownerDb.insert(encounter).values({ organizationId: orgId, patientId: attending.patientId, professionalUserId: ana, appointmentId: attending.appointmentId })
+
+  const home = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, recipient, { ...restricted, appointments: true }))
+  expect(rowsOf(home.waiting, "unclosed").map(row => row.patientName)).toEqual(["Confirmada sin cerrar", "Sin cerrar"])
+  // Quien solo ve sus citas (el odontólogo) no recibe estas filas: las cierra recepción.
+  const own = await withOrgContext(appDb, orgId, tx => getWorkspaceHome(tx, orgId, ana, { ...restricted, appointments: true, ownAppointments: true }))
+  expect(rowsOf(own.waiting, "unclosed")).toEqual([])
+})

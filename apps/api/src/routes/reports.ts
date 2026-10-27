@@ -205,11 +205,21 @@ export function createReportsRoute(deps: ReportsDeps) {
     const parsed = argosInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const body = parsed.data
+    // Lo que costó se guarda con su pregunta (ADR 0085): su id llega al anotarla, antes de guardar el gasto.
+    let questionId: string | null = null
     const ask = (onStep?: (text: string) => void) =>
       meterAiUse(deps.db, orgId, "reportes", () =>
         askArgos(
           deps.db,
-          { platform: deps.llm, decisions: deps.decisions, secretsKey: deps.secretsKey, ...(onStep ? { onStep } : {}) },
+          {
+            platform: deps.llm,
+            decisions: deps.decisions,
+            secretsKey: deps.secretsKey,
+            onQuestion: (id) => {
+              questionId = id
+            },
+            ...(onStep ? { onStep } : {}),
+          },
           {
             orgId,
             userId,
@@ -220,6 +230,7 @@ export function createReportsRoute(deps: ReportsDeps) {
             routed: body.routed === true,
           },
         ),
+        () => ({ reportQuestionId: questionId }),
       )
     // Quien pide líneas (la pantalla) recibe cada paso a medida que pasa (D22) y al final la respuesta; si no, la respuesta entera.
     if (!(c.req.header("accept") ?? "").includes("application/x-ndjson")) return runService(c, 200, () => ask())

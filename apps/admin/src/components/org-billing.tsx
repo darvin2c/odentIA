@@ -1,10 +1,11 @@
 /**
- * Ficha de la clínica › Cobro y consumo (ADR 0031, tablero O2): prueba y
- * descuento negociados (por encima de lo de siempre queda pedido para la
- * administración), cada cuánto se factura y lo que hicieron los agentes.
+ * Ficha de la clínica › Precio y prueba (ADR 0031, tablero O2): prueba y
+ * descuento negociados (por encima de lo de siempre queda pedido para
+ * aprobar) y cada cuánto se factura. Lo que hicieron los agentes y el crédito
+ * del mes están en Resumen y Gastos. Solo la administración (ADR 0094).
  */
 import { Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { DatePickerButton, ErrorState, LoadingState, UsageMeter } from "@odentia/ui-patterns"
+import { DatePickerButton, ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { ApiError, api } from "../lib/api"
@@ -192,24 +193,13 @@ export function OrgBillingSection({ organizationId }: { organizationId: string }
 
   return (
     <div className="flex flex-col gap-4">
-      <h3 className="text-sm font-medium">Cobro y consumo</h3>
+      <h2 className="text-base font-medium">Precio y prueba</h2>
       <p className="text-sm text-muted-foreground">
         {data.status === "prueba" && data.trial.startedAt
           ? `En prueba · día ${Math.max(1, Math.ceil((Date.now() - new Date(data.trial.startedAt).getTime()) / 86_400_000))} de ${data.trial.days}`
           : `Estado: ${data.status}`}
         {data.seller ? ` · vendedor: ${data.seller.name}` : " · sin vendedor"} · se factura {data.billingCycle === "quincenal" ? halfWords : "cada mes"}
       </p>
-      {data.consumption.priced ? (
-        <UsageMeter
-          label={data.consumption.period.credit === "prueba" ? "Saldo de prueba" : "Crédito del mes"}
-          value={data.consumption.subtotalCents}
-          total={data.consumption.creditCents}
-          warnAt={data.warnPercent / 100}
-          alarmAt={data.alarmPercent / 100}
-          valueText={`${money(Math.min(data.consumption.subtotalCents, data.consumption.creditCents))} de ${money(data.consumption.creditCents)}`}
-          description={`Lo que hicieron los agentes: ${plural(count("conversacion"), "conversación", "conversaciones")}, ${plural(count("consulta"), "consulta", "consultas")} y ${plural(count("cita"), "cita", "citas")}, por ${money(data.consumption.subtotalCents)}.`}
-        />
-      ) : null}
 
       {pending.length ? (
         <p role="status" className="rounded-lg bg-warning-soft px-3 py-2 text-sm">

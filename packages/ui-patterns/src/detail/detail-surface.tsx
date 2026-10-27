@@ -1,6 +1,5 @@
 import { Button } from "@odentia/ui"
 import * as React from "react"
-import { common } from "../common.js"
 import { SurfaceShell } from "../surface.js"
 
 export interface DetailSurfaceProps {
@@ -11,13 +10,22 @@ export interface DetailSurfaceProps {
   children: React.ReactNode
   /**
    * Acciones propias del detalle (Editar, Anular, Ver ficha completa…). Van a
-   * la derecha del pie, después del botón de cierre.
+   * la derecha del pie; sin acciones no hay pie.
    */
   actions?: React.ReactNode
+  /**
+   * Pie propio en lugar de la fila de acciones: lo que debe quedar siempre a
+   * mano bajo el cuerpo que se desplaza (la caja de pregunta de Argos).
+   */
+  footer?: React.ReactNode
   /** Cierre ya protegido (ver `useCloseGuard`); lo aporta el contenedor. */
   onClose: () => void
+  /**
+   * El cierre como paso con nombre propio («Listo», «Volver a la
+   * conversación»): además de la «×», va en el pie antes de las acciones.
+   */
   closeLabel?: string
-  /** `false` omite el botón Cerrar y deja el cierre a Esc o al gesto del drawer. */
+  /** `false` omite la «×» y deja el cierre a Esc o al gesto del drawer. */
   showClose?: boolean
   /** En carga, el esqueleto del shell reemplaza a `children`. */
   isLoading?: boolean
@@ -45,15 +53,17 @@ export function DetailSurface({
   headerContent,
   children,
   actions,
+  footer,
   onClose,
-  closeLabel = common.actions.close,
+  closeLabel,
   showClose = true,
   isLoading = false,
   error,
   titleId,
   descriptionId,
 }: DetailSurfaceProps) {
-  const hasFooter = showClose || actions != null
+  const namedClose = showClose && closeLabel != null
+  const hasActions = namedClose || actions != null
 
   return (
     <SurfaceShell
@@ -65,17 +75,19 @@ export function DetailSurface({
       isLoading={isLoading}
       error={error}
       bodyClassName="@container"
+      onClose={showClose ? onClose : undefined}
       footer={
-        hasFooter ? (
+        footer ??
+        (hasActions ? (
           <>
-            {showClose ? (
+            {namedClose ? (
               <Button type="button" variant="secondary" onClick={onClose}>
                 {closeLabel}
               </Button>
             ) : null}
             {actions}
           </>
-        ) : null
+        ) : null)
       }
     >
       {children}

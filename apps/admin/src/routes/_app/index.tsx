@@ -108,8 +108,9 @@ function AdminHome() {
                     </span>
                   </span>
                   <Link
-                    to="/organizations"
-                    search={{ org: item.organizationId }}
+                    to="/organizations/$organizationId"
+                    params={{ organizationId: item.organizationId }}
+                    search={item.kind === "precio_especial" ? { tab: "precio" } : {}}
                     className="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground focus-visible:outline-2 focus-visible:outline-ring"
                   >
                     {item.kind === "precio_especial" ? "Renovar…" : "Ver la clínica"}

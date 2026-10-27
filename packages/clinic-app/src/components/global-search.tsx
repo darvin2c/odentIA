@@ -54,8 +54,8 @@ import {
 } from "react"
 import { apiFetch } from "../lib/api"
 import { ADMIN_NAME } from "../lib/agent-names"
-import { type ArgosRoute, openArgos, routeArgos } from "../lib/argos"
-import { useMyRole, useMyUserId } from "../lib/crm"
+import { type ArgosRoute, openArgos, routeArgos, useArgosLastQuestion } from "../lib/argos"
+import { timeAgo, useMyRole, useMyUserId } from "../lib/crm"
 import {
   askHelp,
   canOpenHref,
@@ -268,6 +268,7 @@ function GlobalSearchDialog({
   // La fila de Argos (D1, tablero 1): cuando se deja de escribir, Jev decide si es una pregunta de los
   // datos, de cómo se usa odentIA o algo para buscar. Solo para quien ve Reportes; Recepción, como hoy.
   const asksArgos = canAccess(role, "reports.read")
+  const lastAsked = useArgosLastQuestion()
   const [routeText, setRouteText] = useState("")
   useEffect(() => {
     const timer = setTimeout(() => setRouteText(query.trim()), 600)
@@ -361,6 +362,7 @@ function GlobalSearchDialog({
     if (data?.owners[0]) return `dueño:${data.owners[0].key}`
     if (data?.meaning[0]) return `dueño:${data.meaning[0].key}`
     if (typing) return asksArgos ? "preguntar-argos" : "preguntar-ayuda"
+    if (asksArgos && lastAsked) return "volver-argos"
     if (recents[0]) return `reciente:${recents[0].id}`
     return screens[0] ? `pantalla:${screens[0].to}` : ""
   }
@@ -416,6 +418,31 @@ function GlobalSearchDialog({
       <CommandShortcut className="hidden tracking-normal group-data-selected/command-item:sm:inline">Enter · Preguntar</CommandShortcut>
     </CommandItem>
   ) : null
+  // Con una conversación abierta, volver a ella es lo primero que se ofrece sin escribir (tablero 5).
+  const resumeRow =
+    asksArgos && lastAsked ? (
+      <CommandGroup heading="Seguir">
+        <CommandItem
+          value="volver-argos"
+          onSelect={() => {
+            onClose()
+            openArgos({ question: "", resume: true })
+          }}
+          className="gap-3 px-3 py-2"
+        >
+          <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center">
+            <AgentMark size="sm" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate font-medium">Volver a la conversación con {ADMIN_NAME}</span>
+            <span className="truncate text-xs text-muted-foreground">
+              «{lastAsked.question}» · {timeAgo(lastAsked.at)}
+            </span>
+          </span>
+          <CommandShortcut className="hidden tracking-normal group-data-selected/command-item:sm:inline">Enter · Abrir</CommandShortcut>
+        </CommandItem>
+      </CommandGroup>
+    ) : null
   const helpRow = (
     <CommandItem
       key="ayuda"
@@ -555,7 +582,7 @@ function GlobalSearchDialog({
             autoFocus
             value={query}
             onValueChange={setQuery}
-            placeholder="Busca una persona, una cita, un pago, un servicio…"
+            placeholder={asksArgos ? `Busca o pregúntale a ${ADMIN_NAME}…` : "Busca una persona, una cita, un pago, un servicio…"}
             aria-label="Buscar en todo"
           />
           <Popover>
@@ -671,6 +698,7 @@ function GlobalSearchDialog({
         <CommandList className="max-h-[min(62vh,34rem)] flex-1 px-1 pb-2 max-sm:max-h-none">
           {!typing ? (
             <>
+              {resumeRow}
               {recents.length ? (
                 <CommandGroup heading="Abiertas hace poco">
                   {recents.map((person) => (
@@ -708,7 +736,9 @@ function GlobalSearchDialog({
                 ))}
               </CommandGroup>
               <p className="px-4 pt-2 text-xs text-muted-foreground">
-                También por teléfono, documento o número de historia.
+                {asksArgos
+                  ? `Busca por nombre, teléfono, documento o número de historia. O escribe una pregunta y ${ADMIN_NAME} responde con los datos de la clínica: «¿cuánto cobramos esta semana?».`
+                  : "También por teléfono, documento o número de historia."}
               </p>
             </>
           ) : null}

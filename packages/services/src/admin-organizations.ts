@@ -415,6 +415,8 @@ export async function listOrganizations(
   loaders: OrganizationBillingLoaders = {},
 ): Promise<OrganizationList> {
   requireStaff(actor)
+  // El precio negociado es de la administración: soporte no lo ve ni filtra por él (ADR 0094).
+  const seesPrice = actor?.role === "admin"
   const q = (opts.q ?? "").trim().slice(0, 120)
   const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100)
   const offset = Math.max(opts.offset ?? 0, 0)
@@ -425,7 +427,7 @@ export async function listOrganizations(
     where ${orgProfile.organizationId} = ${organization.id}), 'dental')`
   const searched = [
     ...(q ? [or(ilike(organization.name, `%${q}%`), ilike(organization.slug, `%${q}%`))] : []),
-    ...(opts.negotiated ? [negotiatedSql] : []),
+    ...(opts.negotiated && seesPrice ? [negotiatedSql] : []),
   ]
   const filters = [...searched, ...(opts.product ? [sql`${productSql} = ${opts.product}`] : [])]
   const where = filters.length ? and(...filters) : undefined
@@ -500,7 +502,7 @@ export async function listOrganizations(
     const negotiated =
       deal && deal.discountBps > 0 && (!deal.endsAt || deal.endsAt > now) ? { discountBps: deal.discountBps, endsAt: deal.endsAt } : null
     items.push({
-      negotiated,
+      negotiated: seesPrice ? negotiated : null,
       id: row.id,
       name: row.name,
       slug: row.slug,

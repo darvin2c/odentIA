@@ -128,6 +128,21 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
         detail: joined([row.phone, `Cita ${appointmentWhen(row.startsAt, context)}`, row.serviceName, row.branchName]),
         action: "Ver la cita",
       }
+    case "unclosed": {
+      // «de ayer 10:00», «de hace 3 días 15:30»: sin cerrar, la cita no cuenta ni como atendida ni como «no vino».
+      const day = daysAgo(row.startsAt, context)
+      return {
+        title: `La cita de ${row.patientName} de ${day} ${formatClock(row.startsAt, context.locale, context.timezone)} quedó sin cerrar`,
+        detail: joined([row.professionalName, row.serviceName, row.branchName]),
+        action: "Ver la cita",
+      }
+    }
+    case "acceptedUnbooked":
+      return {
+        title: plural(row.patients, "persona aceptó su presupuesto y no tiene cita", "personas aceptaron su presupuesto y no tienen cita"),
+        detail: `${formatMoney(row.cents, row.currency, context.locale)} aceptados por hacer`,
+        action: "Ver la lista",
+      }
     case "conversations":
       return {
         title: row.waiting === 1 ? "1 persona espera respuesta" : `${row.waiting} personas esperan respuesta`,
@@ -275,6 +290,13 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
           action: "Abrir la Agenda",
         }
       }
+      if (row.of === "unclosed") {
+        return {
+          title: row.count === 1 ? "1 cita más sin cerrar" : `${row.count} citas más sin cerrar`,
+          detail: "De días anteriores: ¿vinieron?",
+          action: "Abrir la Agenda",
+        }
+      }
       if (row.of === "unsentBudgets") {
         return {
           title: row.count === 1 ? "1 presupuesto más sin enviar" : `${row.count} presupuestos más sin enviar`,
@@ -324,7 +346,7 @@ export function duplicateActions(row: DuplicateRow): { id: "confirmar" | "descar
 
 /** Identidad estable de una fila para React. */
 export function waitingKey(row: WaitingRow): string {
-  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry" || row.kind === "dataRequest") return `${row.kind}:${row.id}`
+  if (row.kind === "case" || row.kind === "task" || row.kind === "unconfirmed" || row.kind === "unclosed" || row.kind === "staleEncounter" || row.kind === "unsentBudget" || row.kind === "possibleDuplicate" || row.kind === "portalReentry" || row.kind === "dataRequest") return `${row.kind}:${row.id}`
   if (row.kind === "registrationDone") return `registrationDone:${row.appointmentId}`
   if (row.kind === "advice") return `advice:${row.key}`
   if (row.kind === "consentToPublish") return `consentToPublish:${row.templateKey}`

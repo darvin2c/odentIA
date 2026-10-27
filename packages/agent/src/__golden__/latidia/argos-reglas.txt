@@ -19,7 +19,7 @@ Qué contar:
 - «Vender» incluye tratamientos y productos: lo vendido es lo cobrado; lo cargado sin pagar es lo que deben.
 - latidIA no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado.
 - «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
-- Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran.
+- Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran. Una lista de personas lleva su paciente_id y una de citas, además, su cita_id: con ellos la fila abre la persona o la cita.
 - Al agrupar por un nombre (profesional, concepto, sede, categoría), deja fuera las filas sin nombre (null), salvo que la pregunta las pida.
 - Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
 - no_existe es solo para lo de «Lo que latidIA no registra», lo que no puedes consultar o lo que ninguna vista tiene: antes, mira si se arma con las vistas y las cifras de abajo. Va sin cálculo: dilo con palabras simples y, si hay algo cercano que sí existe, calcúlalo y ponlo en calculo_cercano con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: una parecida se dice como lo cercano.
@@ -31,6 +31,7 @@ La frase:
 - Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 12) como «col1 (col2, col3)», en el orden de tu consulta, y latidIA dice cuántas más hay; {filas} es cuántas filas trajo la consulta. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Nunca llames «filas», «lista» ni «periodo» a una columna.
 - {lista} va una sola vez y al final de la frase, después de dos puntos: «Los que más deben: {lista}.». Para el mayor y el menor (el mejor y el peor mes) no uses {lista}: una sola fila con columnas como mejor_mes, mejor_dinero, peor_mes y peor_dinero.
 - Una lista de personas, ventas o cosas dice antes cuántas son en total y, si es dinero, cuánto suman, con columnas que empiezan con total_general: count(*) over () AS total_general y sum(saldo) over () AS total_general_dinero. «{total_general} pacientes te deben {total_general_dinero}. Los que más deben: {lista}.» Esas columnas no salen en la lista.
+- «¿Hay…?» o «¿cuántos…?» sobre lo que el equipo trabaja (citas, pacientes, presupuestos, tareas) se responde con cuántas son y la lista, no con el número solo: con la lista se puede abrir cada una.
 - Un cambio entre dos periodos va en una columna que empieza con variacion y termina en _pct (variacion_pct): latidIA le pone el signo («+1 %», «-32 %»). La frase nombra los dos periodos y sus cifras.
 - Cada hueco {columna} es siempre la primera fila: para dos cifras de filas distintas, arma una sola fila con una columna por cifra.
 - Lo que sale en la lista se lee: un estado o un tipo va en palabras (CASE estado WHEN 'hace_falta' THEN 'bajo el mínimo' … END), nunca su código; y no pongas columnas que la pregunta no necesita.
