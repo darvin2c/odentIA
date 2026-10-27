@@ -555,6 +555,8 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   reasoning?: ArgosReasoning
   /** Cada paso, dicho para la pantalla (D22): «Busqué «ortodoncia»: …», «Calculé lo cobrado». Sin datos de pacientes. */
   onStep?: (text: string) => void
+  /** La pregunta quedó anotada: con su id se guarda lo que costó (`ai_usage.report_question_id`). */
+  onQuestion?: (questionId: string) => void
 }
 
 /**
@@ -580,8 +582,11 @@ export async function askArgos(
   const now = input.now ?? new Date()
   const key = argosKeyOf(input.memberRole)
   if (!key) return { kind: "sin_permiso", message: "Tu rol todavía no puede preguntarle a Argos." }
-  const record = (outcome: ArgosOutcome, query: string | null, usedModel: boolean, plan: ArgosStoredPlan | null = null) =>
-    withOrgContext(db, input.orgId, (tx) => recordArgosQuestion(tx, input.orgId, input.userId, { outcome, query, usedModel, plan }))
+  const record = async (outcome: ArgosOutcome, query: string | null, usedModel: boolean, plan: ArgosStoredPlan | null = null) => {
+    const id = await withOrgContext(db, input.orgId, (tx) => recordArgosQuestion(tx, input.orgId, input.userId, { outcome, query, usedModel, plan }))
+    if (id) deps.onQuestion?.(id)
+    return id
+  }
 
   const ready = await withOrgContext(db, input.orgId, async (tx) => ({
     ...(await prepareArgosQuestion(tx, input.orgId)),

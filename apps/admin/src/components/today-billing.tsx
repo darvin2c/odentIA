@@ -62,7 +62,7 @@ export function TodayBilling({ product = "todos" }: { product?: ProductChoice })
                     {row.sellerName ? ` · ${row.sellerName}` : ""}
                   </p>
                 </div>
-                <Button size="sm" variant={row.state === "en_pausa" ? "default" : "outline"} render={<Link to="/organizations" search={{ org: row.organizationId }} />}>
+                <Button size="sm" variant={row.state === "en_pausa" ? "default" : "outline"} render={<Link to="/organizations/$organizationId" params={{ organizationId: row.organizationId }} />}>
                   Llamar
                 </Button>
               </li>

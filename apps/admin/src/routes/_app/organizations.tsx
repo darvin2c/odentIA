@@ -15,7 +15,6 @@ import {
   toast,
 } from "@odentia/ui"
 import {
-  ConfirmDialog,
   common,
   countryOptions,
   EmptyState,
@@ -28,40 +27,35 @@ import {
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router"
 import { Building2, Plus } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
-import { domainOf, platformUrl } from "../../lib/host"
+import { rememberOrganizationsSearch } from "../../lib/organizations-search"
 import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
-import { ClinicCostMarginSection } from "../../components/cost-margin"
-import { OrgBillingSection } from "../../components/org-billing"
+
+interface ListSearch {
+  q?: string
+  producto?: ProductChoice
+  precio?: "negociado"
+  /** Enlace de antes: abría la ficha al lado; ahora la ficha es su propia página. */
+  org?: string
+}
 
 export const Route = createFileRoute("/_app/organizations")({
   component: OrganizationsPage,
-  // Abre la ficha de una clínica desde otra pantalla (Hoy).
-  validateSearch: (search: Record<string, unknown>): { org?: string } => (typeof search.org === "string" ? { org: search.org } : {}),
+  // La búsqueda y los filtros viven en la dirección: al volver de una ficha siguen como estaban.
+  validateSearch: (search: Record<string, unknown>): ListSearch => ({
+    ...(typeof search.q === "string" && search.q ? { q: search.q } : {}),
+    ...(search.producto === "dental" || search.producto === "medical" ? { producto: search.producto } : {}),
+    ...(search.precio === "negociado" ? { precio: "negociado" as const } : {}),
+    ...(typeof search.org === "string" ? { org: search.org } : {}),
+  }),
+  beforeLoad: ({ search }) => {
+    if (search.org) throw redirect({ to: "/organizations/$organizationId", params: { organizationId: search.org } })
+  },
 })
-
-const billingSchema = z
-  .object({
-    status: z.string(),
-    restricted: z.boolean(),
-    restrictReason: z.string().nullable(),
-    isDemo: z.boolean(),
-    trialEndsAt: z.string().nullable(),
-    graceEndsAt: z.string().nullable(),
-    plan: z
-      .object({
-        code: z.string(),
-        name: z.string(),
-        currency: z.string(),
-        priceCents: z.number().optional(),
-      })
-      .nullable(),
-  })
-  .nullable()
 
 const orgItemSchema = z.object({
   id: z.string(),
@@ -106,53 +100,6 @@ function statusVariant(status: string | null): "success" | "warning" | "destruct
   if (status === "restringida") return "destructive"
   return "secondary"
 }
-const orgDetailSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  slug: z.string(),
-  product: z.enum(CLINICAL_PRODUCTS).default("dental"),
-  provisioning: z.object({
-    hasProfile: z.boolean(),
-    hasBranch: z.boolean(),
-    complete: z.boolean(),
-  }),
-  members: z.array(
-    z.object({
-      userId: z.string(),
-      name: z.string(),
-      email: z.string(),
-      role: z.string(),
-      blocked: z.boolean(),
-    }),
-  ),
-  invitations: z.array(
-    z.object({
-      id: z.string(),
-      organizationId: z.string(),
-      email: z.string(),
-      role: z.string().nullable(),
-      status: z.string(),
-      expiresAt: z.string(),
-    }),
-  ),
-  branches: z.array(z.object({ id: z.string(), name: z.string(), isActive: z.boolean() })),
-  usage: z.object({
-    members: z.number(),
-    branches: z.number(),
-    patients: z.number(),
-    contacts: z.number(),
-    pendingInvitations: z.number(),
-    messages30d: z.number(),
-    channels: z.array(z.object({ channel: z.string(), status: z.string() })),
-    lastSessionActivityAt: z.string().nullable(),
-  }),
-  activity: z.array(
-    z.object({ action: z.string(), actorRole: z.string().nullable(), createdAt: z.string() }),
-  ),
-  billing: billingSchema,
-})
-
-type OrgDetail = z.infer<typeof orgDetailSchema>
 
 
 const assistedSchema = z.object({
@@ -206,12 +153,33 @@ function statusLabel(status: string | null): string {
 
 function OrganizationsPage() {
   const queryClient = useQueryClient()
-  const [search, setSearch] = useState("")
-  const [activeSearch, setActiveSearch] = useState("")
-  const { org } = Route.useSearch()
-  const [selectedId, setSelectedId] = useState<string | null>(org ?? null)
+  const listSearch = Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const activeSearch = listSearch.q ?? ""
+  const [search, setSearch] = useState(activeSearch)
+  const onlyNegotiated = listSearch.precio === "negociado"
+  const product: ProductChoice = listSearch.producto ?? "todos"
+  const setList = (next: Partial<ListSearch>) =>
+    void navigate({
+      search: (previous) => {
+        const merged = { ...previous, ...next }
+        return {
+          ...(merged.q ? { q: merged.q } : {}),
+          ...(merged.producto && merged.producto !== "todos" ? { producto: merged.producto } : {}),
+          ...(merged.precio ? { precio: merged.precio } : {}),
+        }
+      },
+      replace: true,
+    })
+  // Lo recuerda para «← Organizaciones» de la ficha: al volver, la lista sigue como estaba.
+  useEffect(() => {
+    rememberOrganizationsSearch({
+      ...(listSearch.q ? { q: listSearch.q } : {}),
+      ...(listSearch.producto && listSearch.producto !== "todos" ? { producto: listSearch.producto } : {}),
+      ...(listSearch.precio ? { precio: listSearch.precio } : {}),
+    })
+  }, [listSearch.q, listSearch.producto, listSearch.precio])
   const [assistedOpen, setAssistedOpen] = useState(false)
-  const [cancelTarget, setCancelTarget] = useState<{ id: string; email: string } | null>(null)
 
   const sessionQuery = useQuery({
     queryKey: ["admin-session"],
@@ -278,8 +246,6 @@ function OrganizationsPage() {
     return countries.find((country) => country.code === code)?.label ?? code
   }
 
-  const [onlyNegotiated, setOnlyNegotiated] = useState(false)
-  const [product, setProduct] = useState<ProductChoice>("todos")
   const listQuery = useQuery({
     queryKey: ["admin-organizations", activeSearch, onlyNegotiated, product],
     queryFn: async () => {
@@ -290,44 +256,10 @@ function OrganizationsPage() {
     },
   })
 
-  const detailQuery = useQuery({
-    queryKey: ["admin-organization", selectedId],
-    enabled: selectedId !== null,
-    queryFn: async () => {
-      const raw = await api<unknown>(`/api/admin/organizations/${selectedId}`)
-      return orgDetailSchema.parse(raw)
-    },
-  })
-
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin-organizations"] })
     void queryClient.invalidateQueries({ queryKey: ["admin-organization"] })
   }
-
-  const resendMutation = useMutation({
-    mutationFn: (invitationId: string) =>
-      api<unknown>(`/api/admin/organizations/invitations/${invitationId}/resend`, {
-        method: "POST",
-      }),
-    onSuccess: () => {
-      toast.success("Invitación reenviada")
-      invalidate()
-    },
-    onError: (error) => toast.error(messageOf(error)),
-  })
-
-  const cancelMutation = useMutation({
-    mutationFn: (invitationId: string) =>
-      api<unknown>(`/api/admin/organizations/invitations/${invitationId}/cancel`, {
-        method: "POST",
-      }),
-    onSuccess: () => {
-      toast.success("Invitación cancelada")
-      setCancelTarget(null)
-      invalidate()
-    },
-    onError: (error) => toast.error(messageOf(error)),
-  })
 
   interface AssistedFormValues {
     orgName: string
@@ -400,7 +332,6 @@ function OrganizationsPage() {
   }
 
   const items = listQuery.data?.items ?? []
-  const detail: OrgDetail | undefined = detailQuery.data
 
   return (
     <PageShell className="flex flex-col gap-6">
@@ -413,7 +344,7 @@ function OrganizationsPage() {
         className="flex flex-wrap items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          setActiveSearch(search.trim())
+          setList({ q: search.trim() || undefined })
         }}
       >
         <div className="flex min-w-64 flex-1 gap-2">
@@ -430,7 +361,7 @@ function OrganizationsPage() {
         {/* Cuenta cada producto con la misma búsqueda, sin contar el filtro de producto. */}
         <ProductFilter
           value={product}
-          onChange={setProduct}
+          onChange={(value) => setList({ producto: value })}
           counts={
             listQuery.data
               ? {
@@ -441,20 +372,23 @@ function OrganizationsPage() {
               : undefined
           }
         />
-        <Select
-          value={onlyNegotiated ? "negociado" : "todas"}
-          items={{ todas: "Todas", negociado: "Con precio negociado" }}
-          onValueChange={(value) => setOnlyNegotiated(value === "negociado")}
-        >
-          <SelectTrigger aria-label="Precio" className="w-60 shrink-0">
-            <span className="text-muted-foreground">Precio:</span>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas</SelectItem>
-            <SelectItem value="negociado">Con precio negociado</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* El precio negociado es de la administración: soporte no filtra por él (ADR 0094). */}
+        {isAdmin ? (
+          <Select
+            value={onlyNegotiated ? "negociado" : "todas"}
+            items={{ todas: "Todas", negociado: "Con precio negociado" }}
+            onValueChange={(value) => setList({ precio: value === "negociado" ? "negociado" : undefined })}
+          >
+            <SelectTrigger aria-label="Precio" className="w-60 shrink-0">
+              <span className="text-muted-foreground">Precio:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas</SelectItem>
+              <SelectItem value="negociado">Con precio negociado</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : null}
       </form>
 
       {listQuery.isPending ? (
@@ -472,165 +406,33 @@ function OrganizationsPage() {
           description="Aún no hay clínicas registradas con este criterio."
         />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <ul className="flex flex-col gap-2">
-            {items.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(item.id)}
-                  aria-pressed={selectedId === item.id}
-                  className={`flex w-full flex-col gap-1.5 rounded-xl border bg-card p-3 text-left text-sm ${
-                    selectedId === item.id ? "border-muted-foreground ring-1 ring-muted-foreground" : ""
-                  }`}
-                >
-                  <ProductMark product={item.product} />
-                  <span className="flex flex-wrap items-center gap-2 font-medium">
-                    <span className="min-w-0 flex-1 truncate">{item.name}</span>
-                    {item.negotiated ? <NegotiatedBadge deal={item.negotiated} /> : null}
-                    {!item.hasProfile || !item.hasBranch ? (
-                      <Badge variant="warning">Alta incompleta</Badge>
-                    ) : item.restricted ? (
-                      <Badge variant="destructive">Restringida</Badge>
-                    ) : (
-                      <Badge variant={statusVariant(item.billingStatus)}>{statusLabel(item.billingStatus)}</Badge>
-                    )}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {item.slug} · {item.memberCount} miembros
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <section aria-label="Ficha de la clínica" className="min-w-0">
-            {!selectedId ? (
-              <EmptyState
-                icon={Building2}
-                title="Elige una clínica"
-                description="Selecciona una clínica de la lista para ver su ficha."
-              />
-            ) : detailQuery.isPending ? (
-              <div className="flex flex-col gap-3">
-                <Skeleton className="h-24 w-full" />
-                <Skeleton className="h-24 w-full" />
-              </div>
-            ) : detailQuery.isError ? (
-              <ErrorState error={detailQuery.error} onRetry={() => void detailQuery.refetch()} />
-            ) : detail ? (
-              <div className="flex flex-col gap-4 rounded-xl border bg-card p-4">
-                <ProductMark product={detail.product} kind className="text-sm" />
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="font-heading text-base font-medium">{detail.name}</h2>
-                  <Badge variant={detail.billing?.restricted ? "destructive" : "outline"}>
-                    {statusLabel(detail.billing?.status ?? null)}
-                  </Badge>
-                  {detail.billing?.isDemo ? <Badge variant="outline">Demo</Badge> : null}
-                  <a
-                    className="ml-auto text-sm underline"
-                    href={platformUrl(detail.slug, "/home", detail.product)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Abrir en {detail.slug}.{domainOf(detail.product)} ↗
-                  </a>
-                </div>
-                {!detail.provisioning.complete ? (
-                  <p className="text-sm text-muted-foreground">
-                    Alta incompleta:{" "}
-                    {!detail.provisioning.hasProfile ? "falta el perfil legal; " : ""}
-                    {!detail.provisioning.hasBranch ? "falta la primera sede." : ""}
-                    La persona invitada la completa desde el panel sin crear otra clínica.
-                  </p>
-                ) : null}
-                <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-                  <div className="rounded-lg border p-2">
-                    <p className="text-xs text-muted-foreground">Miembros</p>
-                    <p className="font-medium">{detail.usage.members}</p>
-                  </div>
-                  <div className="rounded-lg border p-2">
-                    <p className="text-xs text-muted-foreground">Pacientes</p>
-                    <p className="font-medium">{detail.usage.patients}</p>
-                  </div>
-                  <div className="rounded-lg border p-2">
-                    <p className="text-xs text-muted-foreground">Contactos</p>
-                    <p className="font-medium">{detail.usage.contacts}</p>
-                  </div>
-                  <div className="rounded-lg border p-2">
-                    <p className="text-xs text-muted-foreground">Sedes</p>
-                    <p className="font-medium">{detail.usage.branches}</p>
-                  </div>
-                </div>
-                <OrgBillingSection organizationId={detail.id} />
-                {/* Lo cobrado frente a lo que nos costó, por agente y tipo (ADR 0085, tablero O2). */}
-                <ClinicCostMarginSection organizationId={detail.id} />
-                <div>
-                  <h3 className="text-sm font-medium">Miembros</h3>
-                  <ul className="mt-1 flex flex-col gap-1 text-sm">
-                    {detail.members.map((m) => (
-                      <li key={m.userId} className="flex items-center gap-2">
-                        <span className="min-w-0 truncate">
-                          {m.name} · {m.email} · {m.role}
-                        </span>
-                        {m.blocked ? <Badge variant="destructive">Bloqueado</Badge> : null}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium">Invitaciones</h3>
-                  <ul className="mt-1 flex flex-col gap-1 text-sm">
-                    {detail.invitations.map((inv) => (
-                      <li key={inv.id} className="flex items-center gap-2">
-                        <span className="min-w-0 truncate">
-                          {inv.email} · {inv.role ?? "—"} · {inv.status}
-                        </span>
-                        {inv.status === "pending" ? (
-                          <span className="ml-auto flex gap-1">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              disabled={resendMutation.isPending}
-                              onClick={() => resendMutation.mutate(inv.id)}
-                            >
-                              Reenviar
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setCancelTarget({ id: inv.id, email: inv.email })}
-                            >
-                              Cancelar
-                            </Button>
-                          </span>
-                        ) : null}
-                      </li>
-                    ))}
-                    {detail.invitations.length === 0 ? (
-                      <li className="text-muted-foreground">Sin invitaciones.</li>
-                    ) : null}
-                  </ul>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium">Actividad reciente</h3>
-                  <ul className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">
-                    {detail.activity.map((a) => (
-                      <li key={`${a.createdAt}-${a.action}-${a.actorRole ?? "personal"}`}>
-                        {a.action} · {a.actorRole ?? "Personal"}
-                      </li>
-                    ))}
-                    {detail.activity.length === 0 ? <li>Sin actividad registrada.</li> : null}
-                  </ul>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Las restricciones de suscripción se gestionan en Cobros.
-                </p>
-              </div>
-            ) : null}
-          </section>
-        </div>
+        <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {items.map((item) => (
+            <li key={item.id}>
+              <Link
+                to="/organizations/$organizationId"
+                params={{ organizationId: item.id }}
+                className="flex h-full w-full flex-col gap-1.5 rounded-xl border bg-card p-3 text-left text-sm hover:border-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              >
+                <ProductMark product={item.product} />
+                <span className="flex flex-wrap items-center gap-2 font-medium">
+                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                  {item.negotiated ? <NegotiatedBadge deal={item.negotiated} /> : null}
+                  {!item.hasProfile || !item.hasBranch ? (
+                    <Badge variant="warning">Alta incompleta</Badge>
+                  ) : item.restricted ? (
+                    <Badge variant="destructive">Restringida</Badge>
+                  ) : (
+                    <Badge variant={statusVariant(item.billingStatus)}>{statusLabel(item.billingStatus)}</Badge>
+                  )}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {item.slug} · {item.memberCount} miembros
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
 
       <FormDrawer
@@ -874,18 +676,6 @@ function OrganizationsPage() {
         </div>
       </FormDrawer>
 
-      <ConfirmDialog
-        open={cancelTarget !== null}
-        title="Cancelar invitación"
-        description={`Se cancelará la invitación de ${cancelTarget?.email ?? ""}. Podrás crear otra después.`}
-        confirmLabel="Cancelar invitación"
-        variant="destructive"
-        pending={cancelMutation.isPending}
-        onConfirm={() => {
-          if (cancelTarget) cancelMutation.mutate(cancelTarget.id)
-        }}
-        onClose={() => setCancelTarget(null)}
-      />
     </PageShell>
   )
 }

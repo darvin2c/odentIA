@@ -21,6 +21,7 @@ import { Route as AppSupportRouteImport } from './routes/_app/support'
 import { Route as AppTeamRouteImport } from './routes/_app/team'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppWaitlistRouteImport } from './routes/_app/waitlist'
+import { Route as AppOrganizationsOrganizationIdRouteImport } from './routes/_app/organizations_.$organizationId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -81,6 +82,12 @@ const AppWaitlistRoute = AppWaitlistRouteImport.update({
   path: '/waitlist',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOrganizationsOrganizationIdRoute =
+  AppOrganizationsOrganizationIdRouteImport.update({
+    id: '/organizations_/$organizationId',
+    path: '/organizations/$organizationId',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/team': typeof AppTeamRoute
   '/users': typeof AppUsersRoute
   '/waitlist': typeof AppWaitlistRoute
+  '/organizations/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -107,6 +115,7 @@ export interface FileRoutesByTo {
   '/users': typeof AppUsersRoute
   '/waitlist': typeof AppWaitlistRoute
   '/': typeof AppIndexRoute
+  '/organizations/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -122,6 +131,7 @@ export interface FileRoutesById {
   '/_app/users': typeof AppUsersRoute
   '/_app/waitlist': typeof AppWaitlistRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/organizations_/$organizationId': typeof AppOrganizationsOrganizationIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
     | '/team'
     | '/users'
     | '/waitlist'
+    | '/organizations/$organizationId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '/users'
     | '/waitlist'
     | '/'
+    | '/organizations/$organizationId'
   id:
     | '__root__'
     | '/_app'
@@ -164,6 +176,7 @@ export interface FileRouteTypes {
     | '/_app/users'
     | '/_app/waitlist'
     | '/_app/'
+    | '/_app/organizations_/$organizationId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -258,6 +271,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWaitlistRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/organizations_/$organizationId': {
+      id: '/_app/organizations_/$organizationId'
+      path: '/organizations/$organizationId'
+      fullPath: '/organizations/$organizationId'
+      preLoaderRoute: typeof AppOrganizationsOrganizationIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -271,6 +291,7 @@ interface AppRouteChildren {
   AppUsersRoute: typeof AppUsersRoute
   AppWaitlistRoute: typeof AppWaitlistRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppOrganizationsOrganizationIdRoute: typeof AppOrganizationsOrganizationIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -283,6 +304,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppUsersRoute: AppUsersRoute,
   AppWaitlistRoute: AppWaitlistRoute,
   AppIndexRoute: AppIndexRoute,
+  AppOrganizationsOrganizationIdRoute: AppOrganizationsOrganizationIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

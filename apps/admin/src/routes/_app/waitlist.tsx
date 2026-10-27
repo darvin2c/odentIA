@@ -538,7 +538,7 @@ function RequestDrawer({
               <p className="text-sm">
                 Abrió{" "}
                 {item.organizationId ? (
-                  <Link to="/organizations" search={{ org: item.organizationId }} className="font-medium underline">
+                  <Link to="/organizations/$organizationId" params={{ organizationId: item.organizationId }} className="font-medium underline">
                     {item.organizationName ?? "su clínica"}
                   </Link>
                 ) : (

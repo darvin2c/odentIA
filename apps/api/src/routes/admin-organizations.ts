@@ -4,6 +4,7 @@ import { organization, user } from "@odentia/db/schema/auth"
 import { orgProfile } from "@odentia/db/schema/org"
 import { invitationTemplate } from "@odentia/mail"
 import {
+  getClinicAgentCounts,
   type AssistedOrganizationResult,
   approveRecoveryCase,
   getOrganizationBillingTerms,
@@ -459,14 +460,26 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     )
   })
 
-  // O2: cobro y consumo de la clínica (ADR 0031). Lo ve todo el personal; negociar fuera de lo de siempre pide aprobación.
-  app.get("/:id/billing", async (c) => {
+  /**
+   * Lo que hicieron los agentes en el mes, solo cuántas (decisión D4 del lienzo
+   * «Gastos por organización»): lo ve todo el personal, también soporte, sin importes.
+   */
+  app.get("/:id/agents", async (c) => {
     adminContextOf(c)
+    return runService(c, 200, () => owner((tx) => getClinicAgentCounts(tx, c.req.param("id"))))
+  })
+
+  // O2: cobro y consumo de la clínica (ADR 0031). Precio y prueba son de la administración: soporte no ve importes (ADR 0094).
+  app.get("/:id/billing", async (c) => {
+    const denied = forbidUnlessManager(c, adminContextOf(c))
+    if (denied) return denied
     return runService(c, 200, () => owner((tx) => getOrganizationBillingTerms(tx, c.req.param("id"))))
   })
 
   app.post("/:id/billing/discount", async (c) => {
     const actor = adminContextOf(c)
+    const denied = forbidUnlessManager(c, actor)
+    if (denied) return denied
     const parsed = z
       .object({
         discountBps: z.number().int().min(0).max(9000),
@@ -485,6 +498,8 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
 
   app.post("/:id/billing/trial", async (c) => {
     const actor = adminContextOf(c)
+    const denied = forbidUnlessManager(c, actor)
+    if (denied) return denied
     const parsed = z
       .object({
         trialCreditCents: z.number().int().min(0).max(100_000_000),
@@ -499,6 +514,8 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
 
   app.post("/:id/billing/cycle", async (c) => {
     const actor = adminContextOf(c)
+    const denied = forbidUnlessManager(c, actor)
+    if (denied) return denied
     const parsed = z
       .object({ cycle: z.enum(["mensual", "quincenal"]) })
       .strict()

@@ -305,6 +305,8 @@
     --sidebar-ring: #52525b;
     --agent-soft: #f4f4f5;
     --agent-border: #e4e4e7;
+    /* Los gráficos (Gastos de una clínica) en grafito: el color es del producto. */
+    --series-1: #3f3f46;
     --product-dental: #0e7490;
     --product-dental-soft: #d9eff5;
     --product-dental-foreground: #0b5568;
@@ -343,6 +345,7 @@
     --ring: #a1a1aa;
     --sidebar-primary: #e4e4e7;
     --sidebar-primary-foreground: #09090b;
+    --series-1: #d4d4d8;
     --sidebar-ring: #a1a1aa;
     --agent-soft: #1f1f23;
     --agent-border: #3f3f46;

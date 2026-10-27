@@ -31,6 +31,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
 import { createFileRoute } from "@tanstack/react-router"
+import { requireAdminRole } from "../../lib/session"
 import { useState } from "react"
 import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
 import { ApiError, api } from "../../lib/api"
@@ -41,6 +42,7 @@ import { NegotiationsSection } from "../../components/billing-terms"
 import { CommercialTermsSection } from "../../components/commercial-terms"
 
 export const Route = createFileRoute("/_app/billing")({
+  beforeLoad: requireAdminRole,
   component: BillingPage,
 })
 

@@ -54,8 +54,10 @@ import {
   listSaasChargeLines,
   listPeriodActions,
   agendaPendingOf,
+  getClinicCostActionDetail,
   getClinicCostMargin,
   getCostMarginOverview,
+  listClinicCostActions,
   getSaasReceiptUrl,
   getSaasSubscription,
   getSaasUsage30d,
@@ -114,6 +116,14 @@ export interface SaasBillingAccountDeps {
  * `/api/admin/billing` es admin-only: support no ve cobros ni comisiones
  * Las vistas de soporte reciben otro DTO, sin información financiera.
  */
+const costActionsQuery = z.object({
+  periodo: z.enum(["actual", "anterior"]).default("actual"),
+  agente: z.enum(["todo", "sofi", "clio", "argos", "sin_cobro"]).default("todo"),
+  profesional: z.string().min(1).max(120).optional(),
+  canal: z.string().min(1).max(40).optional(),
+  pagina: z.coerce.number().int().min(1).max(10_000).default(1),
+})
+
 function requireAdmin(c: Context): AdminActor | null {
   let actor: AdminActor
   try {
@@ -444,6 +454,35 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     if (!requireAdmin(c)) return forbid(c)
     const periodo = c.req.query("periodo") === "anterior" ? "anterior" : "actual"
     return runService(c, 200, () => getClinicCostMargin(deps.ownerDb, c.req.param("orgId"), { which: periodo }))
+  })
+
+  /**
+   * Cada acción de la clínica con lo que nos costó (lienzo «Gastos por
+   * organización», tablero 2), por agente, profesional o canal y por páginas.
+   */
+  app.get("/cost-margin/:orgId/actions", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    const parsed = costActionsQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const query = parsed.data
+    return runService(c, 200, () =>
+      listClinicCostActions(deps.ownerDb, c.req.param("orgId"), {
+        which: query.periodo,
+        agent: query.agente,
+        professionalId: query.profesional ?? null,
+        channel: query.canal ?? null,
+        page: query.pagina,
+      }),
+    )
+  })
+
+  // De qué se compone una acción: las pausas, las respuestas o las llamadas de una pregunta (tableros 3 a 5).
+  app.get("/cost-margin/:orgId/actions/:key", async (c) => {
+    if (!requireAdmin(c)) return forbid(c)
+    const key = z.string().regex(/^[aqec]:[0-9a-f-]{36}$/).safeParse(c.req.param("key"))
+    if (!key.success) return validationError(c, key.error.issues)
+    const which = c.req.query("periodo") === "anterior" ? "anterior" : "actual"
+    return runService(c, 200, () => getClinicCostActionDetail(deps.ownerDb, c.req.param("orgId"), { key: key.data, which }))
   })
 
   app.get("/negotiations", async (c) => {

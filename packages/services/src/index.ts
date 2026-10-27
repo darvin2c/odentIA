@@ -189,3 +189,4 @@ export { agentTextsFor, productAgentTexts, productDictation, productHelpTopics, 
 export * from "./encounter-dictation.js"
 export type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 export * from "./saas-cost.js"
+export * from "./saas-cost-detail.js"

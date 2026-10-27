@@ -199,6 +199,9 @@ export async function withAiMeter<T>(run: () => Promise<T>, save: (entries: AiUs
   }
 }
 
+/** A qué pertenece un gasto: la conversación sola o su acción (ADR 0085). */
+export type AiUsageLink = string | null | { conversationId?: string | null; encounterId?: string | null; reportQuestionId?: string | null }
+
 /**
  * Mide una operación de una clínica y guarda su uso con el origen dado (ADR
  * 0031). La usan la corrida, las pruebas, el dictado, el Administrador, la
@@ -209,9 +212,12 @@ export function meterAiUse<T>(
   orgId: string,
   origin: AiUsageOrigin,
   run: () => Promise<T>,
-  link: string | null | { conversationId?: string | null; encounterId?: string | null } = null,
+  link: AiUsageLink | (() => AiUsageLink) = null,
 ): Promise<T> {
-  // La conversación sola, o a qué acción pertenece el gasto (la atención de un dictado, ADR 0085).
-  const of = typeof link === "string" || link === null ? { conversationId: link } : link
-  return withAiMeter(run, (entries) => withOrgContext(db, orgId, (tx) => recordAiUsage(tx, orgId, { origin, ...of, entries })))
+  // La conversación sola, o a qué acción pertenece el gasto (la atención de un dictado, ADR 0085). Una
+  // función se lee al guardar: la pregunta a Argos recién tiene su id cuando termina de responder.
+  const of = (value: AiUsageLink) => (typeof value === "string" || value === null ? { conversationId: value } : value)
+  return withAiMeter(run, (entries) =>
+    withOrgContext(db, orgId, (tx) => recordAiUsage(tx, orgId, { origin, ...of(typeof link === "function" ? link() : link), entries })),
+  )
 }
