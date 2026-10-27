@@ -2054,8 +2054,15 @@ export async function createProposal(
     // las 9»): la nueva reemplaza a la anterior, que nunca recibió su sí. Sigue
     // habiendo una sola esperando confirmación, y es la última que se le dijo:
     // si no, su «confirmo» ejecutaba la vieja (auditoría del 27-oct).
-    const replaceable = input.action === "decidir_presupuesto" || (APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(input.action)
-    const replaces = replaceable && pending.length > 0 && pending.every((row) => row.action === input.action)
+    // Entre citas da igual el tipo: si esperaba el sí para mover su cita y ahora
+    // pide reservar otra, lo último que pidió manda (si no, quedaba en un bucle
+    // de «hay otra propuesta pendiente» que la persona no puede deshacer).
+    const appointment = (action: string) => (APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(action)
+    const replaces =
+      pending.length > 0 &&
+      (input.action === "decidir_presupuesto"
+        ? pending.every((row) => row.action === "decidir_presupuesto")
+        : appointment(input.action) && pending.every((row) => appointment(row.action)))
     if (replaces) {
       for (const row of pending) {
         await tx

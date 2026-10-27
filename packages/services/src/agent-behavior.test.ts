@@ -373,6 +373,13 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     }))
     expect(waiting.status).toBe("propuesta")
     expect((await run((tx) => getProposal(tx, ORG, first.id))).status).toBe("expirada")
+    // Aunque sea otro tipo de cita (mover → reservar), lo último que pidió manda.
+    const moved = await run((tx) => createProposal(tx, ORG, {
+      conversationId, action: "cancelar_cita", payload: { appointmentId: "00000000-0000-4000-8000-000000000000", version: 1 },
+      idempotencyKey: "test:crm-agent:hilo-1-cancela",
+    })).catch((error: unknown) => error)
+    expect(moved).toMatchObject({ status: "propuesta", action: "cancelar_cita" })
+    expect((await run((tx) => getProposal(tx, ORG, waiting.id))).status).toBe("expirada")
     await expect(run((tx) => createProposal(tx, ORG, {
       conversationId, action: "crear_oportunidad", payload: { title: "Otra consulta pendiente" },
       idempotencyKey: "test:crm-agent:hilo-1-comercial",
@@ -386,7 +393,8 @@ describe("el hilo nunca se silencia: mensajes y caducidad", () => {
     )
     expect(message.status).toBe("ejecutada")
     expect(message.result).toMatchObject({ kind: "text" })
-    expect((await run((tx) => getProposal(tx, ORG, waiting.id))).status).toBe("propuesta")
+    // Un mensaje no reemplaza nada: la última cita sigue esperando su sí.
+    expect((await run((tx) => getProposal(tx, ORG, (moved as { id: string }).id))).status).toBe("propuesta")
   })
 
   it("las propuestas viejas caducan, persisten y no bloquean la conversación", async () => {
