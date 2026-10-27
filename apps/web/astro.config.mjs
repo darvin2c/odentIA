@@ -8,12 +8,9 @@ import react from "@astrojs/react"
 import sitemap from "@astrojs/sitemap"
 import { defineConfig } from "astro/config"
 
-// Fuera del mapa mientras su texto conserve algún marcador (van con noindex): privacidad espera el
-// código de inscripción del banco de datos en la ANPD.
-const LEGAL_EN_PREPARACION = /\/privacidad$/
-
-// La presentación de Fundadores es para mostrarla o enviarla, no para buscadores (lleva noindex).
-const FUERA_DEL_MAPA = /\/presentacion$/
+// Las presentaciones (/presentacion y cada una debajo) son para mostrarlas o enviarlas, no para
+// buscadores (llevan noindex).
+const FUERA_DEL_MAPA = /\/presentacion(\/.*)?$/
 
 // La web de latidIA la publica el mismo servidor con VITE_PRODUCT=medical: su dominio y solo sus
 // páginas en el mapa del sitio (`src/lib/latidia-pages.json`); las propias de latidIA no van en el de odentIA.
@@ -60,7 +57,7 @@ export default defineConfig({
         // Cada web, solo sus páginas: las demás responden 404 en su dominio.
         const clean = new URL(page).pathname.replace(/\/$/, "") || "/"
         const ours = medical ? latidiaPages.serves.includes(clean) : !latidiaPages.own.includes(clean)
-        return ours && !LEGAL_EN_PREPARACION.test(path) && !FUERA_DEL_MAPA.test(path)
+        return ours && !FUERA_DEL_MAPA.test(path)
       },
     }),
   ],

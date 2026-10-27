@@ -692,7 +692,7 @@ function OrganizationsPage() {
                   aria-describedby="assisted-slug-help"
                 />
                 <FieldDescription id="assisted-slug-help">
-                  Será la dirección de la clínica en odentIA, en minúsculas sin espacios.
+                  Será su dirección en el dominio de su producto, en minúsculas sin espacios.
                 </FieldDescription>
               </Field>
             )}

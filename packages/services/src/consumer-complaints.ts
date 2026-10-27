@@ -394,7 +394,7 @@ function internalSheetEmail(
     ...(input.quote ? { quote: input.quote } : {}),
     sections: sheetSections(sheet),
     ...(options.reviewUrl ? { action: { label: "Abrir en Reclamaciones", url: options.reviewUrl } } : {}),
-    reason: "Aviso interno del equipo de odentIA: cada hoja del Libro de Reclamaciones llega a este buzón.",
+    reason: "Aviso interno de la administración: cada hoja del Libro de Reclamaciones llega a este buzón.",
   })
 }
 
@@ -475,7 +475,7 @@ export function consumerComplaintTimeline(
 
 function assertStaff(actor: AdminActor): void {
   if (!isAdminRole(actor.role)) {
-    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de odentIA")
+    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de la administración")
   }
 }
 

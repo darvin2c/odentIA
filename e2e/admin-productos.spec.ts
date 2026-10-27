@@ -77,4 +77,25 @@ test("la administración distingue el producto de cada clínica y filtra por él
   await shot("organizaciones-oscuro")
   await page.setViewportSize({ width: 390, height: 844 })
   await shot("organizaciones-telefono")
+
+  // Las demás pantallas toman el tema neutro solas: se miran en claro y en oscuro.
+  await page.setViewportSize({ width: 1366, height: 860 })
+  for (const [path, title] of [
+    ["/users", "Usuarios"],
+    ["/commissions", "Comisiones"],
+    ["/support", "Soporte"],
+    ["/complaints", "Libro de Reclamaciones"],
+    ["/team", "Equipo y actividad"],
+  ] as const) {
+    for (const dark of [false, true]) {
+      await page.goto(`${ADMIN}${path}`)
+      await expect(page.getByRole("heading", { level: 1, name: new RegExp(title.split(" ")[0] ?? title, "i") })).toBeVisible()
+      await page.evaluate((on) => {
+        document.documentElement.classList.toggle("dark", on)
+        document.documentElement.style.colorScheme = on ? "dark" : "light"
+      }, dark)
+      await page.waitForLoadState("networkidle")
+      await shot(`${path.slice(1)}-${dark ? "oscuro" : "claro"}`)
+    }
+  }
 })

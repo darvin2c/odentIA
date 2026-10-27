@@ -117,7 +117,7 @@ describe("correos de Plan y pagos", () => {
     expect(mail.html).toContain("Clínica &lt;Sonrisa&gt; &amp; Cía")
     expect(mail.html).not.toContain("cobro <duplicado>")
     expect(mail.text).toContain("Total a pagarte: 118,45 USD")
-    expect(mail.text).toContain("si algo no cuadra, escríbele a tu contacto en odentIA")
+    expect(mail.text).toContain("si algo no cuadra, escríbele a tu contacto en la administración")
     expect(mail.text).not.toContain("escríbenos desde Ayuda")
   })
 })

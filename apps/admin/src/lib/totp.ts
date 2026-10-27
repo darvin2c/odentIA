@@ -42,7 +42,7 @@ export const AUTHENTICATOR_STORES = {
 /** El archivo .txt de «Descargar» con los códigos de respaldo. */
 export function backupCodesText(email: string, codes: string[]): string {
   return [
-    "Códigos de respaldo de la administración de odentIA",
+    "Códigos de respaldo de la administración",
     `Cuenta: ${email}`,
     "",
     "Cada código sirve una sola vez. Úsalo si no tienes tu app de autenticación.",

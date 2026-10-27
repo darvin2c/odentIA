@@ -289,7 +289,7 @@ function ComplaintsPage() {
     <PageShell className="space-y-5">
       <PageHeader
         title="Libro de Reclamaciones"
-        subtitle="Las hojas que llegan desde la web de odentIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
+        subtitle="Las hojas que llegan desde las webs de odentIA y latidIA. Cada una se responde por correo en un plazo de 15 días hábiles que no se puede ampliar."
       />
       {list.data ? (
         <div className="grid gap-3 sm:grid-cols-3">
@@ -328,7 +328,7 @@ function ComplaintsPage() {
         <SearchInput
           placeholder="Buscar por número, nombre o documento"
           isFetching={list.isFetching && !list.isPending}
-          className="w-full sm:w-80"
+          className="w-full sm:w-96"
         />
       </div>
 
@@ -517,7 +517,7 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           </DetailSection>
 
           {sheet.status === "respondido" ? (
-            <DetailSection title="4 · Respuesta de odentIA">
+            <DetailSection title="4 · Nuestra respuesta">
               <div className="flex flex-col gap-3">
                 <p className="whitespace-pre-wrap rounded-lg bg-muted px-3 py-2.5 text-sm leading-relaxed">
                   {sheet.providerResponse}
@@ -563,7 +563,7 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               </div>
             </DetailSection>
           ) : (
-            <DetailSection title="4 · Respuesta de odentIA">
+            <DetailSection title="4 · Nuestra respuesta">
               <div className="flex flex-col gap-2">
                 <FieldLabel htmlFor="libro-respuesta">Qué hicimos y qué le respondemos</FieldLabel>
                 <p className="text-sm text-muted-foreground" id="libro-respuesta-ayuda">

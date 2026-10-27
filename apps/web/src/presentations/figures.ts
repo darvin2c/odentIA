@@ -1,4 +1,4 @@
-// Las cifras de la presentación de Fundadores (/presentacion), de la administración como el resto de
+// Las cifras de la presentación de Fundadores (/presentacion/fundadores), de la administración como el resto de
 // la web: en deck.html cada una es una marca {{nombre}} que se llena al servir la página. Sin los
 // dos planes publicados con todos sus precios no hay presentación: no se inventa ninguna cifra.
 import {
@@ -77,6 +77,19 @@ export function deckFigures(pricing: Pricing, day: Tier[]): Record<string, strin
     answer: businessDays(pricing.terms.waitlistAnswerDays),
     extras: extras.length ? `También con precio de Fundador: ${extras.join(" y ")}. ` : "",
   }
+}
+
+/**
+ * La presentación que reciben las clínicas, sin el guion de quien presenta: fuera las notas de cada
+ * parte, su panel y el botón «Guion (N)». Con /presentacion/fundadores?guion la página las conserva.
+ */
+export function withoutGuide(html: string): string {
+  const out = html
+    .replace(/<aside class="notes">[\s\S]*?<\/aside>\n?/g, "")
+    .replace(/<div class="notes-panel"[^>]*>[\s\S]*?<\/div>\n?/, "")
+    .replace(/[ \t]*<button type="button" id="notesBtn"[^>]*>[\s\S]*?<\/button>\n?/, "")
+  if (/class="notes"|id="notesBtn"|class="notes-panel"/.test(out)) throw new Error("presentación: quedó parte del guion")
+  return out
 }
 
 /** Llena las marcas {{nombre}} de deck.html; una marca sin valor es un error, no un hueco en pantalla. */

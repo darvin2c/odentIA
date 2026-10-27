@@ -562,7 +562,7 @@ function RequestDrawer({
                     </SubmitButton>
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Invita la administración de odentIA.</p>
+                  <p className="text-sm text-muted-foreground">Invita alguien con el rol Administración.</p>
                 )}
                 {lastLink ? (
                   <p className="break-all rounded-lg bg-muted px-3 py-2 text-xs" aria-live="polite">

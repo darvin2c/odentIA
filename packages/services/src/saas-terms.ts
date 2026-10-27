@@ -194,7 +194,7 @@ export async function listSaasNegotiations(tx: Db, input: { orgId?: string; stat
 
 /** Aprobar o rechazar un pedido: solo la administración. Aprobar lo aplica con los mismos límites del plan. */
 export async function decideSaasNegotiation(tx: Db, actor: AdminActor, negotiationId: string, approve: boolean): Promise<void> {
-  if (actor.role !== "admin") throw forbidden("Solo la administración de odentIA aprueba un descuento o una prueba fuera de lo de siempre")
+  if (actor.role !== "admin") throw forbidden("Solo el rol Administración aprueba un descuento o una prueba fuera de lo de siempre")
   const [row] = await tx.select().from(saasNegotiation).where(eq(saasNegotiation.id, negotiationId)).limit(1).for("update")
   if (!row) throw notFound("Pedido")
   if (row.status !== "pendiente") throw new ServiceError("SAAS_NEGOTIATION_DECIDED", 409, "Ese pedido ya se decidió")
@@ -442,7 +442,7 @@ export async function getSaasAlerts(tx: Db, orgId: string, now = new Date()): Pr
         level: daysLeft <= 7 ? "alarma" : "aviso",
         periodKey: sub.guaranteedUntil.toISOString().slice(0, 10),
         title: daysLeft <= 7 ? "Alarma" : "Aviso",
-        message: `Tus condiciones de Fundador terminan el ${fmtDay(sub.guaranteedUntil)}. Desde el día siguiente pasas al plan de lista de odentIA.`,
+        message: `Tus condiciones de Fundador terminan el ${fmtDay(sub.guaranteedUntil)}. Desde el día siguiente pasas al plan de lista.`,
         short: `Tus condiciones de Fundador terminan el ${fmtShort(sub.guaranteedUntil)}`,
         action: "ver_plan",
       })

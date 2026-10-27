@@ -158,7 +158,7 @@ async function issueCycleCharge(
       const n = creditedReviews.length
       lines.push({
         kind: "revision",
-        description: `Devolución por revisión: ${n} ${n === 1 ? "cobro que odentIA devolvió al revisarlo" : "cobros que odentIA devolvió al revisarlos"}`,
+        description: `Devolución por revisión: ${n} ${n === 1 ? "cobro que devolvimos al revisarlo" : "cobros que devolvimos al revisarlos"}`,
         quantity: n,
         amountCents: -amount,
         sortOrder: sort++,

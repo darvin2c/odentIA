@@ -301,8 +301,8 @@ export function ClinicCostMarginSection({ organizationId }: { organizationId: st
           {data ? (
             <p className="text-xs text-muted-foreground">
               Del {day(data.period.start)} al{" "}
-              {day(new Date(new Date(data.period.end).getTime() - 1).toISOString())}. Solo lo ve
-              odentIA.
+              {day(new Date(new Date(data.period.end).getTime() - 1).toISOString())}. Solo lo ve la
+              administración.
             </p>
           ) : null}
         </div>
