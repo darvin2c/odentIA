@@ -170,8 +170,12 @@ export function EncounterDiagnoses({
           {active.map((dx) => (
             <li key={dx.id} className="flex flex-wrap items-start justify-between gap-3 py-2.5">
               <div className="flex min-w-0 flex-col gap-1">
+                {/* Primero el nombre, que es lo que se lee; el código lo acompaña. */}
                 <p className="text-sm">
-                  <span className="font-semibold">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  <span className="font-semibold">{dx.diagnosisTitle ?? diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  {dx.diagnosisTitle ? (
+                    <span className="text-muted-foreground"> · {diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  ) : null}
                   {dx.note ? <span className="text-muted-foreground"> · {dx.note}</span> : null}
                 </p>
                 <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

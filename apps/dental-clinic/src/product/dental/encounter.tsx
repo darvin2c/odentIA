@@ -42,7 +42,7 @@ function useDentalBlocks(ctx: EncounterBlockContext): ProductEncounterBlocks {
         key: "odontograma",
         title: "Odontograma",
         description: "Hallazgos por pieza sobre el odontograma del paciente.",
-        summary: findings === 0 ? NO_FINDINGS : `${findings} hallazgo(s) de esta atención`,
+        summary: findings === 0 ? NO_FINDINGS : `${findings} ${findings === 1 ? "hallazgo" : "hallazgos"} en esta atención`,
         empty: findings === 0,
         dictation: { kinds: ["odontograma"], onlySuggested: NO_FINDINGS },
         content: (
@@ -193,15 +193,14 @@ function DentalClosing({
   )
 }
 
-/** El odontograma vinculado a la atención, con lo registrado. */
+/** El odontograma vinculado a la atención, con lo registrado; sin hallazgos no se muestra. */
 function DentalDetailRecorded({ detail }: { detail: EncounterDetail }) {
   const entries = detail.odontogramEntries ?? []
+  if (entries.length === 0) return null
   return (
     <section aria-label="Odontograma vinculado">
-      <h4 className="mb-2 text-sm font-medium">Odontograma vinculado ({entries.length})</h4>
-      {entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Sin hallazgos de odontograma.</p>
-      ) : (
+      <h4 className="mb-2 text-sm font-medium">Odontograma</h4>
+      {(
         <ul className="flex flex-col gap-2">
           {entries.map((entry) => (
             <li key={entry.id} className="border-b pb-2 text-sm last:border-0">

@@ -7,7 +7,7 @@
  *
  * El orden es fijo y sin puntajes:
  * 1. Un presupuesto armado y sin enviar: «Enviar el presupuesto a Lucía».
- * 2. Lo aceptado que aún no tiene cita: «Aceptó 2 de 3: falta agendar».
+ * 2. Lo aceptado que aún no tiene cita: «Aceptó 2 de 3: falta su cita».
  * 3. Lo que espera respuesta: «Enviado · espera respuesta» o «Lo está pensando».
  * 4. Un tratamiento en curso sin cita para su próxima sesión.
  * 5. El próximo control: «Control de las resinas · por reservar desde el 20 nov».
@@ -36,7 +36,7 @@ import { productHooks } from "./products.js"
 export type PlanNextKind = "enviar" | "agendar" | "respuesta" | "continuar" | "control" | "ninguno"
 
 export interface PlanNextAction {
-  /** «Enviar», «Agendar», «¿Qué respondió?», «Reservar». */
+  /** «Enviar», «Reservar cita» o «¿Qué respondió?». */
   label: string
   budgetId?: string
   /** Lo aceptado que se agenda junto: la cita los trae. */
@@ -258,7 +258,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
     }
   }
 
-  // 2. Lo aceptado sin cita: «Agendar» con los tratamientos ya puestos.
+  // 2. Lo aceptado sin cita: «Reservar cita» con los tratamientos ya puestos.
   const accepted = items.filter((item) => item.decisionStatus === "aceptado" && item.status === "pendiente")
   const toSchedule = accepted.filter((item) => !withAppointment.has(item.id))
   if (toSchedule.length > 0) {
@@ -267,18 +267,18 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
       .find((budget) => budget.items.some((line) => toSchedule.some((item) => item.id === line.planItemId)))
     const text = decided
       ? decided.status === "aceptado"
-        ? "Aceptó todo: falta agendar"
-        : `${decided.stateText}: falta agendar`
+        ? "Aceptó todo: falta su cita"
+        : `${decided.stateText}: falta su cita`
       : context.budgetRequired
         ? "Tiene tratamientos aceptados sin cita"
         : // En latidIA lo indicado ya queda aceptado: no hubo nada que aceptar.
-          "Falta agendar lo indicado"
+          "Falta la cita de lo indicado"
     return {
       kind: "agendar",
       text,
       detail: decided?.decidedAt ? `Respondió el ${day(decided.decidedAt)}` : null,
       action: can("appointments.write")
-        ? { label: "Agendar", planItemIds: toSchedule.map((item) => item.id), serviceId: toSchedule[0]?.serviceId ?? null }
+        ? { label: "Reservar cita", planItemIds: toSchedule.map((item) => item.id), serviceId: toSchedule[0]?.serviceId ?? null }
         : null,
     }
   }
@@ -304,10 +304,10 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
   if (continuing) {
     return {
       kind: "continuar",
-      text: `Falta agendar la próxima sesión: ${continuing.title}`,
+      text: `Falta la cita de la próxima sesión: ${continuing.title}`,
       detail: null,
       action: can("appointments.write")
-        ? { label: "Agendar", planItemIds: [continuing.id], serviceId: continuing.serviceId }
+        ? { label: "Reservar cita", planItemIds: [continuing.id], serviceId: continuing.serviceId }
         : null,
     }
   }
@@ -319,7 +319,7 @@ function planNextStepFrom(facts: PlanFacts, context: PlanContext, can: Can): Pla
         kind: "control",
         text: `${control.title} · por reservar`,
         detail: `Desde el ${day(control.dueAt)}`,
-        action: can("appointments.write") ? { label: "Reservar", followUpId: control.id } : null,
+        action: can("appointments.write") ? { label: "Reservar cita", followUpId: control.id } : null,
       }
     }
     return { kind: "control", text: `${control.title} · con cita`, detail: null, action: null }

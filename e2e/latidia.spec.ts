@@ -8,6 +8,7 @@ import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
+import { surface as sideSurface } from "./surface"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
@@ -473,18 +474,21 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   await expect(indicated.getByText("Aceptado", { exact: true })).toBeVisible()
   await shot("indicar")
 
-  // En el Plan, «Qué sigue» pide agendarlo y el presupuesto queda como opción.
+  // En el Plan, «Qué sigue» pide su cita y el presupuesto queda como opción.
   const person = await request<{ data: { personId: string } }>(page, api, "GET", `/api/people/by-patient/${patientId}`, slug)
   await gotoHydrated(page, latidiaUrl(slug, `/people/${person.body.data.personId}?tab=plan`))
-  await expect(page.getByText("Falta agendar lo indicado")).toBeVisible()
+  await expect(page.getByText("Falta la cita de lo indicado")).toBeVisible()
   await expect(page.getByText("Opcional: lo indicado ya queda aceptado. Prepáralo si la persona quiere saber cuánto costará.")).toBeVisible()
   await expect(page.getByText("No hace falta para agendar ni para atender.")).toBeVisible()
   await expect(page.getByText("Todavía no tiene presupuesto")).toHaveCount(0)
   await views("plan-sin-presupuesto")
   // Sin «dónde» en un consultorio: lo indicado no dice «Boca completa» (revisión final).
   expect(await page.locator("main").innerText()).not.toMatch(/Boca completa|odontograma|Pieza/i)
-  await page.getByRole("button", { name: "Agendar", exact: true }).first().click()
-  await expect(page).toHaveURL(/\/agenda\?.*planItems=/)
+  // «Reservar cita» abre «Nueva cita» al lado, con lo indicado: nadie sale del Plan.
+  await page.getByRole("button", { name: "Reservar cita", exact: true }).first().click()
+  await expect(sideSurface(page, { name: "Nueva cita" })).toBeVisible()
+  await expect(page).toHaveURL(/tab=plan/)
+  await page.keyboard.press("Escape")
 
   // Mateo vino (su consulta quedó firmada) y la pagó: en Reportes «pagó» es la consulta cobrada.
   const [site] = await fixtureDb.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId))
@@ -711,12 +715,12 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   const review = page.getByRole("region", { name: "Sugerencias por revisar" })
   const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
   const write = async (text: string, from = idle) => {
-    await from.getByRole("button", { name: "Escribir lo dictado" }).click()
+    await from.getByRole("button", { name: "Escribir en vez de dictar" }).click()
     await from.getByLabel("Escribe lo dictado").fill(text)
     await from.getByRole("button", { name: "Ordenar lo dictado" }).click()
   }
   await write(DICTATION)
-  await expect(review).toContainText("Dictado terminado: 6 sugerencias")
+  await expect(review).toContainText("Clío dejó 6 sugerencias por revisar")
   await expect(suggested("Signos vitales")).toContainText("PA 118/76 mmHg · FC 96 lpm · T 38.5 °C")
   await expect(suggested("Examen físico")).toContainText("Boca y garganta · con hallazgos")
   await expect(suggested("Examen físico")).toContainText("Tórax y pulmones · sin alteraciones")

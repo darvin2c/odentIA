@@ -36,7 +36,6 @@ import { type PersonConversation, type PersonPage, RELATIONSHIP_WORDS, relations
 import { TaskDrawer } from "../crm/task-drawer"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { NewEncounterButton } from "../patient/new-encounter-button"
-import { useScheduleAccepted } from "../patient/plan/plan-budgets"
 import { PlanNextCard } from "../patient/plan/plan-next"
 import {
   ClinicalAlertsCard,
@@ -130,7 +129,6 @@ export function PersonSummary({
     queryFn: () => fetchPatientHealth(patientId ?? ""),
     enabled: clinical,
   })
-  const schedule = useScheduleAccepted(patientId ?? "")
   const appointments = usePatientAppointments(
     patientId ?? "none",
     canAppointments && Boolean(patientId),
@@ -199,6 +197,8 @@ export function PersonSummary({
               <QueryErrorState error={health.error} onRetry={() => void health.refetch()} />
             ) : (
               <ClinicalAlertsCard
+                patientId={patientId}
+                patientName={person.displayName}
                 health={health.data?.data ?? null}
                 onAntecedentes={() => onSection("antecedentes")}
               />
@@ -208,15 +208,7 @@ export function PersonSummary({
               patientId={patientId}
               onSection={(section) => onSection(section as PatientSectionId)}
             />
-            <PlanNextCard
-              patientId={patientId}
-              onAction={(step) => {
-                if (!step.action) return
-                if ((step.kind === "agendar" || step.kind === "continuar") && step.action.planItemIds)
-                  schedule(step.action.planItemIds, step.action.serviceId ?? null)
-                else onSection("plan", undefined, undefined, undefined, step.action.budgetId)
-              }}
-            />
+            <PlanNextCard patientId={patientId} patientName={person.displayName} />
             {clinicalData ? (
               <LastVisitCard
                 patientId={patientId}
@@ -242,6 +234,7 @@ export function PersonSummary({
             )}
             <UpcomingCard
               patientId={patientId}
+              patientName={person.displayName}
               upcoming={upcoming}
               loading={canAppointments && appointments.isPending}
               failed={!canAppointments || appointments.isError}

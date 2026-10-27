@@ -753,6 +753,13 @@ async function seedBudgets(
         createdBy: plan.evaluation.professionalUserId,
       })),
     )
+  // Cada tratamiento sabe en qué presupuesto está, como cuando lo arma la app:
+  // sin esto, «¿Qué respondió?» falla con «La propuesta ya no es vigente».
+  await tx.execute(sql`
+    update treatment_plan_item i set budget_id = bi.budget_id
+    from treatment_budget_item bi
+    where bi.organization_id = ${input.orgId} and i.organization_id = ${input.orgId}
+      and bi.plan_item_id = i.id and i.budget_id is null`)
   // Entregados con su fecha y su respuesta: desde aquí la base ya no deja tocar las líneas.
   for (const batch of chunks(plans))
     await tx.execute(sql`

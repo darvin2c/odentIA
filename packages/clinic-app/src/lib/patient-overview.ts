@@ -5,6 +5,14 @@ export function sexLabel(sex: string | null | undefined): string {
   return sex && sex in SEX_LABELS ? SEX_LABELS[sex as keyof typeof SEX_LABELS] : "No registrado"
 }
 
+/**
+ * «atenderlo» o «atenderla» según la persona; sin sexo registrado, «atenderla»
+ * (la persona). Lo mismo para cualquier verbo con el pronombre al final.
+ */
+export function attendWord(sex: string | null | undefined, verb = "atender"): string {
+  return `${verb}${sex === "M" ? "lo" : "la"}`
+}
+
 export function documentCategoryLabel(category: string): string {
   if (category === "radiografia") return "Radiografía"
   if (category === "foto_clinica") return "Foto clínica"

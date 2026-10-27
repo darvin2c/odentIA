@@ -184,12 +184,12 @@ export function DictationPanel({
         <AgentMark />
         <div className="min-w-0 flex-1 basis-48">
           <h2 className="font-heading text-base font-semibold">
-            {pending > 0 ? `Dictado terminado: ${plural(pending, "sugerencia", "sugerencias")}` : "Dictar la atención"}
+            {pending > 0 ? `Clío dejó ${plural(pending, "sugerencia", "sugerencias")} por revisar` : "Dictar la atención"}
           </h2>
           <p className="text-sm text-muted-foreground">
             {pending > 0 ? (
               <>
-                {readiness(session)}. Todavía no hay nada en la historia.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+                {readiness(session)}. Nada entra a la historia hasta que lo confirmes.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : blocked ? (
               <>
@@ -226,7 +226,7 @@ export function DictationPanel({
           ) : null}
           {!typing && !blocked ? (
             <Button type="button" variant={session.canListen ? "ghost" : "outline"} className="min-h-11 sm:min-h-9" onClick={() => setTyping(true)}>
-              Escribir lo dictado
+              Escribir en vez de dictar
             </Button>
           ) : null}
           {session.transcript ? (

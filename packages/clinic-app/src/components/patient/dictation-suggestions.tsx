@@ -2,6 +2,7 @@ import { formatMoney, VITAL_SIGNS } from "@odentia/clinical"
 import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
 import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
 import { Check, CircleAlert, Mic, X } from "lucide-react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale } from "../../lib/locale"
@@ -16,6 +17,8 @@ import {
 } from "./dictation-session"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
+import { fetchMyProfessionalProfile } from "../../lib/encounters"
+import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { RecetasPanel } from "./clinical-panels"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { ServicePicker } from "./service-picker"
@@ -248,7 +251,8 @@ function PlanChoices({ session, item, busy }: { session: DictationSession; item:
           </div>
         ))}
       </div>
-      {blocked ? null : (
+      {/* «Al confirmar…» solo cuando ya se puede confirmar: antes, la nota dice qué falta. */}
+      {blocked || item.status !== "lista" ? null : (
         <p className="self-start rounded-md bg-primary-soft px-2.5 py-1.5 text-primary-soft-foreground">
           Al confirmar, su presupuesto en borrador queda con {options.length === 2 ? "las dos opciones" : "las tres opciones"}; lo demás que indiques hoy va en todas.
         </p>
@@ -283,6 +287,11 @@ function medicationDraftOf(item: DictationSuggestion) {
  */
 function PrescriptionSuggestion({ session, items }: { session: DictationSession; items: DictationSuggestion[] }) {
   const [form, setForm] = useState<null | { overriding: boolean }>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
+  const queryClient = useQueryClient()
+  // Se emite con la colegiatura de quien atiende: sin ella no se ofrece «Emitir receta».
+  const profile = useQuery({ queryKey: ["professional-profile", "me"], queryFn: fetchMyProfessionalProfile })
+  const licensed = profile.data?.data.complete !== false
   const warnings = items.flatMap((item) => (Array.isArray(item.payload["allergyWarnings"]) ? (item.payload["allergyWarnings"] as string[]) : []))
   const waiting = items.filter((item) => item.status !== "lista" && !(item.payload["allergyWarnings"] as string[] | undefined)?.length)
   const ready = warnings.length === 0 && waiting.length === 0
@@ -310,7 +319,9 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
                     ? (waiting[0]?.note ?? "Falta completarla.")
                     : voiced?.voice
                       ? `${String(voiced.payload["genericName"] ?? "medicamento").replace(/^./, (first) => first.toLocaleUpperCase(activeOrgLocale()))} corregido por voz, antes ${voiced.voice.before}`
-                      : "Lista para emitir con tu colegiatura."}
+                      : licensed
+                        ? "Lista para emitir con tu colegiatura."
+                        : "Para emitirla falta tu colegiatura."}
               </p>
             </div>
             {warnings.length ? <Badge variant="destructive">Aviso de alergia</Badge> : !ready ? <Badge>Por revisar</Badge> : null}
@@ -319,10 +330,26 @@ function PrescriptionSuggestion({ session, items }: { session: DictationSession;
                 Deshacer
               </Button>
             ) : null}
-            {ready ? (
+            {ready && licensed ? (
               <SubmitButton type="button" size="sm" className="min-h-11 sm:min-h-8" pending={session.issuePrescription.isPending} disabled={busy} onClick={() => session.issuePrescription.mutate()}>
                 Emitir receta
               </SubmitButton>
+            ) : ready ? (
+              <Button type="button" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setProfileOpen(true)}>
+                Completar perfil
+              </Button>
+            ) : null}
+            {profileOpen ? (
+              <ProfessionalProfileDrawer
+                open
+                target="me"
+                profile={profile.data?.data ?? null}
+                onClose={() => setProfileOpen(false)}
+                onSaved={() => {
+                  void queryClient.invalidateQueries({ queryKey: ["professional-profile", "me"] })
+                  void queryClient.invalidateQueries({ queryKey: ["encounter-closing"] })
+                }}
+              />
             ) : null}
             {!warnings.length ? (
               <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => setForm({ overriding: false })}>

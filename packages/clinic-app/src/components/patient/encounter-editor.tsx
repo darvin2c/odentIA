@@ -22,6 +22,8 @@ import {
   MasterDetail,
   useDetailMode,
   PageHeader,
+  addDays,
+  zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
@@ -129,6 +131,21 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
 
 /** Secciones cuyos campos son del propio borrador: se editan en un `FormPanel`. */
 const FORM_SECTIONS: readonly SectionKey[] = ["consulta", "examen", "evolucion"]
+/** Lo que falta para cerrar, dicho corto en el pie. */
+const CLOSING_SHORT: Record<keyof typeof CLOSING_REQUIREMENT_LABELS, string> = {
+  reason: "motivo",
+  diagnosis: "diagnóstico",
+  evolution: "evolución",
+  signature: "tu colegiatura",
+}
+
+/** «a, b y c». */
+function listWords(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items.at(-1)}`
+}
+
+/** Lo que exige el cierre: siempre a la vista. */
+const REQUIRED_SECTIONS: readonly SectionKey[] = ["consulta", "hallazgos", "evolucion"]
 
 interface DraftValues extends Record<NoteKey, string> {
   /** Signos vitales tal como se escriben; el servidor valida rango y unidad. */
@@ -197,6 +214,23 @@ function saveMessage(err: unknown, fallback: string): string {
  * formulario propio usan el detalle de lectura, para no anidar formularios.
  * Finalizar y volver viven en la revisión de cierre, no en un footer suelto.
  */
+/** «1 diagnóstico», «2 diagnósticos»: sin «(s)». */
+function counted(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+/** Desde cuándo está abierta, dicho para que se note si es de otro día. */
+function openSinceWords(iso: string): string {
+  const timeZone = activeOrgTimeZone()
+  const clock = formatClock(iso)
+  const day = zonedDateOf(iso, timeZone)
+  const today = zonedDateOf(new Date().toISOString(), timeZone)
+  if (day === today) return `en curso desde las ${clock}`
+  if (day === addDays(today, -1)) return `en curso desde ayer, ${clock}`
+  const date = new Date(iso).toLocaleDateString(activeOrgLocale(), { day: "numeric", month: "short", timeZone })
+  return `en curso desde el ${date.replace(".", "")}, ${clock}`
+}
+
 function formatClock(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime())
@@ -285,7 +319,9 @@ export function EncounterEditor({
   const [teeth, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
   const [examination, setExamination] = useState<unknown>(() => exam.draft(encounter.examination))
   // Bloque en edición; `null` colapsa el detalle y deja la lista a todo el ancho.
-  const [openSection, setOpenSection] = useState<SectionKey | null>("consulta")
+  // «Consulta» se abre sola solo si falta el motivo: volver a una atención ya
+  // empezada no tapa la pantalla con lo que ya está escrito.
+  const [openSection, setOpenSection] = useState<SectionKey | null>(encounter.reason?.trim() ? null : "consulta")
   const [addedSections, setAddedSections] = useState<ReadonlySet<SectionKey>>(() => new Set())
 
   const [saveState, setSaveState] = useState<SaveState>("saved")
@@ -859,7 +895,14 @@ export function EncounterEditor({
    * registrado»: sin contenido y sin agregar explícitamente, el bloque no se
    * muestra; nunca se pinta un bloque vacío por existir en el sistema.
    */
-  const activeDiagnoses = (detail.diagnoses ?? []).filter((dx) => !dx.voidedAt).length
+  const activeDiagnosisRows = (detail.diagnoses ?? []).filter((dx) => !dx.voidedAt)
+  const activeDiagnoses = activeDiagnosisRows.length
+  // «Caries dental · 26 oclusal», como se lee en la historia; sin nombre en la lista, el conteo.
+  const diagnosisNames = activeDiagnosisRows.every((dx) => dx.diagnosisTitle)
+    ? activeDiagnosisRows
+        .map((dx) => [dx.diagnosisTitle, dx.toothNumber != null ? String(dx.toothNumber) : null].filter(Boolean).join(" · "))
+        .join("; ")
+    : ""
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt).length
   const sections: Array<{
     key: SectionKey
@@ -898,7 +941,7 @@ export function EncounterEditor({
       summary:
         activeDiagnoses === 0
           ? "Sin diagnósticos registrados"
-          : `${activeDiagnoses} diagnóstico(s) registrado(s)`,
+          : diagnosisNames || counted(activeDiagnoses, "diagnóstico", "diagnósticos"),
       empty: activeDiagnoses === 0,
     },
     {
@@ -908,7 +951,7 @@ export function EncounterEditor({
       summary:
         activeProcedures === 0
           ? "Sin procedimientos registrados"
-          : `${activeProcedures} procedimiento(s) registrado(s)`,
+          : counted(activeProcedures, "procedimiento", "procedimientos"),
       empty: detail.procedures.length === 0,
     },
     {
@@ -918,9 +961,9 @@ export function EncounterEditor({
         "El plan en corto, lo hecho hoy y el próximo control. Indicar no ejecuta ni cobra.",
       summary:
         [
-          detail.indicatedItems.length > 0 ? `${detail.indicatedItems.length} indicado(s) hoy` : "",
+          detail.indicatedItems.length > 0 ? `${counted(detail.indicatedItems.length, "indicado", "indicados")} hoy` : "",
           pendingTreatments > 0 ? `${pendingTreatments} por ejecutar` : "",
-          followUps.length > 0 ? `${followUps.length} control(es)` : "",
+          followUps.length > 0 ? counted(followUps.length, "control", "controles") : "",
         ]
           .filter(Boolean)
           .join(" · ") || "Sin indicaciones ni controles",
@@ -935,7 +978,7 @@ export function EncounterEditor({
       description: "Receta, consentimiento, orden, formulario, imagen o archivo de esta atención.",
       summary:
         [
-          docs.total === 0 ? "Sin documentos" : `${docs.total} documento(s)`,
+          docs.total === 0 ? "Sin documentos" : counted(docs.total, "documento", "documentos"),
           docs.pendingSignatures.length > 0
             ? `${docs.pendingSignatures.length} sin firmar`
             : "",
@@ -951,9 +994,11 @@ export function EncounterEditor({
       title: "Evolución, pronóstico e indicaciones",
       description: "Pronóstico, evolución (obligatoria para cerrar) e indicaciones.",
       summary:
-        evolution.trim() === "" && indications.trim() === ""
-          ? "Sin evolución registrada"
-          : "Evolución registrada",
+        evolution.trim() === ""
+          ? "Falta · necesaria para cerrar"
+          : indications.trim() === ""
+            ? "Evolución registrada"
+            : "Evolución e indicaciones registradas",
       empty: evolution.trim() === "" && indications.trim() === "",
     },
   ]
@@ -976,9 +1021,10 @@ export function EncounterEditor({
     .join(" ")
 
   // Un bloque con sugerencias del dictado se muestra aunque no tenga nada registrado: ahí se revisan.
+  // Lo que exige el cierre (motivo, diagnóstico y evolución) siempre está a la vista, no entre lo opcional.
   const includedSections = sections.filter(
     (section) =>
-      section.key === "consulta" ||
+      REQUIRED_SECTIONS.includes(section.key) ||
       !section.empty ||
       addedSections.has(section.key) ||
       dictationCount(section.key) > 0 ||
@@ -1156,6 +1202,8 @@ export function EncounterEditor({
           disabled={locked}
           maxLength={MAX_REASON}
           placeholder="Motivo de la consulta…"
+          // Al entrar sin motivo, el cursor ya está aquí: es lo primero que se escribe.
+          autoFocus={!encounter.reason?.trim()}
           onChange={(event) => editReason(event.target.value)}
         />
       </Field>
@@ -1410,7 +1458,7 @@ export function EncounterEditor({
     : !closingQuery.isSuccess
       ? "Comprobando lo que falta…"
       : !closingReady
-        ? `Falta ${missing.map((m) => CLOSING_REQUIREMENT_LABELS[m].toLowerCase()).join(", ")}`
+        ? `${missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`} para cerrar: ${listWords(missing.map((m) => CLOSING_SHORT[m]))}`
         : unsignedConsents.length > 0
           ? `Listo para firmar · falta${unsignedConsents.length === 1 ? "" : "n"} ${unsignedConsents.length} firma${unsignedConsents.length === 1 ? "" : "s"} de ${signer}`
           : "Listo para firmar"
@@ -1435,7 +1483,7 @@ export function EncounterEditor({
                 hcLabel(patient.patient.patientNumber),
                 // La hora de la cita no viaja en la atención: se dice que viene de ella y cuándo empezó.
                 encounter.appointmentId ? "desde su cita" : null,
-                encounter.startedAt ? `inicio ${formatClock(encounter.startedAt)}` : null,
+                encounter.startedAt ? openSinceWords(encounter.startedAt) : null,
                 memberName(encounter.professionalUserId),
               ]
                 .filter(Boolean)
@@ -1551,7 +1599,7 @@ export function EncounterEditor({
                 >
                   {openSection === section.key ? "En edición" : "Abrir"}
                 </Button>
-                {section.key !== "consulta" && section.empty && dictationCount(section.key) === 0 ? (
+                {!REQUIRED_SECTIONS.includes(section.key) && section.empty && dictationCount(section.key) === 0 ? (
                   <Button
                     type="button"
                     size="sm"
@@ -1591,15 +1639,11 @@ export function EncounterEditor({
             className="flex flex-col gap-3 rounded-sm bg-card p-6"
           >
             <div className="flex flex-col gap-1">
-              <h2 className="font-heading text-base font-medium">Agregar según lo que ocurrió</h2>
-              <p className="text-sm text-muted-foreground">
-                Para cerrar bastan el motivo, un diagnóstico y la evolución; el resto se agrega
-                cuando ocurre, en el orden de la historia clínica.
-              </p>
+              <h2 className="font-heading text-base font-medium">Agregar si ocurrió</h2>
             </div>
             <div className="flex flex-wrap gap-2">
               {availableSections.map((section) => (
-                // «Agregar Evolución, pronóstico e indicaciones» no cabe en 320 px: corta línea.
+                // Dentro de «Agregar si ocurrió» basta el nombre; el lector de pantalla oye «Agregar …».
                 <Button
                   key={section.key}
                   type="button"
@@ -1607,9 +1651,10 @@ export function EncounterEditor({
                   variant="outline"
                   className="h-auto min-h-11 max-w-full shrink py-1 text-left whitespace-normal sm:min-h-8"
                   title={section.description}
+                  aria-label={`Agregar ${section.title}`}
                   onClick={() => addSection(section.key)}
                 >
-                  Agregar {section.title}
+                  {section.title}
                 </Button>
               ))}
             </div>
@@ -1717,12 +1762,19 @@ export function EncounterEditor({
             </p>
           ) : null}
           <div className="flex flex-col gap-2 text-sm">
-            <p className="text-muted-foreground">
-              {activeProcedures} procedimiento(s) · {activeDiagnoses} diagnóstico(s) ·{" "}
-              {detail.odontogramEntries ? `${detail.odontogramEntries.length} hallazgo(s) de odontograma · ` : ""}
-              {detail.documents.length} documento(s) · {pendingTreatments} tratamiento(s) por
-              ejecutar
-            </p>
+            {/* Solo lo que hay: «1 diagnóstico · 2 hallazgos», sin «0 …» ni «(s)». */}
+            {(() => {
+              const done = [
+                activeProcedures > 0 ? counted(activeProcedures, "procedimiento", "procedimientos") : "",
+                activeDiagnoses > 0 ? counted(activeDiagnoses, "diagnóstico", "diagnósticos") : "",
+                detail.odontogramEntries?.length
+                  ? counted(detail.odontogramEntries.length, "hallazgo en el odontograma", "hallazgos en el odontograma")
+                  : "",
+                detail.documents.length > 0 ? counted(detail.documents.length, "documento", "documentos") : "",
+                pendingTreatments > 0 ? `${counted(pendingTreatments, "tratamiento", "tratamientos")} por ejecutar` : "",
+              ].filter(Boolean)
+              return done.length > 0 ? <p className="text-muted-foreground">{done.join(" · ")}</p> : null
+            })()}
             {canReadFinance ? (
               accountQuery.isSuccess ? (
                 <p className="font-medium">
@@ -1754,19 +1806,12 @@ export function EncounterEditor({
                 setVoidOpen(true)
               }}
             >
-              Anular borrador…
+              Anular esta atención…
             </Button>
-            <p className="text-xs text-muted-foreground">
-              Se guarda solo. «Finalizar y firmar» queda fijo al pie.
-            </p>
           </div>
           {dictation.busy ? (
             <p className="text-xs text-muted-foreground">
               Termina el dictado y revisa las sugerencias para poder firmar.
-            </p>
-          ) : !closingReady && closingQuery.isSuccess ? (
-            <p className="text-xs text-muted-foreground">
-              Completa lo pendiente para poder cerrar.
             </p>
           ) : dictationPending > 0 ? (
             <p className="text-xs text-muted-foreground">

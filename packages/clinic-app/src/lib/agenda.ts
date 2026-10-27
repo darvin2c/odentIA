@@ -22,6 +22,9 @@ export async function invalidateAppointmentQueries(client: QueryClient): Promise
       "follow-ups",
       "patient-appointments",
       "patient-summary",
+      // «Qué sigue» y la lista de Pacientes cambian al reservar desde la ficha.
+      "plan-next",
+      "people",
       "treatment-coordination",
       "treatment-journey",
       "workspace-home",

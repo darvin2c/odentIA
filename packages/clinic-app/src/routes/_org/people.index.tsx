@@ -27,6 +27,8 @@ import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-
 import { Plus } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { NewPatientDrawer, type NewPatientTarget } from "../../components/patient/new-patient-drawer"
+import { NextStepButton } from "../../components/patient/plan/next-step-action"
+import { ContactNextAction } from "../../components/person/contact-next-action"
 import { NewPersonDrawer } from "../../components/person/new-person-drawer"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
@@ -252,14 +254,13 @@ function PeoplePage() {
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="text-sm">{step.text}</span>
                   {row.original.missingData ? <Badge variant="warning">Faltan datos</Badge> : null}
-                  {step.actionLabel ? (
-                    <Link
-                      to="/people/$personId"
-                      params={{ personId: row.original.id }}
-                      className={buttonVariants({ size: "sm", variant: "outline" })}
-                    >
-                      {step.actionLabel}
-                    </Link>
+                  {step.action && row.original.patient ? (
+                    <NextStepButton
+                      patient={{ id: row.original.patient.id, name: row.original.displayName }}
+                      step={{ kind: step.kind ?? "ninguno", action: step.action }}
+                      size="sm"
+                      variant="outline"
+                    />
                   ) : null}
                 </span>
                 {who ? <span className="text-xs text-muted-foreground">{who}</span> : null}
@@ -297,15 +298,7 @@ function PeoplePage() {
         {
           id: "step",
           header: "Siguiente paso",
-          cell: ({ row }) => (
-            <Link
-              to="/people/$personId"
-              params={{ personId: row.original.id }}
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-            >
-              {situationAction(row.original.situation)}
-            </Link>
-          ),
+          cell: ({ row }) => <ContactNextAction row={row.original} />,
         },
       ]
     return [

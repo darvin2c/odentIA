@@ -433,7 +433,7 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                           </Badge>
                         ) : canBook ? (
                           <Button type="button" size="sm" className="min-h-11 shrink-0 sm:min-h-8" onClick={() => bookFor(context)}>
-                            Agendar
+                            Reservar cita
                           </Button>
                         ) : null}
                       </li>

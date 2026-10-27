@@ -605,3 +605,33 @@ export function AllergyReviewNotice({
     </section>
   )
 }
+
+/**
+ * «Alergias: no preguntado» en el Resumen: lo mismo que la atención, ahí mismo.
+ * «No tiene alergias» lo deja dicho; «Agregar alergia» abre su cajón. Antes el
+ * botón llevaba a la pestaña Antecedentes y había que pulsarlo otra vez.
+ */
+export function AllergyQuickActions({ patientId, patientName }: { patientId: string; patientName: string }) {
+  const queryClient = useQueryClient()
+  const [adding, setAdding] = useState(false)
+  const reviewed = useMutation({
+    mutationFn: () => markAllergiesReviewedApi(patientId),
+    onSuccess: async () => {
+      await refresh(queryClient, patientId)
+      toast.success("Anotado: no tiene alergias")
+    },
+    onError: (error) => toast.error(errorText(error, "No se pudo guardar la revisión")),
+  })
+  return (
+    <span className="flex flex-wrap gap-2">
+      <Button type="button" size="sm" variant="outline" disabled={reviewed.isPending} onClick={() => reviewed.mutate()}>
+        {reviewed.isPending ? "Guardando…" : "No tiene alergias"}
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
+        <Plus aria-hidden />
+        Agregar alergia
+      </Button>
+      <AllergyFormDrawer patientId={patientId} patientName={patientName} open={adding} onClose={() => setAdding(false)} />
+    </span>
+  )
+}

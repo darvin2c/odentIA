@@ -1,26 +1,12 @@
-import { appWords } from "../../lib/product-words"
-import {
-  Button,
-  Field,
-  FieldGroup,
-  FieldLabel,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { addDays, FormDrawer, minutesToInstant, SubmitButton, zonedDateOf } from "@odentia/ui-patterns"
-import { canAccess } from "@odentia/auth/permissions"
+import { Button, toast } from "@odentia/ui"
+import { addDays, minutesToInstant, SubmitButton, zonedDateOf } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useActiveBranch } from "../../lib/active-branch"
 import { type AgendaAppointment, invalidateAppointmentQueries, professionalSaid } from "../../lib/agenda"
 import { ApiError, apiFetch } from "../../lib/api"
-import { useMyUserId, useOrgMembers, usePermission } from "../../lib/crm"
+import { useMyUserId, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import type { Encounter, PatientFull } from "../../lib/patients"
 
@@ -126,10 +112,11 @@ function useTodayAppointment(patientId: string, enabled: boolean): AgendaAppoint
  * El botón de atender, el mismo en la cabecera de la página (desde cualquier
  * pestaña) y en los vacíos que lo piden (ADR 0035). Un solo nombre por caso:
  * con una atención en curso, «Continuar la atención» (lo escrito no se
- * pierde); con una cita hoy, «Atender (10:00)»: un clic, sin formulario; sin
- * cita, «Atender», que pide el motivo de la visita y el profesional que
- * atiende (por defecto quien pulsa). Solo se ofrece a quien escribe en la
- * historia clínica. La cita se marca atendida al cerrar.
+ * pierde); con una cita hoy, «Atender (10:00)»; sin cita, «Atender». Siempre un
+ * clic (ADR 0096): abre la atención a nombre de quien pulsa y en la sede
+ * activa; el motivo se escribe dentro, en «Consulta», que se abre sola si falta
+ * (lo exige el cierre). Solo se ofrece a quien escribe en la historia clínica.
+ * La cita se marca atendida al cerrar.
  */
 export function NewEncounterButton({
   patientId,
@@ -149,27 +136,17 @@ export function NewEncounterButton({
   variant?: "default" | "outline"
   /**
    * El de la cabecera: con `?atender=true` (viene de «Atender ahora» al
-   * registrarlo) abre «Atender sin cita» una vez y quita el parámetro.
+   * registrarlo) abre la atención una vez y quita el parámetro.
    */
   openFromSearch?: boolean
   size?: "default" | "sm"
 }) {
   const canWrite = usePermission("clinical.write")
   const canSeeAgenda = usePermission("appointments.read")
-  const myUserId = useMyUserId()
-  const members = useOrgMembers()
   const sede = useActiveBranch()
   const queryClient = useQueryClient()
   const attend = useAttendAppointment()
-  // Solo profesionales clínicos: nunca caja ni recepción (el servidor lo exige igual).
-  const professionals = members.filter((m) => canAccess(m.role, "clinical.write"))
-  const eligible = (userId: string | undefined) =>
-    Boolean(userId) && professionals.some((m) => m.userId === userId)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [reason, setReason] = useState("")
-  const [professionalUserId, setProfessionalUserId] = useState(eligible(myUserId) ? myUserId : "")
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const search = useSearch({ strict: false }) as { atender?: boolean }
   const openQuery = useQuery({
@@ -188,19 +165,16 @@ export function NewEncounterButton({
       to: "/patients/$patientId/encounters/$encounterId",
       params: { patientId, encounterId: id },
     })
+  // Sin cita: a nombre de quien pulsa (el servidor lo pone por defecto) y en la
+  // sede activa, la misma de la Agenda, para que lo que se cobre llegue a su caja.
   const start = async () => {
-    if (saving || !reason.trim() || !professionalUserId) return
+    if (saving) return
     setSaving(true)
-    setError(null)
     try {
       const result = await apiFetch<{ data: Encounter }>(`/api/patients/${patientId}/encounters`, {
         method: "POST",
         body: JSON.stringify({
-          reason: reason.trim(),
-          professionalUserId,
-          // Sin cita, la sede en la que se trabaja: así lo que quede por cobrar
-          // aparece en la caja de esa sede.
-          ...(sede.branchId ? { branchId: sede.branchId } : {}),
+          ...(sede.effectiveId ? { branchId: sede.effectiveId } : {}),
           planItemIds: [...new Set(initialPlanItemIds ?? [])],
         }),
       })
@@ -222,7 +196,7 @@ export function NewEncounterButton({
           /* Conserva el error original si no se puede recuperar el borrador. */
         }
       }
-      setError(
+      toast.error(
         err instanceof ApiError
           ? (err.shape.message ?? "No se pudo abrir la atención.")
           : "No se pudo abrir la atención.",
@@ -231,12 +205,13 @@ export function NewEncounterButton({
     }
   }
   const wantsToAttend = openFromSearch && search.atender === true
+  const startOnArrival = useRef(start)
+  startOnArrival.current = start
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `open` cambia en cada render; corre una vez por llegada.
   useEffect(() => {
     if (!wantsToAttend || !canWrite || openQuery.isPending) return
-    if (!inProgressId && !visit) {
-      setError(null)
-      setDrawerOpen(true)
-    }
+    if (inProgressId) open(inProgressId)
+    else if (!visit) void startOnArrival.current()
     void navigate({ to: ".", search: (previous: Record<string, unknown>) => ({ ...previous, atender: undefined }), replace: true } as never)
   }, [wantsToAttend, canWrite, openQuery.isPending, inProgressId, visit, navigate])
   if (!canWrite) return null
@@ -262,69 +237,8 @@ export function NewEncounterButton({
     )
   }
   return (
-    <>
-      <Button
-        variant={variant}
-        size={size}
-        onClick={() => {
-          setError(null)
-          setDrawerOpen(true)
-        }}
-      >
-        Atender
-      </Button>
-      <FormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        title="Atender sin cita"
-        description="Escribe por qué viene y quién lo atiende. La atención se abre en curso."
-        onSubmit={(event) => {
-          event.preventDefault()
-          void start()
-        }}
-        isSubmitting={saving}
-        isDirty={reason.trim().length > 0}
-        error={error}
-        submitLabel="Atender"
-        submitDisabled={!reason.trim() || !professionalUserId || saving}
-      >
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="new-encounter-reason">Motivo de la visita</FieldLabel>
-            <Textarea
-              id="new-encounter-reason"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder={`Ej.: ${appWords().examples.visitReason}`}
-              rows={3}
-              maxLength={2000}
-              required
-              autoFocus
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="new-encounter-professional">Profesional que atiende</FieldLabel>
-            <Select
-              value={professionalUserId}
-              items={Object.fromEntries(professionals.map((m) => [m.userId, m.user.name]))}
-              onValueChange={(value) => {
-                if (value) setProfessionalUserId(value)
-              }}
-            >
-              <SelectTrigger id="new-encounter-professional" aria-label="Profesional que atiende">
-                <SelectValue placeholder="Selecciona el profesional…" />
-              </SelectTrigger>
-              <SelectContent>
-                {professionals.map((m) => (
-                  <SelectItem key={m.userId} value={m.userId}>
-                    {m.user.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-        </FieldGroup>
-      </FormDrawer>
-    </>
+    <SubmitButton variant={variant} size={size} pending={saving} onClick={() => void start()}>
+      Atender
+    </SubmitButton>
   )
 }

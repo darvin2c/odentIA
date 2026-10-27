@@ -64,6 +64,7 @@ import { personOfPatientKey, rememberPatientSection, rememberPersonOfPatient, us
 import { QueryErrorState } from "../../lib/query-error"
 import { isRecordLocked, LockedRecordNotice, LockedRecordPage } from "../../components/person/locked-record"
 import { productUi } from "../../product/product-ui"
+import { openBookingAnywhere } from "../../components/agenda/schedule-host"
 
 // Cada pestaña grande se baja al abrirla: la ficha abre con lo que se ve
 // (resumen y datos) y no con el visor de documentos, la cuenta o el plan.
@@ -105,8 +106,10 @@ export type PersonSearch = {
   itemId?: string
   /** Filtro de Documentos: lo que requiere acción o un tipo de papel. */
   tipo?: DocumentFilter
-  /** Viene de registrarlo con «Atender ahora»: abre «Atender sin cita». */
+  /** Viene de registrarlo con «Atender ahora»: abre su atención. */
   atender?: boolean
+  /** «Cobrar» de Pendientes: Cobros con el cobro ya abierto. */
+  cobrar?: boolean
   /** Lo abierto dentro de una sección del producto (odentIA: el periodontograma, desde Historia o el Resumen). */
   periodontograma?: string
 } & Partial<Record<(typeof FILTER_KEYS)[number], string>>
@@ -132,6 +135,7 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
     documentId: searchId(search.documentId),
     itemId: searchId(search.itemId),
     ...(search.atender === true || search.atender === "true" ? { atender: true } : {}),
+    ...(search.cobrar === true || search.cobrar === "true" ? { cobrar: true } : {}),
     periodontograma: searchId(search.periodontograma),
   }
 }
@@ -155,7 +159,7 @@ const SECTION_LIST_CLASS = "w-max flex-nowrap justify-start"
 
 function PersonPageRoute() {
   const { personId } = Route.useParams()
-  const { tab, tooth, planId, budgetId, documentId, itemId, tipo, periodontograma } = Route.useSearch()
+  const { tab, tooth, planId, budgetId, documentId, itemId, tipo, periodontograma, cobrar } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const queryClient = useQueryClient()
   const can = useCan()
@@ -314,7 +318,7 @@ function PersonPageRoute() {
         return <PersonConversations person={person} />
       case "citas":
         return patientId ? (
-          <CitasPanel patientId={patientId} />
+          <CitasPanel patientId={patientId} patientName={person.displayName} />
         ) : (
           <EmptyState
             icon={CalendarDays}
@@ -327,7 +331,7 @@ function PersonPageRoute() {
             }
             onAction={
               can("appointments.write") && can("crm.read") && !person.archived
-                ? () => void navigate({ to: "/agenda", search: { contactId: person.id } })
+                ? () => openBookingAnywhere({ person: { contactId: person.id, name: person.displayName, phone: person.phone } })
                 : undefined
             }
           />
@@ -337,6 +341,7 @@ function PersonPageRoute() {
         return patientId ? (
           <PlanTab
             patientId={patientId}
+            patientName={person.displayName}
             initialPlanId={planId}
             initialBudgetId={budgetId}
             initialItemId={itemId}
@@ -363,7 +368,16 @@ function PersonPageRoute() {
           />
         ) : null
       case "cuenta":
-        return patientId ? <AccountTab patientId={patientId} part="cuenta" /> : null
+        return patientId ? (
+          <AccountTab
+            patientId={patientId}
+            part="cuenta"
+            openCollect={cobrar === true}
+            onCollectOpened={() =>
+              void navigate({ search: (prev) => ({ ...prev, cobrar: undefined }), replace: true })
+            }
+          />
+        ) : null
       case "filiacion":
         return <PersonData person={person} detail={patientDetail} />
       case "contactos":

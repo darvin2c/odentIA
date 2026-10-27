@@ -7,7 +7,6 @@ import { useMemberName, usePermission } from "../../lib/crm"
 import {
   DIAGNOSIS_TYPE_LABELS,
   type EncounterDetail,
-  encounterStatusLabel,
   type PatientDocument,
   planStatusLabel,
 } from "../../lib/patients"
@@ -17,7 +16,6 @@ import { EncounterMaterialsBlock } from "./encounter-materials"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { partNames } from "../../product/site-fields"
-import { appWords } from "../../lib/product-words"
 
 /** Las URL firmadas expiran: se consideran frescas 10 min y luego se regeneran. */
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
@@ -124,6 +122,11 @@ function DocumentAttachment({
   )
 }
 
+/** «a, b ni c»: lo que no se registró. */
+function listWords(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ni ${items.at(-1)}`
+}
+
 /**
  * Vista de lectura del detalle de una atención: encuentro, procedimientos,
  * tratamientos vinculados, notas, odontograma, documentos y adendas.
@@ -133,10 +136,13 @@ export function EncounterDetailView({
   patientId,
   detail,
   showAddendum = true,
+  showDocuments = true,
 }: {
   patientId: string
   detail: EncounterDetail
   showAddendum?: boolean
+  /** La página de la atención los lista en su propio bloque «Documentos»: aquí no se repiten. */
+  showDocuments?: boolean
 }) {
   const canWrite = usePermission("clinical.write")
   const memberName = useMemberName()
@@ -148,12 +154,19 @@ export function EncounterDetailView({
   const diagnoses = detail.diagnoses ?? []
   const activeDiagnoses = diagnoses.filter((dx) => !dx.voidedAt)
   const voidedDiagnoses = diagnoses.filter((dx) => dx.voidedAt)
-  const activeProcedures = procedures.filter((proc) => !proc.voidedAt)
   // Lo del producto en la atención (odentIA: el odontograma vinculado y el periodontograma).
   const ProductDetail = productUi().encounter.Detail
   // El examen como lo cuenta el producto (latidIA: por sistemas, con lo no examinado).
   const exam = productUi().encounter.examination
   const examLines = exam.readLines(encounter.examination)
+  // Lo que no se registró, en una sola línea: así nadie cree que está escondido.
+  const unrecorded = [
+    diagnoses.length === 0 ? "diagnóstico" : "",
+    procedures.length === 0 ? "procedimientos" : "",
+    encounter.evolution ? "" : "evolución",
+    encounter.indications ? "" : "indicaciones",
+    showDocuments && documents.length === 0 ? "documentos" : "",
+  ].filter(Boolean)
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
@@ -176,14 +189,12 @@ export function EncounterDetailView({
           </p>
         </section>
       ) : null}
-      <section
-        aria-label="Datos de la atención"
-        className="flex flex-col gap-3 rounded-lg border p-4"
-      >
+      {/* Solo lo que tiene datos, en el orden de la historia: lo vacío se dice en una línea al final. */}
+      <section aria-label="Datos de la atención" className="flex flex-col gap-3 rounded-lg border p-4">
         <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
           <div>
             <dt className="text-xs font-medium text-muted-foreground">Motivo</dt>
-            <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "—"}</dd>
+            <dd className="whitespace-pre-wrap text-sm">{encounter.reason ?? "Sin motivo"}</dd>
           </div>
           {encounter.presentIllness || encounter.illnessDuration ? (
             <div>
@@ -218,10 +229,18 @@ export function EncounterDetailView({
               <dd className="whitespace-pre-wrap text-sm">{encounter.prognosis}</dd>
             </div>
           ) : null}
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
-            <dd className="whitespace-pre-wrap text-sm">{encounter.evolution ?? "—"}</dd>
-          </div>
+          {encounter.evolution ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Evolución</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.evolution}</dd>
+            </div>
+          ) : null}
+          {encounter.indications ? (
+            <div>
+              <dt className="text-xs font-medium text-muted-foreground">Indicaciones</dt>
+              <dd className="whitespace-pre-wrap text-sm">{encounter.indications}</dd>
+            </div>
+          ) : null}
           {encounter.consentSkipReason ? (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">
@@ -230,58 +249,27 @@ export function EncounterDetailView({
               <dd className="whitespace-pre-wrap text-sm">{encounter.consentSkipReason}</dd>
             </div>
           ) : null}
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">Indicaciones</dt>
-            <dd className="whitespace-pre-wrap text-sm">{encounter.indications ?? "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">{appWords().clinician.label}</dt>
-            <dd className="text-sm">{memberName(encounter.professionalUserId)}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">Inicio y fin</dt>
-            <dd className="text-sm">
-              {formatDateTime(encounter.startedAt ?? encounter.createdAt)}
-              {encounter.endedAt ? ` – ${formatDateTime(encounter.endedAt)}` : ""}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs font-medium text-muted-foreground">Estado</dt>
-            <dd className="text-sm">
-              <Badge variant="outline">{encounterStatusLabel(encounter.status)}</Badge>
-            </dd>
-          </div>
-          {encounter.signerName ? (
-            <div>
-              <dt className="text-xs font-medium text-muted-foreground">Firmado por</dt>
-              <dd className="text-sm">
-                {encounter.signerName}
-                {encounter.signerTitle ? ` · ${encounter.signerTitle}` : ""}
-                {encounter.signerRegistration ? ` · ${encounter.signerRegistration}` : ""}
-              </dd>
-            </div>
-          ) : null}
-          {productUi().site ? (
+          {productUi().site && teeth.length > 0 ? (
             <div>
               <dt className="text-xs font-medium text-muted-foreground">Piezas tratadas</dt>
-              <dd className="text-sm">
-                {teeth.length === 0 ? "—" : teeth.map((t) => `Pieza ${t}`).join(", ")}
-              </dd>
+              <dd className="text-sm">{teeth.map((t) => `Pieza ${t}`).join(", ")}</dd>
             </div>
           ) : null}
         </dl>
       </section>
 
+      {diagnoses.length > 0 ? (
       <section aria-label="Diagnóstico">
-        <h4 className="mb-2 text-sm font-medium">Diagnóstico ({activeDiagnoses.length})</h4>
-        {activeDiagnoses.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin diagnósticos registrados.</p>
-        ) : (
+        <h4 className="mb-2 text-sm font-medium">Diagnóstico</h4>
+        {activeDiagnoses.length === 0 ? null : (
           <ul className="flex flex-col gap-2">
             {activeDiagnoses.map((dx) => (
               <li key={dx.id} className="border-b pb-2 text-sm last:border-0">
                 <p>
-                  <span className="font-semibold">{diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  <span className="font-semibold">{dx.diagnosisTitle ?? diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  {dx.diagnosisTitle ? (
+                    <span className="text-muted-foreground"> · {diagnosisCodeLabel(dx.diagnosisSystem, dx.diagnosisCode)}</span>
+                  ) : null}
                   {dx.note ? <span className="text-muted-foreground"> · {dx.note}</span> : null}
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -312,12 +300,12 @@ export function EncounterDetailView({
           </details>
         ) : null}
       </section>
+      ) : null}
 
+      {procedures.length > 0 ? (
       <section aria-label="Procedimientos">
-        <h4 className="mb-2 text-sm font-medium">Procedimientos ({activeProcedures.length})</h4>
-        {procedures.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin procedimientos registrados.</p>
-        ) : (
+        <h4 className="mb-2 text-sm font-medium">Lo que se hizo</h4>
+        {(
           <ul className="flex flex-col gap-2">
             {procedures.map((proc) => (
               <li key={proc.id} className="border-b pb-2 text-sm last:border-0">
@@ -343,18 +331,12 @@ export function EncounterDetailView({
           </ul>
         )}
       </section>
+      ) : null}
 
+      {detail.plannedItems.length > 0 ? (
       <section aria-label="Tratamientos vinculados">
-        <h4 className="mb-2 text-sm font-medium">
-          Tratamientos vinculados ({detail.plannedItems.length})
-        </h4>
-        {detail.plannedItems.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {productUi().plan.budgetRequired
-              ? "Sin tratamientos del presupuesto vinculados."
-              : "Sin tratamientos vinculados."}
-          </p>
-        ) : (
+        <h4 className="mb-2 text-sm font-medium">Tratamientos del plan</h4>
+        {(
           <ul className="flex flex-col gap-2">
             {detail.plannedItems.map((item) => (
               <li key={item.id} className="border-b pb-2 text-sm last:border-0">
@@ -370,11 +352,11 @@ export function EncounterDetailView({
           </ul>
         )}
       </section>
+      ) : null}
+      {notes.length > 0 ? (
       <section aria-label="Notas de evolución">
-        <h4 className="mb-2 text-sm font-medium">Notas de evolución ({notes.length})</h4>
-        {notes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin notas de evolución.</p>
-        ) : (
+        <h4 className="mb-2 text-sm font-medium">Notas de evolución</h4>
+        {(
           <ul className="flex flex-col gap-2">
             {notes.map((note) => (
               <li key={note.id} className="border-b pb-2 text-sm last:border-0">
@@ -388,14 +370,14 @@ export function EncounterDetailView({
           </ul>
         )}
       </section>
+      ) : null}
 
       <ProductDetail patientId={patientId} detail={detail} slot="recorded" />
 
+      {showDocuments && documents.length > 0 ? (
       <section aria-label="Documentos vinculados">
-        <h4 className="mb-2 text-sm font-medium">Documentos vinculados ({documents.length})</h4>
-        {documents.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin documentos vinculados.</p>
-        ) : (
+        <h4 className="mb-2 text-sm font-medium">Documentos</h4>
+        {(
           <ul className="flex flex-col gap-3">
             {documents.map((doc) => (
               <DocumentAttachment
@@ -408,18 +390,33 @@ export function EncounterDetailView({
           </ul>
         )}
       </section>
+      ) : null}
 
       <ProductDetail patientId={patientId} detail={detail} slot="end" />
+
+      {unrecorded.length > 0 ? (
+        <p className="text-sm text-muted-foreground">No se registró {listWords(unrecorded)}.</p>
+      ) : null}
+
+      {encounter.signerName ? (
+        <p className="border-t pt-3 text-sm">
+          <span className="font-medium">Firmó {encounter.signerName}</span>
+          <span className="text-muted-foreground">
+            {encounter.signerTitle ? ` · ${encounter.signerTitle}` : ""}
+            {encounter.signerRegistration ? ` · colegiatura ${encounter.signerRegistration}` : ""}
+            {encounter.endedAt ? ` · ${formatDateTime(encounter.endedAt)}` : ""}
+          </span>
+        </p>
+      ) : null}
 
       {encounter.status === "finalizada" ? (
         <EncounterMaterialsBlock patientId={patientId} encounterId={encounter.id} />
       ) : null}
 
+      {addenda.length > 0 || canAddendum ? (
       <section aria-label="Adendas">
-        <h4 className="mb-2 text-sm font-medium">Adendas ({addenda.length})</h4>
-        {addenda.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Sin correcciones posteriores al cierre.</p>
-        ) : (
+        {addenda.length > 0 ? <h4 className="mb-2 text-sm font-medium">Correcciones después del cierre</h4> : null}
+        {addenda.length === 0 ? null : (
           <ul className="flex flex-col gap-2">
             {addenda.map((adenda) => (
               <li key={adenda.id} className="border-b pb-2 text-sm last:border-0">
@@ -437,6 +434,7 @@ export function EncounterDetailView({
           </div>
         ) : null}
       </section>
+      ) : null}
     </div>
   )
 }

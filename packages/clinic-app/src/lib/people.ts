@@ -1,6 +1,7 @@
 import type { ContactScreenView } from "./crm"
 import { useQuery } from "@tanstack/react-query"
 import { apiFetch } from "./api"
+import type { PlanNextStep } from "./budgets"
 import type { PhoneWhatsApp } from "./phone-whatsapp"
 
 /**
@@ -117,7 +118,8 @@ export interface PersonListItem {
   firstContact: { channel: string | null; at: string } | null
   situation: PersonSituation | null
   waitingSince: string | null
-  nextStep: { text: string; actionLabel: string | null } | null
+  /** El paso entero de «Qué sigue»: su botón hace lo que dice desde la lista. */
+  nextStep: { text: string; actionLabel: string | null; kind: PlanNextStep["kind"] | null; action: PlanNextStep["action"] } | null
   attention: "agente" | "persona" | "nadie" | null
   missingData: boolean
 }

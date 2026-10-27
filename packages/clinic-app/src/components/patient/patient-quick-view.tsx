@@ -60,7 +60,7 @@ export function PatientQuickView({ context, onClose }: { context: QuickViewConte
           </Link>
           {canBook ? (
             <Button type="button" onClick={book}>
-              Agendar
+              Reservar cita
             </Button>
           ) : null}
         </>

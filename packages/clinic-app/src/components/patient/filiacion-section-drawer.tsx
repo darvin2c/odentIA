@@ -30,6 +30,7 @@ import { AddressStreetField } from "../address/address-street-field"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
 import { PersonalLinkActions } from "./send-personal-link"
+import { attendWord } from "../../lib/patient-overview"
 
 type FieldKind =
   | { kind: "text"; max: number; wide?: boolean }
@@ -340,7 +341,7 @@ export function FiliacionSectionDrawer({
   const name = patient?.givenNames ?? person?.givenNames ?? patient?.displayName ?? person?.displayName ?? ""
   const title = completing ? `Completar datos de ${name}` : `Editar ${sections[section].title.toLowerCase()}`
   const description = completing
-    ? "Solo lo que falta para atenderla. Al guardar, los apellidos quedan confirmados."
+    ? `Solo lo que falta para ${attendWord(patient?.sex ?? person?.sex)}. Al guardar, los apellidos quedan confirmados.`
     : sections[section].description
   // Apellidos a la vista en «Completar», aunque no falten.
   const namesInView = completing && !wanted?.has("givenNames") && !wanted?.has("familyName")
@@ -458,7 +459,7 @@ export function FiliacionSectionDrawer({
           <OpenDuplicate docType={values.docType} docNumber={values.docNumber.trim()} />
         ) : null}
         {completing && fields.length === 0 ? (
-          <p className="text-sm text-muted-foreground sm:col-span-2">No le falta nada para atenderla.</p>
+          <p className="text-sm text-muted-foreground sm:col-span-2">No le falta nada para {attendWord(patient?.sex ?? person?.sex)}.</p>
         ) : null}
       </div>
     </FormDrawer>
