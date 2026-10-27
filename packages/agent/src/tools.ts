@@ -201,6 +201,33 @@ const MAX_UNSUPPORTED_REPLIES = 2
 const UNKNOWN_PROFESSIONAL =
   "Ese profesional no es de un hueco de buscar_huecos: usa el dato «profesional» exacto (pro-…) del hueco elegido. Nunca inventes identificadores."
 
+/** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
+const SLOT_NOT_OFFERED =
+  "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista, vuelve a consultar con buscar_huecos (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
+
+/**
+ * Si un hueco con ese inicio y ese profesional salió de buscar_huecos en este
+ * turno o en lo que recuerda el caso (sus líneas llevan
+ * «[startsAt … · sede … · <sala> … · profesional …]»). Sin evidencia del turno
+ * (una herramienta llamada fuera del grafo) no hay con qué comparar.
+ */
+export function slotWasOffered(
+  evidence: { text: string }[] | undefined,
+  input: { startsAt: string; professionalUserId: string; roomId: string },
+): boolean {
+  if (!evidence) return true
+  const wanted = Date.parse(input.startsAt)
+  if (Number.isNaN(wanted)) return false
+  const professional = input.professionalUserId.trim().toLowerCase()
+  const slot = /\[startsAt (\S+) · sede \S+ · (.+?) · profesional ([^\]\s]+)\]/g
+  return evidence.some((item) =>
+    [...item.text.matchAll(slot)].some(
+      ([, startsAt = "", room = "", ref = ""]) =>
+        Date.parse(startsAt) === wanted && ref.toLowerCase() === professional && room.includes(input.roomId),
+    ),
+  )
+}
+
 /**
  * Cambios de lo aprendido que valen solo para una prueba: lecciones que se
  * ignoran, lecciones todavía propuestas que se dan por activas y respuestas
@@ -1326,6 +1353,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       durationMin?: number
       reason?: string
     }) => {
+      // Lo mismo en una prueba y en una conversación real: solo se propone un hueco consultado.
+      if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
       if (ctx.sandbox) return sandboxPropose("reservar_cita", await sandboxWhen(input.startsAt))
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`

@@ -221,6 +221,11 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(sandbox.getByRole("listitem").filter({ hasText: FAKE_REPLY })).toHaveCount(1)
   await expect(sandbox.getByRole("button", { name: "Pregunta un precio" })).toHaveAttribute("aria-pressed", "true")
   await expect(sandbox.getByRole("button", { name: "Quiere una cita" })).toHaveAttribute("aria-pressed", "false")
+  // «Lo que hizo» va plegado bajo cada respuesta, para seguir la conversación.
+  const detail = sandbox.getByRole("button", { name: /^Lo que hizo/ }).first()
+  await expect(detail).toHaveAttribute("aria-expanded", "false")
+  await expect(sandbox).not.toContainText("Modelo de demostración")
+  await detail.click()
   // El modelo de las pruebas responde siempre lo mismo, y la pantalla lo dice.
   await expect(sandbox).toContainText("Modelo de demostración")
   await sandbox.getByRole("textbox", { name: "Mensaje de prueba" }).fill("¿Y atienden los sábados?")

@@ -23,7 +23,8 @@ import { formatZoned, type OrgLocale } from "./locale.js"
 
 export const CASE_NOTE_LIMIT = 12
 export const CASE_NOTE_CHARS = 300
-export const CASE_LOOKUP_CHARS = 2000
+/** Cabe lo que se consultó en un turno: los huecos de dos sedes (unos 2 300 caracteres) no se recortan. */
+export const CASE_LOOKUP_CHARS = 4000
 /** Una consulta más antigua ya no se muestra: la agenda y los saldos cambian. */
 export const CASE_LOOKUP_TTL_MS = 6 * 60 * 60 * 1000
 /** Lo resuelto en las últimas horas sigue a la vista para no repetirlo. */

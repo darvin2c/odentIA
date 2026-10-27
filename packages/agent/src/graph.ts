@@ -13,6 +13,7 @@ import {
   type AgentServicesShown,
   GENERAL_PERMISSION_QUESTION,
   PRICES_PER_CONVERSATION,
+  CASE_LOOKUP_CHARS,
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
   formatKnowledgeForPrompt,
@@ -307,7 +308,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     // odentIA está en español; quien escribe en otro idioma recibe la respuesta en el suyo (#48).
     `Respondes en el idioma en que te escribe la persona; si no se distingue, en español. Tono ${TONE_TEXT[cfg.tone]}.`,
     // Siempre con nombre: Sofi, o el que eligió la clínica (issue 183).
-    `Te presentas como ${cfg.personaName}, asistente virtual de la clínica.`,
+    // Solo una vez: con «Te presentas como…» empezaba cada respuesta con «Soy Sofi…».
+    `Te llamas ${cfg.personaName} y eres asistente virtual de la clínica. Te presentas así solo en tu primera respuesta de la conversación: si ya le respondiste antes, no vuelvas a presentarte ni a saludar; ve directo a lo que pide.`,
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
     EMOJI_TEXT[cfg.emojis],
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
@@ -337,7 +339,7 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     ...notes,
     // Con Agendar apagado no hay huecos ni propuestas de cita: la cita la elige la persona en su enlace.
     on("agendar")
-      ? "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay propuesta que confirmar con confirmar_propuesta."
+      ? "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si la persona acepta lo que le ofreciste (por ejemplo «ok, con el doctor»), propone exactamente ese hueco: la misma hora, sede y profesional que le dijiste; si con esa persona le ofreciste más de una hora, pregúntale cuál. Si el «Estado del caso» no muestra una propuesta pendiente, no hay propuesta que confirmar con confirmar_propuesta."
       : "Nunca digas que reservaste, agendaste o que «se gestionará» una cita: por aquí no reservas.",
     has("confirmar_cita")
       ? "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál."
@@ -464,6 +466,8 @@ function lookupDetail(tool: string, text: string): string | undefined {
 export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, toolCtx: AgentToolCtx) {
   const tools = makeAgentTools(toolCtx)
   const available = new Set(tools.map((item) => item.name))
+  /** Lo que devolvió en esta corrida cada herramienta que el caso recuerda, en orden. */
+  const consulted = new Map<string, string[]>()
   // Con camino elegido, al modelo se le enseñan solo las herramientas de ese
   // camino más la que le devuelve el resto. La ejecución admite todas: esto
   // acota lo que se envía en cada llamada, no lo que el agente puede hacer.
@@ -966,7 +970,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   /**
    * Lo que devolvió cada herramienta de lectura pasa a ser fuente de la
    * respuesta (para comprobarla y para su traza) y, en las que conviene
-   * recordar, la última consulta queda en la memoria del caso.
+   * recordar, lo consultado en la última corrida queda en la memoria del caso.
    */
   async function recordLookups(calls: { id?: string; name: string }[], produced: BaseMessage[]): Promise<void> {
     for (const produced_ of produced) {
@@ -982,14 +986,22 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
         const detail = lookupDetail(name, text)
         toolCtx.basis.push({ kind: source.kind, label: source.label, ...(detail ? { detail } : {}) })
       }
-      if (toolCtx.sandbox && (CASE_LOOKUP_TOOLS as readonly string[]).includes(name)) {
+      if (!(CASE_LOOKUP_TOOLS as readonly string[]).includes(name)) continue
+      // Lo consultado en esta corrida se recuerda junto: los huecos de la
+      // segunda sede no borran los de la primera, que ya se le ofrecieron.
+      const remembered = [...(consulted.get(name) ?? []), text]
+      consulted.set(name, remembered)
+      if (toolCtx.sandbox) {
         // En una prueba la consulta se recuerda dentro de la propia prueba.
         const state = toolCtx.sandbox.state
-        state.lookups = [...state.lookups.filter((item) => item.tool !== name), { tool: name, text: text.slice(0, 2000), at: new Date().toISOString() }]
+        state.lookups = [
+          ...state.lookups.filter((item) => item.tool !== name),
+          { tool: name, text: remembered.join("\n").slice(0, CASE_LOOKUP_CHARS), at: new Date().toISOString() },
+        ]
       }
-      if (!toolCtx.dryRun && (CASE_LOOKUP_TOOLS as readonly string[]).includes(name)) {
+      if (!toolCtx.dryRun) {
         await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
-          recordAgentCaseLookup(tx, toolCtx.orgId, toolCtx.conversationId, { tool: name, text }),
+          recordAgentCaseLookup(tx, toolCtx.orgId, toolCtx.conversationId, { tool: name, text: remembered.join("\n") }),
         ).catch(() => {})
       }
     }

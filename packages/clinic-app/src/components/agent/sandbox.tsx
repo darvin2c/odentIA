@@ -1,8 +1,8 @@
 import { appWords } from "../../lib/product-words"
-import { Button, Field, FieldLabel, Input, ScrollArea } from "@odentia/ui"
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Field, FieldLabel, Input, ScrollArea } from "@odentia/ui"
 import { DataRefreshMarker } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowLeft, ArrowRight, CircleAlert, CircleCheck } from "lucide-react"
+import { ArrowLeft, ArrowRight, ChevronRight, CircleAlert, CircleCheck } from "lucide-react"
 import { type FormEvent, useEffect, useRef, useState } from "react"
 import { ANSWER_CHECK_LABEL, type SandboxResult, type SandboxState, type TestCaseItem } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
@@ -311,19 +311,84 @@ export function AgentSandbox({
   )
 }
 
-/** Debajo de cada respuesta de prueba: lo que hizo, en qué se basó y lo que haría después. */
+/**
+ * Debajo de cada respuesta de prueba: lo que hizo, en qué se basó y lo que
+ * haría después, plegado para que se siga la conversación. Lo que cambia lo
+ * que recibiría el paciente (no salió, pasa a una persona, un dato que no
+ * coincide) queda siempre a la vista.
+ */
 function TurnDetail({ result }: { result: SandboxResult }) {
   const nothing =
     result.did.length === 0 && result.basis.length === 0 && result.checks.length === 0 && result.waiting.length === 0
   const receptionName = useReceptionName()
+  const failed = result.checks.filter((check) => !check.ok)
+  const notSent = !result.replied && !result.handedOff
+  const alerts =
+    notSent || result.handedOff || failed.length > 0 ? (
+      <div className="flex w-full max-w-[88%] flex-col gap-1 text-sm">
+        {notSent ? (
+          <p role="status" className="font-medium text-destructive">
+            {receptionName} no llegó a enviar esta respuesta: en una conversación real el paciente no la recibiría.
+          </p>
+        ) : null}
+        {result.handedOff ? <p className="font-semibold">Pasaría el caso a una persona de tu equipo.</p> : null}
+        {failed.map((check) => (
+          <p key={`${check.kind}-${check.value}`} className="flex items-start gap-1.5 text-destructive">
+            <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+            {ANSWER_CHECK_LABEL[check.kind]} «{check.value}»: no está en tus datos; esta respuesta no saldría.
+          </p>
+        ))}
+      </div>
+    ) : null
+  if (nothing && result.model !== "fake") {
+    return (
+      <>
+        {alerts}
+        {result.replied ? (
+          <p className="text-xs text-muted-foreground">Respondió sin consultar nada: con lo que ya había en la conversación.</p>
+        ) : null}
+      </>
+    )
+  }
+  // En una línea: lo primero que hizo y, si hizo más, cuántas cosas más.
+  const summary = result.did[0]
+    ? `${result.did[0].replace(/\.$/, "")}${result.did.length > 1 ? ` y ${result.did.length - 1} más` : ""}`
+    : result.basis.length > 0
+      ? `Se basó en ${result.basis.length === 1 ? "1 fuente" : `${result.basis.length} fuentes`}`
+      : null
   return (
-    <div className="flex w-full max-w-[88%] flex-col gap-2 rounded-xl border bg-card p-3 text-sm">
-      {!result.replied && !result.handedOff ? (
-        <p role="status" className="font-medium text-destructive">
-          {receptionName} no llegó a enviar esta respuesta: en una conversación real el paciente no la recibiría.
-        </p>
-      ) : null}
-      {result.handedOff ? <p className="font-semibold">Pasaría el caso a una persona de tu equipo.</p> : null}
+    <>
+      {alerts}
+      <Collapsible className="flex w-full max-w-[88%] flex-col gap-2">
+        <CollapsibleTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="group h-auto min-h-11 max-w-full justify-start gap-1.5 self-start px-2 text-left text-xs font-normal text-muted-foreground sm:min-h-8"
+            >
+              <ChevronRight
+                aria-hidden
+                className="shrink-0 transition-transform group-data-[panel-open]:rotate-90 motion-reduce:transition-none"
+              />
+              <span className="font-semibold">Lo que hizo</span>
+              {summary ? <span className="min-w-0 truncate">· {summary}</span> : null}
+            </Button>
+          }
+        />
+        <CollapsibleContent className="flex flex-col gap-2 rounded-xl border bg-card p-3 text-sm">
+          <TurnDetailBody result={result} />
+        </CollapsibleContent>
+      </Collapsible>
+    </>
+  )
+}
+
+/** Lo de dentro de «Lo que hizo», tal cual lo devolvió la prueba. */
+function TurnDetailBody({ result }: { result: SandboxResult }) {
+  return (
+    <>
       {result.did.length > 0 ? (
         <div>
           <p className="text-xs font-semibold text-muted-foreground">Lo que hizo</p>
@@ -368,14 +433,11 @@ function TurnDetail({ result }: { result: SandboxResult }) {
           </ul>
         </div>
       ) : null}
-      {nothing && result.replied ? (
-        <p className="text-muted-foreground">Respondió sin consultar nada: con lo que ya había en la conversación.</p>
-      ) : null}
       {result.model === "fake" ? (
         <p className="text-xs text-muted-foreground">
           Modelo de demostración: siempre responde lo mismo y no acredita la calidad de un proveedor real.
         </p>
       ) : null}
-    </div>
+    </>
   )
 }

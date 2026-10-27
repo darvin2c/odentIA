@@ -1573,6 +1573,55 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   expect(offered.messageId).toBeTruthy()
 })
 
+it("dos búsquedas de huecos en un turno se recuerdan juntas y una hora que no salió de ellas no se propone", async () => {
+  const first = await ingestText("tg:dos-busquedas", "evt-dos-busquedas-1", "Quiero una cita el lunes o el martes")
+  const { conversationId } = first
+  const fx = await bookingFixture(conversationId, "dos-busquedas")
+  const monday = upcomingMonday()
+  const tuesday = new Date(monday.getTime() + 86_400_000)
+  const search = (day: Date, id: string) =>
+    toolCall("buscar_huecos", { branchId: fx.branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45 }, id)
+  const turnOne = new ScriptedModel((_messages, call) => {
+    if (call === 1) return search(monday, "b1-lunes")
+    if (call === 2) return search(tuesday, "b1-martes")
+    return toolCall("send_reply", { text: "Tengo el lunes y el martes a las 9:00 a. m. ¿Cuál prefieres?" }, "b1-envio")
+  })
+  expect(await runScripted(turnOne, conversationId, first.messageId)).toBe("done")
+  const remembered = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
+  const slots = remembered.lookups.find((item) => item.tool === "buscar_huecos")?.text ?? ""
+  // La segunda búsqueda no borró la primera: los dos días ofrecidos siguen a la vista.
+  expect(slots.match(new RegExp(ISO_INSTANT.source, "g"))?.map((iso) => new Date(iso).getUTCDay())).toEqual(expect.arrayContaining([1, 2]))
+
+  // En el turno siguiente, una hora que no venía de ningún hueco (las 2:00 p. m.) no se propone.
+  const second = await ingestText("tg:dos-busquedas", "evt-dos-busquedas-2", "Ok, el lunes")
+  const invented = new Date(monday.getTime() + 14 * 3_600_000).toISOString()
+  const line = slots.split("\n").find((item) => item.includes("startsAt")) ?? ""
+  const turnTwo = new ScriptedModel((messages, call) => {
+    if (call === 1) {
+      return toolCall(
+        "proponer_cita",
+        {
+          patientId: fx.patientId,
+          professionalUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
+          roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
+          startsAt: invented,
+          branchId: fx.branchId,
+          durationMin: 45,
+        },
+        "b2-inventada",
+      )
+    }
+    if (call === 2) {
+      expect(String(messages[messages.length - 1]?.content)).toContain("Ese horario no está entre los huecos que consultaste")
+    }
+    return toolCall("send_reply", { text: "¿A qué hora del lunes te acomoda?" }, "b2-envio")
+  })
+  expect(await runScripted(turnTwo, conversationId, second.messageId)).toBe("done")
+  expect(turnTwo.seen).toHaveLength(2)
+  const proposals = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId }))
+  expect(proposals.filter((item) => item.action === "reservar_cita")).toEqual([])
+})
+
 it("una respuesta con un precio que no está en lo consultado no sale y, a la segunda, el caso pasa a una persona", async () => {
   // Las cifras de un identificador no sustentan un precio: la referencia de
   // este profesional llega en los datos de la clínica y lleva el mismo «99»
@@ -1911,7 +1960,7 @@ it("la voz de la clínica entra en el prompt solo cuando se configura; el nombre
   const plain = await promptOf("tg:voz-0", "evt-voz-0")
   expect(plain).toContain("Tono cercano y profesional")
   expect(plain).toContain("Responde solo con datos reales. Si no tiene el dato, lo dice.")
-  expect(plain).toContain("Te presentas como Sofi, asistente virtual de la clínica.")
+  expect(plain).toContain("Te llamas Sofi y eres asistente virtual de la clínica. Te presentas así solo en tu primera respuesta")
   expect(plain).not.toContain("Tratas de")
   expect(plain).toContain("No uses emojis.")
   await withOrgContext(appDb, "org_a", (tx) =>
@@ -1921,7 +1970,7 @@ it("la voz de la clínica entra en el prompt solo cuando se configura; el nombre
     }))
   try {
     const voiced = await promptOf("tg:voz-1", "evt-voz-1")
-    expect(voiced).toContain("Te presentas como Vale, asistente virtual de la clínica.")
+    expect(voiced).toContain("Te llamas Vale y eres asistente virtual de la clínica.")
     expect(voiced).toContain("Tratas de usted al interlocutor.")
     expect(voiced).toContain("Tono formal y respetuoso")
     expect(voiced).toContain("Sobre la clínica: Clínica familiar con dos sedes.")
