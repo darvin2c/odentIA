@@ -136,6 +136,8 @@ beforeAll(async () => {
     activatedAt: new Date(now - 10 * 86_400_000),
     currentPeriodStart: new Date(now - 10 * 86_400_000),
     currentPeriodEnd: new Date(now + 20 * 86_400_000),
+    // Un precio negociado: lo ve la administración, no soporte.
+    discountBps: 1000,
   }
   await ownerDb
     .insert(saasSubscription)
@@ -234,4 +236,16 @@ it("soporte ve cuántas cosas hicieron los agentes, sin importes, y no abre el p
   ).toBe(403)
   // La administración sí abre el precio.
   expect((await call(`/organizations/${ORG}/billing`, "u-admin")).status).toBe(200)
+})
+
+it("el precio negociado de la lista es de la administración: soporte no lo ve ni filtra por él", async () => {
+  type List = { data: { items: Array<{ id: string; negotiated: { discountBps: number } | null }> } }
+  const listed = async (user: string, query = "") =>
+    (
+      (await (await call(`/organizations?q=dental-gastos${query}`, user)).json()) as List
+    ).data.items.find((item) => item.id === ORG)
+  expect((await listed("u-admin"))?.negotiated).toMatchObject({ discountBps: 1000 })
+  expect((await listed("u-soporte"))?.negotiated).toBeNull()
+  // Con el filtro de las negociadas tampoco aparece el descuento.
+  expect(await listed("u-soporte", "&negotiated=1")).toMatchObject({ id: ORG, negotiated: null })
 })

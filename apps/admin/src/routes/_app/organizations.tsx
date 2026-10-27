@@ -372,20 +372,23 @@ function OrganizationsPage() {
               : undefined
           }
         />
-        <Select
-          value={onlyNegotiated ? "negociado" : "todas"}
-          items={{ todas: "Todas", negociado: "Con precio negociado" }}
-          onValueChange={(value) => setList({ precio: value === "negociado" ? "negociado" : undefined })}
-        >
-          <SelectTrigger aria-label="Precio" className="w-60 shrink-0">
-            <span className="text-muted-foreground">Precio:</span>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todas">Todas</SelectItem>
-            <SelectItem value="negociado">Con precio negociado</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* El precio negociado es de la administración: soporte no filtra por él (ADR 0094). */}
+        {isAdmin ? (
+          <Select
+            value={onlyNegotiated ? "negociado" : "todas"}
+            items={{ todas: "Todas", negociado: "Con precio negociado" }}
+            onValueChange={(value) => setList({ precio: value === "negociado" ? "negociado" : undefined })}
+          >
+            <SelectTrigger aria-label="Precio" className="w-60 shrink-0">
+              <span className="text-muted-foreground">Precio:</span>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas</SelectItem>
+              <SelectItem value="negociado">Con precio negociado</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : null}
       </form>
 
       {listQuery.isPending ? (
