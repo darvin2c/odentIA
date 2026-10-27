@@ -33,6 +33,7 @@ import {
   createHandoff,
   topicKindOf,
   recordTopicAskedAgain,
+  latestOpenTopic,
   createProposal,
   createTask,
   findFreeGaps,
@@ -74,6 +75,7 @@ import {
   ServiceError,
   updateContact,
   webchatHandoffWhere,
+  saveWebchatContactForConversation,
   agentTextsFor,
   emergencyAdviceFor,
   type ProductAgentTexts,
@@ -1062,7 +1064,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ patientId }: { patientId?: string }) => {
       if (!patientId) {
         const candidates = await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))
-        if (!candidates.length) return "El interlocutor no está vinculado a ningún paciente: pide sus datos o deriva."
+        if (!candidates.length) return "El interlocutor aún no es paciente: no le pidas documento ni datos para reservar; haz lo que dice la línea del interlocutor (su enlace o recepción)."
         return candidates
           .map((c) => `- ${c.displayName} (id ${c.patientId}, vínculo: ${c.relationship})`)
           .join("\n")
@@ -1291,6 +1293,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     }) => {
       // Lo mismo en una prueba y en una conversación real: solo se propone un hueco consultado.
       if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
+      // En el chat web, si cierra la pestaña no le llega nada: sin su WhatsApp o
+      // su correo no hay cómo recordarle ni avisarle un cambio de la cita.
+      if (
+        (await conversationChannel(ctx)) === "webchat" &&
+        (await inOrg((tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId))) === "preguntar"
+      ) {
+        return "Aún no hay cómo avisarle de la cita: en el chat web, si cierra la pestaña no le llega nada. Antes de proponerla pídele su WhatsApp o su correo; cuando lo escriba, guárdalo con guardar_contacto y vuelve a proponer este mismo horario."
+      }
       if (ctx.dryRun) {
         return `[SIMULACIÓN] Se propondría reservar: paciente ${input.patientId} el ${input.startsAt}.`
       }
@@ -1915,6 +1925,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           : `El aviso al interlocutor no salió: ${outcome}`
       }
       const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
+      // Con un tema abierto en el hilo, lo que vuelve a pedir se anota en ese
+      // tema y solo sale el aviso: un tema por mensaje llena la cola del equipo.
+      // Abre otro solo si sube a urgente (ADR 0097).
+      const open = await inOrg((tx) => latestOpenTopic(tx, ctx.orgId, ctx.conversationId, { kind: clinical === true ? "clinico" : topicKindOf(kind) }))
+      if (open && !(validPriority === "alta" && open.priority !== "alta")) {
+        await inOrg((tx) => recordTopicAskedAgain(tx, ctx.orgId, { handoffId: open.id, messageId: ctx.triggerId ?? null }))
+        ctx.handedOff = true
+        ctx.handoffId = open.id
+        if (!notice) return "Ese tema ya lo tiene el equipo: lo anoté en él. Falta el aviso al interlocutor: llama de nuevo con message."
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        await annotate(ctx.replySettled === true)
+        return ctx.replySettled ? "Ese tema ya lo tiene el equipo: lo anoté en él y salió el aviso. No envíes más mensajes." : `El aviso al interlocutor no salió: ${outcome}`
+      }
       const handoff = await inOrg((tx) =>
         createHandoff(tx, ctx.orgId, null, {
           conversationId: ctx.conversationId,
@@ -1941,13 +1964,37 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
         if (ctx.replySettled) await annotate(true)
       }
-      return `Tema pasado al equipo (${destino}, plazo ${handoff.dueAt ?? "sin plazo"}).${noticeResult} No envíes nada más por este mensaje; en los siguientes sigues atendiendo todo lo demás.`
+      return `Tema pasado al equipo (${destino}).${noticeResult} No envíes nada más por este mensaje; en los siguientes sigues atendiendo todo lo demás.`
     },
     {
       name: "request_human_handoff",
       description:
-        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá y cuándo le responde y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
+        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema. No la uses porque cuente un síntoma y quiera que lo atiendan (un dolor, un sangrado, una hinchazón): eso es una cita, ofrécele los horarios más próximos. Va como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá, sin prometer una hora ni un plazo, y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
       schema: operationAgentSchema("derivacion.crear"),
+    },
+  )
+
+  const saveContact = tool(
+    async ({ whatsapp, email }: { whatsapp?: string; email?: string }) => {
+      if (ctx.dryRun) return "[SIMULACIÓN] Se guardaría dónde avisarle."
+      if ((await conversationChannel(ctx)) !== "webchat") return "Solo sirve en el chat de la web: en este canal ya tienes cómo responderle."
+      try {
+        const saved = await inOrg((tx) => saveWebchatContactForConversation(tx, ctx.orgId, ctx.conversationId, { whatsapp: whatsapp ?? null, email: email ?? null }))
+        const where = [saved?.whatsapp ? `WhatsApp ${saved.whatsapp}` : null, saved?.email ? `correo ${saved.email}` : null].filter(Boolean).join(" y ")
+        return `Guardado: le avisaremos por ${where || "lo que dejó"}. Sigue con lo que pidió.`
+      } catch (error) {
+        if (error instanceof ServiceError) return `No se guardó: ${error.message} Díselo con esas palabras y pídeselo de nuevo.`
+        throw error
+      }
+    },
+    {
+      name: "guardar_contacto",
+      description:
+        "En el chat de la web, guarda el WhatsApp o el correo que la persona escribió para avisarle (de su cita o de lo que tenga el equipo). Úsala apenas lo escriba; no lo inventes ni lo completes.",
+      schema: z.object({
+        whatsapp: z.string().max(40).optional().describe("El número tal como lo escribió, con su código de país si lo dio."),
+        email: z.string().max(320).optional().describe("El correo tal como lo escribió."),
+      }),
     },
   )
 
@@ -1959,13 +2006,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       ).catch(() => null)
       if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
       return result.assigneeName
-        ? `Anotado y avisado a ${result.assigneeName}. Dile a la persona que ${result.assigneeName} tiene su consulta y cuándo le responde; no respondas el tema tú.`
-        : "Anotado: el equipo lo verá. Dile a la persona que su consulta la tiene el equipo y cuándo le responden; no respondas el tema tú."
+        ? `Anotado y avisado a ${result.assigneeName}. Dile a la persona que ${result.assigneeName} tiene su consulta, sin prometer una hora; no respondas el tema tú.`
+        : "Anotado: el equipo lo verá. Dile a la persona que su consulta la tiene el equipo, sin prometer una hora; no respondas el tema tú."
     },
     {
       name: "recordar_tema",
       description:
-        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene y cuándo le responde, sin responder el tema.",
+        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
       schema: z.object({ tema_id: z.string().uuid().describe("El id del tema, de «Temas con el equipo».") }),
     },
   )
@@ -2006,6 +2053,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     rememberFact,
     requestHandoff,
     rememberTopic,
+    saveContact,
   ]
   const tools = all.filter(
     (candidate) =>

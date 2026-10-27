@@ -158,7 +158,7 @@ export interface AnswerBasisItem {
 
 /** Comprobación de un precio, fecha u hora de la respuesta contra lo consultado. */
 export interface AnswerCheck {
-  kind: "precio" | "hora" | "fecha"
+  kind: "precio" | "hora" | "fecha" | "enlace"
   value: string
   ok: boolean
   source: string | null
@@ -186,6 +186,7 @@ export const ANSWER_CHECK_LABEL: Record<AnswerCheck["kind"], string> = {
   precio: "Precio",
   hora: "Hora",
   fecha: "Fecha",
+  enlace: "Enlace",
 }
 
 /* ---------- Fichas de los agentes, niveles y resumen ---------- */

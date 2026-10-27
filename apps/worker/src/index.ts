@@ -14,6 +14,7 @@ import { createTranscriber } from "./transcribe.js"
 import { runAutomationTick } from "./automation.js"
 import { runLegalNoticesTick } from "./legal-notices.js"
 import { tickMailboxes } from "./mailboxes.js"
+import { runDemosTick } from "./demos.js"
 import { runSaasBillingTick } from "./saas-billing.js"
 import { runSupportNoticesTick } from "./support-notices.js"
 import { runAccountLifecycleTick } from "./account-lifecycle.js"
@@ -202,6 +203,7 @@ let nextAccountPoll = 0
 let nextSupportPoll = 0
 let nextLegalPoll = 0
 let nextDigestPoll = 0
+let nextDemoPoll = 0
 queues.push({
   name: "saas_billing",
   poll: async () => {
@@ -259,6 +261,15 @@ queues.push({
     nextDigestPoll = Date.now() + 60_000
     const result = await runReportDigestTick({ ownerDb, appDb: db, mailer, secretsKey })
     return result.mailed > 0
+  },
+}, {
+  // Las demos para presentar (ADR 0096): se arman aparte, y cada día de su zona se ponen al día.
+  name: "demos",
+  poll: async () => {
+    if (Date.now() < nextDemoPoll) return false
+    nextDemoPoll = Date.now() + 5_000
+    const result = await runDemosTick({ ownerDb, secretsKey, fetch, deleteObject: (key) => storage.deleteAttachment(key) })
+    return result.started || result.advanced > 0 || result.expired > 0
   },
 }, {
   name: "account_lifecycle",

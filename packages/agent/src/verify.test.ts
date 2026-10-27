@@ -79,8 +79,20 @@ it("el enlace que envía el agente no se lee como importe en la respuesta", () =
   const link = "https://sonrisa.odentia32.com/reserva?token=0b7e19cad42f8a3c6d5e0b1f2a9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c"
   const tool = { source: "Su enlace", text: `Su enlace, para que Ana elija su cita: ${link}` }
   const ca = { timezone: "America/Toronto", currency: "CAD", locale: "es" }
-  expect(verifyReply(`Aquí tienes tu enlace: ${link}`, [tool], ca, NOW).checks).toEqual([])
+  expect(verifyReply(`Aquí tienes tu enlace: ${link}`, [tool], ca, NOW).checks).toEqual([
+    { kind: "enlace", value: link, ok: true, source: "Su enlace" },
+  ])
   expect(verifyReply(`La limpieza cuesta CAD 42: ${link}`, [tool], ca, NOW).unsupported.map((item) => item.value)).toEqual(["CAD 42"])
+})
+
+it("un enlace que no trajo ninguna fuente no sale", () => {
+  // Auditoría del 27-oct: el modelo armó «…/cita», una página que no existe.
+  const tool = { source: "Datos de la clínica", text: "Sede San Martín: Av. Perú 1820. Cómo llegar: https://sanmartin.latidia72.com/llegar/san-martin" }
+  const pe = { timezone: "America/Lima", currency: "PEN", locale: "es-PE" }
+  expect(verifyReply("Elige tu cita aquí: https://sanmartin.latidia72.com/cita.", [tool], pe, NOW).unsupported).toEqual([
+    { kind: "enlace", value: "https://sanmartin.latidia72.com/cita", ok: false, source: null },
+  ])
+  expect(verifyReply("Así llegas: https://sanmartin.latidia72.com/llegar/san-martin.", [tool], pe, NOW).ok).toBe(true)
 })
 
 it("la versión de una cita no sustenta un precio", () => {

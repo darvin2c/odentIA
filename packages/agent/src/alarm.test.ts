@@ -58,6 +58,8 @@ describe("señales de alarma (ADR 0084)", () => {
       "vomité con sangre",
       "se tomó todas las pastillas",
       "creo que se envenenó",
+      "mi bebé tiene 6 meses, está con 39.5 de fiebre y desde la mañana no quiere lactar",
+      "no quiere lactar mi bebito desde ayer",
     ]
     for (const text of urgent) {
       expect(hasAlarmSignal(text, medical), text).toBe(true)

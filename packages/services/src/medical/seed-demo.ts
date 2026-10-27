@@ -20,6 +20,7 @@ import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, eq, inArray } from "drizzle-orm"
+import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
@@ -28,6 +29,7 @@ import { setProfessionalSpecialties } from "../clinical-forms.js"
 import { createFollowUp } from "../follow-ups.js"
 import { createContact } from "../contacts.js"
 import { createPatient } from "../patients.js"
+import { savePatientRegistrationConfig } from "../patient-registration.js"
 import { ensureDefaultPaymentMethods } from "../payment-methods.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
 import { fromTemplates } from "../service-catalog.js"
@@ -124,6 +126,17 @@ export async function seedMedicalDemo(
   await db.transaction((tx) => ensureDefaultPaymentMethods(tx, ORG, VELA_ID, "PE"))
   // Clío encendida (entrega 10): las atenciones en borrador ofrecen «Dictar la atención».
   await db.transaction((tx) => upsertAgentConfig(tx, ORG, { clinicalAssistantEnabled: true }, { actorUserId: VELA_ID }))
+  // Registro en línea activo, como la demo de odentIA: sin él, a quien escribe por
+  // primera vez Sofi no puede mandarle el enlace para reservar (auditoría del 27-oct).
+  await db.transaction((tx) =>
+    savePatientRegistrationConfig(tx, ORG, VELA_ID, {
+      expectedVersion: 0,
+      enabled: true,
+      fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, docType: "required", docNumber: "required", sex: "required", email: "hidden", address: "hidden" },
+      privacyNotice:
+        "Consultorio San Martín usará tus datos solo para registrarte como paciente, atenderte y recordarte tus citas. Puedes pedir verlos, corregirlos o eliminarlos escribiendo a recepción.",
+    }),
+  )
 
   const [sede] = await db
     .insert(branch)
@@ -191,6 +204,9 @@ export async function seedMedicalDemo(
       ORG,
       VELA_ID,
       library.map((row) => ({ templateId: row.id, priceCents: prices[row.key]!, durationMin: 20 })),
+      // Como lo agrega la pantalla de la biblioteca: «Precio exacto» (decisión 5 de la fase 4).
+      // Sin indicarlo, Sofi decía que la consulta «se define tras una evaluación».
+      { priceDisclosure: "exacto" },
     ),
   )
 

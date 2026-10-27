@@ -110,6 +110,11 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
     /\bvomit\w*\b[^.!?]{0,15}\bsangre\b/,
     /\b(se tomo|me tome|se trago|me trague) (todas las|muchas|un frasco de|toda la caja de) (pastillas|pildoras)\b/,
     /\benvenen/,
+    // Signo general de peligro de AIEPI (IMCI, OMS): un bebé que no puede beber ni
+    // tomar el pecho necesita atención ya (auditoría del 27-oct: 39,5 °C y no lacta).
+    // «39.5 de fiebre»: el punto entre dígitos no corta la frase.
+    /\b(bebe|bebito|bebita|recien nacid[oa])\b(?:[^.!?]|(?<=\d)\.(?=\d)){0,80}\bno (quiere |puede )?(lactar|lacta|tomar? (el )?(pecho|teta|leche))\b/,
+    /\bno (quiere |puede )?(lactar|lacta)\b(?:[^.!?]|(?<=\d)\.(?=\d)){0,80}\b(bebe|bebito|bebita|recien nacid[oa])\b/,
   ],
   clinic: { es: "consultorio médico", en: "medical practice" },
   room: "sala",

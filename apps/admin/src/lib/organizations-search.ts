@@ -8,6 +8,7 @@ export interface OrganizationsSearch {
   q?: string
   producto?: "dental" | "medical"
   precio?: "negociado"
+  clase?: "real" | "demo"
 }
 
 const KEY = "admin.organizations.search"
@@ -29,6 +30,7 @@ export function rememberedOrganizationsSearch(): OrganizationsSearch {
         ? { producto: raw.producto }
         : {}),
       ...(raw.precio === "negociado" ? { precio: "negociado" as const } : {}),
+      ...(raw.clase === "real" || raw.clase === "demo" ? { clase: raw.clase } : {}),
     }
   } catch {
     return {}

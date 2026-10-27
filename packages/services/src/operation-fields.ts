@@ -268,7 +268,7 @@ export const OPERATIONS = {
       priority: { kind: "enum", values: ["alta", "media", "baja"], default: "media", label: "Prioridad", description: "Alta si hay dolor, urgencia o una queja.", body: "optional", agent: "fills" },
       // El agente no conoce los ids del equipo: lo deja en la cola y quien lo toma se lo asigna.
       assigneeUserId: { kind: "text", max: 200, label: "Responsable", description: "A quién del equipo va; sin él queda en la cola.", body: "optional", agent: "person" },
-      message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de quién verá su consulta y cuándo le responde (por ejemplo, «la Dra. lo verá mañana desde las 9:00»). El agente sigue atendiendo lo demás.", body: "none", agent: "fills" },
+      message: { kind: "text", min: 1, max: 4000, label: "Aviso al interlocutor", description: "Aviso breve de quién verá su consulta (por ejemplo, «Recepción lo revisa y te escribe por aquí»), sin prometer una hora ni un plazo. El agente sigue atendiendo lo demás.", body: "none", agent: "fills" },
       clinical: { kind: "flag", label: "Duda clínica", description: "Sí si es una duda sobre su salud, un síntoma, un medicamento o un tratamiento: el tema va al profesional que atiende al paciente.", body: "optional", agent: "fills" },
       // R3 del pulido de la Bandeja: dice a quién le llega y qué temas puede retomar Sofi.
       kind: { kind: "enum", values: ["cita", "precio", "clinico", "pago", "otro"], default: "otro", label: "De qué trata", description: "cita si quiere reservar, cambiar o cancelar una cita; precio si pregunta un precio de la lista (un descuento es otro); clinico si es una duda de salud; pago si habla de un pago, una transferencia o un comprobante; otro en lo demás (un reclamo, un descuento, hablar con una persona).", body: "optional", agent: "fills" },
@@ -597,6 +597,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",
   recordar_tema: "Solo lleva el id del tema: anota que la persona volvió a preguntar y avisa a quien lo tiene (ADR 0050).",
+  guardar_contacto: "Los mismos dos campos y reglas que «¿Dónde te avisamos?» del chat web (`saveWebchatContactForConversation`): su WhatsApp o su correo.",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",
   update_contact: "Pendiente: la ruta de contactos aún declara sus campos; el agente solo toca nombre y campos personalizados.",

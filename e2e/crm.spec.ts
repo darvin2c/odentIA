@@ -199,7 +199,7 @@ test("crm agente: responde al segundo inbound y el operador toma el hilo", async
     org.slug,
   )
   expect(decisions).toEqual([
-    expect.objectContaining({ point: "route.v5", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
+    expect.objectContaining({ point: "route.v6", mode: "route", provider: "fake", error: null, outcome: expect.objectContaining({ path: "cita" }) }),
   ])
   const shadow = page.getByRole("region", { name: "Decisiones del modelo de decisión" })
   await expect(shadow).toBeVisible()
