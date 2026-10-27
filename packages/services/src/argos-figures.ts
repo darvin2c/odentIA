@@ -1065,6 +1065,43 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     ],
   },
   {
+    // Lo que la Agenda llama «Por confirmar» y aún se puede confirmar: una cita cuya hora pasó ya no (ver «sin cerrar»).
+    key: "citas_por_confirmar",
+    name: "Citas por confirmar",
+    describes: "Cuántas citas por venir siguen sin confirmar, hoy: las que aún se pueden confirmar.",
+    how: "Citas por confirmar cuya hora aún no pasa, hoy. Las que ya pasaron sin cerrarse no se confirman: son las citas sin cerrar.",
+    unit: "cantidad",
+    column: "citas",
+    time: "a_hoy",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["citas"],
+        rows: "select sede, profesional, servicio, 1 as v from citas where estado = 'programada' and not ya_paso",
+        cuts: ["sede", "profesional", "servicio"],
+      },
+    ],
+  },
+  {
+    key: "citas_sin_cerrar",
+    name: "Citas sin cerrar",
+    describes: "Cuántas citas ya pasaron sin que nadie dijera si la persona vino, hoy: siguen por confirmar o confirmadas, sin llegada.",
+    how: "Citas cuya hora ya pasó y siguen por confirmar o confirmadas, sin llegada ni atención, hoy. No se marcan solas: falta decir si vino.",
+    unit: "cantidad",
+    column: "citas",
+    time: "a_hoy",
+    value: COUNT,
+    additive: true,
+    sources: [
+      {
+        views: ["citas"],
+        rows: "select sede, profesional, servicio, 1 as v from citas where estado in ('programada', 'confirmada') and ya_paso and llego_en is null",
+        cuts: ["sede", "profesional", "servicio"],
+      },
+    ],
+  },
+  {
     key: "asistieron",
     name: "Asistieron",
     describes: "La asistencia: qué parte de las citas que ya pasaron se atendió.",

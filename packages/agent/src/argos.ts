@@ -224,6 +224,7 @@ La frase:
 - Huecos: {columna} es el valor de esa columna en la primera fila; {lista} son las filas (hasta 12) como «col1 (col2, col3)», en el orden de tu consulta, y ${productName(texts)} dice cuántas más hay; {filas} es cuántas filas trajo la consulta. El hueco ya trae su formato: no agregues moneda ni «%» junto a él. Nunca llames «filas», «lista» ni «periodo» a una columna.
 - {lista} va una sola vez y al final de la frase, después de dos puntos: «Los que más deben: {lista}.». Para el mayor y el menor (el mejor y el peor mes) no uses {lista}: una sola fila con columnas como mejor_mes, mejor_dinero, peor_mes y peor_dinero.
 - Una lista de personas, ventas o cosas dice antes cuántas son en total y, si es dinero, cuánto suman, con columnas que empiezan con total_general: count(*) over () AS total_general y sum(saldo) over () AS total_general_dinero. «{total_general} pacientes te deben {total_general_dinero}. Los que más deben: {lista}.» Esas columnas no salen en la lista.
+- «¿Hay…?» o «¿cuántos…?» sobre lo que el equipo trabaja (citas, pacientes, presupuestos, tareas) se responde con cuántas son y la lista, no con el número solo: con la lista se puede abrir cada una.
 - Un cambio entre dos periodos va en una columna que empieza con variacion y termina en _pct (variacion_pct): ${productName(texts)} le pone el signo («+1 %», «-32 %»). La frase nombra los dos periodos y sus cifras.
 - Cada hueco {columna} es siempre la primera fila: para dos cifras de filas distintas, arma una sola fila con una columna por cifra.
 - Lo que sale en la lista se lee: un estado o un tipo va en palabras (CASE estado WHEN 'hace_falta' THEN 'bajo el mínimo' … END), nunca su código; y no pongas columnas que la pregunta no necesita.
@@ -1184,7 +1185,8 @@ async function runPlan(
 /** La frase llena (o la de sin filas) y su tabla; el periodo lo dice odentIA. */
 function shown(plan: Pick<ArgosPlan, "frase" | "frase_vacia">, result: ArgosQueryResult, zone: Parameters<typeof fillArgosSentence>[2], words: ArgosWords): ArgosShown {
   const empty = fillArgosWords(plan.frase_vacia, words)
-  const filled = result.rows.length ? fillArgosSentence(plan.frase, result, zone, words) : { text: empty, parts: [{ text: empty }] }
+  // Con dos filas o más, la tabla o el dibujo las muestra debajo: la frase no las repite.
+  const filled = result.rows.length ? fillArgosSentence(plan.frase, result, zone, words, result.rows.length > 1) : { text: empty, parts: [{ text: empty }] }
   return { text: filled.text, sentence: filled.parts, table: tableOf(result, zone, result.rows.length ? argosRepeatedColumns(plan.frase, result) : new Set()) }
 }
 
