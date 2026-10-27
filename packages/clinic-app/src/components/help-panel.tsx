@@ -159,8 +159,17 @@ export function WhatIsSent({
  * no se puede. No cambia nada: explica. Si no sabe, lo dice y ofrece enviarlo
  * a odentIA.
  */
-/** Abre la ayuda desde fuera del botón (el menú «⋯» del teléfono). */
+/**
+ * Abre la ayuda desde fuera del botón (el menú «⋯» del teléfono). Con
+ * `detail.support` abre ya el mensaje a soporte con ese texto escrito, para
+ * que la persona lo lea, lo complete y lo envíe ella (`openSupportRequest`).
+ */
 export const OPEN_HELP_EVENT = "odentia:abrir-ayuda"
+
+/** Abre la ayuda con un mensaje a soporte ya escrito; no se envía solo. */
+export function openSupportRequest(text: string) {
+  window.dispatchEvent(new CustomEvent(OPEN_HELP_EVENT, { detail: { support: text } }))
+}
 
 export function HelpButton({ className }: { className?: string } = {}) {
   const receptionName = useReceptionName()
@@ -247,7 +256,11 @@ export function HelpButton({ className }: { className?: string } = {}) {
     setDirect(null)
   }, [pathname])
   useEffect(() => {
-    const onOpen = () => setOpen(true)
+    const onOpen = (event: Event) => {
+      setOpen(true)
+      const support = (event as CustomEvent<{ support?: string } | undefined>).detail?.support?.trim()
+      if (support) setDirect({ kind: "pregunta", text: support, sent: false })
+    }
     window.addEventListener(OPEN_HELP_EVENT, onOpen)
     return () => window.removeEventListener(OPEN_HELP_EVENT, onOpen)
   }, [])

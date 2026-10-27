@@ -1,0 +1,1 @@
+ALTER TABLE "channel_connection" ADD COLUMN "own_app" jsonb;

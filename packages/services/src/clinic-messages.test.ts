@@ -97,6 +97,9 @@ function fakeMeta(override?: (call: Call) => { status?: number; json: unknown } 
         ? { json: { ok: true, result: { id: 77, username: "clinicabot", first_name: "Clínica" } } }
         : { json: { ok: true, result: true } }
     }
+    // Con la app propia: la app queda suscrita y el número ya estaba registrado.
+    if (call.url.includes("/subscribed_apps")) return { json: { success: true } }
+    if (call.url.includes("fields=platform_type")) return { json: { id: "PNID", platform_type: "CLOUD_API" } }
     if (call.url.includes("fields=display_phone_number")) {
       return { json: { id: "PNID", display_phone_number: "+51 999 888 777", verified_name: "Clínica Sonríe" } }
     }

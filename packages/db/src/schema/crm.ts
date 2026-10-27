@@ -70,6 +70,31 @@ export interface ConnectionSignup {
   tokenProblem?: string | null
 }
 
+/**
+ * Lo que odentIA hace en Meta por una conexión de WhatsApp hecha a mano con la
+ * app propia de la clínica (registrar el número y suscribir la app), y lo que
+ * sabe de su clave. Meta solo deja registrar un número por la API, no desde su
+ * página. Nulo: conexión anterior a esto, hecha con el botón o sin proveedor.
+ */
+export interface ConnectionOwnApp {
+  /** Cuándo quedó registrado el número para enviar y recibir. Nulo: falta. */
+  registeredAt: string | null
+  /** Cuándo quedó suscrita la app de la clínica a los avisos de la cuenta. Nulo: falta. */
+  subscribedAt: string | null
+  /** Qué pasó en el último intento de cada paso que sigue pendiente, en palabras. */
+  problems: { suscribir?: string; registrar?: string }
+  /** El número ya tenía un PIN y el que se probó no era: hay que pedírselo a la clínica. */
+  pinNeeded?: boolean
+  /** Intentos de registro que Meta no aceptó en las últimas 72 horas (admite 10). */
+  registerAttempts?: string[]
+  /** Cuándo vence la clave de acceso. Nulo: no vence o no se pudo preguntar. */
+  tokenExpiresAt: string | null
+  /** Cuándo Meta confirmó que la clave es permanente, con permisos y de la misma app que la clave secreta. Nulo: no se pudo preguntar. */
+  keysCheckedAt?: string | null
+  /** Último aviso que llegó con otra firma (la clave secreta no es de esa app). Nulo: ninguno desde la última clave. */
+  signatureRejectedAt?: string | null
+}
+
 export const channelConnection = pgTable(
   "channel_connection",
   {
@@ -99,6 +124,8 @@ export const channelConnection = pgTable(
     accountExternalId: text("account_external_id"),
     /** Los pasos de «Conectar con Facebook» y cómo quedaron. Nulo: conexión hecha a mano. */
     signup: jsonb("signup").$type<ConnectionSignup>(),
+    /** Los pasos que odentIA hace en Meta por una conexión de WhatsApp con la app propia de la clínica. */
+    ownApp: jsonb("own_app").$type<ConnectionOwnApp>(),
     /**
      * Cuándo se leyeron por última vez sus plantillas en la cuenta del
      * proveedor: la revisión diaria pone al día estados y categorías por si se
