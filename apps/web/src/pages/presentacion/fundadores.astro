@@ -1,0 +1,68 @@
+---
+// La presentación de Fundadores (odentia32.com/presentacion/fundadores y latidia72.com/presentacion/fundadores): la de
+// cada producto, a pantalla completa y sin cabecera ni pie. Es para mostrarla en una llamada o
+// enviarla a quien preguntó, no para buscadores: no se indexa ni va en el mapa del sitio. Sus cifras
+// salen de la administración (src/presentations/figures.ts).
+import latidiaFavicon from "../../../../../assets/brand/latidia/favicon.svg?url"
+import latidiaLogo from "../../assets/latidia-logotipo-dark.svg?raw"
+import odentiaLogo from "../../assets/logotipo-dark.svg?raw"
+import { ECG } from "../../components/latidia/home/DictationDemo"
+import { MEDICAL, WORDS } from "../../lib/product"
+import { contactHref } from "../../lib/site"
+import { deckFigures, fillDeck, withoutGuide } from "../../presentations/figures"
+import LatidiaScripts from "../../presentations/LatidiaScripts.astro"
+import latidiaDeck from "../../presentations/latidia/deck.html?raw"
+import OdentiaScripts from "../../presentations/OdentiaScripts.astro"
+import odentiaDeck from "../../presentations/odentia/deck.html?raw"
+
+Astro.response.headers.set("X-Robots-Tag", "noindex, nofollow")
+
+// El día de ejemplo de cada presentación: lo que cobra además de la cita recuperada.
+const figures = deckFigures(
+  Astro.locals.pricing,
+  MEDICAL ? ["agenda", "completa", "informa"] : ["gestiona", "estandar"],
+)
+// El logotipo de la web, sin su título para que no aparezca como globo al pasar el puntero.
+const logo = (MEDICAL ? latidiaLogo : odentiaLogo)
+  .replace(/<title>[^<]*<\/title>/, "")
+  .replace("<svg ", `<svg aria-label="${WORDS.name}" role="img" `)
+// El guion es para quien presenta: solo viene con /presentacion/fundadores?guion.
+const guide = Astro.url.searchParams.has("guion")
+const source = MEDICAL ? latidiaDeck : odentiaDeck
+const deck = figures ? fillDeck(guide ? source : withoutGuide(source), { ...figures, logo, ecg: ECG }) : null
+---
+<!doctype html>
+<html lang="es" data-brand={MEDICAL ? "latidia" : undefined}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>{WORDS.name} Fundadores</title>
+    <meta name="theme-color" content={WORDS.themeColor} />
+    {MEDICAL ? <link rel="icon" href={latidiaFavicon} type="image/svg+xml" /> : <link rel="icon" href="/favicon.svg" type="image/svg+xml" />}
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+  </head>
+  <body>
+    {deck ? (
+      <>
+        <Fragment set:html={deck} />
+        {MEDICAL ? <LatidiaScripts /> : <OdentiaScripts />}
+      </>
+    ) : (
+      <main class="soon">
+        <p>{WORDS.name} Fundadores</p>
+        <h1>Los precios se publican pronto.</h1>
+        <p>Escríbenos y te mostramos la presentación en una llamada.</p>
+        <a href={contactHref}>Habla con nosotros</a>
+      </main>
+    )}
+    <style>
+      .soon { min-height: 100vh; display: grid; place-content: center; gap: 16px; padding: 24px; text-align: center; font-family: Manrope, system-ui, sans-serif; background: #0a2129; color: #f1f5f9; }
+      :global([data-brand="latidia"]) .soon { background: #1e0b3d; }
+      .soon h1 { margin: 0; font-size: clamp(28px, 5vw, 48px); }
+      .soon a { color: inherit; font-weight: 700; }
+    </style>
+  </body>
+</html>
