@@ -216,15 +216,13 @@ export function setArgosLastQuestion(next: ArgosLastQuestion | null): void {
   for (const listener of lastListeners) listener()
 }
 
+function subscribeLastQuestion(listener: () => void): () => void {
+  lastListeners.add(listener)
+  return () => lastListeners.delete(listener)
+}
+
 export function useArgosLastQuestion(): ArgosLastQuestion | null {
-  return useSyncExternalStore(
-    (listener) => {
-      lastListeners.add(listener)
-      return () => lastListeners.delete(listener)
-    },
-    () => lastQuestion,
-    () => null,
-  )
+  return useSyncExternalStore(subscribeLastQuestion, () => lastQuestion, () => null)
 }
 
 export function openArgos(detail: ArgosAskEvent): void {

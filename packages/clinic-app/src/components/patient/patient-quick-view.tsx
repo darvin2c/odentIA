@@ -1,4 +1,4 @@
-import { buttonVariants } from "@odentia/ui"
+import { Button, buttonVariants } from "@odentia/ui"
 import { DetailDrawer } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
@@ -47,6 +47,7 @@ export function PatientQuickView({ context, onClose }: { context: QuickViewConte
       title={context.name}
       description={data ? [hcLabel(data.patientNumber), phone].filter(Boolean).join(" · ") : undefined}
       isLoading={patient.isPending}
+      error={patient.isError ? "No se pudo leer la ficha. Ciérrala y vuelve a intentarlo." : null}
       onClose={onClose}
       actions={
         <>
@@ -58,9 +59,9 @@ export function PatientQuickView({ context, onClose }: { context: QuickViewConte
             Abrir ficha completa
           </Link>
           {canBook ? (
-            <button type="button" className={buttonVariants()} onClick={book}>
+            <Button type="button" onClick={book}>
               Agendar
-            </button>
+            </Button>
           ) : null}
         </>
       }

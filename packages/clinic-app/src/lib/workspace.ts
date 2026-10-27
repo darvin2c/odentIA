@@ -172,7 +172,8 @@ export type WaitingRow =
     }
   /** Un aviso que WhatsApp pasó a promoción: solo sale a quien aceptó novedades; hay que cambiarle el texto (ADR 0040). */
   | { kind: "promotion"; messageId: string; title: string }
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number }
+  /** `startsAt`: en «citas más sin cerrar», la primera que no cupo (la Agenda abre en su día). */
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number; startsAt?: string | null }
 export interface WorkspaceAppointment {
   id: string
   patientId: string

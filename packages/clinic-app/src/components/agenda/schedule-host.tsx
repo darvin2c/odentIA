@@ -1,4 +1,4 @@
-import { scheduleToneAt, useScheduleNow, zonedDateOf } from "@odentia/ui-patterns"
+import { DetailDrawer, scheduleToneAt, useScheduleNow, zonedDateOf } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -109,7 +109,8 @@ function AppointmentHost({
   const resources = useResources(item?.branchId, Boolean(item))
   const toneOf = useToneOf(resources.data?.data)
   const now = useScheduleNow()
-  if (!item || !resources.data) return null
+  if (appointment.isError || resources.isError) return <Waiting title="Cita" error="No se pudo abrir la cita. Ciérrala y vuelve a intentarlo." onClose={onClose} />
+  if (!item || !resources.data) return <Waiting title="Cita" onClose={onClose} />
   const timeZone = resources.data.data.timeZone
   return (
     <AppointmentDrawer
@@ -123,8 +124,9 @@ function AppointmentHost({
       onClose={onClose}
       onChanged={async () => {
         await invalidateAppointmentQueries(client)
-        const fresh = await apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointmentId}`)
-        announce(fresh.data)
+        // El cambio ya se hizo: si releerla falla, solo no se marca la fila de quien la abrió.
+        const fresh = await apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointmentId}`).catch(() => null)
+        if (fresh) announce(fresh.data)
       }}
       onRebook={onRebook}
     />
@@ -138,7 +140,8 @@ function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void
   const resources = useResources(sede.branchId, sede.ready)
   const toneOf = useToneOf(resources.data?.data)
   const now = useScheduleNow()
-  if (!resources.data) return null
+  if (resources.isError) return <Waiting title="Nueva cita" error="No se pudo abrir la agenda. Ciérrala y vuelve a intentarlo." onClose={onClose} />
+  if (!resources.data) return <Waiting title="Nueva cita" onClose={onClose} />
   const data = resources.data.data
   return (
     <BookingDrawer
@@ -157,6 +160,15 @@ function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void
         announce(created)
       }}
     />
+  )
+}
+
+/** El cajón mientras llega lo que necesita, o con lo que falló: el clic nunca se queda sin respuesta. */
+function Waiting({ title, error, onClose }: { title: string; error?: string; onClose: () => void }) {
+  return (
+    <DetailDrawer open title={title} isLoading={!error} error={error ?? null} onClose={onClose}>
+      {null}
+    </DetailDrawer>
   )
 }
 

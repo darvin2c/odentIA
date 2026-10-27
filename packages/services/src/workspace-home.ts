@@ -311,7 +311,8 @@ export type WaitingRow =
   | ({ kind: "advice" } & WaitingAdvice)
   | ({ kind: "budgets" } & WaitingBudgets)
   /** Lo que no cupo de un tipo, con su total. */
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number }
+  /** `startsAt`: en «citas más sin cerrar», la primera que no cupo (la Agenda abre en su día). */
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number; startsAt?: string | null }
 
 export interface WaitingParts {
   /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
@@ -325,7 +326,7 @@ export interface WaitingParts {
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
   /** Citas de días anteriores sin cerrar, de la más antigua a la más reciente, y cuántas son. */
-  unclosed?: { items: WaitingUnclosed[]; total: number } | null
+  unclosed?: { items: WaitingUnclosed[]; total: number; nextAt?: string | null } | null
   /** Quienes aceptaron y no tienen cita, con lo que suma (null o 0: nadie). */
   acceptedUnbooked?: WaitingAcceptedUnbooked | null
   /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
@@ -375,7 +376,7 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
     const shown = parts.unclosed.items.slice(0, WAITING_LIMITS.unclosed)
     for (const item of shown) rows.push({ kind: "unclosed", ...item })
     const left = parts.unclosed.total - shown.length
-    if (left > 0) rows.push({ kind: "more", of: "unclosed", count: left })
+    if (left > 0) rows.push({ kind: "more", of: "unclosed", count: left, startsAt: parts.unclosed.nextAt ?? null })
   }
 
   if (parts.unconfirmed && parts.unconfirmed.total > 0) {

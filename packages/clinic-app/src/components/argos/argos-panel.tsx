@@ -36,7 +36,7 @@ import {
   rerunArgos,
   setArgosLastQuestion,
 } from "../../lib/argos"
-import { visitName } from "../../lib/agenda"
+import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { askHelp, canOpenHref } from "../../lib/global-search"
 import { useOrgLocale } from "../../lib/locale"
@@ -195,8 +195,8 @@ function appointmentOf(row: ArgosTable["rows"][number]): string | null {
  */
 function AnswerRows({ table }: { table: ArgosTable }) {
   const [all, setAll] = useState(false)
-  const [changed, setChanged] = useState<Record<string, string>>({})
-  useAppointmentSaved((appointment) => setChanged((current) => ({ ...current, [appointment.id]: visitName(appointment.visit) })))
+  const [changed, setChanged] = useState<Record<string, AgendaAppointment>>({})
+  useAppointmentSaved((appointment) => setChanged((current) => ({ ...current, [appointment.id]: appointment })))
   // Sin filas, la frase ya lo dice («En setiembre no se cobró nada»): una tabla vacía no agrega nada.
   if (drawingOf(table) || table.columns.length === 0 || table.rows.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
   const rows = all ? table.rows : table.rows.slice(0, ROWS_SHOWN)
@@ -226,16 +226,18 @@ function AnswerRows({ table }: { table: ArgosTable }) {
                   <td className="px-2.5 py-1.5">
                     {appointmentId && lead ? (
                       <span className="flex flex-col items-start gap-1">
-                        <button
+                        <Button
                           type="button"
-                          className="text-left font-semibold text-primary-soft-foreground underline underline-offset-2"
+                          variant="link"
+                          className="h-auto min-h-0 justify-start p-0 text-left text-[13px] font-semibold whitespace-normal text-primary-soft-foreground underline underline-offset-2"
                           onClick={() => openAppointmentAnywhere(appointmentId)}
                         >
                           {display[lead.name]}
-                        </button>
+                        </Button>
                         {state ? (
-                          <Badge variant="success" className="text-[11px]">
-                            {state}
+                          // Verde solo lo que salió bien; «No vino» o «Cancelada» van neutras.
+                          <Badge variant={state.visit === "atendida" || state.visit === "confirmada" || state.visit === "llego" ? "success" : "secondary"} className="text-[11px]">
+                            {visitName(state.visit)}
                           </Badge>
                         ) : null}
                       </span>
@@ -739,9 +741,12 @@ export function ArgosPanel() {
   const last = exchanges[exchanges.length - 1]
   const lastAsked = last?.question
   // El buscador ofrece volver a esta conversación mientras exista.
+  const lastId = last?.id
   useEffect(() => {
     setArgosLastQuestion(lastAsked ? { question: lastAsked, at: new Date().toISOString() } : null)
-  }, [lastAsked])
+  }, [lastAsked, lastId])
+  // Al salir de la clínica (o cerrar sesión) no queda una conversación que ofrecer.
+  useEffect(() => () => setArgosLastQuestion(null), [])
   // biome-ignore lint/correctness/useExhaustiveDependencies: baja a la última respuesta cuando llega.
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" })

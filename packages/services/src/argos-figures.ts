@@ -1087,7 +1087,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     key: "citas_sin_cerrar",
     name: "Citas sin cerrar",
     describes: "Cuántas citas ya pasaron sin que nadie dijera si la persona vino, hoy: siguen por confirmar o confirmadas, sin llegada.",
-    how: "Citas cuya hora ya pasó y siguen por confirmar o confirmadas, sin llegada ni atención, hoy. No se marcan solas: falta decir si vino.",
+    how: "Citas cuya hora ya pasó y siguen por confirmar o confirmadas, sin llegada ni atención empezada, hoy. No se marcan solas: falta decir si vino.",
     unit: "cantidad",
     column: "citas",
     time: "a_hoy",
@@ -1096,7 +1096,7 @@ export const ARGOS_FIGURES: readonly ArgosFigure[] = [
     sources: [
       {
         views: ["citas"],
-        rows: "select sede, profesional, servicio, 1 as v from citas where estado in ('programada', 'confirmada') and ya_paso and llego_en is null",
+        rows: "select sede, profesional, servicio, 1 as v from citas where estado in ('programada', 'confirmada') and ya_paso and llego_en is null and atencion_inicio is null",
         cuts: ["sede", "profesional", "servicio"],
       },
     ],

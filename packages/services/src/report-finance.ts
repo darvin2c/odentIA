@@ -921,7 +921,8 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
           select b.patient_id, max(coalesce(b.decided_at, b.presented_at)) as at, sum(i.price_cents::bigint * ${units}) as cents,
             string_agg(distinct i.title, ' · ') as title,
             array_agg(distinct pi.id::text) filter (where pi.id is not null) as plan_item_ids,
-            case when count(distinct i.service_id) = 1 then min(i.service_id::text) end as service_id
+            -- Uno solo y en todos: si alguno no tiene servicio, la reserva no elige por la persona.
+            case when count(distinct i.service_id) = 1 and bool_and(i.service_id is not null) then min(i.service_id::text) end as service_id
           from treatment_budget b
           join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
             and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null

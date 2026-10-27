@@ -139,7 +139,7 @@ export function waitingText(row: WaitingRow, context: HomeTextContext): { title:
     }
     case "acceptedUnbooked":
       return {
-        title: `${plural(row.patients, "persona aceptó su presupuesto y no tiene cita", "personas aceptaron su presupuesto y no tienen cita")}`,
+        title: plural(row.patients, "persona aceptó su presupuesto y no tiene cita", "personas aceptaron su presupuesto y no tienen cita"),
         detail: `${formatMoney(row.cents, row.currency, context.locale)} aceptados por hacer`,
         action: "Ver la lista",
       }

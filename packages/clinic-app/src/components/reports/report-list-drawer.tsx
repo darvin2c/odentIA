@@ -5,9 +5,9 @@
 import { formatMoney } from "@odentia/clinical"
 import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { DetailDrawer, EmptyState } from "@odentia/ui-patterns"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
 import { QueryErrorState } from "../../lib/query-error"
@@ -328,7 +328,20 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
   // Lo reservado desde esta lista se queda en ella, marcado, hasta que se cierra: así se ve el avance.
   const [booked, setBooked] = useState<Record<string, AgendaAppointment>>({})
   const [quick, setQuick] = useState<QuickViewContext | null>(null)
-  useAppointmentSaved((appointment) => setBooked((current) => ({ ...current, [appointment.patientId]: appointment })))
+  const queryClient = useQueryClient()
+  // Otra lista (o la misma vuelta a abrir) empieza sin marcas ni vista rápida.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se reinicia al cambiar de lista.
+  useEffect(() => {
+    setBooked({})
+    setQuick(null)
+  }, [list])
+  // Solo una cita en pie y por venir la saca de «no tienen cita»: «No vino» o cancelar no la agendan.
+  useAppointmentSaved((appointment) => {
+    if (!bookedNow(appointment)) return
+    setBooked((current) => ({ ...current, [appointment.patientId]: appointment }))
+    // Las cifras de Reportes («No tienen cita: 76») ya no valen; la lista abierta se queda con sus marcas.
+    void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "report" && query.queryKey[1] !== `list:${list}` })
+  })
   const bookFor = (context: QuickViewContext) =>
     openBookingAnywhere({
       patient: { id: context.patientId, name: context.name },
@@ -403,9 +416,9 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
                     return (
                       <li key={row.id} className={cn("flex min-h-[60px] min-w-0 items-center gap-3 py-2", done && "-mx-2 rounded-lg bg-success-soft px-2")}>
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <button type="button" className="truncate text-left font-semibold hover:underline" onClick={() => setQuick(context)}>
+                          <Button type="button" variant="link" className="h-auto min-h-0 justify-start truncate p-0 text-left font-semibold text-foreground" onClick={() => setQuick(context)}>
                             {row.personName}
-                          </button>
+                          </Button>
                           {done ? (
                             <span className="text-[13px] font-semibold text-success">
                               Cita el {bookedLabel(done.startsAt, data.locale, data.timezone)} · {done.professionalName}
@@ -489,6 +502,11 @@ export function ReportListDrawer({ list, query, onClose }: { list: ReportListKey
       ) : null}
     </DetailDrawer>
   )
+}
+
+/** Una cita que deja a la persona con algo por venir: en pie y aún no empieza. */
+function bookedNow(appointment: AgendaAppointment): boolean {
+  return (appointment.status === "programada" || appointment.status === "confirmada") && Date.parse(appointment.startsAt) > Date.now()
 }
 
 /** «jue 29 oct, 10:00»: el día y la hora de la cita recién reservada. */

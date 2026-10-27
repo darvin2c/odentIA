@@ -4,6 +4,7 @@ import { dueWords } from "../../lib/data-requests"
 import { Link } from "@tanstack/react-router"
 import { CalendarClock, CalendarX2, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, ShieldCheck, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { dayKeyOf } from "../../lib/finance-cash"
 import { duplicateActions, type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import { channelLabel } from "../../lib/channels"
 import type { WaitingRow } from "../../lib/workspace"
@@ -159,7 +160,9 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return row.more > 0 ? <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} /> : <Link to={row.href} {...props} />
     case "more":
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
-      if (row.of === "unconfirmed" || row.of === "unclosed") return <Link to="/agenda" search={{}} {...props} />
+      if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
+      // La Agenda muestra «Ya pasaron · sin cerrar» del día que se mira: abre en el de la primera que no cupo.
+      if (row.of === "unclosed") return <Link to="/agenda" search={row.startsAt ? { date: dayKeyOf(row.startsAt, context.timezone) } : {}} {...props} />
       if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
       // «y N casos más»: cada caso es una tarea de Recepción («Te lo pasó Sofi»).
       return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />

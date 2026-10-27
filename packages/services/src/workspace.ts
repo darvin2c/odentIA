@@ -622,7 +622,7 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
  * Citas de un día que ya terminó (en la zona de su sede o, sin ella, la de la clínica) que siguen en pie sin
  * llegada: nadie dijo si vinieron. De la más antigua a la más reciente.
  */
-async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise<{ items: WaitingUnclosed[]; total: number }> {
+async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise<{ items: WaitingUnclosed[]; total: number; nextAt: string | null }> {
   const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] } & { total: number }>(sql`
     select a.id, a.patient_id as "patientId", pp.display_name as "patientName", ${iso(sql`a.starts_at`)} as "startsAt",
       u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
@@ -634,8 +634,12 @@ async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise
     left join "user" u on u.id = a.professional_user_id
     where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada') and a.arrived_at is null
       and (a.starts_at at time zone coalesce(b.timezone, ${timezone}))::date < (now() at time zone coalesce(b.timezone, ${timezone}))::date
-    order by a.starts_at, a.id limit ${WAITING_LIMITS.unclosed}`)
-  return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+      -- Con su atención empezada no está sin cerrar: está en atención (y su borrador ya sale aparte).
+      and not exists (select 1 from encounter e where e.organization_id = a.organization_id and e.appointment_id = a.id and e.status <> 'anulada')
+    order by a.starts_at, a.id limit ${WAITING_LIMITS.unclosed + 1}`)
+  const items = rows.map(({ total: _total, ...row }) => row)
+  // La primera que no cabe: «N más» lleva a su día en la Agenda, donde se cierra.
+  return { items: items.slice(0, WAITING_LIMITS.unclosed), total: rows[0]?.total ?? 0, nextAt: items[WAITING_LIMITS.unclosed]?.startsAt ?? null }
 }
 
 /** La misma cuenta de Reportes › Finanzas («No tienen cita»), en la moneda de la clínica. */
