@@ -12,7 +12,7 @@ export interface Evidence {
   text: string
 }
 
-export type FactKind = "precio" | "hora" | "fecha"
+export type FactKind = "precio" | "hora" | "fecha" | "enlace"
 
 export interface FactCheck {
   kind: FactKind
@@ -558,6 +558,15 @@ export function verifyReply(
     checks.push({ kind: "hora", value: mention.raw, ok: Boolean(found), source: found?.source ?? null })
   }
 
+  // Un enlace sale solo si lo trajo una fuente del turno (una herramienta, los
+  // datos de la clínica): uno armado por el modelo lleva a una página que no
+  // existe (auditoría del 27-oct: «…/cita» en vez de «…/reserva?token=…»).
+  for (const match of normalize(reply).matchAll(WEB_ADDRESS)) {
+    const url = match[0].replace(/[.,;:!?)]+$/, "")
+    const found = evidence.find((item) => normalize(item.text).includes(url))
+    checks.push({ kind: "enlace", value: url, ok: Boolean(found), source: found?.source ?? null })
+  }
+
   const unsupported = checks.filter((check) => !check.ok)
   return { ok: unsupported.length === 0, checks, unsupported }
 }
@@ -634,7 +643,7 @@ export function pricedSubjectsOf(verdict: ReplyVerdict): string[] {
 
 /** Texto que recibe el modelo cuando su respuesta no sale por un dato sin sustento. */
 export function describeUnsupported(verdict: ReplyVerdict): string {
-  const label: Record<FactKind, string> = { precio: "precio", hora: "hora", fecha: "fecha" }
+  const label: Record<FactKind, string> = { precio: "precio", hora: "hora", fecha: "fecha", enlace: "enlace" }
   return verdict.unsupported.map((check) => `${label[check.kind]} «${check.value}»`).join(", ")
 }
 

@@ -11,7 +11,7 @@
   {
     "id": "handoff",
     "kind": "yesno",
-    "instructions": "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains or is upset, asks for clinical advice that only a professional can give (what to take, whether something is serious, what to do about a symptom, test results), or describes something that needs care right now: severe pain, bleeding that does not stop, swelling, high fever in a baby, chest pain, trouble breathing, an accident or distress. No if the contact mentions a symptom only to ask for an appointment, a price or availability: the assistant books that visit."
+    "instructions": "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains or is upset, is distressed or stuck asking for help, asks for clinical advice that only a professional can give (what to take, whether something is serious, what to do about a symptom, test results), or describes an emergency that may put a life at risk: chest pain, trouble breathing, bleeding that does not stop, a swollen face, swelling that blocks breathing or swallowing, high fever in a baby, fainting, an accident. No if the contact mentions a symptom, even strong pain, to ask where or when they can be seen, for an appointment, a price or availability: the assistant offers the nearest visit."
   },
   {
     "id": "urgency",

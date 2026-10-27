@@ -2050,11 +2050,19 @@ export async function createProposal(
           gt(agentProposal.createdAt, new Date(Date.now() - CONFIRM_TTL_MS)),
         ),
       )
-    // La persona corrige la lista de su respuesta («no, la 36 también»): la
-    // nueva reemplaza a la anterior, que nunca recibió su sí. Sigue habiendo
-    // una sola esperando confirmación.
+    // La persona corrige lo que pidió («no, la 36 también»; «mejor el jueves a
+    // las 9»): la nueva reemplaza a la anterior, que nunca recibió su sí. Sigue
+    // habiendo una sola esperando confirmación, y es la última que se le dijo:
+    // si no, su «confirmo» ejecutaba la vieja (auditoría del 27-oct).
+    // Entre citas da igual el tipo: si esperaba el sí para mover su cita y ahora
+    // pide reservar otra, lo último que pidió manda (si no, quedaba en un bucle
+    // de «hay otra propuesta pendiente» que la persona no puede deshacer).
+    const appointment = (action: string) => (APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(action)
     const replaces =
-      input.action === "decidir_presupuesto" && pending.length > 0 && pending.every((row) => row.action === "decidir_presupuesto")
+      pending.length > 0 &&
+      (input.action === "decidir_presupuesto"
+        ? pending.every((row) => row.action === "decidir_presupuesto")
+        : appointment(input.action) && pending.every((row) => appointment(row.action)))
     if (replaces) {
       for (const row of pending) {
         await tx
@@ -3782,6 +3790,42 @@ async function topicPersonName(tx: Db, orgId: string, contactId: string | null):
  * (ADR 0050): el agente no lo responde; se anota el mensaje en el tema y se
  * avisa a su responsable (o, sin responsable, queda resaltado en «Por atender»).
  */
+/**
+ * El tema más reciente que el equipo aún tiene en esta conversación, con su
+ * prioridad: si la persona vuelve a escribir sobre lo mismo se anota en ese
+ * tema, no se abre otro (auditoría del 27-oct: «hablar con la doctora» abría
+ * un tema por mensaje).
+ */
+export async function latestOpenTopic(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  /**
+   * Solo un tema de esta misma atención y de la misma clase: un cambio de cita
+   * no se anota en el «precio de la extracción» abierto días atrás.
+   */
+  match: { kind?: TopicKind } = {},
+): Promise<{ id: string; priority: string } | null> {
+  const [row] = await tx
+    .select({ id: agentHandoff.id, priority: agentHandoff.priority })
+    .from(agentHandoff)
+    .where(
+      and(
+        eq(agentHandoff.organizationId, orgId),
+        eq(agentHandoff.conversationId, conversationId),
+        handoffStillOpen(),
+        gt(agentHandoff.createdAt, new Date(Date.now() - SAME_TOPIC_MS)),
+        ...(match.kind ? [eq(agentHandoff.kind, match.kind)] : []),
+      ),
+    )
+    .orderBy(desc(agentHandoff.createdAt))
+    .limit(1)
+  return row ?? null
+}
+
+/** Cuánto atrás un tema abierto cuenta como «el mismo» que vuelve a pedir. */
+const SAME_TOPIC_MS = 12 * 60 * 60 * 1000
+
 export async function recordTopicAskedAgain(
   tx: Db,
   orgId: string,

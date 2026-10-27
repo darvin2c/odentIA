@@ -500,7 +500,7 @@ export interface AnswerBasisItem {
   ref?: string
 }
 
-export const ANSWER_CHECK_KINDS = ["precio", "hora", "fecha"] as const
+export const ANSWER_CHECK_KINDS = ["precio", "hora", "fecha", "enlace"] as const
 export type AnswerCheckKind = (typeof ANSWER_CHECK_KINDS)[number]
 
 /** Comprobación de un dato concreto de la respuesta contra lo consultado. */

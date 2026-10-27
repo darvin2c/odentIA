@@ -179,11 +179,11 @@ export function formatAgentCaseForPrompt(
   const facts: string[] = []
   if (state.topics?.length) {
     sections.push(
-      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene y cuándo le responde; responde con normalidad todo lo demás:
+      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene, sin prometer una hora. Si habla de otra cosa, no los menciones: responde con normalidad lo que pide:
 ${state.topics
         .map(
           (t) =>
-            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}${t.dueAt ? `; responde antes de ${when(t.dueAt)}` : ""}.`,
+            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}.`,
         )
         .join("\n")}`,
     )
@@ -191,7 +191,7 @@ ${state.topics
   // Lo único que queda pendiente en un hilo es lo que confirma el interlocutor (ADR 0023).
   for (const p of state.pending) {
     facts.push(
-      `- Propuesta pendiente de que el interlocutor confirme: ${p.label} — ${p.summary} (id ${p.id}; creada ${when(p.at)}${p.expiresAt ? `; vence ${when(p.expiresAt)}` : ""}). Si su último mensaje es un sí claro, ejecútala con confirmar_propuesta y ese id; no la propongas de nuevo ni vuelvas a buscar.`,
+      `- Propuesta pendiente de que el interlocutor confirme: ${p.label} — ${p.summary} (id ${p.id}; creada ${when(p.at)}${p.expiresAt ? `; vence ${when(p.expiresAt)}` : ""}). Si su último mensaje es un sí claro a esta propuesta, ejecútala con confirmar_propuesta y ese id; no la propongas de nuevo ni vuelvas a buscar. Si después de proponerla pidió otro día, hora, sede o profesional, no la ejecutes: busca y propón lo que pidió.`,
     )
   }
   for (const p of state.recent) {

@@ -104,7 +104,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
         description:
           "Busca horarios reales y reserva, mueve o cancela por el chat. Antes de hacerlo, siempre le pide el «sí» al paciente. También puede mandar el enlace de reserva cuando a la persona le sirve ver todos los horarios, sedes y profesionales a la vez.",
         fixed: false,
-        tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reprogramar_cita", "cancelar_cita"],
+        tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reprogramar_cita", "cancelar_cita", "guardar_contacto"],
         steps: [
           "Confirma la sede y el servicio.",
           "Busca huecos reales en la agenda, o manda el enlace si a la persona le sirve ver todo.",

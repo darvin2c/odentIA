@@ -370,6 +370,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       mode: "fixed" as const,
       fresh: 22,
       returning: 12,
+      conditions: "Una limpieza por persona.",
     },
     {
       name: "Blanqueamiento 2×1",
@@ -381,6 +382,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       fresh: 0,
       returning: 5,
       onlyNoReturn: true,
+      conditions: "Dos blanqueamientos al precio de uno, para dos personas que vienen juntas.",
     },
     {
       name: "Evaluación gratis",
@@ -391,6 +393,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       mode: "fixed" as const,
       fresh: 9,
       returning: 0,
+      conditions: "Solo para pacientes nuevos.",
     },
     {
       name: "Corona de porcelana con precio desde",
@@ -401,6 +404,7 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       mode: "from" as const,
       fresh: 6,
       returning: 3,
+      conditions: "El precio final se define en la evaluación.",
     },
   ]
   // Quién puede llevarla: una cita atendida dentro de la promoción, sin un borrador de presupuesto.
@@ -411,7 +415,8 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
       name: promotion.name,
       startsAt: promotion.startsAt.toISOString(),
       endsAt: promotion.endsAt?.toISOString() ?? null,
-      conditions: "Semilla de Reportes.",
+      // Lo lee Sofi tal cual a los pacientes: una condición de verdad, nunca una marca de la semilla.
+      conditions: promotion.conditions,
       items: [{ serviceId: promotion.service.id, mode: promotion.mode, priceCents: promotion.mode === "from" ? promotion.priceCents : Math.max(promotion.priceCents, 0) }],
     })
     const until = Math.min(promotion.endsAt?.getTime() ?? now, now - 2 * DAY_MS)

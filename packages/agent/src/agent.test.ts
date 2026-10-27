@@ -5,7 +5,7 @@ import { once } from "node:events"
 import { createServer } from "node:http"
 import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
-import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
 import {
@@ -667,7 +667,7 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
     )
     // Con LLM_MODEL=fake la línea base es el modelo de decisión falso.
     expect(rows).toEqual([
-      expect.objectContaining({ point: "triage.v5", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
+      expect.objectContaining({ point: "triage.v6", provider: "fake", error: null, outcome: expect.objectContaining({ wouldHandoff: true }) }),
     ])
     expect(rows[0]!.stateChars).toBeGreaterThan(0)
     // Las filas no guardan el texto: solo la huella.
@@ -2073,6 +2073,9 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, opened.conversationId)))
   const [testPatient] = await inOrg((tx) => listAgentContextCandidates(tx, "org_a", thread!.contactId))
   expect(testPatient).toMatchObject({ displayName: "Paciente de prueba", relationship: "self" })
+  // En el chat web no se reserva sin dónde avisarle (si la clínica puede avisar):
+  // la persona de prueba ya dejó su correo.
+  await ownerDb.update(contact).set({ email: "prueba@example.com" }).where(eq(contact.id, thread!.contactId))
   const write = (text: string) =>
     inOrg((tx) =>
       ingestInbound(
@@ -2367,7 +2370,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect(info.system).toContain("Camino para este mensaje, elegido por lo que escribió el interlocutor: pide información.")
     expect(info.system).toContain("Si con eso basta, responde ahora con send_reply, en este mismo paso.")
     expect(info.decisions).toEqual([
-      expect.objectContaining({ point: "route.v5", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
+      expect.objectContaining({ point: "route.v6", mode: "route", error: null, outcome: expect.objectContaining({ path: "informacion", intent: "price_or_service_info" }) }),
     ])
     expect(info.ledger).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["send_reply"] }])
     // Con el camino elegido solo se le enseñan las herramientas de ese camino, más la que le devuelve el resto.
@@ -2476,7 +2479,7 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     const shadow = await turn("tg:camino-apagado", "evt-camino-apagado", "Tengo una queja y quiero hablar con una persona")
     expect(shadow.calls).toBe(1)
     expect(shadow.system).not.toContain("Camino para este mensaje")
-    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v5", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
+    expect(shadow.decisions).toEqual([expect.objectContaining({ point: "triage.v6", mode: "shadow", outcome: expect.objectContaining({ wouldHandoff: true }) })])
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
   }

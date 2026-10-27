@@ -7,7 +7,7 @@ import { clinicWord, type ProductAgentTexts } from "@odentia/services"
  * proveedores) con el estado en español; versionadas para que un cambio
  * de redacción u orden de opciones invalide los umbrales calibrados.
  */
-export const TRIAGE_VERSION = "triage.v5"
+export const TRIAGE_VERSION = "triage.v6"
 
 /** Las preguntas de cada mensaje, con las palabras del producto (odentIA: «dental clinic», la boca). */
 export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] => [
@@ -21,9 +21,10 @@ export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] =>
     id: "handoff",
     kind: "yesno",
     instructions:
-      // Contar un síntoma para pedir cita no es pedir una persona (triage.v5): medido con
-      // eval/sintomas-y-cita.json, la versión anterior derivaba a casi todo paciente con un síntoma.
-      "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains or is upset, asks for clinical advice that only a professional can give (what to take, whether something is serious, what to do about a symptom, test results), or describes something that needs care right now: severe pain, bleeding that does not stop, swelling, high fever in a baby, chest pain, trouble breathing, an accident or distress. No if the contact mentions a symptom only to ask for an appointment, a price or availability: the assistant books that visit.",
+      // Contar un síntoma para pedir cita no es pedir una persona (triage.v5, ADR 0095): medido con
+      // eval/sintomas-y-cita.json. triage.v6 (ADR 0097): «dolor fuerte» o «hinchazón» sin más
+      // también es pedir dónde o cuándo atenderse; Sofi ofrece la hora más próxima y el teléfono de urgencias.
+      "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains or is upset, is distressed or stuck asking for help, asks for clinical advice that only a professional can give (what to take, whether something is serious, what to do about a symptom, test results), or describes an emergency that may put a life at risk: chest pain, trouble breathing, bleeding that does not stop, a swollen face, swelling that blocks breathing or swallowing, high fever in a baby, fainting, an accident. No if the contact mentions a symptom, even strong pain, to ask where or when they can be seen, for an appointment, a price or availability: the assistant offers the nearest visit.",
   },
   {
     id: "urgency",

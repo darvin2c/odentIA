@@ -642,7 +642,7 @@ await db.insert(user).values([
   },
   {
     id: LUIS_ID,
-    name: "Luis Prado",
+    name: "Dr. Luis Prado",
     firstName: "Luis",
     lastName: "Prado",
     email: seedEmail("luis"),
