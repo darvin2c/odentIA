@@ -107,14 +107,14 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const block = (name: string) => page.locator(`section[aria-label="${name}"]`).filter({ has: page.getByRole("heading", { level: 2, name, exact: true }) })
   const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
   const write = async (text: string, from = idle) => {
-    await from.getByRole("button", { name: "Escribir lo dictado" }).click()
+    await from.getByRole("button", { name: "Escribir en vez de dictar" }).click()
     await from.getByLabel("Escribe lo dictado").fill(text)
     await from.getByRole("button", { name: "Ordenar lo dictado" }).click()
   }
   await expect(idle).toContainText("Nada entra a la historia hasta que confirmes.")
   await write(DICTATION)
-  await expect(review).toContainText("Dictado terminado: 4 sugerencias")
-  await expect(review).toContainText("4 listas. Todavía no hay nada en la historia.")
+  await expect(review).toContainText("Clío dejó 4 sugerencias por revisar")
+  await expect(review).toContainText("4 listas. Nada entra a la historia hasta que lo confirmes.")
   // Cada sugerencia vive en su bloque, que la cuenta en su resumen.
   await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
   await expect(block("Diagnóstico")).toContainText("Sin diagnósticos confirmados · 1 sugerencia")
@@ -129,7 +129,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const signButton = page.getByRole("button", { name: "Finalizar y firmar", exact: true })
   await expect(closing).toContainText("Diagnóstico: hay uno sugerido, sin confirmar")
   await expect(signButton).toBeDisabled()
-  // Todavía no hay nada en la historia.
+  // Nada entra a la historia hasta que lo confirmes.
   const detail = () => call<{ encounter: { reason: string | null; evolution: string | null; status: string }; diagnoses: Array<{ diagnosisCode: string; toothNumber: number | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
   expect((await detail()).diagnoses).toEqual([])
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -142,7 +142,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await info.attach("dictado-editar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByLabel("Control", { exact: true }).fill("Control de endodoncia")
   await page.getByRole("button", { name: "Guardar y confirmar" }).click()
-  await expect(review).toContainText("Dictado terminado: 3 sugerencias")
+  await expect(review).toContainText("Clío dejó 3 sugerencias por revisar")
   const controls = () => call<Array<{ title: string; status: string }>>(page, "GET", `${apiPath}/follow-ups`, org.slug)
   expect(await controls()).toEqual([expect.objectContaining({ title: "Control de endodoncia", status: "pendiente" })])
 
@@ -184,7 +184,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(suggested("Plan de tratamiento")).toContainText("corregido por voz, antes pieza 25", { timeout: 15_000 })
   await expect(suggested("Plan de tratamiento")).toContainText("Pieza 26")
   await live.getByRole("button", { name: "Terminar dictado" }).click()
-  await expect(review).toContainText("Dictado terminado: 1 sugerencia")
+  await expect(review).toContainText("Clío dejó 1 sugerencia por revisar")
   await expect(backup).toHaveCount(0)
   // Deshacer la corrección por voz vuelve a la pieza dictada primero.
   await suggested("Plan de tratamiento").getByRole("button", { name: "Deshacer" }).click()
@@ -212,7 +212,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await finding.getByRole("button", { name: "Diente no erupcionado" }).click()
   await expect(finding).not.toContainText("Por revisar")
   await finding.getByRole("button", { name: "Confirmar", exact: true }).click()
-  await expect(block("Odontograma")).toContainText("1 hallazgo(s) de esta atención")
+  await expect(block("Odontograma")).toContainText("1 hallazgo en esta atención")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictado-odontograma", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
@@ -234,10 +234,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  // En pantalla estrecha el bloque abierto es un cajón: se cierra para ver la atención.
-  const openBlock = page.getByRole("dialog", { name: "Consulta" })
-  await openBlock.getByRole("button", { name: "Cancelar" }).click()
-  await expect(openBlock).toBeHidden()
+  // Con el motivo ya escrito, volver a la atención no abre «Consulta» encima: se ve la atención.
+  await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
   const dictate = idle.getByRole("button", { name: "Dictar", exact: true })
   expect((await dictate.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await dictate.click()

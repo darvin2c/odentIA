@@ -518,7 +518,8 @@ export function BudgetResponse({
           lines.map((line) =>
             line.decision === "aceptado" || line.decision === "rechazado" ? line.decision : (confirming ?? "pospuesto"),
           ),
-        )}» y ya no se cambia: para corregirlo se crea una revisión.${error ? ` ${error}` : ""}`}
+        )}» y ya no se cambia: para corregirlo se crea una revisión.`}
+        error={error}
         confirmLabel={confirming === "rechazado" ? "Anotar que no acepta" : "Anotar que acepta todo"}
         variant={confirming === "rechazado" ? "destructive" : "default"}
         pending={saving}

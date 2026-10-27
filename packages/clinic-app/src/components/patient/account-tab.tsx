@@ -25,7 +25,7 @@ import { DetailDrawer, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitB
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
-import { useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import {
   CollectDrawer,
   MoneyInput,
@@ -86,10 +86,15 @@ function Section({
 /** Cobros del paciente: saldo, pendiente, cobros y pagos. */
 export function AccountTab({
   patientId,
+  openCollect = false,
+  onCollectOpened,
 }: {
   patientId: string
   /** Se conserva por compatibilidad de enlaces: la cuenta ya no lleva presupuestos. */
   part?: "cuenta"
+  /** «Cobrar» de Pendientes: abre el cobro (o aplica lo que tiene a favor) al llegar. */
+  openCollect?: boolean
+  onCollectOpened?: () => void
 }): React.JSX.Element {
   const uid = useId()
   const navigate = useNavigate()
@@ -160,8 +165,8 @@ export function AccountTab({
   })
 
   // Sede del cobro: la activa; con una sola sede, esa. Solo se pregunta si no hay ninguna.
-  const activeBranch =
-    sede.branchId ?? (sede.branches.length === 1 ? sede.branches[0]?.id : undefined) ?? pickedBranch
+  // La sede activa, la misma de la Agenda: solo se pregunta si la clínica no tiene ninguna activa.
+  const activeBranch = sede.effectiveId ?? pickedBranch
   const branchName = sede.branches.find((item) => item.id === activeBranch)?.name ?? ""
 
   const refundMutation = useMutation({
@@ -204,6 +209,18 @@ export function AccountTab({
     },
     onError: (err) => setError(financeErrorMessage(err)),
   })
+
+  // «Cobrar» de Pendientes: la acción del botón de cobro corre una vez, cuando la
+  // cuenta ya está leída (la decide el render de abajo y la deja en el ref).
+  const collectOnArrival = useRef<(() => void) | null>(null)
+  const collectRequested = useRef(openCollect)
+  const ready = Boolean(account.data) && canWrite
+  useEffect(() => {
+    if (!collectRequested.current || !ready || !collectOnArrival.current) return
+    collectRequested.current = false
+    collectOnArrival.current()
+    onCollectOpened?.()
+  }, [ready, onCollectOpened])
 
   if (!canRead) {
     return (
@@ -297,6 +314,7 @@ export function AccountTab({
 
   // Lo que tiene a favor cubre lo que debe: la acción es aplicarlo, no cobrar.
   const coveredByCredit = orgOwed > 0 && orgBalance === 0
+  collectOnArrival.current = () => withBranch(coveredByCredit ? "aplicar" : "cobrar")
   const collectButton = (className?: string) =>
     coveredByCredit ? (
       <Button className={className} disabled={applyMutation.isPending} onClick={() => withBranch("aplicar")}>

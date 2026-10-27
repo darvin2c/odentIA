@@ -23,7 +23,6 @@ import {
 } from "@odentia/ui"
 import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetchBytes } from "../../../lib/api"
@@ -68,6 +67,7 @@ import { BudgetResponse } from "./budget-response"
 import { BudgetSendButton } from "./budget-send"
 import { appWords } from "../../../lib/product-words"
 import { productUi } from "../../../product/product-ui"
+import { openBookingAnywhere } from "../../agenda/schedule-host"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
 const PAST = ["cancelado", "sustituido"]
@@ -408,7 +408,7 @@ function BudgetCard({
         )
       }
     >
-      Agendar
+      Reservar cita
     </Button>
   ) : null
 
@@ -809,13 +809,9 @@ function ReviseBudgetDrawer({
   )
 }
 
-/** Abre «Nueva cita» con la persona, el servicio y lo aceptado ya puestos. */
-export function useScheduleAccepted(patientId: string) {
-  const navigate = useNavigate()
+/** Abre «Nueva cita» al lado, con la persona, el servicio y lo aceptado ya puestos: nadie sale de la ficha. */
+export function useScheduleAccepted(patient: { id: string; name: string }) {
   return (planItemIds: string[], serviceId?: string | null) => {
-    void navigate({
-      to: "/agenda",
-      search: { patientId, planItems: planItemIds.join(","), ...(serviceId ? { serviceId } : {}) },
-    })
+    openBookingAnywhere({ patient, lockedPatient: true, planItemIds, ...(serviceId ? { serviceId } : {}) })
   }
 }

@@ -116,6 +116,15 @@ export function AllergiesCard({
   const [adding, setAdding] = useState(false)
   const [coding, setCoding] = useState<Allergy | null>(null)
   const [removing, setRemoving] = useState<Allergy | null>(null)
+  const queryClient = useQueryClient()
+  const noneReviewed = useMutation({
+    mutationFn: () => markAllergiesReviewedApi(patientId),
+    onSuccess: async () => {
+      await refresh(queryClient, patientId)
+      toast.success("Anotado: no tiene alergias")
+    },
+    onError: (error) => toast.error(errorText(error, "No se pudo guardar la revisión")),
+  })
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const removed = health.allergies.filter((allergy) => !allergy.isActive)
   const reviewed = health.allergiesReviewedAt
@@ -141,13 +150,21 @@ export function AllergiesCard({
         ) : null}
       </div>
       {active.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {health.reviewStatus.allergies === "none"
-            ? "No tiene alergias: se le preguntó."
-            : health.reviewStatus.allergies === "recorded"
-              ? "Sin alergias vigentes."
-              : "Aún no se le preguntó si tiene alergias."}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
+            {health.reviewStatus.allergies === "none"
+              ? "No tiene alergias: se le preguntó."
+              : health.reviewStatus.allergies === "recorded"
+                ? "Sin alergias vigentes."
+                : "Aún no se le preguntó si tiene alergias."}
+          </p>
+          {/* Sin preguntar, la respuesta más común queda a un toque, como en la atención. */}
+          {canWrite && health.reviewStatus.allergies === "unknown" ? (
+            <Button type="button" size="sm" variant="outline" disabled={noneReviewed.isPending} onClick={() => noneReviewed.mutate()}>
+              {noneReviewed.isPending ? "Guardando…" : "No tiene alergias"}
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <ul className="flex flex-col gap-2">
           {active.map((allergy) => {
@@ -603,5 +620,35 @@ export function AllergyReviewNotice({
         onClose={() => setAdding(false)}
       />
     </section>
+  )
+}
+
+/**
+ * «Alergias: no preguntado» en el Resumen: lo mismo que la atención, ahí mismo.
+ * «No tiene alergias» lo deja dicho; «Agregar alergia» abre su cajón. Antes el
+ * botón llevaba a la pestaña Antecedentes y había que pulsarlo otra vez.
+ */
+export function AllergyQuickActions({ patientId, patientName }: { patientId: string; patientName: string }) {
+  const queryClient = useQueryClient()
+  const [adding, setAdding] = useState(false)
+  const reviewed = useMutation({
+    mutationFn: () => markAllergiesReviewedApi(patientId),
+    onSuccess: async () => {
+      await refresh(queryClient, patientId)
+      toast.success("Anotado: no tiene alergias")
+    },
+    onError: (error) => toast.error(errorText(error, "No se pudo guardar la revisión")),
+  })
+  return (
+    <span className="flex flex-wrap gap-2">
+      <Button type="button" size="sm" variant="outline" disabled={reviewed.isPending} onClick={() => reviewed.mutate()}>
+        {reviewed.isPending ? "Guardando…" : "No tiene alergias"}
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={() => setAdding(true)}>
+        <Plus aria-hidden />
+        Agregar alergia
+      </Button>
+      <AllergyFormDrawer patientId={patientId} patientName={patientName} open={adding} onClose={() => setAdding(false)} />
+    </span>
   )
 }

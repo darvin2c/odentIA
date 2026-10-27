@@ -30,6 +30,8 @@ export interface ConfirmDialogProps {
   children?: ReactNode
   /** Bloquea la confirmación hasta completar lo que el contrato exige. */
   confirmDisabled?: boolean
+  /** Por qué no se pudo: aparte de la descripción, para que no se lea como parte de ella. */
+  error?: string | null
   onConfirm: () => void
   onClose: () => void
 }
@@ -50,9 +52,13 @@ export function ConfirmDialog({
   pending = false,
   children,
   confirmDisabled = false,
+  error = null,
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  // En el ancho chico los dos botones van en columnas iguales: un texto largo
+  // («Anotar que acepta todo») se cortaba. Con texto largo, el ancho normal.
+  const size = confirmLabel.length > 16 || cancelLabel.length > 16 ? "default" : "sm"
   return (
     <AlertDialog
       open={open}
@@ -60,12 +66,17 @@ export function ConfirmDialog({
         if (!next && !pending) onClose()
       }}
     >
-      <AlertDialogContent size="sm">
+      <AlertDialogContent size={size}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         {children ? <div className="flex flex-col gap-3">{children}</div> : null}
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{cancelLabel}</AlertDialogCancel>
           <SubmitButton

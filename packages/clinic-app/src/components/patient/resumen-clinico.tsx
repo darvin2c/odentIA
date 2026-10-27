@@ -1,7 +1,7 @@
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import { Button, buttonVariants } from "@odentia/ui"
 import { Link } from "@tanstack/react-router"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import type { AgendaAppointment } from "../../lib/agenda"
 import { allergyName } from "../../lib/allergies"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
@@ -13,7 +13,10 @@ import {
   type PatientHealth,
   type PatientSummary,
 } from "../../lib/patients"
+import { AllergyQuickActions } from "./allergies-card"
+import { EncounterReadDrawer } from "./encounter-read-drawer"
 import { SummaryCard } from "./resumen-tab"
+import { openBookingAnywhere } from "../agenda/schedule-host"
 
 /** Lo que le falta a la atención, dicho para quien no necesariamente la lleva. */
 const MISSING_LABELS: Record<OpenEncounterBrief["missing"][number], string> = {
@@ -73,10 +76,17 @@ export function OpenEncounterCard({
           <span className="text-muted-foreground">Motivo:</span>{" "}
           {encounter.reason ?? "sin registrar"}
         </p>
+        {/* Solo lo que lleva y lo que le falta: sin «0 diagnósticos». */}
         <p className="text-sm text-muted-foreground">
-          {plural(encounter.diagnosisCount, "diagnóstico", "diagnósticos")} ·{" "}
-          {plural(encounter.procedureCount, "procedimiento", "procedimientos")}
-          {missing.length > 0 ? ` · falta ${missing.join(", ")}` : " · lista para cerrar"}
+          {[
+            encounter.diagnosisCount > 0 ? plural(encounter.diagnosisCount, "diagnóstico", "diagnósticos") : "",
+            encounter.procedureCount > 0 ? plural(encounter.procedureCount, "procedimiento", "procedimientos") : "",
+            missing.length > 0
+              ? `Para cerrarla falta ${missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join(", ")} y ${missing.at(-1)}`}`
+              : "Lista para cerrar",
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
       </div>
       {/* Quien la lleva ya tiene «Continuar la atención» arriba: aquí no se repite. */}
@@ -123,9 +133,13 @@ function Alert({
  * («no preguntado» o «niega»), nunca «ninguna»: no es lo mismo.
  */
 export function ClinicalAlertsCard({
+  patientId,
+  patientName,
   health,
   onAntecedentes,
 }: {
+  patientId: string
+  patientName: string
   health: PatientHealth | null
   onAntecedentes: () => void
 }): React.JSX.Element {
@@ -171,9 +185,7 @@ export function ClinicalAlertsCard({
               {allergyState === "none" ? "Alergias: niega" : "Alergias: no preguntado"}
             </span>
             {allergyState === "unknown" && canWrite ? (
-              <Button type="button" size="sm" variant="outline" onClick={onAntecedentes}>
-                Registrar antecedentes
-              </Button>
+              <AllergyQuickActions patientId={patientId} patientName={patientName} />
             ) : null}
           </li>
         ) : null}
@@ -227,6 +239,8 @@ export function LastVisitCard({
   const memberName = useMemberName()
   const visit = summary.lastVisit
   const professional = summary.lastEncounter?.professionalUserId
+  // «Ver» la lee al lado: la ficha sigue a la vista.
+  const [reading, setReading] = useState(false)
   const gums = summary.periodontal
   // «Encías: Periodontitis · Estadio III · Grado B · sangrado 10 % (12 oct)».
   const gumsLine = gums
@@ -245,16 +259,20 @@ export function LastVisitCard({
       title="Última atención"
       action={
         visit ? (
-          <Link
-            to="/patients/$patientId/encounters/$encounterId"
-            params={{ patientId, encounterId: visit.encounterId }}
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-          >
+          <Button type="button" size="sm" variant="outline" onClick={() => setReading(true)}>
             Ver
-          </Link>
+          </Button>
         ) : undefined
       }
     >
+      {visit && reading ? (
+        <EncounterReadDrawer
+          patientId={patientId}
+          encounterId={visit.encounterId}
+          title={[visit.finalizedAt ? dayOf(visit.finalizedAt) : null, visit.reason || "Atención"].filter(Boolean).join(" · ")}
+          onClose={() => setReading(false)}
+        />
+      ) : null}
       {visit ? (
         <div className="flex flex-col gap-1 text-sm">
           <p className="font-medium">
@@ -302,12 +320,15 @@ export function LastVisitCard({
  */
 export function UpcomingCard({
   patientId,
+  patientName,
   upcoming,
   loading,
   failed,
   phone,
 }: {
   patientId: string
+  /** Para «Nueva cita»: la persona ya puesta. */
+  patientName: string
   upcoming: AgendaAppointment | null
   loading: boolean
   failed: boolean
@@ -332,13 +353,14 @@ export function UpcomingCard({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-muted-foreground">Sin cita por venir</p>
             {canBook ? (
-              <Link
-                to="/agenda"
-                search={{ patientId }}
-                className={buttonVariants({ size: "sm", variant: "outline" })}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true })}
               >
                 Reservar cita
-              </Link>
+              </Button>
             ) : null}
           </div>
         )}

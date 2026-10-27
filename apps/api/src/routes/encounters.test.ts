@@ -891,11 +891,12 @@ it("encounters: PATCH guarda el examen clínico con forma validada y lo limpia c
   expect(clearedDetail.data.encounter.examination).toBeNull()
 })
 
-it("encounters: crear sin motivo responde 400", async () => {
+it("encounters: sin cita también se abre sin motivo y el motivo se escribe dentro (ADR 0098)", async () => {
   const app = buildApp("admin")
   const patientId = await createFreshPatient(app, "Sin Motivo")
   const res = await postEncounter(app, patientId, {})
-  expect(res.status).toBe(400)
+  expect(res.status).toBe(201)
+  expect(((await res.json()) as { data: EncounterRow }).data.reason).toBeNull()
 })
 
 it("encounters: servicio directo se realiza en el acto y el cierre lo cobra una vez", async () => {

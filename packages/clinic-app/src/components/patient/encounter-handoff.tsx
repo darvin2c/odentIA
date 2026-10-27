@@ -6,7 +6,6 @@ import { apiFetch } from "../../lib/api"
 import { fetchConsents } from "../../lib/clinical-forms"
 import {
   fetchFollowUps,
-  fetchPrescriptions,
   formatDate,
   formatDateTime,
 } from "../../lib/clinical-journey"
@@ -26,6 +25,8 @@ interface Step {
   section: PatientSectionId
   /** Documentos abre en «Requieren acción». */
   pending?: boolean
+  /** «Cobrar»: Cobros con el cobro ya abierto. */
+  collect?: boolean
   action: string
 }
 
@@ -50,11 +51,6 @@ export function EncounterHandoff({
     queryFn: () => fetchFollowUps(patientId),
     enabled: canClinical,
   })
-  const prescriptions = useQuery({
-    queryKey: ["prescriptions", patientId],
-    queryFn: () => fetchPrescriptions(patientId),
-    enabled: canClinical,
-  })
   const consents = useQuery({
     queryKey: ["consents", patientId],
     queryFn: () => fetchConsents({ patientId }),
@@ -73,9 +69,6 @@ export function EncounterHandoff({
   const ownControls = (followUps.data?.data ?? []).filter(
     (row) => row.originEncounterId === encounterId,
   )
-  const ownPrescriptions = (prescriptions.data?.data ?? []).filter(
-    (row) => row.encounterId === encounterId && row.status !== "anulada",
-  )
   const pendingConsents = (consents.data?.data ?? []).filter(
     (row) => row.encounterId === encounterId && row.status === "pendiente",
   )
@@ -85,16 +78,6 @@ export function EncounterHandoff({
   )
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt)
   const priced = activeProcedures.length
-
-  const done: string[] = [
-    `${(detail.diagnoses ?? []).filter((dx) => !dx.voidedAt).length} diagnóstico(s)`,
-    `${activeProcedures.length} acto(s) realizado(s)`,
-    // Solo el producto que dibuja el odontograma lo trae (latidIA no).
-    `${(detail.odontogramEntries ?? []).length} hallazgo(s) en el odontograma`,
-    `${ownPrescriptions.length} receta(s)`,
-    `${ownControls.length} control(es) indicado(s)`,
-    `${detail.documents.length} documento(s)`,
-  ].filter((line) => !line.startsWith("0 "))
 
   const steps: Step[] = []
   for (const consent of pendingConsents)
@@ -158,47 +141,39 @@ export function EncounterHandoff({
           balance.saldo > 0 ? "Saldo por cobrar en la cuenta del paciente." : "Lo que tiene a favor cubre lo que debe.",
         tone: "warning",
         section: "cuenta",
-        action: "Ir a la cuenta",
+        collect: true,
+        action: balance.saldo > 0 ? "Cobrar" : "Aplicar",
       })
   }
 
   const loading =
-    (canClinical && (followUps.isPending || prescriptions.isPending || consents.isPending)) ||
+    (canClinical && (followUps.isPending || consents.isPending)) ||
     (canFinance && account.isPending)
 
-  const linkTo = (section: PatientSectionId, label: string, pending?: boolean): ReactNode => (
+  const linkTo = (section: PatientSectionId, label: string, pending?: boolean, collect?: boolean): ReactNode => (
     <Link
       to="/patients/$patientId"
       params={{ patientId }}
-      search={pending ? { tab: section, tipo: "requieren" } : { tab: section }}
+      search={pending ? { tab: section, tipo: "requieren" } : collect ? { tab: section, cobrar: true } : { tab: section }}
       className={buttonVariants({ size: "sm", variant: "outline" })}
     >
       {label}
     </Link>
   )
 
+  // Sin nada pendiente no hay bloque: lo hecho ya se lee en la atención de abajo.
+  if (!loading && steps.length === 0 && (canFinance || priced === 0)) return null
   return (
     <section
       className="flex flex-col gap-4 elevated rounded-xl border bg-card p-6"
       aria-labelledby="relevo-titulo"
     >
-      <div className="flex flex-col gap-1">
-        <h2 id="relevo-titulo" className="font-heading text-base font-medium">
-          Cierre y relevo
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          {done.length > 0
-            ? `En esta atención: ${done.join(" · ")}.`
-            : "Esta atención no registró actos, diagnósticos ni documentos."}
-        </p>
-      </div>
+      <h2 id="relevo-titulo" className="font-heading text-base font-medium">
+        Lo que sigue
+      </h2>
       {loading ? (
         <p className="text-sm text-muted-foreground">Consultando lo que queda por hacer…</p>
-      ) : steps.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No queda nada por hacer derivado de esta atención.
-        </p>
-      ) : (
+      ) : steps.length === 0 ? null : (
         <ul className="flex flex-col divide-y">
           {steps.map((step) => (
             <li
@@ -216,7 +191,7 @@ export function EncounterHandoff({
                   <span className="text-sm text-muted-foreground">{step.detail}</span>
                 ) : null}
               </div>
-              {linkTo(step.section, step.action, step.pending)}
+              {linkTo(step.section, step.action, step.pending, step.collect)}
             </li>
           ))}
         </ul>

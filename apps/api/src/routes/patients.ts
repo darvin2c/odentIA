@@ -268,8 +268,8 @@ const timelineQuery = listQuery.extend({
   order: z.enum(["desc", "asc"]).optional(),
 })
 const encounterCreateInput = z.object({
-  // Sin cita, el motivo es obligatorio al abrir; desde una cita («Atender») se
-  // abre sin él y el cierre lo exige (ADR 0032). La regla vive en el servicio.
+  // El motivo no se pide al abrir: se escribe dentro y el cierre lo exige
+  // (ADR 0032 y 0098). La regla vive en el servicio.
   reason: z.string().trim().max(2000).nullish(),
   /** Cita que motiva la atención; sin ella se une a la cita de hoy que siga en pie. */
   appointmentId: z.uuid().nullish(),

@@ -7,6 +7,7 @@ import { appointment } from "@odentia/db/schema/agenda"
 import {
   clinicalFollowUp,
   clinicalNote,
+  diagnosisCatalog,
   encounter,
   encounterDiagnosis,
   encounterPlanItem,
@@ -23,7 +24,7 @@ import {
 import { member } from "@odentia/db/schema/auth"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { canAccess } from "@odentia/auth/permissions"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm"
 import { markArrivedOnAttend, notifyAppointmentChanged, setAppointmentStatus } from "./appointments.js"
 import { listEncounterDocuments, type PatientDocumentWithContext } from "./clinical.js"
 import { type ConsentNeed, getEncounterConsentNeeds } from "./clinical-forms.js"
@@ -77,9 +78,9 @@ export type EncounterPlannedItemRow = typeof treatmentPlanItem.$inferSelect & Si
 
 export interface CreateEncounterInput {
   /**
-   * Motivo de la visita (hasta 2000 caracteres). Sin cita es obligatorio al
-   * abrir; desde una cita («Atender», sin formulario) toma el motivo escrito en
-   * la cita o queda vacío, y se exige al cerrar (ADR 0032).
+   * Motivo de la visita (hasta 2000 caracteres). No se pide al abrir: desde
+   * una cita toma el motivo escrito en ella; si no, queda vacío y se exige al
+   * cerrar (ADR 0032 y 0098).
    */
   reason?: string | null
   /**
@@ -152,8 +153,11 @@ export interface EncounterDetailBase {
   teeth: number[]
   /** Incluye los anulados (con motivo) para conservar la traza del borrador. */
   procedures: EncounterProcedureRow[]
-  /** Diagnósticos de la atención (lista y código), anulados incluidos. */
-  diagnoses: EncounterDiagnosisRow[]
+  /**
+   * Diagnósticos de la atención (lista y código), anulados incluidos, con su
+   * nombre en el catálogo: quien atiende lee «Caries dental», no solo DA08.0.
+   */
+  diagnoses: Array<EncounterDiagnosisRow & { diagnosisTitle: string | null }>
   /** Notas de evolución sin código (los diagnósticos históricos viven en `diagnoses`). */
   notes: EncounterNoteRow[]
   documents: EncounterDocumentRow[]
@@ -523,8 +527,8 @@ export async function createEncounter(
       .limit(2)
     if (active.length === 1) branchId = active[0]!.id
   }
-  // Desde una cita no se pide el motivo al abrir: vale el que se escribió al
-  // reservar o queda vacío, y el cierre lo exige (ADR 0032).
+  // El motivo no se pide al abrir (ADR 0032 y 0098): desde una cita vale el que
+  // se escribió al reservar; si no, queda vacío y el cierre lo exige.
   let reason = cleanText(input.reason, "reason", TEXT_LIMITS.reason)
   if (!reason && fromAppointment) {
     const [booked] = await tx
@@ -534,7 +538,6 @@ export async function createEncounter(
       .limit(1)
     reason = cleanText(booked?.reason, "reason", TEXT_LIMITS.reason)
   }
-  if (!reason && !fromAppointment) throw validation("El motivo de la atención es obligatorio")
   // Profesional que atiende: por defecto quien abre (también desde la cita de
   // otro profesional: quien cubre a otro es quien escribe). Otro elegido debe
   // ser miembro con escritura clínica, nunca caja ni recepción.
@@ -846,8 +849,15 @@ export async function getEncounterDetail(
       )
       .orderBy(asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id)),
     tx
-      .select()
+      .select({ ...getTableColumns(encounterDiagnosis), diagnosisTitle: diagnosisCatalog.title })
       .from(encounterDiagnosis)
+      .leftJoin(
+        diagnosisCatalog,
+        and(
+          eq(diagnosisCatalog.systemKey, encounterDiagnosis.diagnosisSystem),
+          eq(diagnosisCatalog.code, encounterDiagnosis.diagnosisCode),
+        ),
+      )
       .where(
         and(
           eq(encounterDiagnosis.encounterId, encounterId),

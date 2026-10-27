@@ -1,6 +1,5 @@
-import { Badge, Button, buttonVariants } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
-import { Link, useNavigate } from "@tanstack/react-router"
 import { CalendarDays } from "lucide-react"
 import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
@@ -10,6 +9,7 @@ import {
   usePatientAppointments,
 } from "../../lib/patient-appointments"
 import { QueryErrorState } from "../../lib/query-error"
+import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 
 function statusVariant(appointment: AgendaAppointment): "success" | "warning" | "outline" | "soft" {
   if (appointment.status === "confirmada" || appointment.status === "atendida") return "success"
@@ -31,25 +31,22 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
       <div className="flex flex-wrap items-center gap-2">
         {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención». */}
         <Badge variant={statusVariant(appointment)}>{visitName(appointment.visit)}</Badge>
-        <Link
-          to="/agenda"
-          search={{ appointmentId: appointment.id }}
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-        >
-          Ver en agenda
-        </Link>
+        {/* La cita se abre al lado, con sus acciones de siempre: la pestaña sigue a la vista. */}
+        <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(appointment.id)}>
+          Ver cita
+        </Button>
       </div>
     </li>
   )
 }
 
 /** Citas del paciente: lo reservado y lo ocurrido, con salida a la agenda para gestionarlas. */
-export function CitasPanel({ patientId }: { patientId: string }) {
+export function CitasPanel({ patientId, patientName }: { patientId: string; patientName: string }) {
   const canRead = usePermission("appointments.read")
   const canWrite = usePermission("appointments.write")
-  const navigate = useNavigate()
   const query = usePatientAppointments(patientId, canRead)
-  const book = () => void navigate({ to: "/agenda", search: { patientId } })
+  // «Nueva cita» al lado: la pestaña Citas sigue a la vista.
+  const book = () => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true })
 
   if (query.isPending) return <LoadingState message="Cargando citas…" />
   if (query.isError)
@@ -69,7 +66,7 @@ export function CitasPanel({ patientId }: { patientId: string }) {
         icon={CalendarDays}
         title="Sin citas"
         description="Este paciente no tiene citas reservadas ni pasadas en la agenda."
-        actionLabel={canWrite ? "Agendar cita" : undefined}
+        actionLabel={canWrite ? "Reservar cita" : undefined}
         onAction={canWrite ? book : undefined}
       />
     )
@@ -83,7 +80,7 @@ export function CitasPanel({ patientId }: { patientId: string }) {
           </h2>
           {canWrite ? (
             <Button size="sm" onClick={book}>
-              Agendar cita
+              Reservar cita
             </Button>
           ) : null}
         </div>

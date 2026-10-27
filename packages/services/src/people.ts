@@ -38,7 +38,7 @@ import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { productHooks } from "./products.js"
 import { personSearchCondition } from "./person-search.js"
-import { type PlanNextKind, planNextStepsOf } from "./plan-next.js"
+import { type PlanNextAction, type PlanNextKind, planNextStepsOf } from "./plan-next.js"
 import { inviteStatusOf, inviteStepText } from "./return-invites.js"
 import {
   countPeopleShortcuts,
@@ -421,8 +421,12 @@ export interface PersonListItem {
   situation: PersonSituation | null
   /** Desde cuándo espera su respuesta, si la clínica le escribió y no contesta. */
   waitingSince: string | null
-  /** Qué sigue del plan y el texto de su botón; solo para quien ve el plan. */
-  nextStep: { text: string; actionLabel: string | null } | null
+  /**
+   * Qué sigue del plan y su botón; solo para quien ve el plan. Trae el paso
+   * entero para que el botón haga lo que dice desde la lista (reservar con lo
+   * aceptado, responder el presupuesto o reservar el control).
+   */
+  nextStep: { text: string; actionLabel: string | null; kind: PlanNextKind | null; action: PlanNextAction | null } | null
   /** Quién lleva lo que sigue; nulo si no es paciente o no ve el plan. */
   attention: PersonAttention | null
   /** La ficha le falta algo para atenderla (`faltan_datos`). */
@@ -802,10 +806,10 @@ export async function listPeople(
           ? inviteStepText(invites.get(r.patient_id), { lastVisitAt: r.last_visit_at, nextAppointmentAt: r.next_appointment_at }, { locale, timezone }, now, recallMonths)
           : null
       item.nextStep = invite
-        ? { text: "Toca invitarla a volver", actionLabel: null }
+        ? { text: `Toca ${r.sex === "M" ? "invitarlo" : "invitarla"} a volver`, actionLabel: null, kind: null, action: null }
         : invited
-          ? { text: invited.text, actionLabel: null }
-          : { text: step.text, actionLabel: step.action?.label ?? null }
+          ? { text: invited.text, actionLabel: null, kind: null, action: null }
+          : { text: step.text, actionLabel: step.action?.label ?? null, kind: step.kind, action: step.action }
       // Quien tiene que volver a verla lo lleva la línea de invitar, si está prendida; ya invitada, quien la invitó.
       item.attention = toInvite.has(r.patient_id)
         ? lines.has("invitar_a_volver")

@@ -117,6 +117,8 @@ export interface EncounterDiagnosis {
   /** Lista del código: «ICD-10» o «ICD-11». */
   diagnosisSystem: string
   diagnosisCode: string
+  /** El nombre en el catálogo («Caries dental»); null si el código ya no está en la lista. */
+  diagnosisTitle?: string | null
   /** HL7 FHIR verificationStatus: provisional («Presuntivo») o confirmed («Definitivo»). */
   diagnosisType: "provisional" | "confirmed" | null
   /** «Ya diagnosticado antes»: lo marca el sistema (decisión 11). */

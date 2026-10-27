@@ -27,6 +27,7 @@ import { addressLine, countryText, documentLine, insuranceText, referralText } f
 import { DataConsentSection } from "./data-consent-section"
 import { FiliacionSectionDrawer, type FiliacionSectionKey, useBranches } from "./filiacion-section-drawer"
 import { MessagePermissionsSection, messageRecipientOf } from "./message-permissions-section"
+import { attendWord } from "../../lib/patient-overview"
 
 const missing = <span className="text-muted-foreground">No registrado</span>
 
@@ -136,7 +137,7 @@ export function FiliacionPanel({
         ) : null}
         {gaps.length > 0 ? (
           <>
-            <Badge variant="warning">Faltan datos para atenderla</Badge>
+            <Badge variant="warning">Faltan datos para {attendWord(p.sex)}</Badge>
             <span className="text-muted-foreground">{filiationGapsText(gaps)}.</span>
             {canWrite ? (
               <Button size="sm" variant="outline" onClick={() => setEditing("completar")}>

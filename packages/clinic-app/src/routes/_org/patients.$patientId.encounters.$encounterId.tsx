@@ -1,4 +1,3 @@
-import { Badge } from "@odentia/ui"
 import { EmptyState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
@@ -11,13 +10,24 @@ import { EncounterDetailView } from "../../components/patient/encounter-detail-v
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useMemberName, usePermission } from "../../lib/crm"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import {
   type EncounterDetail,
   encounterStatusLabel,
   hcLabel,
   type PatientFull,
 } from "../../lib/patients"
+
+/** «lun 12 oct 2026, 3:07 a 4:07 p. m.»: el día una vez, sin repetirlo en el fin. */
+function encounterWhen(start: string, end: string | null): string {
+  const locale = activeOrgLocale()
+  const timeZone = activeOrgTimeZone()
+  const day = new Date(start).toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone })
+  const clock = (iso: string) => new Date(iso).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit", timeZone })
+  const sameDay = end && new Date(end).toLocaleDateString(locale, { timeZone }) === new Date(start).toLocaleDateString(locale, { timeZone })
+  return end && sameDay ? `${day}, ${clock(start)} a ${clock(end)}` : `${day}, ${clock(start)}`
+}
 
 export const Route = createFileRoute("/_org/patients/$patientId/encounters/$encounterId")({
   component: EncounterPage,
@@ -30,6 +40,7 @@ function EncounterPage() {
   const EncounterSigned = productUi().history.EncounterSigned
   const canRead = usePermission("clinical.read")
   const canWrite = usePermission("clinical.write")
+  const memberName = useMemberName()
   // Con lo clínico (condiciones, medicación y salud declarada): es una lectura clínica y deja su traza.
   const patientQuery = useQuery({
     queryKey: ["patient", patientId, "clinical"],
@@ -112,20 +123,29 @@ function EncounterPage() {
   }
   return (
     <PageShell className="flex flex-col gap-6">
+      {/* El título es lo que se hizo; el estado, cuándo y quién van debajo. */}
       <PageHeader
-        title={`Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
+        title={detail.encounter.reason?.trim() || `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`}
         subtitle={
           <>
             <EncounterBreadcrumb patientId={patientId} patientName={patient.patient.displayName} />
-            <p className="min-w-0">{`${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`}</p>
-            <Badge variant="outline">Solo lectura</Badge>
+            <p className="min-w-0">
+              {[
+                `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`,
+                encounterWhen(detail.encounter.startedAt ?? detail.encounter.createdAt, detail.encounter.endedAt ?? null),
+                memberName(detail.encounter.professionalUserId),
+                `${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
           </>
         }
       />
       {detail.encounter.status === "finalizada" ? (
         <EncounterHandoff patientId={patientId} detail={detail} />
       ) : null}
-      <EncounterDetailView patientId={patientId} detail={detail} />
+      <EncounterDetailView patientId={patientId} detail={detail} showDocuments={false} />
       {/* Los documentos de la atención en un solo lugar: ya no se crean aquí, pero se envían e imprimen. */}
       <section aria-label="Documentos" className="flex flex-col gap-3 elevated rounded-xl border bg-card p-6">
         <h2 className="font-heading text-base font-medium">Documentos</h2>

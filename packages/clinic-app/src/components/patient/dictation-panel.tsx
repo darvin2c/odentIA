@@ -9,7 +9,8 @@ import { PLAN_PATH } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
-import { dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript } from "./dictation-session"
+import { CLINICAL_NAME } from "../../lib/agent-names"
+import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
@@ -35,6 +36,14 @@ function DictationExamples() {
 }
 
 /** «5 listas y 1 por revisar · 1 quitada por voz», con lo que haya. */
+/** Lleva a la lista de sugerencias de un bloque y la deja con el foco. */
+function goToSuggestions(label: string): void {
+  const list = document.querySelector<HTMLElement>(`[aria-label="Sugerencias de ${CLINICAL_NAME}: ${label}"]`)
+  if (!list) return
+  list.querySelector<HTMLElement>("button")?.focus()
+  list.scrollIntoView({ block: "center" })
+}
+
 function readiness(session: DictationSession): string {
   // La receta no se confirma con las demás: tiene su «Emitir receta».
   const prescription = session.suggestions.some((item) => item.kind === "receta")
@@ -73,6 +82,14 @@ export function DictationPanel({
   const [typed, setTyped] = useState("")
   const role = useMyRole()
   const { mode, pending, ready } = session
+  // Los bloques con sugerencias por revisar, con el nombre de su lista («Receta», «Plan de tratamiento»).
+  const suggestionKinds = [
+    ...new Set(
+      session.suggestions
+        .filter((item) => item.status === "lista" || item.status === "por_revisar")
+        .map((item) => DICTATION_KIND_LABEL[item.kind]),
+    ),
+  ]
   // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085, tablero C4).
   const blocked = session.blocked
   const listening = mode === "listening"
@@ -184,12 +201,12 @@ export function DictationPanel({
         <AgentMark />
         <div className="min-w-0 flex-1 basis-48">
           <h2 className="font-heading text-base font-semibold">
-            {pending > 0 ? `Dictado terminado: ${plural(pending, "sugerencia", "sugerencias")}` : "Dictar la atención"}
+            {pending > 0 ? `${CLINICAL_NAME} dejó ${plural(pending, "sugerencia", "sugerencias")} por revisar` : "Dictar la atención"}
           </h2>
           <p className="text-sm text-muted-foreground">
             {pending > 0 ? (
               <>
-                {readiness(session)}. Todavía no hay nada en la historia.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
+                {readiness(session)}. Nada entra a la historia hasta que lo confirmes.<span className="sm:hidden"> Toca una sugerencia para editarla.</span>
               </>
             ) : blocked ? (
               <>
@@ -208,6 +225,22 @@ export function DictationPanel({
               "Habla como le contarías a un colega. Lo que dictas aparece como sugerencias dentro de cada bloque. Nada entra a la historia hasta que confirmes."
             )}
           </p>
+          {/* A dónde quedó cada sugerencia: un toque lleva a su bloque. */}
+          {pending > 0 && suggestionKinds.length > 0 ? (
+            <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+              {suggestionKinds.map((label) => (
+                <Button
+                  key={label}
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0"
+                  onClick={() => goToSuggestions(label)}
+                >
+                  {label} ↓
+                </Button>
+              ))}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           {session.canListen && !blocked ? (
@@ -226,7 +259,7 @@ export function DictationPanel({
           ) : null}
           {!typing && !blocked ? (
             <Button type="button" variant={session.canListen ? "ghost" : "outline"} className="min-h-11 sm:min-h-9" onClick={() => setTyping(true)}>
-              Escribir lo dictado
+              Escribir en vez de dictar
             </Button>
           ) : null}
           {session.transcript ? (

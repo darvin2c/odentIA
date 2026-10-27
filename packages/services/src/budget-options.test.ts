@@ -272,7 +272,7 @@ it("«Agendar» une lo aceptado a la cita, su atención lo trae y «Qué sigue»
     }),
   )
   const next = await nextStep()
-  expect(next).toMatchObject({ kind: "agendar", text: "Aceptó 1 de 2: falta agendar", action: { label: "Agendar", planItemIds: [a.id] } })
+  expect(next).toMatchObject({ kind: "agendar", text: "Aceptó 1 de 2: falta su cita", action: { label: "Reservar cita", planItemIds: [a.id] } })
   // Sin permiso de agenda, la frase se dice pero el botón no.
   const reader = await nextStep((p) => p !== "appointments.write")
   expect(reader.action).toBeNull()

@@ -268,7 +268,10 @@ function fitToScope(payload: Record<string, unknown>, scope: string | null): Dic
       : {
           payload: { ...rest, ...(hasTooth ? { toothNumber } : {}) },
           status: "por_revisar",
-          note: "Esta prestación necesita la pieza y al menos una cara. Complétala.",
+          // Si ya dijo la pieza, se dice solo lo que falta: «Falta la cara de la 36».
+          note: hasTooth
+            ? `Falta la cara de la ${toothNumber}: elígela para confirmarla.`
+            : "Esta prestación necesita la pieza y al menos una cara. Complétala.",
         }
   }
   return {

@@ -26,14 +26,12 @@ import { useQuery } from "@tanstack/react-query"
 import { ChevronDown, ClipboardList } from "lucide-react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
-import { fetchTreatmentPlans, type PlanNextStep } from "../../lib/budgets"
-import { fetchFollowUps } from "../../lib/clinical-journey"
+import { fetchTreatmentPlans } from "../../lib/budgets"
 import { usePermission } from "../../lib/crm"
 import type { PatientSummary, PlanItem } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { productUi } from "../../product/product-ui"
 import { ControlesPanel } from "./clinical-panels"
-import { FollowUpScheduler } from "./follow-up-scheduler"
 import { NewEncounterButton } from "./new-encounter-button"
 import { PlanBudgets, useScheduleAccepted } from "./plan/plan-budgets"
 import { CoordinationControls, CoordinationTreatments } from "./plan/plan-coordination"
@@ -70,10 +68,13 @@ function Section({
 
 export function PlanTab({
   patientId,
+  patientName,
   initialBudgetId,
   initialItemId,
 }: {
   patientId: string
+  /** Para «Nueva cita»: la persona ya puesta. */
+  patientName: string
   /** Planes anteriores: un enlace guardado con `planId` abre la pestaña igual. */
   initialPlanId?: string
   /** Apertura directa desde enlace ?tab=plan&budgetId=:id (la ruta valida el uuid). */
@@ -102,10 +103,8 @@ export function PlanTab({
     enabled: canClinical,
   })
 
-  const [respondBudgetId, setRespondBudgetId] = useState<string | undefined>(undefined)
   const [focusBudgetId, setFocusBudgetId] = useState<string | undefined>(initialBudgetId)
   const [journeyItemId, setJourneyItemId] = useState<string | null>(initialItemId ?? null)
-  const [scheduleFollowUpId, setScheduleFollowUpId] = useState<string | null>(null)
   useEffect(() => setFocusBudgetId(initialBudgetId), [initialBudgetId])
   useEffect(() => setJourneyItemId(initialItemId ?? null), [initialItemId])
 
@@ -114,29 +113,18 @@ export function PlanTab({
   const openPlan = plans.find((row) => row.isOpen) ?? plans.at(-1) ?? null
   const openItems = openPlan ? items.filter((item) => item.planId === openPlan.plan.id) : []
   const previous = plans.filter((row) => row.plan.id !== openPlan?.plan.id && row.totalItems > 0)
-  const schedule = useScheduleAccepted(patientId)
+  const schedule = useScheduleAccepted({ id: patientId, name: patientName })
   // La misma regla de «Qué sigue»: lo aceptado sin cita también se agenda desde la tarjeta del presupuesto.
   const nextStep = usePlanNextStep(patientId).data?.data ?? null
 
-  const onNextAction = (step: PlanNextStep) => {
-    if (!step.action) return
-    if (step.kind === "respuesta" && step.action.budgetId) {
-      setRespondBudgetId(step.action.budgetId)
-      setFocusBudgetId(step.action.budgetId)
-    } else if ((step.kind === "agendar" || step.kind === "continuar") && step.action.planItemIds) {
-      schedule(step.action.planItemIds, step.action.serviceId ?? null)
-    } else if (step.kind === "control" && step.action.followUpId) {
-      setScheduleFollowUpId(step.action.followUpId)
-      controlsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
-    }
-  }
+
 
   const journeyItem = items.find((item) => item.id === journeyItemId) ?? null
   const summary = summaryQuery.data?.data ?? null
 
   return (
     <div className="flex flex-col gap-6">
-      <PlanNextCard patientId={patientId} onAction={onNextAction} />
+      <PlanNextCard patientId={patientId} patientName={patientName} />
 
       {canClinical ? (
         <Section
@@ -192,7 +180,6 @@ export function PlanTab({
             patientId={patientId}
             planItems={canClinical ? items : null}
             focusBudgetId={focusBudgetId}
-            respondBudgetId={respondBudgetId}
             scheduleItemIds={nextStep?.kind === "agendar" ? (nextStep.action?.planItemIds ?? []) : []}
             onSchedule={(planItemIds, serviceId) => schedule(planItemIds, serviceId)}
           />
@@ -207,17 +194,10 @@ export function PlanTab({
             items={items}
             encounterId={summary?.openEncounterId ?? undefined}
           />
-          {scheduleFollowUpId ? (
-            <ScheduleControl
-              patientId={patientId}
-              followUpId={scheduleFollowUpId}
-              onClose={() => setScheduleFollowUpId(null)}
-            />
-          ) : null}
         </section>
       ) : canAgenda ? (
         <Section title="Controles" sectionRef={controlsRef}>
-          <CoordinationControls patientId={patientId} scheduleFollowUpId={scheduleFollowUpId} />
+          <CoordinationControls patientId={patientId} scheduleFollowUpId={null} />
         </Section>
       ) : null}
 
@@ -276,20 +256,4 @@ export function PlanTab({
       ) : null}
     </div>
   )
-}
-
-/** «Reservar» un control desde «Qué sigue» (vía clínica, la misma operación). */
-function ScheduleControl({
-  patientId,
-  followUpId,
-  onClose,
-}: {
-  patientId: string
-  followUpId: string
-  onClose: () => void
-}): React.JSX.Element | null {
-  const list = useQuery({ queryKey: ["follow-ups", patientId], queryFn: () => fetchFollowUps(patientId) })
-  const control = list.data?.data.find((row) => row.id === followUpId) ?? null
-  if (!control) return null
-  return <FollowUpScheduler patientId={patientId} control={control} scope="clinical" onClose={onClose} />
 }

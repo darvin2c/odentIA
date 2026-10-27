@@ -48,6 +48,7 @@ import { DiagnosisSearch } from "./diagnosis-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
 import { HealthDocumentSendDrawer } from "./health-document-send"
 import { productUi } from "../../product/product-ui"
+import { openAppointmentAnywhere } from "../agenda/schedule-host"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -282,13 +283,15 @@ export function ControlesPanel({
                 </p>
               ) : null}
               {row.appointment && canReadAgenda ? (
-                <Link
-                  to="/agenda"
-                  search={{ appointmentId: row.appointment.id }}
-                  className="w-fit text-sm underline"
+                // La cita se abre al lado, sin salir de la ficha.
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto w-fit p-0 text-sm"
+                  onClick={() => row.appointment && openAppointmentAnywhere(row.appointment.id)}
                 >
-                  Ver cita en agenda
-                </Link>
+                  Ver cita
+                </Button>
               ) : null}
               {planItemLabel(row.planItemId) ? (
                 <p className="text-sm text-muted-foreground">
@@ -314,7 +317,7 @@ export function ControlesPanel({
                         setScheduling(row)
                       }}
                     >
-                      Reservar
+                      Reservar cita
                     </Button>
                   ) : null}
                   {row.status === "pendiente" || row.status === "programado" ? (

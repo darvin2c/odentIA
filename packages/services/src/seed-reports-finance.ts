@@ -520,6 +520,10 @@ export async function seedReportsFinance(tx: Db, seed: ReportsFinanceSeedInput) 
         decision: accepted ? "aceptado" : "pendiente",
         createdBy: ownerUserId,
       })
+      // El tratamiento sabe en qué presupuesto está, como cuando lo arma la app.
+      await tx.execute(sql`
+        update treatment_plan_item set budget_id = ${budgetId}
+        where organization_id = ${orgId} and id = ${planItemId}`)
       await tx.execute(sql`
         update treatment_budget set status = ${accepted ? "aceptado" : "presentado"}, presented_at = ${presentedAt.toISOString()}::timestamptz,
           decided_at = ${accepted ? visit.toISOString() : null}::timestamptz, decided_by = ${accepted ? ownerUserId : null}

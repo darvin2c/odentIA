@@ -38,6 +38,12 @@ export function useActiveBranch(): {
   branches: BranchOption[]
   /** Sede pedida; `undefined` deja que el servidor elija la primera activa. */
   branchId: string | undefined
+  /**
+   * La sede con la que se trabaja aunque nadie la haya elegido: la pedida o, si
+   * no, la primera activa, la misma que muestra la Agenda. Cobrar y atender la
+   * usan sin volver a preguntar; solo es `undefined` mientras llega la lista.
+   */
+  effectiveId: string | undefined
   /** Cambia de sede, la recuerda y la deja en el enlace. */
   choose: (id: string, extra?: Record<string, string | undefined>) => void
 } {
@@ -45,7 +51,7 @@ export function useActiveBranch(): {
   const query = useQuery({
     queryKey: ["branches", "activas"],
     queryFn: () =>
-      apiFetch<{ data: Array<{ id: string; name: string; isActive: boolean }> }>("/api/branches"),
+      apiFetch<{ data: Array<{ id: string; name: string; isActive: boolean; createdAt: string }> }>("/api/branches"),
     staleTime: 60_000,
   })
   const branches = React.useMemo(
@@ -92,5 +98,13 @@ export function useActiveBranch(): {
     },
     [setParams],
   )
-  return { branches, branchId, choose }
+  // La primera activa es la más antigua, como la elige el servidor (`resolveBranch`).
+  const firstActive = React.useMemo(
+    () =>
+      (query.data?.data ?? [])
+        .filter((item) => item.isActive)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]?.id,
+    [query.data],
+  )
+  return { branches, branchId, effectiveId: branchId ?? firstActive, choose }
 }

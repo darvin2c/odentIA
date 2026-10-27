@@ -179,7 +179,7 @@ export function AppointmentSearch({
                         }}
                       >
                         <Plus aria-hidden />
-                        Agendar
+                        Reservar cita
                       </Button>
                     ) : null}
                   </div>

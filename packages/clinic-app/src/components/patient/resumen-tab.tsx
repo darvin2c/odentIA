@@ -17,6 +17,8 @@ import type { PatientFull, PatientHealth, PatientSummary } from "../../lib/patie
 import { filiationGapsText, isHealthReviewPending } from "../../lib/patients"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "./filiacion-section-drawer"
 import { TaskDrawer } from "../crm/task-drawer"
+import { attendWord } from "../../lib/patient-overview"
+import { NextStepButton } from "./plan/next-step-action"
 import { usePlanNextStep } from "./plan/plan-next"
 import { PersonalLinkActions } from "./send-personal-link"
 
@@ -27,6 +29,8 @@ interface Pending {
   action: ReactNode
   /** Lo propone el agente: se distingue con su identidad visual. */
   agent?: boolean
+  /** La acción trae su propio aviso y varios botones: va debajo, a lo ancho. */
+  stacked?: boolean
 }
 
 export function SummaryCard({
@@ -70,11 +74,12 @@ function PendingList({ pending }: { pending: Pending[] }) {
           }`}
         >
           {item.agent ? <AgentMark size="sm" /> : null}
-          <div className="min-w-0 flex-1">
+          {/* El texto tiene un ancho mínimo: una acción ancha baja de línea en vez de dejarlo en una columna de una palabra. */}
+          <div className="min-w-0 flex-[1_1_16rem]">
             <p className="text-sm font-medium">{item.title}</p>
             <p className="text-sm text-muted-foreground">{item.detail}</p>
           </div>
-          {item.action}
+          {item.stacked ? <div className="basis-full">{item.action}</div> : item.action}
         </li>
       ))}
     </ul>
@@ -117,6 +122,8 @@ export function PatientPendingCard({
   const [completing, setCompleting] = useState<FiliacionSectionKey | null>(null)
   // Una tarea de la persona se crea con el mismo cajón que en Tareas (vence con «Día y hora»).
   const [newTask, setNewTask] = useState(false)
+  // «Ver tarea» la abre en ese mismo cajón, sin ir a Tareas.
+  const [viewingTask, setViewingTask] = useState<string | null>(null)
 
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -142,9 +149,9 @@ export function PatientPendingCard({
     enabled: canTasks && canPatients,
     retry: false,
   })
-  // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Quien
-  // lee la clínica lo tiene en su pestaña con el detalle clínico.
-  const nextStepQuery = usePlanNextStep(patientId, (canAppointments || canBudgets) && !canClinical)
+  // «Qué sigue» del plan, la misma regla del servidor que la pestaña Plan. Si el
+  // Resumen ya muestra su tarjeta (quien lee la clínica), aquí no se repite.
+  const nextStepQuery = usePlanNextStep(patientId, (canAppointments || canBudgets) && !clinical)
 
   const go = (section: PatientSectionId, label: string) => (
     <Button size="sm" variant="outline" onClick={() => onTabChange(section)}>
@@ -182,13 +189,24 @@ export function PatientPendingCard({
         </Link>
       ),
     })
-  const nextStep = nextStepQuery.data?.data
+  // Con la tarjeta «Qué sigue» arriba no se repite (la consulta comparte caché con ella).
+  const nextStep = clinical ? undefined : nextStepQuery.data?.data
   if (nextStep && nextStep.kind !== "ninguno")
     pending.push({
       id: "plan-next",
       title: nextStep.text,
       detail: nextStep.detail ?? "Lo que sigue en su plan de tratamiento.",
-      action: go("plan", "Ir al plan"),
+      // El botón hace lo que dice aquí mismo: reservar, responder o reservar el control.
+      action: nextStep.action ? (
+        <NextStepButton
+          patient={{ id: patientId, name: detail.patient.displayName }}
+          step={nextStep}
+          size="sm"
+          variant="outline"
+        />
+      ) : (
+        go("plan", "Ver el plan")
+      ),
     })
   for (const balance of accountQuery.data?.data.byCurrency ?? []) {
     // El saldo descuenta lo que tiene a favor (decisión 22).
@@ -203,7 +221,17 @@ export function PatientPendingCard({
           balance.aFavor > 0
             ? `Debe: ${money(balance.porCobrar, balance.currency)} · A favor: ${money(balance.aFavor, balance.currency)} · Saldo: ${money(balance.saldo, balance.currency)}`
             : "Cargos emitidos sin pago aplicado.",
-        action: go("cuenta", balance.saldo > 0 ? "Ir a cobros" : "Aplicar lo que tiene a favor"),
+        // «Cobrar» abre Cobros con el cobro ya abierto; «Aplicar…» lo aplica al llegar.
+        action: (
+          <Link
+            to="/patients/$patientId"
+            params={{ patientId }}
+            search={{ tab: "cuenta", cobrar: true }}
+            className={buttonVariants({ size: "sm", variant: "outline" })}
+          >
+            {balance.saldo > 0 ? "Cobrar" : "Aplicar lo que tiene a favor"}
+          </Link>
+        ),
       })
   }
   if (canEditPatient) {
@@ -215,7 +243,8 @@ export function PatientPendingCard({
     if (gaps.length > 0 || review)
       pending.push({
         id: "filiacion",
-        title: gaps.length > 0 ? "Faltan datos para atenderla" : "Apellidos por confirmar",
+        title: gaps.length > 0 ? `Faltan datos para ${attendWord(detail.patient.sex)}` : "Apellidos por confirmar",
+        stacked: gaps.length > 0,
         detail: [gaps.length > 0 ? `${filiationGapsText(gaps)}.` : "", review].filter(Boolean).join(" "),
         action: (() => {
           const complete = (
@@ -242,13 +271,9 @@ export function PatientPendingCard({
       title: `Tarea: ${task.title}`,
       detail: task.dueAt ? `Vence el ${formatDate(task.dueAt)}.` : "Sin fecha límite.",
       action: (
-        <Link
-          to="/tasks"
-          search={{ task: task.id }}
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-        >
+        <Button size="sm" variant="outline" onClick={() => setViewingTask(task.id)}>
           Ver tarea
-        </Link>
+        </Button>
       ),
     })
 
@@ -264,6 +289,15 @@ export function PatientPendingCard({
       }
     >
       <PendingList pending={pending} />
+      {viewingTask ? (
+        <TaskDrawer
+          open
+          taskId={viewingTask}
+          patientId={patientId}
+          onClose={() => setViewingTask(null)}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ["patient-tasks", patientId] })}
+        />
+      ) : null}
       {canWriteTasks ? (
         <TaskDrawer
           open={newTask}

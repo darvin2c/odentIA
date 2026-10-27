@@ -385,7 +385,7 @@ async function budgetsWithoutAppointment(tx: Db, orgId: string, zone: OrgLocale,
       id: row.id,
       personName: row.name,
       // Sin importes: quien agenda ve el presupuesto mínimo, no sus líneas.
-      line: `${row.next_session ? "Falta agendar la próxima sesión · " : ""}Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
+      line: `${row.next_session ? "Falta la cita de la próxima sesión · " : ""}Presupuesto N.º ${row.number} · ${row.title} · aceptado el ${dayOf(row.decided_at, zone)}`,
       patientId: row.patient_id,
       budgetId: row.id,
     })),

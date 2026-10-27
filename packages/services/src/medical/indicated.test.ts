@@ -43,7 +43,7 @@ it("en latidIA lo indicado queda aceptado: se agenda, se vincula y se realiza si
     const journeys = await f.run((tx) => listTreatmentJourneys(tx, "org_a", f.patient.id))
     expect(journeys.find((row) => row.item.id === nebulization.id)?.nextAction).toBe("iniciar")
     const next = await f.run((tx) => getPlanNextStep(tx, "org_a", f.patient.id, () => true))
-    expect(next).toMatchObject({ kind: "agendar", text: "Falta agendar lo indicado" })
+    expect(next).toMatchObject({ kind: "agendar", text: "Falta la cita de lo indicado" })
 
     // Se realiza en la atención sin presupuesto: queda en curso y luego realizado.
     await f.run((tx) =>

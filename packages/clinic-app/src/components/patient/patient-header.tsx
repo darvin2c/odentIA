@@ -8,7 +8,6 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
   Button,
-  buttonVariants,
   cn,
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +38,8 @@ import type { PatientSectionId } from "../../lib/patient-areas"
 import { sexLabel } from "../../lib/patient-overview"
 import { ageFrom, hcLabel, type PatientFull, type PatientSummary } from "../../lib/patients"
 import { PERSON_KIND_LABELS, type PersonPage, relationshipText } from "../../lib/people"
+import type { BookingSeed } from "../agenda/booking-drawer"
+import { openBookingAnywhere } from "../agenda/schedule-host"
 import { PersonLink } from "../person-link"
 import { WriteToPersonDialog } from "../write-to-person"
 import { FiliacionSectionDrawer } from "./filiacion-section-drawer"
@@ -229,9 +230,13 @@ export function PersonHeader({
     age ? `${age} años` : null,
     person.sex ? sexLabel(person.sex) : null,
   ].filter(Boolean)
-  // Reservar para quien aún no es paciente crea su ficha mínima unida a la persona:
-  // la Agenda la lee en el CRM.
-  const bookSearch = patient ? { patientId: patient.id } : canCrm ? { contactId: person.id } : null
+  // «Nueva cita» al lado, sin ir a la Agenda. Para quien aún no es paciente crea
+  // su ficha mínima unida a la persona.
+  const bookSeed: BookingSeed | null = patient
+    ? { patient: { id: patient.id, name: person.displayName }, lockedPatient: true }
+    : canCrm
+      ? { person: { contactId: person.id, name: person.displayName, phone: person.phone } }
+      : null
   const writeTargets = [
     {
       contactId: person.id,
@@ -323,14 +328,14 @@ export function PersonHeader({
                 Escribirle
               </Button>
             ) : null}
-            {canBook && bookSearch && !person.archived ? (
-              <Link
-                to="/agenda"
-                search={bookSearch}
-                className={buttonVariants({ variant: primary === "book" ? "default" : "outline" })}
+            {canBook && bookSeed && !person.archived ? (
+              <Button
+                type="button"
+                variant={primary === "book" ? "default" : "outline"}
+                onClick={() => openBookingAnywhere(bookSeed)}
               >
                 Reservar cita
-              </Link>
+              </Button>
             ) : null}
             {primary === "charge" ? (
               <Button onClick={() => onSection("cuenta")}>Cobrar</Button>
