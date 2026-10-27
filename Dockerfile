@@ -45,6 +45,8 @@ RUN pnpm install --frozen-lockfile \
 FROM deps AS build
 COPY . .
 # VITE_* se incrustan en build; deben coincidir con los dominios públicos.
+# Sin ENV: un ARG ya llega al RUN como variable de entorno, y cada ENV era una
+# capa más (5-11 s en el servidor de producción).
 # La web toma de VITE_BASE_DOMAIN su dirección canónica (el dominio raíz).
 ARG VITE_API_URL
 ARG VITE_BASE_DOMAIN
@@ -53,11 +55,6 @@ ARG VITE_DENTAL_DOMAIN=""
 ARG VITE_MEDICAL_DOMAIN=""
 # El producto del panel y de la web de este artefacto: vacío, odentIA; `medical`, el de latidIA.
 ARG VITE_PRODUCT=""
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_BASE_DOMAIN=$VITE_BASE_DOMAIN
-ENV VITE_DENTAL_DOMAIN=$VITE_DENTAL_DOMAIN
-ENV VITE_MEDICAL_DOMAIN=$VITE_MEDICAL_DOMAIN
-ENV VITE_PRODUCT=$VITE_PRODUCT
 RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/dental-clinic build \
   && pnpm --filter @odentia/medical-clinic build && pnpm --filter @odentia/web build
 
