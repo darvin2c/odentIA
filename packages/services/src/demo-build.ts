@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { ClinicalProduct } from "@odentia/clinical"
-import { includedTaxCents } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, includedTaxCents } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { DemoProgress, DemoSize } from "@odentia/db/schema/admin-demos"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
@@ -54,6 +54,7 @@ import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
 import { seedSaasCostDemo } from "./seed-saas-cost.js"
+import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 
@@ -371,6 +372,14 @@ export async function buildDemo(
     },
     { actorUserId: demo.presenterUserId },
   )
+  // Registro en línea activo, como lo tendría una clínica que presenta: sin él, a quien
+  // escribe por primera vez Sofi no puede mandarle su enlace para reservar (ADR 0097).
+  await savePatientRegistrationConfig(tx, orgId, demo.presenterUserId, {
+    expectedVersion: 0,
+    enabled: true,
+    fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, docType: "required", docNumber: "required" },
+    privacyNotice: `${demo.name} usará tus datos solo para registrarte como paciente, atenderte y recordarte tus citas. Puedes pedir verlos, corregirlos o eliminarlos escribiendo a recepción.`,
+  })
 
   // El canal de la demo tiene claves falsas: nada de lo que se escriba desde ella sale.
   const phone = `${country.mobile.prefix}${String(random.int(10 ** (country.mobile.digits - 1), 10 ** country.mobile.digits - 1))}`
@@ -435,7 +444,9 @@ export async function buildDemo(
             priceCents: demoPriceCents(recipe.price, country),
             durationMin: recipe.durationMin,
           },
-        ]),
+          // Como los agrega la pantalla de la biblioteca: «Precio exacto». Sin
+          // indicarlo, Sofi decía que la consulta «se define tras una evaluación».
+        ], { priceDisclosure: "exacto" }),
       )
       .catch(() => undefined)
   }

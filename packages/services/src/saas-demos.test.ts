@@ -3,9 +3,9 @@ import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member, organization, user } from "@odentia/db/schema/auth"
-import { encounter, encounterDiagnosis, patient, patientContact } from "@odentia/db/schema/clinical"
+import { encounter, encounterDiagnosis, patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { conversation } from "@odentia/db/schema/crm"
-import { orgProfile } from "@odentia/db/schema/org"
+import { orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, inArray, like, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
@@ -210,6 +210,22 @@ describe("una demo de Pediatría en Colombia", () => {
       .where(like(user.id, `${demoUserPrefix(demo.id)}%`))
     expect(team.length).toBeGreaterThan(0)
     expect(team.every((row) => row.email.endsWith("@example.com"))).toBe(true)
+  })
+
+  it("Sofi dice el precio de sus servicios y puede mandar el enlace con registro a quien es nuevo", async () => {
+    // Auditoría del 27-oct (ADR 0097): con «solo tras evaluación» Sofi no decía ni el
+    // precio de la consulta, y sin registro en línea pasaba a recepción a todo el que llegaba.
+    const disclosures = await ownerDb
+      .selectDistinct({ disclosure: serviceCatalog.priceDisclosure })
+      .from(serviceCatalog)
+      .where(eq(serviceCatalog.organizationId, demo.organizationId))
+    expect(disclosures).toEqual([{ disclosure: "exacto" }])
+    const [registration] = await ownerDb
+      .select({ enabled: patientRegistrationConfig.enabled, notice: patientRegistrationConfig.privacyNotice })
+      .from(patientRegistrationConfig)
+      .where(eq(patientRegistrationConfig.organizationId, demo.organizationId))
+    expect(registration?.enabled).toBe(true)
+    expect(registration?.notice).toContain("usará tus datos")
   })
 
   it("cada niño es su propia historia y quien escribe es su responsable", async () => {
