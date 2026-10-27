@@ -957,8 +957,14 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       if (result.getType() !== "tool" || result.status === "error") continue
       const name = result.name ?? calls.find((call) => call.id === result.tool_call_id)?.name
       const source = name ? TOOL_SOURCES[name] : undefined
-      if (!name || !source) continue
       const text = typeof result.content === "string" ? result.content : JSON.stringify(result.content)
+      // Un enlace que entregó cualquier herramienta (el de reserva, el de
+      // completar sus datos) sustenta ese enlace en la respuesta (ADR 0096).
+      const links = text.match(/\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi)
+      if (links && !source) {
+        toolCtx.evidence = [...(toolCtx.evidence ?? []), { kind: "sistema", source: "Enlace que entregó el sistema", text: links.join("\n") }]
+      }
+      if (!name || !source) continue
       toolCtx.evidence = [...(toolCtx.evidence ?? []), { kind: source.kind, source: source.label, text }]
       toolCtx.basis ??= []
       if (!toolCtx.basis.some((item) => item.label === source.label)) {

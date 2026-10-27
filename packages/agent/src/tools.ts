@@ -33,6 +33,7 @@ import {
   createHandoff,
   topicKindOf,
   recordTopicAskedAgain,
+  latestOpenTopic,
   createProposal,
   createTask,
   findFreeGaps,
@@ -1924,6 +1925,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           : `El aviso al interlocutor no salió: ${outcome}`
       }
       const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
+      // Con un tema abierto en el hilo, lo que vuelve a pedir se anota en ese
+      // tema y solo sale el aviso: un tema por mensaje llena la cola del equipo.
+      // Abre otro solo si sube a urgente (ADR 0096).
+      const open = await inOrg((tx) => latestOpenTopic(tx, ctx.orgId, ctx.conversationId))
+      if (open && !(validPriority === "alta" && open.priority !== "alta")) {
+        await inOrg((tx) => recordTopicAskedAgain(tx, ctx.orgId, { handoffId: open.id, messageId: ctx.triggerId ?? null }))
+        ctx.handedOff = true
+        ctx.handoffId = open.id
+        if (!notice) return "Ese tema ya lo tiene el equipo: lo anoté en él. Falta el aviso al interlocutor: llama de nuevo con message."
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        await annotate(ctx.replySettled === true)
+        return ctx.replySettled ? "Ese tema ya lo tiene el equipo: lo anoté en él y salió el aviso. No envíes más mensajes." : `El aviso al interlocutor no salió: ${outcome}`
+      }
       const handoff = await inOrg((tx) =>
         createHandoff(tx, ctx.orgId, null, {
           conversationId: ctx.conversationId,
