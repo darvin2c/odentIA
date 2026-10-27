@@ -366,7 +366,8 @@ export function FiliacionSectionDrawer({
     >
       <div className="grid gap-4 sm:grid-cols-2">
         {completing ? (
-          <div className="flex items-center gap-2 sm:col-span-2">
+          // La etiqueta arriba y el aviso con sus botones debajo, a lo ancho: juntos en una fila se apretaban.
+          <div className="flex flex-col items-start gap-2 sm:col-span-2">
             <Badge variant="warning">
               {missing?.length === 1 ? "Falta 1" : `Faltan ${missing?.length ?? 0}`}
             </Badge>
@@ -395,7 +396,8 @@ export function FiliacionSectionDrawer({
           const id = `${uid}-${field.key}`
           const value = values[field.key] ?? ""
           const t = field.type
-          const wide = (t.kind === "text" && t.wide) || t.kind === "insurance" || t.kind === "street"
+          // El teléfono lleva el país al lado: en media columna el número quedaba en 38 px.
+          const wide = (t.kind === "text" && t.wide) || t.kind === "insurance" || t.kind === "street" || t.kind === "phone"
           return (
             <Field key={field.key} className={wide ? "sm:col-span-2" : undefined}>
               <FieldLabel htmlFor={id}>{field.label}</FieldLabel>

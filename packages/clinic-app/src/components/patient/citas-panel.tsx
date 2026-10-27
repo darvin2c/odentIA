@@ -1,6 +1,5 @@
-import { Badge, Button, buttonVariants } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { EmptyState, LoadingState } from "@odentia/ui-patterns"
-import { Link } from "@tanstack/react-router"
 import { CalendarDays } from "lucide-react"
 import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
@@ -10,7 +9,7 @@ import {
   usePatientAppointments,
 } from "../../lib/patient-appointments"
 import { QueryErrorState } from "../../lib/query-error"
-import { openBookingAnywhere } from "../agenda/schedule-host"
+import { openAppointmentAnywhere, openBookingAnywhere } from "../agenda/schedule-host"
 
 function statusVariant(appointment: AgendaAppointment): "success" | "warning" | "outline" | "soft" {
   if (appointment.status === "confirmada" || appointment.status === "atendida") return "success"
@@ -32,13 +31,10 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
       <div className="flex flex-wrap items-center gap-2">
         {/* El momento de la cita con el mismo nombre que en la Agenda: también «Llegó» o «En atención». */}
         <Badge variant={statusVariant(appointment)}>{visitName(appointment.visit)}</Badge>
-        <Link
-          to="/agenda"
-          search={{ appointmentId: appointment.id }}
-          className={buttonVariants({ size: "sm", variant: "outline" })}
-        >
-          Ver en agenda
-        </Link>
+        {/* La cita se abre al lado, con sus acciones de siempre: la pestaña sigue a la vista. */}
+        <Button type="button" size="sm" variant="outline" onClick={() => openAppointmentAnywhere(appointment.id)}>
+          Ver cita
+        </Button>
       </div>
     </li>
   )

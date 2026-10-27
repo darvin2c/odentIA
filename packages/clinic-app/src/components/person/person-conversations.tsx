@@ -49,8 +49,9 @@ export function PersonConversations({ person }: { person: PersonPage }) {
       {canChats ? (
         <SummaryCard
           title="Conversaciones"
+          // Sin conversaciones, «Escribirle» va en el vacío: no se repite arriba.
           action={
-            canWrite && !person.archived ? (
+            canWrite && !person.archived && list.length > 0 ? (
               <Button type="button" size="sm" variant="outline" onClick={() => setWriting(true)}>
                 <MessageCircle aria-hidden className="size-4" />
                 Escribirle

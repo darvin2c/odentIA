@@ -1,12 +1,11 @@
 /**
  * Lo que recepción ve del plan sin leer la ficha clínica (vista de
  * `treatment-coordination.ts`): los tratamientos con su título y estado, y los
- * controles con «Reservar». Nunca diagnósticos, piezas, importes ni notas.
+ * controles con «Reservar cita». Nunca diagnósticos, piezas, importes ni notas.
  */
-import { Badge, Button, buttonVariants } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import { LoadingState } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { planDecisionLabel } from "../../../lib/budgets"
 import {
@@ -19,6 +18,7 @@ import { usePermission } from "../../../lib/crm"
 import { planStatusLabel } from "../../../lib/patients"
 import { QueryErrorState } from "../../../lib/query-error"
 import { FollowUpScheduler } from "../follow-up-scheduler"
+import { openAppointmentAnywhere } from "../../agenda/schedule-host"
 
 /** Una cita cancelada o con inasistencia deja el control otra vez por reservar. */
 export function hasLiveAppointment(control: SchedulableControl): boolean {
@@ -100,16 +100,16 @@ export function CoordinationControls({
                   </span>
                 </div>
                 {live && control.appointment ? (
-                  <Link
-                    to="/agenda"
-                    search={{ appointmentId: control.appointment.id }}
-                    className={buttonVariants({ size: "sm", variant: "outline" })}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => control.appointment && openAppointmentAnywhere(control.appointment.id)}
                   >
-                    Ver en la agenda
-                  </Link>
+                    Ver cita
+                  </Button>
                 ) : canBook && control.status === "pendiente" ? (
                   <Button size="sm" onClick={() => setScheduling(control)}>
-                    Reservar
+                    Reservar cita
                   </Button>
                 ) : null}
               </li>
