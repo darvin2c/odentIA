@@ -5,6 +5,7 @@
  * opciones para seguir las entrega el servidor; la pantalla solo las dibuja.
  * La conversación vive en el panel y no se guarda (decisiones D2 y D4).
  */
+import { useSyncExternalStore } from "react"
 import { ApiError, apiDownload, apiFetch, apiLines } from "./api"
 import type { ReportQuery } from "./reports"
 
@@ -196,10 +197,39 @@ export interface ArgosAskEvent {
   /** Cómo se dice ese periodo y esa sede en el panel («Octubre de 2026 · Todas las sedes»). */
   screenLabel?: string
   routed?: boolean
+  /** Volver a la conversación tal como quedó: no pregunta ni cambia lo de Reportes. */
+  resume?: boolean
+}
+
+/** La última pregunta de la conversación abierta, para que el buscador ofrezca volver a ella. */
+export interface ArgosLastQuestion {
+  question: string
+  at: string
+}
+
+let lastQuestion: ArgosLastQuestion | null = null
+const lastListeners = new Set<() => void>()
+
+/** Lo anota el panel de Argos: la conversación vive mientras dura la sesión (D4). */
+export function setArgosLastQuestion(next: ArgosLastQuestion | null): void {
+  lastQuestion = next
+  for (const listener of lastListeners) listener()
+}
+
+function subscribeLastQuestion(listener: () => void): () => void {
+  lastListeners.add(listener)
+  return () => lastListeners.delete(listener)
+}
+
+export function useArgosLastQuestion(): ArgosLastQuestion | null {
+  return useSyncExternalStore(subscribeLastQuestion, () => lastQuestion, () => null)
 }
 
 export function openArgos(detail: ArgosAskEvent): void {
-  window.dispatchEvent(new CustomEvent<ArgosAskEvent>(ASK_ARGOS_EVENT, { detail }))
+  // Un cuadro después: quien lo abre desde el buscador lo cierra en el mismo
+  // clic, y la columna lateral no se ofrece mientras haya un diálogo en pantalla.
+  // Sin esperar, Argos salía como cajón en una ventana ancha.
+  requestAnimationFrame(() => window.dispatchEvent(new CustomEvent<ArgosAskEvent>(ASK_ARGOS_EVENT, { detail })))
 }
 
 /** Adónde lleva «Abrir…» de cada pantalla. */

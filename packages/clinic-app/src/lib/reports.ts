@@ -279,6 +279,10 @@ export interface ReportListRow {
   currency: string | null
   /** La fila lleva a su conversación en la Bandeja. */
   conversationId?: string | null
+  /** «Aceptaron y no tienen cita»: lo aceptado por hacer, para agendarlo desde la fila. */
+  planItemIds?: string[] | null
+  /** El servicio de eso, si es uno solo. */
+  serviceId?: string | null
 }
 
 export interface ReportList extends ReportHead {

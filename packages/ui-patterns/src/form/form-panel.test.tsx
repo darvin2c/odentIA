@@ -112,6 +112,21 @@ describe("FormPanel", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull()
   })
 
+  it("la «×» de la cabecera es el mismo cierre protegido que «Cancelar»", async () => {
+    const { onClose } = renderPanel({ isDirty: true })
+    fireEvent.click(screen.getByRole("button", { name: common.actions.close }))
+    await screen.findByRole("alertdialog", { name: unsaved.title })
+    fireEvent.click(screen.getByRole("button", { name: unsaved.discard }))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    // «Cancelar» sigue en el pie.
+    expect(screen.queryByRole("button", { name: common.actions.cancel })).not.toBeNull()
+  })
+
+  it("un botón del pie que solo diría «Cerrar» no repite la «×»", () => {
+    renderPanel({ cancelLabel: common.actions.close, submitLabel: common.actions.close })
+    expect(screen.getAllByRole("button", { name: common.actions.close })).toHaveLength(1)
+  })
+
   it("mientras se envía no cierra ni pregunta", () => {
     const { onClose } = renderPanel({ isDirty: true, isSubmitting: true })
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" })

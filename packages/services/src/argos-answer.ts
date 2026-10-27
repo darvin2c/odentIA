@@ -290,12 +290,17 @@ function timeUnitOf(name: string): [string, string] | null {
  * dinero y los porcentajes solos ya se entienden. Un hueco desconocido queda
  * «—» (antes se reintenta). El «%» que el modelo escriba junto a un
  * porcentaje se quita: el hueco ya lo trae.
+ *
+ * Con `listBelow` las filas ya se ven debajo, en la tabla o el dibujo: la
+ * frase dice qué son y termina en dos puntos, sin repetirlas («Hay 5 citas que
+ * ya pasaron sin cerrar:», tablero 1 del lienzo «Argos y citas sin cerrar»).
  */
 export function fillArgosSentence(
   template: string,
   result: ArgosQueryResult,
   zone: Pick<OrgLocale, "locale" | "currency" | "timezone">,
   words: ArgosWords = {},
+  listBelow = false,
 ): { text: string; parts: ArgosSentencePart[] } {
   const first = result.rows[0] ?? {}
   const byName = new Map(result.columns.map((column) => [column.name, column]))
@@ -328,6 +333,7 @@ export function fillArgosSentence(
   const rows = result.truncated ? `más de ${result.rows.length}` : String(result.rows.length)
   const parts: ArgosSentencePart[] = []
   let last = 0
+  let listDropped = false
   for (const match of template.matchAll(HOLE)) {
     const name = match[1] ?? ""
     const at = match.index ?? 0
@@ -343,6 +349,13 @@ export function fillArgosSentence(
       last = at + match[0].length
       continue
     }
+    if (name === "lista" && listBelow && !byName.has(name)) {
+      const previous = parts.at(-1)
+      if (previous && !previous.strong) previous.text = `${previous.text.replace(/[\s:]+$/, "")}:`
+      listDropped = true
+      last = at + match[0].length
+      continue
+    }
     parts.push({ text: byName.has(name) ? cell(first, name) : name === "lista" ? list : name === "filas" ? rows : "—", strong: true })
     last = at + match[0].length
     if (/_pct$/.test(name)) {
@@ -350,6 +363,7 @@ export function fillArgosSentence(
       if (repeated) last += repeated[0].length
     }
   }
-  if (last < template.length) parts.push({ text: template.slice(last) })
+  // Sin la lista, lo que la cerraba («.») sobra después de los dos puntos.
+  if (last < template.length && !(listDropped && /^[\s.]*$/.test(template.slice(last)))) parts.push({ text: template.slice(last) })
   return { text: parts.map((part) => part.text).join(""), parts }
 }

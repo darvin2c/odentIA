@@ -1,4 +1,4 @@
-import { cn, ScrollArea, Skeleton } from "@odentia/ui"
+import { Button, cn, ScrollArea, Skeleton } from "@odentia/ui"
 import * as React from "react"
 import { common } from "./common.js"
 import { ConfirmDialog } from "./confirm-dialog.js"
@@ -43,12 +43,20 @@ export interface SurfaceShellProps {
    * del root es una consecuencia de la superficie, no una prop aparte.
    */
   onSubmit?: (event: React.FormEvent) => void
+  /**
+   * Cierre de la cabecera: la «×» arriba a la derecha, la misma en panel,
+   * cajón y hoja del teléfono. Sin él no hay «×» (la superficie que obliga a
+   * decidir antes de seguir).
+   */
+  onClose?: () => void
+  /** La «×» no responde mientras se guarda. */
+  closeDisabled?: boolean
 }
 
 /**
- * Cabecera fija, cuerpo con scroll interno y pie opcional. El contenido de
- * `children` no se monta mientras `isLoading` (el esqueleto lo reemplaza) y el
- * error va en un banner `role="alert"` por encima del contenido.
+ * Cabecera fija con la «×», cuerpo con scroll interno y pie opcional. El
+ * contenido de `children` no se monta mientras `isLoading` (el esqueleto lo
+ * reemplaza) y el error va en un banner `role="alert"` por encima del contenido.
  */
 export function SurfaceShell({
   title,
@@ -62,19 +70,40 @@ export function SurfaceShell({
   footer,
   bodyClassName,
   onSubmit,
+  onClose,
+  closeDisabled = false,
 }: SurfaceShellProps) {
   const blocks = (
     <>
-      <div className="flex shrink-0 flex-col gap-1 border-b border-border px-6 py-4 text-left">
-        <h2 id={titleId} className="font-heading text-base font-medium text-foreground">
-          {title}
-        </h2>
-        {description ? (
-          <p id={descriptionId} className="text-sm text-balance text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
-        {headerContent}
+      <div className="flex shrink-0 flex-col gap-1 border-b border-border py-4 pr-3 pl-6 text-left">
+        <div className="flex items-start gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-1 pt-1">
+            <h2 id={titleId} className="font-heading text-base font-medium text-foreground">
+              {title}
+            </h2>
+            {description ? (
+              <p id={descriptionId} className="text-sm text-balance text-muted-foreground">
+                {description}
+              </p>
+            ) : null}
+          </div>
+          {onClose ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-lg"
+              className="-mt-0.5 shrink-0"
+              aria-label={common.actions.close}
+              disabled={closeDisabled}
+              onClick={onClose}
+            >
+              <span aria-hidden className="text-lg leading-none">
+                ×
+              </span>
+            </Button>
+          ) : null}
+        </div>
+        {headerContent ? <div className="pr-3">{headerContent}</div> : null}
       </div>
 
       <div className={cn("min-h-0 flex-1 overflow-hidden", bodyClassName)}>

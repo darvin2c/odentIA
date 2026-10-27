@@ -111,11 +111,31 @@ describe("DetailPanel", () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
-  it("el pie lleva Cerrar y las acciones propias del detalle", () => {
-    renderPanel({ actions: <button type="button">Editar</button> })
+  it("la «×» va en la cabecera y el pie solo lleva las acciones del detalle", () => {
+    const { utils } = renderPanel({ actions: <button type="button">Editar</button> })
 
+    const close = screen.getByRole("button", { name: common.actions.close })
+    const title = screen.getByRole("heading", { name: "Atención del 12/09/2026" })
+    // La «×» comparte fila con el título: arriba, no en el pie.
+    expect(close.closest("div.border-b")).toBe(title.closest("div.border-b"))
+    expect(screen.getAllByRole("button", { name: common.actions.close })).toHaveLength(1)
+    expect(screen.getByRole("button", { name: "Editar" }).closest("div.border-b")).toBeNull()
+    expect(utils.container.textContent).not.toContain(`${common.actions.close}Editar`)
+  })
+
+  it("un cierre con nombre propio («Listo») va también en el pie", () => {
+    const { onClose } = renderPanel({ closeLabel: "Listo" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Listo" }))
+
+    expect(onClose).toHaveBeenCalledTimes(1)
     expect(screen.getByRole("button", { name: common.actions.close })).not.toBeNull()
-    expect(screen.getByRole("button", { name: "Editar" })).not.toBeNull()
+  })
+
+  it("sin acciones no monta el pie: solo queda la «×»", () => {
+    renderPanel()
+
+    expect(screen.queryAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([common.actions.close])
   })
 
   it("sin acciones ni cierre visible no monta el pie", () => {

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest"
-import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingTask, type WaitingUnconfirmed } from "./workspace-home.js"
+import { composeWaiting, WAITING_LIMITS, type WaitingCase, type WaitingParts, type WaitingTask, type WaitingUnclosed, type WaitingUnconfirmed } from "./workspace-home.js"
 
 // «Ahora» lo dice `urgent` (decisión 1 del pulido): aquí, la prioridad alta.
 const caseOf = (id: string, priority: string): WaitingCase => ({
@@ -89,4 +89,21 @@ it("las citas sin confirmar que no caben se resumen en una fila con su cuenta", 
 it("los casos que no llegaron en la lista también se cuentan en «y N más»", () => {
   // Llegaron los dos más urgentes de 130: la fila dice cuántos quedan, no los que llegaron.
   expect(shape({ cases: [caseOf("u1", "alta"), caseOf("h1", "media")], casesTotal: 130 })).toEqual(["case:u1", "case:h1", "more:cases:128"])
+})
+
+it("las citas sin cerrar van antes que las por confirmar y las que no caben se resumen", () => {
+  const unclosedOf = (id: string): WaitingUnclosed => ({
+    id, patientId: `p-${id}`, patientName: id, startsAt: "2026-10-25T15:00:00.000Z", professionalName: null, serviceName: null, branchName: "Miraflores",
+  })
+  const items = Array.from({ length: WAITING_LIMITS.unclosed }, (_, index) => unclosedOf(`u${index}`))
+  const rows = composeWaiting({ ...nothing, unclosed: { items, total: WAITING_LIMITS.unclosed + 2 }, unconfirmed: { items: [unconfirmedOf("rosa")], total: 1 } })
+  expect(rows.map((row) => (row.kind === "more" ? `more:${row.of}:${row.count}` : "id" in row ? `${row.kind}:${row.id}` : row.kind))).toEqual([
+    ...items.map((item) => `unclosed:${item.id}`), "more:unclosed:2", "unconfirmed:rosa",
+  ])
+})
+
+it("quienes aceptaron y no tienen cita son una sola fila, y sin nadie no hay fila", () => {
+  expect(shape({ acceptedUnbooked: { patients: 76, cents: 2_412_100, currency: "PEN" } })).toEqual(["acceptedUnbooked"])
+  expect(shape({ acceptedUnbooked: { patients: 0, cents: 0, currency: "PEN" } })).toEqual([])
+  expect(shape({ acceptedUnbooked: null })).toEqual([])
 })

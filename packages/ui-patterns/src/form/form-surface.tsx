@@ -39,8 +39,8 @@ export interface FormSurfaceProps {
 }
 
 /**
- * Shell del formulario: cabecera fija, cuerpo con scroll interno y acciones
- * persistentes (Cancelar, una secundaria opcional y Guardar). No decide DÓNDE vive (drawer modal o
+ * Shell del formulario: cabecera fija con la «×», cuerpo con scroll interno y
+ * acciones persistentes (Cancelar, una secundaria opcional y Guardar). No decide DÓNDE vive (drawer modal o
  * panel lateral): eso lo aportan `FormDrawer` y `FormPanel`, que comparten este
  * shell para que el mismo formulario se vea idéntico en los dos modos. El
  * chrome común con el detalle de lectura vive en `SurfaceShell`.
@@ -63,6 +63,10 @@ export function FormSurface({
   hideSubmit = false,
   secondaryAction,
 }: FormSurfaceProps) {
+  // Un botón del pie que solo dice «Cerrar» repetiría la «×»: queda solo arriba.
+  const footerCancel = cancelLabel !== common.actions.close
+  const footerSubmit = !hideSubmit && submitLabel !== common.actions.close
+  const hasFooter = footerCancel || secondaryAction != null || footerSubmit
   return (
     <SurfaceShell
       title={title}
@@ -73,40 +77,47 @@ export function FormSurface({
       isLoading={isLoading}
       error={error}
       onSubmit={onSubmit}
+      // La «×» es el mismo cierre protegido que «Cancelar»: con cambios, pregunta antes.
+      onClose={onCancel}
+      closeDisabled={isSubmitting}
       footer={
-        <>
-          <Button
-            type="button"
-            variant="secondary"
-            className="min-h-11"
-            onClick={onCancel}
-            disabled={isSubmitting}
-          >
-            {cancelLabel}
-          </Button>
-          {secondaryAction ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="min-h-11"
-              onClick={secondaryAction.onClick}
-              disabled={isSubmitting || isLoading || secondaryAction.disabled}
-            >
-              {secondaryAction.label}
-            </Button>
-          ) : null}
-          {!hideSubmit && (
-            <SubmitButton
-              type="submit"
-              variant="default"
-              className="min-h-11"
-              pending={isSubmitting}
-              disabled={isLoading || submitDisabled}
-            >
-              {submitLabel}
-            </SubmitButton>
-          )}
-        </>
+        hasFooter ? (
+          <>
+            {footerCancel ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-11"
+                onClick={onCancel}
+                disabled={isSubmitting}
+              >
+                {cancelLabel}
+              </Button>
+            ) : null}
+            {secondaryAction ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-11"
+                onClick={secondaryAction.onClick}
+                disabled={isSubmitting || isLoading || secondaryAction.disabled}
+              >
+                {secondaryAction.label}
+              </Button>
+            ) : null}
+            {footerSubmit && (
+              <SubmitButton
+                type="submit"
+                variant="default"
+                className="min-h-11"
+                pending={isSubmitting}
+                disabled={isLoading || submitDisabled}
+              >
+                {submitLabel}
+              </SubmitButton>
+            )}
+          </>
+        ) : null
       }
     >
       {children}

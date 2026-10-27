@@ -137,6 +137,19 @@ describe("la consulta con el periodo", () => {
     expect(bindArgosPeriod("select 1 where :desde < :hasta", resolve("este_mes", "anterior"), null)).toMatchObject({ problem: expect.stringContaining(":desde_antes") })
   })
 
+  it("con las filas a la vista debajo, la frase termina en dos puntos y no las repite", () => {
+    const result = {
+      columns: [{ name: "paciente", kind: "text" as const }, { name: "total_general", kind: "number" as const }],
+      rows: [{ paciente: "Elena Huamán", total_general: 2 }, { paciente: "Carlos Paredes", total_general: 2 }],
+      truncated: false,
+    }
+    const zone = { ...ZONE, currency: "PEN" }
+    const template = "Hay {total_general} citas que ya pasaron sin cerrar: {lista}."
+    expect(fillArgosSentence(template, result, zone, {}, true).text).toBe("Hay 2 citas que ya pasaron sin cerrar:")
+    // Sin tabla debajo, la lista va en la frase como siempre.
+    expect(fillArgosSentence(template, result, zone).text).toBe("Hay 2 citas que ya pasaron sin cerrar: Elena Huamán; Carlos Paredes.")
+  })
+
   it("la frase dice el periodo sin destacarlo y con mayúscula si abre con él", () => {
     const period = resolve("este_mes", "anterior")
     const result = { columns: [{ name: "cobrado_dinero", kind: "number" as const }], rows: [{ cobrado_dinero: 34818 }], truncated: false }

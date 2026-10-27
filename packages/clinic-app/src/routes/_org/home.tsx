@@ -14,6 +14,8 @@ import { useAppointmentArrival } from "../../components/agenda/arrival"
 import { RegistrationHoldDrawer } from "../../components/home/registration-hold-drawer"
 import { AgendaLine, type BranchChoice, CashLine, TodayAgenda, TodayCash, TodayPatients } from "../../components/home/today"
 import { WaitingList } from "../../components/home/waiting-list"
+import { ReportListDrawer } from "../../components/reports/report-list-drawer"
+import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { HomeStart, needsSetup } from "../../components/home-start"
 import { useActiveBranch } from "../../lib/active-branch"
 import { useReceptionName } from "../../lib/agent-names"
@@ -58,6 +60,7 @@ type CaseRow = Extract<WaitingRow, { kind: "case" }>
 type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
 type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
 type InventoryRow = Extract<WaitingRow, { kind: "inventory" }>
+type UnclosedRow = Extract<WaitingRow, { kind: "unclosed" }>
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -96,6 +99,18 @@ function HomePage() {
   const canWriteAppointments = usePermission("appointments.write")
   // «Llegó» desde la fila de quien terminó su registro: la misma operación que la Agenda.
   const arrival = useAppointmentArrival()
+  // «No vino» en una cita que quedó sin cerrar: la misma operación que la Agenda.
+  const noShow = useMutation({
+    mutationFn: (row: UnclosedRow) =>
+      apiFetch(`/api/appointments/${row.id}/status`, { method: "POST", body: JSON.stringify({ status: "no_asistio" }) }),
+    onSuccess: async (_result, row) => {
+      toast.success(`Cita de ${row.patientName}: no vino`)
+      await invalidateAppointmentQueries(queryClient)
+      refresh()
+    },
+  })
+  // Quienes aceptaron y no tienen cita: la lista de Reportes, al lado, para agendarlos desde aquí.
+  const [acceptedList, setAcceptedList] = useState(false)
   const confirmRepresentative = useMutation({
     mutationFn: (row: DuplicateRow) =>
       apiFetch(`/api/patients/${row.patientId}/responsibilities/pending/${row.id}/confirm`, { method: "POST", body: JSON.stringify({}) }),
@@ -141,6 +156,8 @@ function HomePage() {
         ? waitingKey(discardRegistration.variables)
         : reorder.isPending && reorder.variables
           ? waitingKey(reorder.variables)
+          : noShow.isPending && noShow.variables
+          ? waitingKey(noShow.variables)
           : completion.pendingId
           ? `task:${completion.pendingId}`
           : null
@@ -150,6 +167,7 @@ function HomePage() {
     (confirmRepresentative.error ? mutationErrorMessage(confirmRepresentative.error) ?? "No se pudo confirmar el representante." : null) ??
     (discardRegistration.error ? mutationErrorMessage(discardRegistration.error) ?? "No se pudo descartar." : null) ??
     (reorder.error ? mutationErrorMessage(reorder.error) ?? "No se armaron los borradores de compra." : null) ??
+    (noShow.error ? mutationErrorMessage(noShow.error) ?? "No se pudo marcar que no vino." : null) ??
     completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
@@ -233,6 +251,8 @@ function HomePage() {
               onArrived: canWriteAppointments
                 ? (row) => arrival.mutate({ id: row.appointmentId, arrived: true, patient: { id: row.patientId, name: row.patientName } })
                 : undefined,
+              onNoShow: canWriteAppointments ? (row) => noShow.mutate(row) : undefined,
+              onAcceptedList: () => setAcceptedList(true),
               onVoidEncounter: (row) => {
                 setDiscardReason("")
                 setDiscarding(row)
@@ -288,6 +308,17 @@ function HomePage() {
     <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />
     <AdminRecommendationDrawer recommendationKey={advice} onClose={() => setAdvice(null)} />
+      {/* «Ver la lista»: se agenda desde cada fila sin salir de Inicio (tablero 12). */}
+      {acceptedList ? (
+        <ReportListDrawer
+          list="upcoming_unbooked"
+          query={{ period: "este_mes" }}
+          onClose={() => {
+            setAcceptedList(false)
+            refresh()
+          }}
+        />
+      ) : null}
     <AdminUnreachedDrawer open={unreached} onClose={() => setUnreached(false)} />
     {completion.dialog}
     <DetailDrawer

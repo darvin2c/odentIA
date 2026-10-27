@@ -550,7 +550,8 @@ describe("Argos sobre las vistas", () => {
     ])
     const answer = await ask(model, "¿Cómo nos pagan?")
     if (answer.kind !== "respuesta") throw new Error(answer.kind)
-    expect(answer.text).toMatch(/^Se cobró S\/\s?1,250\.50; el primero es Efectivo\. Por medio: Efectivo \(S\/\s?1,250\.50\); Yape \(S\/\s?0\.00\)\.$/)
+    // La lista va debajo, en la tabla: la frase no la repite.
+    expect(answer.text).toMatch(/^Se cobró S\/\s?1,250\.50; el primero es Efectivo\. Por medio:$/)
     expect(answer.query).toMatch(/^with c2 as \(.+\), c1 as \(.+\) select c2\.\*, c1\.total_dinero as c1_total_dinero from c2 left join c1 on true$/)
   })
 })

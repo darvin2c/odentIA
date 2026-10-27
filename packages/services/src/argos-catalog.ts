@@ -152,7 +152,7 @@ export const ARGOS_CATALOG: readonly ArgosView[] = [
   {
     name: "promociones_uso",
     about: "Cada vez que alguien usó una promoción: en un presupuesto entregado o en un cobro.",
-    columns: "promocion, paciente, paciente_id, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día)",
+    columns: "promocion, paciente, paciente_id, fecha, aceptado (bool), descuento, paciente_nuevo (bool: no se había atendido antes), cobrado_desde_entonces (lo que esa persona pagó desde ese día), profesional (en un presupuesto, quien indicó el tratamiento; en un cobro, quien lo atendió; null en la venta de un producto)",
     keys: ["gestion"],
   },
   {
