@@ -34,6 +34,7 @@ import {
   openArgos,
   pinArgos,
   rerunArgos,
+  setArgosLastQuestion,
 } from "../../lib/argos"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { askHelp, canOpenHref } from "../../lib/global-search"
@@ -693,9 +694,11 @@ export function ArgosPanel() {
   useEffect(() => {
     function onAsk(event: Event) {
       const detail = (event as CustomEvent<ArgosAskEvent>).detail
+      setOpen(true)
+      // «Volver a la conversación» del buscador: tal como quedó.
+      if (detail?.resume) return
       const question = detail?.question?.trim() ?? ""
       setScreen(detail?.screen ? { query: detail.screen, label: detail.screenLabel ?? "" } : null)
-      setOpen(true)
       if (question.length >= 3) pushRef.current(question, { screen: detail?.screen, ...(detail?.routed ? { routed: true } : {}) })
       else setDraft(question)
     }
@@ -704,6 +707,11 @@ export function ArgosPanel() {
   }, [])
 
   const last = exchanges[exchanges.length - 1]
+  const lastAsked = last?.question
+  // El buscador ofrece volver a esta conversación mientras exista.
+  useEffect(() => {
+    setArgosLastQuestion(lastAsked ? { question: lastAsked, at: new Date().toISOString() } : null)
+  }, [lastAsked])
   // biome-ignore lint/correctness/useExhaustiveDependencies: baja a la última respuesta cuando llega.
   useEffect(() => {
     end.current?.scrollIntoView({ block: "nearest" })
@@ -743,6 +751,9 @@ export function ArgosPanel() {
         allowance.data?.limited ? `${DESCRIPTION} · ${allowance.data.used} de ${allowance.data.total} preguntas de ${allowance.data.month}` : DESCRIPTION
       }
       onClose={() => setOpen(false)}
+      footer={
+        <ArgosAsk screen={screen} onDropScreen={() => setScreen(null)} draft={draft} onDraft={setDraft} pending={pending} onSubmit={submit} />
+      }
     >
       <div className="flex flex-col gap-4">
         {exchanges.length === 0 ? (
@@ -812,56 +823,76 @@ export function ArgosPanel() {
         <p role="status" className="sr-only">
           {live}
         </p>
-        <div className="flex flex-col gap-2 border-t pt-3.5">
-          {screen ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
-              <span className="min-w-0">
-                Con lo de Reportes{screen.label ? <>: <span className="font-semibold text-foreground">{screen.label}</span></> : null}
-              </span>
-              <Button type="button" variant="link" className="min-h-11 px-1 text-[13px] sm:min-h-8" onClick={() => setScreen(null)}>
-                Quitar
-              </Button>
-            </div>
-          ) : null}
-          <form onSubmit={submit}>
-            <FieldLabel htmlFor="argos-otra" className="sr-only">
-              Escribe otra pregunta
-            </FieldLabel>
-            <InputGroup className="border-input bg-card">
-              <InputGroupTextarea
-                id="argos-otra"
-                rows={1}
-                maxLength={500}
-                className="max-h-32 min-h-11"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault()
-                    event.currentTarget.form?.requestSubmit()
-                  }
-                }}
-                placeholder="Escribe otra pregunta"
-              />
-              <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
-                <InputGroupButton
-                  type="submit"
-                  variant="default"
-                  size="icon-sm"
-                  className="size-11 rounded-xl sm:size-9"
-                  aria-label="Preguntar"
-                  disabled={draft.trim().length < 3 || pending}
-                  aria-busy={pending}
-                >
-                  <ArrowRight aria-hidden />
-                </InputGroupButton>
-              </InputGroupAddon>
-            </InputGroup>
-          </form>
-          <p className="text-[13px] text-muted-foreground">Ve lo mismo que tú. Nunca cambia nada.</p>
-        </div>
       </div>
     </DetailDrawer>
+  )
+}
+
+/** La caja de pregunta: fija en el pie mientras la conversación se desplaza encima. */
+function ArgosAsk({
+  screen,
+  onDropScreen,
+  draft,
+  onDraft,
+  pending,
+  onSubmit,
+}: {
+  screen: { label: string } | null
+  onDropScreen: () => void
+  draft: string
+  onDraft: (value: string) => void
+  pending: boolean
+  onSubmit: (event: FormEvent) => void
+}) {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      {screen ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[13px] text-muted-foreground">
+          <span className="min-w-0">
+            Con lo de Reportes{screen.label ? <>: <span className="font-semibold text-foreground">{screen.label}</span></> : null}
+          </span>
+          <Button type="button" variant="link" className="min-h-11 px-1 text-[13px] sm:min-h-8" onClick={onDropScreen}>
+            Quitar
+          </Button>
+        </div>
+      ) : null}
+      <form onSubmit={onSubmit}>
+        <FieldLabel htmlFor="argos-otra" className="sr-only">
+          Escribe otra pregunta
+        </FieldLabel>
+        <InputGroup className="border-input bg-card">
+          <InputGroupTextarea
+            id="argos-otra"
+            rows={1}
+            maxLength={500}
+            className="max-h-32 min-h-11"
+            value={draft}
+            onChange={(event) => onDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault()
+                event.currentTarget.form?.requestSubmit()
+              }
+            }}
+            placeholder="Escribe otra pregunta"
+          />
+          <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
+            <InputGroupButton
+              type="submit"
+              variant="default"
+              size="icon-sm"
+              className="size-11 rounded-xl sm:size-9"
+              aria-label="Preguntar"
+              disabled={draft.trim().length < 3 || pending}
+              aria-busy={pending}
+            >
+              <ArrowRight aria-hidden />
+            </InputGroupButton>
+          </InputGroupAddon>
+        </InputGroup>
+      </form>
+      <p className="text-[13px] text-muted-foreground">Ve lo mismo que tú. Nunca cambia nada.</p>
+    </div>
   )
 }
 
