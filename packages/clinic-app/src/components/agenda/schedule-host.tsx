@@ -137,7 +137,7 @@ function BookingHost({ seed, onClose }: { seed: BookingSeed; onClose: () => void
   const client = useQueryClient()
   // La sede que se está mirando, la misma de la Agenda.
   const sede = useActiveBranch()
-  const resources = useResources(sede.branchId, sede.ready)
+  const resources = useResources(sede.branchId, true)
   const toneOf = useToneOf(resources.data?.data)
   const now = useScheduleNow()
   if (resources.isError) return <Waiting title="Nueva cita" error="No se pudo abrir la agenda. Ciérrala y vuelve a intentarlo." onClose={onClose} />

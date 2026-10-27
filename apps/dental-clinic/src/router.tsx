@@ -9,6 +9,9 @@ declareProduct(dentalUi)
 export function getRouter() {
   return createRouter({
     routeTree,
+    // Al acercar el puntero (o el foco) a un enlace se baja el código de esa
+    // pantalla y corre su `beforeLoad`: al hacer clic ya está lista.
+    defaultPreload: "intent",
     // La agenda posiciona su timeline según el parámetro `date`: la
     // restauración (que conserva el scroll de contenedores persistentes
     // entre ubicaciones) pisaría ese salto en cada navegación.
