@@ -29,6 +29,7 @@ import {
   getContact,
   getOrgLocale,
   getPersonMemory,
+  getPatientRegistrationConfig,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
@@ -327,8 +328,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     on("seguimiento")
       ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
       : whenOff("seguimiento"),
-    "Si el interlocutor cuenta un síntoma para pedir una cita, un precio o un horario, no es un caso clínico: ofrécele la cita sin diagnosticar ni opinar sobre lo que siente. Si pide hablar con un humano, se queja, tiene una urgencia o pide un consejo clínico (qué tomar, si es grave, qué hacer), usa request_human_handoff con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá y cuándo le responde; no uses send_reply para ese aviso. No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo»).",
-    "Ante una urgencia (dolor fuerte, sangrado, hinchazón, fiebre, un golpe), además de pasar el tema con prioridad alta, dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica. Solo si su vida puede estar en peligro (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar), dile primero que llame ahora al número de emergencias del país que figura ahí o que vaya a la emergencia más cercana. El vencimiento de una tarea es un plazo interno del equipo: no lo digas como hora de respuesta.",
+    `Si el interlocutor cuenta un síntoma (un dolor, fiebre, tos, un golpe) y quiere que lo atiendan o pregunta dónde, no es un caso para el equipo: ${has("buscar_huecos") ? "búscale con buscar_huecos los horarios más próximos y ofréceselos" : "ofrécele la cita"}, sin diagnosticar ni opinar sobre lo que siente. Usa request_human_handoff solo si pide hablar con una persona, se queja, pide un consejo clínico (qué tomar, si es grave, qué hacer) o su vida puede estar en peligro: con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá, sin prometer una hora ni un plazo; no uses send_reply para ese aviso.${has("buscar_huecos") ? " Si en ese mismo mensaje también pide una cita, busca antes los horarios y ofréceselos en ese mismo aviso." : ""} No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo») y no lo mencionas si la persona no pregunta por él.`,
+    "Si lo que cuenta no puede esperar (un dolor que no lo deja dormir, sangrado, hinchazón, fiebre, un golpe), ofrécele la cita más próxima, hoy si hay, y dale también el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; eso no es motivo para pasar el tema al equipo. Solo si su vida puede estar en peligro (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar), dile primero que llame ahora al número de emergencias del país que figura ahí o que vaya a la emergencia más cercana, y pasa el tema con prioridad alta. El vencimiento de una tarea es un plazo interno del equipo: nunca lo digas como hora de respuesta.",
     // Lo del producto (odentIA: la tomografía llega en CD, USB o ZIP).
     ...texts.receptionRules,
     "Ninguna conversación queda abierta: cuando la persona agradece o se despide y no queda nada pendiente (ninguna propuesta esperando su sí, ningún caso con el equipo, ninguna pregunta suya sin responder), despídete en una sola línea cordial, en el tono de la clínica, diciendo que estamos atentos si quiere volver a escribir, y usa despedirse_y_cerrar en lugar de send_reply. Si su agradecimiento llega con algo pendiente o con otra pregunta, responde con send_reply y no cierres. Nunca digas «te dejo por ahora».",
@@ -677,6 +678,18 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .filter(Boolean)
           .join("\n")
       : null
+    // Quien aún no es paciente no se reserva por aquí (proponer_cita es para una
+    // ficha) ni se registra por el chat: el registro pide su aviso de privacidad.
+    // Se le dice desde el primer mensaje, para que no pida datos que no puede usar
+    // (auditoría del 27-oct: pedía nombre, DNI y celular y después no podía).
+    async function newPersonLine(): Promise<string> {
+      const online =
+        available.has("enviar_enlace_cita") &&
+        (await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => (await getPatientRegistrationConfig(tx, toolCtx.orgId)).enabled).catch(() => false))
+      return online
+        ? "Este interlocutor aún no es paciente de la clínica. Por aquí no le reservas ni lo registras, y no le pidas documento ni otros datos para eso: si quiere una cita, ofrécele los horarios y, cuando elija uno, envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos ahí; díselo así."
+        : "Este interlocutor aún no es paciente de la clínica y la clínica no registra pacientes en línea. Por aquí no le reservas ni lo registras: si quiere una cita, pregúntale solo su nombre y qué día y hora prefiere, y pasa el caso a recepción una sola vez con request_human_handoff para que lo registre y le confirme; no le pidas documento ni le digas que la cita quedó reservada."
+    }
     // Personas a las que este interlocutor está vinculado: mismo listado
     // autorizado que ver_contexto_paciente (solo nombre y vínculo, sin clínica).
     const linkedPatients = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
@@ -687,7 +700,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .slice(0, 5)
           .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
           .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente.`
-      : "Este interlocutor no está vinculado a ningún paciente."
+      : await newPersonLine()
     // Lo que el agente recuerda de la persona, venga del canal que venga: sus
     // datos guardados (nunca clínicos) y lo que sale de vínculos y citas.
     const memoryBlock = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) =>

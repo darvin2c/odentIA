@@ -2050,11 +2050,12 @@ export async function createProposal(
           gt(agentProposal.createdAt, new Date(Date.now() - CONFIRM_TTL_MS)),
         ),
       )
-    // La persona corrige la lista de su respuesta («no, la 36 también»): la
-    // nueva reemplaza a la anterior, que nunca recibió su sí. Sigue habiendo
-    // una sola esperando confirmación.
-    const replaces =
-      input.action === "decidir_presupuesto" && pending.length > 0 && pending.every((row) => row.action === "decidir_presupuesto")
+    // La persona corrige lo que pidió («no, la 36 también»; «mejor el jueves a
+    // las 9»): la nueva reemplaza a la anterior, que nunca recibió su sí. Sigue
+    // habiendo una sola esperando confirmación, y es la última que se le dijo:
+    // si no, su «confirmo» ejecutaba la vieja (auditoría del 27-oct).
+    const replaceable = input.action === "decidir_presupuesto" || (APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(input.action)
+    const replaces = replaceable && pending.length > 0 && pending.every((row) => row.action === input.action)
     if (replaces) {
       for (const row of pending) {
         await tx
@@ -3782,6 +3783,26 @@ async function topicPersonName(tx: Db, orgId: string, contactId: string | null):
  * (ADR 0050): el agente no lo responde; se anota el mensaje en el tema y se
  * avisa a su responsable (o, sin responsable, queda resaltado en «Por atender»).
  */
+/**
+ * El tema más reciente que el equipo aún tiene en esta conversación, con su
+ * prioridad: si la persona vuelve a escribir sobre lo mismo se anota en ese
+ * tema, no se abre otro (auditoría del 27-oct: «hablar con la doctora» abría
+ * un tema por mensaje).
+ */
+export async function latestOpenTopic(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+): Promise<{ id: string; priority: string } | null> {
+  const [row] = await tx
+    .select({ id: agentHandoff.id, priority: agentHandoff.priority })
+    .from(agentHandoff)
+    .where(and(eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, conversationId), handoffStillOpen()))
+    .orderBy(desc(agentHandoff.createdAt))
+    .limit(1)
+  return row ?? null
+}
+
 export async function recordTopicAskedAgain(
   tx: Db,
   orgId: string,

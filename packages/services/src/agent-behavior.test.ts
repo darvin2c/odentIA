@@ -357,18 +357,22 @@ describe("evidencia congelada de lo aprobado", () => {
 })
 
 describe("el hilo nunca se silencia: mensajes y caducidad", () => {
-  it("una cita esperando el sí deja salir los mensajes, pero frena otra cita y lo comercial", async () => {
+  it("una cita esperando el sí deja salir los mensajes, la reemplaza otra cita y frena lo comercial", async () => {
     const { conversationId } = await openConversation("hilo-1", "evt-hilo-1")
-    const waiting = await run((tx) =>
+    const first = await run((tx) =>
       createProposal(tx, ORG, {
         conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:hilo-1",
       }),
     )
-    expect(waiting.status).toBe("propuesta")
-    await expect(run((tx) => createProposal(tx, ORG, {
+    expect(first.status).toBe("propuesta")
+    // «Mejor el martes a las 10»: la nueva reemplaza a la que nunca recibió su sí,
+    // y un «confirmo» ya no puede ejecutar la vieja.
+    const waiting = await run((tx) => createProposal(tx, ORG, {
       conversationId, action: "reservar_cita", payload: booking("2026-11-03T15:00:00.000Z"),
       idempotencyKey: "test:crm-agent:hilo-1-otra",
-    }))).rejects.toMatchObject({ code: "PROPOSAL_PENDING_CONFIRM", status: 409 })
+    }))
+    expect(waiting.status).toBe("propuesta")
+    expect((await run((tx) => getProposal(tx, ORG, first.id))).status).toBe("expirada")
     await expect(run((tx) => createProposal(tx, ORG, {
       conversationId, action: "crear_oportunidad", payload: { title: "Otra consulta pendiente" },
       idempotencyKey: "test:crm-agent:hilo-1-comercial",

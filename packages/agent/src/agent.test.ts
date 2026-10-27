@@ -5,7 +5,7 @@ import { once } from "node:events"
 import { createServer } from "node:http"
 import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
-import { contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
 import {
@@ -2073,6 +2073,9 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, opened.conversationId)))
   const [testPatient] = await inOrg((tx) => listAgentContextCandidates(tx, "org_a", thread!.contactId))
   expect(testPatient).toMatchObject({ displayName: "Paciente de prueba", relationship: "self" })
+  // En el chat web no se reserva sin dónde avisarle (si la clínica puede avisar):
+  // la persona de prueba ya dejó su correo.
+  await ownerDb.update(contact).set({ email: "prueba@example.com" }).where(eq(contact.id, thread!.contactId))
   const write = (text: string) =>
     inOrg((tx) =>
       ingestInbound(

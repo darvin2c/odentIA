@@ -848,7 +848,7 @@
   },
   {
     "name": "request_human_handoff",
-    "description": "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá y cuándo le responde y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
+    "description": "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá, sin prometer una hora ni un plazo, y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -875,7 +875,7 @@
           ]
         },
         "message": {
-          "description": "Aviso breve de quién verá su consulta y cuándo le responde (por ejemplo, «la Dra. lo verá mañana desde las 9:00»). El agente sigue atendiendo lo demás.",
+          "description": "Aviso breve de quién verá su consulta (por ejemplo, «Recepción lo revisa y te escribe por aquí»), sin prometer una hora ni un plazo. El agente sigue atendiendo lo demás.",
           "type": "string",
           "minLength": 1,
           "maxLength": 4000
@@ -917,7 +917,7 @@
   },
   {
     "name": "recordar_tema",
-    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene y cuándo le responde, sin responder el tema.",
+    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -932,6 +932,27 @@
       "required": [
         "tema_id"
       ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "guardar_contacto",
+    "description": "En el chat de la web, guarda el WhatsApp o el correo que la persona escribió para avisarle (de su cita o de lo que tenga el equipo). Úsala apenas lo escriba; no lo inventes ni lo completes.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "whatsapp": {
+          "description": "El número tal como lo escribió, con su código de país si lo dio.",
+          "type": "string",
+          "maxLength": 40
+        },
+        "email": {
+          "description": "El correo tal como lo escribió.",
+          "type": "string",
+          "maxLength": 320
+        }
+      },
       "additionalProperties": false
     }
   }

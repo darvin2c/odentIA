@@ -155,7 +155,7 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   clinico: [...ALWAYS],
   cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
-    "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato",
+    "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato", "guardar_contacto",
   ],
   cambio_cita: [
     ...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "reprogramar_cita", "cancelar_cita", "confirmar_propuesta", "confirmar_cita",
@@ -401,7 +401,12 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
         : services === "indice" && has("buscar_en_la_clinica")
           ? "Las sedes, con su id, están arriba; de los servicios va solo el índice: si ya sabe qué servicio quiere, búscalo con buscar_en_la_clinica para tener su id y pásalo a buscar_huecos, así el hueco dura lo que dura ese servicio."
           : "Las sedes, con su id, están arriba. Sin el id del servicio, buscar_huecos usa la duración de una cita regular."
-    return `${head} reservar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n${ids} Si el interlocutor aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; proponer_cita va solo cuando ya eligió uno.`
+    return `${head} reservar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n${ids} Si el interlocutor aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; proponer_cita va solo cuando ya eligió uno.${
+      // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
+      facts.urgency === "urgente"
+        ? " Lo que cuenta no puede esperar: ofrécele primero el horario más próximo, hoy si hay, y dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; no pases el caso al equipo por eso."
+        : ""
+    }`
   }
   if (path === "cambio_cita" && prefetched) {
     return `${head} cambiar o cancelar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo:\n${prefetched}\nUsa los ids y las versiones exactos de ahí.`

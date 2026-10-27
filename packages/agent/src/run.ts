@@ -26,7 +26,9 @@ import {
   automationReplyOf,
   getAgentConfig,
   getLesson,
+  latestOpenTopic,
   lessonImpact,
+  recordTopicAskedAgain,
   ServiceError,
   assertAgentTestBudget,
   isSaasSendBlocked,
@@ -720,7 +722,19 @@ async function attendAgentRun(
       // o no lo deja, sale un aviso fijo: nunca queda sin respuesta.
       const { reason, priority } = routeHandoff(toolCtx.route)
       const said = burstTexts.slice(-8).map((text) => `«${text.slice(0, 300)}»`).join(" · ")
-      await performHandoff(toolCtx, reason, said ? `Escribió: ${said}` : reason, priority, toolCtx.route.intent === "clinical_question")
+      // Con un tema abierto en el hilo, lo que vuelve a escribir se anota en ese
+      // tema: otro tema por mensaje solo llena la cola del equipo. Abre uno nuevo
+      // solo si sube a urgente lo que no lo era.
+      const open = await withOrgContext(db, orgId, (tx) => latestOpenTopic(tx, orgId, conversationId))
+      if (open && !(priority === "alta" && open.priority !== "alta")) {
+        await withOrgContext(db, orgId, (tx) =>
+          recordTopicAskedAgain(tx, orgId, { handoffId: open.id, messageId: toolCtx.triggerId ?? null }),
+        )
+        toolCtx.handedOff = true
+        toolCtx.handoffId = open.id
+      } else {
+        await performHandoff(toolCtx, reason, said ? `Escribió: ${said}` : reason, priority, toolCtx.route.intent === "clinical_question")
+      }
       try {
         await invokeGraph()
       } catch (error) {
@@ -745,6 +759,10 @@ async function attendAgentRun(
       }
     } else {
       await invokeGraph()
+      // Derivar siempre avisa: si el modelo que escribe pasó el caso sin aviso,
+      // o su aviso no salió, la persona recibe el aviso fijo (auditoría del 27-oct:
+      // «me duele una muela» quedaba sin ninguna respuesta).
+      if (toolCtx.handedOff && !toolCtx.replySettled) await noticeAfterHandoff(toolCtx)
       // Quien preguntó por un servicio concreto queda anotado como oportunidad
       // en «Interesado» (decisión 15 de la fase 4): lo hace el sistema, no el
       // modelo que escribe, y solo con «Oportunidades» encendida. Un saludo o

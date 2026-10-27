@@ -110,7 +110,51 @@ const LATIDIA: Scenario[] = [
   { id: "l16-direccion-horario-web", channel: "web_nuevo", persona: "Alguien que escribe desde la web solo para saber la dirección del consultorio y el horario. No quiere agendar." },
 ]
 
-const SCENARIOS = (PRODUCT === "odentia" ? ODENTIA : LATIDIA).filter((s) => ONLY.length === 0 || ONLY.some((id) => s.id.startsWith(id)))
+// Segunda tanda (27-oct, tras los arreglos): conversaciones nuevas, más el caso reportado como control.
+const ODENTIA_2: Scenario[] = [
+  { id: "n01-caso-reportado-probar", channel: "probar", persona: "", script: ["hola", "tengo un dolor de diente, donde me pueden atender", "no me pueden agendar una cita??", "miraflores", "ok agendame para el jueves a las 9", "confirmo"] },
+  { id: "n02-encia-sangra", channel: "wa_nuevo", persona: "Marisol, 41 años. Se le hinchó la encía y le sangra al cepillarse desde hace una semana. Quiere que la vean esta semana, de preferencia en la tarde. Si le piden datos: Marisol Gutiérrez Paz, DNI 40125896." },
+  { id: "n03-nino-golpe-diente", channel: "wa_nuevo", persona: "Ricardo, papá de Thiago (9 años), que se golpeó un diente de adelante en el recreo; se le mueve un poco y le duele. Quiere que lo vean hoy si se puede. Escribe apurado." },
+  { id: "n04-muela-juicio", channel: "wa_nuevo", persona: "Daniela, 26 años. Pregunta cuánto cuesta sacarse una muela del juicio y cuántos días de descanso necesita. Solo quiere la información." },
+  { id: "n05-cambia-a-viernes", channel: "wa_nuevo", persona: "Óscar. Quiere una limpieza. Cuando le ofrezcan horarios, elige uno; después de que Sofi se lo proponga dice «mejor el viernes en la tarde» y, cuando le den el viernes, confirma. Si le piden datos: Óscar Rivas León, DNI 45632189." },
+  { id: "n06-alineadores", channel: "wa_nuevo", persona: "Fiorella, 29 años. Quiere ortodoncia invisible (alineadores). Pregunta precio, si hay cuotas y cuánto dura el tratamiento." },
+  { id: "n07-hija-a-mi-cita", channel: "wa_conocido", patientName: "Rosa Quispe", persona: "Rosa Quispe, paciente. Pregunta si puede llevar a su hija de 12 años a su misma cita para que también la revisen." },
+  { id: "n08-cambiar-doctor", channel: "wa_conocido", patientName: "Carlos Paredes", persona: "Carlos Paredes, paciente. Quiere cambiar su próxima cita a otro día de esta semana y con otro doctor, el que sea." },
+  { id: "n09-nadie-contesta", channel: "wa_nuevo", persona: "Gustavo está molesto: llamó tres veces a la clínica y nadie le contestó el teléfono. Quiere hablar con alguien ya para una cotización de implantes." },
+  { id: "n10-limpieza-web-sin-datos", channel: "web_nuevo", persona: "Paula escribe desde la página web. Quiere una limpieza mañana. Al principio no da datos; si le piden un contacto, deja su WhatsApp 945112233. Si le piden más: Paula Rojas Díaz, DNI 47125896." },
+  { id: "n11-ninos-web", channel: "web_nuevo", persona: "Alguien escribe desde la web: pregunta si atienden niños de 5 años y cuánto cuesta la evaluación. No quiere agendar todavía." },
+  { id: "n12-turista-ingles", channel: "wa_nuevo", persona: "John, a tourist from Canada staying in Miraflores. Writes only in English. Wants a dental cleaning this week and asks the price. If asked for data: John Miller, passport AB123456." },
+  { id: "n13-no-aguanto", channel: "wa_nuevo", persona: "Kevin, 31 años. Escribe: le duele muchísimo una muela, no aguanta, tomó pastillas y no le pasa. Quiere que lo atiendan hoy mismo. Si le piden datos: Kevin Soto Ramos, DNI 70145236." },
+  { id: "n14-radiografia", channel: "wa_nuevo", persona: "Lorena se sacó una radiografía en otro lado y quiere que la clínica le diga si tiene caries mirando la foto que puede mandar. No es paciente." },
+  { id: "n15-boleta", channel: "wa_conocido", patientName: "Elena Huamán", persona: "Elena Huamán, paciente. Pide la boleta de su último pago para presentarla en su trabajo." },
+  { id: "n16-precio-corto", channel: "wa_nuevo", burst: ["precio?"], persona: "Alguien que escribe muy corto: primero solo «precio?», luego «de la limpieza», luego «y sábado atienden?». No da más contexto." },
+  { id: "n17-silla-de-ruedas", channel: "wa_nuevo", persona: "Doña Carmen, 78 años, en silla de ruedas. Trata de usted. Pregunta si la sede de Miraflores tiene acceso para silla de ruedas y quiere una cita para una revisión. Si le piden datos: Carmen Salas Vda. de Ríos, DNI 06235147." },
+  { id: "n18-tarjeta-cuotas", channel: "wa_nuevo", persona: "Hernán pregunta si puede pagar un tratamiento con tarjeta de crédito en cuotas sin intereses." },
+  { id: "n19-blanqueamiento-embarazo", channel: "wa_nuevo", persona: "Valeria, embarazada de 4 meses. Pregunta si puede hacerse un blanqueamiento estando embarazada y, si no, quiere una limpieza." },
+  { id: "n20-confirmar-asistencia", channel: "wa_conocido", patientName: "Carmen Rojas", persona: "Carmen Rojas, paciente. Escribe para confirmar que sí va a ir a su próxima cita y pregunta si debe llevar algo." },
+]
+
+const LATIDIA_2: Scenario[] = [
+  { id: "m01-caso-reportado-probar", channel: "probar", persona: "", script: ["hola", "tengo dolor de cabeza fuerte desde ayer, donde me pueden atender", "no me pueden dar una cita??", "la que sea mas pronto", "ok esa", "confirmo"] },
+  { id: "m02-gripe-fiebre", channel: "wa_nuevo", persona: "Lucía, 35 años. Tiene gripe con fiebre de 38,5 desde ayer. Quiere una cita hoy en la tarde. Si le piden datos: Lucía Mendoza Ríos, DNI 41258963." },
+  { id: "m03-dolor-estomago", channel: "wa_nuevo", persona: "Jorge, 44 años. Tiene dolor de estómago fuerte después de comer desde hace dos días. Quiere que lo atiendan pronto." },
+  { id: "m04-chequeo-anual", channel: "wa_nuevo", persona: "Patricia, 50 años. Quiere un chequeo general anual con análisis. Pregunta qué incluye y cuánto cuesta. Si le conviene, agenda un sábado. Si le piden datos: Patricia Luna Vega, DNI 09875412." },
+  { id: "m05-bebe-fiebre", channel: "wa_nuevo", persona: "Carla, mamá de un bebé de 6 meses que tiene fiebre de 39,5 y no quiere lactar desde la mañana. Escribe muy preocupada." },
+  { id: "m06-cancelar", channel: "wa_conocido", patientName: "Julia Ramos Vega", persona: "Julia Ramos Vega, paciente. Quiere cancelar su cita porque ya se siente mejor. Si le ofrecen reprogramar, dice que no por ahora." },
+  { id: "m07-ginecologia", channel: "wa_nuevo", persona: "Andrea, 30 años. Quiere una consulta de ginecología para un control. Pregunta precio y quiere la próxima semana. Si le piden datos: Andrea Paz Salinas, DNI 72569841." },
+  { id: "m08-certificado-colegio-web", channel: "web_nuevo", persona: "Roberto escribe desde la web. Necesita un certificado de salud para el colegio de su hijo de 8 años. Pregunta si lo hacen y cuánto cuesta. Si le piden contacto: correo roberto.ch@gmail.com." },
+  { id: "m09-diabetes-sis", channel: "wa_nuevo", persona: "Don Ernesto, 66 años, diabético. Trata de usted. Pregunta si aceptan SIS o EsSalud para su control de diabetes; si no, cuánto cuesta particular." },
+  { id: "m10-proximo-control", channel: "wa_conocido", patientName: "Luis Gómez Salas", persona: "Luis Gómez Salas, paciente. Pregunta cuándo le toca su próximo control de presión y si ya puede agendarlo." },
+  { id: "m11-garganta-ibuprofeno", channel: "wa_nuevo", persona: "Mónica tiene dolor de garganta desde hace dos días. Pregunta si puede tomar ibuprofeno y también quiere una cita mañana. Si le piden datos: Mónica Ríos Paz, DNI 46321587." },
+  { id: "m12-electrocardiograma", channel: "wa_nuevo", persona: "Felipe necesita un electrocardiograma para un trámite. Pregunta precio y si puede ser el sábado. Si le piden datos: Felipe Díaz Rojas, DNI 43698521." },
+  { id: "m13-rodilla-web", channel: "web_nuevo", persona: "Natalia escribe desde la web. Le duele la rodilla cuando corre desde hace un mes. Quiere una cita. Si le piden contacto: correo natalia.runner@gmail.com. Si le piden más: Natalia Vargas Poma, DNI 47896321." },
+  { id: "m14-reclamo-espera", channel: "wa_conocido", patientName: "Rosa Paredes Luna", persona: "Rosa Paredes Luna, paciente. Está molesta: en su última cita la hicieron esperar una hora. Quiere que alguien le explique." },
+  { id: "m15-hablar-con-vela", channel: "wa_nuevo", persona: "Claudia quiere hablar con la Dra. Vela sobre unos resultados que le dieron en otro lugar; no quiere contárselo a un asistente." },
+  { id: "m16-cambia-de-hora", channel: "wa_nuevo", persona: "Iván quiere una consulta de medicina general. Primero pide hoy; cuando Sofi le proponga una hora, dice «mejor mañana temprano» y, cuando le den mañana, confirma. Si le piden datos: Iván Paredes Sol, DNI 45213698." },
+]
+
+const SET_2 = env.TANDA === "2"
+const SCENARIOS = (PRODUCT === "odentia" ? (SET_2 ? ODENTIA_2 : ODENTIA) : SET_2 ? LATIDIA_2 : LATIDIA).filter((s) => ONLY.length === 0 || ONLY.some((id) => s.id.startsWith(id)))
 
 const storageStub = {
   putAvatar: async () => { throw new Error("no usado") },

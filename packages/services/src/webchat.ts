@@ -666,12 +666,44 @@ export async function saveWebchatVisitorContact(
 ): Promise<VisitorPoll["contact"]> {
   const conv = await sessionConversation(tx, orgId, connectionId, sessionId)
   if (!conv) throw notFound("Conversación")
+  return saveVisitorContact(tx, orgId, conv, input)
+}
+
+/**
+ * Lo mismo cuando la persona escribe su WhatsApp o su correo en el chat y Sofi
+ * lo guarda (`guardar_contacto`): en el chat web no se reserva sin dónde
+ * avisarle (auditoría del 27-oct). Las mismas reglas que el formulario.
+ */
+export async function saveWebchatContactForConversation(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  input: { whatsapp?: string | null; email?: string | null },
+): Promise<VisitorPoll["contact"]> {
+  const [conv] = await tx
+    .select({ id: conversation.id, contactId: conversation.contactId, phone: contact.phone, email: contact.email })
+    .from(conversation)
+    .innerJoin(contact, eq(contact.id, conversation.contactId))
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, conversationId)))
+    .limit(1)
+  if (!conv) throw notFound("Conversación")
+  return saveVisitorContact(tx, orgId, conv, input)
+}
+
+async function saveVisitorContact(
+  tx: Db,
+  orgId: string,
+  conv: { id: string; contactId: string; phone: string | null; email: string | null },
+  input: { whatsapp?: string | null; email?: string | null },
+): Promise<VisitorPoll["contact"]> {
   // Solo la persona que nació en este chat: la ficha de un paciente, o de quien
   // también escribe por otro canal, no se cambia desde un navegador.
+  // La persona de «Probar» ya nace con su ficha (ADR 0094): se le guarda igual, como a un visitante.
   const [known] = await tx.execute<{ known: boolean }>(sql`
-    select exists (select 1 from patient_contact pc where pc.organization_id = ${orgId} and pc.contact_id = ${conv.contactId})
+    select (exists (select 1 from patient_contact pc where pc.organization_id = ${orgId} and pc.contact_id = ${conv.contactId})
       or exists (select 1 from conversation c2 join channel_connection cn on cn.id = c2.channel_connection_id
-        where c2.organization_id = ${orgId} and c2.contact_id = ${conv.contactId} and cn.provider <> ${WEBCHAT_PROVIDER}) as known`)
+        where c2.organization_id = ${orgId} and c2.contact_id = ${conv.contactId} and cn.provider <> ${WEBCHAT_PROVIDER}))
+      and not exists (select 1 from contact p where p.id = ${conv.contactId} and p.is_test) as known`)
   if (known?.known) throw new ServiceError("WEBCHAT_CONTACT_KNOWN", 409, "Ya tenemos cómo avisarte.")
   const typedPhone = input.whatsapp?.trim() || null
   const typedEmail = input.email?.trim() || null
