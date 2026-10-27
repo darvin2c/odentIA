@@ -2,7 +2,13 @@
 // La presentación de Fundadores (odentia32.com/presentacion/fundadores y latidia72.com/presentacion/fundadores): la de
 // cada producto, a pantalla completa y sin cabecera ni pie. Es para mostrarla en una llamada o
 // enviarla a quien preguntó, no para buscadores: no se indexa ni va en el mapa del sitio. Sus cifras
-// salen de la administración (src/presentations/figures.ts).
+// salen de la administración (src/presentations/figures.ts). Las tipografías son las de la web, servidas
+// desde el mismo dominio: la web no llama a terceros (política de cookies).
+import "@fontsource-variable/manrope"
+import "@fontsource/ibm-plex-mono/latin-400.css"
+import "@fontsource/ibm-plex-mono/latin-500.css"
+import "@fontsource/ibm-plex-mono/latin-600.css"
+import "@fontsource/ibm-plex-mono/latin-700.css"
 import latidiaFavicon from "../../../../../assets/brand/latidia/favicon.svg?url"
 import latidiaLogo from "../../assets/latidia-logotipo-dark.svg?raw"
 import odentiaLogo from "../../assets/logotipo-dark.svg?raw"
@@ -40,9 +46,6 @@ const deck = figures ? fillDeck(guide ? source : withoutGuide(source), { ...figu
     <title>{WORDS.name} Fundadores</title>
     <meta name="theme-color" content={WORDS.themeColor} />
     {MEDICAL ? <link rel="icon" href={latidiaFavicon} type="image/svg+xml" /> : <link rel="icon" href="/favicon.svg" type="image/svg+xml" />}
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
   </head>
   <body>
     {deck ? (

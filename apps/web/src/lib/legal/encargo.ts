@@ -59,7 +59,7 @@ export const ENCARGO: LegalDoc = {
       id: "instrucciones",
       title: "Instrucciones de la Clínica",
       blocks: [
-        "odentIA trata los datos únicamente según las instrucciones documentadas de la Clínica. Se consideran instrucciones estos términos, la configuración que la Clínica hace en la plataforma (qué canales conecta, qué puede hacer cada agente, qué modelo de inteligencia artificial elige, qué roles asigna) y las solicitudes que envíe por escrito.",
+        "odentIA trata los datos únicamente según las instrucciones documentadas de la Clínica. Se consideran instrucciones estos términos, la configuración que la Clínica hace en la plataforma (qué canales conecta, qué puede hacer cada agente, qué roles asigna) y las solicitudes que envíe por escrito.",
         "odentIA no usará los datos para fines propios ni distintos de los indicados. En particular, no usa los datos de la Clínica ni de sus pacientes para entrenar modelos propios. Los proveedores de inteligencia artificial que odentIA usa por API, OpenAI y TypeSafe (Jev), no usan los datos que reciben por esa vía para entrenar sus modelos, según sus condiciones de uso.",
         "Si odentIA considera que una instrucción infringe la ley, lo comunicará a la Clínica y podrá abstenerse de cumplirla.",
         "La Clínica garantiza que los datos se han obtenido lícitamente, que ha informado a los titulares y que cuenta con los consentimientos necesarios, incluido el consentimiento para tratar datos de salud cuando la ley lo exija y para enviar comunicaciones promocionales.",
@@ -70,7 +70,7 @@ export const ENCARGO: LegalDoc = {
       title: "Confidencialidad",
       blocks: [
         "odentIA guarda secreto sobre los datos de la Clínica y garantiza que las personas autorizadas a tratarlos se han comprometido a mantener su confidencialidad. Esta obligación subsiste después de terminado el contrato.",
-        "El personal de odentIA solo accede a los datos de una clínica cuando es necesario para prestar soporte, resolver incidencias o cumplir una obligación legal, Para ver los datos de una clínica en un caso de soporte, el personal necesita el permiso de la Clínica, que dura como máximo una hora por caso y que la Clínica puede retirar en cualquier momento. Cada acceso y cada intento quedan registrados.",
+        "El personal de odentIA solo accede a los datos de una clínica cuando es necesario para prestar soporte, resolver incidencias o cumplir una obligación legal. Para ver los datos de una clínica en un caso de soporte, el personal necesita el permiso de la Clínica, que dura como máximo una hora por caso y que la Clínica puede retirar en cualquier momento. Cada acceso y cada intento quedan registrados.",
       ],
     },
     {
@@ -104,7 +104,7 @@ export const ENCARGO: LegalDoc = {
       title: "Asistencia con los derechos de los titulares",
       blocks: [
         "Para atender los derechos de acceso, rectificación, cancelación, oposición y demás derechos reconocidos por la ley, la plataforma permite a la Clínica consultar y corregir los datos de sus pacientes (la historia clínica se corrige con adendas, sin reescribir lo registrado), descargar o imprimir sus documentos, retirar el consentimiento para el tratamiento de datos y dar de baja a una persona de los mensajes que no quiere recibir.",
-        "La plataforma aún no entrega por sí sola una copia completa de los datos de una persona ni suprime o anonimiza sus datos. Cuando la Clínica lo necesite para responder a un titular, lo pide a odentIA desde Soporte y odentIA lo hace por ella dentro de los plazos legales. La historia clínica no se suprime mientras la normativa sanitaria exija conservarla.",
+        "La Clínica registra en la ficha de cada persona los pedidos que recibe sobre sus datos. Desde ahí puede enviarle una copia completa de su historia (en PDF y en HL7 FHIR) y borrar sus datos. La historia clínica no se borra mientras la normativa sanitaria exija conservarla: queda bloqueada, fuera de la vista del equipo, y solo se abre con un motivo.",
         "Si un titular dirige su solicitud a odentIA, odentIA la trasladará a la Clínica sin demora y no la responderá directamente salvo instrucción de la Clínica. odentIA asistirá a la Clínica en lo razonable para que pueda responder dentro de los plazos legales.",
       ],
     },

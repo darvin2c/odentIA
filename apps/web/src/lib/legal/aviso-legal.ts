@@ -8,7 +8,7 @@ export const AVISO_LEGAL: LegalDoc = {
   description:
     "Titular de las webs de odentIA y latidIA, condiciones de uso del sitio, propiedad intelectual, enlaces, ejemplos y ley aplicable.",
   intro: [
-    "Este aviso regula el acceso y el uso de las webs de odentIA y de latidIA, las dos marcas del mismo servicio. Al navegar por ella, usted acepta estas condiciones.",
+    "Este aviso regula el acceso y el uso de las webs de odentIA y de latidIA, las dos marcas del mismo servicio. Al navegar por ellas, usted acepta estas condiciones.",
   ],
   sections: [
     {
