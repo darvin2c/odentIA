@@ -15,6 +15,8 @@ import {
   type ConnectResult,
   connectionPending,
   connectionWords,
+  ownAppExpiryWords,
+  ownAppSignatureProblem,
   ownMessageData,
   WHATSAPP_DISCONNECT_CONSEQUENCE,
   WHATSAPP_KEY_FIELDS,
@@ -26,6 +28,7 @@ import { ConnectedNotice } from "./connected-notice"
 import { WhatsAppConnectSteps } from "./connect-steps"
 import { WhatsAppMessagePanel } from "./message-panel"
 import { WhatsAppMessages } from "./messages"
+import { OwnAppStatus } from "./own-app-status"
 import { appWords } from "../../../lib/product-words"
 
 const STATUS_WORD: Record<ConnectionTone, string> = {
@@ -181,7 +184,8 @@ export function WhatsAppConnection({
   /* ---- Qué falta para terminar de conectar, según el servidor ---- */
 
   const pendingByList = connectionPending(connection)
-  const manualPending = !byButton && pendingByList !== null
+  // Lo que falta en Meta no se sondea: se arregla con «Volver a comprobar».
+  const manualPending = !byButton && (pendingByList === "address" || pendingByList === "first-message")
   const setupQuery = useQuery({
     queryKey: ["connection-setup", connection.id],
     queryFn: () => apiFetch<{ data: ConnectionSetup }>(`${base}/setup`),
@@ -302,6 +306,9 @@ export function WhatsAppConnection({
   }
 
   const words = connectionWords(connection, since, pending)
+  const expiresSoon = ownAppExpiryWords(connection.ownApp, Date.now(), (iso) =>
+    new Date(iso).toLocaleDateString(locale, { timeZone: activeOrgTimeZone(), day: "numeric", month: "long" }),
+  )
   const openKey = () => {
     setNotice(null)
     setSurface({ kind: "key" })
@@ -408,6 +415,30 @@ export function WhatsAppConnection({
             connection={{ id: connection.id, signup: connection.signup ?? null }}
             onResolved={() => void refreshMessages()}
           />
+        ) : null}
+        {/* Con la app propia: lo que el sistema no pudo hacer en Meta, el PIN si hace falta y «Volver a comprobar». */}
+        {canWrite && !byButton && active && pending === "own-app" && connection.ownApp ? (
+          <div className="flex flex-col gap-3 border-t pt-3">
+            <OwnAppStatus
+              connectionId={connection.id}
+              state={connection.ownApp}
+              found={null}
+              lastInboundAt={connection.lastInboundAt ?? null}
+              step={1}
+              onUpdated={() => void refreshConnections()}
+            />
+            {ownAppSignatureProblem(connection.ownApp, connection.lastInboundAt) ? (
+              <Button type="button" className="h-11 self-start px-5 sm:h-9" onClick={openKey}>
+                Cambiar la clave secreta
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {canWrite && active && !byButton && pending === null && expiresSoon ? (
+          <p className="rounded-xl bg-warning-soft px-3.5 py-3 text-sm text-warning">
+            <strong className="font-semibold">{expiresSoon}</strong> Genera en Meta una clave con caducidad «Nunca» y pégala con
+            «Cambiar la clave».
+          </p>
         ) : null}
         {/* Quien solo consulta lee qué falta, con las palabras del servidor; reintentar es de quien administra. */}
         {!canWrite && pending === "signup" ? (

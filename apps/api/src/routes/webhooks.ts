@@ -307,7 +307,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       if (ownApp && c.req.header("x-hub-signature-256")) {
         await withOrgContext(deps.db, connection.organizationId, (tx) =>
           noteOwnAppSignatureRejected(tx, connection.organizationId, connection.id),
-        ).catch(() => {})
+        ).catch((error: unknown) => console.warn(`[webhooks] no se pudo anotar la firma rechazada de ${connection.id}`, error))
       }
       return c.json(errorBody(c, "UNAUTHORIZED", "Firma inválida"), 401)
     }

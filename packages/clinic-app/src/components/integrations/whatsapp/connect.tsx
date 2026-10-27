@@ -1,14 +1,15 @@
 import { Button } from "@odentia/ui"
-import { useId } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import type { ConnectResult } from "../../../lib/whatsapp"
-import { FacebookSignupButton } from "../../whatsapp/facebook-signup"
+import { FacebookSignupButton, useFacebookSignupAvailable } from "../../whatsapp/facebook-signup"
 import { WhatsAppConnectSteps } from "./connect-steps"
 import { appWords } from "../../../lib/product-words"
 
 /**
- * Conectar un número de WhatsApp: una sola pantalla con los dos caminos.
- * Primero el botón de Facebook, que solo existe si la instalación lo tiene
- * habilitado; debajo, los datos de la app de Meta de la clínica en tres pasos.
+ * Conectar un número de WhatsApp. Con el botón de Facebook disponible, dos
+ * caminos lado a lado: el botón (recomendado) y la propia app de Meta de la
+ * clínica, cuyos tres pasos se abren solo al elegirla, para que nadie empiece
+ * por el camino largo sin querer. Sin el botón, los tres pasos van abiertos.
  * Con cualquiera de los dos el número queda igual de conectado.
  */
 export function WhatsAppConnect({
@@ -23,6 +24,15 @@ export function WhatsAppConnect({
   onCancel?: () => void
 }) {
   const headingId = useId()
+  const { available, loading } = useFacebookSignupAvailable()
+  const [ownApp, setOwnApp] = useState(false)
+  const steps = useRef<HTMLDivElement>(null)
+  // Al elegir la propia app, el foco va a sus pasos.
+  useEffect(() => {
+    if (ownApp) steps.current?.querySelector<HTMLElement>("h2")?.focus()
+  }, [ownApp])
+  const showSteps = !loading && (!available || ownApp)
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <section aria-labelledby={headingId} className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-5">
@@ -48,19 +58,59 @@ export function WhatsAppConnect({
             </Button>
           ) : null}
         </div>
-        {/* El botón no se dibuja si la instalación no lo tiene: entonces su explicación tampoco. */}
-        <div className="peer flex flex-col gap-3 empty:hidden">
-          {/* Lleva al panel, que abre la ventana de Meta y vuelve aquí con `?conectado=`. */}
-          <FacebookSignupButton />
-        </div>
-        <p className="text-sm text-muted-foreground peer-empty:hidden">
-          Entras con el Facebook de quien administra la clínica, eliges el número y vuelves con él conectado, sin copiar ningún
-          dato. Ten a mano el teléfono de ese número, para recibir un código. Si el número se usa hoy en la aplicación de
-          WhatsApp de un teléfono, Meta puede pedir darlo de baja ahí antes de conectarlo.
-        </p>
+        {available ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-2 rounded-xl border p-4">
+              <span className="self-start rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-semibold text-primary-soft-foreground">
+                Recomendado · 5 minutos
+              </span>
+              <h3 className="text-[15px] font-semibold">Con tu Facebook</h3>
+              <p className="text-sm text-muted-foreground">
+                Entras con el Facebook de quien administra la clínica, eliges el número y vuelves conectado, sin copiar ningún dato. Ten
+                a mano el teléfono de ese número para recibir un código.
+              </p>
+              {/* Lleva al panel, que abre la ventana de Meta y vuelve aquí con `?conectado=`. */}
+              <div className="mt-auto pt-1">
+                <FacebookSignupButton />
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 rounded-xl border p-4">
+              <span className="self-start rounded-full bg-muted px-2.5 py-0.5 text-xs font-semibold text-muted-foreground">
+                30 a 45 minutos · sin programar
+              </span>
+              <h3 className="text-[15px] font-semibold">Con tu propia app de Meta</h3>
+              <p className="text-sm text-muted-foreground">
+                Para cuando el botón no está disponible o la clínica prefiere tener su app. Te guiamos paso a paso: creas la app en Meta
+                y pegas aquí cuatro datos.
+              </p>
+              <div className="mt-auto pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 sm:min-h-9"
+                  aria-expanded={ownApp}
+                  onClick={() => setOwnApp(true)}
+                  disabled={ownApp}
+                >
+                  {ownApp ? "Pasos abiertos abajo" : "Usar mi propia app"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </section>
 
-      <WhatsAppConnectSteps title="Conectar con los datos de mi app de Meta" connection={null} created={null} step={1} onCreated={onCreated} />
+      {showSteps ? (
+        <div ref={steps}>
+          <WhatsAppConnectSteps
+            title={available ? "Con tu propia app de Meta" : "Conectar con los datos de mi app de Meta"}
+            connection={null}
+            created={null}
+            step={1}
+            onCreated={onCreated}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

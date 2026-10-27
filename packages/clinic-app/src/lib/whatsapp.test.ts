@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { bareProduct, declareProduct } from "../product/product-ui"
-import type { ConnectionItem } from "./crm"
+import type { ConnectionItem, OwnAppState } from "./crm"
 import { sinceWords } from "./integrations"
 import {
   accountWords,
@@ -18,6 +18,10 @@ import {
   messageRow,
   messageSource,
   messagesSummary,
+  ownAppChecks,
+  ownAppExpiryWords,
+  ownAppHelpText,
+  ownAppSignatureProblem,
   ownMessageData,
   previewText,
   setupStep,
@@ -387,5 +391,77 @@ describe("Bandeja, pasadas las 24 horas", () => {
     expect(approvedValues({ fields }, { 2: "octubre" })).toEqual(["", "octubre"])
     // Un mensaje que no pide datos no envía ninguno.
     expect(approvedValues({ fields: [] }, { 1: "sobra" })).toBeUndefined()
+  })
+})
+
+describe("WhatsApp con la app propia de la clínica", () => {
+  const done: OwnAppState = {
+    registeredAt: minutesAgo(30),
+    subscribedAt: minutesAgo(30),
+    problems: {},
+    pinNeeded: false,
+    tokenExpiresAt: null,
+    keysCheckedAt: minutesAgo(30),
+    signatureRejectedAt: null,
+  }
+  const day = (iso: string) => new Date(iso).toLocaleDateString("es-PE", { timeZone: "America/Lima", day: "numeric", month: "long" })
+
+  it("todo hecho: cada comprobación en verde y la conexión no necesita nada", () => {
+    const checks = ownAppChecks(done, { found: "+51 992 154 378 · Clínica Sonríe", day })
+    expect(checks.map((check) => [check.key, check.state])).toEqual([
+      ["numero", "ok"],
+      ["vence", "ok"],
+      ["permisos", "ok"],
+      ["secreta", "ok"],
+      ["registro", "ok"],
+      ["suscripcion", "ok"],
+    ])
+    expect(connectionPending(connection({ ownApp: done }))).toBeNull()
+  })
+
+  it("lo que falta en Meta se dice con las palabras del servidor y deja la conexión pidiendo atención", () => {
+    const state: OwnAppState = {
+      ...done,
+      registeredAt: null,
+      pinNeeded: true,
+      problems: { registrar: "Este número ya tiene un PIN de verificación en dos pasos." },
+    }
+    const registro = ownAppChecks(state, { found: null, day }).find((check) => check.key === "registro")
+    expect(registro).toMatchObject({ state: "problem", text: "Este número ya tiene un PIN de verificación en dos pasos." })
+    expect(connectionPending(connection({ ownApp: state }))).toBe("own-app")
+    expect(connectionWords(connection({ ownApp: state }), since, "own-app")).toMatchObject({ tone: "pending", status: "Necesita atención." })
+  })
+
+  it("una clave que vence se avisa con su fecha, y sin respuesta de Meta no se afirma nada de las claves", () => {
+    const expiring = ownAppChecks({ ...done, tokenExpiresAt: "2026-12-25T15:00:00Z" }, { found: null, day })
+    expect(expiring.find((check) => check.key === "vence")).toMatchObject({ state: "warn", title: "La clave vence el 25 de diciembre." })
+    const unknown = ownAppChecks({ ...done, keysCheckedAt: null }, { found: null, day })
+    expect(unknown.map((check) => check.key)).toEqual(["secreta", "registro", "suscripcion"])
+    expect(unknown[0]).toMatchObject({ state: "warn", title: "No pudimos preguntarle a Meta por las claves." })
+  })
+
+  it("la tarjeta dice el vencimiento solo en los últimos 7 días", () => {
+    const at = (days: number) => ({ ...done, tokenExpiresAt: new Date(NOW + days * 86_400_000).toISOString() })
+    expect(ownAppExpiryWords(at(20), NOW, day)).toBeNull()
+    expect(ownAppExpiryWords(at(5), NOW, day)).toMatch(/^La clave de WhatsApp vence el /)
+    expect(ownAppExpiryWords(at(-1), NOW, day)).toBe("La clave de WhatsApp venció: los mensajes ya no salen.")
+    expect(ownAppExpiryWords(done, NOW, day)).toBeNull()
+  })
+
+  it("una firma rechazada cuenta solo si llegó después del último mensaje que sí se leyó", () => {
+    const rejected = { ...done, signatureRejectedAt: minutesAgo(5) }
+    expect(ownAppSignatureProblem(rejected, minutesAgo(12))).toBe(true)
+    expect(ownAppSignatureProblem(rejected, minutesAgo(1))).toBe(false)
+    expect(ownAppSignatureProblem(rejected, null)).toBe(true)
+    expect(connectionPending(connection({ ownApp: rejected }))).toBe("own-app")
+  })
+
+  it("«Pedir ayuda» lleva el paso y lo que falta, nunca las claves", () => {
+    const text = ownAppHelpText(1, ownAppChecks({ ...done, subscribedAt: null, problems: { suscribir: "Meta no dejó." } }, { found: null, day }))
+    expect(text.split("\n")).toEqual([
+      "Me trabé conectando WhatsApp con mi propia app de Meta, en el paso 1 de 3.",
+      "Lo que dice la pantalla:",
+      "- Falta que tu app reciba los avisos de la cuenta. Meta no dejó.",
+    ])
   })
 })

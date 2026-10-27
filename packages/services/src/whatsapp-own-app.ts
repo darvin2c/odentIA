@@ -23,7 +23,7 @@ import { upsertWorkspaceNotification } from "./workspace.js"
  * por la API, no desde su página, y sin suscribir la app a la cuenta los avisos
  * de un número real no llegan: una clínica sin técnico no podría hacerlo sola.
  * Es el mismo registro y la misma suscripción que hace «Conectar con Facebook»,
- * con la clave de la clínica (ADR 0091).
+ * con la clave de la clínica (ADR 0092).
  *
  * Sin probar contra una cuenta real de Meta: las respuestas son las que publica Meta.
  */

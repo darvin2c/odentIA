@@ -100,8 +100,20 @@ export interface WorkspaceNoticeInput {
  * - `modelo-del-agente`: el agente volvió a responder después del aviso.
  * - `clave-meta:<conexión>`: la clave de WhatsApp ya no tiene problema (se
  *   renovó o se volvió a conectar) o la conexión ya no está activa.
+ * - `firma-meta:<conexión>`: WhatsApp con la app propia recibió un aviso bien
+ *   firmado o se cambió la clave secreta.
+ * - `vence-clave-meta:<conexión>`: la clave de la app propia ya no vence en
+ *   los próximos 7 días (se pegó otra) o la conexión ya no está activa.
  */
-export const NOTICE_SUBJECTS = ["producto", "orden-clinica", "oportunidad", "modelo-del-agente", "clave-meta"] as const
+export const NOTICE_SUBJECTS = [
+  "producto",
+  "orden-clinica",
+  "oportunidad",
+  "modelo-del-agente",
+  "clave-meta",
+  "firma-meta",
+  "vence-clave-meta",
+] as const
 
 /**
  * La campana es para enterarse, no para trabajar: lo que pide trabajo está en

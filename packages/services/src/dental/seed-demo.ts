@@ -896,6 +896,14 @@ await db
       name: "Clínica Dental Smile",
       checkedAt: new Date().toISOString(),
     },
+    // Conectada con su propia app de Meta (ADR 0092): número registrado y app suscrita. Dato de la semilla.
+    ownApp: {
+      registeredAt: new Date(Date.now() - 7 * 24 * 3_600_000).toISOString(),
+      subscribedAt: new Date(Date.now() - 7 * 24 * 3_600_000).toISOString(),
+      problems: {},
+      tokenExpiresAt: null,
+      keysCheckedAt: new Date(Date.now() - 7 * 24 * 3_600_000).toISOString(),
+    },
   })
   .where(eq(channelConnection.id, connA.id))
 // Sus mensajes: los diez con los que viene, en estados variados, y uno propio.
@@ -918,6 +926,24 @@ const connB = await createConnection(
   },
   { fetch, validateExternal: false },
 )
+// La clínica Norte se trabó en Meta: su número ya tenía un PIN y falta escribirlo (ADR 0092). Dato de la semilla.
+await db
+  .update(channelConnection)
+  .set({
+    webhookVerifiedAt: new Date(Date.now() - 2 * 24 * 3_600_000),
+    ownApp: {
+      registeredAt: null,
+      subscribedAt: new Date(Date.now() - 2 * 24 * 3_600_000).toISOString(),
+      problems: {
+        registrar:
+          "Este número ya tiene un PIN de verificación en dos pasos. Escríbelo para registrarlo; si no lo recuerdas, cámbialo en WhatsApp Manager › tu número › «Verificación en dos pasos».",
+      },
+      pinNeeded: true,
+      tokenExpiresAt: null,
+      keysCheckedAt: new Date(Date.now() - 2 * 24 * 3_600_000).toISOString(),
+    },
+  })
+  .where(eq(channelConnection.id, connB.id))
 
 // --- Contactos A (reparto por etapa según posición) ---
 const CONTACTS_A = [
