@@ -266,11 +266,12 @@ function OrganizationsPage() {
   })
   // Las demos (ADR 0096): las listas son clínicas de la lista; las que se arman o fallaron, tarjetas aparte.
   const demosQuery = useDemos(kindFilter !== "real")
-  const demoOfOrg = new Map((demosQuery.data ?? []).flatMap((demo) => (demo.organizationId && demo.status === "lista" ? [[demo.organizationId, demo] as const] : [])))
+  // Una que ya es clínica (también mientras se vuelve a armar) va en su tarjeta, con su etiqueta.
+  const demoOfOrg = new Map((demosQuery.data ?? []).flatMap((demo) => (demo.organizationId ? [[demo.organizationId, demo] as const] : [])))
   const pendingDemos = (demosQuery.data ?? []).filter(
     (demo) =>
       kindFilter !== "real" &&
-      (demo.status !== "lista" || !demo.organizationId) &&
+      !demo.organizationId &&
       (product === "todos" || demo.product === product) &&
       (!activeSearch || `${demo.name} ${demo.slug}`.toLowerCase().includes(activeSearch.toLowerCase())),
   )

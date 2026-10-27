@@ -25,14 +25,27 @@ function totpNow(base32: string): string {
   return String((mac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0")
 }
 
-test("la administración crea una demo de latidIA, la ve armarse, la vuelve a empezar y la borra", async ({ owner, fixtureDb }, testInfo) => {
+test("la administración crea una demo de latidIA, la ve armarse, la vuelve a empezar y la borra", async ({
+  owner,
+  fixtureDb,
+}, testInfo) => {
   test.setTimeout(300_000)
   const { page, user } = owner
-  const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
+  const shot = (name: string) =>
+    page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
   await page.setViewportSize({ width: 1366, height: 900 })
   await fixtureDb.insert(adminStaff).values({ userId: user.id, role: "admin" })
   // La demo se cuenta con el plan de lista de su producto: si otra prueba no lo dejó, se crea.
-  const [listed] = await fixtureDb.select({ id: saasPlan.id }).from(saasPlan).where(and(eq(saasPlan.product, "medical"), eq(saasPlan.isDefault, true), eq(saasPlan.isActive, true)))
+  const [listed] = await fixtureDb
+    .select({ id: saasPlan.id })
+    .from(saasPlan)
+    .where(
+      and(
+        eq(saasPlan.product, "medical"),
+        eq(saasPlan.isDefault, true),
+        eq(saasPlan.isActive, true),
+      ),
+    )
   if (!listed) {
     await fixtureDb.insert(saasPlan).values({
       code: `demos-${randomUUID().slice(0, 8)}`,
@@ -65,9 +78,18 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   await page.goto(`${ADMIN}/organizations`)
   await expect(page.getByRole("heading", { level: 1, name: "Clínicas" })).toBeVisible()
   await page.getByRole("button", { name: "Crear demo" }).first().click()
-  await page.getByRole("radiogroup", { name: "Producto" }).getByRole("radio", { name: /latidIA/ }).check()
-  await page.getByRole("radiogroup", { name: "Tipo de consultorio" }).getByRole("radio", { name: /Pediatría/ }).check()
-  await page.getByRole("radiogroup", { name: "Tamaño" }).getByRole("radio", { name: /Pequeño/ }).check()
+  await page
+    .getByRole("radiogroup", { name: "Producto" })
+    .getByRole("radio", { name: /latidIA/ })
+    .check()
+  await page
+    .getByRole("radiogroup", { name: "Tipo de consultorio" })
+    .getByRole("radio", { name: /Pediatría/ })
+    .check()
+  await page
+    .getByRole("radiogroup", { name: "Tamaño" })
+    .getByRole("radio", { name: /Pequeño/ })
+    .check()
   await page.getByLabel("Historia").click()
   await page.getByRole("option", { name: "6 meses" }).click()
   const name = await page.getByLabel("Nombre").inputValue()
@@ -79,7 +101,9 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   // --- Mientras se crea (tablero 4) y lista ---------------------------------------------------
   await expect(page.getByText("Puedes cerrar esto y seguir.")).toBeVisible()
   await shot("creando-demo")
-  await expect(page.getByRole("heading", { name: `${name} está lista` })).toBeVisible({ timeout: 180_000 })
+  await expect(page.getByRole("heading", { name: `${name} está lista` })).toBeVisible({
+    timeout: 180_000,
+  })
   await expect(page.getByRole("button", { name: "Abrir la demo" })).toBeEnabled()
   await shot("demo-lista")
   await page.getByRole("button", { name: "Cerrar" }).last().click()
@@ -118,7 +142,9 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
 
   // --- Volver a empezar y borrar (tablero 4b) -------------------------------------------------
   await band.getByRole("button", { name: "Volver a empezar" }).click()
-  await expect(page.getByRole("alertdialog")).toContainText("Se borra lo que se hizo en las presentaciones")
+  await expect(page.getByRole("alertdialog")).toContainText(
+    "Se borra lo que se hizo en las presentaciones",
+  )
   await shot("volver-a-empezar")
   await page.getByRole("alertdialog").getByRole("button", { name: "Volver a empezar" }).click()
   await expect(band).toContainText("Se está volviendo a armar")
@@ -131,7 +157,10 @@ test("la administración crea una demo de latidIA, la ve armarse, la vuelve a em
   }).toPass({ timeout: 180_000, intervals: [3_000] })
   await rebuilt.click()
 
-  await page.getByRole("region", { name: "Demo" }).getByRole("button", { name: "Borrar demo" }).click()
+  await page
+    .getByRole("region", { name: "Demo" })
+    .getByRole("button", { name: "Borrar demo" })
+    .click()
   const dialog = page.getByRole("alertdialog")
   await expect(dialog.getByRole("button", { name: "Borrar demo" })).toBeDisabled()
   await dialog.getByLabel("Escribe el nombre para confirmar").fill(name.slice(0, 6))

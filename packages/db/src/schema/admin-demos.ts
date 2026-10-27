@@ -1,5 +1,16 @@
 import { sql } from "drizzle-orm"
-import { check, date, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core"
+import {
+  check,
+  date,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core"
 import { organization, user } from "./auth.js"
 import { adminSchema } from "./schemas.js"
 
@@ -87,6 +98,9 @@ export const saasDemo = adminSchema.table(
     check("saas_demo_product_check", sql`${table.product} IN ('dental','medical')`),
     check("saas_demo_size_check", sql`${table.size} IN ('pequeno','mediano','grande')`),
     check("saas_demo_months_check", sql`${table.months} IN (6, 12, 24)`),
-    check("saas_demo_status_check", sql`${table.status} IN ('pendiente','creando','lista','fallida')`),
+    check(
+      "saas_demo_status_check",
+      sql`${table.status} IN ('pendiente','creando','lista','fallida')`,
+    ),
   ],
 )

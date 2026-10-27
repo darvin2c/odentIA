@@ -206,8 +206,7 @@ import { createService, quickAddServices, updateService } from "../service-catal
 import { librarySpecialtyIds } from "../specialties.js"
 import type { DentalFinalizeParts } from "./hooks.js"
 import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
-import { buildDemo } from "../demo-build.js"
-import { deleteDemo } from "../saas-demos.js"
+import { buildDemo, purgeDemoOrganization } from "../demo-build.js"
 import { createStorage } from "../storage.js"
 import {
   countWhereIn,
@@ -607,8 +606,16 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
 }
 
 // La demo para presentar de la semilla (ADR 0096) se va primero: nombra a la administradora.
-for (const row of await db.select({ id: saasDemo.id }).from(saasDemo).where(like(saasDemo.slug, "seed-%"))) {
-  await db.transaction((tx) => deleteDemo(tx, null, row.id, null))
+for (const row of await db
+  .select({ id: saasDemo.id, organizationId: saasDemo.organizationId })
+  .from(saasDemo)
+  .where(like(saasDemo.slug, "seed-%"))) {
+  const purged = await db.transaction(async (tx) => {
+    const result = row.organizationId ? await purgeDemoOrganization(tx, row.id, row.organizationId) : { storageKeys: [] }
+    await tx.delete(saasDemo).where(eq(saasDemo.id, row.id))
+    return result
+  })
+  for (const key of purged.storageKeys) await storage.deleteAttachment(key).catch(() => undefined)
 }
 await wipeSeed()
 
@@ -4145,8 +4152,9 @@ await db.insert(aiUsage).values([
 ])
 
 // --- Una demo para presentar (ADR 0096): Clínicas › «Demos» de la administración ---
-{
-  const [demo] = await db
+// En una sola transacción, como la arma el worker: si algo falla no queda una demo a medias.
+await db.transaction(async (tx) => {
+  const [demo] = await tx
     .insert(saasDemo)
     .values({
       product: "medical",
@@ -4163,14 +4171,12 @@ await db.insert(aiUsage).values([
     })
     .returning()
   if (!demo) throw new Error("No se pudo pedir la demo de la semilla")
-  const built = await db.transaction((tx) =>
-    buildDemo(tx, { ...demo, product: "medical", size: "pequeno" }, { secretsKey, fetch }),
-  )
-  await db
+  const built = await buildDemo(tx, { ...demo, product: "medical", size: "pequeno" }, { secretsKey, fetch })
+  await tx
     .update(saasDemo)
-    .set({ organizationId: built.organizationId, status: "lista", historyThrough: built.historyThrough, readyAt: new Date(), progress: { step: "listo", done: 5, total: 5 } })
+    .set({ organizationId: built.organizationId, slug: built.slug, status: "lista", historyThrough: built.historyThrough, readyAt: new Date(), progress: { step: "listo", done: 5, total: 5 } })
     .where(eq(saasDemo.id, demo.id))
-}
+})
 
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
 await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })

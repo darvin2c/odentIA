@@ -1,5 +1,19 @@
 import { CLINICAL_PRODUCTS, type ClinicalProduct } from "@odentia/clinical"
-import { Badge, Button, Input, Label, RadioGroup, RadioGroupItem, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, toast } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Input,
+  Label,
+  RadioGroup,
+  RadioGroupItem,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Skeleton,
+  toast,
+} from "@odentia/ui"
 import { ConfirmDialog, DetailDrawer, ErrorState, FormDrawer, common } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check } from "lucide-react"
@@ -55,17 +69,34 @@ const showcaseSchema = z.object({
   agendaThrough: z.string().nullable(),
 })
 
-const demoDetailSchema = z.object({ demo: demoSchema.extend({ showcase: showcaseSchema.nullable() }).nullable() })
+const demoDetailSchema = z.object({
+  demo: demoSchema.extend({ showcase: showcaseSchema.nullable() }).nullable(),
+})
 export type DemoDetail = NonNullable<z.infer<typeof demoDetailSchema>["demo"]>
 
 const optionsSchema = z.object({
   products: z.array(
     z.object({
       product: z.enum(CLINICAL_PRODUCTS),
-      kinds: z.array(z.object({ key: z.string(), name: z.string(), hint: z.string(), names: z.record(z.string(), z.array(z.string())) })),
+      kinds: z.array(
+        z.object({
+          key: z.string(),
+          name: z.string(),
+          hint: z.string(),
+          names: z.record(z.string(), z.array(z.string())),
+        }),
+      ),
     }),
   ),
-  sizes: z.array(z.object({ key: z.string(), name: z.string(), professionals: z.number(), branches: z.number(), patients: z.number() })),
+  sizes: z.array(
+    z.object({
+      key: z.string(),
+      name: z.string(),
+      professionals: z.number(),
+      branches: z.number(),
+      patients: z.number(),
+    }),
+  ),
   months: z.array(z.number()),
   countries: z.array(z.object({ code: z.string(), name: z.string() })),
   presenters: z.array(z.object({ id: z.string(), name: z.string(), email: z.string() })),
@@ -78,11 +109,33 @@ function messageOf(error: unknown): string {
 
 /** Los pasos del armado, como los dice el avance (tablero 4). */
 const STEPS: Array<{ key: string; title: string; detail: (demo: DemoItem) => string }> = [
-  { key: "equipo", title: "La clínica y su equipo", detail: (demo) => `${demo.sizeName}: sedes, ${demo.product === "dental" ? "unidades" : "consultorios"}, quien atiende y su horario` },
-  { key: "tarifario", title: "El tarifario", detail: (demo) => `Los servicios de ${demo.kindName} con precios de ${demo.countryName}` },
-  { key: "historia", title: "La historia", detail: (demo) => `${demo.months} meses de citas, atenciones, cobros y conversaciones, día por día` },
-  { key: "agentes", title: "Lo que hicieron los agentes", detail: () => "Sofi, Clío y Argos, con lo que costó cada uno" },
-  { key: "hoy", title: "Hoy y las próximas dos semanas", detail: () => "La agenda de hoy, lo que espera en la Bandeja y los controles que vencen" },
+  {
+    key: "equipo",
+    title: "La clínica y su equipo",
+    detail: (demo) =>
+      `${demo.sizeName}: sedes, ${demo.product === "dental" ? "unidades" : "consultorios"}, quien atiende y su horario`,
+  },
+  {
+    key: "tarifario",
+    title: "El tarifario",
+    detail: (demo) => `Los servicios de ${demo.kindName} con precios de ${demo.countryName}`,
+  },
+  {
+    key: "historia",
+    title: "La historia",
+    detail: (demo) =>
+      `${demo.months} meses de citas, atenciones, cobros y conversaciones, día por día`,
+  },
+  {
+    key: "agentes",
+    title: "Lo que hicieron los agentes",
+    detail: () => "Sofi, Clío y Argos, con lo que costó cada uno",
+  },
+  {
+    key: "hoy",
+    title: "Hoy y las próximas dos semanas",
+    detail: () => "La agenda de hoy, lo que espera en la Bandeja y los controles que vencen",
+  },
 ]
 
 /** Las demos, al día mientras alguna se arma. */
@@ -90,8 +143,12 @@ export function useDemos(enabled = true) {
   return useQuery({
     queryKey: ["admin-demos"],
     enabled,
-    queryFn: async () => z.object({ items: z.array(demoSchema) }).parse(await api<unknown>("/api/admin/demos")).items,
-    refetchInterval: (query) => (query.state.data?.some((demo) => demo.status === "pendiente" || demo.status === "creando") ? 3_000 : false),
+    queryFn: async () =>
+      z.object({ items: z.array(demoSchema) }).parse(await api<unknown>("/api/admin/demos")).items,
+    refetchInterval: (query) =>
+      query.state.data?.some((demo) => demo.status === "pendiente" || demo.status === "creando")
+        ? 3_000
+        : false,
   })
 }
 
@@ -100,16 +157,22 @@ export function demoLine(demo: DemoItem): string {
   return `${demo.kindName} · ${demo.sizeName.toLowerCase()} · ${demo.months} meses · ${demo.status === "lista" ? "al día" : demo.status === "fallida" ? "no se pudo crear" : "creándose"}`
 }
 
-const shortDay = (iso: string) => new Intl.DateTimeFormat("es", { day: "numeric", month: "short" }).format(new Date(iso)).replaceAll(".", "")
+const shortDay = (iso: string) =>
+  new Intl.DateTimeFormat("es", { day: "numeric", month: "short" })
+    .format(new Date(iso))
+    .replaceAll(".", "")
 
 /** La etiqueta de una demo: «Demo», «Creando… 40 %», «No se pudo crear» o «Se borra el 4 dic». */
 export function DemoBadge({ demo }: { demo: DemoItem }) {
   if (demo.status === "pendiente" || demo.status === "creando") {
-    const percent = demo.progress ? Math.round((demo.progress.done / Math.max(1, demo.progress.total)) * 100) : 0
+    const percent = demo.progress
+      ? Math.round((demo.progress.done / Math.max(1, demo.progress.total)) * 100)
+      : 0
     return <Badge variant="secondary">Creando… {percent} %</Badge>
   }
   if (demo.status === "fallida") return <Badge variant="destructive">No se pudo crear</Badge>
-  if (demo.expiresSoon) return <Badge variant="warning">Se borra el {shortDay(demo.expiresAt)}</Badge>
+  if (demo.expiresSoon)
+    return <Badge variant="warning">Se borra el {shortDay(demo.expiresAt)}</Badge>
   return <Badge variant="outline">Demo</Badge>
 }
 
@@ -127,16 +190,35 @@ export function PendingDemoCard({ demo, onOpen }: { demo: DemoItem; onOpen: () =
         <DemoBadge demo={demo} />
       </span>
       <span className="text-xs text-muted-foreground">
-        {demo.kindName} · {demo.sizeName.toLowerCase()} · {demo.months} meses · la presenta {demo.presenter.name}
+        {demo.kindName} · {demo.sizeName.toLowerCase()} · {demo.months} meses · la presenta{" "}
+        {demo.presenter.name}
       </span>
     </button>
   )
 }
 
+/** Un nombre de ejemplo del tipo y el país, para «Otro». */
+const pickName = (names: string[] | undefined) =>
+  names && names.length > 0 ? (names[Math.floor(Math.random() * names.length)] as string) : ""
+
 /** «Crear demo» (tablero 3): la receta de la demo; la arma el worker. */
-export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { open: boolean; onClose: () => void; onCreated: (id: string) => void; currentUserId: string | null }) {
+export function CreateDemoDrawer({
+  open,
+  onClose,
+  onCreated,
+  currentUserId,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (id: string) => void
+  currentUserId: string | null
+}) {
   const queryClient = useQueryClient()
-  const options = useQuery({ queryKey: ["admin-demo-options"], enabled: open, queryFn: async () => optionsSchema.parse(await api<unknown>("/api/admin/demos/options")) })
+  const options = useQuery({
+    queryKey: ["admin-demo-options"],
+    enabled: open,
+    queryFn: async () => optionsSchema.parse(await api<unknown>("/api/admin/demos/options")),
+  })
   const [product, setProduct] = useState<ClinicalProduct>("medical")
   const [kind, setKind] = useState("")
   const [size, setSize] = useState("mediano")
@@ -144,18 +226,26 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
   const [country, setCountry] = useState("PE")
   const [name, setName] = useState("")
   const [presenter, setPresenter] = useState("")
-  const kinds = useMemo(() => options.data?.products.find((item) => item.product === product)?.kinds ?? [], [options.data, product])
+  const kinds = useMemo(
+    () => options.data?.products.find((item) => item.product === product)?.kinds ?? [],
+    [options.data, product],
+  )
   const kindOption = kinds.find((item) => item.key === kind)
-  const pickName = (names: string[] | undefined) => (names && names.length > 0 ? (names[Math.floor(Math.random() * names.length)] as string) : "")
   // El tipo y el nombre siguen al producto y al país: el nombre sale del tipo, y se puede cambiar.
   useEffect(() => {
-    if (kinds.length > 0 && !kinds.some((item) => item.key === kind)) setKind((kinds[1] ?? kinds[0])?.key ?? "")
+    if (kinds.length > 0 && !kinds.some((item) => item.key === kind))
+      setKind((kinds[1] ?? kinds[0])?.key ?? "")
   }, [kinds, kind])
   useEffect(() => {
     if (kindOption) setName(pickName(kindOption.names[country]))
   }, [kindOption, country])
   useEffect(() => {
-    if (!presenter && options.data) setPresenter(options.data.presenters.find((item) => item.id === currentUserId)?.id ?? options.data.presenters[0]?.id ?? "")
+    if (!presenter && options.data)
+      setPresenter(
+        options.data.presenters.find((item) => item.id === currentUserId)?.id ??
+          options.data.presenters[0]?.id ??
+          "",
+      )
   }, [options.data, presenter, currentUserId])
 
   const create = useMutation({
@@ -163,7 +253,15 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
       z.object({ id: z.string() }).parse(
         await api<unknown>("/api/admin/demos", {
           method: "POST",
-          body: JSON.stringify({ product, kind, size, months: Number(months), countryCode: country, name, presenterUserId: presenter }),
+          body: JSON.stringify({
+            product,
+            kind,
+            size,
+            months: Number(months),
+            countryCode: country,
+            name,
+            presenterUserId: presenter,
+          }),
         }),
       ),
     onSuccess: (created) => {
@@ -214,7 +312,10 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
               className="grid grid-cols-2 gap-2"
             >
               {CLINICAL_PRODUCTS.map((option) => (
-                <Label key={option} className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground">
+                <Label
+                  key={option}
+                  className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
+                >
                   <RadioGroupItem value={option} />
                   <ProductMark product={option} className="text-sm" />
                 </Label>
@@ -224,9 +325,17 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
 
           <fieldset className="flex flex-col gap-2">
             <legend className="pb-2 text-sm font-medium">{kindWord}</legend>
-            <RadioGroup aria-label={kindWord} value={kind} onValueChange={(value) => setKind(String(value))} className="grid gap-2 sm:grid-cols-2">
+            <RadioGroup
+              aria-label={kindWord}
+              value={kind}
+              onValueChange={(value) => setKind(String(value))}
+              className="grid gap-2 sm:grid-cols-2"
+            >
               {kinds.map((option) => (
-                <Label key={option.key} className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground">
+                <Label
+                  key={option.key}
+                  className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
+                >
                   <RadioGroupItem value={option.key} className="mt-0.5" />
                   <span className="flex flex-col">
                     <span className="text-sm font-medium">{option.name}</span>
@@ -239,15 +348,25 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
 
           <fieldset className="flex flex-col gap-2">
             <legend className="pb-2 text-sm font-medium">Tamaño</legend>
-            <RadioGroup aria-label="Tamaño" value={size} onValueChange={(value) => setSize(String(value))} className="grid gap-2">
+            <RadioGroup
+              aria-label="Tamaño"
+              value={size}
+              onValueChange={(value) => setSize(String(value))}
+              className="grid gap-2"
+            >
               {(options.data?.sizes ?? []).map((option) => (
-                <Label key={option.key} className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground">
+                <Label
+                  key={option.key}
+                  className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
+                >
                   <RadioGroupItem value={option.key} className="mt-0.5" />
                   <span className="flex flex-wrap items-baseline gap-x-2">
                     <span className="text-sm font-medium">{option.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {option.professionals} {option.professionals === 1 ? "profesional" : "profesionales"}
-                      {option.branches > 1 ? ` · ${option.branches} sedes` : ""} · unos {option.patients.toLocaleString("es")} pacientes
+                      {option.professionals}{" "}
+                      {option.professionals === 1 ? "profesional" : "profesionales"}
+                      {option.branches > 1 ? ` · ${option.branches} sedes` : ""} · unos{" "}
+                      {option.patients.toLocaleString("es")} pacientes
                     </span>
                   </span>
                 </Label>
@@ -258,7 +377,13 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="demo-months">Historia</Label>
-              <Select value={months} onValueChange={(value) => setMonths(String(value))} items={Object.fromEntries((options.data?.months ?? []).map((value) => [String(value), `${value} meses`]))}>
+              <Select
+                value={months}
+                onValueChange={(value) => setMonths(String(value))}
+                items={Object.fromEntries(
+                  (options.data?.months ?? []).map((value) => [String(value), `${value} meses`]),
+                )}
+              >
                 <SelectTrigger id="demo-months">
                   <SelectValue />
                 </SelectTrigger>
@@ -273,7 +398,13 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="demo-country">País</Label>
-              <Select value={country} onValueChange={(value) => setCountry(String(value))} items={Object.fromEntries((options.data?.countries ?? []).map((item) => [item.code, item.name]))}>
+              <Select
+                value={country}
+                onValueChange={(value) => setCountry(String(value))}
+                items={Object.fromEntries(
+                  (options.data?.countries ?? []).map((item) => [item.code, item.name]),
+                )}
+              >
                 <SelectTrigger id="demo-country">
                   <SelectValue />
                 </SelectTrigger>
@@ -291,12 +422,24 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="demo-name">Nombre</Label>
             <div className="flex gap-2">
-              <Input id="demo-name" value={name} maxLength={80} onChange={(event) => setName(event.target.value)} />
-              <Button type="button" variant="outline" onClick={() => setName(pickName(kindOption?.names[country]))}>
+              <Input
+                id="demo-name"
+                value={name}
+                maxLength={80}
+                onChange={(event) => setName(event.target.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setName(pickName(kindOption?.names[country]))}
+              >
                 Otro
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">Sale del tipo. Puedes poner el de la clínica que visitas: «Pediatría del Dr. Ruiz». Su dirección sale del nombre, sin «demo».</p>
+            <p className="text-xs text-muted-foreground">
+              Sale del tipo. Puedes poner el de la clínica que visitas: «Pediatría del Dr. Ruiz». Su
+              dirección sale del nombre, sin «demo».
+            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -304,7 +447,12 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
             <Select
               value={presenter}
               onValueChange={(value) => setPresenter(String(value))}
-              items={Object.fromEntries((options.data?.presenters ?? []).map((item) => [item.id, item.id === currentUserId ? `${item.name} (tú)` : item.name]))}
+              items={Object.fromEntries(
+                (options.data?.presenters ?? []).map((item) => [
+                  item.id,
+                  item.id === currentUserId ? `${item.name} (tú)` : item.name,
+                ]),
+              )}
             >
               <SelectTrigger id="demo-presenter">
                 <SelectValue />
@@ -317,7 +465,10 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Alguien del equipo de la administración. Entra como propietario y la ve en «Elige tu clínica»; el resto del equipo de la demo no tiene cuenta.</p>
+            <p className="text-xs text-muted-foreground">
+              Alguien del equipo de la administración. Entra como propietario y la ve en «Elige tu
+              clínica»; el resto del equipo de la demo no tiene cuenta.
+            </p>
           </div>
         </div>
       )}
@@ -326,7 +477,13 @@ export function CreateDemoDrawer({ open, onClose, onCreated, currentUserId }: { 
 }
 
 /** «Mientras se crea» (tablero 4): los pasos, el avance y, al terminar, «Abrir la demo». */
-export function DemoProgressDrawer({ demoId, onClose }: { demoId: string | null; onClose: () => void }) {
+export function DemoProgressDrawer({
+  demoId,
+  onClose,
+}: {
+  demoId: string | null
+  onClose: () => void
+}) {
   const demos = useDemos(Boolean(demoId))
   const queryClient = useQueryClient()
   const openDemo = useOpenDemo()
@@ -344,8 +501,20 @@ export function DemoProgressDrawer({ demoId, onClose }: { demoId: string | null;
     <DetailDrawer
       open={Boolean(demoId)}
       onClose={onClose}
-      title={demo ? (ready ? `${demo.name} está lista` : demo.status === "fallida" ? `${demo.name} no se pudo crear` : `Creando ${demo.name}`) : "Creando la demo"}
-      description={demo ? `${demo.kindName} · ${demo.sizeName.toLowerCase()} · ${demo.months} meses · ${demo.countryName}` : undefined}
+      title={
+        demo
+          ? ready
+            ? `${demo.name} está lista`
+            : demo.status === "fallida"
+              ? `${demo.name} no se pudo crear`
+              : `Creando ${demo.name}`
+          : "Creando la demo"
+      }
+      description={
+        demo
+          ? `${demo.kindName} · ${demo.sizeName.toLowerCase()} · ${demo.months} meses · ${demo.countryName}`
+          : undefined
+      }
       closeLabel="Cerrar"
       actions={
         demo?.status === "fallida" ? (
@@ -365,22 +534,40 @@ export function DemoProgressDrawer({ demoId, onClose }: { demoId: string | null;
         <div className="flex flex-col gap-5">
           {demo.status === "fallida" ? (
             <p className="rounded-xl bg-destructive/10 p-3 text-sm">
-              No quedó nada a medias: «Intentar de nuevo» la arma otra vez con lo mismo.{demo.error ? ` Motivo: ${demo.error}` : ""}
+              No quedó nada a medias: «Intentar de nuevo» la arma otra vez con lo mismo.
+              {demo.error ? ` Motivo: ${demo.error}` : ""}
             </p>
           ) : (
             <div className="flex flex-col gap-2">
               <p className="flex justify-between text-sm">
                 <b>{ready ? "Lista" : `Paso ${Math.min(done + 1, total)} de ${total}`}</b>
-                <span className="text-muted-foreground">{ready ? "" : "menos de un par de minutos"}</span>
+                <span className="text-muted-foreground">
+                  {ready ? "" : "menos de un par de minutos"}
+                </span>
               </p>
-              <div role="progressbar" aria-label="Avance" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-foreground transition-[width]" style={{ width: `${percent}%` }} />
+              <div
+                role="progressbar"
+                aria-label="Avance"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={percent}
+                className="h-2 overflow-hidden rounded-full bg-muted"
+              >
+                <div
+                  className="h-full bg-foreground transition-[width]"
+                  style={{ width: `${percent}%` }}
+                />
               </div>
             </div>
           )}
           <ol className="flex flex-col gap-1">
             {STEPS.map((step, index) => {
-              const state = ready || index < done ? "hecho" : index === done && demo.status === "creando" ? "ahora" : "despues"
+              const state =
+                ready || index < done
+                  ? "hecho"
+                  : index === done && demo.status === "creando"
+                    ? "ahora"
+                    : "despues"
               return (
                 <li key={step.key} className="flex items-start gap-3 py-2">
                   <span
@@ -392,14 +579,17 @@ export function DemoProgressDrawer({ demoId, onClose }: { demoId: string | null;
                   <span className={state === "despues" ? "text-muted-foreground" : ""}>
                     <span className="block text-sm font-medium text-foreground">{step.title}</span>
                     <span className="block text-sm text-muted-foreground">{step.detail(demo)}</span>
-                    <span className="sr-only">{state === "hecho" ? "Hecho" : state === "ahora" ? "En curso" : "Pendiente"}</span>
+                    <span className="sr-only">
+                      {state === "hecho" ? "Hecho" : state === "ahora" ? "En curso" : "Pendiente"}
+                    </span>
                   </span>
                 </li>
               )
             })}
           </ol>
           <p className="rounded-xl bg-muted p-3 text-sm text-muted-foreground">
-            Puedes cerrar esto y seguir. La demo aparece en Clínicas con su avance y se abre cuando está lista.
+            Puedes cerrar esto y seguir. La demo aparece en Clínicas con su avance y se abre cuando
+            está lista.
           </p>
         </div>
       )}
@@ -409,10 +599,22 @@ export function DemoProgressDrawer({ demoId, onClose }: { demoId: string | null;
 
 /** La demo de una clínica, para su ficha. */
 export function useDemoOfOrganization(organizationId: string) {
-  return useQuery({
+  const queryClient = useQueryClient()
+  const query = useQuery({
     queryKey: ["admin-demo-of", organizationId],
-    queryFn: async () => demoDetailSchema.parse(await api<unknown>(`/api/admin/demos/organization/${organizationId}`)).demo,
+    queryFn: async () =>
+      demoDetailSchema.parse(await api<unknown>(`/api/admin/demos/organization/${organizationId}`))
+        .demo,
+    // Mientras se vuelve a armar, la franja dice cómo va y se pone al día sola.
+    refetchInterval: (state) =>
+      state.state.data?.status === "pendiente" || state.state.data?.status === "creando" ? 3_000 : false,
   })
+  const status = query.data?.status
+  useEffect(() => {
+    // Ya armada de nuevo: lo demás de la ficha (miembros, pacientes, gastos) es otro.
+    if (status === "lista") void queryClient.invalidateQueries({ queryKey: ["admin-organization", organizationId] })
+  }, [status, organizationId, queryClient])
+  return query
 }
 
 /**
@@ -420,7 +622,15 @@ export function useDemoOfOrganization(organizationId: string) {
  * quién la presenta, que está al día, y «Volver a empezar» y «Borrar demo»
  * con su confirmación (tablero 4b).
  */
-export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdmin: boolean; onDeleted: () => void }) {
+export function DemoBand({
+  demo,
+  isAdmin,
+  onDeleted,
+}: {
+  demo: DemoDetail
+  isAdmin: boolean
+  onDeleted: () => void
+}) {
   const queryClient = useQueryClient()
   const [confirm, setConfirm] = useState<"reset" | "delete" | null>(null)
   const [typed, setTyped] = useState("")
@@ -435,7 +645,11 @@ export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdm
     onError: (error) => toast.error(messageOf(error)),
   })
   const remove = useMutation({
-    mutationFn: async () => api(`/api/admin/demos/${demo.id}`, { method: "DELETE", body: JSON.stringify({ confirmName: typed }) }),
+    mutationFn: async () =>
+      api(`/api/admin/demos/${demo.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({ confirmName: typed }),
+      }),
     onSuccess: () => {
       setConfirm(null)
       toast.success(`«${demo.name}» se borró`)
@@ -447,21 +661,32 @@ export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdm
   })
   const building = demo.status === "pendiente" || demo.status === "creando"
   return (
-    <section aria-label="Demo" className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4">
+    <section
+      aria-label="Demo"
+      className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-4"
+    >
       <div className="flex min-w-72 flex-1 flex-col gap-1">
         <p className="text-sm font-medium">
-          Demo de {demo.kindName} · {demo.sizeName.toLowerCase()} · {demo.months} meses · {demo.countryName}
+          Demo de {demo.kindName} · {demo.sizeName.toLowerCase()} · {demo.months} meses ·{" "}
+          {demo.countryName}
         </p>
         <p className="text-sm text-muted-foreground">
           {building
             ? "Se está volviendo a armar: la clínica de antes sigue hasta que termine."
             : `La presenta ${demo.presenter.name}. Al día hoy: cada noche suma el día que pasó. Sin cobro; sus mensajes no salen a nadie.`}
-          {demo.expiresSoon ? ` Nadie la abre desde el ${shortDay(demo.lastUsedAt)}: se borra el ${shortDay(demo.expiresAt)} si nadie la abre.` : ""}
+          {demo.expiresSoon
+            ? ` Nadie la abre desde el ${shortDay(demo.lastUsedAt)}: se borra el ${shortDay(demo.expiresAt)} si nadie la abre.`
+            : ""}
         </p>
       </div>
       {isAdmin ? (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" disabled={building} onClick={() => setConfirm("reset")}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={building}
+            onClick={() => setConfirm("reset")}
+          >
             Volver a empezar
           </Button>
           <Button
@@ -500,7 +725,12 @@ export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdm
       >
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="demo-confirm-name">Escribe el nombre para confirmar</Label>
-          <Input id="demo-confirm-name" value={typed} autoComplete="off" onChange={(event) => setTyped(event.target.value)} />
+          <Input
+            id="demo-confirm-name"
+            value={typed}
+            autoComplete="off"
+            onChange={(event) => setTyped(event.target.value)}
+          />
         </div>
       </ConfirmDialog>
     </section>
@@ -511,9 +741,17 @@ export function DemoBand({ demo, isAdmin, onDeleted }: { demo: DemoDetail; isAdm
 export function DemoShowcase({ demo }: { demo: DemoDetail }) {
   const showcase = demo.showcase
   if (!showcase) return null
-  const day = new Intl.DateTimeFormat("es", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${showcase.today}T12:00:00Z`))
+  const day = new Intl.DateTimeFormat("es", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(`${showcase.today}T12:00:00Z`))
   return (
-    <section aria-labelledby="demo-hoy" className="flex flex-col gap-3.5 rounded-xl border bg-card p-4">
+    <section
+      aria-labelledby="demo-hoy"
+      className="flex flex-col gap-3.5 rounded-xl border bg-card p-4"
+    >
       <div>
         <h2 id="demo-hoy" className="text-base font-medium">
           Lo que tiene hoy para mostrar
@@ -526,7 +764,9 @@ export function DemoShowcase({ demo }: { demo: DemoDetail }) {
         <div className="flex flex-col gap-0.5 rounded-xl border p-3">
           <p className="text-xs text-muted-foreground">Agenda de hoy</p>
           <p className="text-xl font-semibold tabular-nums">{showcase.agendaToday} citas</p>
-          <p className="text-xs text-muted-foreground">{showcase.unconfirmed} por confirmar entre hoy y mañana</p>
+          <p className="text-xs text-muted-foreground">
+            {showcase.unconfirmed} por confirmar entre hoy y mañana
+          </p>
         </div>
         <div className="flex flex-col gap-0.5 rounded-xl border p-3">
           <p className="text-xs text-muted-foreground">Bandeja</p>
@@ -540,7 +780,8 @@ export function DemoShowcase({ demo }: { demo: DemoDetail }) {
         </div>
       </div>
       <p className="text-xs text-muted-foreground">
-        La historia inventada no gasta IA: «Nos costó» suma lo que Sofi y Clío hicieron de verdad en las presentaciones, más el espacio y el servidor.
+        La historia inventada no gasta IA: «Nos costó» suma lo que Sofi y Clío hicieron de verdad en
+        las presentaciones, más el espacio y el servidor.
       </p>
     </section>
   )

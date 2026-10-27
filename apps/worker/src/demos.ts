@@ -12,7 +12,7 @@ import {
   purgeDemoOrganization,
 } from "@odentia/services"
 import type { ClinicalProduct } from "@odentia/clinical"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 
 /**
  * Las demos para presentar en el worker (ADR 0096). Armar una lleva minutos:
@@ -49,36 +49,51 @@ function refOf(row: typeof saasDemo.$inferSelect): DemoRecipeRef {
 
 async function build(deps: DemosDeps, row: typeof saasDemo.$inferSelect): Promise<void> {
   const beat = setInterval(() => {
-    void deps.ownerDb.update(saasDemo).set({ heartbeatAt: new Date() }).where(eq(saasDemo.id, row.id)).catch(() => undefined)
+    void deps.ownerDb
+      .update(saasDemo)
+      .set({ heartbeatAt: new Date() })
+      .where(eq(saasDemo.id, row.id))
+      .catch(() => undefined)
   }, 30_000)
   try {
     const storageKeys: string[] = []
     const built = await deps.ownerDb.transaction(async (tx) => {
       // Volver a empezar: la clínica anterior se va en la misma transacción.
-      if (row.organizationId) storageKeys.push(...(await purgeDemoOrganization(tx as Db, row.id, row.organizationId)).storageKeys)
+      if (row.organizationId)
+        storageKeys.push(
+          ...(await purgeDemoOrganization(tx as Db, row.id, row.organizationId)).storageKeys,
+        )
       const result = await buildDemo(tx as Db, refOf(row), {
+        // Volver a empezar conserva la clínica: su ficha, sus enlaces y las sesiones siguen.
+        ...(row.organizationId ? { organizationId: row.organizationId } : {}),
         secretsKey: deps.secretsKey,
         fetch: deps.fetch,
         // El avance va por otra conexión: la transacción no se ve hasta el final.
         onProgress: async (progress) => {
-          await deps.ownerDb.update(saasDemo).set({ progress, heartbeatAt: new Date() }).where(eq(saasDemo.id, row.id))
+          await deps.ownerDb
+            .update(saasDemo)
+            .set({ progress, heartbeatAt: new Date() })
+            .where(eq(saasDemo.id, row.id))
         },
       })
       const now = new Date()
-      await tx
+      const saved = await tx
         .update(saasDemo)
         .set({
           organizationId: result.organizationId,
+          slug: result.slug,
           status: "lista",
           error: null,
           historyThrough: result.historyThrough,
           advancedOn: null,
           readyAt: now,
-          openedAt: null,
           progress: { step: "listo", done: 5, total: 5 },
           updatedAt: now,
         })
         .where(eq(saasDemo.id, row.id))
+        .returning({ id: saasDemo.id })
+      // Sin su fila sería una clínica inventada que nada puede borrar: no se guarda.
+      if (saved.length === 0) throw new Error("La demo se borró mientras se armaba")
       return result
     })
     for (const key of storageKeys) await deps.deleteObject?.(key).catch(() => undefined)
@@ -87,7 +102,11 @@ async function build(deps: DemosDeps, row: typeof saasDemo.$inferSelect): Promis
     console.error(`worker: la demo ${row.slug} no se pudo armar`, error)
     await deps.ownerDb
       .update(saasDemo)
-      .set({ status: "fallida", error: error instanceof Error ? error.message.slice(0, 300) : "Error al armarla", updatedAt: new Date() })
+      .set({
+        status: "fallida",
+        error: error instanceof Error ? error.message.slice(0, 300) : "Error al armarla",
+        updatedAt: new Date(),
+      })
       .where(eq(saasDemo.id, row.id))
   } finally {
     clearInterval(beat)
@@ -95,7 +114,9 @@ async function build(deps: DemosDeps, row: typeof saasDemo.$inferSelect): Promis
 }
 
 /** Una vuelta: arma la que espera, pone al día una y borra las vencidas. */
-export async function runDemosTick(deps: DemosDeps): Promise<{ started: boolean; advanced: number; expired: number }> {
+export async function runDemosTick(
+  deps: DemosDeps,
+): Promise<{ started: boolean; advanced: number; expired: number }> {
   let started = false
   if (!building) {
     await deps.ownerDb.transaction((tx) => failStaleDemos(tx as Db))
@@ -114,15 +135,28 @@ export async function runDemosTick(deps: DemosDeps): Promise<{ started: boolean;
       if (!row.organizationId) continue
       try {
         await deps.ownerDb.transaction(async (tx) => {
-          const result = await advanceDemo(tx as Db, { ...refOf(row), organizationId: row.organizationId as string, historyThrough: row.historyThrough })
+          const result = await advanceDemo(tx as Db, {
+            ...refOf(row),
+            organizationId: row.organizationId as string,
+            historyThrough: row.historyThrough,
+          })
           await tx
             .update(saasDemo)
-            .set({ historyThrough: result.historyThrough, advancedOn: result.today, updatedAt: new Date() })
+            .set({
+              historyThrough: result.historyThrough,
+              advancedOn: result.today,
+              updatedAt: new Date(),
+            })
             .where(eq(saasDemo.id, row.id))
         })
         advanced += 1
       } catch (error) {
         console.error(`worker: la demo ${row.slug} no se pudo poner al día`, error)
+        // Se vuelve a intentar mañana: una que falla no deja a las demás sin ponerse al día.
+        await deps.ownerDb
+          .execute(sql`update admin.saas_demo d set advanced_on = (now() at time zone p.timezone)::date
+            from org_profile p where p.organization_id = d.organization_id and d.id = ${row.id}`)
+          .catch(() => undefined)
       }
     }
   }
@@ -130,7 +164,9 @@ export async function runDemosTick(deps: DemosDeps): Promise<{ started: boolean;
   if (!building) {
     for (const view of await deps.ownerDb.transaction((tx) => expiredDemos(tx as Db))) {
       try {
-        const purged = await deps.ownerDb.transaction((tx) => deleteDemo(tx as Db, null, view.id, null))
+        const purged = await deps.ownerDb.transaction((tx) =>
+          deleteDemo(tx as Db, null, view.id, null),
+        )
         for (const key of purged.storageKeys) await deps.deleteObject?.(key).catch(() => undefined)
         expired += 1
       } catch (error) {
