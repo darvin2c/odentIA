@@ -5,6 +5,7 @@ import { encounterDictationSuggestion } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { reportQuestion } from "@odentia/db/schema/reports"
 import { saasAction, saasPlan, saasSubscription } from "@odentia/db/schema/saas-billing"
+import { eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { getClinicCostMargin } from "./saas-cost.js"
@@ -317,8 +318,8 @@ describe("cada acción con lo que nos costó", () => {
     expect(question(ids.asked!)).toMatchObject({
       outcome: "Respondida",
       chargedNote: "2 de 300",
-      costMicros: 250,
-      calls: 2,
+      costMicros: 150,
+      calls: 1,
       spread: false,
     })
     // El título de una pregunta sobre un paciente puede llevar su nombre: no se muestra.
@@ -387,15 +388,33 @@ describe("de qué se compone una acción", () => {
         { label: "Llevó a", value: "Agenda" },
       ]),
     )
-    expect(asked.steps.map((step) => step.what)).toEqual([
-      "Jev decidió qué se preguntaba",
-      "Escribió la consulta",
+    // Lo de Jev va en su fila, como en «Costo y margen»: la pregunta suma solo lo que escribió la consulta.
+    expect(asked.steps.map((step) => [step.what, step.costMicros])).toEqual([
+      ["Escribió la consulta", 150],
     ])
     const old = await getClinicCostActionDetail(ownerDb, ORG, { key: `q:${ids.old}`, now })
     expect(old).toMatchObject({ spread: true, steps: [], costMicros: 600 })
     await expect(
       getClinicCostActionDetail(ownerDb, ORG, { key: `a:${randomUUID()}`, now }),
     ).rejects.toMatchObject({ status: 404 })
+  })
+})
+
+describe("las preguntas del plan", () => {
+  it("un plan que no cobra paquetes no tiene tope: todas son incluidas, como en «Costo y margen»", async () => {
+    await ownerDb
+      .update(saasPlan)
+      .set({ argosPackMicros: null })
+      .where(eq(saasPlan.code, "detalle"))
+    const { items, questions } = await listClinicCostActions(ownerDb, ORG, { agent: "argos", now })
+    expect(items.find((item) => item.key === `q:${ids.asked}`)).toMatchObject({
+      chargedNote: "Incluida",
+    })
+    expect(questions).toMatchObject({ counted: 3, included: 0 })
+    await ownerDb
+      .update(saasPlan)
+      .set({ argosPackMicros: 3_000_000 })
+      .where(eq(saasPlan.code, "detalle"))
   })
 })
 

@@ -134,6 +134,12 @@ const OUTCOME_WHAT: Record<string, string> = {
   no_pudo: "El proveedor no respondió",
 }
 
+/** De dónde salió la reserva de una cita recuperada. */
+const BOOKED_FROM: Record<string, string> = {
+  agent: "en la conversación",
+  enlace: "desde el enlace",
+}
+
 /** Lo que hizo Sofi en una respuesta, por las herramientas que usó. Lo demás es «Respondió». */
 const TOOL_WORDS: Record<string, string> = {
   buscar_huecos: "Buscó horarios libres",
@@ -196,14 +202,28 @@ const SCREEN_WORDS: Record<string, string> = {
   reportes: "Reportes",
 }
 
+/** La pregunta nombró a una persona (la encontrara o no): su título puede llevar el nombre. */
+function aboutPatient(plan: ArgosStoredPlan | null): boolean {
+  return !!plan && (!!plan.paciente || plan.pacientes !== undefined)
+}
+
 /**
- * Lo que entendió Argos de una pregunta: su título. Si la pregunta era de un
- * paciente con nombre, el título puede llevarlo: se dice solo eso.
+ * Lo que entendió Argos de una pregunta: su título. Si la pregunta nombró a
+ * un paciente, el título puede llevar su nombre: se dice solo eso.
  */
 function understoodOf(plan: ArgosStoredPlan | null, outcome: string): string {
-  if (plan && (plan.paciente || plan.pacientes?.length)) return "Una pregunta sobre un paciente"
+  if (aboutPatient(plan)) return "Una pregunta sobre un paciente"
   const title = plan?.titulo?.trim()
   return title || OUTCOME_WHAT[outcome] || "Sin título"
+}
+
+/** La clave de lo que no dice a qué atención o conversación pertenece. */
+const NO_ID = "00000000-0000-0000-0000-000000000000"
+
+function pushTo<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const list = map.get(key)
+  if (list) list.push(value)
+  else map.set(key, [value])
 }
 
 /** El día en la zona de la clínica (`yyyy-MM-dd`). */
@@ -239,23 +259,22 @@ async function loadItems(
   const product = await orgProduct(tx, orgId)
   const dayOf = dayFormat(timezone)
 
-  // Las atenciones de Clío: las cobradas y las que escuchó sin que se confirmara nada.
+  // Lo que no se cobró, por atención (Clío) o por conversación (Sofi); lo que no dice
+  // cuál va junto con la clave vacía, para que la lista sume lo mismo que su fila.
   const clioFree = new Map<string, CostUsageRow[]>()
   const sofiFree = new Map<string, CostUsageRow[]>()
   for (const row of usage) {
     const target = targets.get(row.id)
     if (!target || !("bucket" in target)) continue
-    if (target.bucket === "clio_sin_cobro" && row.encounterId)
-      clioFree.set(row.encounterId, [...(clioFree.get(row.encounterId) ?? []), row])
-    if (target.bucket === "sofi_sin_cobro" && row.conversationId)
-      sofiFree.set(row.conversationId, [...(sofiFree.get(row.conversationId) ?? []), row])
+    if (target.bucket === "clio_sin_cobro") pushTo(clioFree, row.encounterId ?? NO_ID, row)
+    if (target.bucket === "sofi_sin_cobro") pushTo(sofiFree, row.conversationId ?? NO_ID, row)
   }
   const encounterIds = [
     ...new Set([
       ...actions
         .filter((row) => row.kind === "consulta" && row.encounterId)
         .map((row) => row.encounterId as string),
-      ...clioFree.keys(),
+      ...[...clioFree.keys()].filter((id) => id !== NO_ID),
     ]),
   ]
   const encounters = encounterIds.length
@@ -333,17 +352,11 @@ async function loadItems(
   const questionUsage = new Map<string, CostUsageRow[]>()
   const unlinkedByDay = new Map<string, CostUsageRow[]>()
   for (const row of usage) {
-    if (row.origin !== "reportes") continue
-    if (row.reportQuestionId)
-      questionUsage.set(row.reportQuestionId, [
-        ...(questionUsage.get(row.reportQuestionId) ?? []),
-        row,
-      ])
-    else
-      unlinkedByDay.set(dayOf(row.createdAt), [
-        ...(unlinkedByDay.get(dayOf(row.createdAt)) ?? []),
-        row,
-      ])
+    // Lo de Jev va en su fila, como en «Costo y margen»: aquí solo lo que suma «Argos · Preguntas».
+    const target = targets.get(row.id)
+    if (!target || !("bucket" in target) || target.bucket !== "preguntas") continue
+    if (row.reportQuestionId) pushTo(questionUsage, row.reportQuestionId, row)
+    else pushTo(unlinkedByDay, dayOf(row.createdAt), row)
   }
   const asked = questions.filter((row) => row.usedModel || questionUsage.has(row.id))
   // Lo que no dice su pregunta se reparte entre las del día que tampoco lo dicen (las de antes del cambio).
@@ -410,8 +423,7 @@ async function loadItems(
   const usageOfAction = new Map<string, CostUsageRow[]>()
   for (const row of usage) {
     const target = targets.get(row.id)
-    if (target && "action" in target)
-      usageOfAction.set(target.action, [...(usageOfAction.get(target.action) ?? []), row])
+    if (target && "action" in target) pushTo(usageOfAction, target.action, row)
   }
 
   for (const row of actions) {
@@ -469,7 +481,8 @@ async function loadItems(
         agent: "argos",
         type: "Cita recuperada",
         who: patientOf(row.contactId) ?? row.personName,
-        whoDetail: row.channel ? channelWords(row.channel) : null,
+        // El canal de una cita recuperada es de dónde salió la reserva (`appointment.source`).
+        whoDetail: row.channel ? (BOOKED_FROM[row.channel] ?? channelWords(row.channel)) : null,
         what: row.detail,
         professionalId: null,
         channel: row.channel,
@@ -490,8 +503,10 @@ async function loadItems(
     }
   }
 
-  // Las preguntas: «N de 300» mientras alcanzan las incluidas, después «Paquete».
-  const included = plan?.argosIncludedQuestions ?? 0
+  // Las preguntas: «N de 300» mientras alcanzan las incluidas, después «Paquete». Con la
+  // regla de «Costo y margen»: un plan que no cobra paquetes no tiene tope y todas son incluidas.
+  const limited = !!plan && plan.argosPackMicros !== null
+  const included = limited ? (plan?.argosIncludedQuestions ?? 0) : 0
   let counted = 0
   for (const row of asked) {
     const label = OUTCOME_WORDS[row.outcome] ?? row.outcome
@@ -515,11 +530,11 @@ async function loadItems(
       chargedMicros: null,
       chargedNote: !counts
         ? "No cuenta"
-        : included && counted > included
-          ? "Paquete"
-          : included
-            ? `${counted} de ${included}`
-            : "Incluida",
+        : !limited
+          ? "Incluida"
+          : counted > included
+            ? "Paquete"
+            : `${counted} de ${included}`,
       costMicros: micros,
       calls,
       spread: spread !== null,
@@ -542,7 +557,10 @@ async function loadItems(
       occurredAt: rows[0]?.createdAt ?? seen?.startedAt ?? period.start,
       who: seen ? (nameOf.get(seen.professionalUserId) ?? null) : null,
       whoDetail: patient ? `con ${patient}` : null,
-      what: `Escuchó ${pauses === 1 ? "1 pausa" : `${pauses} pausas`} y no se confirmó nada`,
+      what:
+        encounterId === NO_ID
+          ? "Dictado que no dice de qué atención es"
+          : `Escuchó ${pauses === 1 ? "1 pausa" : `${pauses} pausas`} y no se confirmó nada`,
       chargedMicros: null,
       chargedNote: "Sin cobro",
       costMicros: rows.reduce((sum, row) => sum + (row.costMicros ?? 0), 0),
@@ -562,7 +580,10 @@ async function loadItems(
       occurredAt: rows[0]?.createdAt ?? period.start,
       who: patientOf(rows[0]?.contactId ?? null) ?? "Sin nombre",
       whoDetail: null,
-      what: "No contó como conversación: pasó al equipo, fue ajeno o spam",
+      what:
+        conversationId === NO_ID
+          ? "Respuestas que no dicen de qué conversación son"
+          : "No contó como conversación: pasó al equipo, fue ajeno o spam",
       chargedMicros: null,
       chargedNote: "Sin cobro",
       costMicros: rows.reduce((sum, row) => sum + (row.costMicros ?? 0), 0),
@@ -658,7 +679,11 @@ export async function listClinicCostActions(
   if (days.at(-1)?.day !== last)
     days.push({ day: last, costMicros: cost.get(last) ?? 0, ahead: last > today })
 
-  const page = Math.max(1, Math.floor(input.page ?? 1))
+  // Una página que ya no existe (otro mes, otro filtro) muestra la última.
+  const page = Math.min(
+    Math.max(1, Math.floor(input.page ?? 1)),
+    Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)),
+  )
   const questionItems = items.filter((item) => item.type === "Pregunta")
   return {
     period: { start: context.period.start, end: context.period.end, credit: context.period.credit },
@@ -685,8 +710,10 @@ export async function listClinicCostActions(
 }
 
 export interface CostStep {
+  /** El primer gasto del paso: no se repite aunque dos pasos compartan hora. */
+  id: string
   at: Date
-  /** «Buscó horarios libres», «Una nota y un diagnóstico», «Jev eligió la cifra». */
+  /** «Buscó horarios libres», «Nota y diagnóstico», «Escribió la consulta». */
   what: string
   model: string
   calls: number
@@ -711,11 +738,11 @@ export interface CostActionDetail {
 function stepsOf(
   rows: CostUsageRow[],
   keyOf: (row: CostUsageRow) => string = (row) => String(row.createdAt.getTime()),
-): Array<{ at: Date; rows: CostUsageRow[] }> {
-  const groups = new Map<string, { at: Date; rows: CostUsageRow[] }>()
+): Array<{ id: string; at: Date; rows: CostUsageRow[] }> {
+  const groups = new Map<string, { id: string; at: Date; rows: CostUsageRow[] }>()
   for (const row of rows) {
     const key = keyOf(row)
-    const group = groups.get(key) ?? { at: row.createdAt, rows: [] }
+    const group = groups.get(key) ?? { id: row.id, at: row.createdAt, rows: [] }
     group.rows.push(row)
     groups.set(key, group)
   }
@@ -759,14 +786,14 @@ export async function getClinicCostActionDetail(
         !!target &&
         "bucket" in target &&
         target.bucket === "clio_sin_cobro" &&
-        row.encounterId === id
+        (row.encounterId ?? NO_ID) === id
       )
     if (kind === "c")
       return (
         !!target &&
         "bucket" in target &&
         target.bucket === "sofi_sin_cobro" &&
-        row.conversationId === id
+        (row.conversationId ?? NO_ID) === id
       )
     return false
   })
@@ -774,21 +801,22 @@ export async function getClinicCostActionDetail(
   if (item.agent === "clio") {
     const encounterId =
       kind === "e" ? id : context.actions.find((row) => row.id === id)?.encounterId
-    const suggestions = encounterId
-      ? await tx
-          .select({
-            kind: encounterDictationSuggestion.kind,
-            status: encounterDictationSuggestion.status,
-            createdAt: encounterDictationSuggestion.createdAt,
-          })
-          .from(encounterDictationSuggestion)
-          .where(
-            and(
-              eq(encounterDictationSuggestion.organizationId, orgId),
-              eq(encounterDictationSuggestion.encounterId, encounterId),
-            ),
-          )
-      : []
+    const suggestions =
+      encounterId && encounterId !== NO_ID
+        ? await tx
+            .select({
+              kind: encounterDictationSuggestion.kind,
+              status: encounterDictationSuggestion.status,
+              createdAt: encounterDictationSuggestion.createdAt,
+            })
+            .from(encounterDictationSuggestion)
+            .where(
+              and(
+                eq(encounterDictationSuggestion.organizationId, orgId),
+                eq(encounterDictationSuggestion.encounterId, encounterId),
+              ),
+            )
+        : []
     const pauses = stepsOf(own)
     // Lo que sugirió cada pausa: lo que se guardó después de su gasto y antes de la pausa siguiente.
     const steps = pauses.map((pause, index) => {
@@ -804,6 +832,7 @@ export async function getClinicCostActionDetail(
         ),
       ]
       return {
+        id: pause.id,
         at: pause.at,
         what: kinds.length
           ? capital(listWords(kinds.map((value) => DICTATION_WORDS[value] ?? value)))
@@ -894,6 +923,7 @@ export async function getClinicCostActionDetail(
             ? (RUN_STATUS_WORDS[run.status] as string)
             : "Respondió"
         return {
+          id: step.id,
           at: run?.startedAt ?? step.at,
           what,
           model: modelsOf(step.rows),
@@ -932,7 +962,8 @@ export async function getClinicCostActionDetail(
         value: plan.fuente === "oficial" ? "Una cifra oficial de Reportes" : "Un cálculo de Argos",
       })
     if (plan?.sede) facts.push({ label: "Sede", value: plan.sede })
-    if (plan?.parcial && plan.falta) facts.push({ label: "Le faltó", value: plan.falta })
+    if (plan?.parcial && plan.falta && !aboutPatient(plan))
+      facts.push({ label: "Le faltó", value: plan.falta })
     if (plan?.pantalla && SCREEN_WORDS[plan.pantalla])
       facts.push({ label: "Llevó a", value: SCREEN_WORDS[plan.pantalla] as string })
     if (plan?.seguir?.length)
@@ -942,8 +973,9 @@ export async function getClinicCostActionDetail(
       })
     const linked = questionUsage.get(id) ?? []
     const steps = linked.map((usageRow) => ({
+      id: usageRow.id,
       at: usageRow.createdAt,
-      what: usageRow.provider === "jev" ? "Jev decidió qué se preguntaba" : "Escribió la consulta",
+      what: "Escribió la consulta",
       model: usageRow.model,
       calls: usageRow.calls,
       inputTokens: usageRow.inputTokens,
@@ -972,6 +1004,8 @@ export async function getClinicCostActionDetail(
 
 export interface ClinicAgentCounts {
   period: { start: Date; end: Date; credit: "prueba" | "mes" }
+  /** La zona de la clínica: las fechas del mes se dicen en ella. */
+  timezone: string
   sofi: { conversations: number; byTier: Record<"informa" | "gestiona" | "agenda", number> }
   clio: { consultations: number; byTier: Record<"simple" | "estandar" | "completa", number> }
   /** `included`: las preguntas del plan; `limited` false si el plan no las cuenta. */
@@ -997,6 +1031,7 @@ export async function getClinicAgentCounts(
     actions.filter((row) => row.kind === kind && row.tier === value).length
   return {
     period: { start: period.start, end: period.end, credit: period.credit },
+    timezone: (await findOrgLocale(tx, orgId)).timezone,
     sofi: {
       conversations: actions.filter((row) => row.kind === "conversacion" && row.tier !== "agenda")
         .length,

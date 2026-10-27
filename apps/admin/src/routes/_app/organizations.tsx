@@ -29,9 +29,10 @@ import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router"
 import { Building2, Plus } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
+import { rememberOrganizationsSearch } from "../../lib/organizations-search"
 import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 
 interface ListSearch {
@@ -170,6 +171,14 @@ function OrganizationsPage() {
       },
       replace: true,
     })
+  // Lo recuerda para «← Organizaciones» de la ficha: al volver, la lista sigue como estaba.
+  useEffect(() => {
+    rememberOrganizationsSearch({
+      ...(listSearch.q ? { q: listSearch.q } : {}),
+      ...(listSearch.producto && listSearch.producto !== "todos" ? { producto: listSearch.producto } : {}),
+      ...(listSearch.precio ? { precio: listSearch.precio } : {}),
+    })
+  }, [listSearch.q, listSearch.producto, listSearch.precio])
   const [assistedOpen, setAssistedOpen] = useState(false)
 
   const sessionQuery = useQuery({

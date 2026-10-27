@@ -20,6 +20,7 @@ import { ProductMark } from "../../components/product"
 import { ApiError, api } from "../../lib/api"
 import { plural } from "../../lib/cost-format"
 import { domainOf, platformUrl } from "../../lib/host"
+import { rememberedOrganizationsSearch } from "../../lib/organizations-search"
 
 const TABS = ["resumen", "gastos", "precio", "equipo", "actividad"] as const
 type Tab = (typeof TABS)[number]
@@ -217,6 +218,7 @@ function OrganizationPage() {
   const back = (
     <Link
       to="/organizations"
+      search={rememberedOrganizationsSearch()}
       className="self-start text-sm text-muted-foreground hover:text-foreground"
     >
       ← Organizaciones
@@ -249,7 +251,7 @@ function OrganizationPage() {
     : null
   const facts = [
     org.slug,
-    isAdmin && org.billing?.plan ? `Plan ${org.billing.plan.name}` : null,
+    isAdmin && org.billing?.plan ? org.billing.plan.name : null,
     isAdmin && terms ? (terms.seller ? `vendedor: ${terms.seller.name}` : "sin vendedor") : null,
     isAdmin ? cycle : null,
     plural(org.usage.members, "miembro", "miembros"),
@@ -297,7 +299,8 @@ function OrganizationPage() {
         </TabsList>
       </Tabs>
 
-      {tab === "resumen" ? (
+      {session.isPending ? <Skeleton className="h-64 w-full" /> : null}
+      {!session.isPending && tab === "resumen" ? (
         <OrgSummary
           organizationId={org.id}
           isAdmin={isAdmin}

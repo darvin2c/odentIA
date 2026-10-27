@@ -56,6 +56,7 @@ interface CostActionDetail {
   key: string
   agent: "sofi" | "clio" | "argos"
   steps: Array<{
+    id: string
     at: string
     what: string
     model: string
@@ -92,7 +93,7 @@ const CHIPS: Array<{ value: SpendingAgent; label: string }> = [
 const CHANNEL_NAMES: Record<string, string> = {
   whatsapp: "WhatsApp",
   instagram: "Instagram",
-  messenger: "Facebook",
+  messenger: "Messenger",
   facebook: "Facebook",
   telegram: "Telegram",
   webchat: "Chat web",
@@ -189,7 +190,9 @@ function columnsOf(
     heading: "Cobrado",
     numeric: true,
     cell: (item: CostActionItem) => (
-      <span className={item.chargedMicros === null ? "text-muted-foreground" : "tabular-nums"}>
+      <span
+        className={`whitespace-nowrap ${item.chargedMicros === null ? "text-muted-foreground" : "tabular-nums"}`}
+      >
         {chargedText(item)}
       </span>
     ),
@@ -333,28 +336,45 @@ function ActionDetail({
         </dl>
       ) : null}
       {data.steps.length ? (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <caption className="sr-only">
-              {item.agent === "clio" ? "Pausas de la atención" : "Llamadas al proveedor"}
+              {item.agent === "clio"
+                ? "Pausas de la atención"
+                : item.agent === "sofi" || item.type === "Cita recuperada"
+                  ? "Respuestas de Sofi"
+                  : "Llamadas al proveedor"}
             </caption>
             <thead>
               <tr className="text-left text-xs text-muted-foreground">
-                {item.agent === "clio" ? <th className="px-2 py-1 font-medium">Pausa</th> : null}
-                <th className="px-2 py-1 font-medium">Hora</th>
-                <th className="px-2 py-1 font-medium">{stepName}</th>
-                <th className="px-2 py-1 font-medium">Modelo</th>
-                <th className="px-2 py-1 text-right font-medium">Llamadas</th>
-                <th className="px-2 py-1 text-right font-medium">Tokens (entra / sale)</th>
-                <th className="px-2 py-1 text-right font-medium">Nos costó</th>
+                {item.agent === "clio" ? (
+                  <th scope="col" className="px-2 py-1 font-medium">
+                    Pausa
+                  </th>
+                ) : null}
+                <th scope="col" className="px-2 py-1 font-medium">
+                  Hora
+                </th>
+                <th scope="col" className="px-2 py-1 font-medium">
+                  {stepName}
+                </th>
+                <th scope="col" className="px-2 py-1 font-medium">
+                  Modelo
+                </th>
+                <th scope="col" className="px-2 py-1 text-right font-medium">
+                  Llamadas
+                </th>
+                <th scope="col" className="px-2 py-1 text-right font-medium">
+                  Tokens (entra / sale)
+                </th>
+                <th scope="col" className="px-2 py-1 text-right font-medium">
+                  Nos costó
+                </th>
               </tr>
             </thead>
             <tbody>
               {data.steps.map((step, index) => (
-                <tr
-                  key={`${step.at}-${step.model}-${step.what}`}
-                  className="border-t border-border/60"
-                >
+                <tr key={step.id} className="border-t border-border/60">
                   {item.agent === "clio" ? (
                     <td className="px-2 py-1 tabular-nums">{index + 1}</td>
                   ) : null}
@@ -462,7 +482,7 @@ function ActionList({
   const toggle = (key: string) => setOpen((current) => (current === key ? null : key))
   return (
     <div className="flex flex-col gap-3">
-      <div className="hidden overflow-x-auto rounded-xl border bg-card px-2 md:block">
+      <div className="relative hidden overflow-x-auto rounded-xl border bg-card px-2 md:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
@@ -473,7 +493,7 @@ function ActionList({
                 <th
                   key={column.heading}
                   scope="col"
-                  className={`px-2 py-2 font-medium ${column.numeric ? "text-right" : ""}`}
+                  className={`whitespace-nowrap px-2 py-2 font-medium ${column.numeric ? "text-right" : ""}`}
                 >
                   {column.heading}
                 </th>
@@ -494,7 +514,7 @@ function ActionList({
                         variant="outline"
                         size="icon-sm"
                         aria-expanded={isOpen}
-                        aria-label={isOpen ? "Cerrar el detalle" : "Abrir el detalle"}
+                        aria-label={`${isOpen ? "Cerrar" : "Abrir"} el detalle: ${AGENT_NAME[item.agent]} · ${item.type}, ${clock.when(item.occurredAt)}`}
                         onClick={() => toggle(item.key)}
                       >
                         {isOpen ? "−" : "+"}
@@ -568,6 +588,7 @@ function ActionList({
                 size="sm"
                 className="self-start"
                 aria-expanded={isOpen}
+                aria-label={`${isOpen ? "Ocultar" : "Ver"} el detalle: ${AGENT_NAME[item.agent]} · ${item.type}, ${clock.when(item.occurredAt)}`}
                 onClick={() => toggle(item.key)}
               >
                 {isOpen ? "Ocultar el detalle" : "Ver el detalle"}
@@ -630,13 +651,13 @@ function ByTypeTable({
   }
   return (
     <section
-      className="flex flex-col gap-2 rounded-xl border bg-card p-3"
+      className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-3"
       aria-labelledby="por-tipo"
     >
       <h2 id="por-tipo" className="px-1 text-base font-medium">
         Por agente y tipo
       </h2>
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs text-muted-foreground">
@@ -877,7 +898,14 @@ export function OrgSpending({
   const monthTabs = (
     <Tabs
       value={search.mes}
-      onValueChange={(value) => onSearch({ mes: value as SpendingMonth, pagina: 1 })}
+      onValueChange={(value) =>
+        onSearch({
+          mes: value as SpendingMonth,
+          pagina: 1,
+          profesional: undefined,
+          canal: undefined,
+        })
+      }
     >
       <TabsList aria-label="Qué mes">
         <TabsTrigger value="actual">
@@ -889,7 +917,7 @@ export function OrgSpending({
   )
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       {overview ? (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -928,7 +956,7 @@ export function OrgSpending({
             />
           </div>
           <section
-            className="flex flex-col gap-2 rounded-xl border bg-card p-3"
+            className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-3"
             aria-labelledby="costo-dia"
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1001,14 +1029,16 @@ export function OrgSpending({
                   }[search.agente]
                 }
               </h2>
-              {search.agente === "clio" && actions.professionals.length > 1 ? (
+              {search.agente === "clio" &&
+              (actions.professionals.length > 1 || search.profesional) ? (
                 <Tabs
+                  className="max-w-full"
                   value={search.profesional ?? "todos"}
                   onValueChange={(value) =>
                     onSearch({ profesional: value === "todos" ? undefined : value, pagina: 1 })
                   }
                 >
-                  <TabsList aria-label="Profesional">
+                  <TabsList aria-label="Profesional" className="max-w-full overflow-x-auto">
                     <TabsTrigger value="todos">Todos</TabsTrigger>
                     {actions.professionals.map((item) => (
                       <TabsTrigger
@@ -1019,14 +1049,15 @@ export function OrgSpending({
                   </TabsList>
                 </Tabs>
               ) : null}
-              {search.agente === "sofi" && actions.channels.length > 1 ? (
+              {search.agente === "sofi" && (actions.channels.length > 1 || search.canal) ? (
                 <Tabs
+                  className="max-w-full"
                   value={search.canal ?? "todos"}
                   onValueChange={(value) =>
                     onSearch({ canal: value === "todos" ? undefined : value, pagina: 1 })
                   }
                 >
-                  <TabsList aria-label="Canal">
+                  <TabsList aria-label="Canal" className="max-w-full overflow-x-auto">
                     <TabsTrigger value="todos">Todos</TabsTrigger>
                     {actions.channels.map((item) => (
                       <TabsTrigger

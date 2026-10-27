@@ -14,6 +14,7 @@ import type { SpendingAgent } from "./org-spending"
 
 interface AgentCounts {
   period: { start: string; end: string; credit: "prueba" | "mes" }
+  timezone: string
   sofi: { conversations: number; byTier: Record<"informa" | "gestiona" | "agenda", number> }
   clio: { consultations: number; byTier: Record<"simple" | "estandar" | "completa", number> }
   argos: { questions: number; included: number; limited: boolean; recovered: number }
@@ -57,11 +58,14 @@ const NOTICE_WORDS: Record<string, string> = {
   condiciones_alarma: "Sus condiciones de Fundador terminan en 7 días",
 }
 
-const longDay = (iso: string) =>
-  new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "long", timeZone: "UTC" }).format(
+/** Un día en la zona de la clínica: «28 de octubre». */
+const longDay = (iso: string, timeZone: string) =>
+  new Intl.DateTimeFormat("es-PE", { day: "numeric", month: "long", timeZone }).format(
     new Date(iso),
   )
-const lastDay = (iso: string) => longDay(new Date(new Date(iso).getTime() - 1).toISOString())
+/** El último día de un tramo que termina en `iso`: el fin no está incluido. */
+const lastDay = (iso: string, timeZone: string) =>
+  longDay(new Date(new Date(iso).getTime() - 1).toISOString(), timeZone)
 
 function Stat({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
@@ -253,9 +257,9 @@ export function OrgSummary({
               {trial ? "La prueba, en curso" : "El mes, en curso"}
             </h2>
             <p className="text-xs text-muted-foreground">
-              Del {longDay(c.period.start)} al {lastDay(c.period.end)} · van{" "}
+              Del {longDay(c.period.start, c.timezone)} al {lastDay(c.period.end, c.timezone)} · van{" "}
               {plural(days, "día", "días")}
-              {trial ? "" : ` · se factura el ${longDay(c.period.end)}`}
+              {trial ? "" : ` · se factura el ${longDay(c.period.end, c.timezone)}`}
             </p>
           </div>
           {isAdmin ? (
@@ -374,7 +378,7 @@ export function OrgSummary({
           <p>
             <b>Último aviso:</b>{" "}
             {lastNotice?.sentAt
-              ? `«${NOTICE_WORDS[lastNotice.kind] ?? lastNotice.kind}», el ${longDay(lastNotice.sentAt)}.`
+              ? `«${NOTICE_WORDS[lastNotice.kind] ?? lastNotice.kind}», el ${longDay(lastNotice.sentAt, c.timezone)}.`
               : "ninguno este mes."}
           </p>
         ) : null}
