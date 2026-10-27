@@ -41,7 +41,7 @@ const listQuery = z.object({
 function staffOf(c: Context): AdminActor {
   const actor = adminContextOf(c)
   if (actor.role !== "admin" && actor.role !== "support") {
-    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de odentIA")
+    throw new ServiceError("FORBIDDEN", 403, "Solo el equipo de la administración")
   }
   return actor
 }

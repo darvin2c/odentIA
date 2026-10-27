@@ -93,6 +93,9 @@ const recoverySchema = z.object({
   organizationId: z.string(),
 })
 
+/** Cómo entra cada cuenta, en palabras: Better Auth llama «credential» a la contraseña. */
+const PROVIDER_LABEL: Record<string, string> = { credential: "contraseña", google: "Google", microsoft: "Microsoft" }
+
 const STATUS_OPTIONS = [
   { value: "todos", label: "Todos" },
   { value: "activos", label: "Activos" },
@@ -277,7 +280,11 @@ function UsersPage() {
           onChange={(event) => setSearch(event.target.value)}
           className="min-w-0 flex-1"
         />
-        <Select<string> value={status} onValueChange={(next) => setStatus(next ?? "")}>
+        <Select<string>
+          value={status}
+          items={Object.fromEntries(STATUS_OPTIONS.map((option) => [option.value, option.label]))}
+          onValueChange={(next) => setStatus(next ?? "")}
+        >
           <SelectTrigger aria-label="Estado" className="w-40">
             <SelectValue />
           </SelectTrigger>
@@ -326,8 +333,8 @@ function UsersPage() {
                     {!item.emailVerified ? <Badge variant="outline">Sin verificar</Badge> : null}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {item.name} · {item.organizationCount} clínicas ·{" "}
-                    {item.providers.join(", ") || "contraseña"}
+                    {item.name} · {item.organizationCount} {item.organizationCount === 1 ? "clínica" : "clínicas"} ·{" "}
+                    {item.providers.map((provider) => PROVIDER_LABEL[provider] ?? provider).join(", ") || "contraseña"}
                   </span>
                 </button>
               </li>

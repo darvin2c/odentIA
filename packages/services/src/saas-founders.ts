@@ -48,7 +48,7 @@ export async function getSignupMode(tx: Db): Promise<SaasSignupMode> {
 }
 
 export async function setSignupMode(tx: Db, actor: AdminActor, mode: SaasSignupMode): Promise<SaasSignupMode> {
-  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo la administración de odentIA cambia cómo se abren clínicas")
+  if (actor.role !== "admin") throw new ServiceError("FORBIDDEN", 403, "Solo el rol Administración cambia cómo se abren clínicas")
   if (mode !== "invitacion" && mode !== "abierta") throw validation("Elige «Solo con invitación» o «Abierta»")
   await tx
     .insert(saasSignupPolicy)
