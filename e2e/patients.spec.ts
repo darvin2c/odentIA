@@ -361,20 +361,19 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   const dialogo = page.getByRole("dialog", { name: "Atención finalizada" })
   await expect(dialogo.getByText("Quedó por cobrar")).toBeVisible()
   await dialogo.getByRole("button", { name: "Listo", exact: true }).click()
-  // Al finalizar se permanece en la atención, con su cierre y relevo a la vista.
+  // Al finalizar se permanece en la atención, con lo que sigue a la vista.
   await expect(page).toHaveURL(/\/encounters\//)
-  await expect(page.getByRole("heading", { name: "Cierre y relevo" })).toBeVisible()
-  await expect(page.getByText(/1 acto\(s\) realizado\(s\)/)).toBeVisible()
-  await expect(page.getByText("Solo lectura", { exact: true })).toBeVisible()
-  // El relevo nombra a quién le toca lo siguiente: aquí, caja con el saldo generado.
+  await expect(page.getByRole("heading", { name: "Lo que sigue" })).toBeVisible()
+  await expect(page.getByText(/acto\(s\)|\(s\)/)).toHaveCount(0)
+  // Lo que sigue nombra a quién le toca: aquí, caja con el saldo generado, y «Cobrar» cobra.
   await expect(page.getByText(/Cobrar S\/\s450\.00/)).toBeVisible()
-  await expect(page.getByText("Ir a la cuenta", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Cobrar", exact: true })).toBeVisible()
   // La atención se lee con nombres, no con identificadores.
   await expect(page.getByText("Ana Pruebas", { exact: true }).first()).toBeVisible()
   await expect(page.getByText(/Tratamiento del plan: Endodoncia unirradicular/)).toBeVisible()
   await page.screenshot({ path: test.info().outputPath("cierre-y-relevo.png"), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.getByRole("heading", { name: "Cierre y relevo" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Lo que sigue" })).toBeVisible()
   await page.screenshot({
     path: test.info().outputPath("cierre-y-relevo-movil.png"),
     fullPage: true,
@@ -494,7 +493,7 @@ for (const role of ["reception", "clinician", "cashier"] as const) {
       expect(account.status).toBe(403)
       expect(chats.status).toBe(200)
       expect(notes.status).toBe(200)
-      await expect(page.locator("a", { hasText: "Reservar cita" }).first()).toBeVisible()
+      await expect(page.getByRole("button", { name: "Reservar cita", exact: true }).first()).toBeVisible()
       // Recepción marca «Llegó»; «Atender» es de quien escribe en la historia.
       await expect(page.getByRole("button", { name: /^Atender/ })).toHaveCount(0)
       // Su Resumen no es clínico: abrir la página no lee la historia (ADR 0035).

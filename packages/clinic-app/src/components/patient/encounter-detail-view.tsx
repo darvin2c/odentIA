@@ -400,7 +400,9 @@ export function EncounterDetailView({
 
       {encounter.signerName ? (
         <p className="border-t pt-3 text-sm">
-          <span className="font-medium">Firmó {encounter.signerName}</span>
+          <span className="font-medium">
+            Firmó <span>{encounter.signerName}</span>
+          </span>
           <span className="text-muted-foreground">
             {encounter.signerTitle ? ` · ${encounter.signerTitle}` : ""}
             {encounter.signerRegistration ? ` · colegiatura ${encounter.signerRegistration}` : ""}

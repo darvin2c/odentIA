@@ -86,7 +86,7 @@ test("control clínico: reserva real, mover reprograma y cancelaciones coherente
   // «Ver cita» abre esa cita al lado, sin salir de la ficha.
   await page.getByRole("button", { name: "Ver cita", exact: true }).click()
   await expect(page).toHaveURL(/\/(patients|people)\//)
-  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(surface(page, { name: /Lucía Quispe/ })).toBeVisible()
   await page.keyboard.press("Escape")
 
   // API: el control queda programado con la cita del mismo paciente.

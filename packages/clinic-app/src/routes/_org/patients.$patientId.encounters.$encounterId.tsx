@@ -10,7 +10,7 @@ import { EncounterDetailView } from "../../components/patient/encounter-detail-v
 import { EncounterEditor } from "../../components/patient/encounter-editor"
 import { EncounterHandoff } from "../../components/patient/encounter-handoff"
 import { apiFetch } from "../../lib/api"
-import { usePermission } from "../../lib/crm"
+import { useMemberName, usePermission } from "../../lib/crm"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import {
   type EncounterDetail,
@@ -40,6 +40,7 @@ function EncounterPage() {
   const EncounterSigned = productUi().history.EncounterSigned
   const canRead = usePermission("clinical.read")
   const canWrite = usePermission("clinical.write")
+  const memberName = useMemberName()
   // Con lo clínico (condiciones, medicación y salud declarada): es una lectura clínica y deja su traza.
   const patientQuery = useQuery({
     queryKey: ["patient", patientId, "clinical"],
@@ -132,6 +133,7 @@ function EncounterPage() {
               {[
                 `Atención ${encounterStatusLabel(detail.encounter.status).toLowerCase()}`,
                 encounterWhen(detail.encounter.startedAt ?? detail.encounter.createdAt, detail.encounter.endedAt ?? null),
+                memberName(detail.encounter.professionalUserId),
                 `${patient.patient.displayName} · ${hcLabel(patient.patient.patientNumber)}`,
               ]
                 .filter(Boolean)

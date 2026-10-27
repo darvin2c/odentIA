@@ -8,7 +8,6 @@ import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
 import { hostUrl, latidiaUrl, tenant } from "./env"
 import { chooseOption, expect, PASSWORD, test } from "./fixtures"
-import { surface as sideSurface } from "./surface"
 import { gotoHydrated } from "./hydration"
 import { latestLinkFor } from "./mailpit"
 import { surface } from "./surface"
@@ -486,7 +485,7 @@ test("latidIA: lo indicado queda aceptado y se agenda sin presupuesto; Reportes 
   expect(await page.locator("main").innerText()).not.toMatch(/Boca completa|odontograma|Pieza/i)
   // «Reservar cita» abre «Nueva cita» al lado, con lo indicado: nadie sale del Plan.
   await page.getByRole("button", { name: "Reservar cita", exact: true }).first().click()
-  await expect(sideSurface(page, { name: "Nueva cita" })).toBeVisible()
+  await expect(surface(page, { name: "Nueva cita" })).toBeVisible()
   await expect(page).toHaveURL(/tab=plan/)
   await page.keyboard.press("Escape")
 
@@ -774,7 +773,8 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
 
   // El descanso se emite en su formulario, ya lleno con los días dictados; el diagnóstico solo si la persona lo autoriza.
   await suggested("Descanso médico").getByRole("button", { name: "Emitir descanso" }).click()
-  const leave = page.getByRole("dialog", { name: "Emitir descanso médico" })
+  // En ventana ancha y sin otro bloque abierto, el formulario va a la columna lateral.
+  const leave = surface(page, { name: "Emitir descanso médico" })
   await expect(leave.getByLabel("Días")).toHaveValue("3")
   await shot("clio-descanso")
   await leave.getByRole("button", { name: "Emitir descanso médico" }).click()

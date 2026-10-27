@@ -212,7 +212,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await finding.getByRole("button", { name: "Diente no erupcionado" }).click()
   await expect(finding).not.toContainText("Por revisar")
   await finding.getByRole("button", { name: "Confirmar", exact: true }).click()
-  await expect(block("Odontograma")).toContainText("1 hallazgo(s) de esta atención")
+  await expect(block("Odontograma")).toContainText("1 hallazgo en esta atención")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictado-odontograma", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
@@ -234,10 +234,8 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
-  // En pantalla estrecha el bloque abierto es un cajón: se cierra para ver la atención.
-  const openBlock = page.getByRole("dialog", { name: "Consulta" })
-  await openBlock.getByRole("button", { name: "Cancelar" }).click()
-  await expect(openBlock).toBeHidden()
+  // Con el motivo ya escrito, volver a la atención no abre «Consulta» encima: se ve la atención.
+  await expect(page.getByRole("dialog", { name: "Consulta" })).toHaveCount(0)
   const dictate = idle.getByRole("button", { name: "Dictar", exact: true })
   expect((await dictate.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await dictate.click()
