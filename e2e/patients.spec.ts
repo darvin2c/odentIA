@@ -588,7 +588,9 @@ test("recepción coordina el control sin leer la ficha clínica", async ({ owner
   // «Qué sigue» del Plan llega a su resumen, con la misma regla: primero, enviar
   // el presupuesto que dejó la evaluación (decisión 12).
   await expect(page.getByText("Enviar el presupuesto a Lucía")).toBeVisible()
-  await page.getByRole("button", { name: "Ir al plan", exact: true }).click()
+  // El botón de la fila hace lo que dice («Enviar»), ya no lleva al Plan: se entra por su pestaña.
+  await expect(page.getByRole("button", { name: "Ir al plan", exact: true })).toHaveCount(0)
+  await page.getByRole("tablist", { name: "Pestañas de la página" }).getByRole("tab", { name: "Plan", exact: true }).click()
   await expect(page).toHaveURL(/tab=plan/)
   await expect(page.getByRole("heading", { name: "Controles", exact: true })).toBeVisible()
   await expect(page.getByText("Endodoncia unirradicular").first()).toBeVisible()

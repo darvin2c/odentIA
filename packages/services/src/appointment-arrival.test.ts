@@ -177,11 +177,14 @@ it("«Atender» desde la cita abre sin pedir motivo, marca la llegada a la hora 
   expect(blank.reason).toBeNull()
   expect((await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, blank.id))).missing).toContain("reason")
   await f.run((tx) => voidEncounter(tx, ...f.args, blank.id, { reason: "Prueba" }))
-  // Anulada la atención, la llegada sigue (vino) y se puede deshacer; sin cita, el motivo es obligatorio al abrir.
+  // Anulada la atención, la llegada sigue (vino) y se puede deshacer. Sin cita
+  // también se abre sin motivo (ADR 0096): el cierre lo pide igual.
   expect((await f.run((tx) => getAppointment(tx, "org_a", plain.id))).visit).toBe("llego")
   await f.run((tx) => setAppointmentArrival(tx, "org_a", f.actor, plain.id, false))
   await f.run((tx) => setAppointmentStatus(tx, "org_a", f.actor, plain.id, "cancelada"))
-  await expect(f.run((tx) => createEncounter(tx, ...f.args, {}))).rejects.toMatchObject({ code: "VALIDATION" })
+  const walkIn = await f.run((tx) => createEncounter(tx, ...f.args, {}))
+  expect(walkIn.reason).toBeNull()
+  expect((await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, walkIn.id))).missing).toContain("reason")
 })
 
 it("dos citas el mismo día: sin indicar cuál, la atención se une a la que llegó", async () => {
