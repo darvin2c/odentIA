@@ -21,3 +21,12 @@ export async function requireAdminSession(): Promise<AdminSession> {
   if (!session.verified) throw redirect({ to: "/security" })
   return session
 }
+
+/**
+ * Las pantallas solo de la administración (Cobros y planes, Comisiones): el
+ * menú no las muestra a soporte y, si entra con la dirección, vuelve a Inicio
+ * en vez de ver errores de acceso. La API tampoco le da los datos (ADR 0094).
+ */
+export function requireAdminRole({ context }: { context: { adminSession: AdminSession } }): void {
+  if (context.adminSession.actor.role !== "admin") throw redirect({ to: "/" })
+}

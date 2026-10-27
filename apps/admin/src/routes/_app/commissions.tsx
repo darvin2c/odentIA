@@ -15,11 +15,13 @@ import {
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { requireAdminRole } from "../../lib/session"
 import { Plus } from "lucide-react"
 import { useState } from "react"
 import { ApiError, api } from "../../lib/api"
 
 export const Route = createFileRoute("/_app/commissions")({
+  beforeLoad: requireAdminRole,
   component: CommissionsPage,
 })
 
