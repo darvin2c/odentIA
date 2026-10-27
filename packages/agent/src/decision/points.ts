@@ -22,7 +22,7 @@ export const triageQuestions = (texts: ProductAgentTexts): DecisionQuestion[] =>
     kind: "yesno",
     instructions:
       // Contar un síntoma para pedir cita no es pedir una persona (triage.v5, ADR 0095): medido con
-      // eval/sintomas-y-cita.json. triage.v6 (ADR 0096): «dolor fuerte» o «hinchazón» sin más
+      // eval/sintomas-y-cita.json. triage.v6 (ADR 0097): «dolor fuerte» o «hinchazón» sin más
       // también es pedir dónde o cuándo atenderse; Sofi ofrece la hora más próxima y el teléfono de urgencias.
       "Should a person from the clinic take over instead of the automated assistant? Yes if the contact asks for a human, complains or is upset, is distressed or stuck asking for help, asks for clinical advice that only a professional can give (what to take, whether something is serious, what to do about a symptom, test results), or describes an emergency that may put a life at risk: chest pain, trouble breathing, bleeding that does not stop, a swollen face, swelling that blocks breathing or swallowing, high fever in a baby, fainting, an accident. No if the contact mentions a symptom, even strong pain, to ask where or when they can be seen, for an appointment, a price or availability: the assistant offers the nearest visit.",
   },

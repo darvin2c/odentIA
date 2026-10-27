@@ -1927,7 +1927,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
       // Con un tema abierto en el hilo, lo que vuelve a pedir se anota en ese
       // tema y solo sale el aviso: un tema por mensaje llena la cola del equipo.
-      // Abre otro solo si sube a urgente (ADR 0096).
+      // Abre otro solo si sube a urgente (ADR 0097).
       const open = await inOrg((tx) => latestOpenTopic(tx, ctx.orgId, ctx.conversationId, { kind: clinical === true ? "clinico" : topicKindOf(kind) }))
       if (open && !(validPriority === "alta" && open.priority !== "alta")) {
         await inOrg((tx) => recordTopicAskedAgain(tx, ctx.orgId, { handoffId: open.id, messageId: ctx.triggerId ?? null }))

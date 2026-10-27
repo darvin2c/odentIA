@@ -959,7 +959,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       const source = name ? TOOL_SOURCES[name] : undefined
       const text = typeof result.content === "string" ? result.content : JSON.stringify(result.content)
       // Un enlace que entregó cualquier herramienta (el de reserva, el de
-      // completar sus datos) sustenta ese enlace en la respuesta (ADR 0096).
+      // completar sus datos) sustenta ese enlace en la respuesta (ADR 0097).
       const links = text.match(/\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi)
       if (links && !source) {
         toolCtx.evidence = [...(toolCtx.evidence ?? []), { kind: "sistema", source: "Enlace que entregó el sistema", text: links.join("\n") }]

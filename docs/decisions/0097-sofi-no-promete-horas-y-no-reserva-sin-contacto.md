@@ -1,4 +1,4 @@
-# 0096 · Sofi no promete horas, no deja a nadie sin respuesta y no reserva sin dónde avisar
+# 0097 · Sofi no promete horas, no deja a nadie sin respuesta y no reserva sin dónde avisar
 
 **Fecha:** 2026-10-27 · **Estado:** aceptada
 
