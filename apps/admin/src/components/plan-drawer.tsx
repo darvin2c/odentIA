@@ -333,14 +333,13 @@ export function PlanDrawer({
             <p className="text-xs text-muted-foreground">No se cambia después: sus clínicas y su web son de ese producto.</p>
           </fieldset>
           <div className="flex flex-col gap-1">
-            <Label id="plan-template-label">Empezar con los precios de</Label>
+            <Label htmlFor="plan-template">Empezar con los precios de</Label>
             <Select
               value={template}
               onValueChange={(value) => (value === null || value === NO_TEMPLATE ? setTemplate(NO_TEMPLATE) : copyFrom(String(value)))}
-              aria-labelledby="plan-template-label"
               items={{ [NO_TEMPLATE]: "Ninguno: en blanco", ...Object.fromEntries(plans.map((item) => [item.id, `${item.name} · ${productWords(item.product).name}`])) }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger id="plan-template" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
