@@ -26,7 +26,7 @@
  */
 
 /** Tope de filas por tipo: lo demás se resume en una fila «y N más». */
-export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3, unsentBudgets: 3 } as const
+export const WAITING_LIMITS = { urgentCases: 5, overdueTasks: 3, otherCases: 3, unconfirmed: 3, unclosed: 3, unsentBudgets: 3 } as const
 
 /**
  * Terminó de completar sus datos por su enlace hoy y tiene cita hoy, aún sin
@@ -216,6 +216,30 @@ export interface WaitingStaleEncounter {
   missing: string[]
 }
 
+/**
+ * Una cita de un día que ya terminó y que nadie cerró: sigue «por confirmar» o
+ * «confirmada», sin llegada ni atención. Ya no se puede confirmar; queda decir
+ * si vino («Registrar la atención») o no («No vino»). No se marca sola: el
+ * sistema no sabe si vino. Las de hoy ya salen en la Agenda («Ya pasaron · sin
+ * cerrar»); aquí entran al terminar su día.
+ */
+export interface WaitingUnclosed {
+  id: string
+  patientId: string
+  patientName: string
+  startsAt: string
+  professionalName: string | null
+  serviceName: string | null
+  branchName: string
+}
+
+/** Quienes aceptaron un presupuesto y no tienen cita por venir: la lista se trabaja desde Inicio. */
+export interface WaitingAcceptedUnbooked {
+  patients: number
+  cents: number
+  currency: string
+}
+
 /** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
 export interface WaitingStillOpen {
   total: number
@@ -273,6 +297,8 @@ export type WaitingRow =
   | ({ kind: "staleEncounter" } & WaitingStaleEncounter)
   | ({ kind: "registrationDone" } & WaitingRegistrationDone)
   | ({ kind: "unconfirmed" } & WaitingUnconfirmed)
+  | ({ kind: "unclosed" } & WaitingUnclosed)
+  | ({ kind: "acceptedUnbooked" } & WaitingAcceptedUnbooked)
   | ({ kind: "unsentBudget" } & WaitingUnsentBudget)
   | ({ kind: "possibleDuplicate" } & WaitingPossibleDuplicate)
   | ({ kind: "portalReentry" } & WaitingPortalReentry)
@@ -285,7 +311,7 @@ export type WaitingRow =
   | ({ kind: "advice" } & WaitingAdvice)
   | ({ kind: "budgets" } & WaitingBudgets)
   /** Lo que no cupo de un tipo, con su total. */
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number }
 
 export interface WaitingParts {
   /** Casos que pasó el agente y siguen sin resolver, del que más lleva esperando al más reciente. */
@@ -298,6 +324,10 @@ export interface WaitingParts {
   registrationsDone?: WaitingRegistrationDone[]
   /** Citas sin confirmar tras el recordatorio, de la más próxima a la más lejana, y cuántas son. */
   unconfirmed?: { items: WaitingUnconfirmed[]; total: number } | null
+  /** Citas de días anteriores sin cerrar, de la más antigua a la más reciente, y cuántas son. */
+  unclosed?: { items: WaitingUnclosed[]; total: number } | null
+  /** Quienes aceptaron y no tienen cita, con lo que suma (null o 0: nadie). */
+  acceptedUnbooked?: WaitingAcceptedUnbooked | null
   /** Presupuestos armados y sin enviar desde el día anterior, del más antiguo al más reciente. */
   unsentBudgets?: { items: WaitingUnsentBudget[]; total: number } | null
   /** Lo que «Su enlace» encontró repetido, del más antiguo al más reciente. */
@@ -340,6 +370,14 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
   // Terminó su registro y su cita es hoy: ya se le puede atender al llegar.
   for (const item of (parts.registrationsDone ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "registrationDone", ...item })
 
+  // Lo que pasó y nadie cerró va antes que lo que viene: sin cerrar, sus cifras no cuentan.
+  if (parts.unclosed && parts.unclosed.total > 0) {
+    const shown = parts.unclosed.items.slice(0, WAITING_LIMITS.unclosed)
+    for (const item of shown) rows.push({ kind: "unclosed", ...item })
+    const left = parts.unclosed.total - shown.length
+    if (left > 0) rows.push({ kind: "more", of: "unclosed", count: left })
+  }
+
   if (parts.unconfirmed && parts.unconfirmed.total > 0) {
     const shown = parts.unconfirmed.items.slice(0, WAITING_LIMITS.unconfirmed)
     for (const item of shown) rows.push({ kind: "unconfirmed", ...item })
@@ -354,6 +392,9 @@ export function composeWaiting(parts: WaitingParts): WaitingRow[] {
     const left = parts.unsentBudgets.total - shown.length
     if (left > 0) rows.push({ kind: "more", of: "unsentBudgets", count: left })
   }
+
+  // Trabajo ya vendido sin cita: una sola fila que abre la lista para agendarlos desde Inicio.
+  if (parts.acceptedUnbooked && parts.acceptedUnbooked.patients > 0) rows.push({ kind: "acceptedUnbooked", ...parts.acceptedUnbooked })
 
   // Lo que dejaron «Su enlace» y el portal para recepción (ADR 0037).
   for (const item of (parts.portalReentries ?? []).slice(0, WAITING_LIMITS.otherCases)) rows.push({ kind: "portalReentry", ...item })

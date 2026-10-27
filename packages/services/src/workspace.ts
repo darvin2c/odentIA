@@ -19,6 +19,7 @@ import { notFound, validation } from "./errors.js"
 import { getCashToday } from "./finance.js"
 import { inventoryWaiting } from "./inventory.js"
 import { getOrgLocale } from "./locale.js"
+import { upcomingWork } from "./report-finance.js"
 import { windowOpen } from "./message-window.js"
 import {
   composeWaiting,
@@ -32,6 +33,8 @@ import {
   type WaitingRegistrationDone,
   type WaitingTask,
   type WaitingUnconfirmed,
+  type WaitingUnclosed,
+  type WaitingAcceptedUnbooked,
   type WaitingUnsentBudget,
 } from "./workspace-home.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
@@ -597,6 +600,33 @@ async function waitingRegistrationsDone(tx: Db, orgId: string): Promise<WaitingR
   return [...rows]
 }
 
+/**
+ * Citas de un día que ya terminó (en la zona de su sede o, sin ella, la de la clínica) que siguen en pie sin
+ * llegada: nadie dijo si vinieron. De la más antigua a la más reciente.
+ */
+async function waitingUnclosed(tx: Db, orgId: string, timezone: string): Promise<{ items: WaitingUnclosed[]; total: number }> {
+  const rows = await tx.execute<{ [K in keyof WaitingUnclosed]: WaitingUnclosed[K] } & { total: number }>(sql`
+    select a.id, a.patient_id as "patientId", pp.display_name as "patientName", ${iso(sql`a.starts_at`)} as "startsAt",
+      u.name as "professionalName", a.service_name as "serviceName", b.name as "branchName",
+      count(*) over ()::int as total
+    from appointment a
+    join branch b on b.id = a.branch_id and b.organization_id = a.organization_id
+    join patient p on p.id = a.patient_id and p.organization_id = a.organization_id
+    join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+    left join "user" u on u.id = a.professional_user_id
+    where a.organization_id = ${orgId} and a.status in ('programada', 'confirmada') and a.arrived_at is null
+      and (a.starts_at at time zone coalesce(b.timezone, ${timezone}))::date < (now() at time zone coalesce(b.timezone, ${timezone}))::date
+    order by a.starts_at, a.id limit ${WAITING_LIMITS.unclosed}`)
+  return { items: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? 0 }
+}
+
+/** La misma cuenta de Reportes › Finanzas («No tienen cita»), en la moneda de la clínica. */
+async function acceptedUnbookedOf(tx: Db, orgId: string): Promise<WaitingAcceptedUnbooked | null> {
+  const { currency } = await getOrgLocale(tx, orgId)
+  const work = await upcomingWork(tx, orgId, currency, new Date())
+  return work.unbooked.patients > 0 ? { patients: work.unbooked.patients, cents: work.unbooked.cents, currency } : null
+}
+
 async function waitingUnconfirmed(tx: Db, orgId: string): Promise<{ items: WaitingUnconfirmed[]; total: number }> {
   const appt = sql.raw("a")
   const rows = await tx.execute<{ [K in keyof WaitingUnconfirmed]: WaitingUnconfirmed[K] } & { total: number }>(sql`
@@ -839,6 +869,10 @@ export async function getWorkspaceHome(tx: Db, orgId: string, userId: string, ac
     staleEncounters: access.attends ? await waitingStaleEncounters(tx, orgId, userId, timezone) : [],
     // Quien ve la agenda de la sede llama a quien no confirmó; quien atiende no.
     unconfirmed: access.appointments && !access.ownAppointments ? await waitingUnconfirmed(tx, orgId) : null,
+    // Y cierra lo que ya pasó: ¿vino o no vino?
+    unclosed: access.appointments && !access.ownAppointments ? await waitingUnclosed(tx, orgId, timezone) : null,
+    // Lo aceptado sin cita, para quien ve Reportes: la fila abre esa lista para agendarlos.
+    acceptedUnbooked: options.can?.("reports.read") ? await acceptedUnbookedOf(tx, orgId) : null,
     // Quien ve la agenda de la sede sabe quién ya completó su registro para su cita de hoy.
     registrationsDone: access.appointments && !access.ownAppointments ? await waitingRegistrationsDone(tx, orgId) : [],
     // El presupuesto que nadie envió le sale a quien habla con la persona (decisión 12).

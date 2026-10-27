@@ -3579,6 +3579,26 @@ const agendaSeed: Array<{
     service: "ENDODONCIA",
     status: "programada",
   },
+  // Ayer, sin cerrar: nadie marcó si vinieron. Inicio las pide en «Te espera» con «No vino».
+  {
+    patient: "Elena Huamán",
+    professional: ANA_ID,
+    room: 0,
+    day: -1,
+    start: "10:00",
+    end: "10:45",
+    service: "OBTURACION",
+  },
+  {
+    patient: "Carlos Paredes",
+    professional: LUIS_ID,
+    room: 1,
+    day: -1,
+    start: "15:30",
+    end: "16:00",
+    service: "ORTODONCIA_CTRL",
+    status: "confirmada",
+  },
   // Tarde de hoy: la agenda muestra «lo que viene», huecos entre citas y por confirmar.
   {
     patient: "Carmen Rojas",

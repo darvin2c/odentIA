@@ -2,12 +2,13 @@ import { Badge, Button, buttonVariants, cn, Textarea } from "@odentia/ui"
 import { AgentMark } from "@odentia/ui-patterns"
 import { dueWords } from "../../lib/data-requests"
 import { Link } from "@tanstack/react-router"
-import { CalendarClock, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, ShieldCheck, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
+import { CalendarClock, CalendarX2, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, ShieldCheck, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
 import { type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { duplicateActions, type HomeTextContext, PHONE_ROWS, waitingKey, waitingOpenText, waitingText } from "../../lib/home"
 import { channelLabel } from "../../lib/channels"
 import type { WaitingRow } from "../../lib/workspace"
 import { HandoffUrgency } from "../agent/handoff-badges"
+import { openAppointmentAnywhere } from "../agenda/schedule-host"
 
 type RowOf<K extends WaitingRow["kind"]> = Extract<WaitingRow, { kind: K }>
 
@@ -45,6 +46,10 @@ export interface WaitingHandlers {
   onReorder?: (row: RowOf<"inventory">) => void
   /** «Anular con motivo» una atención de otro día sin cerrar; la fila la continúa. */
   onVoidEncounter?: (row: RowOf<"staleEncounter">) => void
+  /** «No vino» en una cita que quedó sin cerrar; sin esto (sin permiso) la fila solo abre la cita. */
+  onNoShow?: (row: RowOf<"unclosed">) => void
+  /** Abre al lado la lista de quienes aceptaron y no tienen cita. */
+  onAcceptedList?: () => void
   /** La fila cuya acción está en curso: sus botones se desactivan y el de la acción dice que trabaja. */
   busyKey?: string | null
   /** Con dos botones, cuál está en curso (`confirmar`, `descartar`); sin esto, el primero. */
@@ -76,6 +81,8 @@ function iconOf(row: WaitingRow, context: HomeTextContext): ReactNode {
   if (row.kind === "registrationDone") return <TypeIcon icon={UsersRound} />
   if (row.kind === "more" && row.of === "cases") return <TypeIcon icon={UserRound} />
   if (row.kind === "unconfirmed" || (row.kind === "more" && row.of === "unconfirmed")) return <TypeIcon icon={CalendarClock} />
+  if (row.kind === "unclosed" || (row.kind === "more" && row.of === "unclosed")) return <TypeIcon icon={CalendarX2} />
+  if (row.kind === "acceptedUnbooked") return <TypeIcon icon={FileText} />
   if (row.kind === "conversations") return <TypeIcon icon={MessageCircle} />
   if (row.kind === "stillOpen") return <TypeIcon icon={MessagesSquare} />
   if (row.kind === "advice") return <TypeIcon icon={Lightbulb} />
@@ -115,8 +122,11 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} {...props} />
     case "staleEncounter":
       return <Link to="/patients/$patientId/encounters/$encounterId" params={{ patientId: row.patientId, encounterId: row.id }} {...props} />
+    // La cita y la lista se abren al lado: Inicio no se va (tablero 12).
     case "unconfirmed":
-      return <Link to="/agenda" search={{ appointmentId: row.id }} {...props} />
+    case "unclosed":
+    case "acceptedUnbooked":
+      return null
     case "unsentBudget":
       // El Plan de la persona: «Qué sigue» ofrece «Enviar» y dice por dónde y a quién le llega.
       return <Link to="/patients/$patientId" params={{ patientId: row.patientId }} search={{ tab: "plan", budgetId: row.id }} {...props} />
@@ -149,7 +159,7 @@ function linkOf(row: WaitingRow, context: HomeTextContext, props: { className: s
       return row.more > 0 ? <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} /> : <Link to={row.href} {...props} />
     case "more":
       if (row.of === "tasks") return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
-      if (row.of === "unconfirmed") return <Link to="/agenda" search={{}} {...props} />
+      if (row.of === "unconfirmed" || row.of === "unclosed") return <Link to="/agenda" search={{}} {...props} />
       if (row.of === "unsentBudgets") return <Link to="/people" search={{}} {...props} />
       // «y N casos más»: cada caso es una tarea de Recepción («Te lo pasó Sofi»).
       return <Link to="/tasks" search={{ task: undefined, vista: tasksView }} {...props} />
@@ -163,6 +173,8 @@ function open(row: WaitingRow, handlers: WaitingHandlers) {
   else if (row.kind === "advice") handlers.onAdvice(row)
   else if (row.kind === "unreached") handlers.onUnreached()
   else if (row.kind === "budgets") handlers.onBudgets(row)
+  else if (row.kind === "unconfirmed" || row.kind === "unclosed") openAppointmentAnywhere(row.id)
+  else if (row.kind === "acceptedUnbooked") handlers.onAcceptedList?.()
 }
 
 type QuickAction = { id: string; label: string; run: () => void; primary: boolean }
@@ -182,6 +194,11 @@ function quickActions(row: WaitingRow, handlers: WaitingHandlers, reply: { open:
   if (row.kind === "case" && row.unclaimed && row.conversationId && handlers.onTake) {
     const take = handlers.onTake
     return [{ id: "tomar", label: "Tomar este tema", run: () => take(row), primary: true }]
+  }
+  // Ya no se puede confirmar: queda decir que no vino (la atención se registra desde la cita).
+  if (row.kind === "unclosed" && handlers.onNoShow) {
+    const noShow = handlers.onNoShow
+    return [{ id: "no-vino", label: "No vino", run: () => noShow(row), primary: false }]
   }
   if (row.kind === "registrationDone" && handlers.onArrived) {
     const arrived = handlers.onArrived

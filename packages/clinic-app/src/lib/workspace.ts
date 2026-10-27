@@ -95,6 +95,19 @@ export type WaitingRow =
       branchName: string
       serviceName: string | null
     }
+  /** Una cita de un día que ya terminó y nadie cerró: ¿vino o no vino? No se marca sola. */
+  | {
+      kind: "unclosed"
+      id: string
+      patientId: string
+      patientName: string
+      startsAt: string
+      professionalName: string | null
+      serviceName: string | null
+      branchName: string
+    }
+  /** Quienes aceptaron un presupuesto y no tienen cita por venir: abre la lista para agendarlos. */
+  | { kind: "acceptedUnbooked"; patients: number; cents: number; currency: string }
   | { kind: "conversations"; waiting: number; oldestAt: string | null }
   /** Conversaciones que siguen abiertas con una persona a cargo y sin mensajes desde hace horas. */
   | { kind: "stillOpen"; total: number; conversationId: string | null; contactName: string | null; quietSince: string | null }
@@ -159,7 +172,7 @@ export type WaitingRow =
     }
   /** Un aviso que WhatsApp pasó a promoción: solo sale a quien aceptó novedades; hay que cambiarle el texto (ADR 0040). */
   | { kind: "promotion"; messageId: string; title: string }
-  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unsentBudgets"; count: number }
+  | { kind: "more"; of: "cases" | "tasks" | "unconfirmed" | "unclosed" | "unsentBudgets"; count: number }
 export interface WorkspaceAppointment {
   id: string
   patientId: string
