@@ -3800,15 +3800,31 @@ export async function latestOpenTopic(
   tx: Db,
   orgId: string,
   conversationId: string,
+  /**
+   * Solo un tema de esta misma atención y de la misma clase: un cambio de cita
+   * no se anota en el «precio de la extracción» abierto días atrás.
+   */
+  match: { kind?: TopicKind } = {},
 ): Promise<{ id: string; priority: string } | null> {
   const [row] = await tx
     .select({ id: agentHandoff.id, priority: agentHandoff.priority })
     .from(agentHandoff)
-    .where(and(eq(agentHandoff.organizationId, orgId), eq(agentHandoff.conversationId, conversationId), handoffStillOpen()))
+    .where(
+      and(
+        eq(agentHandoff.organizationId, orgId),
+        eq(agentHandoff.conversationId, conversationId),
+        handoffStillOpen(),
+        gt(agentHandoff.createdAt, new Date(Date.now() - SAME_TOPIC_MS)),
+        ...(match.kind ? [eq(agentHandoff.kind, match.kind)] : []),
+      ),
+    )
     .orderBy(desc(agentHandoff.createdAt))
     .limit(1)
   return row ?? null
 }
+
+/** Cuánto atrás un tema abierto cuenta como «el mismo» que vuelve a pedir. */
+const SAME_TOPIC_MS = 12 * 60 * 60 * 1000
 
 export async function recordTopicAskedAgain(
   tx: Db,

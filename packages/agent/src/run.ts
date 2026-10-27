@@ -27,6 +27,7 @@ import {
   getAgentConfig,
   getLesson,
   latestOpenTopic,
+  topicKindOf,
   lessonImpact,
   recordTopicAskedAgain,
   ServiceError,
@@ -725,7 +726,9 @@ async function attendAgentRun(
       // Con un tema abierto en el hilo, lo que vuelve a escribir se anota en ese
       // tema: otro tema por mensaje solo llena la cola del equipo. Abre uno nuevo
       // solo si sube a urgente lo que no lo era.
-      const open = await withOrgContext(db, orgId, (tx) => latestOpenTopic(tx, orgId, conversationId))
+      const open = await withOrgContext(db, orgId, (tx) =>
+        latestOpenTopic(tx, orgId, conversationId, { kind: toolCtx.route?.intent === "clinical_question" ? "clinico" : topicKindOf(undefined) }),
+      )
       if (open && !(priority === "alta" && open.priority !== "alta")) {
         await withOrgContext(db, orgId, (tx) =>
           recordTopicAskedAgain(tx, orgId, { handoffId: open.id, messageId: toolCtx.triggerId ?? null }),

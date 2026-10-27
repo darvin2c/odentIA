@@ -699,7 +699,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       ? `Pacientes vinculados a este interlocutor: ${linkedPatients
           .slice(0, 5)
           .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
-          .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente.`
+          .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente. Si la cita es para alguien que no es el propio interlocutor, nombra al paciente al proponerla («para Pedro Quispe») y, si no coincide con lo que contó (pide por su hija y el vinculado es otra persona), no la propongas: toma su nombre y el horario que prefiere y pasa el caso a recepción para que la registre.`
       : await newPersonLine()
     // Lo que el agente recuerda de la persona, venga del canal que venga: sus
     // datos guardados (nunca clínicos) y lo que sale de vínculos y citas.
