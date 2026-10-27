@@ -12,6 +12,7 @@ import { account, invitation, member, organization, session, user } from "@odent
 import { patient } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
 import { z } from "zod"
@@ -411,7 +412,7 @@ function auditInput(
 export async function listOrganizations(
   tx: Db,
   actor: AdminActor | null,
-  opts: { q?: string; limit?: number; offset?: number; negotiated?: boolean; product?: ClinicalProduct },
+  opts: { q?: string; limit?: number; offset?: number; negotiated?: boolean; product?: ClinicalProduct; kind?: "real" | "demo" },
   loaders: OrganizationBillingLoaders = {},
 ): Promise<OrganizationList> {
   requireStaff(actor)
@@ -425,9 +426,12 @@ export async function listOrganizations(
   // Sin perfil, la clínica todavía no eligió nada: nace dental (`org_profile.product` por defecto).
   const productSql = sql<ClinicalProduct>`coalesce((select ${orgProfile.product} from ${orgProfile}
     where ${orgProfile.organizationId} = ${organization.id}), 'dental')`
+  // Una demo para presentar es la clínica con su fila en `admin.saas_demo` (ADR 0096).
+  const demoSql = sql`${organization.id} in (select ${saasDemo.organizationId} from ${saasDemo} where ${saasDemo.organizationId} is not null)`
   const searched = [
     ...(q ? [or(ilike(organization.name, `%${q}%`), ilike(organization.slug, `%${q}%`))] : []),
     ...(opts.negotiated && seesPrice ? [negotiatedSql] : []),
+    ...(opts.kind === "demo" ? [demoSql] : opts.kind === "real" ? [sql`not (${demoSql})`] : []),
   ]
   const filters = [...searched, ...(opts.product ? [sql`${productSql} = ${opts.product}`] : [])]
   const where = filters.length ? and(...filters) : undefined

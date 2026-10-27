@@ -28,6 +28,7 @@ import { type BillingSummary, OrgSummary } from "../../components/org-summary"
 import { ProductMark } from "../../components/product"
 import { ApiError, api } from "../../lib/api"
 import { plural } from "../../lib/cost-format"
+import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../../components/demos"
 import { domainOf, platformUrl } from "../../lib/host"
 import { rememberedOrganizationsSearch } from "../../lib/organizations-search"
 
@@ -171,6 +172,9 @@ function OrganizationPage() {
     queryFn: async () =>
       detailSchema.parse(await api<unknown>(`/api/admin/organizations/${organizationId}`)),
   })
+  // Si es una demo para presentar (ADR 0096): su franja y lo que tiene hoy para mostrar.
+  const demo = useDemoOfOrganization(organizationId)
+  const openDemo = useOpenDemo()
   const billing = useQuery({
     queryKey: ["admin", "organizations", organizationId, "billing"],
     enabled: isAdmin,
@@ -279,14 +283,20 @@ function OrganizationPage() {
             {STATUS_WORDS[status ?? ""] ?? "Sin dato"}
           </Badge>
           {org.billing?.isDemo ? <Badge variant="outline">Demo</Badge> : null}
-          <a
-            className="text-sm underline sm:ml-auto"
-            href={platformUrl(org.slug, "/home", org.product)}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Abrir en {org.slug}.{domainOf(org.product)} ↗
-          </a>
+          {demo.data?.status === "lista" ? (
+            <Button type="button" variant="link" className="h-auto p-0 text-sm underline sm:ml-auto" onClick={() => demo.data && openDemo.mutate(demo.data)}>
+              Abrir en {org.slug}.{domainOf(org.product)} ↗
+            </Button>
+          ) : (
+            <a
+              className="text-sm underline sm:ml-auto"
+              href={platformUrl(org.slug, "/home", org.product)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Abrir en {org.slug}.{domainOf(org.product)} ↗
+            </a>
+          )}
         </div>
         <p className="text-sm text-muted-foreground">{facts.join(" · ")}</p>
         {!org.provisioning.complete ? (
@@ -297,6 +307,14 @@ function OrganizationPage() {
           </p>
         ) : null}
       </header>
+
+      {demo.data ? (
+        <DemoBand
+          demo={demo.data}
+          isAdmin={isAdmin}
+          onDeleted={() => void navigate({ to: "/organizations", search: rememberedOrganizationsSearch() })}
+        />
+      ) : null}
 
       <Tabs value={tab} onValueChange={(value) => go({ tab: value as Tab })}>
         <ScrollArea horizontal className="min-w-0 max-w-full">
@@ -311,6 +329,7 @@ function OrganizationPage() {
       </Tabs>
 
       {session.isPending ? <Skeleton className="h-64 w-full" /> : null}
+      {!session.isPending && tab === "resumen" && demo.data ? <DemoShowcase demo={demo.data} /> : null}
       {!session.isPending && tab === "resumen" ? (
         <OrgSummary
           organizationId={org.id}
