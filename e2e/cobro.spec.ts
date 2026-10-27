@@ -193,7 +193,7 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await fixtureDb.insert(adminSessionVerification).values({ userId: user.id, sessionId: current!.id, factorId, method: "totp", expiresAt: new Date(now + day) })
 
   await gotoHydrated(page, hostUrl("admin", "/billing"))
-  await expect(page.getByRole("heading", { name: "Planes" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Planes", exact: true })).toBeVisible()
   await page.getByText(plan!.name).first().scrollIntoViewIfNeeded()
   await shot("admin-facturacion")
   const planRow = page.getByRole("listitem").filter({ hasText: plan!.code })

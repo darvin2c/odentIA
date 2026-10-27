@@ -143,10 +143,28 @@ const FOUNDERS_PLAN = {
   showOnWeb: true,
 } as const
 
+/**
+ * La lista de latidIA (ADR 0093): una copia exacta de la de odentIA, con su
+ * propio plan por defecto y sus propios 20 lugares de Fundadores.
+ */
+const MEDICAL_ACTION_PLAN = {
+  ...ACTION_PLAN,
+  code: "latidia-ficticio",
+  name: "Plan latidIA (ficticio)",
+  product: "medical",
+} as const
+const MEDICAL_FOUNDERS_PLAN = {
+  ...FOUNDERS_PLAN,
+  code: "fundadores-latidia-ficticio",
+  name: "Fundadores latidIA (ficticio)",
+  product: "medical",
+} as const
+
 /** Catálogo ficticio (no pisa lo editado: solo inserta lo ausente). */
 export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods: number }> {
-  await db.insert(saasPlan).values(ACTION_PLAN).onConflictDoNothing({ target: saasPlan.code })
-  await db.insert(saasPlan).values(FOUNDERS_PLAN).onConflictDoNothing({ target: saasPlan.code })
+  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+    await db.insert(saasPlan).values(plan).onConflictDoNothing({ target: saasPlan.code })
+  }
   // Una base de antes de los tipos (ADR 0085): pone sus precios solo si siguen siendo los de la semilla.
   for (const plan of [ACTION_PLAN, FOUNDERS_PLAN]) {
     const before = PRE_TIER_PRICES[plan.code]
@@ -180,7 +198,7 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
       })
       .onConflictDoNothing({ target: saasPaymentMethod.code })
   }
-  return { plans: 2, methods: FICTIONAL_METHODS.length }
+  return { plans: 4, methods: FICTIONAL_METHODS.length }
 }
 
 const DEMO_ACTOR = "seed-saas-demo"
@@ -339,6 +357,8 @@ const DEMO_WAITLIST = [
   { email: "andes-demo@example.test", firstName: "Luis", lastName: "Mamani (ficticio)", clinicName: "Dental Andes (ficticia)", countryCode: "PE", city: "Cusco", professionals: "4-9", currentTool: "otro_software", phone: "+51912345678", status: "por_revisar", ageDays: 1 },
   { email: "odontovida-demo@example.test", firstName: "Carla", lastName: "Ruiz (ficticia)", clinicName: "OdontoVida (ficticia)", countryCode: "EC", city: "Quito", professionals: "1", currentTool: "nada", phone: "+593991234567", status: "por_revisar", ageDays: 5 },
   { email: "fundadora-demo@example.test", firstName: "Rosa", lastName: "Díaz (ficticia)", clinicName: "Clínica Norte Fundadora (ficticia)", countryCode: "MX", city: "Monterrey", professionals: "2-3", currentTool: "cuaderno_excel", phone: "+528112345678", status: "invitada", ageDays: 3 },
+  // Una de latidIA: se invita con Fundadores latidIA y gasta sus propios lugares (ADR 0093).
+  { email: "latido-demo@example.test", firstName: "Elena", lastName: "Torres (ficticia)", clinicName: "Consultorio Latido (ficticio)", countryCode: "PE", city: "Lima", professionals: "1", currentTool: "cuaderno_excel", phone: "+51923456789", status: "por_revisar", ageDays: 2, product: "medical" },
   { email: "descartada-demo@example.test", firstName: "Pedro", lastName: "Salas (ficticio)", clinicName: "Proveedor Dental (ficticio)", countryCode: "CO", city: "Bogotá", professionals: "10+", currentTool: "otro_software", phone: "+573001234567", status: "descartada", ageDays: 8 },
 ] as const
 

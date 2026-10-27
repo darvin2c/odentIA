@@ -146,7 +146,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
           ],
         },
         { h: "Crédito, presupuesto y facturación" },
-        "Las acciones se descuentan primero del crédito del mes. Lo que exceda el crédito se factura como consumo variable, de forma mensual o quincenal según la modalidad elegida por la Clínica. El crédito no usado en un mes no se acumula para el siguiente.",
+        "Las acciones se descuentan primero del crédito del mes. Lo que exceda el crédito se factura como consumo variable, de forma mensual o quincenal según la modalidad que figura en la suscripción de la Clínica. El crédito no usado en un mes no se acumula para el siguiente.",
         "La Clínica puede fijar un presupuesto mensual y odentIA le avisa cuando el consumo se acerca a ese presupuesto. Al alcanzarlo, las conversaciones nuevas pasan al equipo de la Clínica con un mensaje fijo y el paciente siempre recibe respuesta; Clío no inicia la escucha en nuevas atenciones y Argos no inicia nuevas acciones de recuperación ni suma paquetes de preguntas, hasta que la Clínica amplíe el presupuesto o empiece un nuevo periodo. Lo que ya había empezado se termina y se cobra. El almacenamiento no cuenta para el presupuesto.",
         "El servicio es pospago: el plan, las acciones, los paquetes de preguntas y el almacenamiento adicional se pagan al cerrar el periodo, después de usarlos.",
         { h: "Impuestos y terceros" },
@@ -160,8 +160,8 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "pagos",
       title: "Pagos y suspensión por falta de pago",
       blocks: [
-        "La Clínica paga el plan y el consumo variable de cada periodo por los medios que odentIA le indica en la aplicación, como la transferencia bancaria. odentIA no guarda datos de tarjetas.",
-        `Si un pago no se puede cobrar, odentIA avisará a la Clínica y le dará un plazo de ${days(terms.graceDays)} para regularizarlo. Vencido ese plazo, odentIA puede suspender los agentes y, después, el acceso a la cuenta, salvo la exportación de datos. La suspensión no elimina los datos y el servicio se reactiva al regularizar el pago.`,
+        "La Clínica paga el plan y el consumo variable de cada periodo por los medios que odentIA le indica en la aplicación, como la transferencia bancaria: sube el comprobante en la aplicación y odentIA confirma el pago. odentIA no guarda datos de tarjetas.",
+        `Si un pago vence sin pagarse, odentIA avisará a la Clínica y le dará un plazo de ${days(terms.graceDays)} para regularizarlo. Vencido ese plazo, odentIA puede restringir la cuenta: la Clínica sigue pudiendo consultar sus datos, ver su facturación, pagar y pedir soporte, pero no registrar operaciones nuevas ni enviar mensajes. La restricción no elimina los datos y el servicio se reactiva al regularizar el pago.`,
         "Salvo que la ley disponga otra cosa, los importes pagados no son reembolsables, incluidos los periodos ya iniciados.",
       ],
     },
@@ -174,7 +174,7 @@ export function terminosFor(pricing: Pricing): LegalDoc {
           list: [
             "Sofi responde por los canales que la Clínica conecta (WhatsApp, Instagram, Messenger, Telegram, chat web y correo electrónico). Siempre se presenta como asistente virtual y deriva la conversación a una persona del equipo cuando corresponde o cuando el interlocutor lo pide.",
             "Clío propone notas, diagnósticos y planes de tratamiento a partir del dictado del profesional. Nada entra en la historia clínica sin la confirmación expresa del profesional, que es responsable de su contenido.",
-            "Argos envía recordatorios, avisos de controles y seguimiento de presupuestos según lo que la Clínica configure.",
+            "Argos responde las preguntas de la Clínica sobre sus propios datos y lleva el seguimiento de sus pacientes con las líneas que la Clínica prende (recordatorios de cita, controles y presupuestos). Los recordatorios y avisos salen con textos fijos que la Clínica puede ver antes de prenderlos.",
           ],
         },
         "La Clínica decide qué puede hacer cada agente y puede activar o desactivar cada capacidad en cualquier momento. odentIA elige el modelo de inteligencia artificial que usan los agentes y pone la cuenta.",
@@ -262,9 +262,9 @@ export function terminosFor(pricing: Pricing): LegalDoc {
       id: "cancelacion",
       title: "Duración, cancelación y exportación de datos",
       blocks: [
-        "El contrato es de duración indefinida y se renueva cada mes. La Clínica puede cancelarlo en cualquier momento desde la aplicación; la cancelación surte efecto al terminar el periodo en curso y se factura el consumo variable producido hasta esa fecha.",
+        `El contrato es de duración indefinida y se renueva cada mes. La Clínica puede cancelarlo en cualquier momento pidiéndolo desde Ayuda, en la aplicación, o escribiendo a ${contactEmail}; la cancelación surte efecto al terminar el periodo en curso y se factura el consumo variable producido hasta esa fecha.`,
         "odentIA puede terminar el contrato por incumplimiento grave de la Clínica, por falta de pago no regularizada o avisando con 30 días de anticipación.",
-        "Antes y después de cancelar, la Clínica puede exportar sus datos en formatos de uso común. odentIA conserva los datos durante 30 días después de terminar el contrato para permitir su exportación y luego los elimina, salvo que la ley obligue a conservarlos. La Clínica es responsable de conservar su historia clínica durante el plazo que exija la normativa sanitaria.",
+        "Mientras el contrato esté vigente, la Clínica puede descargar sus reportes en CSV y la historia de cada paciente en PDF y en HL7 FHIR. Además, durante el contrato y los 30 días siguientes a su término, puede pedir a odentIA una copia completa de sus datos en formatos de uso común, que odentIA le entrega. Vencido ese plazo, odentIA elimina los datos, salvo que la ley obligue a conservarlos. La Clínica es responsable de conservar su historia clínica durante el plazo que exija la normativa sanitaria.",
       ],
     },
     {

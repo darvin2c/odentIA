@@ -6,25 +6,25 @@ export const COOKIES: LegalDoc = {
   path: "/cookies",
   title: "Política de cookies",
   description:
-    "La web de odentIA no usa cookies. La aplicación usa solo cookies de sesión estrictamente necesarias y almacenamiento local para preferencias y borradores.",
+    "Las webs de odentIA y latidIA no usan cookies. La aplicación usa solo cookies necesarias para la sesión, una que recuerda el menú lateral y almacenamiento local para preferencias y borradores.",
   intro: [
     "Las cookies son pequeños archivos que un sitio web guarda en su navegador. El almacenamiento local es un espacio similar del navegador que una aplicación usa para recordar información en su dispositivo.",
   ],
   sections: [
     {
       id: "web",
-      title: "La web de odentIA",
+      title: "Las webs de odentIA y latidIA",
       blocks: [
-        "Esta web no instala cookies ni usa herramientas de analítica, publicidad o redes sociales de terceros. Para conocer el tráfico de forma agregada, usamos los registros de nuestro propio servidor, como se explica en la [política de privacidad](/privacidad).",
+        "Esta web no instala cookies ni carga herramientas de analítica, publicidad, redes sociales o tipografías de terceros. Para conocer el tráfico de forma agregada, usamos los registros de nuestro propio servidor, como se explica en la [política de privacidad](/privacidad).",
         "Por eso no le pedimos que acepte cookies al visitar la web.",
       ],
     },
     {
       id: "aplicacion",
-      title: "La aplicación de odentIA",
+      title: "La aplicación",
       blocks: [
-        "La aplicación que usan las clínicas (el panel y la plataforma) usa únicamente cookies estrictamente necesarias para iniciar y mantener la sesión, y el almacenamiento local del navegador para recordar preferencias y conservar borradores. No usa cookies de analítica ni de publicidad.",
-        "Como son imprescindibles para que el servicio funcione, no requieren consentimiento. Si las bloquea, no podrá iniciar sesión.",
+        "La aplicación que usan las clínicas y los consultorios usa cookies estrictamente necesarias para iniciar y mantener la sesión, una cookie que recuerda si el menú lateral está abierto, y el almacenamiento local del navegador para recordar preferencias y conservar borradores. No usa cookies de analítica ni de publicidad.",
+        "Como sirven para que el servicio funcione o para recordar lo que el propio usuario eligió, no requieren consentimiento. Si bloquea las de sesión, no podrá iniciar sesión.",
         {
           table: {
             caption: "Cookies y almacenamiento local de la aplicación",
@@ -39,6 +39,21 @@ export const COOKIES: LegalDoc = {
                 "Cookie del segundo paso de verificación",
                 "Recordar, mientras se inicia sesión, que falta el código del segundo paso.",
                 "10 minutos.",
+              ],
+              [
+                "Cookies del inicio de sesión con Google",
+                "Comprobar, mientras se entra con Google, que la respuesta de Google corresponde a ese intento.",
+                "Unos minutos; se borran al terminar de entrar.",
+              ],
+              [
+                "Cookie del menú lateral",
+                "Recordar si el usuario dejó el menú lateral abierto o cerrado.",
+                "7 días.",
+              ],
+              [
+                "Cookie del equipo reconocido (solo la administración de odentIA)",
+                "Recordar que el personal de odentIA ya confirmó su segundo paso en ese equipo.",
+                "30 días sin usarlo.",
               ],
               [
                 "Almacenamiento local: preferencias",

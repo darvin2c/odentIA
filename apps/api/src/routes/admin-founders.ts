@@ -1,4 +1,4 @@
-import { type ClinicalProduct, productWords } from "@odentia/clinical"
+import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import type { Mailer } from "@odentia/mail"
 import {
@@ -7,7 +7,7 @@ import {
   FOUNDER_INVITATION_DAYS,
   founderInvitationEmail,
   founderOffer,
-  getSignupMode,
+  getSignupModes,
   inviteFromWaitlist,
   listWaitlist,
   markInvitationSent,
@@ -77,16 +77,19 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
     )
   })
 
+  // Cómo se abren las clínicas de cada producto (ADR 0093).
   app.get("/signup-mode", (c) => {
     staffOf(c)
-    return runService(c, 200, async () => ({ mode: await deps.ownerDb.transaction((tx) => getSignupMode(tx)) }))
+    return runService(c, 200, async () => ({ modes: await deps.ownerDb.transaction((tx) => getSignupModes(tx)) }))
   })
 
   app.put("/signup-mode", async (c) => {
-    const parsed = z.strictObject({ mode: z.enum(["invitacion", "abierta"]) }).safeParse(await c.req.json().catch(() => null))
+    const parsed = z
+      .strictObject({ mode: z.enum(["invitacion", "abierta"]), product: z.enum(CLINICAL_PRODUCTS).default("dental") })
+      .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => ({
-      mode: await deps.ownerDb.transaction((tx) => setSignupMode(tx, adminOf(c), parsed.data.mode)),
+      mode: await deps.ownerDb.transaction((tx) => setSignupMode(tx, adminOf(c), parsed.data.mode, parsed.data.product)),
     }))
   })
 

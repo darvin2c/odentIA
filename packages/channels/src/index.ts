@@ -25,6 +25,14 @@ export {
   subscribeAppToAccount,
 } from "./whatsapp-embedded-signup.js"
 export {
+  inspectOwnAppToken,
+  type OwnAppNumber,
+  type OwnAppToken,
+  OwnAppTokenError,
+  type OwnAppTokenProblem,
+  readOwnAppNumber,
+} from "./whatsapp-own-app.js"
+export {
   assertValidWebchatConfig,
   buildWebchatInbound,
   createWebchatToken,

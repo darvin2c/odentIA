@@ -4,13 +4,34 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, ChevronDown } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../../lib/api"
-import type { ConnectionItem } from "../../../lib/crm"
+import type { ConnectionItem, OwnAppState } from "../../../lib/crm"
 import { PageDraftGuard } from "../../../lib/page-draft-guard"
-import { accountWords, type ConnectResult, type ConnectionSetup, WHATSAPP_FIELDS } from "../../../lib/whatsapp"
+import {
+  accountWords,
+  type ConnectResult,
+  type ConnectionSetup,
+  ownAppHelpText,
+  ownAppSignatureProblem,
+  ownAppUnfinished,
+  WHATSAPP_FIELDS,
+} from "../../../lib/whatsapp"
+import { openSupportRequest } from "../../help-panel"
 import { CopyValue } from "../channel-panel"
 import { AccountField } from "./account-field"
 import { Note } from "./note"
+import { OwnAppGuide } from "./own-app-guide"
+import { OwnAppStatus } from "./own-app-status"
 import { appWords } from "../../../lib/product-words"
+
+/** El dato que corrige cada rechazo de las claves: el foco va a ese campo. */
+const FIELD_OF_ERROR: Record<string, string> = {
+  WHATSAPP_APP_SECRET_REJECTED: "appSecret",
+  WHATSAPP_TEMPORARY_KEY: "accessToken",
+  WHATSAPP_KEY_SCOPES: "accessToken",
+}
+
+/** Tiempo esperando el primer mensaje antes de ofrecer qué revisar. */
+const FIRST_MESSAGE_HELP_MS = 3 * 60_000
 
 type StepState = "done" | "current" | "pending"
 
@@ -112,13 +133,16 @@ function AccountForm({ idPrefix, onCreated }: { idPrefix: string; onCreated: (cr
       onCreated(data)
       await queryClient.invalidateQueries({ queryKey: ["connections"] })
     },
-    // El servidor ya dice qué pasó y cómo arreglarlo.
-    onError: (failure) =>
+    // El servidor ya dice qué pasó y cómo arreglarlo; si es de una clave, el foco va a esa clave.
+    onError: (failure) => {
       setError(
         failure instanceof ApiError && failure.shape.message
           ? failure.shape.message
           : "No pudimos conectar WhatsApp. Revisa los datos y vuelve a intentarlo.",
-      ),
+      )
+      const field = failure instanceof ApiError && failure.shape.code ? FIELD_OF_ERROR[failure.shape.code] : undefined
+      if (field) document.getElementById(`${idPrefix}-${field}`)?.focus()
+    },
   })
 
   function submit(event: FormEvent) {
@@ -169,7 +193,7 @@ function AccountForm({ idPrefix, onCreated }: { idPrefix: string; onCreated: (cr
   )
 }
 
-/** Paso 1 recién hecho: qué número encontró y si la clave puede pedir mensajes. */
+/** Paso 1 recién hecho: qué número encontró, qué se comprobó e hizo en Meta y si la clave puede pedir mensajes. */
 function AccountFound({
   created,
   onContinue,
@@ -181,6 +205,9 @@ function AccountFound({
 }) {
   const next = useRef<HTMLButtonElement>(null)
   const describedBy = useId()
+  const [ownApp, setOwnApp] = useState<OwnAppState | null>(created.ownApp ?? null)
+  // Sin registrar el número no se sigue: no podría enviar ni recibir.
+  const blocked = ownAppUnfinished(ownApp)
   // «Comprobar» ya no está: el foco sigue en el siguiente paso, que lee lo que se encontró.
   useEffect(() => {
     next.current?.focus()
@@ -190,11 +217,20 @@ function AccountFound({
   return (
     <div className="flex flex-col gap-3">
       <div id={describedBy} className="flex flex-col gap-3">
-        {/* Solo se dice lo que WhatsApp confirmó: sin su respuesta, que la conexión quedó guardada. */}
-        <Note tone="ok" title={account ? "Encontramos tu número" : "La conexión quedó guardada"}>
-          {account ? <span>{account}</span> : null}
-          {account && report?.canManage ? <span>La clave puede leer y pedir mensajes.</span> : null}
-        </Note>
+        {ownApp ? (
+          <>
+            <Note tone={blocked ? "waiting" : "ok"} title={blocked ? "Falta un paso en Meta" : "Todo en orden"}>
+              {account ? <span>{account}</span> : null}
+            </Note>
+            <OwnAppStatus connectionId={created.id} state={ownApp} found={null} step={1} onUpdated={setOwnApp} />
+          </>
+        ) : (
+          // Solo se dice lo que WhatsApp confirmó: sin su respuesta, que la conexión quedó guardada.
+          <Note tone="ok" title={account ? "Encontramos tu número" : "La conexión quedó guardada"}>
+            {account ? <span>{account}</span> : null}
+            {account && report?.canManage ? <span>La clave puede leer y pedir mensajes.</span> : null}
+          </Note>
+        )}
         {report?.error ? (
           <Note tone="waiting" title="La conexión sigue; faltan los mensajes">
             <span>{report.error}</span>
@@ -202,9 +238,11 @@ function AccountFound({
         ) : null}
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button ref={next} type="button" className="h-11 px-5" aria-describedby={describedBy} onClick={onContinue}>
-          Continuar
-        </Button>
+        {blocked ? null : (
+          <Button ref={next} type="button" className="h-11 px-5" aria-describedby={describedBy} onClick={onContinue}>
+            Continuar
+          </Button>
+        )}
         {report?.error ? (
           <Button type="button" variant="outline" className="h-11" onClick={onChangeKey}>
             Cambiar la clave
@@ -271,8 +309,48 @@ function AddressStep({
   )
 }
 
-/** Paso 3: escribir «hola» al número; la pantalla detecta sola el primer mensaje. */
-function FirstMessageStep({ requested }: { requested: number | null }) {
+/**
+ * Paso 3: escribir «hola» al número; la pantalla detecta sola el primer
+ * mensaje. Si a los 3 minutos no llegó, dice qué revisar; si llegó uno firmado
+ * con otra clave secreta, lo dice en vez de seguir esperando.
+ */
+function FirstMessageStep({
+  requested,
+  connection,
+  onOpenGuide,
+  onChangeKey,
+}: {
+  requested: number | null
+  connection: ConnectionItem | null
+  onOpenGuide: () => void
+  onChangeKey: () => void
+}) {
+  const [waitedLong, setWaitedLong] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setWaitedLong(true), FIRST_MESSAGE_HELP_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+  const [ownApp, setOwnApp] = useState<OwnAppState | null>(connection?.ownApp ?? null)
+  useEffect(() => {
+    setOwnApp(connection?.ownApp ?? null)
+  }, [connection?.ownApp])
+  if (ownAppSignatureProblem(ownApp, connection?.lastInboundAt)) {
+    return (
+      <div className="flex flex-col gap-3">
+        <div role="alert" className="flex flex-col gap-2 rounded-xl bg-danger-soft px-3.5 py-3 text-sm text-destructive">
+          <strong className="font-semibold">Llegó un mensaje, pero no pudimos leerlo</strong>
+          <span>
+            Meta lo firmó con una clave secreta distinta de la que pegaste. Suele pasar si la copiaste de otra app o si la cambiaste en
+            Meta («Restablecer»). Copia la «Clave secreta de la app» de la misma app y pégala aquí.
+          </span>
+          <Button type="button" className="h-11 self-start px-5" onClick={onChangeKey}>
+            Cambiar la clave secreta
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">Meta lo reintenta durante 7 días: al corregir la clave, los mensajes pendientes llegan solos.</p>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-3">
       <Note tone="ok" icon live title="Meta verificó la dirección.">
@@ -281,6 +359,35 @@ function FirstMessageStep({ requested }: { requested: number | null }) {
       <Note tone="waiting" icon live title="Esperando el primer mensaje.">
         <span>Esta pantalla lo detecta sola en cuanto llegue.</span>
       </Note>
+      {waitedLong ? (
+        <div className="flex flex-col gap-2 rounded-xl border px-3.5 py-3 text-sm">
+          <strong className="font-semibold">¿Escribiste y no llega? Revisa en este orden</strong>
+          <ol className="flex list-decimal flex-col gap-1 pl-5 text-muted-foreground">
+            <li>
+              <strong className="font-semibold text-foreground">¿Publicaste la app?</strong> En Meta, junto al nombre de tu app, debe
+              decir «Publicada» y no «En desarrollo». Sin publicar, Meta no avisa de los mensajes reales.{" "}
+              <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-0" onClick={onOpenGuide}>
+                Cómo publicarla
+              </Button>
+            </li>
+            <li>
+              <strong className="font-semibold text-foreground">¿Marcaste «messages»?</strong> En WhatsApp › Configuración › Webhooks,
+              la fila «messages» debe estar suscrita.
+            </li>
+            <li>
+              <strong className="font-semibold text-foreground">¿Escribiste al número correcto?</strong> Desde otro teléfono, al número
+              de la clínica.
+            </li>
+          </ol>
+          {connection && ownApp ? (
+            <OwnAppStatus connectionId={connection.id} state={ownApp} found={null} step={3} onUpdated={setOwnApp} />
+          ) : (
+            <Button type="button" variant="ghost" className="h-11 self-start sm:h-9" onClick={() => openSupportRequest(ownAppHelpText(3))}>
+              Pedir ayuda a {appWords().name}
+            </Button>
+          )}
+        </div>
+      ) : null}
       <div className="flex flex-col gap-1 rounded-xl border px-3.5 py-3 text-sm">
         <strong className="font-semibold">
           {requested && requested > 0
@@ -341,6 +448,7 @@ export function WhatsAppConnectSteps({
 }) {
   const headingId = useId()
   const fieldId = useId()
+  const [guideOpen, setGuideOpen] = useState(false)
   const stateOf = (number: number): StepState => (number < step ? "done" : number === step ? "current" : "pending")
   const section = useRef<HTMLElement>(null)
 
@@ -361,9 +469,14 @@ export function WhatsAppConnectSteps({
   return (
     <section ref={section} aria-labelledby={headingId} className="elevated flex min-w-0 flex-col rounded-xl border bg-card">
       <div className="flex flex-col gap-1 px-4 pt-4 pb-3.5 sm:px-5">
-        <h2 id={headingId} className="font-heading text-base font-semibold">
-          {title}
-        </h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <h2 id={headingId} tabIndex={-1} className="font-heading text-base font-semibold outline-none">
+            {title}
+          </h2>
+          <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-8" onClick={() => setGuideOpen(true)}>
+            Ver la guía
+          </Button>
+        </div>
         <p className="text-sm text-muted-foreground">
           Tres pasos. Cada uno se comprueba solo y dice qué encontró; puedes cerrar y volver cuando quieras.
         </p>
@@ -412,9 +525,15 @@ export function WhatsAppConnectSteps({
           state={stateOf(3)}
           summary="Escribe «hola» al número de la clínica desde cualquier teléfono."
         >
-          <FirstMessageStep requested={requested} />
+          <FirstMessageStep
+            requested={requested}
+            connection={connection}
+            onOpenGuide={() => setGuideOpen(true)}
+            onChangeKey={() => onChangeKey?.()}
+          />
         </StepItem>
       </ol>
+      <OwnAppGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
     </section>
   )
 }
