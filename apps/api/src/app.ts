@@ -12,10 +12,10 @@ import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import { streamSSE } from "hono/streaming"
-import postgres from "postgres"
 import { z } from "zod"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
+import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
 import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
 import { createAdminCoreRoute, createAccountAdminAccessRoute, createAdminFactorBoundary } from "./routes/admin-core.js"
 import { createAccountRoute } from "./routes/account.js"
@@ -108,7 +108,7 @@ export interface AppDeps {
   complaintsEmail?: string | undefined
   /** Buzón que lee las respuestas a los correos de Fundadores (FOUNDERS_EMAIL). */
   foundersEmail?: string | undefined
-  /** Conexión dedicada LISTEN (postgres.js crudo). */
+  /** La conexión LISTEN que comparten todos los streams del proceso (postgres.js crudo). */
   listenUrl: string
   registrationRemoteAddress?: RegistrationRemoteAddress
   /** Cuenta de odentIA en el proveedor del modelo (LLM_*); la organización no elige ni trae la suya. */
@@ -180,15 +180,6 @@ const orgPrintingInput = z.object({
   ticketFooter: z.string().trim().min(1, "Escribe la frase al pie del ticket").max(280),
 })
 
-interface NotifyPayload {
-  orgId: string
-  kind: string
-  taskId?: string | number
-  conversationId?: string
-  messageId?: string
-  at: string
-}
-
 type AuditRow = typeof auditEvent.$inferSelect
 
 /**
@@ -224,6 +215,8 @@ async function toReplayPayload(
 
 export function createApp(deps: AppDeps) {
   const { auth, db } = deps
+  // Una sola escucha de eventos para todos los streams de este proceso.
+  const orgEvents = createOrgEventsHub(deps.listenUrl)
   // «Su enlace» de cada persona vive en el subdominio de su clínica: los
   // mensajes y las plantillas de WhatsApp que lo llevan leen esta dirección.
   configurePublicLinks({ webURL: deps.webURL, cookieDomain: deps.cookieDomain, productDomains: deps.productDomains ?? {} })
@@ -267,6 +260,10 @@ export function createApp(deps: AppDeps) {
       credentials: true,
       // El nombre de un archivo que se descarga (un CSV de Reportes, un papel en PDF) lo dice el servidor.
       exposeHeaders: ["Content-Disposition"],
+      // La pantalla está en otro origen: sin esto el navegador repite la consulta
+      // previa (OPTIONS) cada pocos segundos y cada pedido cuesta dos viajes.
+      // Chrome no guarda más de 2 horas.
+      maxAge: 7200,
     }),
   )
 
@@ -725,21 +722,11 @@ export function createApp(deps: AppDeps) {
         }
       }
 
-      const listener = postgres(deps.listenUrl, { max: 1 })
       // NOTIFY nunca lleva datos clínicos: solo orgId/kind/taskId/at.
-      const { unlisten } = await listener.listen("org_events", async (raw) => {
-        let payload: NotifyPayload
-        try {
-          payload = JSON.parse(raw) as NotifyPayload
-        } catch {
-          return
-        }
-        if (payload.orgId !== orgId) return
-        await stream.writeSSE({
-          id: payload.at,
-          event: payload.kind,
-          data: JSON.stringify(payload),
-        })
+      const stopListening = await orgEvents.subscribe(orgId, (payload) => {
+        void stream
+          .writeSSE({ id: payload.at, event: payload.kind, data: JSON.stringify(payload) })
+          .catch(() => undefined)
       })
 
       const heartbeat = setInterval(() => {
@@ -750,7 +737,7 @@ export function createApp(deps: AppDeps) {
       const done = Promise.withResolvers<void>()
       stream.onAbort(() => {
         clearInterval(heartbeat)
-        void unlisten().then(() => listener.end())
+        stopListening()
         done.resolve()
       })
       await done.promise

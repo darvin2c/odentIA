@@ -69,7 +69,7 @@ import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-no
 import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient, authFetch } from "../lib/auth-client"
-import { requireTermsAccepted, requireVerifiedSession, ssrFetchOptions } from "../lib/guards"
+import { requireTermsAccepted, requireVerifiedSession, type SessionInfo, ssrFetchOptions } from "../lib/guards"
 import { apiFetch } from "../lib/api"
 import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
@@ -116,33 +116,71 @@ async function loadOrgRegion(): Promise<OrgRegion> {
   }
 }
 
+function readOrganization(slug: string, fetchOptions: ReturnType<typeof ssrFetchOptions>) {
+  return authClient.organization.getFullOrganization({ query: { organizationSlug: slug }, fetchOptions })
+}
+type FullOrganization = NonNullable<Awaited<ReturnType<typeof readOrganization>>["data"]>
+interface OrgAccess {
+  slug: string
+  at: number
+  session: SessionInfo
+  org: FullOrganization
+}
+
+/**
+ * Cuánto vale en el navegador lo comprobado al entrar. `beforeLoad` corre en cada
+ * navegación, también cuando solo cambia la búsqueda (el día de la Agenda, la
+ * conversación abierta, un filtro): sin esto, cada clic esperaba tres viajes a la
+ * API antes de cambiar la pantalla. La API autoriza cada pedido igual; esto solo
+ * decide qué pantalla mostrar, y un cambio de rol o del equipo se ve a los 2 minutos.
+ */
+const ORG_ACCESS_FRESH_MS = 120_000
+let orgAccessChecked: OrgAccess | null = null
+
+/** Sesión verificada, términos aceptados y la clínica del host, o el redirect que toque. */
+async function checkOrgAccess(location: { href: string }): Promise<{ session: SessionInfo; org: FullOrganization }> {
+  const slug = orgSlugFromHostname(requestHostname())
+  const cached = orgAccessChecked
+  if (typeof window !== "undefined" && cached && cached.slug === slug && Date.now() - cached.at < ORG_ACCESS_FRESH_MS) {
+    return cached
+  }
+  const fetchOptions = ssrFetchOptions()
+  // Las tres a la vez; se revisan en el orden de siempre: sesión, términos y clínica.
+  const sessionCheck = requireVerifiedSession(location)
+  const termsCheck = requireTermsAccepted(location)
+  const orgRead = slug ? readOrganization(slug, fetchOptions) : null
+  // Si falla una antes, las otras no quedan como rechazo sin atender.
+  termsCheck.catch(() => undefined)
+  orgRead?.catch(() => undefined)
+  const session = await sessionCheck
+  await termsCheck
+  if (!slug || !orgRead) {
+    throw redirect({ href: panelUrl("/") })
+  }
+  const { data } = await orgRead
+  if (!data) {
+    const { data: orgs } = await authClient.organization.list({ fetchOptions })
+    throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/?cambiar=1" : "/onboarding") })
+  }
+  if (typeof window !== "undefined") orgAccessChecked = { slug, at: Date.now(), session, org: data }
+  return { session, org: data }
+}
+
 export const Route = createFileRoute("/_org")({
   beforeLoad: async ({ location }) => {
     const toAdmin = adminRedirectFor(requestHostname())
     if (toAdmin) throw redirect({ href: toAdmin })
-    const session = await requireVerifiedSession(location)
-    await requireTermsAccepted(location)
-    const slug = orgSlugFromHostname(requestHostname())
-    if (!slug) {
-      throw redirect({ href: panelUrl("/") })
-    }
-    const fetchOptions = ssrFetchOptions()
-    const { data } = await authClient.organization.getFullOrganization({
-      query: { organizationSlug: slug },
-      fetchOptions,
-    })
-    if (!data) {
-      const { data: orgs } = await authClient.organization.list({ fetchOptions })
-      throw redirect({ href: panelUrl(orgs && orgs.length > 0 ? "/?cambiar=1" : "/onboarding") })
-    }
+    // El formato regional se pide junto con lo demás; si falla, queda el del navegador.
+    const regionLoad = loadOrgRegion()
+    const { session, org: data } = await checkOrgAccess(location)
     const role = data.members.find((member) => member.userId === session.userId)?.role ?? "member"
     const permissions = platformPathPermission(location.pathname)
     if (permissions && !canAccessAny(role, permissions)) throw redirect({ to: "/home" })
-    const region = await loadOrgRegion()
+    const region = await regionLoad
     // Una clínica de otro producto se abre en su dominio, con su app (decisión 9 del
     // issue 229). Sin ese dominio configurado el destino es este mismo: no se redirige.
     const elsewhere =
-      region.product && region.product !== productUi().product ? tenantUrl(slug, location.href, region.product) : null
+      region.product && region.product !== productUi().product ? tenantUrl(data.slug, location.href, region.product) : null
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
     return { session, org: data, region }
   },

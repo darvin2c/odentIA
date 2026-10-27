@@ -630,6 +630,11 @@ export const message = pgTable(
       .on(table.conversationId, table.externalId)
       .where(sql`"external_id" is not null`),
     index("message_conversation_created_idx").on(table.conversationId, table.createdAt),
+    // Cada acuse del proveedor (enviado, entregado, leído) busca su mensaje solo por
+    // la clínica y el id externo: el índice único empieza por la conversación.
+    index("message_org_external_idx")
+      .on(table.organizationId, table.externalId)
+      .where(sql`"external_id" is not null`),
     // Los mensajes de una clínica en un tramo (Reportes): sin él, cada consulta recorre los de todas.
     index("message_org_created_idx").on(table.organizationId, table.createdAt),
     // Las respuestas por entregar (R1): el ciclo las busca cada minuto y casi nunca hay.

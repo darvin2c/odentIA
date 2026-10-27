@@ -219,14 +219,15 @@ function AgendaPage() {
   const sede = useActiveBranch()
   const resourcesQuery = useQuery({
     queryKey: ["agenda-resources", sede.branchId ?? null],
-    enabled: sede.ready,
     queryFn: () =>
       apiFetch<{ data: AgendaResources }>(
         `/api/agenda/resources${sede.branchId ? `?branchId=${encodeURIComponent(sede.branchId)}` : ""}`,
       ),
   })
   const resources = resourcesQuery.data?.data
-  const branchId = resources?.branchId
+  // Con la sede ya elegida, las citas se piden a la vez que las fichas, sin esperarlas;
+  // sin ella, la elige el servidor y llega con las fichas.
+  const branchId = resources?.branchId ?? sede.branchId
   const TZ = resources?.timeZone ?? activeOrgTimeZone()
 
   const now = useScheduleNow()

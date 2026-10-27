@@ -38,8 +38,6 @@ export function useActiveBranch(): {
   branches: BranchOption[]
   /** Sede pedida; `undefined` deja que el servidor elija la primera activa. */
   branchId: string | undefined
-  /** `false` mientras no se sabe si la sede recordada sigue existiendo. */
-  ready: boolean
   /** Cambia de sede, la recuerda y la deja en el enlace. */
   choose: (id: string, extra?: Record<string, string | undefined>) => void
 } {
@@ -68,10 +66,11 @@ export function useActiveBranch(): {
     setStored(fromLink)
   }, [fromLink, stored])
 
-  // Una sede recordada que ya no existe no debe romper la pantalla.
+  // La sede recordada se usa enseguida, sin esperar la lista: la pantalla pide
+  // sus datos a la vez que las sedes, no después. Si al llegar la lista ya no
+  // existe, se deja de pedir y el servidor elige la primera activa.
   const known = (id: string) => branches.some((item) => item.id === id)
-  const branchId = fromLink ?? (stored && query.isSuccess && known(stored) ? stored : undefined)
-  const ready = fromLink !== undefined || stored === undefined || !query.isPending
+  const branchId = fromLink ?? (stored && (!query.isSuccess || known(stored)) ? stored : undefined)
 
   const choose = React.useCallback(
     (id: string, extra?: Record<string, string | undefined>) => {
@@ -81,5 +80,5 @@ export function useActiveBranch(): {
     },
     [setParams],
   )
-  return { branches, branchId, ready, choose }
+  return { branches, branchId, choose }
 }

@@ -37,4 +37,4 @@
 
 ## Referencias
 
-`packages/services/src/agent-probar.ts`, `packages/db/drizzle/0007_probar_igual_que_lo_real.sql`, `0008_probar_reglas.sql`, `packages/clinic-app/src/components/agent/test-chat.tsx`. Lienzo «Probar igual que lo real».
+`packages/services/src/agent-probar.ts`, `packages/db/drizzle/0008_probar_igual_que_lo_real.sql`, `0009_probar_reglas.sql`, `packages/clinic-app/src/components/agent/test-chat.tsx`. Lienzo «Probar igual que lo real».

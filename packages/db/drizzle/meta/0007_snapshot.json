@@ -1,5 +1,5 @@
 {
-  "id": "0797de98-33f6-4db9-ba7f-e5077729221d",
+  "id": "d17e81d7-7128-4985-b595-b819ae42ad09",
   "prevId": "8f14dae1-053e-417e-9a8d-48f27cfb845f",
   "version": "7",
   "dialect": "postgresql",
@@ -2328,13 +2328,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "is_test": {
-          "name": "is_test",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "arrived_at": {
           "name": "arrived_at",
@@ -23691,13 +23684,6 @@
           "notNull": true,
           "default": true
         },
-        "is_test": {
-          "name": "is_test",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "screen": {
           "name": "screen",
           "type": "text",
@@ -24242,12 +24228,6 @@
           "notNull": true,
           "default": false
         },
-        "test_by_user_id": {
-          "name": "test_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -24415,20 +24395,6 @@
             "id"
           ],
           "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "conversation_test_by_user_id_user_id_fk": {
-          "name": "conversation_test_by_user_id_user_id_fk",
-          "tableFrom": "conversation",
-          "tableTo": "user",
-          "schemaTo": "auth",
-          "columnsFrom": [
-            "test_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "conversation_organization_id_contact_identity_id_contact_identity_organization_id_id_fk": {
@@ -25243,6 +25209,28 @@
             }
           ],
           "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "message_org_external_idx": {
+          "name": "message_org_external_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"external_id\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -28867,6 +28855,39 @@
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "audit_event_org_entity_id_created_idx": {
+          "name": "audit_event_org_entity_id_created_idx",
+          "columns": [
+            {
+              "expression": "organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entity_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": false,
               "nulls": "last"
             }
           ],

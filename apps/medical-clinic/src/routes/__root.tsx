@@ -1,7 +1,8 @@
 import { BrandProvider, Toaster } from "@odentia/ui"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createQueryClient } from "@odentia/clinic-app/lib/query-client"
+import { QueryClientProvider } from "@tanstack/react-query"
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router"
-import { type ReactNode, useEffect } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import favicon from "../../../../assets/brand/latidia/favicon.svg?url"
 import appCss from "../styles/app.css?url"
 
@@ -24,9 +25,9 @@ export const Route = createRootRoute({
   component: RootComponent,
 })
 
-const queryClient = new QueryClient()
-
 function RootComponent() {
+  // Cada render SSR tiene su propia caché: nunca compartir datos entre sesiones.
+  const [queryClient] = useState(createQueryClient)
   useEffect(() => {
     document.documentElement.dataset.hydrated = "true"
     return () => {

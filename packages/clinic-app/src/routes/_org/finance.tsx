@@ -408,7 +408,7 @@ function FinanceWorkspace() {
         menu={headerMenu}
       />
 
-      {profile.isPending || !sede.ready || branchZone.isPending ? (
+      {profile.isPending || branchZone.isPending ? (
         <LoadingState message="Preparando la caja…" />
       ) : profile.isError ? (
         isForbidden(profile.error) ? (
