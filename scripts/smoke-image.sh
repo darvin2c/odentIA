@@ -26,7 +26,7 @@ for entrada in "${servicios[@]}"; do
   salida=$(docker run --rm --network none -e PORT=3000 "$imagen" \
     sh -c "timeout 25 $comando" 2>&1)
   codigo=$?
-  if echo "$salida" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (module|package)|ERR_PACKAGE_PATH_NOT_EXPORTED|MODULE_NOT_FOUND|command not found|not found: "; then
+  if echo "$salida" | grep -qE "ERR_MODULE_NOT_FOUND|Cannot find (module|package)|ERR_PACKAGE_PATH_NOT_EXPORTED|MODULE_NOT_FOUND|[Cc]ommand (\"[^\"]*\" )?not found|not found: "; then
     echo "::error::$nombre: falta un módulo en la imagen"
     echo "$salida" | tail -15
     fallos=$((fallos + 1))
@@ -35,7 +35,7 @@ for entrada in "${servicios[@]}"; do
     echo "$salida" | tail -15
     fallos=$((fallos + 1))
   else
-    echo "ok  $nombre (código $codigo)"
+    echo "ok  $nombre (código $codigo): $(echo "$salida" | grep -v '^$' | tail -1 | cut -c1-140)"
   fi
 done
 
