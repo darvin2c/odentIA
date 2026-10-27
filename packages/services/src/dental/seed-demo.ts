@@ -12,9 +12,8 @@
  * Regla permanente: toda función nueva que añada pantalla o entidad debe
  * extender este archivo con su escenario mínimo en la misma PR.
  *
- * La misma historia es la demo de ventas en producción con
- * `DEMO_MODE=produccion` y `DEMO_OWNER_EMAIL` (ver `PROD` abajo y
- * `docs/deployment.md`): una sola clínica, sin cuentas que entren y en CIE-11.
+ * Las demos de producción ya no salen de aquí: se crean desde la
+ * administración, con «Crear demo» (ADR 0096).
  */
 import { LEGAL } from "@odentia/auth/legal"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
@@ -91,7 +90,8 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { hashPassword } from "better-auth/crypto"
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm"
+import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "../agent-operations.js"
 import { ANSWER_READY_MESSAGE, replyId } from "../automation-messages.js"
 import { upsertAgentConfig } from "../agentConfig.js"
@@ -206,6 +206,7 @@ import { createService, quickAddServices, updateService } from "../service-catal
 import { librarySpecialtyIds } from "../specialties.js"
 import type { DentalFinalizeParts } from "./hooks.js"
 import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
+import { buildDemo, purgeDemoOrganization } from "../demo-build.js"
 import { createStorage } from "../storage.js"
 import {
   countWhereIn,
@@ -280,23 +281,11 @@ const secretsKey = secretsKeyFromEnv(process.env.SECRETS_KEY)
 
 const db = createOwnerDb(databaseUrl)
 
-/**
- * La demo de producción (`seed:demo-produccion`): la misma clínica para mostrar
- * odentIA en ventas, sin nada que sirva para entrar ni nada global. Su equipo
- * son personas sin cuenta (correos de `example.com`, RFC 2606), la dueña de la
- * demo es la persona de `DEMO_OWNER_EMAIL`, los diagnósticos van en CIE-11 (la
- * lista oficial que carga producción) y no se crean administradores, planes,
- * clínicas de prueba, reclamaciones ni el consultorio de latidIA. Clínica Norte
- * se crea porque la historia la usa y se borra al terminar.
- */
-const PROD = process.env.DEMO_MODE === "produccion"
-const DEMO_OWNER_EMAIL = process.env.DEMO_OWNER_EMAIL?.trim().toLowerCase()
-if (PROD && !DEMO_OWNER_EMAIL) throw new Error("DEMO_OWNER_EMAIL es obligatoria en la demo de producción")
 // La semilla de desarrollo crea administradores con la clave de la semilla: nunca en producción.
-if (!PROD && process.env.NODE_ENV === "production") {
-  throw new Error("En producción solo corre la demo de ventas: DEMO_MODE=produccion y DEMO_OWNER_EMAIL")
+if (process.env.NODE_ENV === "production") {
+  throw new Error("La semilla de desarrollo no corre en producción: las demos se crean en la administración, con «Crear demo»")
 }
-const ID = PROD ? "demo" : "seed"
+const ID = "seed"
 const ORG_A = `${ID}-org-dental-smile`
 const ORG_B = `${ID}-org-clinica-norte`
 // El consultorio de latidIA (`../medical/seed-demo.ts`) se borra y se crea con la demo.
@@ -311,12 +300,10 @@ const SALAS_ID = `${ID}-user-salas`
 /** Caja de Dental Smile: responde desde Inicio los temas de pagos que le pasa Sofi (decisión 3 del pulido de la Bandeja). */
 const CAJA_ID = `${ID}-user-caja`
 /** El correo de cada persona del equipo: en producción, uno que no llega a nadie. */
-const SEED_EMAIL_DOMAIN = PROD ? "example.com" : "odentia.dev"
-const seedEmail = (dev: string, prod: string) => (PROD ? `${prod}@${SEED_EMAIL_DOMAIN}` : `${dev}@${SEED_EMAIL_DOMAIN}`)
-/** Los diagnósticos de la historia, en la lista de la clínica (producción solo tiene la CIE-11). */
-const DX = PROD
-  ? { caries: "DA08.0", pulpitis: "DA09.0", dentalExam: "QA00.8" }
-  : { caries: "K02.1", pulpitis: "K04.0", dentalExam: "Z01.2" }
+const SEED_EMAIL_DOMAIN = "odentia.dev"
+const seedEmail = (name: string) => `${name}@${SEED_EMAIL_DOMAIN}`
+/** Los diagnósticos de la historia, en la lista de la clínica (la CIE-10 de la semilla). */
+const DX = { caries: "K02.1", pulpitis: "K04.0", dentalExam: "Z01.2" }
 const SEED_USERS = [ANA_ID, LUIS_ID, CORA_ID, ROJAS_ID, SALAS_ID, CAJA_ID]
 /** Las cuentas que se borran: las de odentIA y la Dra. Vela del consultorio de latidIA. */
 const WIPED_USERS = [...SEED_USERS, VELA_ID]
@@ -618,6 +605,18 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   }
 }
 
+// La demo para presentar de la semilla (ADR 0096) se va primero: nombra a la administradora.
+for (const row of await db
+  .select({ id: saasDemo.id, organizationId: saasDemo.organizationId })
+  .from(saasDemo)
+  .where(like(saasDemo.slug, "seed-%"))) {
+  const purged = await db.transaction(async (tx) => {
+    const result = row.organizationId ? await purgeDemoOrganization(tx, row.id, row.organizationId) : { storageKeys: [] }
+    await tx.delete(saasDemo).where(eq(saasDemo.id, row.id))
+    return result
+  })
+  for (const key of purged.storageKeys) await storage.deleteAttachment(key).catch(() => undefined)
+}
 await wipeSeed()
 
 // --- Identidad fija ---
@@ -637,7 +636,7 @@ await db.insert(user).values([
     name: "Dra. Ana Torres",
     firstName: "Ana",
     lastName: "Torres",
-    email: seedEmail("ana", "ana.torres"),
+    email: seedEmail("ana"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -646,7 +645,7 @@ await db.insert(user).values([
     name: "Dr. Luis Prado",
     firstName: "Luis",
     lastName: "Prado",
-    email: seedEmail("luis", "luis.prado"),
+    email: seedEmail("luis"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -655,7 +654,7 @@ await db.insert(user).values([
     name: "Dra. Cora Vega",
     firstName: "Cora",
     lastName: "Vega",
-    email: seedEmail("cora", "cora.vega"),
+    email: seedEmail("cora"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -664,7 +663,7 @@ await db.insert(user).values([
     name: "Dra. Elena Rojas",
     firstName: "Elena",
     lastName: "Rojas",
-    email: seedEmail("rojas", "elena.rojas"),
+    email: seedEmail("rojas"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -673,7 +672,7 @@ await db.insert(user).values([
     name: "Dr. Diego Salas",
     firstName: "Diego",
     lastName: "Salas",
-    email: seedEmail("salas", "diego.salas"),
+    email: seedEmail("salas"),
     emailVerified: true,
     ...SEED_TERMS,
   },
@@ -682,34 +681,21 @@ await db.insert(user).values([
     name: "Paula Ríos",
     firstName: "Paula",
     lastName: "Ríos",
-    email: seedEmail("caja", "paula.rios"),
+    email: seedEmail("caja"),
     emailVerified: true,
     ...SEED_TERMS,
   },
 ])
-// En producción nadie del equipo de la demo tiene con qué entrar: sin cuenta
-// ni contraseña. Entra solo quien la muestra, con su propia cuenta.
-const passwordHash = PROD ? null : await hashPassword(PASSWORD)
-if (passwordHash) {
-  await db.insert(account).values(
-    SEED_USERS.map((userId) => ({
-      id: randomUUID(),
-      accountId: userId,
-      providerId: "credential",
-      userId,
-      password: passwordHash,
-    })),
-  )
-}
-// La cuenta de quien muestra la demo: dueña, pero no atiende (sin horario no es
-// una columna de la Agenda).
-let salesOwnerId: string | null = null
-if (PROD && DEMO_OWNER_EMAIL) {
-  const [owner] = await db.select({ id: user.id }).from(user).where(eq(user.email, DEMO_OWNER_EMAIL)).limit(1)
-  if (!owner) throw new Error(`No hay una cuenta con el correo ${DEMO_OWNER_EMAIL}`)
-  await db.insert(member).values({ id: randomUUID(), organizationId: ORG_A, userId: owner.id, role: "owner", createdAt: new Date() })
-  salesOwnerId = owner.id
-}
+const passwordHash = await hashPassword(PASSWORD)
+await db.insert(account).values(
+  SEED_USERS.map((userId) => ({
+    id: randomUUID(),
+    accountId: userId,
+    providerId: "credential",
+    userId,
+    password: passwordHash,
+  })),
+)
 await db.insert(member).values([
   { id: randomUUID(), organizationId: ORG_A, userId: ANA_ID, role: "owner", createdAt: new Date() },
   {
@@ -787,7 +773,7 @@ await db.insert(orgProfile).values([
     locale: "es-PE",
     timezone: "America/Lima",
     // La lista de diagnósticos que recomienda Perú (decisión 26).
-    diagnosisSystem: PROD ? "ICD-11" : "ICD-10",
+    diagnosisSystem: "ICD-10",
     // El que da el agente ante una urgencia (ADR 0050); la clínica B no tiene y ve el aviso.
     emergencyPhone: "+5115550123",
   },
@@ -801,7 +787,7 @@ await db.insert(orgProfile).values([
     locale: "es-PE",
     timezone: "America/Lima",
     // La lista de diagnósticos que recomienda Perú (decisión 26).
-    diagnosisSystem: PROD ? "ICD-11" : "ICD-10",
+    diagnosisSystem: "ICD-10",
   },
 ])
 await db.transaction(async (tx) => {
@@ -3485,7 +3471,7 @@ const domainSeed = {
 }
 // Solo Miraflores lleva agenda: Surco se deja limpia (sin unidades dentales, horarios ni ausencias)
 // para ver los estados de «falta configurar» y montar una sede desde la propia agenda.
-await db.transaction((tx) => seedAvailability(tx, { ...domainSeed, exceptUserIds: salesOwnerId ? [salesOwnerId] : [] }))
+await db.transaction((tx) => seedAvailability(tx, domainSeed))
 // La Dra. Rojas, endodoncista, atiende solo martes y jueves por la tarde
 // (fase 4, tablero 2): «Endodoncia unirradicular» se ofrece solo en sus horas.
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
@@ -3766,8 +3752,8 @@ for (const seed of [
   seedOpportunities,
   seedPortal,
   seedWorkspace,
-  // Recepción, odontólogo y caja con la clave de la semilla: solo en desarrollo.
-  ...(PROD ? [] : [seedRoles]),
+  // Recepción, odontólogo y caja con la clave de la semilla.
+  seedRoles,
 ]) {
   await db.transaction((tx) => seed(tx, domainSeed))
 }
@@ -3926,7 +3912,7 @@ const reportsHistory = await db.transaction((tx) => {
   })
 })
 // Lo que contó el cobro por acción de esa historia (Reportes › Agente): la suscripción pasa a activa.
-await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, ...(PROD ? { planCode: "odentia" } : {}), dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
+await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
 // Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
 const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
 // Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
@@ -3959,8 +3945,7 @@ await db.transaction(async (tx) => {
   ])
 })
 // Lo de la plataforma (administración, planes ficticios, clínicas de prueba,
-// soporte y Libro de Reclamaciones): solo en desarrollo, nunca en la demo de producción.
-if (!PROD) {
+// soporte y Libro de Reclamaciones).
 await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
@@ -4022,7 +4007,6 @@ await db.transaction(async (tx) => {
     )
   }
 })
-}
 // Lo que hicieron los agentes este mes (ADR 0031 y 0085), para ver Plan y
 // pagos y «Ver cada acción» con datos: conversaciones de cada tipo, consultas
 // de cada tipo, una cita recuperada y un paquete de preguntas a Argos, con el
@@ -4122,7 +4106,7 @@ await db.transaction(async (tx) => {
   const actionOf = (key: string) => reviewed.find((row) => row.key === key)?.id
   const ana = { userId: ANA_ID, roleLabel: "Dueño" }
   const caseIds: string[] = []
-  const kept = PROD ? undefined : actionOf("semilla:conversacion:2")
+  const kept = actionOf("semilla:conversacion:2")
   if (kept) {
     const asked = await requestActionReview(db, ORG_A, ana, {
       actionId: kept,
@@ -4138,8 +4122,8 @@ await db.transaction(async (tx) => {
       })
     }
   }
-  // Los pedidos de revisión abren casos en Soporte de odentIA: solo en desarrollo.
-  const pending = PROD ? undefined : actionOf("semilla:conversacion:4")
+  // Los pedidos de revisión abren casos en Soporte de odentIA.
+  const pending = actionOf("semilla:conversacion:4")
   if (pending) {
     const asked = await requestActionReview(db, ORG_A, ana, {
       actionId: pending,
@@ -4167,11 +4151,35 @@ await db.insert(aiUsage).values([
   { organizationId: ORG_A, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: null },
 ])
 
+// --- Una demo para presentar (ADR 0096): Clínicas › «Demos» de la administración ---
+// En una sola transacción, como la arma el worker: si algo falla no queda una demo a medias.
+await db.transaction(async (tx) => {
+  const [demo] = await tx
+    .insert(saasDemo)
+    .values({
+      product: "medical",
+      kind: "pediatria",
+      size: "pequeno",
+      months: 6,
+      countryCode: "PE",
+      name: "Pediatría Los Olivos",
+      slug: "seed-pediatria-los-olivos",
+      presenterUserId: SEED_STAFF_ADMIN_ID,
+      createdBy: SEED_STAFF_ADMIN_ID,
+      seed: 20_261_027,
+      status: "creando",
+    })
+    .returning()
+  if (!demo) throw new Error("No se pudo pedir la demo de la semilla")
+  const built = await buildDemo(tx, { ...demo, product: "medical", size: "pequeno" }, { secretsKey, fetch })
+  await tx
+    .update(saasDemo)
+    .set({ organizationId: built.organizationId, slug: built.slug, status: "lista", historyThrough: built.historyThrough, readyAt: new Date(), progress: { step: "listo", done: 5, total: 5 } })
+    .where(eq(saasDemo.id, demo.id))
+})
+
 // --- latidIA: el consultorio de la demo médica (issue 229) ---
-if (passwordHash) await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })
-// La demo de producción es una sola clínica: Clínica Norte (que la historia
-// usa para mostrar el aislamiento entre clínicas) y su dueña se van al final.
-if (PROD) await wipeSeed([ORG_B], [CORA_ID])
+await seedMedicalDemo(db, { anaId: ANA_ID, passwordHash })
 
 // --- Resumen ---
 async function summary(orgId: string, label: string): Promise<string> {
@@ -4212,9 +4220,5 @@ console.log(
   `gastos del mes (dental-smile): ${saasCost.pauses} pausas de Clío, ${saasCost.runs} respuestas de Sofi y ${saasCost.questions} preguntas a Argos con su costo`,
   `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress).map(([status, count]) => `${count} ${status}`).join(", ")}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
 )
-console.log(
-  PROD
-    ? `demo de producción: entra ${DEMO_OWNER_EMAIL} con su cuenta; el equipo de la demo no tiene acceso`
-    : "credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev",
-)
+console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev")
 process.exit(0)

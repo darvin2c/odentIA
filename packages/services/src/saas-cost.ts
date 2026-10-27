@@ -85,6 +85,8 @@ export interface ClinicCostMargin {
   currency: string
   planName: string | null
   founder: boolean
+  /** Una demo para presentar (ADR 0096): nunca se cobra. */
+  demo: boolean
   chargedCents: number
   aiMicros: number
   storageMicros: number
@@ -298,9 +300,10 @@ export async function getClinicCostMargin(
 ): Promise<ClinicCostMargin> {
   const { now, period, sub, plan, actions, usage, actionCost, bucket } = await loadClinicCostContext(tx, orgId, input)
   const subtotalMicros = actions.reduce((sum, row) => sum + netMicros(row), 0)
-  // Lo cobrado: la cuota y lo que pasó del crédito, sin impuesto. La prueba es de regalo.
+  // Lo cobrado: la cuota y lo que pasó del crédito, sin impuesto. La prueba es de
+  // regalo, y una demo nunca se factura (ADR 0096).
   const chargedCents =
-    period.credit === "prueba"
+    period.credit === "prueba" || sub?.isDemo
       ? 0
       : (plan?.priceCents ?? 0) + Math.max(0, microsToCents(subtotalMicros) - period.creditCents)
 
@@ -481,6 +484,7 @@ export async function getClinicCostMargin(
     currency: plan?.currency ?? "USD",
     planName: plan?.name ?? null,
     founder: founder || sub?.guaranteedUntil != null,
+    demo: sub?.isDemo ?? false,
     chargedCents,
     aiMicros,
     storageMicros,

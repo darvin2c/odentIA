@@ -59,6 +59,8 @@ const organizationQuery = pageQuery.extend({
   negotiated: z.enum(["1"]).optional(),
   /** Solo las clínicas de un producto (odentIA o latidIA). */
   product: z.enum(CLINICAL_PRODUCTS).optional(),
+  /** Reales o demos para presentar (ADR 0096). */
+  clase: z.enum(["real", "demo"]).optional(),
 })
 
 const userQuery = pageQuery.extend({
@@ -179,7 +181,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
         listOrganizations(
           tx,
           actor,
-          { q: parsed.data.q, limit: parsed.data.limit, offset: parsed.data.offset, negotiated: parsed.data.negotiated === "1", product: parsed.data.product },
+          { q: parsed.data.q, limit: parsed.data.limit, offset: parsed.data.offset, negotiated: parsed.data.negotiated === "1", product: parsed.data.product, kind: parsed.data.clase },
           loaders,
         ),
       ),

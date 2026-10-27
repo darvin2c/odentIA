@@ -37,6 +37,8 @@ export interface ClinicCostMargin {
   currency: string
   planName: string | null
   founder: boolean
+  /** Una demo para presentar: no se cobra. */
+  demo?: boolean
   chargedCents: number
   aiMicros: number
   storageMicros: number
