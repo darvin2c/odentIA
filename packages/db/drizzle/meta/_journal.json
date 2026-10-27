@@ -50,6 +50,13 @@
       "when": 1793076457931,
       "tag": "0006_promociones_uso_profesional",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793115986253,
+      "tag": "0007_indices_de_rendimiento",
+      "breakpoints": true
     }
   ]
 }
