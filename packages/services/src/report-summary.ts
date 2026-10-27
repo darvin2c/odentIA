@@ -188,7 +188,7 @@ export async function getReportProfessionals(tx: Db, orgId: string, query: Repor
       count(*) filter (where a.status = 'no_asistio')::int as "noShow",
       count(*)::int as total
     from appointment a join "user" u on u.id = a.professional_user_id
-    where a.organization_id = ${orgId} and a.starts_at >= ${at(window.start)} and a.starts_at < ${at(window.end)}
+    where a.organization_id = ${orgId} and not a.is_test and a.starts_at >= ${at(window.start)} and a.starts_at < ${at(window.end)}
       and (a.status in ('atendida','no_asistio','cancelada') or (a.status in ('programada','confirmada') and a.ends_at < ${at(now)}))
       ${branchId ? sql`and a.branch_id = ${branchId}` : sql``}
     group by a.professional_user_id, u.name`)

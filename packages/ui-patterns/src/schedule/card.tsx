@@ -87,6 +87,9 @@ export function ScheduleCard({
           "transition-shadow focus-visible:ring-2 focus-visible:ring-ring",
           statusSurfaceClass(state),
           entry.warning && "ring-2 ring-warning ring-inset",
+          // De prueba: rayada y con borde punteado, para que nadie la tome por una cita real.
+          entry.test &&
+            "border-[1.5px] border-dashed border-muted-foreground/60 bg-[repeating-linear-gradient(135deg,var(--color-background)_0_8px,var(--color-muted)_8px_16px)]",
           selected && "ring-2 ring-ring",
           draggable && "cursor-grab",
           dragging && "cursor-grabbing opacity-80 shadow-lg ring-2 ring-ring",
@@ -96,6 +99,7 @@ export function ScheduleCard({
           <>
             <span className="flex w-full items-center gap-1.5 text-[13px] leading-[17px] font-semibold">
               <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+              {entry.test ? <TestTag /> : null}
               {entry.warning ? (
                 <TriangleAlert aria-hidden className="size-3.5 shrink-0 text-warning" />
               ) : null}
@@ -110,6 +114,7 @@ export function ScheduleCard({
           <span className="flex w-full items-center gap-1.5 text-xs leading-4 font-semibold">
             <span className="shrink-0 tabular-nums">{startLabel}</span>
             <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+            {entry.test ? <TestTag /> : null}
             <StatusIcon status={state} className="size-3.5" />
           </span>
         )}
@@ -141,5 +146,14 @@ export function ScheduleCard({
         </>
       ) : null}
     </div>
+  )
+}
+
+/** «Prueba» junto al nombre: la cita salió de una prueba del agente. */
+function TestTag() {
+  return (
+    <span aria-hidden className="shrink-0 rounded-full bg-foreground px-1.5 text-[10px] leading-4 font-bold text-background">
+      Prueba
+    </span>
   )
 }

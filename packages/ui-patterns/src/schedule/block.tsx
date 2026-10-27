@@ -8,6 +8,6 @@ export function entryAccessibleName(
   timeZone: string,
   draggable: boolean,
 ): string {
-  const base = `Cita de ${entry.title}, ${timeRangeLabel(entry.start, entry.end, timeZone)}${entry.subtitle ? `, ${entry.subtitle}` : ""}. ${entryStateLabel(entry)}${entry.warning ? `. Atención: ${entry.warning}` : ""}`
+  const base = `${entry.test ? "Cita de prueba" : "Cita"} de ${entry.title}, ${timeRangeLabel(entry.start, entry.end, timeZone)}${entry.subtitle ? `, ${entry.subtitle}` : ""}. ${entryStateLabel(entry)}${entry.warning ? `. Atención: ${entry.warning}` : ""}`
   return draggable ? `${base}. Alt+Intro para moverla` : base
 }

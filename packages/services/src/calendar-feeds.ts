@@ -477,6 +477,8 @@ async function feedEvents(
         eq(appointment.organizationId, orgId),
         eq(appointment.professionalUserId, userId),
         ne(appointment.status, "cancelada"),
+        // Una cita de prueba no va al calendario del profesional (ADR 0094).
+        eq(appointment.isTest, false),
         gte(appointment.startsAt, from),
         lt(appointment.startsAt, to),
       ),

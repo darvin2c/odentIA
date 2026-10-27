@@ -47,6 +47,7 @@ import { FiliacionSectionDrawer } from "../patient/filiacion-section-drawer"
 import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
 import { useAppointmentArrival } from "./arrival"
+import { TestAppointmentDrawer } from "./test-appointment-drawer"
 import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
 import { useWhen, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
@@ -86,7 +87,25 @@ const STATUS_DONE: Record<AppointmentStatus, string> = {
  * («Atender», «Deshacer»), en atención (con quién y desde cuándo) y atendida
  * («Ver la atención»). «Atendida» no se pone a mano: la pone el cierre.
  */
-export function AppointmentDrawer({
+type AppointmentDrawerProps = React.ComponentProps<typeof RealAppointmentDrawer>
+
+/** La cita de prueba tiene su propio cajón (ADR 0094): nadie llega a ella ni se atiende. */
+export function AppointmentDrawer(props: AppointmentDrawerProps) {
+  if (props.appointment.test) {
+    return (
+      <TestAppointmentDrawer
+        appointment={props.appointment}
+        timeZone={props.timeZone}
+        today={props.today}
+        onClose={props.onClose}
+        onChanged={props.onChanged}
+      />
+    )
+  }
+  return <RealAppointmentDrawer {...props} />
+}
+
+function RealAppointmentDrawer({
   appointment,
   initialMode = "view",
   canWrite,

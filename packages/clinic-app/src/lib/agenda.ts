@@ -85,6 +85,11 @@ export interface AgendaAppointment {
   visit: AppointmentVisit
   /** La atención unida (abierta o firmada); null sin atención. */
   encounter: AppointmentEncounterRef | null
+  /**
+   * Cita de prueba (ADR 0094): de qué prueba salió, quién la hizo en «Probar»
+   * (nulo en la del chat web) y cuándo se borra sola. Null en una cita real.
+   */
+  test?: { conversationId: string | null; byUserId: string | null; byName: string | null; deletesAt: string | null } | null
 }
 
 /** El estado de cada momento como lo entiende la rejilla (`ScheduleState`). */

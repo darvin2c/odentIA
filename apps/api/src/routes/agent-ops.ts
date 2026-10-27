@@ -3,10 +3,12 @@ import {
   meterAiUse,
   type PlatformDecisions,
   type PlatformLlm,
-  simulateAgentSandbox,
   simulateAgentTurn,
+  TOOL_ACTION_LABEL,
 } from "@odentia/agent"
-import { type Db, withOrgContext } from "@odentia/db"
+import { buildWebchatInbound } from "@odentia/channels"
+import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
+import { inboundEvent } from "@odentia/db/schema/crm"
 import {
   assertAgentTestBudget,
   confirmProposalByContact,
@@ -14,7 +16,13 @@ import {
   createHandoff,
   operationBodySchema,
   createProposal,
+  deleteProbar,
+  deleteWebchatTest,
   executeProposal,
+  getProbar,
+  openProbar,
+  type ProbarState,
+  probarSession,
   getAgentPanelSummary,
   getAgentRunStats,
   getProposal,
@@ -24,7 +32,6 @@ import {
   listAnswerTraces,
   listAwaitingAnswer,
   listHandoffs,
-  noteSandboxTurn,
   claimHandoff,
   getCaseBrief,
   listProposals,
@@ -76,40 +83,15 @@ const decisionsQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 })
 
+const probarMessageInput = z.object({
+  text: z.string().trim().min(1).max(2000),
+  /** Lo genera la pantalla: reenviar el mismo mensaje no lo duplica. */
+  clientMessageId: z.string().uuid(),
+})
+
 const simulateInput = z.object({
   conversationId: z.string().uuid(),
   text: z.string().min(1).max(4000),
-})
-
-const sandboxProposal = z.object({
-  id: z.string().uuid(),
-  action: z.string().max(40),
-  label: z.string().max(80),
-  summary: z.string().max(300),
-  status: z.string().max(20),
-  detail: z.string().max(300).nullable(),
-  at: z.string().max(40),
-  expiresAt: z.string().max(40).nullable(),
-})
-
-/**
- * Conversación de prueba: el historial y el estado los trae quien prueba y
- * solo alimentan esa prueba; por eso van acotados, no porque se confíe en ellos.
- */
-const sandboxInput = z.object({
-  message: z.string().min(1).max(2000),
-  transcript: z
-    .array(z.object({ role: z.enum(["contact", "agent"]), text: z.string().max(4000) }))
-    .max(40)
-    .default([]),
-  state: z
-    .object({
-      pending: z.array(sandboxProposal).max(5),
-      recent: z.array(sandboxProposal).max(5),
-      notes: z.array(z.object({ text: z.string().max(300), at: z.string().max(40) })).max(12),
-      lookups: z.array(z.object({ tool: z.string().max(40), text: z.string().max(2100), at: z.string().max(40) })).max(5),
-    })
-    .optional(),
 })
 
   const app = new Hono()
@@ -379,33 +361,83 @@ const sandboxInput = z.object({
   })
 
   /**
-   * «Probar»: un turno de una conversación de prueba, sin hilo ni persona
-   * real. No envía ni escribe; cuenta que la clínica probó a su agente (si
-   * el modelo respondió) y lo que gastó, dentro del tope de pruebas (ADR 0031).
+   * «Probar» (ADR 0094): una conversación real con Sofi por el recorrido del
+   * chat web, con una persona de prueba. Cada turno sale de la misma corrida
+   * que una conversación real; lo que crea queda marcado «Prueba».
    */
-  app.post("/sandbox", async (c) => {
+  const probarView = (state: ProbarState) => ({
+    ...state,
+    turns: state.turns.map((turn) => ({
+      ...turn,
+      did: turn.toolsUsed.map((tool) => TOOL_ACTION_LABEL[tool]).filter((label): label is string => Boolean(label)),
+    })),
+  })
+
+  app.get("/probar", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
+    return runService(c, 200, async () => probarView(await withOrgContext(deps.db, orgId, (tx) => getProbar(tx, orgId, userId))))
+  })
+
+  /** «Empezar de nuevo»: borra la prueba anterior con lo que creó y abre otra. */
+  app.post("/probar", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
+    return runService(c, 201, async () =>
+      probarView(
+        await withOrgContext(deps.db, orgId, async (tx) => {
+          await openProbar(tx, orgId, userId, { secretsKey: deps.secretsKey })
+          return getProbar(tx, orgId, userId)
+        }),
+      ),
+    )
+  })
+
+  app.delete("/probar", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, async (tx) => ({ deleted: await deleteProbar(tx, orgId, userId) })))
+  })
+
+  /** «Borrar esta prueba» desde la cita de prueba de la Agenda: la de quien sea, con todo lo que creó. */
+  app.post("/probar/delete", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
-    const parsed = sandboxInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = z.object({ conversationId: z.string().uuid() }).strict().safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    try {
-      return await runService(c, 200, async () => {
-        await withOrgContext(deps.db, orgId, (tx) => assertAgentTestBudget(tx, orgId))
-        const result = await meterAiUse(deps.db, orgId, "probar", () =>
-          simulateAgentSandbox(
-            deps.db,
-            { secretsKey: deps.secretsKey, platform: deps.llm, decisions: deps.decisions, embedder: deps.embedder },
-            { orgId, ...parsed.data },
-          ),
-        )
-        // «Lo probaste» cuenta solo las pruebas que el modelo respondió.
-        if (result.modelAnswered) await withOrgContext(deps.db, orgId, (tx) => noteSandboxTurn(tx, orgId))
-        return result
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, async (tx) => ({ deleted: await deleteWebchatTest(tx, orgId, { conversationId: parsed.data.conversationId }) })),
+    )
+  })
+
+  /**
+   * Escribir como paciente: el mensaje entra como uno del chat web (la misma
+   * ingesta y la misma cola); el worker corre a Sofi como en cualquier canal.
+   */
+  app.post("/probar/messages", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
+    const parsed = probarMessageInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const ownerDb = deps.ownerDb
+    if (!ownerDb) return c.json(errorBody(c, "UNAVAILABLE", "Probar no está disponible"), 503)
+    return runService(c, 201, async () => {
+      const session = await withOrgContext(deps.db, orgId, async (tx) => {
+        await assertAgentTestBudget(tx, orgId)
+        const found = (await probarSession(tx, orgId, userId)) ?? (await openProbar(tx, orgId, userId, { secretsKey: deps.secretsKey }))
+        return { sessionId: found.sessionId, connectionId: found.connectionId }
       })
-    } catch (error) {
-      if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "agente")
-      throw error
-    }
+      const event = buildWebchatInbound(session.sessionId, { text: parsed.data.text, clientMessageId: parsed.data.clientMessageId })
+      await ownerDb.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(inboundEvent)
+          .values({ provider: "web_chat", externalEventId: event.externalEventId })
+          .onConflictDoNothing()
+          .returning({ id: inboundEvent.id })
+        if (inserted.length > 0) await sendInboundMessage(tx, { orgId, connectionId: session.connectionId, event })
+      })
+      return { queued: true }
+    })
   })
 
   app.post("/simulate", async (c) => {

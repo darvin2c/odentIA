@@ -36,6 +36,7 @@ import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./avai
 import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
+  patientIsTest,
   getAppointment,
   moveAppointment,
   setAppointmentStatus,
@@ -1052,6 +1053,8 @@ export interface FreeGapInput {
   professionalRef?: string
   roomId?: string
   serviceId?: string
+  /** Una conversación de prueba (ADR 0094): sus huecos descuentan también las otras pruebas. */
+  forTest?: boolean
 }
 
 export interface FreeGap {
@@ -1136,6 +1139,7 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
     perProfessionalPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
+    ...(input.forTest ? { forTest: true } : {}),
   })
   const shown = slots.slice(0, GAPS_SHOWN)
   const ids = [...new Set([...shown.map((s) => s.professionalUserId), ...(attending?.professionalUserIds ?? [])])]
@@ -2451,6 +2455,8 @@ async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, u
     branchId = room?.branchId ?? null
   }
   if (!branchId) return false
+  // La cita de una persona de prueba también choca con las otras pruebas (ADR 0094).
+  const forTest = typeof payload.patientId === "string" ? await patientIsTest(tx, orgId, payload.patientId) : false
   try {
     await validateAvailability(tx, orgId, {
       branchId,
@@ -2458,6 +2464,7 @@ async function proposedSlotFree(tx: Db, orgId: string, payload: Record<string, u
       roomId: payload.roomId,
       startsAt,
       endsAt,
+      forTest,
     })
     return true
   } catch (error) {
@@ -2633,20 +2640,17 @@ export async function executeProposal(
   if (locked.status !== "aprobada") {
     throw new ServiceError("PROPOSAL_NOT_APPROVED", 409, "La propuesta no está aprobada")
   }
-  // En una prueba del chat web Sofi responde de verdad (`enviar_mensaje`), pero
-  // no reserva, cambia ni anota nada en la clínica (fase 6 del pulido de la Bandeja).
+  // Una prueba ejecuta de verdad, como en real (ADR 0094): lo que cree es de su
+  // persona de prueba y queda marcado. Una prueba nunca toca a una persona real.
   if (locked.conversationId && locked.action !== "enviar_mensaje") {
     const [thread] = await tx
-      .select({ isTest: conversation.isTest })
+      .select({ isTest: conversation.isTest, personIsTest: contact.isTest })
       .from(conversation)
+      .innerJoin(contact, and(eq(contact.organizationId, conversation.organizationId), eq(contact.id, conversation.contactId)))
       .where(and(eq(conversation.id, locked.conversationId), eq(conversation.organizationId, orgId)))
       .limit(1)
-    if (thread?.isTest) {
-      throw new ServiceError(
-        "TEST_CONVERSATION",
-        409,
-        "Es una prueba del chat web: no se reserva, cambia ni anota nada de verdad. Díselo así: en la prueba no queda nada hecho.",
-      )
+    if (thread?.isTest && !thread.personIsTest) {
+      throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se reserva, cambia ni anota nada de verdad.")
     }
   }
   const action = locked.action as ProposalAction
@@ -3112,6 +3116,11 @@ async function enrichHandoffs(tx: Db, rows: HandoffRow[]): Promise<HandoffItem[]
   })
 }
 
+/** Un tema de una prueba de «Probar»: se sigue en su panel (ADR 0094). `h` es `agent_handoff` o su alias. */
+function probarHandoffSql(h: SQL): SQL {
+  return sql`exists (select 1 from conversation t_probar where t_probar.id = ${h}.conversation_id and t_probar.test_by_user_id is not null)`
+}
+
 /**
  * Casos que pasó el agente y siguen sin resolver. Con `forUserId`, el único
  * contador de la aplicación (el del menú del Agente): lo que nadie ha tomado
@@ -3121,7 +3130,7 @@ export async function countOpenHandoffs(tx: Db, orgId: string, opts: { forUserId
   const [row] = await tx.execute<{ count: number }>(sql`
     select count(*)::int as count
     from agent_handoff h
-    where h.organization_id = ${orgId} and ${handoffOpenSql(sql.raw("h"))}
+    where h.organization_id = ${orgId} and ${handoffOpenSql(sql.raw("h"))} and not ${probarHandoffSql(sql.raw("h"))}
       ${opts.forUserId ? sql`and (h.assignee_user_id is null or h.assignee_user_id = ${opts.forUserId})` : sql``}`)
   return row?.count ?? 0
 }
@@ -3605,6 +3614,8 @@ export async function listHandoffs(
 ): Promise<HandoffItem[]> {
   const conditions = [eq(agentHandoff.organizationId, orgId)]
   if (input.conversationId) conditions.push(eq(agentHandoff.conversationId, input.conversationId))
+  // Lo que pasa a una persona en «Probar» se ve en la prueba, no en «Te espera» (ADR 0094).
+  else conditions.push(sql`not ${probarHandoffSql(sql.raw('"agent_handoff"'))}`)
   if (input.only) {
     const either = [
       ...(input.only.assignee ? [eq(agentHandoff.assigneeUserId, input.only.assignee)] : []),
@@ -3732,6 +3743,7 @@ export async function claimHandoff(
     await createWorkspaceNotification(tx, orgId, {
       userId: before.assigneeUserId,
       dedupeKey: `tema:${claimed.id}:tomado:${target}`,
+      contactId: claimed.contactId,
       title: `${actor?.name ?? "Alguien"} tomó el tema de ${who}`,
       body: claimed.reason,
       href,
@@ -3743,6 +3755,7 @@ export async function claimHandoff(
     await createWorkspaceNotification(tx, orgId, {
       userId: target,
       dedupeKey: `tema:${claimed.id}:pasado:${target}`,
+      contactId: claimed.contactId,
       title: `${actor?.name ?? "Alguien"} te pasó el tema de ${who}`,
       body: claimed.reason,
       href,
@@ -3802,6 +3815,7 @@ export async function recordTopicAskedAgain(
     await upsertWorkspaceNotification(tx, orgId, {
       userId: row.assigneeUserId,
       dedupeKey: `tema:${row.id}:pregunta`,
+      contactId: row.contactId,
       title: `${who} volvió a preguntar por su tema`,
       body: row.reason,
       href: row.conversationId ? `/inbox?conversation=${row.conversationId}` : "/inbox",

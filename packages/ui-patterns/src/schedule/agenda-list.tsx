@@ -127,6 +127,7 @@ function AgendaRow({
           <span className="truncate text-[15px] font-semibold">{entry.title}</span>
         )}
         <span className="truncate text-[13px] text-muted-foreground">
+          {entry.test ? <span className="font-semibold text-foreground">Prueba · </span> : null}
           {entry.subtitle}
           <span className="sm:hidden">
             {entry.subtitle ? " · " : ""}

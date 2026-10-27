@@ -127,6 +127,7 @@ export function firstContactSql(orgId: string): SQL {
       left join patient_registration r on r.organization_id = p.organization_id and r.patient_id = p.id
       left join conversation rc on rc.organization_id = r.organization_id and rc.id = r.conversation_id
       where p.organization_id = ${orgId}
+        and not exists (select 1 from contact t where t.organization_id = p.organization_id and t.id = p.person_id and t.is_test)
     ), first_contact as (
       select g.person_id, g.patient_id, k.at as first_at, k.channel, g.writer_id
       from registered g

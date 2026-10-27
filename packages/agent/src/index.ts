@@ -39,16 +39,12 @@ export {
   type AgentRuntime,
   consumeAgentRun,
   processAgentRun,
-  EMPTY_SANDBOX_STATE,
   type LessonPreview,
-  type SandboxResult,
-  type SandboxTurn,
   previewLesson,
-  simulateAgentSandbox,
   simulateAgentTurn,
   type SimulationResult,
 } from "./run.js"
-export type { AgentSandboxState } from "./tools.js"
+export { TOOL_ACTION_LABEL } from "./tools.js"
 export {
   type ArgosAskResult,
   type ArgosClosest,

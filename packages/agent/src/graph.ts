@@ -64,14 +64,11 @@ import { channelFormatRule } from "./channel-format.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
-  type AgentSandbox,
   type AgentToolCtx,
   conversationChannel,
   makeAgentTools,
   noticeAfterHandoff,
   performHandoff,
-  SANDBOX_PATIENT_ID,
-  SANDBOX_PERSON,
   TOOL_SOURCES,
   agentTexts,
   roomWord,
@@ -307,7 +304,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     // odentIA está en español; quien escribe en otro idioma recibe la respuesta en el suyo (#48).
     `Respondes en el idioma en que te escribe la persona; si no se distingue, en español. Tono ${TONE_TEXT[cfg.tone]}.`,
     // Siempre con nombre: Sofi, o el que eligió la clínica (issue 183).
-    `Te presentas como ${cfg.personaName}, asistente virtual de la clínica.`,
+    // Solo una vez: con «Te presentas como…» empezaba cada respuesta con «Soy Sofi…».
+    `Te llamas ${cfg.personaName} y eres asistente virtual de la clínica. Te presentas así solo en tu primera respuesta de la conversación: si ya le respondiste antes, no vuelvas a presentarte ni a saludar; ve directo a lo que pide.`,
     cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
     EMOJI_TEXT[cfg.emojis],
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
@@ -329,7 +327,7 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     on("seguimiento")
       ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
       : whenOff("seguimiento"),
-    "Si el interlocutor pide hablar con un humano, se queja, tiene una urgencia o el caso es clínico, usa request_human_handoff con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá y cuándo le responde; no uses send_reply para ese aviso. No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo»).",
+    "Si el interlocutor cuenta un síntoma para pedir una cita, un precio o un horario, no es un caso clínico: ofrécele la cita sin diagnosticar ni opinar sobre lo que siente. Si pide hablar con un humano, se queja, tiene una urgencia o pide un consejo clínico (qué tomar, si es grave, qué hacer), usa request_human_handoff con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá y cuándo le responde; no uses send_reply para ese aviso. No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo»).",
     "Ante una urgencia (dolor fuerte, sangrado, hinchazón, fiebre, un golpe), además de pasar el tema con prioridad alta, dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica. Solo si su vida puede estar en peligro (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar), dile primero que llame ahora al número de emergencias del país que figura ahí o que vaya a la emergencia más cercana. El vencimiento de una tarea es un plazo interno del equipo: no lo digas como hora de respuesta.",
     // Lo del producto (odentIA: la tomografía llega en CD, USB o ZIP).
     ...texts.receptionRules,
@@ -337,7 +335,7 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     ...notes,
     // Con Agendar apagado no hay huecos ni propuestas de cita: la cita la elige la persona en su enlace.
     on("agendar")
-      ? "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si el «Estado del caso» no muestra una propuesta pendiente, no hay propuesta que confirmar con confirmar_propuesta."
+      ? "Una cita solo existe si la propusiste con proponer_cita (o la moviste o cancelaste con su herramienta) y la persona la confirmó con confirmar_propuesta. Nunca digas que propusiste, reservaste, agendaste o que «se gestionará» una cita sin haber usado esas herramientas: para pedir el sí, primero llama a proponer_cita con un hueco que devolvió buscar_huecos; si la hora que pide no estaba entre los huecos, búscala antes. Si la persona acepta lo que le ofreciste (por ejemplo «ok, con el doctor»), propone exactamente ese hueco: la misma hora, sede y profesional que le dijiste; si con esa persona le ofreciste más de una hora, pregúntale cuál. Si el «Estado del caso» no muestra una propuesta pendiente, no hay propuesta que confirmar con confirmar_propuesta."
       : "Nunca digas que reservaste, agendaste o que «se gestionará» una cita: por aquí no reservas.",
     has("confirmar_cita")
       ? "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál."
@@ -464,6 +462,8 @@ function lookupDetail(tool: string, text: string): string | undefined {
 export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, toolCtx: AgentToolCtx) {
   const tools = makeAgentTools(toolCtx)
   const available = new Set(tools.map((item) => item.name))
+  /** Lo que devolvió en esta corrida cada herramienta que el caso recuerda, en orden. */
+  const consulted = new Map<string, string[]>()
   // Con camino elegido, al modelo se le enseñan solo las herramientas de ese
   // camino más la que le devuelve el resto. La ejecución admite todas: esto
   // acota lo que se envía en cada llamada, no lo que el agente puede hacer.
@@ -706,34 +706,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   }
 
   /**
-   * Hilo de una conversación de prueba: una persona ficticia vinculada a sí
-   * misma, el historial que trae quien prueba y el estado que dejaron los
-   * turnos anteriores de la misma prueba. No lee ni escribe nada del hilo.
-   */
-  function sandboxThread(sandbox: AgentSandbox, zone: OrgLocale): ThreadContext {
-    const at = new Date().toISOString()
-    toolCtx.casePending = sandbox.state.pending.length > 0
-    return {
-      contactBlock: [
-        `Interlocutor: ${SANDBOX_PERSON}. Etiquetas: sin etiquetas. Oportunidades abiertas: sin oportunidades abiertas. Seguimientos: sin seguimientos pendientes.`,
-        `Pacientes vinculados a este interlocutor: ${SANDBOX_PERSON} (id ${SANDBOX_PATIENT_ID}, vínculo: self). Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente.`,
-      ].join("\n\n"),
-      crossBlock: null,
-      caseBlock: formatAgentCaseForPrompt(
-        { ...sandbox.state, totalMessages: sandbox.transcript.length },
-        zone,
-        HISTORY_LIMIT,
-      ),
-      items: sandbox.transcript.slice(-HISTORY_LIMIT).map((turn) => ({
-        direction: turn.role === "contact" ? "in" : "out",
-        senderKind: turn.role === "contact" ? "contact" : "agent",
-        body: turn.text,
-        createdAt: at,
-      })),
-    }
-  }
-
-  /**
    * Citas, presupuestos y saldo del paciente del interlocutor, traídos por el
    * código cuando el camino es cambiar una cita. Usa la misma herramienta que
    * usaría el modelo, con su misma autorización, y solo cuando hay un único
@@ -743,7 +715,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const name = "ver_resumen_paciente"
     const summary = tools.find((item) => item.name === name)
     const source = TOOL_SOURCES[name]
-    if (!summary || !source || toolCtx.sandbox) return null
+    if (!summary || !source) return null
     try {
       const linked = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
         listAgentContextCandidates(tx, toolCtx.orgId, toolCtx.contactId),
@@ -760,9 +732,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
 
   async function loadContext(): Promise<{ messages: BaseMessage[] }> {
     const zone = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getOrgLocale(tx, toolCtx.orgId))
-    const { contactBlock, crossBlock, caseBlock, items } = toolCtx.sandbox
-      ? sandboxThread(toolCtx.sandbox, zone)
-      : await readThread(zone)
+    const { contactBlock, crossBlock, caseBlock, items } = await readThread(zone)
     const draft = toolCtx.draftText?.trim().slice(0, 4000)
     const latestInbound = draft ?? [...items].reverse().find((item) => item.direction === "in")?.body ?? null
     toolCtx.lastInboundText = latestInbound ?? undefined
@@ -796,7 +766,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       },
     )
     // Un uso cuenta cuando la lección toca el tema del mensaje; una prueba no cuenta.
-    if (!toolCtx.dryRun && lessons.matchedIds.length > 0) {
+    if (!toolCtx.dryRun && !toolCtx.testConversation && lessons.matchedIds.length > 0) {
       await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
         noteLessonUse(tx, toolCtx.orgId, { lessonIds: lessons.matchedIds }),
       ).catch(() => undefined)
@@ -966,7 +936,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   /**
    * Lo que devolvió cada herramienta de lectura pasa a ser fuente de la
    * respuesta (para comprobarla y para su traza) y, en las que conviene
-   * recordar, la última consulta queda en la memoria del caso.
+   * recordar, lo consultado en la última corrida queda en la memoria del caso.
    */
   async function recordLookups(calls: { id?: string; name: string }[], produced: BaseMessage[]): Promise<void> {
     for (const produced_ of produced) {
@@ -982,14 +952,14 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
         const detail = lookupDetail(name, text)
         toolCtx.basis.push({ kind: source.kind, label: source.label, ...(detail ? { detail } : {}) })
       }
-      if (toolCtx.sandbox && (CASE_LOOKUP_TOOLS as readonly string[]).includes(name)) {
-        // En una prueba la consulta se recuerda dentro de la propia prueba.
-        const state = toolCtx.sandbox.state
-        state.lookups = [...state.lookups.filter((item) => item.tool !== name), { tool: name, text: text.slice(0, 2000), at: new Date().toISOString() }]
-      }
-      if (!toolCtx.dryRun && (CASE_LOOKUP_TOOLS as readonly string[]).includes(name)) {
+      if (!(CASE_LOOKUP_TOOLS as readonly string[]).includes(name)) continue
+      // Lo consultado en esta corrida se recuerda junto: los huecos de la
+      // segunda sede no borran los de la primera, que ya se le ofrecieron.
+      const remembered = [...(consulted.get(name) ?? []), text]
+      consulted.set(name, remembered)
+      if (!toolCtx.dryRun) {
         await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
-          recordAgentCaseLookup(tx, toolCtx.orgId, toolCtx.conversationId, { tool: name, text }),
+          recordAgentCaseLookup(tx, toolCtx.orgId, toolCtx.conversationId, { tool: name, text: remembered.join("\n") }),
         ).catch(() => {})
       }
     }

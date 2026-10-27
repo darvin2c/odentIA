@@ -820,6 +820,24 @@ export interface EnqueueInput {
 }
 
 /**
+ * Lo de una persona de prueba no sale hacia afuera (ADR 0094): ni recordatorios,
+ * ni avisos, ni seguimientos. Es el único filtro de todas las líneas: cada una
+ * anota sus casos con `enqueueJob`.
+ */
+async function jobForTestPerson(tx: Db, orgId: string, input: EnqueueInput): Promise<boolean> {
+  if (!input.contactId && !input.appointmentId && !input.patientId && !input.opportunityId && !input.budgetId) return false
+  const rows = (await tx.execute(sql`select (
+       exists (select 1 from contact c where c.organization_id = ${orgId} and c.id = ${input.contactId ?? null}::uuid and c.is_test)
+    or exists (select 1 from appointment a where a.organization_id = ${orgId} and a.id = ${input.appointmentId ?? null}::uuid and a.is_test)
+    or exists (select 1 from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
+               where p.organization_id = ${orgId} and p.id = ${input.patientId ?? null}::uuid and pp.is_test)
+    or exists (select 1 from opportunity o join contact oc on oc.organization_id = o.organization_id and oc.id = o.contact_id
+               where o.organization_id = ${orgId} and o.id = ${input.opportunityId ?? null}::uuid and oc.is_test)
+  ) as test`)) as unknown as Array<{ test: boolean }>
+  return rows[0]?.test === true
+}
+
+/**
  * Anota un caso de una línea; el unique (org, dedupe_key) evita duplicados
  * aunque el tick o el evento se repitan. Devuelve null si ya existía.
  */
@@ -829,6 +847,7 @@ export async function enqueueJob(
   input: EnqueueInput,
 ): Promise<JobRow | null> {
   assertJobKind(input.kind)
+  if (await jobForTestPerson(tx, orgId, input)) return null
   const [row] = await tx
     .insert(automationJob)
     .values({

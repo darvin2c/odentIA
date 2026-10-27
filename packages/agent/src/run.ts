@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto"
 import type { Callbacks } from "@langchain/core/callbacks/manager"
 import { AIMessage, type BaseMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
+import { buildWebchatInbound, webChatAdapter } from "@odentia/channels"
 import { type AgentRunJob, type Db, type QueueMessage, sendAgentRun, withOrgContext } from "@odentia/db"
 import { agentRunLedger, type AnswerBasisItem, type AnswerCheck } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
@@ -34,6 +36,10 @@ import {
   recordAgentRun,
   type SearchEmbedder,
   type Storage,
+  createTestConversation,
+  noteSandboxTurn,
+  ingestInbound,
+  LESSON_PERSON_NAME,
   reportAgentNoReply,
   sendOutbound,
   answerToTeamMember,
@@ -46,8 +52,8 @@ import {
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
-import { BURST_HORIZON_MS, triageState } from "./decision/points.js"
-import { offTopicReply, readRoute, ROUTE_SPAM, routeHandoff, routeQuestions } from "./decision/route.js"
+import { BURST_HORIZON_MS } from "./decision/points.js"
+import { offTopicReply, ROUTE_SPAM, routeHandoff } from "./decision/route.js"
 import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watchDecisionKey } from "./decision/outage.js"
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
@@ -65,15 +71,11 @@ import {
   resolveLlmSpec,
 } from "./llm.js"
 import {
-  type AgentSandboxState,
   type AgentToolCtx,
   type LessonOverrides,
   makeAgentTools,
   noticeAfterHandoff,
   performHandoff,
-  SANDBOX_NIL_ID,
-  TOOL_ACTION_LABEL,
-  agentTexts,
 } from "./tools.js"
 export interface AgentRuntime {
   /** Cuenta de odentIA en el proveedor del modelo; la organización no elige ni trae la suya. */
@@ -108,6 +110,11 @@ export interface AgentRuntime {
   callbacks?: Callbacks
   /** Reloj de la corrida (pruebas); sin él, la hora real. */
   now?: () => Date
+  /**
+   * «Probar una lección» (ADR 0094): la corrida real de una conversación de
+   * prueba, con la lección como si estuviera publicada o sin ella.
+   */
+  lessonOverrides?: LessonOverrides
 }
 
 /** Problema del proveedor que no se arregla reintentando. */
@@ -179,6 +186,7 @@ function baseToolCtx(
     triggerId?: string | null
     excludedTools?: readonly string[]
     texts?: ProductAgentTexts
+    testConversation?: boolean
   } = {},
 ): AgentToolCtx {
   return {
@@ -192,6 +200,7 @@ function baseToolCtx(
     handedOff: false,
     replySettled: false,
     dryRun: false,
+    ...(options.testConversation ? { testConversation: true } : {}),
     ...(options.excludedTools?.length ? { excludedTools: options.excludedTools } : {}),
     toolsUsed: [],
     usage: {
@@ -235,10 +244,14 @@ export async function processAgentRun(
   // Una prueba del chat web (fase 6 del pulido) gasta como «probar», con su
   // tope de 30 días: pasado el tope, Sofi no responde la prueba.
   const test = await withOrgContext(db, orgId, async (tx) => {
-    const [thread] = await tx.select({ isTest: conversation.isTest }).from(conversation).where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId))).limit(1)
+    const [thread] = await tx
+      .select({ isTest: conversation.isTest, probar: conversation.testByUserId })
+      .from(conversation)
+      .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+      .limit(1)
     if (!thread?.isTest) return false
     await assertAgentTestBudget(tx, orgId)
-    return true
+    return { probar: thread.probar !== null }
   }).catch((error: unknown) => {
     if (error instanceof ServiceError && error.code === "AGENT_TEST_LIMIT") return null
     throw error
@@ -246,7 +259,21 @@ export async function processAgentRun(
   if (test === null) return "done"
   // Todo lo que la corrida gasta en IA queda con origen `recepcion` (ADR 0031),
   // también si falla o se reintenta.
-  return meterAiUse(db, orgId, test ? "probar" : "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+  const verdict = await meterAiUse(db, orgId, test ? "probar" : "recepcion", () => attendAgentRun(db, runtime, msg), conversationId)
+  // «Lo probaste» de la puesta en marcha cuenta solo lo que Sofi respondió en «Probar»
+  // (ADR 0094): no la prueba del chat web ni «Probar una lección».
+  if (test && test.probar && !runtime.lessonOverrides) {
+    await withOrgContext(db, orgId, async (tx) => {
+      const [run] = await tx
+        .select({ status: agentRunLedger.status })
+        .from(agentRunLedger)
+        .where(and(eq(agentRunLedger.organizationId, orgId), eq(agentRunLedger.conversationId, conversationId), eq(agentRunLedger.triggerMessageId, msg.message.messageId)))
+        .orderBy(desc(agentRunLedger.startedAt))
+        .limit(1)
+      if (run?.status === "ok") await noteSandboxTurn(tx, orgId)
+    }).catch(() => undefined)
+  }
+  return verdict
 }
 
 async function attendAgentRun(
@@ -324,7 +351,8 @@ async function attendAgentRun(
         return { skip: { reason: "agent-off", model: effectiveModel } }
       }
       const cfg = await getAgentConfig(tx, orgId)
-      if (!cfg.enabled) return { skip: { reason: "agent-disabled", model: effectiveModel } }
+      // Una prueba responde aunque Sofi esté apagada: se prueba antes de encenderla (ADR 0094).
+      if (!cfg.enabled && !conv.isTest) return { skip: { reason: "agent-disabled", model: effectiveModel } }
       // Sofi responde siempre, a toda hora y en todos los canales (ADR 0084): no
       // hay horario ni canales que la hagan esperar.
       const now = clock()
@@ -473,6 +501,7 @@ async function attendAgentRun(
       return {
         toolCtx: baseToolCtx(db, orgId, conversationId, conv.contactId, runtime.secretsKey, {
           triggerId: latestId,
+          testConversation: conv.isTest,
           excludedTools: await orgToolExclusions(tx, orgId, cfg),
           texts,
         }),
@@ -530,6 +559,7 @@ async function attendAgentRun(
     if (runtime.publicUrl) toolCtx.publicUrl = runtime.publicUrl
     if (runtime.embedder) toolCtx.embedder = runtime.embedder
     if (runtime.storage) toolCtx.storage = runtime.storage
+    if (runtime.lessonOverrides) toolCtx.lessonOverrides = runtime.lessonOverrides
     runUsage = toolCtx.usage
     // Dinero (ADR 0031 y 0085): ningún agente se calla por un tope; el único
     // límite es el presupuesto del mes que fija la clínica. Sin saldo de prueba
@@ -1058,161 +1088,6 @@ export async function simulateAgentTurn(
   }
 }
 
-export interface SandboxTurn {
-  role: "contact" | "agent"
-  text: string
-}
-
-export interface SandboxResult extends SimulationResult {
-  /**
-   * El modelo que escribe contestó en este turno. Los caminos que no lo llaman
-   * (texto fijo, derivar sin redactar) no cuentan: «Lo probaste» solo suma
-   * las pruebas que el modelo respondió.
-   */
-  modelAnswered: boolean
-  /** Lo que hizo en este turno, dicho para quien prueba. */
-  did: string[]
-  /** Lo que queda esperando tras este turno y quién lo decide. */
-  waiting: string[]
-  /** Estado de la prueba: se devuelve tal cual en el turno siguiente. */
-  state: AgentSandboxState
-}
-
-export const EMPTY_SANDBOX_STATE: AgentSandboxState = { pending: [], recent: [], notes: [], lookups: [] }
-
-/**
- * Un turno de una conversación de prueba: escribes como si fueras un paciente
- * y el agente responde con el modelo, las funciones, la base y el conocimiento
- * vigentes. No hay hilo ni persona real: el historial y lo que el agente dejó
- * pendiente viajan con la propia prueba, así se puede seguir varios turnos
- * (proponer una cita y confirmarla con un «sí»). No envía, no escribe en la
- * base y no deja rastro en el libro. Las lecturas (sedes, tarifas, agenda,
- * conocimiento) sí son las reales de la clínica.
- */
-export async function simulateAgentSandbox(
-  db: Db,
-  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel" | "embedder">,
-  input: {
-    orgId: string
-    transcript: SandboxTurn[]
-    message: string
-    state?: AgentSandboxState
-    /** Probar con una lección aún sin aprobar, o sin una activa. */
-    lessonOverrides?: LessonOverrides
-  },
-): Promise<SandboxResult> {
-  const { orgId } = input
-  const text = input.message.trim()
-  if (!text) throw new Error("El mensaje de prueba es obligatorio")
-  const startedAt = Date.now()
-  const { cfg, spec, excludedTools } = await withOrgContext(db, orgId, async (tx) => {
-    const cfg = await getAgentConfig(tx, orgId)
-    return {
-      cfg,
-      spec: resolveLlmSpec(deps.platform),
-      excludedTools: await orgToolExclusions(tx, orgId, cfg),
-    }
-  })
-  const toolCtx = baseToolCtx(db, orgId, SANDBOX_NIL_ID, SANDBOX_NIL_ID, deps.secretsKey, {
-    excludedTools,
-    texts: await withOrgContext(db, orgId, (tx) => productAgentTexts(tx, orgId)),
-  })
-  toolCtx.dryRun = true
-  toolCtx.verifyReplies = cfg.replyCheckEnabled
-  toolCtx.emojis = cfg.emojis
-  toolCtx.modelName = spec.modelName
-  toolCtx.modelProvider = spec.provider
-  toolCtx.draftText = text.slice(0, 4000)
-  if (deps.embedder) toolCtx.embedder = deps.embedder
-  const state = structuredClone(input.state ?? EMPTY_SANDBOX_STATE)
-  toolCtx.sandbox = { transcript: input.transcript.slice(-40), state }
-  if (input.lessonOverrides) toolCtx.lessonOverrides = input.lessonOverrides
-  if (cfg.decisionProvider !== "none") {
-    try {
-      toolCtx.decision = deps.createDecisionModel
-        ? deps.createDecisionModel(cfg.decisionProvider)
-        : await createDecisionModel(cfg.decisionProvider, deps.decisions ?? {}, spec)
-    } catch {
-      // Sin credenciales de plataforma la prueba sigue por el camino sin modelo de decisión.
-      toolCtx.decision = null
-    }
-  }
-  if (toolCtx.decision && cfg.decisionRoutingEnabled) {
-    try {
-      const said = toolCtx.sandbox.transcript.filter((turn) => turn.role === "contact")
-      toolCtx.route = readRoute(
-        await toolCtx.decision.decide(
-          triageState(said.map((turn) => ({ direction: "in" as const, body: turn.text })), text),
-          routeQuestions(agentTexts(toolCtx)),
-        ),
-      )
-    } catch {
-      // Sin camino la prueba sigue como un turno abierto.
-      toolCtx.route = null
-    }
-  }
-  if (toolCtx.route?.path === "fuera_de_tema") {
-    const clinic = await publicClinicName(db, orgId)
-    return {
-      reply: offTopicReply(cfg.treatment, cfg.personaName, clinic, !cfg.disabledFunctions.includes("informar")),
-      replied: true,
-      toolsUsed: [],
-      handedOff: false,
-      basis: [],
-      checks: [],
-      did: ["Respondió con el texto fijo para lo que no es de la clínica, sin llamar al modelo que escribe."],
-      modelAnswered: false,
-      waiting: [],
-      state,
-      inputTokens: null,
-      outputTokens: null,
-      model: spec.modelName,
-      latencyMs: Date.now() - startedAt,
-    }
-  }
-  if (toolCtx.route?.path === "derivar") {
-    return {
-      reply: "(No respondería: pasa el caso a una persona de tu equipo.)",
-      replied: false,
-      toolsUsed: [],
-      handedOff: true,
-      basis: [],
-      checks: [],
-      did: ["Pasó el caso a una persona sin redactar respuesta: el mensaje lo pide o no le corresponde atenderlo."],
-      modelAnswered: false,
-      waiting: [],
-      state,
-      inputTokens: null,
-      outputTokens: null,
-      model: spec.modelName,
-      latencyMs: Date.now() - startedAt,
-    }
-  }
-  const model = deps.createModel ? await deps.createModel(spec) : await createConfiguredChatModel(spec)
-  const graph = compileAgentGraph(model, toolCtx)
-  const result = (await graph.invoke({ messages: [], turnCount: 0 })) as { messages: BaseMessage[] }
-  const replies = result.messages.filter((m) => m instanceof AIMessage)
-  const last = replies[replies.length - 1]
-  // Lo único que queda pendiente es lo que confirma el paciente (ADR 0023).
-  const waiting = state.pending.map((item) => `${item.label} (${item.summary}): espera el sí del paciente.`)
-  return {
-    reply: toolCtx.simulatedReply ?? ((last ? messageText(last) : "") || "(sin respuesta)"),
-    replied: toolCtx.replySettled,
-    toolsUsed: toolCtx.toolsUsed,
-    handedOff: toolCtx.handedOff,
-    basis: toolCtx.basis ?? [],
-    checks: toolCtx.lastChecks ?? [],
-    did: toolCtx.toolsUsed.map((name) => TOOL_ACTION_LABEL[name]).filter((label): label is string => Boolean(label)),
-    modelAnswered: replies.length > 0,
-    waiting,
-    state,
-    inputTokens: toolCtx.usage.reported ? toolCtx.usage.inputTokens : null,
-    outputTokens: toolCtx.usage.reported ? toolCtx.usage.outputTokens : null,
-    model: spec.modelName,
-    latencyMs: Date.now() - startedAt,
-  }
-}
-
 export interface LessonPreviewCase {
   question: string
   /** Lo que una persona dio por bueno para esa pregunta, si es un caso de prueba. */
@@ -1246,8 +1121,8 @@ const sameReply = (a: string, b: string) =>
  */
 export async function previewLesson(
   db: Db,
-  deps: Pick<AgentRuntime, "platform" | "secretsKey" | "createModel" | "decisions" | "createDecisionModel">,
-  input: { orgId: string; lessonId: string },
+  deps: AgentRuntime,
+  input: { orgId: string; userId: string; lessonId: string },
 ): Promise<LessonPreview> {
   const { orgId } = input
   const { lesson, impact } = await withOrgContext(db, orgId, async (tx) => {
@@ -1279,11 +1154,10 @@ export async function previewLesson(
   const cases: LessonPreviewCase[] = []
   let model = ""
   for (const item of questions) {
-    const run = (lessonOverrides: LessonOverrides) =>
-      simulateAgentSandbox(db, deps, { orgId, transcript: [], message: item.question, lessonOverrides })
+    const run = (lessonOverrides: LessonOverrides) => answerInTestConversation(db, { ...deps, lessonOverrides }, { orgId, userId: input.userId, text: item.question })
     const before = await run(without)
     const after = await run(withIt)
-    model = after.model
+    model = after.model || before.model
     // «Hoy» es sin la lección si aún no se aprobó, y con ella si ya está activa.
     const today = lesson.status === "propuesta" ? before.reply : after.reply
     const changed = lesson.status === "propuesta" ? after.reply : before.reply
@@ -1291,6 +1165,63 @@ export async function previewLesson(
   }
   return { cases, total: impact.total, touched: impact.touched.length, model }
 }
+
+/** Lo que recibe el paciente cuando el agente no le escribe nada y pasa el caso. */
+const HANDED_OFF_REPLY = "(No respondió: pasó el caso a una persona)"
+
+/**
+ * Una pregunta en una conversación de prueba recién abierta (ADR 0094): entra
+ * como un mensaje del chat web y la responde la corrida real, en el acto. Lo
+ * que respondió se lee y la conversación se borra con todo lo que dejó.
+ */
+async function answerInTestConversation(
+  db: Db,
+  runtime: AgentRuntime,
+  input: { orgId: string; userId: string; text: string },
+): Promise<{ reply: string; model: string }> {
+  const { orgId } = input
+  const opened = await withOrgContext(db, orgId, (tx) =>
+    createTestConversation(tx, orgId, input.userId, { secretsKey: runtime.secretsKey, personName: LESSON_PERSON_NAME }),
+  )
+  try {
+    const event = buildWebchatInbound(opened.sessionId, { text: input.text, clientMessageId: randomUUID() })
+    const ingested = await withOrgContext(db, orgId, (tx) =>
+      ingestInbound(tx, { orgId, connectionId: opened.connectionId, event }, webChatAdapter, {
+        storage: runtime.storage ?? NO_STORAGE,
+        fetch,
+        secretsKey: runtime.secretsKey,
+      }),
+    )
+    await processAgentRun(db, { ...runtime, burst: undefined }, {
+      msg_id: 0,
+      read_ct: 0,
+      message: { kind: "inbound_message", orgId, conversationId: ingested.conversationId, messageId: ingested.messageId },
+    })
+    return await withOrgContext(db, orgId, async (tx) => {
+      const out = await tx
+        .select({ body: message.body })
+        .from(message)
+        .where(and(eq(message.organizationId, orgId), eq(message.conversationId, ingested.conversationId), eq(message.direction, "out")))
+        .orderBy(message.createdAt)
+      const [run] = await tx
+        .select({ model: agentRunLedger.model })
+        .from(agentRunLedger)
+        .where(and(eq(agentRunLedger.organizationId, orgId), eq(agentRunLedger.conversationId, ingested.conversationId)))
+        .limit(1)
+      const reply = out.map((row) => row.body?.trim() ?? "").filter(Boolean).join("\n\n")
+      return { reply: reply || HANDED_OFF_REPLY, model: run?.model ?? "" }
+    })
+  } finally {
+    await withOrgContext(db, orgId, (tx) => tx.execute(sql`select public.delete_webchat_test(${opened.conversationId}::uuid)`))
+  }
+}
+
+/** Un mensaje de texto no guarda adjuntos: el almacén no se usa. */
+const NO_STORAGE = new Proxy({} as Storage, {
+  get() {
+    throw new Error("Una conversación de prueba no guarda adjuntos")
+  },
+})
 
 /** La corrida no dejó respuesta pero el hilo ya la tenía (reentrega): no se pide un momento. */
 class SkipMoment extends Error {}

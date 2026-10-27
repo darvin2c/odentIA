@@ -52,17 +52,30 @@ import { findOrgCountry, NEUTRAL_TIMEZONE } from "./locale.js"
 const PAGE_DEFAULT = 30
 
 /** Upsert atómico del correlativo de historia clínica por organización. */
-export async function nextPatientNumber(tx: Db, orgId: string): Promise<number> {
+export async function nextPatientNumber(tx: Db, orgId: string, options: { test?: boolean } = {}): Promise<number> {
+  // La ficha de una persona de prueba no gasta un número de historia (ADR 0094):
+  // lleva el suyo, negativo, de otro contador.
+  const key = options.test ? "patient_test" : "patient"
   const [row] = await tx
     .insert(orgCounter)
-    .values({ organizationId: orgId, key: "patient", value: 1 })
+    .values({ organizationId: orgId, key, value: 1 })
     .onConflictDoUpdate({
       target: [orgCounter.organizationId, orgCounter.key],
       set: { value: sql`"org_counter"."value" + 1` },
     })
     .returning({ value: orgCounter.value })
   if (!row) throw new Error("No se pudo generar el número de historia clínica")
-  return row.value
+  return options.test ? -row.value : row.value
+}
+
+/** Persona de prueba (ADR 0094): nace así y no cambia. */
+export async function personIsTest(tx: Db, orgId: string, personId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ isTest: contact.isTest })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
+    .limit(1)
+  return row?.isTest ?? false
 }
 
 function conflict(code: string, message: string): ServiceError {
@@ -395,7 +408,7 @@ export async function createPatient(
     }
     const [row] = await tx.insert(patient).values({
       ...(record as Partial<typeof patient.$inferInsert>),
-      organizationId: orgId, personId, patientNumber: await nextPatientNumber(tx, orgId),
+      organizationId: orgId, personId, patientNumber: await nextPatientNumber(tx, orgId, { test: await personIsTest(tx, orgId, personId) }),
       registeredBranchId: registeredBranchId || null,
     }).returning({ id: patient.id, patientNumber: patient.patientNumber })
     if (!row) throw new Error("No se pudo crear el paciente")
@@ -672,8 +685,8 @@ export async function listPatients(
       }),
     )
   if (input.isActive !== undefined) conditions.push(eq(contact.isActive, input.isActive))
-  // Una historia bloqueada no sale en ninguna lista (ADR 0080).
-  conditions.push(isNull(contact.recordLockedAt))
+  // Una historia bloqueada no sale en ninguna lista (ADR 0080), ni una de prueba (ADR 0094).
+  conditions.push(isNull(contact.recordLockedAt), eq(contact.isTest, false))
   if (input.sex) conditions.push(eq(contact.sex, input.sex))
   if (input.docType) conditions.push(eq(contact.docType, input.docType))
   if (input.cursor) {

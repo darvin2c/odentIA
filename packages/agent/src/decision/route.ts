@@ -13,7 +13,7 @@ import { answerOf, type DecisionQuestion, type DecisionResult } from "./port.js"
  * probabilidades no hay certeza y el turno sigue por el camino abierto de
  * siempre. Versionado: cambiar preguntas u opciones invalida lo medido.
  */
-export const ROUTE_VERSION = "route.v4"
+export const ROUTE_VERSION = "route.v5"
 export const routeQuestions = (texts: ProductAgentTexts): DecisionQuestion[] => triageQuestions(texts)
 /** Desde aquí se pasa el caso a una persona sin llamar al modelo que escribe. Punto de partida, por medir. */
 export const ROUTE_HANDOFF = 0.85
