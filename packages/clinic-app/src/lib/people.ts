@@ -207,6 +207,30 @@ export function fetchPersonOfPatient(patientId: string): Promise<{ data: { perso
   )
 }
 
+/**
+ * En el navegador, la persona de cada paciente ya buscada (5 minutos): la ficha
+ * vieja (`/patients/…`) salta a la de la persona sin otro viaje, y al acercar el
+ * puntero a un enlace la búsqueda ya queda hecha. En SSR no se guarda nada.
+ */
+const PERSON_OF_PATIENT_MS = 5 * 60_000
+const personOfPatient = new Map<string, { at: number; personId: Promise<string> }>()
+
+export function personIdOfPatient(patientId: string): Promise<string> {
+  const read = () => fetchPersonOfPatient(patientId).then(({ data }) => data.personId)
+  if (typeof window === "undefined") return read()
+  const known = personOfPatient.get(patientId)
+  if (known && Date.now() - known.at < PERSON_OF_PATIENT_MS) return known.personId
+  const personId = read()
+  personOfPatient.set(patientId, { at: Date.now(), personId })
+  personId.catch(() => personOfPatient.delete(patientId))
+  return personId
+}
+
+/** La página de la persona ya sabe quién es su paciente: lo deja anotado. */
+export function rememberPersonOfPatient(patientId: string, personId: string): void {
+  if (typeof window !== "undefined") personOfPatient.set(patientId, { at: Date.now(), personId: Promise.resolve(personId) })
+}
+
 /** Palabras de la relación con la que una persona está vinculada a un paciente. */
 export const RELATIONSHIP_WORDS: Record<string, string> = {
   self: "la propia persona",

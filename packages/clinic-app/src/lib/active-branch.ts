@@ -71,6 +71,18 @@ export function useActiveBranch(): {
   // existe, se deja de pedir y el servidor elige la primera activa.
   const known = (id: string) => branches.some((item) => item.id === id)
   const branchId = fromLink ?? (stored && (!query.isSuccess || known(stored)) ? stored : undefined)
+  // Con `?branch=` manda el enlace (y vuelve a anotarse): no se olvida nada.
+  const forgotten = !fromLink && query.isSuccess && stored !== undefined && !known(stored)
+  // Una sede que ya no existe se olvida: el próximo ingreso no la vuelve a pedir.
+  React.useEffect(() => {
+    if (!forgotten) return
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch {
+      // Sin almacenamiento: no había nada guardado.
+    }
+    setStored(undefined)
+  }, [forgotten])
 
   const choose = React.useCallback(
     (id: string, extra?: Record<string, string | undefined>) => {

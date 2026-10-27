@@ -1,9 +1,10 @@
+import { canAccess } from "@odentia/auth/permissions"
 import { ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, Outlet, useChildMatches, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Outlet, redirect, useChildMatches, useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { usePermission } from "../../lib/crm"
-import { fetchPersonOfPatient, personOfPatientKey } from "../../lib/people"
+import { fetchPersonOfPatient, personIdOfPatient, personOfPatientKey } from "../../lib/people"
 import { QueryErrorState } from "../../lib/query-error"
 
 /**
@@ -15,6 +16,16 @@ import { QueryErrorState } from "../../lib/query-error"
  */
 export const Route = createFileRoute("/_org/patients/$patientId")({
   validateSearch: (search: Record<string, unknown>): Record<string, unknown> => search,
+  // Se salta antes de pintar: con la persona ya conocida (o buscada al acercar el
+  // puntero al enlace) no hay «Abriendo su página…» ni un viaje más. Sin permiso
+  // o si la búsqueda falla, la página de abajo lo dice como siempre.
+  beforeLoad: async ({ context, location, params, search }) => {
+    if (location.pathname.replace(/\/+$/, "") !== `/patients/${params.patientId}`) return
+    const role = context.org.members.find((member) => member.userId === context.session.userId)?.role ?? "member"
+    if (!canAccess(role, "patients.read")) return
+    const personId = await personIdOfPatient(params.patientId).catch(() => null)
+    if (personId) throw redirect({ to: "/people/$personId", params: { personId }, search: search as never, replace: true })
+  },
   component: PatientRoute,
 })
 
