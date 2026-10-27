@@ -61,7 +61,6 @@ import { type DecisionKeyProblem, decisionKeyProblem, reportDecisionOutage, watc
 import { decideRoute, recordShadowUnavailable, runShadowTriage } from "./decision/shadow.js"
 import { meterAiUse, takeAiUsage } from "./ai-usage.js"
 import { hasAlarmSignal } from "./alarm.js"
-import { looksUnfinished, UNFINISHED_QUIET_MS } from "./burst.js"
 import { compileAgentGraph } from "./graph.js"
 import { noteAskedInterest } from "./interest.js"
 import {
@@ -464,14 +463,7 @@ async function attendAgentRun(
       if (runtime.burst && newest && oldest) {
         const sinceLast = now.getTime() - newest.createdAt.getTime()
         const waited = now.getTime() - oldest.createdAt.getTime()
-        // A medias («tengo» / «un problema»), se espera un silencio más largo, sin pasar del tope.
-        const lastAgent = recent.find((item) => item.direction !== "in")
-        const unfinished = looksUnfinished(
-          [...pendingTail].reverse().map((item) => item.body ?? ""),
-          (lastAgent?.body ?? "").trim().endsWith("?"),
-        )
-        const quietMs = unfinished ? Math.max(runtime.burst.quietMs, UNFINISHED_QUIET_MS) : runtime.burst.quietMs
-        const remaining = Math.min(quietMs - sinceLast, runtime.burst.maxWaitMs - waited)
+        const remaining = Math.min(runtime.burst.quietMs - sinceLast, runtime.burst.maxWaitMs - waited)
         if (remaining > 0) {
           await sendAgentRun(tx, msg.message, { delaySeconds: Math.max(1, Math.ceil(remaining / 1000)) })
           return { skip: { reason: BURST_WAITING, model: effectiveModel, silent: true } }
