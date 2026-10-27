@@ -35,7 +35,7 @@ export function WhatsAppConnect({
 
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <section aria-labelledby={headingId} className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-5">
+      <section aria-labelledby={headingId} className="@container elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-5">
         <div className="flex items-start gap-3.5">
           <span
             aria-hidden
@@ -59,7 +59,8 @@ export function WhatsAppConnect({
           ) : null}
         </div>
         {available ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          // Dos columnas solo si la tarjeta tiene ancho: con un panel abierto al lado, una debajo de la otra.
+          <div className="grid gap-3 @2xl:grid-cols-2">
             <div className="flex flex-col gap-2 rounded-xl border p-4">
               <span className="self-start rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-semibold text-primary-soft-foreground">
                 Recomendado · 5 minutos

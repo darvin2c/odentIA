@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
-import { conversation } from "@odentia/db/schema/crm"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateWhatsAppInbound } from "./channels"
@@ -177,6 +177,79 @@ test("whatsapp: se conecta con los datos de la app de Meta en tres pasos que se 
   await connected.getByRole("button", { name: "Ver mis mensajes", exact: true }).click()
   await expect(connected).toHaveCount(0)
   await expect(page.getByRole("heading", { level: 2, name: "Mensajes", exact: true })).toBeFocused()
+})
+
+test("whatsapp: con la propia app de Meta, los pasos se abren al elegirla, hay guía y lo que falta en Meta se arregla desde la tarjeta", async ({
+  owner,
+  fixtureDb,
+}, info) => {
+  const { page, org } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  // Aquí no existe la app de odentIA en Meta: se responde como si el botón estuviera, para ver los dos caminos.
+  await page.route("**/api/channels/whatsapp/signup", (route) =>
+    route.fulfill({ json: { data: { enabled: true, appId: "APP-E2E", configId: "CONFIG-E2E", graphVersion: "v25.0" } } }),
+  )
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
+  await expect(page.getByRole("heading", { level: 3, name: "Con tu Facebook", exact: true })).toBeVisible()
+  const steps = page.getByRole("region", { name: "Con tu propia app de Meta", exact: true })
+  // Los tres pasos no se ofrecen hasta elegir ese camino: nadie empieza por el largo sin querer.
+  await expect(steps).toHaveCount(0)
+  await page.getByRole("button", { name: "Usar mi propia app", exact: true }).click()
+  await expect(steps).toBeVisible()
+  await expect(steps.getByRole("listitem")).toHaveCount(3)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("whatsapp-dos-caminos", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // La guía, de cero a la app publicada, con el enlace a cada página de Meta.
+  await steps.getByRole("button", { name: "Ver la guía", exact: true }).click()
+  const guide = page.getByRole("heading", { name: "Cómo crear tu app de Meta" })
+  await expect(guide).toBeVisible()
+  await expect(page.getByRole("heading", { level: 3, name: /Publicar la app/ })).toBeVisible()
+  await expect(page.getByText("whatsapp_business_messaging", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: /Abrir Usuarios del sistema/ })).toHaveAttribute("href", /^https:\/\/business\.facebook\.com\//)
+  await info.attach("whatsapp-guia", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+
+  // Una conexión con la app propia cuyo número ya tenía PIN, como la dejaría Meta: lo dice la tarjeta y pide el PIN.
+  const created = await createWhatsApp(page, org.slug, [])
+  await fixtureDb
+    .update(channelConnection)
+    .set({
+      webhookVerifiedAt: new Date(),
+      ownApp: {
+        registeredAt: null,
+        subscribedAt: new Date().toISOString(),
+        problems: { registrar: "Este número ya tiene un PIN de verificación en dos pasos. Escríbelo para registrarlo." },
+        pinNeeded: true,
+        tokenExpiresAt: null,
+        keysCheckedAt: new Date().toISOString(),
+      },
+    })
+    .where(eq(channelConnection.id, created.id))
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
+  const card = page.getByRole("region", { name: "Conexión", exact: true })
+  await expect(card).toContainText("Necesita atención.")
+  await expect(card).toContainText("Falta registrar el número en WhatsApp.")
+  await expect(card).toContainText("Tu app recibe los avisos de esta cuenta.")
+  await card.getByLabel("PIN de 6 dígitos del número", { exact: true }).fill("12")
+  await card.getByRole("button", { name: "Registrar el número", exact: true }).click()
+  await expect(card.getByText("El PIN tiene 6 dígitos.", { exact: true })).toBeVisible()
+  await expect(card.getByLabel("PIN de 6 dígitos del número", { exact: true })).toBeFocused()
+  // Aquí no se llama a Meta: «Volver a comprobar» lo dice y no afirma nada.
+  await card.getByRole("button", { name: "Volver a comprobar", exact: true }).click()
+  await expect(card.getByRole("status").filter({ hasText: "En este entorno no se llama a Meta" })).toBeVisible()
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("whatsapp-necesita-atencion", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(card).toContainText("Necesita atención.")
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("whatsapp-necesita-atencion-telefono", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // «Pedir ayuda» abre la Ayuda con el mensaje a soporte ya escrito, sin claves; la persona lo envía.
+  await card.getByRole("button", { name: /Pedir ayuda a/ }).click()
+  const draft = page.getByLabel(/Tu mensaje para/)
+  await expect(draft).toHaveValue(/Me trabé conectando WhatsApp con mi propia app de Meta/)
+  await expect(draft).not.toHaveValue(new RegExp(APP_SECRET))
 })
 
 test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en revisión, crear uno propio y eliminarlo", async ({ owner }, info) => {

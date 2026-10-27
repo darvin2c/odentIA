@@ -60,7 +60,7 @@ export function OwnAppStatus({
       apiFetch<{ data: RetryResult }>(`/api/channels/connections/${connectionId}/own-app`, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: ({ data }, body) => {
       onUpdated(data.ownApp)
-      setResult(data.problem ? null : "Todo en orden.")
+      setResult(data.problem ?? "Todo en orden.")
       if (body.pin) setPin("")
       void queryClient.invalidateQueries({ queryKey: ["connections"] })
     },
