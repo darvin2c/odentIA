@@ -1969,7 +1969,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "request_human_handoff",
       description:
-        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá, sin prometer una hora ni un plazo, y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
+        "Pasa al equipo lo que tú no puedes responder (una duda clínica, un descuento, un reclamo, que pida hablar con una persona) como un tema. No la uses porque cuente un síntoma y quiera que lo atiendan (un dolor, un sangrado, una hinchazón): eso es una cita, ofrécele los horarios más próximos. Va como un tema, con motivo, resumen factual y prioridad (alta/media/baja). No te apaga: en los siguientes mensajes sigues atendiendo todo lo demás, pero nunca respondes ese tema. Termina con este mensaje: pon en message el aviso breve de quién lo verá, sin prometer una hora ni un plazo, y, si en el mismo mensaje preguntó otra cosa que sí sabes, respóndela ahí también.",
       schema: operationAgentSchema("derivacion.crear"),
     },
   )
