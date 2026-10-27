@@ -310,15 +310,11 @@ El Dockerfile no usa extensiones exclusivas de BuildKit ni declara un frontend
 externo. Esto evita que OpenShip fuerce la ruta de transporte del contexto asociada
 a esa directiva. CI sigue utilizando BuildKit mediante buildx.
 
-## Demo de ventas
+## Demos para presentar
 
-La clínica «Dental Smile» para mostrar odentIA es la misma historia de la semilla de desarrollo (`packages/services/src/dental/seed-demo.ts`) en modo producción: una sola clínica de demostración (sin cobro), con 24 meses de historia, cuya dueña es la cuenta de `DEMO_OWNER_EMAIL`. Su equipo son personas sin cuenta (correos de `example.com`) y los diagnósticos van en la CIE-11 oficial. No crea administradores, planes, clínicas de prueba, soporte, reclamaciones ni el consultorio de latidIA, y necesita el plan `odentia` creado. Volver a correrla borra y rehace solo esa clínica. Sin `DEMO_MODE=produccion`, la semilla se niega a correr con `NODE_ENV=production`.
+Las demos se crean en la administración, en Clínicas › «Crear demo» (ADR 0096): producto, tipo de clínica o consultorio, tamaño, meses de historia, país y quién la presenta. Las arma el worker en una sola transacción (unos segundos a un par de minutos), cada día de su zona las pone al día y borra solas las que nadie abre en 60 días. Necesitan el plan de lista de su producto («Plan odentIA» o «Plan latidIA») y la biblioteca de servicios (`seed:procedures`). Su canal tiene claves falsas y su equipo, correos de `example.com`: nada sale a una persona.
 
-```sh
-docker exec -w /app/packages/services -e DEMO_MODE=produccion -e DEMO_OWNER_EMAIL=<correo de la cuenta> openship-odentia-api node_modules/.bin/tsx src/dental/seed-demo.ts
-```
-
-Los canales de la demo tienen claves falsas: nada de lo que se escriba desde ella llega a una persona.
+Borrar una demo (y volver a empezar) borra su clínica entera con las comprobaciones de la base suspendidas dentro de esa transacción, así que necesita la conexión owner (`DATABASE_URL`, superusuario de la imagen). Solo actúa sobre una clínica con su fila en `admin.saas_demo`: una clínica real nunca se borra. La semilla de desarrollo se niega a correr con `NODE_ENV=production`.
 
 ## Backups y recuperación
 

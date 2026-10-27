@@ -32,8 +32,6 @@ export async function seedAvailability(
     branchId: string
     patientId: string
     contactId: string
-    /** Miembros que no atienden aunque su rol lo permita (la dueña de la demo de ventas). */
-    exceptUserIds?: string[]
   },
 ): Promise<void> {
   // Solo roles profesionales atienden: recepción/caja nunca como odontólogos.
@@ -55,8 +53,7 @@ export async function seedAvailability(
         eq(professionalSchedule.branchId, input.branchId),
       ),
     )
-  const except = new Set(input.exceptUserIds ?? [])
-  for (const professional of members.filter((m) => !except.has(m.userId))) {
+  for (const professional of members) {
     await setProfessionalSchedule(tx, input.orgId, input.ownerUserId, {
       branchId: input.branchId,
       professionalUserId: professional.userId,

@@ -1,11 +1,14 @@
 import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
+import type { DemoKindRecipe } from "./demo-recipes.js"
 import { DENTAL_AGENT_TEXTS } from "./dental/agent-texts.js"
+import { DENTAL_DEMO_KINDS } from "./dental/demo-kinds.js"
 import { dentalHooks } from "./dental/hooks.js"
 import { ServiceError } from "./errors.js"
 import { HELP_TOPICS, type HelpTopic } from "./help-guide.js"
 import { orgProduct } from "./locale.js"
 import { MEDICAL_AGENT_TEXTS } from "./medical/agent-texts.js"
+import { MEDICAL_DEMO_KINDS } from "./medical/demo-kinds.js"
 import { MEDICAL_HELP_TOPICS } from "./medical/help.js"
 import { medicalHooks } from "./medical/hooks.js"
 import type { ProductAgentTexts } from "./product-agent.js"
@@ -54,6 +57,13 @@ export function agentTextsFor(product: ClinicalProduct): ProductAgentTexts {
 /** Las palabras del producto de esta clínica en lo que lee el modelo. */
 export async function productAgentTexts(tx: Db, orgId: string): Promise<ProductAgentTexts> {
   return agentTextsFor(await orgProduct(tx, orgId))
+}
+
+const DEMO_KINDS: Record<ClinicalProduct, readonly DemoKindRecipe[]> = { dental: DENTAL_DEMO_KINDS, medical: MEDICAL_DEMO_KINDS }
+
+/** Los tipos de demo para presentar de cada producto (ADR 0096). */
+export function demoKindsFor(product: ClinicalProduct): readonly DemoKindRecipe[] {
+  return DEMO_KINDS[product]
 }
 
 const HELP: Record<ClinicalProduct, readonly HelpTopic[]> = { dental: HELP_TOPICS, medical: MEDICAL_HELP_TOPICS }

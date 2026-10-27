@@ -28,17 +28,20 @@ import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/
 import { useForm, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router"
-import { Building2, Plus } from "lucide-react"
+import { Building2, Plus, Presentation } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { rememberOrganizationsSearch } from "../../lib/organizations-search"
+import { CreateDemoDrawer, DemoBadge, type DemoItem, DemoProgressDrawer, demoLine, PendingDemoCard, useDemos } from "../../components/demos"
 import { type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 
 interface ListSearch {
   q?: string
   producto?: ProductChoice
   precio?: "negociado"
+  /** Reales o demos para presentar (ADR 0096). */
+  clase?: "real" | "demo"
   /** Enlace de antes: abría la ficha al lado; ahora la ficha es su propia página. */
   org?: string
 }
@@ -50,6 +53,7 @@ export const Route = createFileRoute("/_app/organizations")({
     ...(typeof search.q === "string" && search.q ? { q: search.q } : {}),
     ...(search.producto === "dental" || search.producto === "medical" ? { producto: search.producto } : {}),
     ...(search.precio === "negociado" ? { precio: "negociado" as const } : {}),
+    ...(search.clase === "real" || search.clase === "demo" ? { clase: search.clase } : {}),
     ...(typeof search.org === "string" ? { org: search.org } : {}),
   }),
   beforeLoad: ({ search }) => {
@@ -167,6 +171,7 @@ function OrganizationsPage() {
           ...(merged.q ? { q: merged.q } : {}),
           ...(merged.producto && merged.producto !== "todos" ? { producto: merged.producto } : {}),
           ...(merged.precio ? { precio: merged.precio } : {}),
+          ...(merged.clase ? { clase: merged.clase } : {}),
         }
       },
       replace: true,
@@ -177,15 +182,19 @@ function OrganizationsPage() {
       ...(listSearch.q ? { q: listSearch.q } : {}),
       ...(listSearch.producto && listSearch.producto !== "todos" ? { producto: listSearch.producto } : {}),
       ...(listSearch.precio ? { precio: listSearch.precio } : {}),
+      ...(listSearch.clase ? { clase: listSearch.clase } : {}),
     })
-  }, [listSearch.q, listSearch.producto, listSearch.precio])
+  }, [listSearch.q, listSearch.producto, listSearch.precio, listSearch.clase])
   const [assistedOpen, setAssistedOpen] = useState(false)
+  const [demoOpen, setDemoOpen] = useState(false)
+  const [demoProgress, setDemoProgress] = useState<string | null>(null)
+  const kindFilter = listSearch.clase
 
   const sessionQuery = useQuery({
     queryKey: ["admin-session"],
     queryFn: async () =>
       z
-        .object({ actor: z.object({ role: z.string() }) })
+        .object({ actor: z.object({ role: z.string(), userId: z.string().optional() }) })
         .parse(await api<unknown>("/api/admin/access/session")),
   })
   const isAdmin = sessionQuery.data?.actor.role === "admin"
@@ -247,14 +256,25 @@ function OrganizationsPage() {
   }
 
   const listQuery = useQuery({
-    queryKey: ["admin-organizations", activeSearch, onlyNegotiated, product],
+    queryKey: ["admin-organizations", activeSearch, onlyNegotiated, product, kindFilter],
     queryFn: async () => {
       const raw = await api<unknown>(
-        `/api/admin/organizations?q=${encodeURIComponent(activeSearch)}&limit=30${onlyNegotiated ? "&negotiated=1" : ""}${product === "todos" ? "" : `&product=${product}`}`,
+        `/api/admin/organizations?q=${encodeURIComponent(activeSearch)}&limit=30${onlyNegotiated ? "&negotiated=1" : ""}${product === "todos" ? "" : `&product=${product}`}${kindFilter ? `&clase=${kindFilter}` : ""}`,
       )
       return orgListSchema.parse(raw)
     },
   })
+  // Las demos (ADR 0096): las listas son clínicas de la lista; las que se arman o fallaron, tarjetas aparte.
+  const demosQuery = useDemos(kindFilter !== "real")
+  // Una que ya es clínica (también mientras se vuelve a armar) va en su tarjeta, con su etiqueta.
+  const demoOfOrg = new Map((demosQuery.data ?? []).flatMap((demo) => (demo.organizationId ? [[demo.organizationId, demo] as const] : [])))
+  const pendingDemos = (demosQuery.data ?? []).filter(
+    (demo) =>
+      kindFilter !== "real" &&
+      !demo.organizationId &&
+      (product === "todos" || demo.product === product) &&
+      (!activeSearch || `${demo.name} ${demo.slug}`.toLowerCase().includes(activeSearch.toLowerCase())),
+  )
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin-organizations"] })
@@ -339,6 +359,8 @@ function OrganizationsPage() {
         title="Clínicas"
         subtitle="Las de odentIA y las de latidIA, con suscripción, uso, miembros y actividad."
         primary={{ label: "Alta asistida", icon: <Plus aria-hidden />, onClick: () => setAssistedOpen(true) }}
+        // Crear demos es de la administración (decisión 11): soporte no lo ve.
+        {...(isAdmin ? { secondary: { label: "Crear demo", icon: <Presentation aria-hidden />, onClick: () => setDemoOpen(true) } } : {})}
       />
       <form
         className="flex flex-wrap items-center gap-2"
@@ -389,6 +411,21 @@ function OrganizationsPage() {
             </SelectContent>
           </Select>
         ) : null}
+        <Select
+          value={kindFilter ?? "todas"}
+          items={{ todas: "Todas", real: "Reales", demo: "Demos" }}
+          onValueChange={(value) => setList({ clase: value === "real" || value === "demo" ? value : undefined })}
+        >
+          <SelectTrigger aria-label="Clase" className="w-44 shrink-0">
+            <span className="text-muted-foreground">Clase:</span>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas</SelectItem>
+            <SelectItem value="real">Reales</SelectItem>
+            <SelectItem value="demo">Demos</SelectItem>
+          </SelectContent>
+        </Select>
       </form>
 
       {listQuery.isPending ? (
@@ -399,7 +436,7 @@ function OrganizationsPage() {
         </div>
       ) : listQuery.isError ? (
         <ErrorState error={listQuery.error} onRetry={() => void listQuery.refetch()} />
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && pendingDemos.length === 0 ? (
         <EmptyState
           icon={Building2}
           title="Sin clínicas"
@@ -407,6 +444,11 @@ function OrganizationsPage() {
         />
       ) : (
         <ul className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {pendingDemos.map((demo) => (
+            <li key={demo.id}>
+              <PendingDemoCard demo={demo} onOpen={() => setDemoProgress(demo.id)} />
+            </li>
+          ))}
           {items.map((item) => (
             <li key={item.id}>
               <Link
@@ -418,7 +460,9 @@ function OrganizationsPage() {
                 <span className="flex flex-wrap items-center gap-2 font-medium">
                   <span className="min-w-0 flex-1 truncate">{item.name}</span>
                   {item.negotiated ? <NegotiatedBadge deal={item.negotiated} /> : null}
-                  {!item.hasProfile || !item.hasBranch ? (
+                  {demoOfOrg.get(item.id) ? (
+                    <DemoBadge demo={demoOfOrg.get(item.id) as DemoItem} />
+                  ) : !item.hasProfile || !item.hasBranch ? (
                     <Badge variant="warning">Alta incompleta</Badge>
                   ) : item.restricted ? (
                     <Badge variant="destructive">Restringida</Badge>
@@ -427,13 +471,24 @@ function OrganizationsPage() {
                   )}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {item.slug} · {item.memberCount} miembros
+                  {demoOfOrg.get(item.id) ? demoLine(demoOfOrg.get(item.id) as DemoItem) : `${item.slug} · ${item.memberCount} miembros`}
                 </span>
               </Link>
             </li>
           ))}
         </ul>
       )}
+
+      <CreateDemoDrawer
+        open={demoOpen}
+        onClose={() => setDemoOpen(false)}
+        currentUserId={sessionQuery.data?.actor.userId ?? null}
+        onCreated={(id) => {
+          setDemoOpen(false)
+          setDemoProgress(id)
+        }}
+      />
+      <DemoProgressDrawer demoId={demoProgress} onClose={() => setDemoProgress(null)} />
 
       <FormDrawer
         open={assistedOpen}
