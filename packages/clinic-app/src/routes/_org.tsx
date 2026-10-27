@@ -62,6 +62,7 @@ import {
 } from "../components/agent-panel"
 import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } from "../components/global-search"
 import { ArgosPanel } from "../components/argos/argos-panel"
+import { ScheduleHost } from "../components/agenda/schedule-host"
 import { HelpButton } from "../components/help-panel"
 import { HeaderHelpMenuItem } from "../components/header-more-menu"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
@@ -410,6 +411,8 @@ function OrgLayout() {
           {/* Argos no tiene botón: lo abren el buscador y Reportes. Una sola vez aquí, no en la cabecera de cada
               página: la conversación sigue al navegar (D4). */}
           <ArgosPanel />
+          {/* La cita y «Nueva cita» desde cualquier pantalla: Argos, listas e Inicio las abren al lado. */}
+          <ScheduleHost />
           </GlobalSearchProvider>
         </AgentPanelProvider>
       </SideDockProvider>

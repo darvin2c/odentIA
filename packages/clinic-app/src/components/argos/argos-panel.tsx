@@ -36,12 +36,14 @@ import {
   rerunArgos,
   setArgosLastQuestion,
 } from "../../lib/argos"
+import { visitName } from "../../lib/agenda"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { askHelp, canOpenHref } from "../../lib/global-search"
 import { useOrgLocale } from "../../lib/locale"
 import { mutationErrorMessage } from "../../lib/query-error"
 import type { ReportQuery } from "../../lib/reports"
 import { PINS_KEY } from "../../lib/reports-ask"
+import { openAppointmentAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
 import { PersonLink } from "../person-link"
 import { ArgosPeriodRow } from "./argos-period"
 
@@ -181,9 +183,20 @@ function personOf(row: ArgosTable["rows"][number]): { patientId: string | null; 
   return patientId || contactId ? { patientId, contactId } : null
 }
 
-/** La tabla cuando no hay dibujo y hay más de una cifra que leer; cada nombre abre su página (`PersonLink`). */
+/** La cita de una fila, por el id que la tabla trae y no muestra. */
+function appointmentOf(row: ArgosTable["rows"][number]): string | null {
+  return typeof row.cita_id === "string" ? row.cita_id : null
+}
+
+/**
+ * La tabla cuando no hay dibujo y hay más de una cifra que leer. Una fila de
+ * cita abre la cita al lado y, al volver, dice cómo quedó (tablero 1); una de
+ * persona abre su página (`PersonLink`).
+ */
 function AnswerRows({ table }: { table: ArgosTable }) {
   const [all, setAll] = useState(false)
+  const [changed, setChanged] = useState<Record<string, string>>({})
+  useAppointmentSaved((appointment) => setChanged((current) => ({ ...current, [appointment.id]: visitName(appointment.visit) })))
   // Sin filas, la frase ya lo dice («En setiembre no se cobró nada»): una tabla vacía no agrega nada.
   if (drawingOf(table) || table.columns.length === 0 || table.rows.length === 0 || (table.rows.length <= 1 && table.columns.length <= 1)) return null
   const rows = all ? table.rows : table.rows.slice(0, ROWS_SHOWN)
@@ -203,13 +216,30 @@ function AnswerRows({ table }: { table: ArgosTable }) {
           </thead>
           <tbody>
             {rows.map((row, index) => {
-              const person = lead?.kind === "text" ? personOf(row) : null
+              const appointmentId = appointmentOf(row)
+              const person = lead?.kind === "text" && !appointmentId ? personOf(row) : null
               const display = table.display[index] ?? {}
+              const state = appointmentId ? changed[appointmentId] : undefined
               return (
                 // biome-ignore lint/suspicious/noArrayIndexKey: las filas de una respuesta no se reordenan.
-                <tr key={index} className="border-t">
+                <tr key={index} className={cn("border-t", state && "bg-muted/50")}>
                   <td className="px-2.5 py-1.5">
-                    {person && lead ? (
+                    {appointmentId && lead ? (
+                      <span className="flex flex-col items-start gap-1">
+                        <button
+                          type="button"
+                          className="text-left font-semibold text-primary-soft-foreground underline underline-offset-2"
+                          onClick={() => openAppointmentAnywhere(appointmentId)}
+                        >
+                          {display[lead.name]}
+                        </button>
+                        {state ? (
+                          <Badge variant="success" className="text-[11px]">
+                            {state}
+                          </Badge>
+                        ) : null}
+                      </span>
+                    ) : person && lead ? (
                       <PersonLink
                         patientId={person.patientId}
                         contactId={person.contactId}

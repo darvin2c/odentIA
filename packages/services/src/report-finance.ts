@@ -897,6 +897,10 @@ type FinanceListRow = {
   cents: string | null
   currency: string | null
   total: number
+  /** «Aceptaron y no tienen cita»: lo aceptado por hacer, para agendarlo desde la fila. */
+  planItemIds?: string[] | null
+  /** El servicio de eso, si es uno solo: la reserva lo trae elegido. */
+  serviceId?: string | null
 }
 
 /**
@@ -915,7 +919,9 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
       ...(await tx.execute<FinanceListRow>(sql`
         with pending as (
           select b.patient_id, max(coalesce(b.decided_at, b.presented_at)) as at, sum(i.price_cents::bigint * ${units}) as cents,
-            string_agg(distinct i.title, ' · ') as title
+            string_agg(distinct i.title, ' · ') as title,
+            array_agg(distinct pi.id::text) filter (where pi.id is not null) as plan_item_ids,
+            case when count(distinct i.service_id) = 1 then min(i.service_id::text) end as service_id
           from treatment_budget b
           join treatment_budget_item i on i.organization_id = b.organization_id and i.budget_id = b.id
             and i.option_id = ${budgetValueOptionSql(budget)} and i.decision = 'aceptado' and i.price_cents is not null
@@ -927,7 +933,8 @@ export async function financeListRows(tx: Db, orgId: string, scope: ReportScope,
         )
         select x.patient_id::text as id, x.at, x.patient_id as "patientId", pp.display_name as "personName", x.title,
           null::text as "professionalName", null::text as "branchName", false as "hasNextAppointment",
-          x.cents::text as cents, ${scope.currency}::text as currency, count(*) over()::int as total
+          x.cents::text as cents, ${scope.currency}::text as currency, count(*) over()::int as total,
+          x.plan_item_ids as "planItemIds", x.service_id as "serviceId"
         from pending x
         join patient p on p.id = x.patient_id and p.organization_id = ${orgId} join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id
         order by x.cents desc, x.patient_id limit ${limit}`)),

@@ -212,7 +212,7 @@ Qué contar:
 - «Vender» incluye tratamientos y productos: lo vendido es lo cobrado; lo cargado sin pagar es lo que deben.
 - ${productName(texts)} no emite facturas ni boletas, solo tickets de pago: nunca digas «facturado» ni «facturación». Si preguntan por eso, dilo en la frase y responde con lo cobrado.
 - «Lo más …» se ordena por lo que pregunta: «más ingresos» o «más dinero» por monto, «más veces» o «más frecuentes» por cuántas veces; si no lo dice, por cuántas veces y después por monto.
-- Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran.
+- Cuenta y agrupa a las personas por su paciente_id (o persona_id) cuando la vista lo tenga: hay nombres repetidos. Esos ids no se muestran. Una lista de personas lleva su paciente_id y una de citas, además, su cita_id: con ellos la fila abre la persona o la cita.
 - Al agrupar por un nombre (profesional, concepto, sede, categoría), deja fuera las filas sin nombre (null), salvo que la pregunta las pida.
 - Para juntar cifras de dos vistas, suma cada vista por separado (una subconsulta o un WITH por vista) y junta los totales después: un JOIN de filas de dos vistas antes de sumar las multiplica.
 - no_existe es solo para lo de «Lo que ${productName(texts)} no registra», lo que no puedes consultar o lo que ninguna vista tiene: antes, mira si se arma con las vistas y las cifras de abajo. Va sin cálculo: dilo con palabras simples y, si hay algo cercano que sí existe, calcúlalo y ponlo en calculo_cercano con su frase_cercana. Nunca respondas otra cifra como si fuera la pedida: una parecida se dice como lo cercano.
