@@ -260,6 +260,7 @@ export function createReportsRoute(deps: ReportsDeps) {
     const { orgId, memberRole } = orgContextOf(c)
     return runService(c, 200, async () => ({
       ...(await withOrgContext(deps.db, orgId, (tx) => getArgosPanelAllowance(tx, orgId))),
+      enabled: (await withOrgContext(deps.db, orgId, (tx) => getAdminSettings(tx, orgId))).enabled,
       canAdd: seesBilling(memberRole),
     }))
   })

@@ -3,7 +3,7 @@ import { Switch } from "@odentia/ui/components/switch"
 import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect, useRef } from "react"
 import { AdminRequest } from "../../components/agent/admin-draft"
 import { AdminLine } from "../../components/agent/admin-line"
 import { AdminPreview } from "../../components/agent/admin-recommendation"
@@ -12,6 +12,7 @@ import { writingWeekRows } from "../../lib/writing-hours"
 import { type AgentRoles, namedAgentRoles } from "../../lib/agent"
 import { ADMIN_NAME, AGENT_NAME_REASONS, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
+import { ARGOS_ALLOWANCE_KEY } from "../../lib/argos"
 import { usePermission } from "../../lib/crm"
 import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
 
@@ -260,6 +261,16 @@ function AdministratorPage() {
     enabled: canRead,
     retry: false,
   })
+
+  // Quien llega con una línea abierta (desde Inicio o un enlace) la encuentra a la vista, una sola vez.
+  const arrived = useRef(false)
+  const pageLoaded = pageQuery.data !== undefined
+  useEffect(() => {
+    if (arrived.current || !pageLoaded) return
+    arrived.current = true
+    if (linea) document.getElementById(`linea-${linea}`)?.scrollIntoView({ block: "start" })
+  }, [linea, pageLoaded])
+
   const rolesQuery = useQuery({
     queryKey: ["agent-roles"],
     queryFn: () => apiFetch<{ data: AgentRoles }>("/api/agent/roles"),
@@ -270,7 +281,11 @@ function AdministratorPage() {
   const power = useMutation({
     retry: false,
     mutationFn: (enabled: boolean) => apiFetch("/api/agent/admin/settings", { method: "PUT", body: JSON.stringify({ enabled }) }),
-    onSettled: () => refreshAdmin(queryClient),
+    onSettled: () => {
+      // El buscador y el panel de Argos leen si está encendido: que no se queden con lo de antes.
+      void queryClient.invalidateQueries({ queryKey: ARGOS_ALLOWANCE_KEY })
+      return refreshAdmin(queryClient)
+    },
   })
 
   if (!canRead) {
@@ -283,7 +298,8 @@ function AdministratorPage() {
   const page = pageQuery.data?.data
   const role = rolesQuery.data?.data.roles.find((item) => item.id === "administrador")
   const principles = rolesQuery.data?.data.principles ?? []
-  const open = (key: string | undefined) => void navigate({ search: key ? { linea: key } : {}, replace: true })
+  // Abrir o cerrar una línea no mueve la página: la línea se queda donde está y se abre debajo de quien la tocó.
+  const open = (key: string | undefined) => void navigate({ search: key ? { linea: key } : {}, replace: true, resetScroll: false })
   const on = page?.lines.filter((line) => line.enabled) ?? []
   const off = page?.lines.filter((line) => !line.enabled) ?? []
 

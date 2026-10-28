@@ -74,8 +74,12 @@ it("Argos apagado lo dice; encendido responde con la llave del rol y anota la co
     (await buildApp("owner").request("/reports/argos/route", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) })).json()
   expect(await route("dónde configuro los horarios")).toEqual({ data: { route: "ayuda" } })
   expect(await route("¿cuánto cobramos hoy?")).toEqual({ data: { route: "buscar" } })
+  // El buscador y el panel saben que está apagado: no lo ofrecen como si respondiera.
+  const allowance = async () => (await (await buildApp("owner").request("/reports/argos/allowance")).json()) as { data: { enabled: boolean } }
+  expect((await allowance()).data.enabled).toBe(false)
 
   await withOrgContext(appDb, ORG, (tx) => updateAdminSettings(tx, ORG, OWNER, { enabled: true }))
+  expect((await allowance()).data.enabled).toBe(true)
   const on = await ask("admin", { text: "¿Cuánto cobramos este mes?", screen: { period: "este_mes" }, previous: null })
   expect(on.status).toBe(200)
   expect(await on.json()).toMatchObject({ data: { kind: "respuesta", text: expect.stringMatching(/^(Del|El) .+ se cobró/), period: { value: "este_mes" } } })
