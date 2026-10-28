@@ -49,7 +49,7 @@ it("la CIE-10 del MINSA se carga entera y una clínica de Perú cierra una atenc
   expect((await search("caries dentina"))[0]).toMatchObject({
     system: "ICD-10-PE",
     code: "K02.1",
-    description: "CARIES DE LA DENTINA",
+    description: "Caries de la dentina",
   })
   const f = await clinicalFixture()
   const hypertension = await f.run((tx) =>

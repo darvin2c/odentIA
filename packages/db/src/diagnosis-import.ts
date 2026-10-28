@@ -27,6 +27,8 @@ export interface DiagnosisSourceRow {
 export interface DiagnosisCatalogRow extends DiagnosisSourceRow {
   isCategory: boolean
   searchText: string
+  /** El título como lo publica su editor, si el que se muestra es otro (ADR 0103); si no, null. */
+  officialTitle: string | null
 }
 
 /** Falla si los bytes no son los publicados: un archivo distinto no entra. */
@@ -432,5 +434,6 @@ export function prepareDiagnosisRows(
     ...row,
     isCategory: prefixes.has(row.code),
     searchText: diagnosisSearchText(row.code, row.title),
+    officialTitle: null,
   }))
 }

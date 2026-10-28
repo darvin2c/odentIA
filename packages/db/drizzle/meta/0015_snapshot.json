@@ -1,5 +1,5 @@
 {
-  "id": "b7d0c3d8-5f52-4b6d-817c-d04e89d37b8a",
+  "id": "c2e4c914-53f4-49c1-ba2d-650e127be2af",
   "prevId": "80a61be5-3177-41bb-9633-8998f849d2b8",
   "version": "7",
   "dialect": "postgresql",
@@ -11873,6 +11873,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "official_title": {
+          "name": "official_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "uri": {
           "name": "uri",

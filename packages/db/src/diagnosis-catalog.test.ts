@@ -31,12 +31,15 @@ it("la CIE-10 del MINSA incluida es la hoja oficial (SHA-256 del .xlsx) y viene 
   const codes = new Set(rows.map((row) => row.code))
   expect(rows.filter((row) => row.code.length > 3 && !codes.has(row.code.slice(0, 3)))).toEqual([])
   const byCode = new Map(rows.map((row) => [row.code, row]))
-  expect(byCode.get("K02")).toMatchObject({ title: "CARIES DENTAL", isCategory: true })
-  expect(byCode.get("K02.1")).toMatchObject({ title: "CARIES DE LA DENTINA", isCategory: false })
+  // Se lee como frase; el título oficial del MINSA se guarda aparte, sin cambios.
+  expect(byCode.get("K02")).toMatchObject({ title: "Caries dental", officialTitle: "CARIES DENTAL", isCategory: true })
+  expect(byCode.get("K02.1")).toMatchObject({ title: "Caries de la dentina", officialTitle: "CARIES DE LA DENTINA" })
   // La categoría sin subdivisiones va con su X, y los códigos propios del MINSA tienen seis caracteres.
   expect(byCode.get("I10.X")).toMatchObject({ isCategory: false })
   expect(byCode.get("Z30.051")).toMatchObject({ isCategory: false })
-  expect(byCode.get("P07.11")?.title).toBe("RECIEN NACIDO DE MUY BAJO PESO AL NACER (< 1500 GRAMOS)")
+  expect(byCode.get("P07.11")?.officialTitle).toBe("RECIEN NACIDO DE MUY BAJO PESO AL NACER (< 1500 GRAMOS)")
+  expect(byCode.get("Q90.9")?.title).toBe("Sindrome de Down, no especificado")
+  expect(byCode.get("B20.0")?.title).toBe("Enfermedad por VIH, resultante en infeccion por micobacterias")
 })
 
 it("cada código que propone el odontograma en la CIE-10 del MINSA existe y se puede registrar", () => {

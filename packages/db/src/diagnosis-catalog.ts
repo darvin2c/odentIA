@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import type { DiagnosisSystemKey } from "@odentia/clinical"
+import { type DiagnosisSystemKey, diagnosisSearchText } from "@odentia/clinical"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import type { Db } from "./client.js"
 import {
@@ -11,6 +11,7 @@ import {
   prepareDiagnosisRows,
   readDiagnosisFile,
 } from "./diagnosis-import.js"
+import { minsaTitleForDisplay } from "./diagnosis-titles.js"
 import { diagnosisCatalog, diagnosisCodeRelease } from "./schema/clinical.js"
 
 /**
@@ -100,9 +101,19 @@ export function readDiagnosisList(load: DiagnosisListLoad): {
     throw new Error(`${load.system} ${load.edition}: una lista oficial necesita su SHA-256`)
   const bytes = readFileSync(load.path)
   const sha = load.sha256 ? assertSha256(bytes, load.sha256) : null
-  const rows = prepareDiagnosisRows(load.system, readDiagnosisFile(bytes))
+  const prepared = prepareDiagnosisRows(load.system, readDiagnosisFile(bytes))
   // La semilla de desarrollo no es una edición: solo una lista oficial tiene que venir entera.
-  if (load.official && load.system.startsWith("ICD-10")) assertCompleteIcd10(rows)
+  if (load.official && load.system.startsWith("ICD-10")) assertCompleteIcd10(prepared)
+  // La del MINSA viene en mayúsculas: se lee como frase y el título oficial se guarda aparte.
+  const rows =
+    load.system === "ICD-10-PE"
+      ? prepared.map((row) => {
+          const title = minsaTitleForDisplay(row.title)
+          return title === row.title
+            ? row
+            : { ...row, title, officialTitle: row.title, searchText: diagnosisSearchText(row.code, title) }
+        })
+      : prepared
   return { sha, rows }
 }
 
@@ -169,6 +180,7 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
             code: diagnosisCatalog.code,
             edition: diagnosisCatalog.edition,
             title: diagnosisCatalog.title,
+            officialTitle: diagnosisCatalog.officialTitle,
             uri: diagnosisCatalog.uri,
             isCategory: diagnosisCatalog.isCategory,
             searchText: diagnosisCatalog.searchText,
@@ -183,6 +195,7 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
         !old ||
         old.edition !== load.edition ||
         old.title !== row.title ||
+        old.officialTitle !== row.officialTitle ||
         old.uri !== row.uri ||
         old.searchText !== row.searchText
       )
@@ -197,6 +210,7 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
             code: row.code,
             edition: load.edition,
             title: row.title,
+            officialTitle: row.officialTitle,
             uri: row.uri,
             isCategory: row.isCategory,
             searchText: row.searchText,
@@ -207,6 +221,7 @@ export async function loadDiagnosisList(db: Db, load: DiagnosisListLoad): Promis
           set: {
             edition: sql`excluded."edition"`,
             title: sql`excluded."title"`,
+            officialTitle: sql`excluded."official_title"`,
             uri: sql`excluded."uri"`,
             searchText: sql`excluded."search_text"`,
           },

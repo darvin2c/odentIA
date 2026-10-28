@@ -116,7 +116,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await expect(review).toContainText("Clío dejó 4 sugerencias por revisar")
   await expect(review).toContainText("4 listas. Nada entra a la historia hasta que lo confirmes.")
   // Cada sugerencia vive en su bloque, que la cuenta en su resumen.
-  await expect(suggested("Diagnóstico")).toContainText("K02.1 · CARIES DE LA DENTINA")
+  await expect(suggested("Diagnóstico")).toContainText("K02.1 · Caries de la dentina")
   await expect(block("Diagnóstico")).toContainText("Sin diagnósticos confirmados · 1 sugerencia")
   await expect(suggested("Plan de tratamiento")).toContainText("Endodoncia multirradicular · S/ 650.00")
   // Indicaciones y controles se revisan en un solo bloque, «Plan y controles» (ADR 0034).
