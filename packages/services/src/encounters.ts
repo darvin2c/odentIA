@@ -19,6 +19,7 @@ import {
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
+  serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
@@ -1127,7 +1128,24 @@ export async function addEncounterProcedure(
     // Lo que llega del sitio se compara con el del tratamiento: no cambia.
     planSite = { siteSystem: plan.siteSystem, siteCode: plan.siteCode, siteQualifiers: plan.siteQualifiers }
     const given = siteInputOf(site, input)
-    if (Object.keys(given).length > 0) {
+    const pending = plan.scope ? (site.pending?.(planSite, plan.scope) ?? null) : null
+    if (pending) {
+      // Indicado con la pieza o la cara por definir: se define al hacerlo, con las
+      // reglas de su ámbito, y queda también en el tratamiento. Lo que ya se dijo
+      // al indicarlo (la pieza) no cambia.
+      if (Object.keys(given).length === 0) throw validation(pending.ask)
+      const [offer] = plan.serviceId
+        ? await tx.select().from(serviceCatalog).where(and(eq(serviceCatalog.id, plan.serviceId), eq(serviceCatalog.organizationId, orgId))).limit(1)
+        : []
+      const asked = site.columns({ ...site.fields(planSite), ...given }, { scope: plan.scope!, surfaces: offer ? await surfaceLimits(tx, orgId, offer) : undefined })
+      if (planSite.siteCode && asked.siteCode !== planSite.siteCode)
+        throw validation("El procedimiento conserva la pieza del tratamiento indicado")
+      planSite = asked
+      await tx
+        .update(treatmentPlanItem)
+        .set({ ...asked, updatedAt: new Date() })
+        .where(and(eq(treatmentPlanItem.id, plan.id), eq(treatmentPlanItem.organizationId, orgId)))
+    } else if (Object.keys(given).length > 0) {
       const asked = site.columns({ ...site.fields(planSite), ...given })
       if (!sameSite(asked, planSite))
         throw validation("El procedimiento conserva el sitio del tratamiento indicado, sin cambios")

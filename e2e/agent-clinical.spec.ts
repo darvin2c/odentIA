@@ -34,7 +34,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const dictation = () => call<{ enabled: boolean; suggestions: Array<{ kind: string; status: string }> }>(page, "GET", dictationPath, org.slug)
 
   // --- Apagado: la atención no ofrece dictar y el servidor no acepta dictados ---
-  expect(await dictation()).toEqual({ enabled: false, suggestions: [], removedByVoice: [], confirmed: 0, blocked: null })
+  expect(await dictation()).toEqual({ enabled: false, suggestions: [], removedByVoice: [], undoRequests: [], teeth: [], confirmed: 0, blocked: null })
   expect((await api(page, "POST", dictationPath, org.slug, { transcript: DICTATION })).status).toBe(409)
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
@@ -216,20 +216,23 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictado-odontograma", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  // Una prestación a la que le falta algo queda «Por revisar»: se completa en la superficie lateral.
+  // A una prestación le falta la pieza: no frena (ADR 0099). Avisa, ofrece las piezas que ya se
+  // nombraron y se completa con un toque; también se podría confirmar así y definirla al hacerla.
+  const in16 = async () =>
+    (await call<Array<{ toothNumber: number | null }>>(page, "GET", `${apiPath}/plan`, org.slug)).filter((item) => item.toothNumber === 16).length
+  const before16 = await in16()
   await write("Hacemos endodoncia.")
   const pendingPlan = suggested("Plan de tratamiento").getByRole("listitem")
-  await expect(pendingPlan).toContainText("Por revisar")
-  await expect(pendingPlan).toContainText("no dijiste cuál")
-  await expect(review).toContainText("1 por revisar")
-  await pendingPlan.getByRole("button", { name: "Buscar otra prestación" }).click()
-  await expect(page.getByRole("combobox", { name: "Buscar otra prestación" })).toBeVisible()
-  await expect(page.getByText("Precio del servicio: S/ 650.00. No se edita aquí.")).toBeVisible()
-  await page.getByLabel("Pieza", { exact: true }).fill("26")
-  await page.getByRole("button", { name: "Guardar y confirmar" }).click()
+  await expect(pendingPlan).toContainText("¿En qué pieza?")
+  await expect(pendingPlan).not.toContainText("Por revisar")
+  await expect(pendingPlan.getByRole("button", { name: "Confirmar", exact: true })).toBeEnabled()
+  await info.attach("dictado-pieza-por-definir", { body: await pendingPlan.screenshot(), contentType: "image/png" })
+  await pendingPlan.getByRole("group", { name: "Pieza" }).getByRole("button", { name: "16", exact: true }).click()
+  await expect(pendingPlan).toContainText("Pieza 16")
+  await expect(pendingPlan).not.toContainText("¿En qué pieza?")
+  await pendingPlan.getByRole("button", { name: "Confirmar", exact: true }).click()
   await expect(idle).toBeVisible()
-  const planItems = await call<Array<{ toothNumber: number | null; serviceName?: string }>>(page, "GET", `${apiPath}/plan`, org.slug)
-  expect(planItems.filter((item) => item.toothNumber === 26)).toHaveLength(1)
+  expect(await in16()).toBe(before16 + 1)
 
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
@@ -268,21 +271,25 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click()
 
-  // --- Una sugerencia sin revisar: al firmar se nombra y, si se firma, no entra a la historia ---
+  // --- Una sugerencia sin confirmar: al firmar viene marcada; desmarcada, no entra a la historia ---
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await expect(closing).toContainText("Si quedan sugerencias sin revisar, te lo pregunta antes de firmar.")
   await signButton.click()
-  const sign = page.getByRole("alertdialog", { name: "Queda 1 sugerencia sin revisar" })
-  await expect(sign.getByRole("list", { name: "Sugerencias sin revisar" })).toContainText("Diagnóstico · falta confirmarla")
-  await expect(sign).toContainText("Las otras 6 ya están confirmadas y se firman con la atención.")
+  const sign = page.getByRole("alertdialog", { name: "Firmar la atención" })
+  const dictated = sign.getByRole("list", { name: "Lo dictado sin confirmar" })
+  await expect(dictated).toContainText("K02.9")
+  await expect(dictated.getByRole("checkbox")).toBeChecked()
+  await expect(sign.getByRole("button", { name: "Firmar con 1 marcada" })).toBeVisible()
   await info.attach("firmar-con-sugerencias", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  // «Revisar ahora» vuelve a la atención sin firmar.
-  await sign.getByRole("button", { name: "Revisar ahora" }).click()
+  // «Volver» vuelve a la atención sin firmar.
+  await sign.getByRole("button", { name: "Volver" }).click()
   await expect(sign).toBeHidden()
   expect((await detail()).encounter.status).toBe("borrador")
   await signButton.click()
-  await sign.getByRole("button", { name: "Descartarla y firmar" }).click()
+  await dictated.getByRole("checkbox").click()
+  await expect(dictated).toContainText("desmarcada: no entra")
+  await sign.getByRole("button", { name: "Firmar sin lo dictado" }).click()
   await expect.poll(async () => (await detail()).encounter.status, { timeout: 30_000 }).toBe("finalizada")
   const final = await detail()
   expect(final.diagnoses).toHaveLength(1)

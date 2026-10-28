@@ -688,7 +688,7 @@ export async function addPlanItem(
   const service = await requireServiceForIndication(tx, orgId, input.serviceId.trim())
   const hooks = await hooksOf(tx, orgId)
   const scope = assertScopeValue(hooks.site, service.scope)
-  const itemSite = hooks.site.columns(siteInputOf(hooks.site, input), { scope, surfaces: await surfaceLimits(tx, orgId, service) })
+  const itemSite = hooks.site.columns(siteInputOf(hooks.site, input), { scope, surfaces: await surfaceLimits(tx, orgId, service), pending: true })
   const detail = assertDetail(input.detail)
   const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
@@ -888,7 +888,7 @@ export async function updatePlanItem(
     if (patch.serviceId.trim() !== current.serviceId) {
       const service = await requireServiceForIndication(tx, orgId, patch.serviceId.trim())
       scope = assertScopeValue(hooks.site, service.scope)
-      itemSite = hooks.site.columns(askedSite(), { scope, surfaces: await surfaceLimits(tx, orgId, service) })
+      itemSite = hooks.site.columns(askedSite(), { scope, surfaces: await surfaceLimits(tx, orgId, service), pending: true })
       if (service.priceCents === null) {
         throw new ServiceError(
           "SERVICE_UNPRICED",
@@ -928,7 +928,7 @@ export async function updatePlanItem(
         .limit(1)
       limits = offer ? await surfaceLimits(tx, orgId, offer) : { min: 1, max: 5 }
     }
-    itemSite = hooks.site.columns(askedSite(), { scope, surfaces: limits })
+    itemSite = hooks.site.columns(askedSite(), { scope, surfaces: limits, pending: true })
     fields.push("site")
   }
   if (fields.includes("serviceId") || fields.includes("site")) {

@@ -774,7 +774,7 @@ export function EncounterEditor({
     try {
       await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
       await dictation.refresh()
-      // Sin consentimientos por firmar, «Descartarla y firmar» firma; si falta
+      // Sin consentimientos por firmar, «Firmar con N marcadas» firma; si falta
       // alguno, sigue al cierre para firmarlo o decir por qué se sigue sin él.
       if ((closingQuery.data?.data.consents ?? []).length === 0) await handleConfirmFinalize()
       else setConfirmWithDictation(false)
@@ -1898,13 +1898,18 @@ export function EncounterEditor({
         session={dictation}
         signing={finalizing}
         onClose={() => setConfirmOpen(false)}
-        onReview={() => {
+        onComplete={(id) => {
           setConfirmOpen(false)
           // Lo que no se puede confirmar tal cual se abre para completarlo.
-          const first = dictation.suggestions.find((item) => item.status === "por_revisar")
-          if (first) dictation.openEdit(first)
+          const item = dictation.suggestions.find((candidate) => candidate.id === id)
+          if (item) dictation.openEdit(item)
         }}
-        onDiscardAndSign={() => void discardDictationAndContinue()}
+        onSign={(ids) =>
+          void dictation.confirmMany
+            .mutateAsync(ids)
+            .then(() => discardDictationAndContinue())
+            .catch(() => undefined)
+        }
       >
         {signFields}
       </DictationSignDialog>

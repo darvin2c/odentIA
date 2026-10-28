@@ -17,22 +17,24 @@ import {
   patientAllergy,
   prescription,
   serviceCatalog,
+  treatmentBudget,
   treatmentBudgetOption,
+  treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
-import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
+import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch } from "./encounters.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { createFollowUp } from "./follow-ups.js"
+import { cancelFollowUp, createFollowUp } from "./follow-ups.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { findOrgLocale, formatOrgMoney, type OrgLocale, orgProduct } from "./locale.js"
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addBudgetItems, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
-import { addPlanItem } from "./plan.js"
+import { addPlanItem, setPlanItemStatus } from "./plan.js"
 import { createPrescription } from "./prescriptions.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
@@ -104,6 +106,8 @@ export interface DictationSuggestion {
   voice: { before: string } | null
   /** Quitada por voz («quita la endodoncia»): lo que dijo, para poder deshacerlo. */
   removal: { said: string } | null
+  /** Ya confirmada, y pidió quitarla en voz alta: espera que una persona lo decida. */
+  undoRequest: { said: string } | null
   createdAt: string
 }
 
@@ -118,6 +122,8 @@ interface SuggestionMeta {
   segments?: string[]
   voice?: { payload: Record<string, unknown>; status: "lista" | "por_revisar"; note: string | null; before: string } | undefined
   removal?: { status: "lista" | "por_revisar"; said: string } | undefined
+  /** «Quita la endodoncia» sobre una ya confirmada: nunca se quita sola, se propone. */
+  undoRequest?: { said: string } | undefined
 }
 const META = "_meta"
 
@@ -272,9 +278,9 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
     const options = Array.isArray(payload["options"]) ? (payload["options"] as PlanChoice[]) : []
     if (options.length) {
       // Dos o tres caminos para lo mismo: la principal es la opción A, la recomendada.
-      const how = options.length === 1 ? "Dos caminos" : "Tres caminos"
-      const tooth = typeof payload["toothNumber"] === "number" ? ` para la ${payload["toothNumber"]}` : ""
-      return [`${how}${tooth} · elige uno`, `Opción A · recomendada: ${choice(payload as PlanChoice)}`, ...options.map((option, index) => `Opción ${OPTION_LETTER[index + 1]}: ${choice(option)}`)].join("\n")
+      const how = options.length === 1 ? "dos caminos" : "tres caminos"
+      const tooth = typeof payload["toothNumber"] === "number" ? `Pieza ${payload["toothNumber"]} · ` : ""
+      return [`${tooth}${tooth ? how : `${how.charAt(0).toUpperCase()}${how.slice(1)}`}, el paciente elige`, `Opción A · recomendada: ${choice(payload as PlanChoice)}`, ...options.map((option, index) => `Opción ${OPTION_LETTER[index + 1]}: ${choice(option)}`)].join("\n")
     }
     return [`${payload["serviceName"] ?? payload["service"] ?? ""}${price ? ` · ${price}` : ""}`, dictation.siteWords(payload), payload["detail"]].filter(Boolean).join("\n")
   }
@@ -301,6 +307,7 @@ function toItem(row: typeof encounterDictationSuggestion.$inferSelect, zone: Zon
     summary: summarize(row.kind, data, zone, dictation),
     voice: meta.voice ? { before: meta.voice.before } : null,
     removal: row.status === "descartada" && meta.removal ? { said: meta.removal.said } : null,
+    undoRequest: row.status === "confirmada" && meta.undoRequest ? { said: meta.undoRequest.said } : null,
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -327,8 +334,12 @@ export function dictationModelLabel(item: Pick<DictationSuggestion, "kind" | "pa
             : dictation.kinds.includes(item.kind)
             ? dictation.modelLabel(item.kind, payload)
             : String(payload["title"] ?? "Control")
-  return `${DICTATION_KIND_LABEL[item.kind]}: ${what}`
+  // Lo que le falta va a la vista del asistente: «oclusal», dicho solo, completa esa.
+  const missing = (Array.isArray(payload["pending"]) ? (payload["pending"] as string[]) : []).map((key) => PENDING_WORDS[key] ?? key)
+  return `${DICTATION_KIND_LABEL[item.kind]}: ${what}${missing.length ? ` · falta: ${missing.join(" y ")}` : ""}`
 }
+
+const PENDING_WORDS: Record<string, string> = { toothNumber: "la pieza", surfaces: "la cara" }
 
 /**
  * Deja una sugerencia lista o por revisar. Se valida con el mismo esquema que
@@ -418,11 +429,18 @@ function settlePlan(payload: Record<string, unknown>, services: ServiceOption[],
   if (!main.serviceId || (fitted.status === "lista" && options.some((option) => !option.serviceId))) return { ...ready, status: "por_revisar", note: CHOOSE_EACH_OPTION }
   if (fitted.status !== "lista") return ready
   // Resina (por caras) o corona (por pieza): cada camino se revisa con su propio ámbito.
+  // Lo que le falta a alguno (la cara de la resina) es un aviso de la elección, no un freno.
+  const pending = new Set(Array.isArray(fitted.payload["pending"]) ? (fitted.payload["pending"] as string[]) : [])
+  let note = fitted.note
   for (const [index, option] of options.entries()) {
     const own = dictation.fitToScope(site, option.serviceScope ?? null)
-    if (own.status !== "lista") return { ...ready, status: "por_revisar", note: `Opción ${OPTION_LETTER[index + 1]} · ${option.serviceName ?? option.service}: ${own.note}` }
+    const label = `Opción ${OPTION_LETTER[index + 1]} · ${option.serviceName ?? option.service}`
+    if (own.status !== "lista") return { ...ready, status: "por_revisar", note: `${label}: ${own.note}` }
+    for (const key of Array.isArray(own.payload["pending"]) ? (own.payload["pending"] as string[]) : []) pending.add(key)
+    note ??= own.note ? `${label}: ${own.note}` : null
   }
-  return ready
+  const { pending: _old, ...choice } = ready.payload
+  return { payload: pending.size ? { ...choice, pending: [...pending] } : choice, status: "lista", note }
 }
 
 /** La pieza y las caras de una elección de caminos, tal como se dijeron. */
@@ -727,6 +745,8 @@ export interface DictationSegmentResult {
   suggestions: DictationSuggestion[]
   corrected: string[]
   removed: string[]
+  /** Ya confirmadas que pidió quitar: quedan propuestas, no se quitan solas. */
+  undoRequested: string[]
   /** El tramo ya se había guardado: no se hizo nada. */
   repeated: boolean
 }
@@ -768,7 +788,7 @@ export async function saveDictationSegment(
   await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
   const segmentId = segment.segmentId
   if (segmentId && (await dictationSegmentSeen(tx, orgId, patientId, encounterId, segmentId))) {
-    return { suggestions: [], corrected: [], removed: [], repeated: true }
+    return { suggestions: [], corrected: [], removed: [], undoRequested: [], repeated: true }
   }
   const stamp = (meta: SuggestionMeta): SuggestionMeta => (segmentId ? { ...meta, segments: [...(meta.segments ?? []), segmentId] } : meta)
   const scope = await dictationScope(tx, orgId)
@@ -819,9 +839,35 @@ export async function saveDictationSegment(
   for (const correction of (segment.corrections ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) await correct(correction.suggestionId, correction.changes)
 
   const removed: string[] = []
+  const undoRequested: string[] = []
   for (const removal of (segment.removals ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const row = await pendingRow(removal.suggestionId)
-    if (!row) continue
+    if (!row) {
+      // Ya confirmada hoy: lo confirmado nunca se quita solo. Queda propuesto en su
+      // tarjeta («Quitar del plan» / «Dejarla») y una persona lo decide.
+      const [confirmed] = await tx
+        .select()
+        .from(encounterDictationSuggestion)
+        .where(
+          and(
+            eq(encounterDictationSuggestion.organizationId, orgId),
+            eq(encounterDictationSuggestion.encounterId, encounterId),
+            eq(encounterDictationSuggestion.id, removal.suggestionId),
+            eq(encounterDictationSuggestion.status, "confirmada"),
+            inArray(encounterDictationSuggestion.kind, UNDOABLE_KINDS),
+          ),
+        )
+        .for("update")
+        .limit(1)
+      if (!confirmed) continue
+      const { data, meta } = splitMeta(confirmed.payload)
+      await tx
+        .update(encounterDictationSuggestion)
+        .set({ payload: withMeta(data, stamp({ ...meta, undoRequest: { said: removal.said.slice(0, DICTATION_SOURCE_CHARS) } })), updatedAt: new Date() })
+        .where(eq(encounterDictationSuggestion.id, confirmed.id))
+      undoRequested.push(confirmed.id)
+      continue
+    }
     const { data, meta } = splitMeta(row.payload)
     // Si se entendió mal, «Deshacer» la devuelve como estaba (issue 135, opción B).
     const undo = { status: row.status as "lista" | "por_revisar", said: removal.said.slice(0, DICTATION_SOURCE_CHARS) }
@@ -906,7 +952,7 @@ export async function saveDictationSegment(
     })
   }
   const inserted = rows.length ? await tx.insert(encounterDictationSuggestion).values(rows).returning() : []
-  if (inserted.length + corrected.length + removed.length > 0) {
+  if (inserted.length + corrected.length + removed.length + undoRequested.length > 0) {
     await tx.insert(auditEvent).values({
       organizationId: orgId,
       actorUserId,
@@ -914,11 +960,11 @@ export async function saveDictationSegment(
       entity: "encounter",
       entityId: encounterId,
       // Sin texto clínico en la auditoría: cuántas y de qué clase.
-      metadata: { patientId, count: inserted.length, kinds: [...new Set(inserted.map((row) => row.kind))], corrected: corrected.length, removed: removed.length },
+      metadata: { patientId, count: inserted.length, kinds: [...new Set(inserted.map((row) => row.kind))], corrected: corrected.length, removed: removed.length, undoRequested: undoRequested.length },
     })
   }
   const zone = await findOrgLocale(tx, orgId)
-  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, repeated: false }
+  return { suggestions: inserted.map((row) => toItem(row, zone, dictation)), corrected, removed, undoRequested, repeated: false }
 }
 
 /**
@@ -1099,6 +1145,150 @@ export async function undoDictationVoiceCorrection(
     .where(eq(encounterDictationSuggestion.id, id))
     .returning()
   if (!updated) throw new Error("No se pudo deshacer la corrección")
+  return toItem(updated, await findOrgLocale(tx, orgId), dictation)
+}
+
+/**
+ * Lo confirmado hoy que el asistente puede proponer quitar: una indicación sin
+ * caminos, un diagnóstico o un control. Una elección de caminos ya armó el
+ * presupuesto con sus opciones, y un hallazgo o la receta se corrigen donde
+ * quedaron: esos no se proponen.
+ */
+const UNDOABLE_KINDS: DictationKind[] = ["plan", "diagnostico", "control"]
+
+/** Ya confirmadas en esta atención que se pueden proponer quitar, en el orden en que se dictaron. */
+export async function listConfirmedDictation(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<DictationSuggestion[]> {
+  const { dictation } = await productHooks(tx, orgId)
+  if (!dictation) return []
+  const rows = await tx
+    .select()
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.status, "confirmada"),
+        inArray(encounterDictationSuggestion.kind, UNDOABLE_KINDS),
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.createdAt), asc(encounterDictationSuggestion.id))
+  const zone = await findOrgLocale(tx, orgId)
+  return rows
+    .filter((row) => row.entityId && !Array.isArray(splitMeta(row.payload).data["options"]))
+    .map((row) => toItem(row, zone, dictation))
+}
+
+/**
+ * Las piezas nombradas en lo dictado de esta atención (pendiente o confirmado),
+ * para ofrecer con un toque la que le falta a una indicación.
+ */
+export async function dictationTeeth(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<number[]> {
+  const rows = await tx
+    .select({ payload: encounterDictationSuggestion.payload })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        inArray(encounterDictationSuggestion.status, ["lista", "por_revisar", "confirmada"]),
+      ),
+    )
+  const teeth = new Set<number>()
+  for (const row of rows) {
+    const tooth = (row.payload as Record<string, unknown>)["toothNumber"]
+    if (typeof tooth === "number") teeth.add(tooth)
+  }
+  return [...teeth].sort((a, b) => a - b)
+}
+
+async function lockUndoRequest(tx: Db, orgId: string, patientId: string, encounterId: string, id: string) {
+  const [row] = await tx
+    .select()
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.patientId, patientId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.id, id),
+        eq(encounterDictationSuggestion.status, "confirmada"),
+      ),
+    )
+    .for("update")
+    .limit(1)
+  const parts = row ? splitMeta(row.payload) : null
+  if (!row || !parts?.meta.undoRequest) throw conflict("NO_UNDO_REQUEST", "No hay un pedido de quitar esto")
+  return { row, ...parts, undoRequest: parts.meta.undoRequest }
+}
+
+/**
+ * «Quitar del plan» (o el diagnóstico, o el control) de lo que se pidió quitar
+ * en voz alta y ya estaba confirmado. Lo hace la operación de siempre, con el
+ * motivo de lo que dijo: el tratamiento se cancela (y sale del presupuesto en
+ * borrador), el diagnóstico se anula y el control se cancela. Un tratamiento que
+ * ya está en un presupuesto enviado no se toca desde aquí.
+ */
+export async function undoConfirmedDictation(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  id: string,
+): Promise<DictationSuggestion> {
+  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const dictation = await requireDictatingProduct(tx, orgId)
+  const { row, data, meta, undoRequest } = await lockUndoRequest(tx, orgId, patientId, encounterId, id)
+  const reason = `Se quitó al dictar: «${undoRequest.said}»`.slice(0, 2000)
+  const entityId = String(row.entityId)
+  if (row.kind === "plan") {
+    const [item] = await tx
+      .select({ budgetId: treatmentPlanItem.budgetId, status: treatmentBudget.status })
+      .from(treatmentPlanItem)
+      .leftJoin(treatmentBudget, eq(treatmentBudget.id, treatmentPlanItem.budgetId))
+      .where(and(eq(treatmentPlanItem.organizationId, orgId), eq(treatmentPlanItem.id, entityId)))
+      .limit(1)
+    if (item?.budgetId && item.status !== "borrador") {
+      throw conflict("PLAN_ITEM_IN_SENT_BUDGET", "Ya está en un presupuesto enviado: cámbialo desde el plan")
+    }
+    if (item?.budgetId) await removeBudgetItems(tx, orgId, actorUserId, patientId, item.budgetId, { itemIds: [entityId] })
+    await setPlanItemStatus(tx, orgId, actorUserId, patientId, entityId, { status: "cancelado", statusReason: reason, encounterId })
+  } else if (row.kind === "diagnostico") {
+    await voidEncounterDiagnosis(tx, orgId, actorUserId, patientId, encounterId, entityId, { reason })
+  } else if (row.kind === "control") {
+    await cancelFollowUp(tx, orgId, actorUserId, patientId, entityId, { reason })
+  } else {
+    throw conflict("NOT_UNDOABLE", "Esto se corrige donde quedó, no desde el dictado")
+  }
+  const [updated] = await tx
+    .update(encounterDictationSuggestion)
+    .set({ payload: withMeta(data, { ...meta, undoRequest: undefined }), status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, id))
+    .returning()
+  if (!updated) throw new Error("No se pudo quitar")
+  return toItem(updated, await findOrgLocale(tx, orgId), dictation)
+}
+
+/** «Dejarla»: el pedido de quitar algo ya confirmado se descarta y todo sigue como estaba. */
+export async function keepConfirmedDictation(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  id: string,
+): Promise<DictationSuggestion> {
+  await lockOwnDraft(tx, orgId, actorUserId, patientId, encounterId)
+  const dictation = await requireDictatingProduct(tx, orgId)
+  const { data, meta } = await lockUndoRequest(tx, orgId, patientId, encounterId, id)
+  const [updated] = await tx
+    .update(encounterDictationSuggestion)
+    .set({ payload: withMeta(data, { ...meta, undoRequest: undefined }), updatedAt: new Date() })
+    .where(eq(encounterDictationSuggestion.id, id))
+    .returning()
+  if (!updated) throw new Error("No se pudo dejar")
   return toItem(updated, await findOrgLocale(tx, orgId), dictation)
 }
 
@@ -1399,10 +1589,10 @@ export async function discardPendingDictation(tx: Db, orgId: string, actorUserId
  * Lo mismo que `saveDictationSuggestions`, sin guardar nada: para el dictado
  * de práctica. Valida contra los servicios y el catálogo reales de la clínica.
  */
-export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal">>> {
+export async function previewDictationSuggestions(tx: Db, orgId: string, drafts: DictationDraft[]): Promise<Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal" | "undoRequest">>> {
   const scope = await dictationScope(tx, orgId)
   const zone = await findOrgLocale(tx, orgId)
-  const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal">> = []
+  const out: Array<Omit<DictationSuggestion, "id" | "createdAt" | "voice" | "removal" | "undoRequest">> = []
   for (const draft of drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const ready = await prepare(tx, draft, scope)
     if (!ready) continue

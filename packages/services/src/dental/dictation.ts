@@ -248,31 +248,29 @@ async function prepareFinding(
  * y una por pieza no lleva caras, aunque se hayan dictado. Si le falta lo que
  * su ámbito exige, queda por revisar en vez de fallar al confirmar.
  */
+/** Lo que falta de una indicación, como pregunta: nunca impide confirmarla. */
+const PENDING_TOOTH = "¿En qué pieza? Tócala o dila; si aún no la sabes, confirma igual y la defines al hacerla."
+const pendingSurfaces = (tooth: number) =>
+  `¿Qué cara de la ${tooth}? Tócala o dila; si aún no la sabes, confirma igual y la defines al hacerla.`
+
 function fitToScope(payload: Record<string, unknown>, scope: string | null): DictationPrepared {
   const { toothNumber, surfaces, ...rest } = payload
   const hasTooth = typeof toothNumber === "number"
   const hasSurfaces = Array.isArray(surfaces) && surfaces.length > 0
-  if (scope === "general") return { payload: rest, status: "lista", note: null }
+  // La pieza y la cara que no se dijeron no frenan: la indicación queda lista con lo
+  // que falta a la vista (`pending`), se completa con un toque o dicho, y si no, se
+  // define al hacerla. Solo el cuadrante o la arcada se arman desde el plan.
+  const { pending: _pending, ...clean } = rest
+  if (scope === "general") return { payload: clean, status: "lista", note: null }
   if (scope === "tooth") {
     return hasTooth
-      ? { payload: { ...rest, toothNumber }, status: "lista", note: null }
-      : {
-          payload: rest,
-          status: "por_revisar",
-          note: "Esta prestación se indica por pieza y no dijiste cuál. Agrega la pieza.",
-        }
+      ? { payload: { ...clean, toothNumber }, status: "lista", note: null }
+      : { payload: { ...clean, pending: ["toothNumber"] }, status: "lista", note: PENDING_TOOTH }
   }
   if (scope === "surfaces") {
-    return hasTooth && hasSurfaces
-      ? { payload: { ...rest, toothNumber, surfaces }, status: "lista", note: null }
-      : {
-          payload: { ...rest, ...(hasTooth ? { toothNumber } : {}) },
-          status: "por_revisar",
-          // Si ya dijo la pieza, se dice solo lo que falta: «Falta la cara de la 36».
-          note: hasTooth
-            ? `Falta la cara de la ${toothNumber}: elígela para confirmarla.`
-            : "Esta prestación necesita la pieza y al menos una cara. Complétala.",
-        }
+    if (hasTooth && hasSurfaces) return { payload: { ...clean, toothNumber, surfaces }, status: "lista", note: null }
+    if (hasTooth) return { payload: { ...clean, toothNumber, pending: ["surfaces"] }, status: "lista", note: pendingSurfaces(toothNumber) }
+    return { payload: { ...clean, pending: ["toothNumber", "surfaces"] }, status: "lista", note: PENDING_TOOTH }
   }
   return {
     payload: rest,

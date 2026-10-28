@@ -187,6 +187,51 @@
       "espera": {}
     },
     {
+      "id": "aviso-cara-suelta",
+      "_nota": "Desde aquí, el aviso abierto: lo que falta se dice suelto y completa esa sugerencia.",
+      "pendientes": [
+        "Odontograma: caries, enamel, Pieza 36 · cara oclusal",
+        "Plan de tratamiento: Resina fotocurable, 1 superficie, posterior, Pieza 36 · falta: la cara"
+      ],
+      "texto": "Oclusal.",
+      "espera": { "correcciones": 1, "corrigeCual": [2], "corrige": "oclusal", "nuevos": 0 }
+    },
+    {
+      "id": "aviso-pieza-suelta",
+      "pendientes": [
+        "Plan de tratamiento: Corona metal-cerámica, metal base · falta: la pieza",
+        "Controles: Control en 1 mes"
+      ],
+      "texto": "Eh... en la veinticinco, la corona.",
+      "espera": { "correcciones": 1, "corrigeCual": [1], "nuevos": 0 }
+    },
+    {
+      "id": "aviso-cara-entre-charla",
+      "pendientes": [
+        "Plan de tratamiento: Obturación con resina, Pieza 46 · falta: la cara",
+        "Plan de tratamiento: Profilaxis"
+      ],
+      "texto": "Muerde suave. Ya. Mesial, la de la cuarenta y seis es mesial.",
+      "espera": { "correcciones": 1, "corrigeCual": [1], "corrige": "mesial", "nuevos": 0 }
+    },
+    {
+      "id": "quita-ya-confirmada",
+      "pendientes": [
+        "Plan de tratamiento: Profilaxis",
+        "Plan de tratamiento: Endodoncia multirradicular, Pieza 36 · ya confirmada"
+      ],
+      "texto": "Quita también la endodoncia, mejor que la vea el endodoncista.",
+      "espera": { "quitar": 1, "quitarCual": [2], "nuevos": 0 }
+    },
+    {
+      "id": "no-corrige-ya-confirmada",
+      "pendientes": [
+        "Plan de tratamiento: Corona metal-cerámica, metal base, Pieza 25 · ya confirmada"
+      ],
+      "texto": "Y otra corona igual en la veintiséis.",
+      "espera": { "correcciones": 0, "quitar": 0, "planes": [26], "nuevos": 1 }
+    },
+    {
       "id": "caos-mejor-otra-prestacion",
       "pendientes": [
         "Plan de tratamiento: Exodoncia simple, Pieza 46"
