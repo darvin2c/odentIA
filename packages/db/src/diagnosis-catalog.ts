@@ -5,11 +5,11 @@ import type { DiagnosisSystemKey } from "@odentia/clinical"
 import { and, eq, inArray, sql } from "drizzle-orm"
 import type { Db } from "./client.js"
 import {
+  assertCompleteIcd10,
   assertSha256,
   type DiagnosisCatalogRow,
-  diagnosisFileText,
-  parseDiagnosisFile,
   prepareDiagnosisRows,
+  readDiagnosisFile,
 } from "./diagnosis-import.js"
 import { diagnosisCatalog, diagnosisCodeRelease } from "./schema/clinical.js"
 
@@ -61,20 +61,24 @@ export const BUNDLED_DIAGNOSIS_LISTS: readonly DiagnosisListLoad[] = [
  * Semilla mínima de desarrollo, NO oficial: los 124 códigos de la CIE-10 de la
  * cavidad bucal y Z01.2, y 41 de la atención primaria para latidIA (issue 229:
  * amigdalitis, hipertensión, diabetes, asma…), sin fuente verificada ni permiso
- * de la OPS. Nunca en producción.
+ * de la OPS. Nunca en producción. Los mismos códigos sirven de CIE-10 del
+ * MINSA, la lista que se propone en Perú, para que una clínica de Perú de
+ * desarrollo o de las pruebas pueda cerrar una atención sin la hoja oficial.
  */
-export const DEV_DIAGNOSIS_LISTS: readonly DiagnosisListLoad[] = [
-  {
-    system: "ICD-10",
+const DEV_CIE10_LICENSE =
+  "Semilla mínima de desarrollo, no oficial: sin fuente verificada ni permiso de uso comercial."
+
+export const DEV_DIAGNOSIS_LISTS: readonly DiagnosisListLoad[] = (["ICD-10", "ICD-10-PE"] as const).map(
+  (system) => ({
+    system,
     edition: "semilla-desarrollo",
     official: false,
-    license:
-      "Semilla mínima de desarrollo, no oficial: sin fuente verificada ni permiso de uso comercial.",
+    license: DEV_CIE10_LICENSE,
     sourceUrl: null,
     sha256: null,
     path: join(here, "..", "seeds", "cie10.csv"),
-  },
-]
+  }),
+)
 
 /** Las filas de la lista, después de verificar el SHA-256 del archivo. */
 export function readDiagnosisList(load: DiagnosisListLoad): {
@@ -85,7 +89,10 @@ export function readDiagnosisList(load: DiagnosisListLoad): {
     throw new Error(`${load.system} ${load.edition}: una lista oficial necesita su SHA-256`)
   const bytes = readFileSync(load.path)
   const sha = load.sha256 ? assertSha256(bytes, load.sha256) : null
-  return { sha, rows: prepareDiagnosisRows(load.system, parseDiagnosisFile(diagnosisFileText(bytes))) }
+  const rows = prepareDiagnosisRows(load.system, readDiagnosisFile(bytes))
+  // La semilla de desarrollo no es una edición: solo una lista oficial tiene que venir entera.
+  if (load.official && load.system.startsWith("ICD-10")) assertCompleteIcd10(rows)
+  return { sha, rows }
 }
 
 export interface DiagnosisListResult {

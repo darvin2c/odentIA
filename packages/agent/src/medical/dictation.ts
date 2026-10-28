@@ -233,7 +233,8 @@ export function demoExtraction(
         sourceText: part.trim(),
       })
     }
-    if (diagnosisSystem === "ICD-10") {
+    // Los códigos de práctica son de la CIE-10: la del MINSA los trae iguales.
+    if (diagnosisSystem.startsWith("ICD-10")) {
       for (const diagnosis of DEMO_DIAGNOSES) {
         if (!diagnosis.words.test(text)) continue
         drafts.push({

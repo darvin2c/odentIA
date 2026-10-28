@@ -18,8 +18,9 @@ no se comparte con OpenShip ni con las demás aplicaciones.
   del repositorio (`seed:diagnoses`: la CIE-11 de la OMS; sin cambios no escribe
   nada, y con `NODE_ENV=production` nunca carga las semillas de desarrollo).
   Termina después; detenido con código cero es su estado normal. API y worker
-  dependen de su finalización. La CIE-10 no está incluida: con el permiso escrito
-  de la OPS se carga una vez con su archivo (ver `docs/development.md`).
+  dependen de su finalización. La CIE-10 no está incluida: el permiso de la OPS
+  deja cargarla en la base, no guardarla en el repositorio. La del MINSA, la que
+  usa Perú, se carga una vez con su hoja (ver «CIE-10 del MINSA en producción»).
 - La historia de migraciones empieza en la base del 2026-10-24 (ADR 0088). Una
   base creada antes no se migra a ella, tampoco la de producción: se recrea su
   volumen antes de desplegar. Antes de esa fecha no hubo datos reales.
@@ -315,6 +316,61 @@ a esa directiva. CI sigue utilizando BuildKit mediante buildx.
 Las demos se crean en la administración, en Clínicas › «Crear demo» (ADR 0096): producto, tipo de clínica o consultorio, tamaño, meses de historia, país y quién la presenta. Las arma el worker en una sola transacción (unos segundos a un par de minutos), cada día de su zona las pone al día y borra solas las que nadie abre en 60 días. Necesitan el plan de lista de su producto («Plan odentIA» o «Plan latidIA») y la biblioteca de servicios (`seed:procedures`). Su canal tiene claves falsas y su equipo, correos de `example.com`: nada sale a una persona.
 
 Borrar una demo (y volver a empezar) borra su clínica entera con las comprobaciones de la base suspendidas dentro de esa transacción, así que necesita la conexión owner (`DATABASE_URL`, superusuario de la imagen). Solo actúa sobre una clínica con su fila en `admin.saas_demo`: una clínica real nunca se borra. La semilla de desarrollo se niega a correr con `NODE_ENV=production`.
+
+## CIE-10 del MINSA en producción
+
+Perú trabaja con la CIE-10 del MINSA, la del registro HIS (ADR 0100). Cerrar una
+atención exige un diagnóstico: sin esta lista cargada, una clínica de Perú no
+encuentra ningún código y no cierra ninguna atención. Abrir la primera clínica real
+de Perú solo después de este paso (issue 141).
+
+El permiso de la OPS deja cargar la lista en la base, no guardarla en el
+repositorio ni en la imagen: la hoja entra por un volumen, una sola vez, y no
+queda en el servidor. La carga es de su lista: los despliegues siguientes (que
+cargan la CIE-11 del repositorio) no la tocan.
+
+1. Descargar la hoja del MINSA desde REUNIS (https://www.minsa.gob.pe/reunis/?op=3&niv=1,
+   «Manuales y Códigos» › «CIE-10 (MINSA – Excel)»): `CIE10_MINSA_OFICIAL.xlsx`, tal
+   como se descarga, sin abrirla ni guardarla con Excel. Calcular su huella:
+   `sha256sum CIE10_MINSA_OFICIAL.xlsx`. La del 2026-10-28 (modificada por el MINSA el
+   2024-07-04, 403 389 bytes) es
+   `072fe2c4f05404281f76b661d8f4ca590a581528ae760d775347421f42d15dbe`; otra huella es
+   otra edición, y su fecha va en el paso 3.
+2. Copiarla al servidor fuera del repositorio, por ejemplo `/root/cie10/CIE10_MINSA_OFICIAL.xlsx`.
+3. Cargarla con la imagen de `migrate`, que ya tiene la conexión owner. Desde la
+   raíz del proyecto en el servidor, con el mismo entorno del stack (fuera de
+   OpenShip, `--env-file infra/prod/.env`):
+
+   ```bash
+   docker compose -f compose.prod.yaml run --rm --no-deps \
+     -v /root/cie10:/cie10:ro \
+     -e DIAGNOSIS_SYSTEM=ICD-10-PE \
+     -e DIAGNOSIS_FILE=/cie10/CIE10_MINSA_OFICIAL.xlsx \
+     -e DIAGNOSIS_SHA256=<huella del paso 1> \
+     -e DIAGNOSIS_EDITION=2024-07 \
+     -e DIAGNOSIS_LICENSE="CIE-10 MINSA oficial (REUNIS). CIE-10 en español: permiso escrito de la OPS <referencia>, <fecha>; solo carga en la base" \
+     -e DIAGNOSIS_SOURCE_URL=https://files.minsa.gob.pe/s/szimSEZTwFrQR25 \
+     migrate pnpm --filter @odentia/db seed:diagnoses
+   ```
+
+   Si la huella no coincide, una fila no se reconoce o la lista viene incompleta
+   (le falta una letra de la A a la Z, sin la U, o tiene menos de 10 000 códigos),
+   no escribe nada. Responde con la cantidad de códigos: 15 037 en la edición de
+   2024-07. Otra cantidad es otra edición: compararla con la anterior antes de
+   seguir (ADR 0100).
+4. Comprobar la carga:
+
+   ```sql
+   SELECT edition, official, code_count, loaded_at
+   FROM catalog.diagnosis_code_release WHERE system_key = 'ICD-10-PE';
+   ```
+
+   Debe aparecer una fila con `official = true` y la cantidad de códigos del paso 3.
+5. Borrar la hoja del servidor (`rm -r /root/cie10`). El permiso y la hoja quedan
+   guardados fuera del servidor, con quien administra odentIA.
+6. En una clínica de Perú con «CIE-10 MINSA» en Configuración › Lista de diagnósticos
+   (las demos nacen con la CIE-11), buscar «caries» en una atención, elegir K02.1 y
+   cerrarla.
 
 ## Backups y recuperación
 
