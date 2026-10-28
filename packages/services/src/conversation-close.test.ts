@@ -504,9 +504,16 @@ describe("temas para el equipo: el agente nunca se calla (ADR 0050)", () => {
     await c.say(conv.id, "in", "¿Y el descuento?", new Date(Date.now() - 60_000))
     const topic = await c.run((tx) => createHandoff(tx, c.orgId, null, { conversationId: conv.id, reason: "Descuento", summary: "Descuento", assigneeUserId: c.receptionId, createdBy: "agent" }))
     const [again] = await c.say(conv.id, "in", "¿Ya me pueden decir lo del descuento?", new Date())
-    expect(await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: again!.id }))).toEqual({ assigneeName: "Rita de Recepción", reason: "Descuento" })
+    expect(await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: again!.id }))).toEqual({ assigneeName: "Rita de Recepción", reason: "Descuento", raised: false })
     const [row] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id))
     expect(row?.askedMessageIds).toEqual([again!.id])
+    // Si insiste otra vez por lo mismo, su tema pasa a urgente, una sola vez.
+    const [twice] = await c.say(conv.id, "in", "Sigo esperando lo del descuento", new Date())
+    expect((await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: twice!.id }))).raised).toBe(true)
+    const [urgent] = await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.id, topic.id))
+    expect(urgent?.priority).toBe("alta")
+    const [thrice] = await c.say(conv.id, "in", "¿Y?", new Date())
+    expect((await c.run((tx) => recordTopicAskedAgain(tx, c.orgId, { handoffId: topic.id, messageId: thrice!.id }))).raised).toBe(false)
     expect((await ownerDb.select().from(workspaceNotification).where(eq(workspaceNotification.userId, c.receptionId))).map((n) => n.title))
       .toEqual(["Carlos volvió a preguntar por su tema"])
     // Cita lo que escribió la dueña: va a un tema de ella, no del agente.

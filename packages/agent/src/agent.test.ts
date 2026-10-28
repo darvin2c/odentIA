@@ -1305,7 +1305,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
     appointmentId: booked.id, startsAt: dayAt(1, 16), expectedVersion: booked.version,
   }))
   expect(proposed).toContain("pregúntale con naturalidad si se la reservas")
-  const proposalId = /Propuesta ([0-9a-f-]{36})/.exec(proposed)?.[1]
+  const proposalId = /id ([0-9a-f-]{36})/.exec(proposed)?.[1]
   expect(proposalId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-1", "Sí, confirmo")
   const confirmed = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: proposalId! }))
@@ -1321,7 +1321,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const staleProposal = String(await reprogram.invoke({
     appointmentId: booked.id, startsAt: dayAt(2), expectedVersion: booked.version + 1,
   }))
-  const staleId = /Propuesta ([0-9a-f-]{36})/.exec(staleProposal)?.[1]
+  const staleId = /id ([0-9a-f-]{36})/.exec(staleProposal)?.[1]
   expect(staleId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-2", "Si confirmo")
   await withOrgContext(appDb, "org_a", (tx) =>
@@ -1343,7 +1343,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   expect(pendingMsg).toContain("pregúntale con naturalidad si se la reservas")
   const repeatedMsg = String(await cancel.invoke({ appointmentId: booked.id }))
-  const cancelId = /Propuesta ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
+  const cancelId = /id ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
   expect(cancelId).toBeTruthy()
   expect(repeatedMsg).toContain(cancelId!)
   const pendingCancels = await withOrgContext(appDb, "org_a", (tx) =>
@@ -1360,7 +1360,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   // Cancelar una cita ya cancelada no produce efectos parciales.
   ctx.triggerId = "trig-cancel-2"
   const lateMsg = String(await cancel.invoke({ appointmentId: booked.id }))
-  const lateId = /Propuesta ([0-9a-f-]{36})/.exec(lateMsg)?.[1]
+  const lateId = /id ([0-9a-f-]{36})/.exec(lateMsg)?.[1]
   expect(lateId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-cancel-si-2", "Sí")
   const lateConfirm = String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: lateId! }))

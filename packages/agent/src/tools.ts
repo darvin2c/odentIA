@@ -259,6 +259,8 @@ export interface AgentToolCtx {
    * tocó un botón de un mensaje automático. Va con lo del turno, tras el camino.
    */
   routeHint?: string
+  /** Volvió a preguntar por un tema abierto y este pasó a urgente: se le puede decir. */
+  topicRaised?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -629,19 +631,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (action === "enviar_mensaje" && proposal.status !== "fallida" && proposal.status !== "expirada") {
       ctx.replySettled = true
     }
-    if (proposal.status === "ejecutada") return `Ejecutado en modo directo (propuesta ${proposal.id}).`
+    if (proposal.status === "ejecutada") return `Ejecutado en modo directo (id ${proposal.id}).`
     if (proposal.status === "fallida") {
       const rawError = proposal.error?.trim() ?? ""
       if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") {
         return outsideWindow()
       }
       const detail = rawError ? `: ${rawError.slice(0, 300)}` : "."
-      return `No se pudo ejecutar en modo directo (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
+      return `No se pudo ejecutar en modo directo (id ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
     }
     if (proposal.status === "expirada") {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
-    return `Propuesta ${proposal.id} creada. En tu mensaje di el día, la hora, la sede y con quién, y pregúntale con naturalidad si se la reservas (por ejemplo «¿Te la reservo?»), sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
+    return `Cita lista para su sí (id ${proposal.id}). En tu mensaje di el día, la hora, la sede y con quién, y pregúntale con naturalidad si se la reservas (por ejemplo «¿Te la reservo?»), sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
   }
 
   /**
@@ -1452,8 +1454,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         : minor
           ? `para ${givenNames} ${familyName}, y que lo registras como paciente contigo como su madre, padre o tutor`
           : `para ${givenNames} ${familyName}, y que la registras como paciente`
-      const where = (await webchatNeedsContact()) ? " En el chat web, pídele en ese mismo mensaje su WhatsApp para avisarle de la cita." : ""
-      return `Propuesta ${created.id} creada; todavía no se reservó ni registró nada. En tu mensaje di el día, la hora, la sede y con quién, ${whom}, y termina con estas palabras: «Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?» (si te habla de usted: «Al confirmar, acepta nuestro aviso de privacidad: ${noticeUrl}. ¿Se la reservo?»). Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta: eso la registra y reserva. Si no dice que sí, no insistas.`
+      const where = (await webchatNeedsContact())
+        ? " En el chat web, si aún no te dio su WhatsApp ni se lo pediste, pídeselo en ese mismo mensaje para avisarle de la cita."
+        : ""
+      // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona.
+      return `Cita lista para su sí (id ${created.id}); todavía no se reservó ni registró nada. En tu mensaje, en su idioma, di el día, la hora, la sede y con quién, ${whom}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?». Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",
@@ -1841,16 +1846,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ).catch(() => null)
           if (data) {
             const why = data.missing.length ? `Al paciente le faltan datos para atenderlo (${data.missing.join(", ")})` : "Se acaba de registrar"
-            return `Confirmado y ejecutado (propuesta ${proposal.id}). ${why}: al confirmar la cita, añade en el mismo mensaje «Antes de venir, completa tus datos y tu salud aquí (toma 2 minutos) y llegas con todo listo: ${data.url}». Escribe el enlace tal cual, sin cambiarlo.`
+            return `Confirmado y ejecutado (id ${proposal.id}). ${why}: al confirmar la cita, añade en el mismo mensaje «Antes de venir, completa tus datos y tu salud aquí (toma 2 minutos) y llegas con todo listo: ${data.url}». Escribe el enlace tal cual, sin cambiarlo.`
           }
         }
-        return `Confirmado y ejecutado (propuesta ${proposal.id}).`
+        return `Confirmado y ejecutado (id ${proposal.id}).`
       }
       if (proposal.status === "fallida") {
         const rawError = proposal.error?.trim() ?? ""
         if (rawError.startsWith("WINDOW_CLOSED") || proposal.result?.errorCode === "WINDOW_CLOSED") return outsideWindow()
         const detail = rawError ? `: ${rawError.slice(0, 300)}` : "."
-        return `No se pudo ejecutar al confirmar (propuesta ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
+        return `No se pudo ejecutar al confirmar (id ${proposal.id})${detail} Ofrece una alternativa o deriva a humano.`
       }
       if (proposal.status === "expirada") {
         return `La propuesta ${proposal.id} expiró (48h): pide de nuevo el acto al interlocutor para crear una nueva propuesta, no reintentes confirmar.`
@@ -2113,12 +2118,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // Abre otro solo si sube a urgente (ADR 0097).
       const open = await inOrg((tx) => latestOpenTopic(tx, ctx.orgId, ctx.conversationId, { kind: clinical === true ? "clinico" : topicKindOf(kind) }))
       if (open && !(validPriority === "alta" && open.priority !== "alta")) {
-        await inOrg((tx) => recordTopicAskedAgain(tx, ctx.orgId, { handoffId: open.id, messageId: ctx.triggerId ?? null }))
+        const again = await inOrg((tx) => recordTopicAskedAgain(tx, ctx.orgId, { handoffId: open.id, messageId: ctx.triggerId ?? null }))
         ctx.handedOff = true
         ctx.handoffId = open.id
+        const raised = again.raised ? " Como ya preguntó varias veces, ese tema quedó como urgente para el equipo: díselo." : ""
         if (!notice) {
           ctx.handoffNeedsReply = true
-          return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él. ${REPLY_ASKED_AGAIN}`
+          return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él.${raised} ${REPLY_ASKED_AGAIN}`
         }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
@@ -2192,6 +2198,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         recordTopicAskedAgain(tx, ctx.orgId, { handoffId: tema_id, messageId: ctx.triggerId }),
       ).catch(() => null)
       if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
+      if (result.raised) return "Anotado: como ya preguntó varias veces, su tema quedó como urgente para el equipo. Díselo en una frase, sin prometer una hora; no respondas el tema tú."
       return result.assigneeName
         ? `Anotado y avisado a ${result.assigneeName}. Dile a la persona que ${result.assigneeName} tiene su consulta, sin prometer una hora; no respondas el tema tú.`
         : "Anotado: el equipo lo verá. Dile a la persona que su consulta la tiene el equipo, sin prometer una hora; no respondas el tema tú."

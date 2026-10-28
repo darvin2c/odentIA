@@ -252,15 +252,38 @@ async function converse(index: number) {
   }
   const recorded = conversationId ? await whatWasRecorded(conversationId) : "nada"
   const verdict = await grade(persona, realChannel, known !== null, transcript, recorded)
-  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, conversationId, transcript, verdict }
+  // Lo que costó: cada arreglo se mide también en tokens, no solo en calidad.
+  const [cost] = conversationId
+    ? await ownerDb.execute<{ corridas: number; llamadas: number; entrada: number; cache: number; salida: number; usd: number }>(
+        `select count(*)::int as corridas, coalesce(sum(llm_calls), 0)::int as llamadas, coalesce(sum(input_tokens), 0)::int as entrada,
+                coalesce(sum(cached_input_tokens), 0)::int as cache, coalesce(sum(output_tokens), 0)::int as salida,
+                coalesce(sum(cost_micros), 0)::float / 1000000 as usd
+           from agent_run_ledger where conversation_id = '${conversationId}'` as never,
+      )
+    : []
+  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, conversationId, transcript, verdict, cost: cost ?? null }
   writeFileSync(join(OUT, `${String(index).padStart(3, "0")}.json`), JSON.stringify(result, null, 2))
   console.log(`[${index}] ${realChannel} · ${persona.por_que_escribe.slice(0, 60)} → ${verdict?.cumple ? "cumple" : "NO cumple"}`)
 }
 
 /** Lo que de verdad quedó en la base: el juez no puede adivinar si un pase o una cita existen. */
 async function whatWasRecorded(conversationId: string): Promise<string> {
-  const handoffs = await ownerDb.execute<{ reason: string; priority: string }>(
-    `select reason, priority from agent_handoff where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
+  // Todo lo que Sofi puede decir que hizo: si el juez no lo ve, lo marca como falso sin serlo.
+  const handoffs = await ownerDb.execute<{ reason: string; priority: string; asks: string | null; pending: string | null; again: number }>(
+    `select reason, priority, asks, pending, coalesce(jsonb_array_length(asked_message_ids), 0) as again from agent_handoff where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
+  )
+  const [memory] = await ownerDb.execute<{ notes: Array<{ text: string }> | null }>(
+    `select notes from agent_case_memory where conversation_id = '${conversationId}'` as never,
+  )
+  const [person] = await ownerDb.execute<{ phone: string | null; email: string | null; given_names: string | null; family_name: string | null }>(
+    `select ct.phone, ct.email, ct.given_names, ct.family_name from conversation c join contact ct on ct.id = c.contact_id where c.id = '${conversationId}'` as never,
+  )
+  const registered = await ownerDb.execute<{ name: string; consent: string | null }>(
+    `select pp.display_name as name, (select d.channel from patient_data_consent d where d.patient_id = p.id limit 1) as consent
+       from patient p join contact pp on pp.id = p.person_id
+      where p.created_at > now() - interval '1 hour'
+        and (p.person_id = (select contact_id from conversation where id = '${conversationId}')
+          or exists (select 1 from patient_contact pc where pc.patient_id = p.id and pc.contact_id = (select contact_id from conversation where id = '${conversationId}')))` as never,
   )
   const appointments = await ownerDb.execute<{ starts_at: Date; status: string }>(
     `select starts_at, status from appointment where conversation_id = '${conversationId}'` as never,
@@ -269,7 +292,12 @@ async function whatWasRecorded(conversationId: string): Promise<string> {
     `select action, status from agent_proposal where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
   )
   return JSON.stringify({
-    pases_al_equipo: handoffs.map((row) => `${row.reason} (${row.priority})`),
+    pases_al_equipo: handoffs.map(
+      (row) => `${row.reason} (${row.priority})${row.asks ? `; pide: ${row.asks}` : ""}${row.pending ? `; falta: ${row.pending}` : ""}${row.again ? `; volvió a preguntar ${row.again} veces y quedó anotado en el tema` : ""}`,
+    ),
+    notas_del_caso_anotadas: (memory?.notes ?? []).map((note) => note.text),
+    datos_guardados_de_quien_escribe: person,
+    pacientes_registrados_en_esta_conversacion: registered.map((row) => `${row.name}${row.consent ? ` (aceptó el aviso por ${row.consent})` : ""}`),
     citas_creadas: appointments.map((row) => `${new Date(row.starts_at).toISOString()} ${row.status}`),
     propuestas: proposals.map((row) => `${row.action} ${row.status}`),
   })
@@ -307,7 +335,7 @@ Objetivo: que cada persona quede atendida como con la mejor recepcionista: enten
 cumple = todo lo aplicable bien y dijo_algo_interno_falso_o_contradictorio false.
 No juzgues como falsos los horarios, precios, profesionales, sedes, teléfonos o promociones: Sofi los consulta en la agenda y los datos de la clínica, que tú no ves. Los enlaces de este entorno de prueba usan el dominio «.localhost» y son válidos. Sí es falso decir que pasó algo que no quedó registrado (un pase, una cita, quién tiene el caso) o contradecir lo que dijo antes. Lo que quedó registrado en la clínica: ${recorded}
 
-Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez.
+Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez. Las personas a veces se van sin contestar: si la conversación termina después de una pregunta de Sofi que era la correcta para avanzar (por ejemplo «¿Te la reservo?»), juzga lo que Sofi hizo hasta ahí; que la cita no quedara reservada por eso no es una falla de Sofi.
 
 Canal: ${channel}. ¿Paciente ya conocido?: ${known ? "sí" : "no"}. Quién era la persona (Sofi no lo sabía): ${JSON.stringify(persona)}
 
