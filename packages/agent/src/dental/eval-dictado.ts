@@ -50,6 +50,11 @@ interface PracticeDictation {
     caminos?: Array<{ pieza?: number; principal: string; otros: string[] }>
     /** El paciente ya eligió: ninguna indicación lleva otros caminos. */
     sinCaminos?: boolean
+    /** Los números (desde 1) de las pendientes que debe quitar o corregir: no basta con contar. */
+    quitarCual?: number[]
+    corrigeCual?: number[]
+    /** No debe quedar ninguna frase sin usar («No pude usar esto»). */
+    sinNoUsado?: boolean
   }
 }
 
@@ -180,6 +185,10 @@ for (const dictation of bank.dictados) {
   if (dictation.espera.quitar !== undefined) other("quitar", read.removals.length === dictation.espera.quitar)
   const corrige = dictation.espera.corrige
   if (corrige) other(`corrige a ${corrige}`, read.corrections.some((item) => plain(JSON.stringify(item.changes)).includes(plain(corrige))))
+  const which = (list: Array<{ index: number }>) => JSON.stringify(list.map((item) => item.index + 1).sort())
+  if (dictation.espera.quitarCual) other(`quitar la ${dictation.espera.quitarCual.join(" y la ")}`, which(read.removals) === JSON.stringify([...dictation.espera.quitarCual].sort()))
+  if (dictation.espera.corrigeCual) other(`corregir la ${dictation.espera.corrigeCual.join(" y la ")}`, which(read.corrections) === JSON.stringify([...dictation.espera.corrigeCual].sort()))
+  if (dictation.espera.sinNoUsado) other("todo lo dicho se usó", read.unused.length === 0 && read.omitted === 0)
   if (dictation.espera.nuevos !== undefined) other("nada registrado otra vez", read.drafts.length === dictation.espera.nuevos)
   // Lo que no debía tocar nada pendiente («la tercera» sin tercera): no se aplica.
   if (dictation.espera.correcciones === undefined && dictation.espera.quitar === undefined && pending.length) {
@@ -188,6 +197,8 @@ for (const dictation of bank.dictados) {
   const unused = read.unused.length ? ` · no usó: ${read.unused.map((phrase) => `«${phrase}»`).join(", ")}` : ""
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   console.log(`${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`)
+  // `--detalle`: lo que devolvió el modelo en los que fallan, para ver por qué.
+  if (notes.length && process.argv.includes("--detalle")) console.log(JSON.stringify({ drafts: read.drafts, corrections: read.corrections, removals: read.removals }, null, 1))
 }
 
 const pct = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)} %` : "—")

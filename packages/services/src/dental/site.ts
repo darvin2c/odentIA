@@ -103,6 +103,16 @@ export const dentalProductSite: ProductSite = {
     if (rules) {
       if (!isTreatmentScope(rules.scope)) throw validation("Ámbito de prestación inválido")
       const site = { toothNumber, surfaces: Array.isArray(input.surfaces) ? input.surfaces.map(String) : null, quadrant, arch }
+      const hasSurfaces = Array.isArray(site.surfaces) && site.surfaces.length > 0
+      // Indicado con la pieza o la cara por definir: lo dicho se valida, lo que falta espera a hacerlo.
+      const pendingTooth = rules.pending && (rules.scope === "tooth" || rules.scope === "surfaces") && toothNumber === null && !hasSurfaces && quadrant === null && arch === null
+      const pendingSurfaces = rules.pending && rules.scope === "surfaces" && toothNumber !== null && !hasSurfaces
+      if (pendingTooth) return siteColumns({ toothNumber: null, surfaces: [], quadrant: null, arch: null })
+      if (pendingSurfaces) {
+        if (!isValidTooth(toothNumber)) throw validation(`Pieza FDI inválida: ${input.toothNumber}`)
+        if (quadrant !== null || arch !== null) throw validation("La prestación por caras no lleva cuadrante ni arcada")
+        return siteColumns({ toothNumber, surfaces: [], quadrant: null, arch: null })
+      }
       try {
         assertTreatmentSite(rules.scope, site, rules.surfaces)
       } catch (e) {
@@ -142,4 +152,15 @@ export const dentalProductSite: ProductSite = {
     return { text: `Pieza ${site.toothNumber} (FDI)${site.surfaces.length ? ` · ${site.surfaces.join(", ")}` : ""}` }
   },
   invalid: (value) => `Pieza FDI inválida: ${value}`,
+  pending(row, scope) {
+    const site = dentalSiteOfRow(row)
+    const noPlace = site.toothNumber === null && site.quadrant === null && site.arch === null
+    if ((scope === "tooth" || scope === "surfaces") && noPlace) {
+      return { fields: scope === "surfaces" ? ["toothNumber", "surfaces"] : ["toothNumber"], ask: "Falta la pieza: elígela para registrar lo hecho." }
+    }
+    if (scope === "surfaces" && site.toothNumber !== null && site.surfaces.length === 0) {
+      return { fields: ["surfaces"], ask: `Falta la cara de la ${site.toothNumber}: elígela para registrar lo hecho.` }
+    }
+    return null
+  },
 }

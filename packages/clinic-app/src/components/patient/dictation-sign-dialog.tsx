@@ -1,24 +1,26 @@
 import {
   AlertDialog,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  Checkbox,
   ScrollArea,
 } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
-import { CircleAlert } from "lucide-react"
-import type { ReactNode } from "react"
-import { DICTATION_KIND_LABEL, type DictationSession, suggestionMissing, suggestionText } from "./dictation-session"
+import { type ReactNode, useEffect, useState } from "react"
+import { productUi } from "../../product/product-ui"
+import { confirmable, DICTATION_KIND_LABEL, type DictationSession, dictationErrorText, suggestionText } from "./dictation-session"
 
 /**
- * Firmar con sugerencias del dictado sin revisar. Las nombra una por una —qué
- * es, de qué bloque y qué le falta— y dice cuántas ya entraron a la atención.
- * Lo que no se confirma no entra a la historia: o se revisa ahora, o se
- * descarta al firmar. La firma y la hora de fin son las de siempre (`children`).
+ * Firmar con lo dictado sin confirmar: la lista viene marcada y firmar
+ * confirma lo marcado; lo que se desmarca no entra. Lo que falta de una
+ * sugerencia (la cara, la pieza) se completa ahí mismo con un toque, sin salir,
+ * y si no, entra por definir. Solo lo que no se puede confirmar tal cual (una
+ * prestación que no está en tus servicios, la receta, que se emite aparte)
+ * queda fuera y lo dice. La firma y la hora de fin son las de siempre (`children`).
  */
 export function DictationSignDialog({
   open,
@@ -26,8 +28,8 @@ export function DictationSignDialog({
   signing,
   children,
   onClose,
-  onReview,
-  onDiscardAndSign,
+  onComplete,
+  onSign,
 }: {
   open: boolean
   session: DictationSession
@@ -35,57 +37,98 @@ export function DictationSignDialog({
   /** Con quién se firma y la hora de fin: lo mismo que al firmar sin sugerencias. */
   children: ReactNode
   onClose: () => void
-  onReview: () => void
-  onDiscardAndSign: () => void
+  /** Abre una sugerencia que no se puede confirmar tal cual, para completarla. */
+  onComplete: (id: string) => void
+  /** Firma con las marcadas confirmadas; las demás se descartan. */
+  onSign: (ids: string[]) => void
 }) {
-  const left = session.pending
-  const one = left === 1
-  const done = session.confirmed
+  const items = session.suggestions
+  const [unmarked, setUnmarked] = useState<string[]>([])
+  // Cada vez que se abre, todo lo que se puede confirmar viene marcado.
+  useEffect(() => {
+    if (open) setUnmarked([])
+  }, [open])
+  const marked = items.filter((item) => confirmable(item) && !unmarked.includes(item.id)).map((item) => item.id)
+  const Choices = productUi().dictation?.SuggestionChoices
+  const busy = signing || session.confirmMany.isPending
+  const error = dictationErrorText(session.confirmMany.error, "No pude confirmar alguna. Revísala y vuelve a firmar.")
   return (
     <AlertDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && !signing) onClose()
+        if (!next && !busy) onClose()
       }}
     >
-      <AlertDialogContent size="sm">
+      {/* Ancho de siempre: la lista y «Firmar con N marcadas» caben sin cortarse. */}
+      <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{one ? "Queda 1 sugerencia sin revisar" : `Quedan ${left} sugerencias sin revisar`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            Lo que no confirmes no entra a la historia. Decide qué hacer con {one ? "ella" : "ellas"} antes de firmar.
-          </AlertDialogDescription>
+          <AlertDialogTitle>Firmar la atención</AlertDialogTitle>
+          <AlertDialogDescription>Lo que dictaste y está marcado entra con la firma. Desmarca lo que no va.</AlertDialogDescription>
         </AlertDialogHeader>
         <div className="flex flex-col gap-3">
-          <ScrollArea className="flex max-h-48 flex-col">
-            <ul aria-label="Sugerencias sin revisar" className="flex flex-col gap-2">
-              {session.suggestions.map((item) => (
-                <li key={item.id} className="flex items-start gap-2 rounded-xl border border-warning/40 bg-warning-soft p-3 text-sm">
-                  <CircleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
-                  <span className="min-w-0">
-                    <span className="block font-medium">{suggestionText(item).title}</span>
-                    <span className="block">
-                      {DICTATION_KIND_LABEL[item.kind]} · {suggestionMissing(item)}
-                    </span>
-                  </span>
-                </li>
-              ))}
+          {children}
+          <ScrollArea className="flex max-h-[45vh] flex-col">
+            <ul aria-label="Lo dictado sin confirmar" className="flex flex-col gap-2">
+              {items.map((item) => {
+                const { title } = suggestionText(item)
+                const can = confirmable(item)
+                const checked = marked.includes(item.id)
+                const why =
+                  item.kind === "receta"
+                    ? "Se emite con «Emitir receta»; si firmas sin emitirla, no entra."
+                    : item.kind === "descanso"
+                      ? "Se emite con su formulario; si firmas sin emitirlo, no entra."
+                      : !can
+                        ? (item.note ?? "Falta completarla para que entre.")
+                        : null
+                return (
+                  <li key={item.id} className="flex flex-col gap-2 rounded-xl border p-3 text-sm">
+                    <div className="flex items-start gap-3">
+                      <Checkbox
+                        id={`firmar-${item.id}`}
+                        checked={checked}
+                        disabled={!can || busy}
+                        onCheckedChange={(value) =>
+                          setUnmarked((current) => (value === true ? current.filter((id) => id !== item.id) : [...current, item.id]))
+                        }
+                        className="mt-0.5"
+                      />
+                      <span className="flex min-w-0 flex-col gap-0.5">
+                        <label htmlFor={`firmar-${item.id}`} className={`font-medium ${checked ? "" : "text-muted-foreground"}`}>
+                          {title}
+                        </label>
+                        <span className="text-muted-foreground">
+                          {DICTATION_KIND_LABEL[item.kind]}
+                          {can && !checked ? " · desmarcada: no entra" : ""}
+                        </span>
+                        {can && item.note ? <span className="text-warning">{item.note}</span> : null}
+                        {why ? <span className="text-warning">{why}</span> : null}
+                      </span>
+                    </div>
+                    {Choices && can ? <Choices session={session} item={item} busy={busy} /> : null}
+                    {!can && item.kind !== "receta" && item.kind !== "descanso" ? (
+                      <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:ml-7 sm:min-h-8" disabled={busy} onClick={() => onComplete(item.id)}>
+                        Completar
+                      </Button>
+                    ) : null}
+                  </li>
+                )
+              })}
             </ul>
           </ScrollArea>
-          {done > 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {done === 1 ? "La otra ya está confirmada y se firma con la atención." : `Las otras ${done} ya están confirmadas y se firman con la atención.`}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
             </p>
           ) : null}
-          {children}
         </div>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={signing}>Cancelar</AlertDialogCancel>
-          <SubmitButton type="button" variant="outline" pending={signing} onClick={onDiscardAndSign}>
-            {one ? "Descartarla y firmar" : "Descartarlas y firmar"}
-          </SubmitButton>
-          <Button type="button" disabled={signing} onClick={onReview}>
-            Revisar ahora
+          <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
+            Volver
           </Button>
+          <SubmitButton type="button" pending={busy} onClick={() => onSign(marked)}>
+            {marked.length === 0 ? "Firmar sin lo dictado" : marked.length === 1 ? "Firmar con 1 marcada" : `Firmar con ${marked.length} marcadas`}
+          </SubmitButton>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

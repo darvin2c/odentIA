@@ -33,6 +33,8 @@ function site(item: PlanItem): string {
   if (item.toothNumber != null) return ` · Pieza ${item.toothNumber}`
   if (item.quadrant != null) return ` · Cuadrante ${item.quadrant}`
   if (item.arch) return item.arch === "upper" ? " · Arcada superior" : " · Arcada inferior"
+  // Indicado sin decir la pieza: se define al hacerlo (no es toda la boca).
+  if (item.scope === "tooth" || item.scope === "surfaces") return " · Pieza por definir"
   return productUi().site ? " · Boca completa" : ""
 }
 
