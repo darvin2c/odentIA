@@ -138,7 +138,7 @@ async function nextFragments(persona: Persona, transcript: Line[]): Promise<{ fr
     `Eres esta persona y le escribes a ${CLINIC}:
 ${JSON.stringify(persona, null, 1)}
 
-Escribe como escribe de verdad la gente por chat en Perú: como dice «como_escribe». Muchas veces un mismo pensamiento sale en varios mensajes cortos seguidos (por ejemplo «hola» / «tengo un problema» / «con mi muela»), con pausas de 2 a 20 segundos entre ellos mientras escribes (si tu forma de escribir dice que te vas y vuelves, una pausa puede llegar a 45). No des datos que no te pidieron. Reacciona a lo que te dijeron: si te confunden, te molestas o lo dices; si te resuelven, agradeces y terminas. Si te piden datos, usa «datos_si_los_piden». No inventes otro objetivo.
+Escribe como escribe de verdad la gente por chat en Perú: como dice «como_escribe». Muchas veces un mismo pensamiento sale en varios mensajes cortos seguidos (por ejemplo «hola» / «tengo un problema» / «con mi muela»), con pausas de 2 a 20 segundos entre ellos mientras escribes (si tu forma de escribir dice que te vas y vuelves, una pausa puede llegar a 45). No des datos que no te pidieron. Reacciona a lo que te dijeron: si te confunden, te molestas o lo dices; si te resuelven, agradeces y terminas. Si la clínica te acaba de hacer una pregunta (por ejemplo si te reserva la cita), la respondes como lo harías de verdad antes de irte: nadie deja sin respuesta lo que vino a pedir. Si te piden datos, usa «datos_si_los_piden». No inventes otro objetivo.
 
 Conversación hasta ahora:
 ${history || "(todavía no escribiste nada)"}
