@@ -57,6 +57,19 @@ ARG VITE_MEDICAL_DOMAIN=""
 ARG VITE_PRODUCT=""
 RUN pnpm --filter @odentia/admin build && pnpm --filter @odentia/panel build && pnpm --filter @odentia/dental-clinic build \
   && pnpm --filter @odentia/medical-clinic build && pnpm --filter @odentia/web build
+# Producción no necesita las herramientas de build, prueba ni storybook (biome,
+# turbo, TypeScript, rolldown...: más de la mitad de node_modules). Se podan sin
+# red y sin volver a ejecutar scripts; lo que se ejecuta con `tsx` lo declara
+# en `dependencies`. Mismos filtros que la instalación de arriba.
+# scripts/smoke-image.sh (en CI) arranca cada servicio de la imagen podada.
+RUN pnpm install --prod --frozen-lockfile --offline --ignore-scripts \
+  --filter @odentia/api... \
+  --filter @odentia/worker... \
+  --filter @odentia/panel... \
+  --filter @odentia/admin... \
+  --filter @odentia/dental-clinic... \
+  --filter @odentia/medical-clinic... \
+  --filter @odentia/web...
 
 FROM base AS runtime
 ENV NODE_ENV=production
