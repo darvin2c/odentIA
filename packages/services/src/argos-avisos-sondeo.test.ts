@@ -287,12 +287,20 @@ describe("sondeo 8: «no aceptó novedades» se lee como «pidió no recibir»",
   })
 })
 
-// Sin ejecutar: la agenda no deja 206 citas superpuestas con el mismo profesional y sala; se dejó solo por lectura.
-describe.skip("sondeo 9: pacientes sin contacto ocupan el lote de 200 y tapan a los demás", () => {
+describe("sondeo 9: pacientes sin contacto ocupan el lote de 200 y tapan a los demás", () => {
   it("205 citas próximas sin ningún contacto dejan sin recordatorio a la cita 206, que sí lo tiene", async () => {
     const c = await clinic()
     await run(c, (tx) => setLine(tx, c.orgId, c.ownerId, "recordatorio_cita", { enabled: true }))
-    const start = Date.now() + 2 * 3_600_000
+    // A 10 horas: el aviso de 24 h ya no cabe, el de 3 h sí.
+    const start = Date.now() + 10 * 3_600_000
+    // Control: la misma cita sola, en otra clínica, sí recibe su recordatorio.
+    const control = await clinic()
+    await run(control, (tx) => setLine(tx, control.orgId, control.ownerId, "recordatorio_cita", { enabled: true }))
+    const alone = await person(control, "Con contacto")
+    await ownerDb.insert(appointment).values({
+      organizationId: control.orgId, branchId: control.branchId, patientId: alone, professionalUserId: control.professionalId, roomId: control.roomId,
+      startsAt: new Date(start), endsAt: new Date(start + 30 * 60_000), durationMin: 30, status: "programada",
+    })
     const ids: string[] = []
     for (let i = 0; i < 205; i++) ids.push(await person(c, `Sin contacto ${i}`))
     const reachable = await person(c, "Con contacto")
@@ -300,15 +308,24 @@ describe.skip("sondeo 9: pacientes sin contacto ocupan el lote de 200 y tapan a 
     await ownerDb.execute(sql`update contact set is_active = false where organization_id = ${c.orgId}
       and id in (select contact_id from patient_contact where organization_id = ${c.orgId}
         and patient_id in (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)}))`)
-    const rows = [...ids, reachable].map((patientId, index) => {
-      const startsAt = new Date(start + index * 60_000)
-      return { organizationId: c.orgId, branchId: c.branchId, patientId, professionalUserId: c.professionalId, roomId: c.roomId, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada" as const }
+    // Cada cita con su profesional y su sala: la agenda no admite empalmes, y así caben 206 en la misma hora.
+    const all206 = [...ids, reachable]
+    const professionals = all206.map((_, index) => `prof9-${c.orgId}-${index}`)
+    await ownerDb.insert(user).values(professionals.map((id) => ({ id, name: `Dr. ${id.slice(-3)}`, email: `${id}@sondeo.test`, emailVerified: true })))
+    await ownerDb.insert(member).values(professionals.map((id) => ({ id: `m-${id}`, userId: id, organizationId: c.orgId, role: "clinician", createdAt: new Date() })))
+    const rooms = await ownerDb.insert(scheduleRoom).values(all206.map((_, index) => ({ organizationId: c.orgId, branchId: c.branchId, name: `Unidad ${index}` }))).returning({ id: scheduleRoom.id })
+    const rows = all206.map((patientId, index) => {
+      // Las primeras 205 son las más próximas; la cita con contacto es la última.
+      const startsAt = new Date(start + index * 1000)
+      return { organizationId: c.orgId, branchId: c.branchId, patientId, professionalUserId: professionals[index]!, roomId: rooms[index]!.id, startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "programada" as const }
     })
     await ownerDb.insert(appointment).values(rows)
     await tickAutomations(ownerDb, appDb, new Date(), { secretsKey: KEY, publicBaseUrl: "https://clinica.test" })
     await tickAutomations(ownerDb, appDb, new Date(), { secretsKey: KEY, publicBaseUrl: "https://clinica.test" })
     const queued = (await jobsOf(c)).filter((job) => job.kind === "recordatorio_cita")
-    console.log("[sondeo 9] recordatorios anotados tras dos ciclos:", queued.length, "(la cita con contacto es la 206)")
+    const controlQueued = (await jobsOf(control)).filter((job) => job.kind === "recordatorio_cita")
+    console.log("[sondeo 9] recordatorios tras dos ciclos: con 205 sin contacto delante =", queued.length, "| la misma cita sola =", controlQueued.length)
+    expect(controlQueued.length).toBeGreaterThan(0)
     expect(queued.length).toBe(0)
   })
 })
