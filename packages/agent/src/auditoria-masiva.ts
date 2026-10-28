@@ -259,8 +259,22 @@ async function converse(index: number) {
 
 /** Lo que de verdad quedó en la base: el juez no puede adivinar si un pase o una cita existen. */
 async function whatWasRecorded(conversationId: string): Promise<string> {
-  const handoffs = await ownerDb.execute<{ reason: string; priority: string }>(
-    `select reason, priority from agent_handoff where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
+  // Todo lo que Sofi puede decir que hizo: si el juez no lo ve, lo marca como falso sin serlo.
+  const handoffs = await ownerDb.execute<{ reason: string; priority: string; asks: string | null; pending: string | null; again: number }>(
+    `select reason, priority, asks, pending, coalesce(jsonb_array_length(asked_message_ids), 0) as again from agent_handoff where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
+  )
+  const [memory] = await ownerDb.execute<{ notes: Array<{ text: string }> | null }>(
+    `select notes from agent_case_memory where conversation_id = '${conversationId}'` as never,
+  )
+  const [person] = await ownerDb.execute<{ phone: string | null; email: string | null; given_names: string | null; family_name: string | null }>(
+    `select ct.phone, ct.email, ct.given_names, ct.family_name from conversation c join contact ct on ct.id = c.contact_id where c.id = '${conversationId}'` as never,
+  )
+  const registered = await ownerDb.execute<{ name: string; consent: string | null }>(
+    `select pp.display_name as name, (select d.channel from patient_data_consent d where d.patient_id = p.id limit 1) as consent
+       from patient p join contact pp on pp.id = p.person_id
+      where p.created_at > now() - interval '1 hour'
+        and (p.person_id = (select contact_id from conversation where id = '${conversationId}')
+          or exists (select 1 from patient_contact pc where pc.patient_id = p.id and pc.contact_id = (select contact_id from conversation where id = '${conversationId}')))` as never,
   )
   const appointments = await ownerDb.execute<{ starts_at: Date; status: string }>(
     `select starts_at, status from appointment where conversation_id = '${conversationId}'` as never,
@@ -269,7 +283,12 @@ async function whatWasRecorded(conversationId: string): Promise<string> {
     `select action, status from agent_proposal where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
   )
   return JSON.stringify({
-    pases_al_equipo: handoffs.map((row) => `${row.reason} (${row.priority})`),
+    pases_al_equipo: handoffs.map(
+      (row) => `${row.reason} (${row.priority})${row.asks ? `; pide: ${row.asks}` : ""}${row.pending ? `; falta: ${row.pending}` : ""}${row.again ? `; volvió a preguntar ${row.again} veces y quedó anotado en el tema` : ""}`,
+    ),
+    notas_del_caso_anotadas: (memory?.notes ?? []).map((note) => note.text),
+    datos_guardados_de_quien_escribe: person,
+    pacientes_registrados_en_esta_conversacion: registered.map((row) => `${row.name}${row.consent ? ` (aceptó el aviso por ${row.consent})` : ""}`),
     citas_creadas: appointments.map((row) => `${new Date(row.starts_at).toISOString()} ${row.status}`),
     propuestas: proposals.map((row) => `${row.action} ${row.status}`),
   })
