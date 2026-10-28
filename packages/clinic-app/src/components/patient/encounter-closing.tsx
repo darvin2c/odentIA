@@ -7,14 +7,21 @@ import {
   DialogHeader,
   DialogTitle,
   Field,
+  FieldDescription,
+  FieldError,
   FieldLabel,
+  Input,
   Textarea,
 } from "@odentia/ui"
 import { TimeSelect } from "@odentia/ui-patterns"
 import { useId } from "react"
 import { clinicDateTimeValue } from "../../lib/clinical-journey"
 import type { ConsentNeed } from "../../lib/encounter-documents"
-import type { ClosingCheck, ClosingMaterials } from "../../lib/encounters"
+import {
+  type ClosingCheck,
+  type ClosingMaterials,
+  type SignatureRegistration,
+} from "../../lib/encounters"
 import { activeOrgLocale } from "../../lib/locale"
 import { closingMaterialsWords } from "../../lib/materials"
 import { productUi } from "../../product/product-ui"
@@ -81,6 +88,9 @@ export function EncounterClosingDialog({
   onSignNow,
   onConfirm,
   onClose,
+  registration = null,
+  confirmLabel = null,
+  initialFocus,
   children,
 }: {
   open: boolean
@@ -111,6 +121,12 @@ export function EncounterClosingDialog({
   onSignNow: (need: ConsentNeed) => void
   onConfirm: () => void
   onClose: () => void
+  /** Sin colegiatura en el perfil: se pide aquí, en lugar de «Firmarás como». */
+  registration?: React.ReactNode
+  /** «Guardar y firmar» cuando antes hay que guardar la colegiatura. */
+  confirmLabel?: string | null
+  /** Dónde empieza el foco al abrir (el número de colegiatura, si se pide). */
+  initialFocus?: React.RefObject<HTMLElement | null>
   /** Lo que se suma al cierre (el aviso del dictado, por ejemplo). */
   children?: React.ReactNode
 }): React.JSX.Element {
@@ -126,7 +142,7 @@ export function EncounterClosingDialog({
         if (!value && !pending) onClose()
       }}
     >
-      <DialogContent aria-describedby={`${ids}-desc`} className="sm:max-w-lg">
+      <DialogContent aria-describedby={`${ids}-desc`} className="sm:max-w-lg" initialFocus={initialFocus}>
         <DialogHeader>
           <DialogTitle>Finalizar y firmar</DialogTitle>
           <DialogDescription id={`${ids}-desc`}>
@@ -134,10 +150,12 @@ export function EncounterClosingDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4 text-sm">
-          <div className="rounded-lg border p-3">
-            <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
-            <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
-          </div>
+          {registration ?? (
+            <div className="rounded-lg border p-3">
+              <p className="font-medium">Firmarás como {signAs ?? "—"}</p>
+              <p className="text-xs text-muted-foreground">De tu perfil profesional</p>
+            </div>
+          )}
           {closing ? <ProductClosing closing={closing} pending={pending} openBlock={onOpenBlock} /> : null}
           {materials && materials.items.length > 0 ? (
             <p className="rounded-lg border p-3">
@@ -205,10 +223,95 @@ export function EncounterClosingDialog({
             Volver
           </Button>
           <Button type="button" disabled={!ready} onClick={onConfirm}>
-            {pending ? "Firmando…" : (productUi().encounter.signLabel(closing) ?? "Finalizar y firmar")}
+            {pending ? "Firmando…" : (confirmLabel ?? productUi().encounter.signLabel(closing) ?? "Finalizar y firmar")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+
+/**
+ * Sin colegiatura no se firma (ADR 0003: nombre y colegiatura en cada
+ * atención): se pide en el mismo cierre, sin salir de la atención, y se
+ * guarda en el perfil profesional para las siguientes. El título solo se pide
+ * si el perfil no lo tiene; el colegio viene propuesto por el país del
+ * producto (COP en odentIA, CMP en latidIA) y se puede cambiar.
+ */
+export function SignatureRegistrationFields({
+  signAs,
+  values,
+  askTitle,
+  error,
+  disabled,
+  numberRef,
+  onChange,
+}: {
+  /** El nombre con que firma, de su cuenta o su perfil. */
+  signAs: string | null
+  values: SignatureRegistration
+  askTitle: boolean
+  error: string | null
+  disabled: boolean
+  /** El número es lo que falta escribir: ahí empieza el foco. */
+  numberRef?: React.Ref<HTMLInputElement>
+  onChange: (values: SignatureRegistration) => void
+}): React.JSX.Element {
+  const ids = useId()
+  const set = (key: keyof SignatureRegistration, value: string) => onChange({ ...values, [key]: value })
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-warning/50 bg-warning-soft p-3">
+      <div className="flex flex-col">
+        <p className="font-medium">Falta tu colegiatura para firmar</p>
+        <p className="text-xs text-muted-foreground">
+          {signAs ? `Firmarás como ${signAs}. ` : ""}La historia clínica pide nombre y colegiatura.
+        </p>
+      </div>
+      {askTitle ? (
+        <Field>
+          <FieldLabel htmlFor={`${ids}-title`}>Título profesional</FieldLabel>
+          <Input
+            id={`${ids}-title`}
+            maxLength={120}
+            disabled={disabled}
+            value={values.professionalTitle}
+            onChange={(event) => set("professionalTitle", event.target.value)}
+          />
+        </Field>
+      ) : null}
+      <div className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-3">
+        <Field>
+          <FieldLabel htmlFor={`${ids}-body`}>Colegio</FieldLabel>
+          <Input
+            id={`${ids}-body`}
+            maxLength={120}
+            disabled={disabled}
+            value={values.registrationBody}
+            onChange={(event) => set("registrationBody", event.target.value)}
+          />
+        </Field>
+        <Field data-invalid={error ? true : undefined}>
+          <FieldLabel htmlFor={`${ids}-number`}>Número de colegiatura</FieldLabel>
+          <Input
+            id={`${ids}-number`}
+            ref={numberRef}
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={20}
+            disabled={disabled}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${ids}-error` : `${ids}-help`}
+            value={values.registrationNumber}
+            onChange={(event) => set("registrationNumber", event.target.value)}
+          />
+        </Field>
+      </div>
+      {error ? (
+        <FieldError id={`${ids}-error`}>{error}</FieldError>
+      ) : (
+        <FieldDescription id={`${ids}-help`}>Se guarda en tu perfil profesional: no la volverá a pedir.</FieldDescription>
+      )}
+    </div>
   )
 }
