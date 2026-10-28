@@ -1813,6 +1813,13 @@ export const patientDataConsent = pgTable(
     grantedByContactId: uuid("granted_by_contact_id").references(() => contact.id),
     grantedByName: text("granted_by_name").notNull(),
     channel: text("channel").notNull(),
+    /**
+     * En el chat (ADR 0101), el mensaje con que dijo que sí: la pregunta que lo
+     * pedía decía «Al confirmar, aceptas nuestro aviso de privacidad». Nulo en los demás canales.
+     * Sin clave foránea: una conversación de prueba se borra con su persona; el
+     * servicio comprueba que el mensaje es de esa conversación y organización.
+     */
+    sourceMessageId: uuid("source_message_id"),
     recordedBy: text("recorded_by").references(() => user.id),
     grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -1823,7 +1830,11 @@ export const patientDataConsent = pgTable(
     index("patient_data_consent_org_patient_idx").on(table.organizationId, table.patientId),
     check(
       "patient_data_consent_channel_check",
-      sql`${table.channel} IN ('presencial','formulario_publico','portal')`,
+      sql`${table.channel} IN ('presencial','formulario_publico','portal','chat')`,
+    ),
+    check(
+      "patient_data_consent_chat_message_check",
+      sql`(${table.channel} = 'chat') = (${table.sourceMessageId} IS NOT NULL)`,
     ),
     check(
       "patient_data_consent_revoke_check",

@@ -143,6 +143,8 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
 const BURST_COVERED = "burst-covered"
 /** El equipo tomó o cerró la conversación mientras el modelo redactaba: nada salió. */
 const TEAM_TOOK_OVER = "team-took-over"
+/** La persona siguió escribiendo mientras se preparaba la respuesta: la de su último mensaje responde todo (ADR 0097). */
+const PERSON_KEPT_WRITING = "persona-siguio-escribiendo"
 /** Motivo en el libro de quien pasó al equipo porque la clínica llegó a su presupuesto del mes. */
 const BUDGET_REACHED = "PRESUPUESTO"
 /** Ya recibió hoy el mensaje fijo del presupuesto: lo que siga escribiendo lo ve el equipo, sin otro aviso. */
@@ -762,6 +764,7 @@ async function attendAgentRun(
       }
     } else {
       await invokeGraph()
+      if (toolCtx.superseded) omitReason = PERSON_KEPT_WRITING
       // Derivar siempre avisa: si el modelo que escribe pasó el caso sin aviso,
       // o su aviso no salió, la persona recibe el aviso fijo (auditoría del 27-oct:
       // «me duele una muela» quedaba sin ninguna respuesta).

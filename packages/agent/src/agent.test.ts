@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createServer } from "node:http"
 import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, sendAgentRun, withOrgContext } from "@odentia/db"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
@@ -58,11 +58,11 @@ import {
   addAgentGuidance,
   removeAgentGuidance,
 } from "@odentia/services"
-import { closeConversationWith, professionalRef } from "@odentia/services"
+import { closeConversationWith, configurePublicLinks, getPatientRegistrationConfig, professionalRef, savePatientRegistrationConfig } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, beforeAll, expect, it } from "vitest"
+import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { offTopicReply } from "./decision/route.js"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
@@ -522,6 +522,27 @@ it("derivar con aviso envía el mensaje y registra la derivación en una sola ll
   expect(handoffs).toEqual([{ priority: "alta" }])
   expect(await ledgerRows(conversationId)).toEqual([
     { status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] },
+  ])
+})
+
+it("si pasa un tema sin escribirle, el modelo responde él lo demás que preguntó; el aviso fijo no sale", async () => {
+  const { conversationId, messageId } = await ingestText(
+    "tg:ag-deriva-sin-aviso",
+    "evt-ag-deriva-sin-aviso",
+    "¿Debo tomar algo para la fiebre? ¿Y hay cita hoy?",
+  )
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall("request_human_handoff", { reason: "Pregunta qué tomar", summary: "Pregunta qué tomar para la fiebre", clinical: true }, "call-1")
+      : toolCall("send_reply", { text: "Lo de la fiebre lo verá el equipo clínico. ¿Para qué hora de hoy buscas la cita?" }, "call-2"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen.length).toBe(2)
+  const handoffResult = (model.seen[1] ?? []).filter((m) => m.getType() === "tool").map((m) => String(m.content))
+  expect(handoffResult.at(-1)).toContain("Falta tu respuesta")
+  expect(await agentMessages(conversationId)).toEqual(["Lo de la fiebre lo verá el equipo clínico. ¿Para qué hora de hoy buscas la cita?"])
+  expect(await ledgerRows(conversationId)).toEqual([
+    { status: "handoff", llmCalls: 2, toolsUsed: ["request_human_handoff", "send_reply"] },
   ])
 })
 
@@ -1099,6 +1120,124 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.status).toBe("programada")
 })
 
+it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el aviso a la vista (ADR 0101)", async () => {
+  const [createdBranch] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede Registro Chat", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const branchId = createdBranch!.id
+  const stamp = Date.now()
+  const actorId = `agent-actor-reg-${stamp}`
+  const professionalId = `agent-professional-reg-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: actorId, name: "Actor Registro", email: `actor-reg-${stamp}@example.test` },
+    { id: professionalId, name: "Dentista Registro", email: `dentista-reg-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+  const createdRoom = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: "Unidad dental Registro" }))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setProfessionalSchedule(tx, "org_a", actorId, {
+      branchId,
+      professionalUserId: professionalId,
+      rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+    }))
+  const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+  // Las demás pruebas cuentan con el registro como estaba, pase lo que pase con esta.
+  onTestFinished(async () => {
+    const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+    await withOrgContext(appDb, "org_a", (tx) =>
+      savePatientRegistrationConfig(tx, "org_a", actorId, {
+        expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice,
+      }))
+  })
+  if (!current.enabled || !current.privacyNotice.trim()) {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      savePatientRegistrationConfig(tx, "org_a", actorId, {
+        expectedVersion: current.version, enabled: true, fields: current.fields, privacyNotice: "Usamos tus datos solo para atenderte.",
+      }))
+  }
+  const { conversationId } = await ingestText("tg:registro-chat", "evt-registro-chat", "Hola, quiero una cita")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+    publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" },
+  }
+  const tools = makeAgentTools(ctx)
+  const monday = new Date(Date.now() + 7 * 86_400_000)
+  monday.setUTCDate(monday.getUTCDate() + ((8 - monday.getUTCDay()) % 7))
+  const from = `${monday.toISOString().slice(0, 10)}T05:00:00Z`
+  const out = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId, from, to: new Date(Date.parse(from) + 86_400_000).toISOString(), durationMin: 30,
+  }))
+  const line = out.split("\n")[1] ?? ""
+  const slot = {
+    branchId: line.match(/sede ([0-9a-f-]{36})/i)![1]!,
+    roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
+    professionalUserId: line.match(/profesional ([^\]\s]+)/)![1]!,
+    startsAt: line.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)![1]!,
+    durationMin: 30,
+  }
+  expect(slot.roomId).toBe(createdRoom!.id)
+  // Un documento mal escrito se pide de nuevo antes de pedir el sí: no queda propuesta.
+  const badDocument = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({
+    ...slot, givenNames: "Valeria", familyName: "Rojas Salazar", docType: "DNI", docNumber: "123",
+  }))
+  expect(badDocument).toContain("Pídele que lo revise")
+  const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, givenNames: "Valeria", familyName: "Rojas Salazar" }))
+  // La pregunta lleva la frase del aviso y su enlace; todavía no hay nadie registrado.
+  expect(asked).toContain("Al confirmar, aceptas nuestro aviso de privacidad: https://")
+  // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
+  ctx.evidence = [...(ctx.evidence ?? []), { kind: "sistema", source: "reservar_paciente_nuevo", text: asked }]
+  const noticeUrl = asked.match(/https:\/\/\S+\/aviso/)?.[0]
+  expect(noticeUrl).toBeDefined()
+  const before = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
+  expect(before[0]?.n).toBe(0)
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  // El aviso quedó congelado en la propuesta: es el que se guarda con su sí.
+  expect(pending!.payload.privacyNotice).toMatchObject({ text: expect.any(String) })
+  // Un «sí» antes de que le llegue la pregunta con el aviso no la registra.
+  await ingestText("tg:registro-chat", "evt-registro-chat-temprano", "sí")
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("Todavía no le llegó la pregunta con el aviso")
+  await tools.find((t) => t.name === "send_reply")!.invoke({
+    text: `Te reservo el lunes con el dentista y te registro como paciente. Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?`,
+  })
+  ctx.replySettled = false
+  // Ese «sí» de antes no vale: hace falta uno después de la pregunta.
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("no es un sí")
+  await ingestText("tg:registro-chat", "evt-registro-chat-si", "sí porfa")
+  // La dirección pública la configuran la API y el worker al arrancar.
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" })
+  const confirmed = await (async () => {
+    try {
+      return String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))
+    } finally {
+      configurePublicLinks(null)
+    }
+  })()
+  expect(confirmed).toContain("Confirmado y ejecutado")
+  const [patientRow] = await ownerDb.execute<{ id: string; display_name: string }>(
+    sql`select p.id, pp.display_name from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id where p.person_id = ${contactId}`,
+  )
+  expect(patientRow?.display_name).toBe("Valeria Rojas Salazar")
+  const booked = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(appointment).where(eq(appointment.patientId, patientRow!.id)))
+  expect(booked).toHaveLength(1)
+  expect(booked[0]!.startsAt.toISOString()).toBe(slot.startsAt)
+  const [consent] = await ownerDb.execute<{ channel: string; source_message_id: string | null }>(
+    sql`select channel, source_message_id from patient_data_consent where patient_id = ${patientRow!.id}`,
+  )
+  expect(consent?.channel).toBe("chat")
+  expect(consent?.source_message_id).not.toBeNull()
+  // Con la cita, el enlace para llegar con todo completo.
+  expect(confirmed).toContain("llegas con todo listo")
+})
+
 it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {
   const [createdBranch] = await ownerDb
     .insert(branch)
@@ -1165,7 +1304,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const proposed = String(await reprogram.invoke({
     appointmentId: booked.id, startsAt: dayAt(1, 16), expectedVersion: booked.version,
   }))
-  expect(proposed).toContain("pide al interlocutor que confirme")
+  expect(proposed).toContain("pregúntale con naturalidad si se la reservas")
   const proposalId = /Propuesta ([0-9a-f-]{36})/.exec(proposed)?.[1]
   expect(proposalId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-1", "Sí, confirmo")
@@ -1202,7 +1341,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
-  expect(pendingMsg).toContain("pide al interlocutor que confirme")
+  expect(pendingMsg).toContain("pregúntale con naturalidad si se la reservas")
   const repeatedMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   const cancelId = /Propuesta ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
   expect(cancelId).toBeTruthy()
@@ -1309,7 +1448,7 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
     patientId: randomUUID(), professionalUserId: professionalRef("org_a", professionalId), roomId: randomUUID(),
     startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
   }))
-  expect(booked).toContain("pide al interlocutor que confirme")
+  expect(booked).toContain("pregúntale con naturalidad si se la reservas")
   const before = await withOrgContext(appDb, "org_a", (tx) =>
     listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
   const second = String(await tools.find((t) => t.name === "create_opportunity")!.invoke({ title: "Plan alternativo" }))
@@ -2377,8 +2516,8 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
         "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "elegir_mensajes",
-        "enviar_comprobante", "pedir_volver_al_portal", "recordar_tema", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
-        "ver_sedes_y_servicios",
+        "enviar_comprobante", "pedir_volver_al_portal", "recordar_tema", "reenviar_presupuesto", "request_human_handoff", "send_reply", "update_contact",
+        "ver_presupuesto", "ver_sedes_y_servicios",
       ],
     )
 
@@ -2417,7 +2556,8 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     }, "aviso"))
     const asks = notifier()
     const handoff = await derive("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona", asks)
-    expect(asks.offered).toEqual([["request_human_handoff"]])
+    // Con el caso ya en el equipo puede leer su cita y las sedes para decirle algo concreto.
+    expect(asks.offered).toEqual([["ver_sedes_y_servicios", "ver_contexto_paciente", "ver_resumen_paciente", "request_human_handoff"]])
     expect(systemTextOf(asks.seen[0] ?? [])).toContain("el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso")
     expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] }])
     expect(await agentStatusOf(handoff.conversationId)).toBe("on")
@@ -2817,6 +2957,38 @@ it("si el equipo toma o cierra la conversación mientras el modelo escribe, lo r
     const [conv] = await ownerDb.select({ status: conversation.status }).from(conversation).where(eq(conversation.id, conversationId))
     expect(conv?.status).toBe(thread === "tg:cerrada-en-curso" ? "closed" : "open")
   }
+})
+
+it("si la persona sigue escribiendo mientras el modelo responde, lo redactado no sale: lo responde la corrida de su último mensaje (ADR 0097)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:sigue-escribiendo", "evt-sigue-1", "tengo un problema")
+  const model = new SlowScriptedModel(
+    () => toolCall("send_reply", { text: "¿Qué problema tienes?" }, "call-1"),
+    // Mientras escribe, llega el resto: «en el diente», con su corrida en la cola como en el worker.
+    async () => {
+      const next = await ingestText("tg:sigue-escribiendo", "evt-sigue-2", "en el diente")
+      await withOrgContext(appDb, "org_a", (tx) =>
+        sendAgentRun(tx, { kind: "inbound_message", orgId: "org_a", conversationId, messageId: next.messageId }, { delaySeconds: 600 }))
+      return next
+    },
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(await agentMessages(conversationId)).toEqual([])
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+  expect(row).toEqual({ status: "omitida", error: "persona-siguio-escribiendo" })
+  // No queda como «sin respuesta» ni pasa a una persona: la siguiente corrida responde todo junto.
+  expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.conversationId, conversationId))).toEqual([])
+})
+
+it("lo que llega sin corrida propia (un botón, «BAJA») no hace descartar la respuesta (ADR 0097)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:boton-mientras", "evt-boton-1", "¿atienden el sábado?")
+  const model = new SlowScriptedModel(
+    () => toolCall("send_reply", { text: "Sí, atendemos los sábados." }, "call-1"),
+    // El toque de un botón lo resuelve el sistema: no encola otra corrida.
+    () => ingestText("tg:boton-mientras", "evt-boton-2", "Confirmar"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(await agentMessages(conversationId)).toEqual(["Sí, atendemos los sábados."])
 })
 
 it("quien escribe mucho sigue atendido: no hay tope por persona ni por día (ADR 0085)", async () => {

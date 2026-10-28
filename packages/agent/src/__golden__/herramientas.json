@@ -262,11 +262,23 @@
   },
   {
     "name": "update_contact",
-    "description": "Actualiza los campos personalizados del contacto o el nombre de quien aún no es paciente (el nombre de un paciente lo cambia el equipo en su ficha).",
+    "description": "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente, o los campos personalizados del contacto. El nombre de un paciente lo cambia el equipo en su ficha.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "givenNames": {
+          "description": "Sus nombres, como los dijo.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "familyName": {
+          "description": "Sus apellidos, como los dijo.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "displayName": {
           "type": "string",
           "minLength": 1,
@@ -515,6 +527,109 @@
         "patientId",
         "professionalUserId",
         "startsAt"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "reservar_paciente_nuevo",
+    "description": "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona, van los datos de esa persona con forOther; si es su hijo o hija menor, también minor. Nunca preguntes nada de salud para esto.",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "professionalUserId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "El profesional del hueco elegido en buscar_huecos."
+        },
+        "roomId": {
+          "description": "La unidad dental del hueco elegido en buscar_huecos; sin ella, la agenda pone la primera libre de la sede.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "startsAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "description": "Inicio exacto del hueco elegido, en ISO 8601 con zona."
+        },
+        "branchId": {
+          "description": "La sede del hueco elegido.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "serviceId": {
+          "description": "El servicio que se va a atender, si se sabe.",
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "durationMin": {
+          "description": "La del hueco elegido; si falta se toma la del servicio y, sin servicio, la de una cita regular en la sede.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 480
+        },
+        "reason": {
+          "description": "Motivo de la consulta en palabras del paciente.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "givenNames": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Sus nombres, como los escribió."
+        },
+        "familyName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Sus apellidos, como los escribió."
+        },
+        "docType": {
+          "description": "Tipo de documento, solo si lo dio.",
+          "type": "string",
+          "enum": [
+            "NACIONAL",
+            "DNI",
+            "CE",
+            "PASAPORTE",
+            "CNV",
+            "DIE",
+            "OTRO"
+          ]
+        },
+        "docNumber": {
+          "description": "Número de documento, solo si lo dio.",
+          "type": "string",
+          "maxLength": 20
+        },
+        "forOther": {
+          "description": "true si la cita es para otra persona: los nombres son los de esa persona.",
+          "type": "boolean"
+        },
+        "minor": {
+          "description": "Con forOther: true si es su hijo o hija menor de edad y quien escribe es su madre, padre o tutor.",
+          "type": "boolean"
+        },
+        "writerName": {
+          "description": "Cómo se llama quien escribe, cuando la cita es para otra persona.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "professionalUserId",
+        "startsAt",
+        "givenNames",
+        "familyName"
       ],
       "additionalProperties": false
     }

@@ -85,6 +85,13 @@
       "when": 1793206043887,
       "tag": "0011_clio_alergias_y_procedimientos",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793211067912,
+      "tag": "0012_sofi_registra_por_el_chat",
+      "breakpoints": true
     }
   ]
 }

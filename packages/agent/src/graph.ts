@@ -5,6 +5,8 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
 import { withOrgContext } from "@odentia/db"
 import { DEFAULT_AUTONOMY_MODES } from "@odentia/db/schema/agent"
+import { contact } from "@odentia/db/schema/crm"
+import { eq } from "drizzle-orm"
 import {
   AGENT_BASE_PRINCIPLES,
   AGENT_ROLES,
@@ -30,6 +32,8 @@ import {
   getOrgLocale,
   getPersonMemory,
   getPatientRegistrationConfig,
+  LESSON_PERSON_NAME,
+  PROBAR_PERSON_NAME,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
@@ -48,6 +52,7 @@ import {
   reportAgentNoReply,
   clinicWord,
   type ProductAgentTexts,
+  READ_TOOLS,
 } from "@odentia/services"
 import {
   KNOWLEDGE_SELECT_VERSION,
@@ -307,7 +312,12 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     // Siempre con nombre: Sofi, o el que eligió la clínica (issue 183).
     // Solo una vez: con «Te presentas como…» empezaba cada respuesta con «Soy Sofi…».
     `Te llamas ${cfg.personaName} y eres asistente virtual de la clínica. Te presentas así solo en tu primera respuesta de la conversación: si ya le respondiste antes, no vuelvas a presentarte ni a saludar; ve directo a lo que pide.`,
-    cfg.treatment ? `Tratas de ${cfg.treatment === "tu" ? "tú" : "usted"} al interlocutor.` : null,
+    // Como una recepcionista: el trato de la clínica, pero a quien habla de usted no se le tutea.
+    cfg.treatment === "usted"
+      ? "Tratas de usted al interlocutor."
+      : cfg.treatment === "tu"
+        ? "Tratas de tú al interlocutor; si te habla de usted, trátalo de usted."
+        : "Trata a la persona como ella te trata: si te tutea, de tú; si te habla de usted, de usted.",
     EMOJI_TEXT[cfg.emojis],
     cfg.about ? `Sobre la clínica: ${cfg.about}` : null,
     `La zona horaria de la clínica es ${zone.timezone}. Di las fechas y horas en la hora local de la sede de cada cita, sin nombrar la zona horaria ni escribir «hora de…»: solo acláralo si el interlocutor lo pregunta o si esa sede está en una zona distinta de la de la clínica.`,
@@ -328,6 +338,10 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     on("seguimiento")
       ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
       : whenOff("seguimiento"),
+    // El objetivo de Sofi (ADR 0097): atender como la mejor recepcionista.
+    `Sabes con quién hablas: si la línea del interlocutor dice que aún no sabes cómo se llama, en tu primera respuesta útil pregúntale su nombre con naturalidad, al final y sin frenar lo que pidió (por ejemplo «¿Con quién tengo el gusto?»), y desde entonces llámalo por su nombre${has("update_contact") ? "; cuando te lo diga, guárdalo con update_contact (nombres y apellidos) en ese mismo paso" : ""}. Si la cita o la consulta es para otra persona, pregunta también cómo se llama esa persona. No le vuelvas a preguntar algo que ya te dijo: si ya le pediste sus nombres y apellidos (o te los dio), no le preguntes además «¿con quién tengo el gusto?».`,
+    "Hablas como una recepcionista, no como un sistema: nunca menciones herramientas, propuestas, el sistema, el «estado del caso», la «filiación» ni «vincular», y nunca le pidas que escriba una frase para confirmar: un «sí», «ok», «dale» o «ya» basta. Un mensaje corto y natural por turno; no repitas lo que ya dijiste. Si te equivocas, corrígelo sin culpar a nada.",
+    "Lo que tiene el equipo se dice una sola vez: si ya le contaste que un tema lo verá el equipo, no lo repitas en los mensajes siguientes salvo que pregunte por él. Nunca digas que recepción o el equipo verá algo si no lo pasaste al equipo ni figura en «Temas con el equipo».",
     `Si el interlocutor cuenta un síntoma (un dolor, fiebre, tos, un golpe) y quiere que lo atiendan o pregunta dónde, no es un caso para el equipo: ${has("buscar_huecos") ? "búscale con buscar_huecos los horarios más próximos y ofréceselos" : "ofrécele la cita"}, sin diagnosticar ni opinar sobre lo que siente. Usa request_human_handoff solo si pide hablar con una persona, se queja, pide un consejo clínico (qué tomar, si es grave, qué hacer) o su vida puede estar en peligro: con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá, sin prometer una hora ni un plazo; no uses send_reply para ese aviso.${has("buscar_huecos") ? " Si en ese mismo mensaje también pide una cita, busca antes los horarios y ofréceselos en ese mismo aviso." : ""} No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo») y no lo mencionas si la persona no pregunta por él.`,
     "Si lo que cuenta no puede esperar (un dolor que no lo deja dormir, sangrado, hinchazón, fiebre, un golpe), ofrécele la cita más próxima, hoy si hay, y dale también el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; eso no es motivo para pasar el tema al equipo. Solo si su vida puede estar en peligro (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar), dile primero que llame ahora al número de emergencias del país que figura ahí o que vaya a la emergencia más cercana, y pasa el tema con prioridad alta. El vencimiento de una tarea es un plazo interno del equipo: nunca lo digas como hora de respuesta.",
     // Lo del producto (odentIA: la tomografía llega en CD, USB o ZIP).
@@ -678,18 +692,44 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .filter(Boolean)
           .join("\n")
       : null
-    // Quien aún no es paciente no se reserva por aquí (proponer_cita es para una
-    // ficha) ni se registra por el chat: el registro pide su aviso de privacidad.
-    // Se le dice desde el primer mensaje, para que no pida datos que no puede usar
-    // (auditoría del 27-oct: pedía nombre, DNI y celular y después no podía).
+    // Quien aún no es paciente se reserva y registra aquí mismo con su sí, si la
+    // clínica tiene su aviso de privacidad publicado (ADR 0101); si no, por su
+    // enlace o por recepción. Se le dice desde el primer mensaje, para que no pida
+    // datos que no puede usar (auditoría del 27-oct).
     async function newPersonLine(): Promise<string> {
-      const online =
-        available.has("enviar_enlace_cita") &&
-        (await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => (await getPatientRegistrationConfig(tx, toolCtx.orgId)).enabled).catch(() => false))
+      const config = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getPatientRegistrationConfig(tx, toolCtx.orgId)).catch(() => null)
+      if (available.has("reservar_paciente_nuevo") && config?.enabled && config.privacyNotice.trim() && toolCtx.publicUrl) {
+        const document =
+          config.fields.docNumber === "required" ? " y, porque la clínica lo pide, su documento (si no lo tiene a la mano, sigue sin él)" : ""
+        return `Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, pídele sus nombres y apellidos${document} y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo. Si la cita es para otra persona, pide los nombres y apellidos de esa persona, cómo se llama quien escribe y, si no lo dijo, si es su hijo o hija menor de edad. No le pidas nada de salud ni otros datos. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita.`
+      }
+      const online = available.has("enviar_enlace_cita") && config?.enabled === true
       return online
         ? "Este interlocutor aún no es paciente de la clínica. Por aquí no le reservas ni lo registras, y no le pidas documento ni otros datos para eso: si quiere una cita, ofrécele los horarios y, cuando elija uno, envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos ahí; díselo así."
         : "Este interlocutor aún no es paciente de la clínica y la clínica no registra pacientes en línea. Por aquí no le reservas ni lo registras: si quiere una cita, pregúntale solo su nombre y qué día y hora prefiere, y pasa el caso a recepción una sola vez con request_human_handoff para que lo registre y le confirme; no le pidas documento ni le digas que la cita quedó reservada."
     }
+    // Saber con quién habla (objetivo de Sofi, ADR 0097): el nombre del perfil de
+    // WhatsApp o «Visitante del chat web» no es su nombre. Se conoce cuando la ficha
+    // tiene nombres y apellidos, o cuando lo dijo en esta conversación.
+    const [person] = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+      tx
+        .select({ givenNames: contact.givenNames, familyName: contact.familyName, isTest: contact.isTest })
+        .from(contact)
+        .where(eq(contact.id, toolCtx.contactId))
+        .limit(1),
+    )
+    // La persona de «Probar» nace llamándose «Paciente de prueba»: ese no es su nombre.
+    const fullName = `${person?.givenNames ?? ""} ${person?.familyName ?? ""}`.trim()
+    const nameKnown = Boolean(
+      person?.givenNames?.trim() && person.familyName?.trim() && !(person.isTest && (fullName === PROBAR_PERSON_NAME || fullName === LESSON_PERSON_NAME)),
+    )
+    // Con solo sus nombres ya se sabe con quién habla: los apellidos se piden cuando hacen falta.
+    const onlyGivenNames = !nameKnown && Boolean(person?.givenNames?.trim()) && !person?.isTest
+    const nameLine = nameKnown
+      ? `Se llama ${person?.givenNames} ${person?.familyName}.`
+      : onlyGivenNames
+        ? `Se llama ${person?.givenNames}; aún no sabes sus apellidos (pídelos solo si hacen falta, por ejemplo para registrarla).`
+        : "Aún no sabes cómo se llama: lo que figura es el nombre de su perfil o del chat, no su nombre."
     // Personas a las que este interlocutor está vinculado: mismo listado
     // autorizado que ver_contexto_paciente (solo nombre y vínculo, sin clínica).
     const linkedPatients = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
@@ -699,7 +739,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       ? `Pacientes vinculados a este interlocutor: ${linkedPatients
           .slice(0, 5)
           .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
-          .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente. Si la cita es para alguien que no es el propio interlocutor, nombra al paciente al proponerla («para Pedro Quispe») y, si no coincide con lo que contó (pide por su hija y el vinculado es otra persona), no la propongas: toma su nombre y el horario que prefiere y pasa el caso a recepción para que la registre.`
+          .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente. Si la cita es para alguien que no es el propio interlocutor, di su nombre completo al proponerla y, si no coincide con lo que contó (pide por su hija y el vinculado es otra persona), no la propongas: toma su nombre y el horario que prefiere y pasa el caso a recepción para que la registre.`
       : await newPersonLine()
     // Lo que el agente recuerda de la persona, venga del canal que venga: sus
     // datos guardados (nunca clínicos) y lo que sale de vínculos y citas.
@@ -707,7 +747,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       formatPersonMemoryForPrompt(await getPersonMemory(tx, toolCtx.orgId, toolCtx.contactId), zone),
     )
     const contactBlock = [
-      `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
+      `Interlocutor: ${contactDetail.displayName}. ${nameLine} Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       patientsLine,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
@@ -837,7 +877,10 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
     const stable = [receptionPrompt(zone, cfg, { tools: available, services }, agentTexts(toolCtx)), rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
-    const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
+    // Todo lo que lee está en español; lo más cercano a la respuesta le recuerda el idioma de la persona.
+    const languageLine =
+      "Responde en el idioma del último mensaje de la persona, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español: si te escribe en otro idioma, tradúcelas."
+    const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const system = [stable, perTurn].filter(Boolean).join("\n\n")
@@ -987,7 +1030,19 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   async function routeAfterTools(state: typeof AgentState.State): Promise<string> {
     // La respuesta ya salió o espera decisión: otra llamada al modelo solo
     // produciría texto que no llega a nadie.
-    if (toolCtx.handedOff || toolCtx.replySettled) return END
+    if (toolCtx.replySettled) return END
+    // Pasó un tema sin escribirle: vuelve al modelo una vez para que responda él.
+    if (toolCtx.handedOff) {
+      if (toolCtx.handoffNeedsReply) {
+        toolCtx.handoffNeedsReply = false
+        return "llm"
+      }
+      // Con el caso ya en el equipo, consultar algo (su cita, el teléfono de la sede)
+      // es para decirle algo concreto en el aviso: el turno sigue hasta que lo envíe.
+      const lastCall = [...state.messages].reverse().find((item): item is AIMessage => item instanceof AIMessage && (item.tool_calls?.length ?? 0) > 0)
+      const onlyRead = !!lastCall?.tool_calls?.every((call) => READ_TOOLS.includes(call.name))
+      if (!onlyRead) return END
+    }
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
       return cfg.maxTurns
