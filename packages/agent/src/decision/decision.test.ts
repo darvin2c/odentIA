@@ -240,6 +240,40 @@ it("la regla de la ráfaga solo cambia el camino «saludo» y solo con más de u
   expect(guardBurst(route("cita"), 4).path).toBe("cita")
 })
 
+it("responder a lo que preguntó la clínica no es saludar: el «dale» a «¿cuál prefieres?» va por el camino abierto (ADR 0104)", async () => {
+  const { asksSomething, guardAnswer } = await import("./route.js")
+  const route = (path: "saludo" | "cita") => ({ path, intent: null, handoff: null, confidence: null, urgency: null })
+  expect(asksSomething("Tengo el martes a las 10:00 o a las 11:30. ¿Cuál prefieres?")).toBe(true)
+  expect(asksSomething("Listo, quedó reservada. Te esperamos.")).toBe(false)
+  expect(asksSomething(null)).toBe(false)
+  expect(guardAnswer(route("saludo"), true).path).toBe("abierto")
+  expect(guardAnswer(route("saludo"), false).path).toBe("saludo")
+  expect(guardAnswer(route("cita"), true).path).toBe("cita")
+})
+
+it("la indicación de la cita dice lo que falta según cómo va la atención, nunca lo que ya se hizo (ADR 0104)", async () => {
+  const { routeInstruction } = await import("./route.js")
+  const tools = new Set(["buscar_huecos", "proponer_cita", "reservar_paciente_nuevo", "confirmar_propuesta", "request_human_handoff"])
+  const fresh = routeInstruction("cita", null, { tools }) ?? ""
+  expect(fresh).toContain("busca con buscar_huecos y ofrécele dos o tres horarios")
+  expect(fresh).toContain("proponer_cita (o reservar_paciente_nuevo, si aún no es paciente) va solo cuando ya eligió uno")
+  const offered = routeInstruction("cita", null, { tools, progress: { offered: true } }) ?? ""
+  expect(offered).toContain("Ya le ofreciste horarios en esta atención")
+  expect(offered).toContain("No le repitas los mismos horarios.")
+  expect(offered).not.toContain("ofrécele dos o tres horarios")
+  const pending = routeInstruction("cita", null, { tools, progress: { offered: true, pending: "Reservar cita — Cita: lunes 2 de noviembre, 9:00" } }) ?? ""
+  expect(pending).toContain("Ya hay una cita propuesta que espera su sí (Reservar cita — Cita: lunes 2 de noviembre, 9:00)")
+  expect(pending).not.toContain("Ya le ofreciste horarios")
+  const done = routeInstruction("cita", null, { tools, urgency: "urgente", progress: { offered: true, done: "Reservar cita — Cita: lunes 2 de noviembre, 9:00" } }) ?? ""
+  expect(done).toContain("En esta atención ya quedó hecho: Reservar cita — Cita: lunes 2 de noviembre, 9:00. No se la vuelvas a ofrecer")
+  expect(done).not.toContain("ofrécele primero el horario más próximo")
+  // Quien vuelve a contar su síntoma tras recibir horarios no empieza de cero.
+  expect(routeInstruction("clinico", null, { tools }) ?? "").toContain("pregúntale qué le pasa en una línea")
+  const again = routeInstruction("clinico", null, { tools, progress: { offered: true } }) ?? ""
+  expect(again).toContain("no le preguntes otra vez qué le pasa")
+  expect(again).not.toContain("pregúntale qué le pasa en una línea")
+})
+
 it("spam solo con el modelo de decisión muy seguro y nunca si habla de la clínica o pide una persona (ADR 0054)", async () => {
   const { readRoute, ROUTE_SPAM } = await import("./route.js")
   const spamOf = (notSpam: number, intent = "other", intentP = 0.7, handoff = 0.05) =>

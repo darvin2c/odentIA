@@ -1407,7 +1407,7 @@ export async function listMessagesById(
  * reabre, y su hora es la del comienzo de esa transacción: un instante antes
  * de `attention_started_at` (más, si la ingesta transcribe un audio).
  */
-const ATTENTION_OPENING_MS = 5 * 60_000
+export const ATTENTION_OPENING_MS = 5 * 60_000
 
 /** Lo que lee el agente de su conversación en cada turno (ADR 0104). */
 export interface AttentionMessages {

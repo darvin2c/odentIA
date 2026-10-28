@@ -4,7 +4,7 @@ import { productAgentTexts, recordAgentDecision } from "@odentia/services"
 import { and, desc, eq, lt } from "drizzle-orm"
 import { BURST_HORIZON_MS, BURST_MESSAGES, TRIAGE_VERSION, triageQuestions, triageOutcome, triageState } from "./points.js"
 import { DecisionError, type DecisionModel, type DecisionResult } from "./port.js"
-import { type AgentRoute, guardBurst, readRoute, ROUTE_VERSION, routeQuestions, routeOutcome } from "./route.js"
+import { type AgentRoute, asksSomething, guardAnswer, guardBurst, readRoute, ROUTE_VERSION, routeQuestions, routeOutcome } from "./route.js"
 
 /**
  * Estado mínimo que ve el modelo de decisión: el mensaje disparador, los que
@@ -16,7 +16,7 @@ async function decisionState(
   db: Db,
   orgId: string,
   input: { conversationId: string; triggerMessageId: string; alone?: boolean },
-): Promise<{ text: string; messages: number } | null> {
+): Promise<{ text: string; messages: number; answersQuestion: boolean } | null> {
   return withOrgContext(db, orgId, async (tx) => {
     const [trigger] = await tx
       .select({ body: message.body, createdAt: message.createdAt })
@@ -26,11 +26,12 @@ async function decisionState(
     if (!trigger) return null
     // Solo el mensaje nuevo: a quien está en Spam se lo mira por lo que escribió
     // ahora (decisión 9a); con el spam de antes al lado, nunca saldría.
-    if (input.alone) return { text: triageState([], trigger.body ?? "[attachment]"), messages: 1 }
+    if (input.alone) return { text: triageState([], trigger.body ?? "[attachment]"), messages: 1, answersQuestion: false }
     // La ráfaga empieza después de lo último que salió de la clínica y nunca
     // llega más atrás que el horizonte: lo antiguo sin responder es historial.
+    // Lo que dijo la clínica no viaja al proveedor; solo se mira si preguntaba algo.
     const [lastOut] = await tx
-      .select({ createdAt: message.createdAt })
+      .select({ createdAt: message.createdAt, body: message.body })
       .from(message)
       .where(
         and(
@@ -67,6 +68,7 @@ async function decisionState(
       ),
       // Cuántos mensajes seguidos sin respuesta leyó el modelo, contando el último.
       messages: burst.length + 1,
+      answersQuestion: asksSomething(lastOut?.body),
     }
   })
 }
@@ -109,7 +111,7 @@ export async function decideRoute(
       return null
     }
     // En el libro queda el camino que de verdad se aplicó.
-    const route = guardBurst(readRoute(result), read.messages)
+    const route = guardAnswer(guardBurst(readRoute(result), read.messages), read.answersQuestion)
     await record({
       ...base,
       model: result.model,

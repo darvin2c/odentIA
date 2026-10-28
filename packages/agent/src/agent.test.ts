@@ -1689,7 +1689,9 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   } finally {
     await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none" }))
   }
-  expect(systemTextOf(turnTwo.seen[0] ?? [])).toContain("Camino para este mensaje, elegido por lo que escribió el interlocutor: un saludo")
+  // Ese «Sí» responde a «¿Confirmas la cita?»: no es un saludo y no recibe
+  // «responde breve, sin consultar nada» (ADR 0104); va por el camino abierto.
+  expect(systemTextOf(turnTwo.seen[0] ?? [])).not.toContain("Camino para este mensaje")
   expect(turnTwo.offered[0]).toContain("confirmar_propuesta")
   expect(turnTwo.offered[0]).not.toContain("ampliar_herramientas")
   // El segundo turno recibió lo que dejó el primero: la nota, la consulta de

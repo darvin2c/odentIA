@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm"
 import {
   AGENT_BASE_PRINCIPLES,
   AGENT_ROLES,
+  type AgentCaseState,
   type AgentConfig,
   agentServicesShown,
   type AgentServicesShown,
@@ -66,7 +67,7 @@ import { DecisionError, type DecisionResult } from "./decision/port.js"
 import { z } from "zod"
 import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
 import { reportAiUse } from "./ai-usage.js"
-import { fitHistory, HISTORY_MAX_MESSAGES, HISTORY_MIN_TAIL } from "./attention.js"
+import { attentionLines, attentionProgress, fitHistory, HISTORY_MAX_MESSAGES, HISTORY_MIN_TAIL } from "./attention.js"
 import { channelFormatRule } from "./channel-format.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
@@ -141,6 +142,10 @@ interface ThreadContext {
   crossBlock: string | null
   caseBlock: string | null
   items: ThreadMessage[]
+  /** El estado del caso, del que sale cómo va la atención (ADR 0104). */
+  state: AgentCaseState
+  /** Cuándo empezó la atención en curso. */
+  startedAt: string
 }
 
 /**
@@ -245,7 +250,7 @@ const EMOJI_TEXT: Record<AgentConfig["emojis"], string> = {
  */
 const sells = ({ visit }: ProductAgentTexts): string => {
   const noun = visit.word.replace(/^la /, "")
-  return `Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o ${visit.word}). Ofrécela una vez en la conversación: si ya la mencionaste, no la repitas salvo que vuelvan a preguntar por el precio. Cuando un precio es «desde» o necesita ${noun} —de un servicio o de una promoción— dilo siempre junto al precio y ofrece ${visit.word}: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que te devolvió la agenda. Si un precio se define en ${visit.word}, o la persona duda o tiene miedo, explícalo con calma y ofrece ${visit.word} (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona.`
+  return `Vendes como un buen asesor de la clínica: si lo que pregunta la persona tiene una promoción vigente, ofrécela aunque no la pida, dejando claro que es una promoción, su precio, cuánto ahorra y hasta cuándo vale (si tiene fecha de fin, dila siempre); cierra invitando a dar el siguiente paso (agendar la cita o ${visit.word}). Ofrécela una sola vez por atención. Cuando un precio es «desde» o necesita ${noun} —de un servicio o de una promoción— dilo siempre junto al precio y ofrece ${visit.word}: nunca lo presentes como precio final. Usa solo lo que traen los datos: nunca inventes descuentos, plazos, cupos, urgencia ni condiciones, y no presiones; tampoco digas qué horarios se llenan, cuáles tienen más lugar ni cómo está la agenda, salvo los huecos que te devolvió la agenda. Si un precio se define en ${visit.word}, o la persona duda o tiene miedo, explícalo con calma y ofrece ${visit.word} (y el enlace para reservarla): eso no es motivo para pasar el caso a una persona.`
 }
 
 /**
@@ -309,7 +314,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     `Respondes en el idioma en que te escribe la persona; si no se distingue, en español. Tono ${TONE_TEXT[cfg.tone]}.`,
     // Siempre con nombre: Sofi, o el que eligió la clínica (issue 183).
     // Solo una vez: con «Te presentas como…» empezaba cada respuesta con «Soy Sofi…».
-    `Te llamas ${cfg.personaName} y eres asistente virtual de la clínica. Te presentas así solo en tu primera respuesta de la conversación: si ya le respondiste antes, no vuelvas a presentarte ni a saludar; ve directo a lo que pide.`,
+    // Si ya le respondió lo dice cada turno, contado por el código (ADR 0104).
+    `Te llamas ${cfg.personaName} y eres asistente virtual de la clínica. Te presentas así solo en tu primera respuesta de cada atención.`,
     // Como una recepcionista: el trato de la clínica, pero a quien habla de usted no se le tutea.
     cfg.treatment === "usted"
       ? "Tratas de usted al interlocutor."
@@ -641,7 +647,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       .join("; ")
     // La atención en curso entera (ADR 0104): lo que la persona ya dijo no se
     // le vuelve a pedir. Si no cabe, quedan cómo empezó y lo último, con aviso.
-    const { items, history } = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
+    const { items, history, startedAt } = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const read = await listAttentionMessages(tx, toolCtx.orgId, toolCtx.conversationId, {
         minTail: HISTORY_MIN_TAIL,
         max: HISTORY_MAX_MESSAGES,
@@ -660,15 +666,15 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
         const quoted = item.replyToMessageId ? byId.get(item.replyToMessageId) : undefined
         return quoted ? { ...item, quote: { body: quoted.body, contentType: quoted.contentType } } : item
       })
-      return { items: shown, history: { total, omitted: total - page.length } }
+      return { items: shown, history: { total, omitted: total - page.length }, startedAt: read.startedAt }
     })
     // Lo ya propuesto, lo que el propio agente anotó y lo que consultó en
     // turnos anteriores: sin esto cada turno empieza de cero y no puede
     // confirmar la propuesta que él mismo dejó pendiente.
-    const caseBlock = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
+    const { caseBlock, state } = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const state = await getAgentCaseState(tx, toolCtx.orgId, toolCtx.conversationId)
       toolCtx.casePending = state.pending.length > 0
-      return formatAgentCaseForPrompt(state, zone, history)
+      return { caseBlock: formatAgentCaseForPrompt(state, zone, history), state }
     })
     // Historial acotado de otros canales del mismo contacto verificado, con
     // procedencia, para continuidad omnicanal. La autorización la da el
@@ -761,7 +767,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     ]
       .filter(Boolean)
       .join("\n\n")
-    return { contactBlock, crossBlock, caseBlock, items }
+    return { contactBlock, crossBlock, caseBlock, items, state, startedAt }
   }
 
   /**
@@ -791,7 +797,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
 
   async function loadContext(): Promise<{ messages: BaseMessage[] }> {
     const zone = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getOrgLocale(tx, toolCtx.orgId))
-    const { contactBlock, crossBlock, caseBlock, items } = await readThread(zone)
+    const { contactBlock, crossBlock, caseBlock, items, state, startedAt } = await readThread(zone)
     const draft = toolCtx.draftText?.trim().slice(0, 4000)
     const latestInbound = draft ?? [...items].reverse().find((item) => item.direction === "in")?.body ?? null
     toolCtx.lastInboundText = latestInbound ?? undefined
@@ -863,6 +869,10 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // Para reservar o cambiar una cita lo primero que el modelo pide es quién
     // es el paciente y qué citas tiene: llega ya consultado y se ahorra el paso.
     const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
+    // Cómo va la atención (ADR 0104): la indicación del turno dice lo que
+    // falta y lo que ya se hizo no se vuelve a ordenar.
+    const progress = attentionProgress({ items, startedAt, state, promotions: clinicData.promotions.map((promo) => promo.name) })
+    const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName).join("\n")].filter(Boolean).join("\n\n")
     const budgets = available.has("ver_presupuesto")
     const routeBlock = route
       ? [
@@ -872,6 +882,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
             services,
             informs: clinicData.informs,
             urgency: toolCtx.alarm ? "alarma" : route.urgency !== null && route.urgency >= URGENT_SCORE ? "urgente" : null,
+            progress: { offered: progress.offered, pending: progress.pending, done: progress.done },
           }),
           toolCtx.routeHint,
           toolCtx.topicRaised
@@ -889,7 +900,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // Todo lo que lee está en español; lo más cercano a la respuesta le recuerda el idioma de la persona.
     const languageLine =
       "Responde en el idioma del último mensaje de la persona, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español: si te escribe en otro idioma, tradúcelas."
-    const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, nowLine]
+    const perTurn = [contactBlock, formatLine, crossBlock, attentionBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const system = [stable, perTurn].filter(Boolean).join("\n\n")
