@@ -104,7 +104,7 @@ export const dentalUi: ProductUi = {
     SuggestionChoices: (props) =>
       props.item.kind === "odontograma" ? (
         <FindingChoices {...props} />
-      ) : props.item.kind === "plan" ? (
+      ) : props.item.kind === "plan" || props.item.kind === "procedimiento" ? (
         <PlanSiteChoices {...props} />
       ) : null,
     examples: [
@@ -113,6 +113,8 @@ export const dentalUi: ProductUi = {
       { block: "Plan", say: "«Resina en la 36, o si no una corona»" },
       { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
       { block: "Control", say: "«Control en un mes»" },
+      { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
+      { block: "Procedimientos", say: "«Le hice la profilaxis» · «Terminé la resina de la 36»" },
       { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
     ],
     placeholder: "En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…",

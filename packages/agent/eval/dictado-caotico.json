@@ -239,6 +239,71 @@
       "texto": "Mejor no la sacamos, hagamos endodoncia multirradicular en la cuarenta y seis.",
       "_nota": "Otro tratamiento es otra indicación: se quita la exodoncia y se indica la endodoncia.",
       "espera": { "quitar": 1, "quitarCual": [1], "planes": [46], "nuevos": 1 }
+    },
+    {
+      "id": "alergia-con-reaccion",
+      "texto": "Ya, a ver, antecedentes… es alérgica a la penicilina, le salieron ronchas la última vez. Ok, sigamos.",
+      "espera": { "alergias": ["penicilin"], "hechos": []}
+    },
+    {
+      "id": "alergia-niega-suelto",
+      "texto": "¿Alergias? Niega. Bueno, abre la boquita, eso.",
+      "espera": { "alergias": ["ninguna"], "hechos": []}
+    },
+    {
+      "id": "alergia-latex-fuerte",
+      "texto": "Ojo, el látex le da una reacción fuerte, se le cerró la garganta una vez. Ponte los guantes de nitrilo.",
+      "espera": { "alergias": ["latex"]}
+    },
+    {
+      "id": "alergia-no-es-lo-que-toma",
+      "texto": "Toma losartán para la presión, nada más. Alergias, ninguna.",
+      "espera": { "alergias": ["ninguna"], "recetas": []}
+    },
+    {
+      "id": "alergia-y-receta-juntas",
+      "texto": "Me dice que el ibuprofeno le da alergia, se hincha. Entonces le dejo paracetamol de quinientos, una tableta cada ocho horas por tres días.",
+      "espera": { "alergias": ["ibuprofeno"], "recetas": [{ "dci": "paracetamol", "concentracion": "500", "duracion": "3" }]}
+    },
+    {
+      "id": "alergia-sigue-igual",
+      "texto": "De alergias sigue igual, nada nuevo. Hoy viene por control.",
+      "espera": { "alergias": ["ninguna"]}
+    },
+    {
+      "id": "sin-alergia-ni-hecho",
+      "texto": "¿Te duele aquí? ¿No? Ya no sangra tampoco. Muy bien.",
+      "espera": { "alergias": [], "hechos": []}
+    },
+    {
+      "id": "hecho-profilaxis-y-control",
+      "texto": "Listo, le hice la profilaxis, quedó limpiecito. Control en seis meses.",
+      "espera": { "hechos": [{ "servicio": "profilaxis" }], "controles": 1}
+    },
+    {
+      "id": "hecho-resina-terminada",
+      "texto": "Terminé la resina de la treinta y seis, oclusal, quedó bien adaptada.",
+      "espera": { "hechos": [{ "servicio": "resina", "pieza": 36}]}
+    },
+    {
+      "id": "hecho-y-por-hacer",
+      "texto": "Hoy solo el destartraje. La cuarenta y seis tiene caries, ahí hay que hacerle resina la próxima.",
+      "espera": { "hechos": [{ "servicio": "destartraje" }], "planes": [46], "hallazgos": [{ "pieza": 46, "hallazgo": "caries" }]}
+    },
+    {
+      "id": "por-hacer-no-es-hecho",
+      "texto": "Vamos a necesitar una endodoncia en la once, la programamos para la otra semana.",
+      "espera": { "hechos": [], "planes": [11]}
+    },
+    {
+      "id": "hecho-entre-charla",
+      "texto": "Ya, muerde la gasa. Bien, bien. La extracción de la treinta y ocho salió completa, sin complicaciones.",
+      "espera": { "hechos": [{ "servicio": "", "pieza": 38}]}
+    },
+    {
+      "id": "hecho-radiografia",
+      "texto": "Le tomé una periapical de la veintiuno, se ve la lesión.",
+      "espera": { "hechos": [{ "servicio": "periapical", "pieza": 21}]}
     }
   ]
 }

@@ -286,8 +286,13 @@ export interface ProductDictation {
   normalizeSite(payload: Record<string, unknown>): { payload: Record<string, unknown>; invalid: string | null }
   /** El «dónde» en palabras («Pieza 16 · cara oclusal»); vacío sin sitio. */
   siteWords(payload: Record<string, unknown>): string
-  /** Una indicación ajustada al ámbito de su servicio: lo que no lleva se quita y lo que le falta la deja por revisar. */
-  fitToScope(payload: Record<string, unknown>, scope: string | null): DictationPrepared
+  /**
+   * Una indicación ajustada al ámbito de su servicio: lo que no lleva se quita y
+   * lo que le falta queda a la vista sin impedir confirmarla (ADR 0099). Con
+   * `done` es lo que se hizo hoy: eso sí necesita su sitio, así que lo que falta
+   * la deja por revisar, con la pregunta.
+   */
+  fitToScope(payload: Record<string, unknown>, scope: string | null, done?: boolean): DictationPrepared
   /** Revisa una sugerencia de una clase propia, ya validada con su operación. */
   prepare(
     tx: Db,

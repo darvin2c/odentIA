@@ -253,7 +253,19 @@ const PENDING_TOOTH = "¿En qué pieza? Tócala o dila; si aún no la sabes, con
 const pendingSurfaces = (tooth: number) =>
   `¿Qué cara de la ${tooth}? Tócala o dila; si aún no la sabes, confirma igual y la defines al hacerla.`
 
-function fitToScope(payload: Record<string, unknown>, scope: string | null): DictationPrepared {
+/** Lo hecho hoy sí lleva su sitio: se pregunta, y se responde con un toque o dicho. */
+const DONE_TOOTH = "¿En qué pieza lo hiciste? Tócala o dila."
+const doneSurfaces = (tooth: number) => `¿Qué cara de la ${tooth} trabajaste? Tócala o dila.`
+
+function fitToScope(payload: Record<string, unknown>, scope: string | null, done = false): DictationPrepared {
+  const fitted = fitIndication(payload, scope)
+  const pending = Array.isArray(fitted.payload["pending"]) ? (fitted.payload["pending"] as string[]) : []
+  if (!done || pending.length === 0) return fitted
+  const tooth = fitted.payload["toothNumber"]
+  return { ...fitted, status: "por_revisar", note: pending.includes("toothNumber") || typeof tooth !== "number" ? DONE_TOOTH : doneSurfaces(tooth) }
+}
+
+function fitIndication(payload: Record<string, unknown>, scope: string | null): DictationPrepared {
   const { toothNumber, surfaces, ...rest } = payload
   const hasTooth = typeof toothNumber === "number"
   const hasSurfaces = Array.isArray(surfaces) && surfaces.length > 0

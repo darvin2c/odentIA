@@ -55,6 +55,10 @@ interface PracticeDictation {
     corrigeCual?: number[]
     /** No debe quedar ninguna frase sin usar («No pude usar esto»). */
     sinNoUsado?: boolean
+    /** Alergias dichas, por una palabra de la sustancia; «ninguna»: dijo que no tiene. Exactas: ni una de más. */
+    alergias?: string[]
+    /** Lo hecho hoy, por una palabra de lo que hizo y su pieza si la dijo. Exactos: ni uno de más. */
+    hechos?: Array<{ servicio: string; pieza?: number }>
   }
 }
 
@@ -189,6 +193,14 @@ for (const dictation of bank.dictados) {
   if (dictation.espera.quitarCual) other(`quitar la ${dictation.espera.quitarCual.join(" y la ")}`, which(read.removals) === JSON.stringify([...dictation.espera.quitarCual].sort()))
   if (dictation.espera.corrigeCual) other(`corregir la ${dictation.espera.corrigeCual.join(" y la ")}`, which(read.corrections) === JSON.stringify([...dictation.espera.corrigeCual].sort()))
   if (dictation.espera.sinNoUsado) other("todo lo dicho se usó", read.unused.length === 0 && read.omitted === 0)
+  const allergies = read.drafts.filter((draft) => draft.kind === "alergia").map((draft) => (draft.payload["none"] === true && !draft.payload["substance"] ? "ninguna" : plain(String(draft.payload["substance"] ?? ""))))
+  for (const word of dictation.espera.alergias ?? []) other(`alergia ${word}`, allergies.some((said) => said.includes(plain(word))))
+  if (dictation.espera.alergias) other("ninguna alergia de más", allergies.length === dictation.espera.alergias.length)
+  const done = read.drafts.filter((draft) => draft.kind === "procedimiento").map((draft) => draft.payload)
+  for (const expected of dictation.espera.hechos ?? []) {
+    other(`hecho: ${expected.servicio}${expected.pieza ? ` en la ${expected.pieza}` : ""}`, done.some((payload) => plain(String(payload["service"] ?? "")).includes(plain(expected.servicio)) && (!expected.pieza || payload["toothNumber"] === expected.pieza)))
+  }
+  if (dictation.espera.hechos) other("nada hecho de más", done.length === dictation.espera.hechos.length)
   if (dictation.espera.nuevos !== undefined) other("nada registrado otra vez", read.drafts.length === dictation.espera.nuevos)
   // Lo que no debía tocar nada pendiente («la tercera» sin tercera): no se aplica.
   if (dictation.espera.correcciones === undefined && dictation.espera.quitar === undefined && pending.length) {

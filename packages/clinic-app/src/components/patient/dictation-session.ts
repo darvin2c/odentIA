@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento"
 
 export interface DictationSuggestion {
   id: string
@@ -32,6 +32,8 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   signos: "Signos vitales",
   examen: "Examen físico",
   descanso: "Descanso médico",
+  alergia: "Alergias",
+  procedimiento: "Procedimientos",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -95,6 +97,8 @@ interface SegmentResponse {
     /** Partes de este tramo que el asistente no pudo usar y, si se sabe, lo que se dijo para pedirlas. */
     omitted: number
     unused: string[]
+    /** Alergias dichas que ya estaban registradas: no se proponen otra vez. */
+    alreadyOnFile?: string[]
     repeated: boolean
     model: string | null
   }
@@ -207,6 +211,8 @@ export function useDictationSession({
       const data = response.data
       if (data.model) setDemo(data.model === "fake")
       if (data.sources.length) setHighlights((current) => [...current, ...data.sources])
+      // La alergia que ya estaba registrada no se propone otra vez: se dice y se sigue.
+      for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
       if (data.omitted > 0) {
         setUnused((current) => ({
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
@@ -411,6 +417,9 @@ export function useDictationSession({
       if (input.item.kind === "plan" && options > 0) {
         toast.success(`Entró al plan. Su presupuesto en borrador quedó con ${options === 1 ? "las dos opciones" : "las tres opciones"}.`)
       }
+      if (input.item.kind === "procedimiento" && input.item.payload["acceptOnDo"] === true) {
+        toast.success("Quedó hecho y el tratamiento, aceptado. Se cobra al cerrar la atención.")
+      }
     },
     onSettled: () => void refresh(),
   })
@@ -564,6 +573,7 @@ export function suggestionMissing(item: DictationSuggestion): string {
   if (item.kind === "plan" && typeof item.payload["serviceId"] !== "string") return "falta elegir la prestación"
   if (item.kind === "diagnostico") return "falta revisar el diagnóstico"
   if (item.kind === "odontograma") return "falta completar el hallazgo"
+  if (item.kind === "procedimiento") return "falta la pieza"
   return "falta completarla"
 }
 
