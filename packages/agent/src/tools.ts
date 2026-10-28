@@ -18,6 +18,7 @@ import {
   resendBudgetByContact,
   confirmProposalByContact,
   proposalReplyOf,
+  chosenBeforeProposalOf,
   bookedDataLink,
   answerGeneralPermission,
   chooseMessagesInConversation,
@@ -87,7 +88,7 @@ import {
 import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import { z } from "zod"
 import type { DecisionModel } from "./decision/port.js"
-import { understoodYes } from "./confirm-intent.js"
+import { choseThisSlot, understoodYes } from "./confirm-intent.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
@@ -1338,12 +1339,25 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
       const { reason, ...payload } = { ...input, professionalUserId }
-      const proposed = await propose("reservar_cita", payload, "proponer_cita", reason)
+      let created: ProposalItem | undefined
+      const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
+        created = p
+      })
       // En el chat web, si cierra la pestaña no le llega nada: la propuesta queda
       // creada y la reserva espera a tener dónde avisarle (se exige al confirmar).
-      return (await webchatNeedsContact())
-        ? `${proposed} En el chat web, antes de reservar hace falta su WhatsApp o su correo para avisarle de la cita: pídeselo en este mismo mensaje junto con su sí.`
-        : proposed
+      if (await webchatNeedsContact()) {
+        return `${proposed} En el chat web, antes de reservar hace falta su WhatsApp o su correo para avisarle de la cita: pídeselo en este mismo mensaje junto con su sí.`
+      }
+      // Si ya pidió reservar esa misma hora, su sí está dado: no se le vuelve a pedir (ADR 0097).
+      if (created?.status === "propuesta") {
+        const id = created.id
+        const before = await inOrg((tx) => chosenBeforeProposalOf(tx, ctx.orgId, ctx.contactId, id)).catch(() => null)
+        if (before && (await choseThisSlot(ctx.decision, { proposed: before.proposed, said: before.said }))) {
+          const done = await confirmById({ proposalId: id }, before.messageId)
+          return `Ya había pedido esta misma hora, así que no se le pregunta de nuevo. ${done} Dile que quedó reservada, con el día, la hora, la sede y con quién.`
+        }
+      }
+      return proposed
     },
     {
       name: "proponer_cita",
@@ -1673,8 +1687,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
-  const confirmProposal = tool(
-    async ({ proposalId }: { proposalId: string }) => {
+  /** Confirma con el sí de la persona: el de después de la propuesta o el que ya dio al elegir la hora. */
+  const confirmById = async ({ proposalId }: { proposalId: string }, chosenMessageId?: string): Promise<string> => {
       if (ctx.dryRun) return `[SIMULACIÓN] Se confirmaría la propuesta ${proposalId}.`
       // Una cita del chat web se reserva cuando ya hay dónde avisarle; la propuesta sigue
       // esperando y se confirma esta misma, sin volver a proponerla (ADR 0097).
@@ -1693,7 +1707,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       let proposal: ProposalItem
       try {
         proposal = await inOrg((tx) =>
-          confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, { secretsKey: ctx.secretsKey, understoodMessageId }),
+          confirmProposalByContact(tx, ctx.orgId, ctx.contactId, proposalId, {
+            secretsKey: ctx.secretsKey,
+            understoodMessageId,
+            chosenMessageId,
+          }),
         )
       } catch (e) {
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
@@ -1731,7 +1749,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return `La propuesta ${proposal.id} expiró (48h): pide de nuevo el acto al interlocutor para crear una nueva propuesta, no reintentes confirmar.`
       }
       return `Propuesta ${proposal.id} en estado ${proposal.status}.`
-    },
+  }
+  const confirmProposal = tool(
+    (input: { proposalId: string }) => confirmById(input),
     {
       name: "confirmar_propuesta",
       description:

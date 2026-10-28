@@ -49,3 +49,38 @@ export async function understoodYes(
     return false
   }
 }
+
+/**
+ * Quien ya escribió «resérvame mañana a las 2 con la Dra. Ana» dio su sí antes
+ * de la propuesta (ADR 0097): se reserva sin volver a pedírselo. Solo lo
+ * decide el modelo de decisión, y solo si pidió reservar esa misma cita; un
+ * «¿qué horarios hay?» o un «a las 2 o a las 4» no es elegirla.
+ */
+export const CHOSE_QUESTION: DecisionQuestion = {
+  id: "eligio_esa_cita",
+  kind: "yesno",
+  instructions:
+    "La persona escribió esto antes de que la clínica le ofreciera una cita. ¿Ya pidió reservar exactamente esa cita?",
+  criteria: {
+    yes: "Pide reservarla, sin dudas: el mismo día y la misma hora, y si nombró profesional o sede, los mismos («resérvame mañana a las 2 con la Dra. Ana», «agéndame el jueves 10 am»).",
+    no: "Solo pregunta qué hay, duda, da varias opciones, pide otro día, hora o profesional, o no dice día y hora.",
+  },
+}
+
+export async function choseThisSlot(
+  decision: DecisionModel | null | undefined,
+  input: { proposed: string; said: string },
+): Promise<boolean> {
+  if (!decision) return false
+  try {
+    const state = [
+      `Lo que escribió la persona: «${input.said.slice(0, 600)}»`,
+      `La cita que la clínica le va a ofrecer: «${input.proposed.slice(0, 400)}»`,
+    ].join("\n")
+    const result = await decision.decide(state, [CHOSE_QUESTION])
+    const answer = result.answers.find((item) => item.id === CHOSE_QUESTION.id)
+    return answer?.kind === "yesno" && answer.probability >= CONFIRMS_MIN
+  } catch {
+    return false
+  }
+}

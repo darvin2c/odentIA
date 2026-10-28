@@ -2337,6 +2337,35 @@ export async function proposalReplyOf(
   return { reply: reply ? { id: reply.id, body: reply.body ?? "" } : null, proposed: proposed?.body ?? null }
 }
 
+/**
+ * Lo que la persona escribió justo antes de que se le propusiera la cita (sus
+ * mensajes desde la última respuesta de la clínica) y lo propuesto: con esto
+ * el agente pregunta al modelo de decisión si ya pidió reservar esa misma hora
+ * (ADR 0097). Nulo si ya respondió después de la propuesta o no escribió nada.
+ */
+export async function chosenBeforeProposalOf(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  id: string,
+): Promise<{ messageId: string; said: string; proposed: string } | null> {
+  const current = await requireProposal(tx, orgId, id)
+  if (current.contactId !== contactId) throw notFound("Propuesta")
+  const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
+  const isBefore = (m: (typeof items)[number]) => new Date(m.createdAt).getTime() < current.createdAt.getTime()
+  if (items.some((m) => m.direction === "in" && !isBefore(m))) return null
+  const before = items.filter(isBefore)
+  const lastOut = before.findLastIndex((m) => m.direction === "out")
+  const said = before.slice(lastOut + 1).filter((m) => m.direction === "in" && m.body)
+  const latest = said.at(-1)
+  if (!latest) return null
+  const proposed = current.afterSummary ?? PROPOSAL_ACTION_LABEL[current.action as ProposalAction]
+  return { messageId: latest.id, said: said.map((m) => m.body).join("\n"), proposed }
+}
+
+/** Cuánto antes de la propuesta puede estar el mensaje que eligió la hora. */
+const CHOSEN_BEFORE_PROPOSAL_MS = 10 * 60 * 1000
+
 export async function confirmProposalByContact(
   tx: Db,
   orgId: string,
@@ -2350,6 +2379,13 @@ export async function confirmProposalByContact(
      * («perfecto, ahí estaré»). Vale solo si es de la persona y posterior a la propuesta.
      */
     understoodMessageId?: string
+    /**
+     * El mensaje con que la persona eligió esa misma hora y pidió reservarla
+     * («resérvame mañana a las 2 con la Dra. Ana»), anterior a la propuesta:
+     * su sí ya está dado y no se le vuelve a pedir (ADR 0097). Vale solo si es
+     * su último mensaje y de los minutos previos a la propuesta.
+     */
+    chosenMessageId?: string
   } = {},
 ): Promise<ProposalItem> {
   const current = await requireProposal(tx, orgId, id)
@@ -2372,7 +2408,13 @@ export async function confirmProposalByContact(
   const byWords = items.find((m) => afterProposal(m) && isAffirmative(m.body))
   // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
   const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
-  const confirmation = byWords ?? byIntent
+  const latestIn = items.filter((m) => m.direction === "in").at(-1)
+  const byChoice =
+    opts.chosenMessageId && latestIn?.id === opts.chosenMessageId &&
+    current.createdAt.getTime() - new Date(latestIn.createdAt).getTime() <= CHOSEN_BEFORE_PROPOSAL_MS
+      ? latestIn
+      : undefined
+  const confirmation = byWords ?? byIntent ?? byChoice
   if (!confirmation) {
     throw new ServiceError(
       "PROPOSAL_NOT_CONFIRMED",
@@ -2394,7 +2436,7 @@ export async function confirmProposalByContact(
     action: "agent.proposal_confirmed",
     entity: "agent_proposal",
     entityId: id,
-    metadata: { via: opts.staffUserId ? "staff" : "contact", messageId: confirmationId, understood: byWords ? "palabras" : "modelo_de_decision" },
+    metadata: { via: opts.staffUserId ? "staff" : "contact", messageId: confirmationId, understood: byWords ? "palabras" : byIntent ? "modelo_de_decision" : "eligio_esa_hora" },
   })
   return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
 }

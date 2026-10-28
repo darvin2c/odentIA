@@ -12,6 +12,7 @@ import {
   executeProposal,
   getProposal,
   proposalReplyOf,
+  chosenBeforeProposalOf,
 } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound, listMessages } from "./conversations.js"
@@ -261,6 +262,43 @@ describe("recorrido comercial directo", () => {
       sql`select metadata from audit_event where entity_id = ${proposal.id} and action = 'agent.proposal_confirmed'`,
     )
     expect(audit?.metadata.understood).toBe("modelo_de_decision")
+  })
+
+  it("quien ya pidió esa misma hora no tiene que decir sí otra vez, pero solo con su último mensaje (ADR 0097)", async () => {
+    const { conversationId, contactId, connectionId: connId } = await openConversation("comercial-7", "evt-com-7")
+    await inbound("comercial-7", connId, "evt-com-7b", "Resérvame el lunes a las 10 con la Dra. Ana")
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:chosen-1" }),
+    )
+    const before = await run((tx) => chosenBeforeProposalOf(tx, ORG, contactId, proposal.id))
+    expect(before?.said).toContain("Resérvame el lunes a las 10")
+    // Otro mensaje que no es el último no sirve.
+    const [first] = (await run((tx) => listMessages(tx, ORG, conversationId, { limit: 10 }))).items
+    if (first!.id !== before!.messageId) {
+      await expect(
+        run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { chosenMessageId: first!.id })),
+      ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
+    }
+    const done = await run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { chosenMessageId: before!.messageId }))
+    expect(done.status).not.toBe("propuesta")
+    const [audit] = await ownerDb.execute<{ metadata: { understood: string } }>(
+      sql`select metadata from audit_event where entity_id = ${proposal.id} and action = 'agent.proposal_confirmed'`,
+    )
+    expect(audit?.metadata.understood).toBe("eligio_esa_hora")
+  })
+
+  it("si ya respondió después de la propuesta, lo de antes no cuenta como elección", async () => {
+    const { conversationId, contactId, connectionId: connId } = await openConversation("comercial-8", "evt-com-8")
+    await inbound("comercial-8", connId, "evt-com-8b", "Resérvame el lunes a las 10")
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:chosen-2" }),
+    )
+    const before = await run((tx) => chosenBeforeProposalOf(tx, ORG, contactId, proposal.id))
+    await inbound("comercial-8", connId, "evt-com-8c", "mejor a las 11")
+    expect(await run((tx) => chosenBeforeProposalOf(tx, ORG, contactId, proposal.id))).toBeNull()
+    await expect(
+      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { chosenMessageId: before!.messageId })),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
   })
 })
 

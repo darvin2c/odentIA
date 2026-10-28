@@ -24,7 +24,8 @@ Una auditoría con 41 conversaciones simuladas por el recorrido real (odentIA y 
 - **Sin horas prometidas:** el vencimiento de la tarea no llega al modelo, y ningún texto le pide decir «cuándo le responde».
 - **Enlaces comprobados:** un enlace sale solo si lo trajo una fuente del turno (nuevo tipo `enlace` de la comprobación).
 - **Quien aún no es paciente** lo sabe Sofi desde el primer mensaje. Con registro en línea, recibe su enlace al elegir la hora; si no, Sofi toma su nombre y su preferencia y pasa el caso una sola vez.
-- **Chat web:** `proponer_cita` exige un WhatsApp o un correo cuando la clínica puede avisar por alguno. `guardar_contacto` los guarda con las reglas del formulario «¿Dónde te avisamos?».
+- **Chat web:** reservar (`confirmar_propuesta`) exige un WhatsApp o un correo cuando la clínica puede avisar por alguno; proponer no, para no dejar a la persona sin horario. `guardar_contacto` los guarda con las reglas del formulario «¿Dónde te avisamos?».
+- **Quien ya eligió la hora** («resérvame mañana a las 2 con la Dra. Ana») no tiene que decir sí otra vez: si el modelo de decisión entiende que pidió reservar esa misma cita, `proponer_cita` la confirma con ese mensaje. Vale solo su último mensaje y de los diez minutos previos a la propuesta, y queda auditado como `eligio_esa_hora`.
 
 ## Alternativas descartadas
 
