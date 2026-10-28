@@ -138,7 +138,7 @@ async function nextFragments(persona: Persona, transcript: Line[]): Promise<{ fr
     `Eres esta persona y le escribes a ${CLINIC}:
 ${JSON.stringify(persona, null, 1)}
 
-Escribe como escribe de verdad la gente por chat en Perú: como dice «como_escribe». Muchas veces un mismo pensamiento sale en varios mensajes cortos seguidos (por ejemplo «hola» / «tengo un problema» / «con mi muela»), con pausas de 2 a 20 segundos entre ellos mientras escribes (si tu forma de escribir dice que te vas y vuelves, una pausa puede llegar a 45). No des datos que no te pidieron. Reacciona a lo que te dijeron: si te confunden, te molestas o lo dices; si te resuelven, agradeces y terminas. Si la clínica te acaba de hacer una pregunta (por ejemplo si te reserva la cita), la respondes como lo harías de verdad antes de irte: nadie deja sin respuesta lo que vino a pedir. Si te piden datos, usa «datos_si_los_piden». No inventes otro objetivo.
+Escribe como escribe de verdad la gente por chat en Perú: como dice «como_escribe». Muchas veces un mismo pensamiento sale en varios mensajes cortos seguidos (por ejemplo «hola» / «tengo un problema» / «con mi muela»), con pausas de 2 a 20 segundos entre ellos mientras escribes (si tu forma de escribir dice que te vas y vuelves, una pausa puede llegar a 45). No des datos que no te pidieron. Reacciona a lo que te dijeron: si te confunden, te molestas o lo dices; si te resuelven, agradeces y terminas. Si te piden datos, usa «datos_si_los_piden». No inventes otro objetivo.
 
 Conversación hasta ahora:
 ${history || "(todavía no escribiste nada)"}
@@ -252,7 +252,16 @@ async function converse(index: number) {
   }
   const recorded = conversationId ? await whatWasRecorded(conversationId) : "nada"
   const verdict = await grade(persona, realChannel, known !== null, transcript, recorded)
-  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, conversationId, transcript, verdict }
+  // Lo que costó: cada arreglo se mide también en tokens, no solo en calidad.
+  const [cost] = conversationId
+    ? await ownerDb.execute<{ corridas: number; llamadas: number; entrada: number; cache: number; salida: number; usd: number }>(
+        `select count(*)::int as corridas, coalesce(sum(llm_calls), 0)::int as llamadas, coalesce(sum(input_tokens), 0)::int as entrada,
+                coalesce(sum(cached_input_tokens), 0)::int as cache, coalesce(sum(output_tokens), 0)::int as salida,
+                coalesce(sum(cost_micros), 0)::float / 1000000 as usd
+           from agent_run_ledger where conversation_id = '${conversationId}'` as never,
+      )
+    : []
+  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, conversationId, transcript, verdict, cost: cost ?? null }
   writeFileSync(join(OUT, `${String(index).padStart(3, "0")}.json`), JSON.stringify(result, null, 2))
   console.log(`[${index}] ${realChannel} · ${persona.por_que_escribe.slice(0, 60)} → ${verdict?.cumple ? "cumple" : "NO cumple"}`)
 }
@@ -326,7 +335,7 @@ Objetivo: que cada persona quede atendida como con la mejor recepcionista: enten
 cumple = todo lo aplicable bien y dijo_algo_interno_falso_o_contradictorio false.
 No juzgues como falsos los horarios, precios, profesionales, sedes, teléfonos o promociones: Sofi los consulta en la agenda y los datos de la clínica, que tú no ves. Los enlaces de este entorno de prueba usan el dominio «.localhost» y son válidos. Sí es falso decir que pasó algo que no quedó registrado (un pase, una cita, quién tiene el caso) o contradecir lo que dijo antes. Lo que quedó registrado en la clínica: ${recorded}
 
-Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez.
+Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez. Las personas a veces se van sin contestar: si la conversación termina después de una pregunta de Sofi que era la correcta para avanzar (por ejemplo «¿Te la reservo?»), juzga lo que Sofi hizo hasta ahí; que la cita no quedara reservada por eso no es una falla de Sofi.
 
 Canal: ${channel}. ¿Paciente ya conocido?: ${known ? "sí" : "no"}. Quién era la persona (Sofi no lo sabía): ${JSON.stringify(persona)}
 
