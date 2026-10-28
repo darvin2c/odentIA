@@ -140,6 +140,7 @@ export function WhatsAppConnection({
   freshRead,
   freshByButton,
   showAccount,
+  otherActive = false,
   canWrite,
   fixedCreate,
   initialMessageId = null,
@@ -154,6 +155,8 @@ export function WhatsAppConnection({
   freshByButton: boolean
   /** La clínica tiene más de un número: cada bloque dice de cuál es. */
   showAccount: boolean
+  /** Esta conexión está desconectada y la clínica ya usa otro número: queda de historial. */
+  otherActive?: boolean
   canWrite: boolean
   /** En teléfono «Nuevo mensaje» queda fijo al pie de la página. */
   fixedCreate: boolean
@@ -315,7 +318,7 @@ export function WhatsAppConnection({
   }
   // En corto, lo que no es de todos los días va al menú.
   const menuItems = [
-    ...(byButton ? [] : [{ key: "clave", label: "Cambiar la clave", onSelect: openKey }]),
+    ...(byButton || otherActive ? [] : [{ key: "clave", label: "Cambiar la clave", onSelect: openKey }]),
     ...(active
       ? [{ key: "desconectar", label: "Desconectar", tone: "danger" as const, onSelect: () => setConfirming(true) }]
       : []),
@@ -342,6 +345,11 @@ export function WhatsAppConnection({
             <p className="text-sm">
               <strong className={cn("font-semibold", STATUS_WORD[words.tone])}>{words.status}</strong> {words.detail}
             </p>
+            {otherActive ? (
+              <p className="text-sm text-muted-foreground">
+                Número anterior. Para volver a usarlo, desconecta primero el número que está conectado.
+              </p>
+            ) : null}
             {words.facts.length > 0 ? (
               <ul className="mt-0.5 flex flex-wrap gap-1.5">
                 {words.facts.map((fact) => (
@@ -361,12 +369,12 @@ export function WhatsAppConnection({
                   <Button type="button" variant="outline" disabled={test.isPending} onClick={() => test.mutate()}>
                     {test.isPending ? "Probando…" : "Probar conexión"}
                   </Button>
-                ) : (
+                ) : otherActive ? null : (
                   <Button type="button" disabled={setStatus.isPending} onClick={() => setStatus.mutate("enable")}>
                     {setStatus.isPending ? "Conectando…" : "Volver a conectar"}
                   </Button>
                 )}
-                {byButton ? null : (
+                {byButton || otherActive ? null : (
                   <Button type="button" variant="outline" onClick={openKey}>
                     Cambiar la clave
                   </Button>
@@ -384,7 +392,7 @@ export function WhatsAppConnection({
                     {test.isPending ? "Probando…" : "Probar"}
                     <span className="sr-only"> conexión</span>
                   </Button>
-                ) : (
+                ) : otherActive ? null : (
                   <Button type="button" className="h-11 flex-1" disabled={setStatus.isPending} onClick={() => setStatus.mutate("enable")}>
                     {setStatus.isPending ? "Conectando…" : "Volver a conectar"}
                   </Button>
@@ -448,7 +456,7 @@ export function WhatsAppConnection({
             ))}
           </ul>
         ) : null}
-        {canWrite && byButton ? (
+        {canWrite && byButton && !otherActive ? (
           <div className="flex flex-col gap-1.5 border-t pt-3">
             <p className="text-sm text-muted-foreground">
               Esta conexión se hizo con Facebook: no tiene una clave que cambiar. Si el permiso se pierde, se vuelve a conectar

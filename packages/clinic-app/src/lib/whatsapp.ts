@@ -322,6 +322,23 @@ export function connectionPending(
   return step === 2 ? "address" : step === 3 ? "first-message" : null
 }
 
+/**
+ * Los números de WhatsApp como los muestra la página: el conectado primero y, detrás,
+ * los desconectados, que quedan de historial. Solo se ofrece conectar otro número si
+ * ninguno está conectado: el servidor admite un WhatsApp activo por clínica
+ * (`assertSingleWhatsApp`) y el desconectado no lo ocupa.
+ */
+export function whatsappNumbers(connections: ConnectionItem[]): {
+  ordered: ConnectionItem[]
+  activeCount: number
+  offerConnect: boolean
+} {
+  const isActive = (connection: ConnectionItem) => connection.status === "active"
+  const ordered = [...connections.filter(isActive), ...connections.filter((connection) => !isActive(connection))]
+  const activeCount = connections.filter(isActive).length
+  return { ordered, activeCount, offerConnect: activeCount === 0 }
+}
+
 /** Espacio de no separación, escrito por su código para que se vea en el fuente. */
 const THIN_GAP = String.fromCharCode(0xa0)
 
