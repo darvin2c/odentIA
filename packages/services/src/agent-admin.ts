@@ -15,11 +15,13 @@ import {
   describeLine,
   flowOf,
   hourPhrase,
+  jobKindsOfLine,
   type LineFlow,
+  lineOfJobKind,
   TASK_AREA_LABELS,
 } from "./admin-lines.js"
 import { type AdminDraftView, draftViewOf } from "./admin-drafts.js"
-import { messageExampleValues, renderMessage } from "./automation-messages.js"
+import { isAppointmentNotice, messageExampleValues, renderMessage } from "./automation-messages.js"
 import { currentSaasPeriod } from "./saas-actions.js"
 import { currentAutomationMessageOf } from "./clinic-messages.js"
 import {
@@ -27,6 +29,7 @@ import {
   adminRuntime,
   listBudgetHeldJobs,
   CAUSE_WORDS,
+  causeWordsFor,
   type DeliverDeps,
   deliverDueJobs,
   deliverJob,
@@ -40,6 +43,7 @@ import {
   lineTiming,
   listLineRules,
   preferredContact,
+  purposeOfKind,
   reconcileDeliveries,
   requestNeededTemplates,
   type RuleRow,
@@ -697,7 +701,8 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
   const taskTeam = row.task_area && row.task_area in TASK_AREA_LABELS ? TASK_AREA_LABELS[row.task_area as keyof typeof TASK_AREA_LABELS].team : "una persona"
   if (row.status === "enviado") {
     if (row.kind === "recordatorio_cita" && row.appointment_status === "confirmada") return { outcome: "confirmo", text: `Confirmó, ${via}.`, fix: null, cause: null }
-    if (row.kind !== "recordatorio_cita" && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
+    // Un aviso de cita no busca que reserve otra: solo se dice si llegó.
+    if (row.kind !== "recordatorio_cita" && !isAppointmentNotice(row.kind) && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
     if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Sofi.`, fix: null, cause: null }
     const delivery: JobDelivery | null = deliveryOf(row.message_status)
     if (delivery === "entregado" || delivery === "leido") return { outcome: "entregado", text: `Entregado ${via}${delivery === "leido" ? "; lo leyó" : ""}. Sin respuesta todavía.`, fix: null, cause: null }
@@ -705,7 +710,7 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
   }
   if (row.status === "fallido" || row.status === "omitido") {
     const cause = (row.cause ?? "proveedor") as AutomationCause
-    const words = CAUSE_WORDS[cause] ?? CAUSE_WORDS.proveedor
+    const words = CAUSE_WORDS[cause] ? causeWordsFor(cause, purposeOfKind(row.kind)) : CAUSE_WORDS.proveedor
     const who = row.task_status ? (taskDone ? ` ${resolved}` : ` Lo tiene ${taskTeam}.`) : ""
     return { outcome: "no_pudo", text: `Sofi no pudo escribirle: ${words.one}.${who}`, fix: words.fix, cause }
   }
@@ -741,7 +746,9 @@ export async function listAdminLinePeople(
   const line = requireLine(key)
   if (!can(line.permission)) throw new ServiceError("FORBIDDEN", 403, "Tu rol no puede ver los casos de esta línea")
   const zone = await getOrgLocale(tx, orgId)
-  const where = options.only === "no-pudo" ? sql`j.kind = ${line.key} and j.cause is not null` : sql`j.kind = ${line.key}`
+  // Los avisos de cita (reservada, movida, cancelada) son de «Recordar la cita».
+  const kinds = jobKindsOfLine(line.key)
+  const where = options.only === "no-pudo" ? sql`j.kind in ${kinds} and j.cause is not null` : sql`j.kind in ${kinds}`
   const limit = Math.min(Math.max(options.limit ?? 20, 1), ADMIN_LIST_LIMIT)
   const rows = await tx.execute<JobView>(jobsQuery(orgId, where, limit))
   const [count] = await tx.execute<{ n: number }>(sql`select count(*)::int as n from automation_job j where j.organization_id = ${orgId} and ${where}`)
@@ -780,10 +787,23 @@ async function weekOf(tx: Db, orgId: string, days = 7): Promise<Map<string, Line
     left join task t on t.id = j.task_id and t.organization_id = j.organization_id
     where j.organization_id = ${orgId} and j.updated_at >= now() - make_interval(days => ${days})
     group by j.kind`)
-  return new Map(rows.map((row) => [row.kind, {
-    cases: Number(row.cases), messages: Number(row.messages), answered: Number(row.answered), tasks: Number(row.tasks),
-    tasksDone: Number(row.tasks_done), unreached: Number(row.unreached),
-  }]))
+  const weeks = new Map<string, LineWeek>()
+  for (const row of rows) {
+    const own = lineOfJobKind(row.kind)?.key
+    if (own === undefined) continue
+    const current = weeks.get(own) ?? { cases: 0, messages: 0, answered: 0, tasks: 0, tasksDone: 0, unreached: 0 }
+    if (row.kind === own) {
+      current.cases += Number(row.cases)
+      current.messages += Number(row.messages)
+      current.answered += Number(row.answered)
+      current.tasks += Number(row.tasks)
+      current.tasksDone += Number(row.tasks_done)
+    }
+    // Lo que no salió cuenta aunque sea un aviso de cita; el resto de sus cifras es del recordatorio.
+    current.unreached += Number(row.unreached)
+    weeks.set(own, current)
+  }
+  return weeks
 }
 
 const ANSWERED_WORD: Partial<Record<AdminLineKey, [string, string]>> = {
@@ -1346,18 +1366,25 @@ export interface AdminUnreached {
   people: Array<AdminPersonRow & { lineKey: string; lineName: string }>
 }
 
+/** Cuánto atrás mira «no pude»: tres días, para que un fallo del viernes se vea el lunes. */
+export const UNREACHED_DAYS = 3
+
 /**
- * Las personas a las que el agente no pudo escribir en las últimas 24 horas,
+ * Las personas a las que el agente no pudo escribir en los últimos tres días,
  * con el motivo de cada una y cómo habilitarla. Es la fila de Inicio: un
  * motivo que se puede corregir, no una lista de errores.
  */
 export async function getAdminUnreached(tx: Db, orgId: string, can: (permission: string) => boolean): Promise<AdminUnreached> {
-  const kinds = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.agent && can(line.permission)).map((line) => line.key)
+  const kinds = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.agent && can(line.permission)).flatMap((line) => jobKindsOfLine(line.key))
   if (kinds.length === 0 || !(await getAdminSettings(tx, orgId)).enabled) return { total: 0, byCause: [], people: [] }
   const zone = await getOrgLocale(tx, orgId)
+  // Quien nunca aceptó novedades no es un fallo: es lo esperado, y de eso se ocupa
+  // «te piden poco permiso» (`permissionGaps`) cuando son muchas.
+  const novedadesKinds = [...ADMIN_LINES, ...CUSTOM_LINES].filter((line) => line.agent?.purpose === "novedades").map((line) => line.key)
   // Quien no recibe recordatorios ya sale el día antes como una llamada (ADR 0040): no se cuenta dos veces.
-  const where = sql`j.cause is not null and j.updated_at >= now() - interval '24 hours' and j.kind in ${kinds}
-    and not (j.kind = 'recordatorio_cita' and j.cause = 'sin_permiso')`
+  const where = sql`j.cause is not null and j.updated_at >= now() - make_interval(days => ${UNREACHED_DAYS}) and j.kind in ${kinds}
+    and not (j.kind in ${jobKindsOfLine("recordatorio_cita")} and j.cause = 'sin_permiso')
+    and not (j.kind in ${novedadesKinds} and j.cause = 'sin_permiso')`
   const rows = await tx.execute<JobView>(jobsQuery(orgId, where, ADMIN_LIST_LIMIT))
   const counts = await tx.execute<{ cause: string; n: number }>(sql`
     select j.cause, count(*)::int as n from automation_job j
@@ -1372,7 +1399,10 @@ export async function getAdminUnreached(tx: Db, orgId: string, can: (permission:
   return {
     total: byCause.reduce((sum, row) => sum + row.total, 0),
     byCause,
-    people: rows.map((row) => ({ ...toPersonRow(row, zone), lineKey: row.kind, lineName: adminLineOf(row.kind)?.name ?? row.kind })),
+    people: rows.map((row) => {
+      const line = lineOfJobKind(row.kind)
+      return { ...toPersonRow(row, zone), lineKey: line?.key ?? row.kind, lineName: line?.name ?? row.kind }
+    }),
   }
 }
 
@@ -1421,19 +1451,34 @@ export interface TickSummary {
   respuestasOfrecidas: number
   /** Temas de cita o precio que Sofi retomó a la hora de apertura (decisión 5 del pulido). */
   temasRetomados: number
+  /** Pasos que fallaron y se aislaron: el ciclo siguió con lo demás y con las demás clínicas. */
+  errores: number
 }
 
 /**
  * Un paso del ciclo que no detiene a los demás: si falla en una clínica, se
  * registra y el ciclo sigue con lo suyo y con las demás clínicas.
  */
-async function apart<T>(orgId: string, what: string, fallback: T, run: () => Promise<T>): Promise<T> {
+async function apart<T>(orgId: string, what: string, fallback: T, run: () => Promise<T>, onError?: () => void): Promise<T> {
   try {
     return await run()
   } catch (error) {
+    onError?.()
     console.warn(`[ciclo] ${what} de ${orgId}: ${error instanceof Error ? error.message : String(error)}`)
     return fallback
   }
+}
+
+/** Lo mismo dentro de una transacción: el punto de guardado deshace solo lo del paso que falló. */
+async function inSavepoint<T>(
+  tx: Db,
+  orgId: string,
+  what: string,
+  fallback: T,
+  run: (inner: Db) => Promise<T>,
+  onError?: () => void,
+): Promise<T> {
+  return apart(orgId, what, fallback, () => tx.transaction((inner) => run(inner as Db)), onError)
 }
 
 /** Las líneas que escriben a la persona, cada una con quien anota sus casos. */
@@ -1465,15 +1510,25 @@ export async function tickAutomations(
   deps: TickDeps,
 ): Promise<TickSummary> {
   const orgRows = await ownerDb.select({ orgId: organization.id }).from(organization)
-  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0, respuestasOfrecidas: 0, temasRetomados: 0 }
-  for (const { orgId } of orgRows) {
+  const summary: TickSummary = { orgs: 0, programados: 0, entregados: 0, fallidos: 0, insistidas: 0, cerradas: 0, tareasCerradas: 0, respuestasOfrecidas: 0, temasRetomados: 0, errores: 0 }
+  let orgId = ""
+  const count = () => {
+    summary.errores++
+  }
+  /** Un paso de la clínica: si falla, se cuenta y se sigue con los demás pasos. */
+  const step = <T>(what: string, fallback: T, run: () => Promise<T>): Promise<T> =>
+    apart(orgId, what, fallback, run, count)
+  for (const { orgId: current } of orgRows) {
+    orgId = current
+    // Una clínica que falla no detiene a las siguientes: se registra y el ciclo sigue.
+    try {
     // Restricción/pausa comercial: no se programa, coordina ni entrega nada;
     // lo encolado se conserva para la reanudación. La ingesta no pasa por aquí.
     if (await shouldSkipSaasOrg(ownerDb, orgId)) continue
     // Ninguna conversación queda abierta (ADR 0024): es de Recepción, no del
     // Administrador, así que corre aunque este esté apagado.
-    const care = await withOrgContext(appDb, orgId, (tx) =>
-      tickConversationCare(tx, orgId, now, deps.format ? { format: deps.format } : {}),
+    const care = await step("cuidado de conversaciones", { nudged: 0, closed: 0 }, () =>
+      withOrgContext(appDb, orgId, (tx) => tickConversationCare(tx, orgId, now, deps.format ? { format: deps.format } : {})),
     )
     summary.insistidas += care.nudged
     summary.cerradas += care.closed
@@ -1485,7 +1540,7 @@ export async function tickAutomations(
     )
     // Las tareas se cierran solas cuando su motivo desaparece, aunque el
     // Administrador esté apagado: una cita que pasó no espera a que lo prendan.
-    summary.tareasCerradas += await withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now))
+    summary.tareasCerradas += await step("cierre de tareas", 0, () => withOrgContext(appDb, orgId, (tx) => settleTasks(tx, orgId, now)))
     // Las pruebas del chat web de más de 7 días se borran solas (fase 6 del pulido).
     await apart(orgId, "pruebas del chat web", 0, () => withOrgContext(appDb, orgId, (tx) => purgeOldWebchatTests(tx, orgId, now)))
     // Las respuestas del equipo por entregar (R1) son de la Bandeja: «Ver
@@ -1497,45 +1552,54 @@ export async function tickAutomations(
     // esté apagado: «Retomar la conversación» y los propios son de la Bandeja.
     if (deps.templates) {
       const templates = deps.templates
-      await withOrgContext(appDb, orgId, (tx) =>
-        requestNeededTemplates(tx, orgId, deps.secretsKey, now, templates),
+      await step("mensajes de WhatsApp", 0, () =>
+        withOrgContext(appDb, orgId, (tx) => requestNeededTemplates(tx, orgId, deps.secretsKey, now, templates)),
       )
     }
     const runtime = await withOrgContext(appDb, orgId, (tx) => adminRuntime(tx, orgId))
     if (!runtime.adminOn) continue
     summary.orgs++
     // Secuencial: las sincronizaciones comparten la transacción del tenant.
-    const synced = await withOrgContext(appDb, orgId, async (tx) => {
-      let total = 0
-      const rules = new Map((await listLineRules(tx, orgId)).map((rule) => [rule.kind, rule]))
-      for (const [key, sync] of AGENT_SYNCS) {
-        const rule = rules.get(key)
-        // En pausa: Recepción es quien escribe. Si la línea solo deja tareas, sigue.
-        if (!rule?.enabled || (rule.agentPart && !runtime.receptionOn)) continue
-        total += (await sync(tx, orgId, now)).programados
-      }
-      total += await syncTeamLines(tx, orgId, now)
-      return total
-    })
+    // Cada línea en su propio punto de guardado: una que falla no deja sin anotar a las demás.
+    const synced = await step("anotar los casos", 0, () =>
+      withOrgContext(appDb, orgId, async (tx) => {
+        let total = 0
+        const rules = new Map((await listLineRules(tx, orgId)).map((rule) => [rule.kind, rule]))
+        for (const [key, sync] of AGENT_SYNCS) {
+          const rule = rules.get(key)
+          // En pausa: Recepción es quien escribe. Si la línea solo deja tareas, sigue.
+          if (!rule?.enabled || (rule.agentPart && !runtime.receptionOn)) continue
+          total += await inSavepoint(tx, orgId, `línea ${key}`, 0, async (inner) => (await sync(inner, orgId, now)).programados, count)
+        }
+        total += await inSavepoint(tx, orgId, "líneas del equipo", 0, (inner) => syncTeamLines(inner, orgId, now), count)
+        return total
+      }),
+    )
     summary.programados += synced
-    const delivered = await withOrgContext(appDb, orgId, async (tx) => {
-      await reconcileDeliveries(tx, orgId, now)
-      return deliverDueJobs(
-        tx,
-        orgId,
-        now,
-        {
-          secretsKey: deps.secretsKey,
-          publicBaseUrl: deps.publicBaseUrl,
-          alreadyTold: deps.alreadyTold,
-          ...(deps.storage ? { storage: deps.storage } : {}),
-        },
-        deps.limit ?? 25,
-      )
-    })
+    const delivered = await step("entrega", [], () =>
+      withOrgContext(appDb, orgId, async (tx) => {
+        await inSavepoint(tx, orgId, "conciliar entregas", 0, (inner) => reconcileDeliveries(inner, orgId, now), count)
+        return deliverDueJobs(
+          tx,
+          orgId,
+          now,
+          {
+            secretsKey: deps.secretsKey,
+            publicBaseUrl: deps.publicBaseUrl,
+            alreadyTold: deps.alreadyTold,
+            ...(deps.storage ? { storage: deps.storage } : {}),
+          },
+          deps.limit ?? 25,
+        )
+      }),
+    )
     for (const r of delivered) {
       if (r.outcome === "enviado" || r.outcome === "tarea") summary.entregados++
       if (r.outcome === "fallido") summary.fallidos++
+    }
+    } catch (error) {
+      summary.errores++
+      console.warn(`[ciclo] la clínica ${orgId} falló y se sigue con las demás: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
   return summary

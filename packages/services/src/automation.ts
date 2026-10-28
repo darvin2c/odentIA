@@ -758,28 +758,16 @@ export function deliveryOf(messageStatus: string | null | undefined): JobDeliver
 }
 
 /**
- * Destinatario del aviso de fallo: creador de la regla si sigue en la
- * organización; si no, el primer owner/admin. Null si nadie califica.
+ * A quienes administran la clínica (dueña y administradores): un aviso de WhatsApp
+ * llega a todos, no a uno elegido sin orden, porque quien lo corrige puede ser cualquiera.
  */
-export async function failureRecipient(
-  tx: Db,
-  orgId: string,
-  createdBy: string | null,
-): Promise<string | null> {
-  if (createdBy) {
-    const [creator] = await tx
-      .select({ userId: member.userId })
-      .from(member)
-      .where(and(eq(member.organizationId, orgId), eq(member.userId, createdBy)))
-      .limit(1)
-    if (creator) return creator.userId
-  }
-  const [admin] = await tx
+export async function failureRecipients(tx: Db, orgId: string): Promise<string[]> {
+  const rows = await tx
     .select({ userId: member.userId })
     .from(member)
     .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
-    .limit(1)
-  return admin?.userId ?? null
+    .orderBy(asc(member.createdAt), asc(member.userId))
+  return [...new Set(rows.map((row) => row.userId))]
 }
 
 async function audit(
@@ -1028,7 +1016,9 @@ export async function syncAppointmentReminders(
   const hoursList = lineConfigOf(rule.config).hoursBefore ?? [...DEFAULT_HOURS_BEFORE]
   // Solo las citas que entran en el aviso más lejano, las más próximas primero,
   // y sin las que ya tienen todos sus avisos: el lote avanza aunque la clínica
-  // tenga más citas que el tope.
+  // tenga más citas que el tope. «Todos» son los que aún caben: a una cita de
+  // mañana ya no le toca el de 24 horas, y no por eso se vuelve a elegir cada ciclo.
+  const fitting = sql.join(hoursList.map((hours) => sql`(${hours}::numeric)`), sql`, `)
   const horizon = new Date(now.getTime() + (Math.max(...hoursList) + 1) * 3_600_000)
   const upcoming = await tx
     .select()
@@ -1041,17 +1031,18 @@ export async function syncAppointmentReminders(
         lte(appointment.startsAt, horizon),
         sql`(select count(*) from automation_job j
           where j.organization_id = ${orgId} and j.rule_id = ${rule.id} and j.kind = 'recordatorio_cita'
-            and j.appointment_id = ${appointment.id}) < ${hoursList.length}`,
+            and j.appointment_id = ${appointment.id})
+          < (select count(*) from (values ${fitting}) as hh(h)
+              where ${appointment.startsAt} - hh.h * interval '1 hour' >= ${now.toISOString()}::timestamptz - interval '30 minutes')`,
       ),
     )
     .orderBy(asc(appointment.startsAt), asc(appointment.id))
     .limit(BATCH_LIMIT)
   for (const appt of upcoming) {
     const contactId = await preferredContact(tx, orgId, appt.patientId)
-    if (!contactId) {
-      omitidos++
-      continue
-    }
+    // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
+    // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
+    if (!contactId) omitidos++
     // El «Horario de recontacto» se mide con la hora de la sede de la cita.
     const timeZone = await timezoneOf(tx, orgId, appt.branchId)
     const schedule = await writingScheduleOf(tx, orgId, timeZone)
@@ -1106,10 +1097,9 @@ export async function syncBudgetFollowUps(tx: Db, orgId: string, now: Date): Pro
   for (const budget of pending) {
     const contactId =
       budget.decisionContactId ?? (await preferredContact(tx, orgId, budget.patientId))
-    if (!contactId) {
-      omitidos++
-      continue
-    }
+    // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
+    // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
+    if (!contactId) omitidos++
     const job = await enqueueJob(tx, orgId, {
       ruleId: rule.id,
       kind: "seguimiento_presupuesto",
@@ -1221,10 +1211,9 @@ export async function syncVisitFollowUps(tx: Db, orgId: string, now: Date): Prom
     .limit(BATCH_LIMIT)
   for (const appt of visits) {
     const contactId = await preferredContact(tx, orgId, appt.patientId)
-    if (!contactId) {
-      omitidos++
-      continue
-    }
+    // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
+    // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
+    if (!contactId) omitidos++
     const timeZone = await timezoneOf(tx, orgId, appt.branchId)
     const at = hour === undefined ? now : nextDayAt(appt.endsAt, timeZone, hour)
     const job = await enqueueJob(tx, orgId, {
@@ -1253,12 +1242,12 @@ export async function syncLapsedInvites(tx: Db, orgId: string, now: Date): Promi
   let omitidos = 0
   if (!rule) return { programados, omitidos }
   const { timezone } = await findOrgLocale(tx, orgId)
-  for (const row of await lapsedToInvite(tx, orgId, timezone, now, { limit: BATCH_LIMIT })) {
+  // Solo quienes cumplieron los meses sin venir desde que se prendió: lo anterior no cuenta (como en las demás líneas).
+  for (const row of await lapsedToInvite(tx, orgId, timezone, now, { limit: BATCH_LIMIT, since: activeSince(rule) })) {
     const contactId = await preferredContact(tx, orgId, row.patientId)
-    if (!contactId) {
-      omitidos++
-      continue
-    }
+    // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
+    // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
+    if (!contactId) omitidos++
     const job = await enqueueJob(tx, orgId, {
       ruleId: rule.id,
       kind: "invitar_a_volver",
@@ -1322,10 +1311,9 @@ export async function syncCancelledAppointments(tx: Db, orgId: string, now: Date
     .limit(BATCH_LIMIT)
   for (const appt of cancelled) {
     const contactId = await preferredContact(tx, orgId, appt.patientId)
-    if (!contactId) {
-      omitidos++
-      continue
-    }
+    // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
+    // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
+    if (!contactId) omitidos++
     const job = await enqueueJob(tx, orgId, {
       ruleId: rule.id,
       kind: "cita_cancelada",
@@ -1367,10 +1355,9 @@ export async function syncCheckupReminders(tx: Db, orgId: string, now: Date): Pr
     .limit(BATCH_LIMIT)
   for (const control of due) {
     const contactId = await preferredContact(tx, orgId, control.patientId)
-    if (!contactId) {
-      omitidos++
-      continue
-    }
+    // Sin a quién escribirle el caso se anota igual: al atenderlo queda como «no pude» (sin_destino)
+    // con su tarea, y no vuelve a ocupar el lote en cada ciclo.
+    if (!contactId) omitidos++
     const job = await enqueueJob(tx, orgId, {
       ruleId: rule.id,
       kind: "recordatorio_control",
@@ -1807,6 +1794,22 @@ export const CAUSE_WORDS: Record<AutomationCause, { one: string; many: string; f
   },
 }
 
+/**
+ * Las palabras de un motivo según el tipo de mensaje. En las novedades y promociones
+ * «sin permiso» casi siempre es que nunca las aceptó, no que pidió no recibirlas.
+ */
+export function causeWordsFor(cause: AutomationCause, purpose: ConsentPurpose): (typeof CAUSE_WORDS)[AutomationCause] {
+  if (cause === "sin_permiso" && purpose === "novedades") {
+    return {
+      one: "no aceptó novedades y promociones",
+      many: "no aceptaron novedades y promociones",
+      fix: "Si acepta, anótalo en su página, en Datos › Mensajes.",
+      fixMany: "Si aceptan, anótalo en sus páginas, en Datos › Mensajes.",
+    }
+  }
+  return CAUSE_WORDS[cause]
+}
+
 /** Motivo de un fallo definitivo según el código que devuelve el envío. */
 function causeOfCode(code: string | undefined): AutomationCause {
   if (code === "TEMPLATE_IS_PROMOTION") return "promocion"
@@ -1952,6 +1955,22 @@ function settledWords(reason: string | undefined, name: string | null): string {
   return text.charAt(0).toLowerCase() + text.slice(1)
 }
 
+/** La tarea de un aviso de cita que no pudo salir: avisarle lo que cambió. */
+const NOTICE_TASK_TITLE: Record<string, (name: string) => string> = {
+  aviso_cita_reservada: (name) => `Avisarle a ${name} que su cita quedó reservada`,
+  aviso_cita_movida: (name) => `Avisarle a ${name} que su cita cambió de fecha`,
+  aviso_cita_cancelada: (name) => `Avisarle a ${name} que su cita se canceló`,
+}
+
+/**
+ * Cuando un aviso de cita no sale, ¿alguien más se lo diría? El recordatorio de una cita reservada
+ * o movida sale después y dice la fecha; una cita cancelada no tiene recordatorio: sin tarea,
+ * la persona llega a una cita que ya no existe.
+ */
+function needsCallWhenMissed(kind: string): boolean {
+  return !isAppointmentNotice(kind) || kind === "aviso_cita_cancelada"
+}
+
 /**
  * Deja la tarea de un caso para una persona del equipo: a su área o, si el
  * caso tiene quien lo lleva, a esa persona. Dice quién la dejó (el
@@ -1963,7 +1982,8 @@ async function leaveTask(
   job: JobRow,
   input: { reason: string; note?: string | undefined; dueAt?: Date; timeZone: string; now: Date },
 ): Promise<string | null> {
-  const line = adminLineOf(job.kind)
+  // Un aviso de cita es de «Recordar la cita»: su tarea es la de esa línea, dicha para lo que cambió.
+  const line = lineOfJobKind(job.kind)
   if (!line) return null
   const payload = jobPayloadOf(job.payload)
   let name: string | null = null
@@ -2016,8 +2036,9 @@ async function leaveTask(
     }
   }
   // Una tarea de un paciente sin otro vínculo queda de su propia persona (`createTask`).
+  const who = name ?? "esta persona"
   const task = await createTask(tx, orgId, {
-    title: line.team.taskTitle(name ?? "esta persona").slice(0, 200),
+    title: (NOTICE_TASK_TITLE[job.kind]?.(who) ?? line.team.taskTitle(who)).slice(0, 200),
     patientId: job.patientId,
     contactId: job.patientId ? null : job.contactId,
     opportunityId: job.opportunityId,
@@ -2054,7 +2075,7 @@ async function linkOpportunityThread(tx: Db, orgId: string, job: JobRow, convers
 
 /** Hasta cuándo sirve llamar por el recordatorio de una cita: hasta que empieza. */
 async function reminderDue(tx: Db, orgId: string, job: JobRow): Promise<Date | undefined> {
-  if (job.kind !== "recordatorio_cita" || !job.appointmentId) return undefined
+  if ((job.kind !== "recordatorio_cita" && !isAppointmentNotice(job.kind)) || !job.appointmentId) return undefined
   const [appt] = await tx
     .select({ startsAt: appointment.startsAt })
     .from(appointment)
@@ -2245,9 +2266,10 @@ export async function deliverJob(
     await notify(tx, { orgId, kind: "automation.job.failed", jobId: job.id, at: now.toISOString() })
     // Sin aviso en la campana: quien puede habilitarlo lo ve en «Te espera»
     // («el agente no pudo escribirle a N personas», ADR 0025). Un aviso de
-    // cita no deja tarea: la llamada la pide su recordatorio, si tampoco sale.
-    if (rule.teamPart && !isAppointmentNotice(job.kind)) {
-      const words = CAUSE_WORDS[cause]
+    // cita reservada o movida no deja tarea: la llamada la pide su recordatorio, si tampoco sale;
+    // la cancelación sí, porque nada más le diría a la persona que no vaya.
+    if (rule.teamPart && needsCallWhenMissed(job.kind)) {
+      const words = causeWordsFor(cause, purpose)
       for (const item of group) {
         const taskId = await leaveTask(tx, orgId, item, {
           reason: `Sofi no pudo escribirle: ${words.one}. ${words.fix}`,
@@ -2576,7 +2598,7 @@ export async function reconcileDeliveries(tx: Db, orgId: string, now: Date): Pro
       rules.set(job.ruleId, rule ?? null)
     }
     const rule = rules.get(job.ruleId)
-    if (rule?.teamPart && !job.taskId && !isAppointmentNotice(job.kind)) {
+    if (rule?.teamPart && !job.taskId && needsCallWhenMissed(job.kind)) {
       const taskId = await leaveTask(tx, orgId, job, {
         reason: `Sofi no pudo escribirle: ${words.one}. ${words.fix}`,
         dueAt: await reminderDue(tx, orgId, job),
@@ -2608,9 +2630,47 @@ export async function deliverDueJobs(
   const rows = Array.isArray(due) ? due : []
   const results: DeliverResult[] = []
   for (const r of rows) {
-    results.push(await deliverJob(tx, orgId, r.id, now, deps))
+    // Cada caso en su propio punto de guardado: uno que falla no deshace lo que ya salió
+    // ni deja a los demás sin atender (un caso que siempre falla no bloquea la cola).
+    try {
+      results.push(await tx.transaction((inner) => deliverJob(inner as Db, orgId, r.id, now, deps)))
+    } catch (error) {
+      results.push(await markCrashedJob(tx, orgId, r.id, now, error))
+    }
   }
   return results
+}
+
+/**
+ * Un caso que lanzó un error inesperado (no un motivo de «no pude» conocido):
+ * se reintenta pasados 15 minutos y, tras `MAX_ATTEMPTS`, se cierra como
+ * fallido con el motivo «proveedor» para que aparezca en «Te espera» en vez
+ * de repetirse cada minuto sin que nadie lo vea.
+ */
+async function markCrashedJob(tx: Db, orgId: string, jobId: string, now: Date, error: unknown): Promise<DeliverResult> {
+  const detail = (error instanceof Error ? error.message : String(error)).slice(0, 300)
+  console.warn(`[ciclo] el caso ${jobId} de ${orgId} falló: ${detail}`)
+  const [job] = await tx
+    .select({ attempts: automationJob.attempts })
+    .from(automationJob)
+    .where(and(eq(automationJob.id, jobId), eq(automationJob.organizationId, orgId), eq(automationJob.status, "pendiente")))
+    .limit(1)
+  if (!job) return { jobId, outcome: "omitido", detail: "Ya procesado" }
+  const attempts = job.attempts + 1
+  if (attempts < MAX_ATTEMPTS) {
+    await tx
+      .update(automationJob)
+      .set({ attempts, lastError: detail, scheduledFor: new Date(now.getTime() + 15 * 60_000), updatedAt: now })
+      .where(eq(automationJob.id, jobId))
+    return { jobId, outcome: "pospuesto", detail }
+  }
+  await tx
+    .update(automationJob)
+    .set({ attempts, status: "fallido", cause: "proveedor", lastError: detail, updatedAt: now })
+    .where(eq(automationJob.id, jobId))
+  await audit(tx, orgId, null, "automation_job.failed", jobId, { cause: "proveedor", detail })
+  await notify(tx, { orgId, kind: "automation.job.failed", jobId, at: now.toISOString() })
+  return { jobId, outcome: "fallido", detail }
 }
 
 /** Cancela lo pendiente de una cita al resolverse (confirmada/atendida/cancelada). */
@@ -3479,20 +3539,20 @@ export async function requestNeededTemplates(
     requested += outcome.requested
     const [first] = outcome.failed
     if (!first) continue
-    const recipient = await failureRecipient(tx, orgId, null)
-    if (!recipient) continue
     const many = outcome.failed.length
-    await upsertWorkspaceNotification(tx, orgId, {
-      userId: recipient,
-      dedupeKey: `template-request:${connection.id}:${now.toISOString().slice(0, 10)}`,
-      title:
-        many === 1
-          ? "WhatsApp no aceptó la solicitud de un mensaje"
-          : `WhatsApp no aceptó la solicitud de ${many} mensajes`,
-      body: `${many === 1 ? `«${first.title}». ` : ""}Motivo: ${first.detail}. Revisa en Configuración › Integraciones › WhatsApp que la clave pueda pedir mensajes. Se vuelve a pedir mañana.`,
-      href: MESSAGES_HREF,
-      permission: "settings.write",
-    })
+    for (const recipient of await failureRecipients(tx, orgId)) {
+      await upsertWorkspaceNotification(tx, orgId, {
+        userId: recipient,
+        dedupeKey: `template-request:${connection.id}:${now.toISOString().slice(0, 10)}`,
+        title:
+          many === 1
+            ? "WhatsApp no aceptó la solicitud de un mensaje"
+            : `WhatsApp no aceptó la solicitud de ${many} mensajes`,
+        body: `${many === 1 ? `«${first.title}». ` : ""}Motivo: ${first.detail}. Revisa en Configuración › Integraciones › WhatsApp que la clave pueda pedir mensajes. Se vuelve a pedir mañana.`,
+        href: MESSAGES_HREF,
+        permission: "settings.write",
+      })
+    }
   }
   // Un cambio de texto que ya puede valer (aprobado, o sin WhatsApp) pasa a ser el vigente.
   await settleMessageTexts(tx, orgId)
@@ -3559,8 +3619,8 @@ export async function applyTemplateUpdates(
     const notice = TEMPLATE_NOTICE[template.status]
     const owner = owners.get(template.id)
     if (!notice || !owner || (!owner.isCurrent && !owner.isPending)) continue
-    const recipient = await failureRecipient(tx, orgId, null)
-    if (!recipient) continue
+    const recipients = await failureRecipients(tx, orgId)
+    if (recipients.length === 0) continue
     const reason = templateReasonWords(template.reason)
     const why = reason ? `Motivo: ${reason}. ` : ""
     let title = `${notice.title}: «${owner.title}»`
@@ -3585,14 +3645,16 @@ export async function applyTemplateUpdates(
         body += ` ${n === 1 ? "1 persona lo tiene" : `${n} personas lo tienen`} por salir en las próximas 24 horas: a quien no le llegue lo verás con su motivo en Agente › Argos.`
       }
     }
-    await upsertWorkspaceNotification(tx, orgId, {
-      userId: recipient,
-      dedupeKey: `template-status:${template.id}:${template.status}`,
-      title,
-      body,
-      href: MESSAGES_HREF,
-      permission: "settings.write",
-    })
+    for (const recipient of recipients) {
+      await upsertWorkspaceNotification(tx, orgId, {
+        userId: recipient,
+        dedupeKey: `template-status:${template.id}:${template.status}`,
+        title,
+        body,
+        href: MESSAGES_HREF,
+        permission: "settings.write",
+      })
+    }
   }
   return changes.length
 }

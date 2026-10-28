@@ -158,6 +158,8 @@ for (const width of [1440, 390]) {
 test("la fila la decide la pregunta: lo de cómo se usa va primero a la Ayuda y un nombre deja primero los resultados", async ({ owner, fixtureDb }) => {
   await lastMonth(fixtureDb, owner)
   const page = owner.page
+  // Con Argos apagado el buscador no lo ofrece: la fila se decide con él encendido.
+  await call(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(owner.org.slug, "/home"))
   await openSearch(page, 1440, "dónde configuro los horarios")

@@ -471,7 +471,7 @@ describe("por dónde le llega a cada persona", () => {
       title: "Llamar a No aceptó por su presupuesto",
       createdBy: "admin",
       area: "recepcion",
-      reason: "Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
+      reason: "Sofi no pudo escribirle: no aceptó novedades y promociones. Si acepta, anótalo en su página, en Datos › Mensajes.",
       patientId: refused.patientId,
       status: "open",
     })
@@ -1562,7 +1562,7 @@ describe("«Retomar una oportunidad» funciona como las demás líneas", () => {
     expect(taskOf(ownedId)).toEqual([expect.objectContaining({
       title: "Llamar a Con responsable por Ortodoncia", assigneeUserId: c.professionalId,
       contactId: owned.contactId, status: "open",
-      reason: "Sofi no pudo escribirle: pidió no recibir este tipo de mensaje. Si cambia de opinión, anótalo en su página, en Datos › Mensajes.",
+      reason: "Sofi no pudo escribirle: no aceptó novedades y promociones. Si acepta, anótalo en su página, en Datos › Mensajes.",
     })])
     expect(jobs.find((job) => job.opportunityId === ownedId)?.taskId).toBe(taskOf(ownedId)[0]?.id)
     // Sin responsable, la tarea va al equipo de recepción.
