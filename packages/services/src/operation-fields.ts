@@ -410,6 +410,24 @@ export const OPERATIONS = {
       quantity: { kind: "int", min: 1, max: 99, label: "Cantidad", description: "Cuántas unidades, solo si lo dijo («dos carillas» = 2).", body: "optional", nullable: true, agent: "fills" },
     },
   },
+  // La próxima cita que se pide reservar en la atención (issue 109, paso 2): el servicio busca el
+  // hueco del profesional y la reserva `createAppointment`, como «Nueva cita».
+  "cita.dictada": {
+    label: "Próxima cita",
+    fields: {
+      service: { kind: "text", max: 200, label: "Para qué", description: "Para qué es la cita, con sus palabras («el tratamiento», «el control»). Vacío si no lo dijo.", body: "optional", nullable: true, agent: "fills" },
+      date: { kind: "text", min: 10, max: 10, label: "Día", description: "El día de la cita en AAAA-MM-DD: el que dijo («el jueves») o el que resulta de contar desde la fecha de hoy que se te da («en quince días»).", body: "required", agent: "requires" },
+      time: { kind: "text", max: 5, label: "Hora", description: "La hora en HH:MM de 24 horas, solo si la dijo («a las cuatro de la tarde» = 16:00).", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
+  // «Arma el presupuesto» (issue 109, paso 2): lo indicado en la atención entra al borrador ahora,
+  // con la misma regla que al firmar (`assembleEncounterBudget`).
+  "presupuesto.armar": {
+    label: "Presupuesto",
+    fields: {
+      show: { kind: "flag", label: "Para mostrárselo", description: "true si pidió armarlo para enseñárselo o explicárselo al paciente ahora; false si solo pidió armarlo o enviarlo.", body: "optional", agent: "requires" },
+    },
+  },
   "control.crear": {
     label: "Control",
     fields: {

@@ -423,6 +423,63 @@
         "additionalProperties": false
       }
     },
+    "citas": {
+      "default": [],
+      "description": "La próxima cita, solo si pidió reservarla (normalmente una sola).",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "description": "Para qué es la cita, con sus palabras («el tratamiento», «el control»). Vacío si no lo dijo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "date": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 10,
+            "description": "El día de la cita en AAAA-MM-DD: el que dijo («el jueves») o el que resulta de contar desde la fecha de hoy que se te da («en quince días»)."
+          },
+          "time": {
+            "description": "La hora en HH:MM de 24 horas, solo si la dijo («a las cuatro de la tarde» = 16:00).",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 5
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "date"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "presupuesto": {
+      "description": "Solo si pidió armar el presupuesto ahora.",
+      "type": "object",
+      "properties": {
+        "show": {
+          "type": "boolean",
+          "description": "true si pidió armarlo para enseñárselo o explicárselo al paciente ahora; false si solo pidió armarlo o enviarlo."
+        },
+        "dicho": {
+          "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+          "type": "string",
+          "maxLength": 600
+        }
+      },
+      "required": [
+        "show"
+      ],
+      "additionalProperties": false
+    },
     "descanso": {
       "description": "El descanso médico, solo si lo indicó.",
       "type": "object",
@@ -520,6 +577,7 @@
     "controles",
     "alergias",
     "procedimientos",
+    "citas",
     "correcciones",
     "quitar"
   ],

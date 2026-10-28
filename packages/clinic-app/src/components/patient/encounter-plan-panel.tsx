@@ -41,6 +41,7 @@ import { DiagnosisSearch } from "./diagnosis-search"
 import { EncounterTreatments } from "./encounter-treatments"
 import { treatmentSiteLabel } from "./plan/budget-parts"
 import { BudgetSendButton } from "./plan/budget-send"
+import { BudgetShowActions } from "./plan/budget-show"
 import { usePlanNextStep } from "./plan/plan-next"
 import { ServicePicker } from "./service-picker"
 import { productUi } from "../../product/product-ui"
@@ -96,9 +97,12 @@ export function EncounterPlanPanel({
   beforeWrite,
   onChanged,
   onPendingChange,
+  patientName,
 }: {
   patientId: string
   encounterId: string
+  /** Para «Mostrar a Rosa» el presupuesto en borrador. */
+  patientName: string
   /** Tratamientos vinculados a esta atención (sesión registrada o traídos por la cita). */
   plannedItems: PlanItem[]
   /** Indicados en esta atención: se marcan «Hoy» en el plan en corto. */
@@ -226,27 +230,46 @@ export function EncounterPlanPanel({
         heading="Próximo control"
       />
 
-      <EncounterBudgetSend patientId={patientId} beforeWrite={beforeWrite} />
+      <EncounterBudgetSend patientId={patientId} patientName={patientName} beforeWrite={beforeWrite} />
     </div>
   )
 }
 
 /**
  * «Enviar presupuesto» mientras la persona sigue en la unidad dental: el borrador que
- * ya está armado (de una atención anterior o revisado). Lo de esta atención se
- * suma al firmar, y el cierre pregunta «¿Enviárselo ahora?». La misma regla de
- * «Qué sigue» decide si hay algo que enviar.
+ * ya está armado (de una atención anterior, revisado o armado a pedido con
+ * Clío). Se le muestra a pantalla completa, se imprime o se envía sin salir de
+ * la atención. Lo de esta atención se suma al firmar, y el cierre pregunta
+ * «¿Enviárselo ahora?». La misma regla de «Qué sigue» decide si hay algo que enviar.
  */
-function EncounterBudgetSend({
+export function EncounterBudgetSend({
   patientId,
+  patientName,
   beforeWrite,
+  compact = false,
 }: {
   patientId: string
+  patientName: string
   beforeWrite: () => Promise<void>
+  /** En el bloque cerrado de la atención: una fila, sin abrir el bloque (lo armado por Clío se ve ahí). */
+  compact?: boolean
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
   const step = usePlanNextStep(patientId, canSend).data?.data ?? null
   if (!canSend || step?.kind !== "enviar" || !step.action?.budgetId) return null
+  if (compact) {
+    return (
+      <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-background px-3 py-2">
+        <span className="min-w-0 flex-1 text-sm">
+          Presupuesto por enviar{step.detail ? ` · ${step.detail}` : ""}
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <BudgetShowActions patientId={patientId} budgetId={step.action.budgetId} patientName={patientName} beforeWrite={beforeWrite} />
+          <BudgetSendButton patientId={patientId} budgetId={step.action.budgetId} size="sm" beforeSend={beforeWrite} />
+        </div>
+      </div>
+    )
+  }
   return (
     <BlockPart title="Presupuesto por enviar">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -259,6 +282,7 @@ function EncounterBudgetSend({
           size="sm"
           beforeSend={beforeWrite}
         />
+        <BudgetShowActions patientId={patientId} budgetId={step.action.budgetId} patientName={patientName} beforeWrite={beforeWrite} />
       </div>
     </BlockPart>
   )
