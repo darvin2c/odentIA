@@ -110,7 +110,7 @@ const now = new Date()
 const solo = arg("solo", "")
 for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo)) {
   const pending = (dictation.pendientes ?? []).map((label) => ({ label }))
-  const { read, reply } = await askDictationModel(
+  const { read, reply, repeated } = await askDictationModel(
     model,
     spec,
     {
@@ -288,7 +288,7 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
   // Más de una llamada a la herramienta en una respuesta: se lee solo la primera, y eso explica lo perdido.
   const calls = (reply.tool_calls ?? []).length
   console.log(
-    `${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}${calls > 1 ? `, ${calls} llamadas` : ""})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`,
+    `${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}${calls > 1 ? `, ${calls} llamadas` : ""}${repeated.length ? `, repitió ${repeated.join(", ")}` : ""})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`,
   )
   if (notes.length && process.argv.includes("--detalle")) console.log(JSON.stringify((reply.tool_calls ?? []).map((call) => call.args), null, 1))
 }

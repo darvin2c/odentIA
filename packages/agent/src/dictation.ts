@@ -368,6 +368,136 @@ export interface DictationExtraction {
   model: string
 }
 
+const empty = (value: unknown) =>
+  blank(value) ||
+  (Array.isArray(value) && value.length === 0) ||
+  (isRecord(value) && Object.keys(value).length === 0)
+
+/**
+ * Una clave que llega dos veces no borra lo que ya traía: lo vacío no
+ * reemplaza a lo lleno, dos listas se juntan sin repetir elementos iguales y
+ * dos objetos se unen campo por campo. Si las dos traen un dato distinto, vale
+ * el último, como en `JSON.parse`.
+ */
+function joinRepeated(before: unknown, after: unknown): unknown {
+  if (empty(after)) return before
+  if (empty(before)) return after
+  if (Array.isArray(before) && Array.isArray(after)) {
+    const seen = new Set(before.map((item) => JSON.stringify(item)))
+    return [...before, ...after.filter((item) => !seen.has(JSON.stringify(item)))]
+  }
+  if (isRecord(before) && isRecord(after)) {
+    const joined = { ...before }
+    for (const [key, value] of Object.entries(after))
+      joined[key] = key in joined ? joinRepeated(joined[key], value) : value
+    return joined
+  }
+  return after
+}
+
+const JSON_STRING = /"(?:[^"\\]|\\.)*"/y
+const JSON_NUMBER = /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y
+const JSON_LITERAL = /true|false|null/y
+
+/**
+ * Los argumentos de la herramienta tal como llegaron, con las claves repetidas
+ * unidas (`joinRepeated`). gpt-6-luna a veces, al cerrar, vuelve a escribir
+ * claves que ya llenó, esta vez vacías (`"examen":[…]` y al final
+ * `"examen":[]`), y `JSON.parse`, que usa LangChain, se queda con la última:
+ * el dictado perdía bloques enteros (el examen, el diagnóstico, la receta) que
+ * el modelo sí había ordenado. Medido el 2026-10-28 con `eval:dictado-medico`:
+ * respuesta completa, una sola llamada y la clave dos veces. `repeated`: las
+ * claves que llegaron más de una vez. Un texto que no es JSON: null.
+ */
+export function parseToolArguments(text: string): { value: unknown; repeated: string[] } | null {
+  const repeated: string[] = []
+  let at = 0
+  const space = () => {
+    while (at < text.length && /\s/.test(text.charAt(at))) at += 1
+  }
+  const token = (pattern: RegExp) => {
+    pattern.lastIndex = at
+    const found = pattern.exec(text)
+    if (!found) throw new SyntaxError(`JSON inválido en ${at}`)
+    at = pattern.lastIndex
+    return found[0]
+  }
+  const expect = (char: string) => {
+    space()
+    if (text.charAt(at) !== char) throw new SyntaxError(`Se esperaba «${char}» en ${at}`)
+    at += 1
+  }
+  const value = (): unknown => {
+    space()
+    const char = text.charAt(at)
+    if (char === "{") {
+      at += 1
+      const object: Record<string, unknown> = {}
+      space()
+      if (text.charAt(at) === "}") {
+        at += 1
+        return object
+      }
+      for (;;) {
+        space()
+        const key = JSON.parse(token(JSON_STRING)) as string
+        expect(":")
+        const item = value()
+        if (Object.hasOwn(object, key)) {
+          repeated.push(key)
+          object[key] = joinRepeated(object[key], item)
+        } else object[key] = item
+        space()
+        if (text.charAt(at) === ",") at += 1
+        else {
+          expect("}")
+          return object
+        }
+      }
+    }
+    if (char === "[") {
+      at += 1
+      const list: unknown[] = []
+      space()
+      if (text.charAt(at) === "]") {
+        at += 1
+        return list
+      }
+      for (;;) {
+        list.push(value())
+        space()
+        if (text.charAt(at) === ",") at += 1
+        else {
+          expect("]")
+          return list
+        }
+      }
+    }
+    if (char === '"') return JSON.parse(token(JSON_STRING))
+    if (char === "-" || /\d/.test(char)) return Number(token(JSON_NUMBER))
+    return JSON.parse(token(JSON_LITERAL))
+  }
+  try {
+    const parsed = value()
+    space()
+    return at === text.length ? { value: parsed, repeated } : null
+  } catch {
+    return null
+  }
+}
+
+/** Los argumentos crudos de la llamada al dictado: en /v1/responses, `output`; en chat/completions, `tool_calls`. */
+function rawToolArguments(reply: AIMessage): string | null {
+  const output = reply.response_metadata?.["output"]
+  const fromOutput = Array.isArray(output)
+    ? output.find((item) => isRecord(item) && item["type"] === "function_call" && item["name"] === DICTATION_TOOL)
+    : undefined
+  if (isRecord(fromOutput) && typeof fromOutput["arguments"] === "string") return fromOutput["arguments"]
+  const calls = reply.additional_kwargs?.tool_calls ?? []
+  const fromCalls = calls.find((item) => item.function?.name === DICTATION_TOOL)
+  return typeof fromCalls?.function?.arguments === "string" ? fromCalls.function.arguments : null
+}
+
 /**
  * Una llamada al modelo con una pausa del dictado y su lectura parte por
  * parte. La usan el dictado de la atención y su medición (`eval:dictado`),
@@ -378,7 +508,7 @@ export async function askDictationModel(
   spec: Pick<LlmSpec, "provider" | "modelName">,
   ask: DictationAsk,
   profile: DictationProfile,
-): Promise<{ read: Omit<DictationExtraction, "model"> | null; reply: AIMessage }> {
+): Promise<{ read: Omit<DictationExtraction, "model"> | null; reply: AIMessage; repeated: string[] }> {
   const record = tool(async () => "registrado", {
     name: DICTATION_TOOL,
     description: profile.toolDescription,
@@ -403,8 +533,14 @@ export async function askDictationModel(
     reply instanceof AIMessage || "tool_calls" in reply
       ? (reply as AIMessage).tool_calls?.find((item) => item.name === DICTATION_TOOL)
       : undefined
+  // Lo que llegó tal cual, con las claves repetidas unidas; si no se encuentra, lo que leyó LangChain.
+  const raw = call ? rawToolArguments(reply as AIMessage) : null
+  const parsed = raw === null ? null : parseToolArguments(raw)
   return {
-    read: call ? readDictation(call.args, ask.transcript, ask.pending.length, profile.parts) : null,
+    read: call
+      ? readDictation(parsed ? parsed.value : call.args, ask.transcript, ask.pending.length, profile.parts)
+      : null,
     reply,
+    repeated: parsed?.repeated ?? [],
   }
 }
