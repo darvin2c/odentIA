@@ -183,6 +183,8 @@ export interface ChatMessage {
   senderKind: string
   /** Quién del equipo lo escribió; nulo si no fue una persona del equipo. */
   senderUserId?: string | null
+  /** Lo escribió el equipo desde la app WhatsApp Business del celular (coexistencia). */
+  fromBusinessApp?: boolean
   contentType: string
   body: string | null
   attachments: { objectKey: string; mimeType: string; filename: string; size: number }[]
@@ -624,6 +626,10 @@ export interface ConnectionItem {
     subscribedAt: string | null
     registeredAt: string | null
     pending: { step: string; title: string; problem: string | null }[]
+    /** El número sigue en la app WhatsApp Business del celular (coexistencia). Ausente en respuestas antiguas. */
+    businessApp?: boolean
+    /** La clínica no compartió el historial del celular al conectar. */
+    historyDeclined?: boolean
   } | null
   /** Solo en WhatsApp con la app propia de la clínica: lo que odentIA hizo en Meta y sabe de sus claves. */
   ownApp?: OwnAppState | null

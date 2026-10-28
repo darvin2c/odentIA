@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import type {
   ChannelAdapter,
   ChannelAdapterDeps,
+  NormalizedAppContact,
   NormalizedInbound,
   NormalizedStatus,
   NormalizedTemplateCategory,
@@ -136,6 +137,88 @@ interface WaValue {
   contacts?: { profile?: { name?: string }; wa_id?: string }[]
   messages?: WaMessage[]
   statuses?: WaStatus[]
+  /** `smb_message_echoes`: lo que el equipo envió desde la app del celular (`from` es la empresa, `to` la persona). */
+  message_echoes?: (WaMessage & { to?: string })[]
+  /** `history`: el historial del celular, por partes; o el error si la clínica no quiso compartirlo. */
+  history?: {
+    errors?: WaError[]
+    threads?: {
+      /** La persona del hilo (`wa_id`). */
+      id?: string
+      messages?: (WaMessage & { history_context?: { status?: string } })[]
+    }[]
+  }[]
+  /** `smb_app_state_sync`: cambios de la agenda de contactos del celular. */
+  state_sync?: {
+    type?: string
+    action?: string
+    contact?: { full_name?: string; first_name?: string; phone_number?: string }
+  }[]
+}
+
+/**
+ * Coexistencia: el número sigue en la app WhatsApp Business del celular y, con
+ * la Cloud API, Meta avisa lo que el equipo escribe desde ahí
+ * (`smb_message_echoes`), el historial al conectar (`history`) y la agenda de
+ * contactos (`smb_app_state_sync`). Formas de la guía, leída el 2026-10-28;
+ * sin probar contra Meta:
+ * https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users
+ */
+const HISTORY_DECLINED_CODE = 2593109
+
+/** El número de un hilo o un contacto, solo dígitos (`+51 999…` → `51999…`). */
+function waDigits(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const digits = value.replace(/\D/g, "")
+  return digits || null
+}
+
+/** Un mensaje que salió de la empresa: hilo y remitente son los de la persona a quien se escribió. */
+function fromBusiness(n: NormalizedInbound, customer: string): NormalizedInbound {
+  const { senderDisplayName: _name, ...rest } = n
+  return { ...rest, externalThreadId: `wa:${customer}`, senderExternalId: `wa:${customer}`, fromBusinessApp: true }
+}
+
+/** Lo que trae un cambio de coexistencia, ya normalizado. */
+function coexistenceOf(value: WaValue): {
+  messages: NormalizedInbound[]
+  appContacts: NormalizedAppContact[]
+  historyDeclined: boolean
+} {
+  const messages: NormalizedInbound[] = []
+  for (const echo of value.message_echoes ?? []) {
+    const customer = waDigits(echo.to)
+    // Una reacción del equipo no es un mensaje que la Bandeja sepa mostrar.
+    if (!customer || echo.type === "reaction") continue
+    const n = messageToNormalized(echo, undefined)
+    if (n) messages.push(fromBusiness(n, customer))
+  }
+  let historyDeclined = false
+  for (const chunk of value.history ?? []) {
+    if (chunk.errors?.some((error) => error.code === HISTORY_DECLINED_CODE)) historyDeclined = true
+    for (const thread of chunk.threads ?? []) {
+      const customer = waDigits(thread.id)
+      if (!customer) continue
+      for (const m of thread.messages ?? []) {
+        if (m.type === "reaction") continue
+        const n = messageToNormalized(m, displayNameOf(value, m.from))
+        if (!n) continue
+        const status = m.history_context?.status?.toLowerCase()
+        const historyStatus = status === "read" || status === "played" ? "read" : status === "delivered" ? "delivered" : "sent"
+        const own = waDigits(m.from) !== customer
+        messages.push(own ? { ...fromBusiness(n, customer), history: true, historyStatus } : { ...n, history: true })
+      }
+    }
+  }
+  const appContacts: NormalizedAppContact[] = []
+  for (const sync of value.state_sync ?? []) {
+    if (sync.type !== "contact") continue
+    const number = waDigits(sync.contact?.phone_number)
+    if (!number) continue
+    const name = sync.contact?.full_name?.trim() || sync.contact?.first_name?.trim() || null
+    appContacts.push({ externalUserId: `wa:${number}`, name, removed: sync.action === "remove" })
+  }
+  return { messages, appContacts, historyDeclined }
 }
 
 function displayNameOf(value: WaValue, from: string): string | undefined {
@@ -629,6 +712,9 @@ interface WaChange {
   statuses: NormalizedStatus[]
   templateStatus: NormalizedTemplateStatus | null
   templateCategory: NormalizedTemplateCategory | null
+  /** Coexistencia: la agenda del celular y si la clínica no compartió el historial. */
+  appContacts?: NormalizedAppContact[]
+  historyDeclined?: boolean
 }
 
 /** Recorre `entry[].changes[]` de un aviso y normaliza cada cambio por separado. */
@@ -673,6 +759,8 @@ function readChanges(rawBody: string): WaChange[] {
         const n = statusToNormalized(s)
         if (n) statuses.push(n)
       }
+      const coexistence = coexistenceOf(value)
+      messages.push(...coexistence.messages)
       found.push({
         accountId,
         phoneNumberId: text(value.metadata?.phone_number_id),
@@ -680,6 +768,8 @@ function readChanges(rawBody: string): WaChange[] {
         statuses,
         templateStatus: null,
         templateCategory: null,
+        ...(coexistence.appContacts.length > 0 ? { appContacts: coexistence.appContacts } : {}),
+        ...(coexistence.historyDeclined ? { historyDeclined: true } : {}),
       })
     }
   }
@@ -693,6 +783,10 @@ export interface WhatsAppNumberDelivery {
   accountId: string | null
   messages: NormalizedInbound[]
   statuses: NormalizedStatus[]
+  /** Coexistencia: la agenda de contactos del celular. */
+  appContacts: NormalizedAppContact[]
+  /** Coexistencia: la clínica no compartió el historial del celular. */
+  historyDeclined: boolean
 }
 
 /** Lo que un aviso trae para una cuenta: los cambios de estado y de categoría de sus plantillas. */
@@ -732,16 +826,22 @@ export function splitWhatsAppWebhook(rawBody: string): WhatsAppDelivery[] {
       accounts.set(change.accountId, account)
       continue
     }
-    if (!change.phoneNumberId || (change.messages.length === 0 && change.statuses.length === 0)) continue
+    const empty =
+      change.messages.length === 0 && change.statuses.length === 0 && !change.appContacts?.length && !change.historyDeclined
+    if (!change.phoneNumberId || empty) continue
     const number = numbers.get(change.phoneNumberId) ?? {
       kind: "number",
       phoneNumberId: change.phoneNumberId,
       accountId: change.accountId,
       messages: [],
       statuses: [],
+      appContacts: [],
+      historyDeclined: false,
     }
     number.messages.push(...change.messages)
     number.statuses.push(...change.statuses)
+    number.appContacts.push(...(change.appContacts ?? []))
+    if (change.historyDeclined) number.historyDeclined = true
     numbers.set(change.phoneNumberId, number)
   }
   return [...numbers.values(), ...accounts.values()]
@@ -772,15 +872,21 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const statuses: NormalizedStatus[] = []
     const templateStatuses: NormalizedTemplateStatus[] = []
     const templateCategories: NormalizedTemplateCategory[] = []
+    const appContacts: NormalizedAppContact[] = []
+    let historyDeclined = false
     for (const change of readChanges(rawBody)) {
       messages.push(...change.messages)
       statuses.push(...change.statuses)
       if (change.templateStatus) templateStatuses.push(change.templateStatus)
       if (change.templateCategory) templateCategories.push(change.templateCategory)
+      appContacts.push(...(change.appContacts ?? []))
+      if (change.historyDeclined) historyDeclined = true
     }
     return {
       messages,
       statuses,
+      ...(appContacts.length > 0 ? { appContacts } : {}),
+      ...(historyDeclined ? { historyDeclined } : {}),
       ...(templateStatuses.length > 0 ? { templateStatuses } : {}),
       ...(templateCategories.length > 0 ? { templateCategories } : {}),
     }

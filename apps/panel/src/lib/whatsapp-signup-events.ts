@@ -18,7 +18,12 @@ export function fromFacebook(origin: string): boolean {
 
 /** Lo que la ventana de Meta avisa a la página que la abrió. */
 export type SessionEvent =
-  | { kind: "finished"; wabaId: string; phoneNumberId: string }
+  /**
+   * `businessApp`: el número ya usaba la app WhatsApp Business del celular y
+   * sigue en ella (coexistencia). Meta solo promete la cuenta en ese aviso; sin
+   * el número, lo busca el servidor en la cuenta.
+   */
+  | { kind: "finished"; wabaId: string; phoneNumberId: string | null; businessApp: boolean }
   | { kind: "no-number" }
   | { kind: "cancelled" }
   | { kind: "error"; message: string | null }
@@ -31,7 +36,9 @@ const id = (value: unknown): string | null =>
 
 /**
  * `{ type: "WA_EMBEDDED_SIGNUP", event, data }`. Un final con `FINISH…` trae la
- * cuenta y el número; `FINISH_ONLY_WABA` termina sin número; `CANCEL` trae la
+ * cuenta y el número; `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`, la cuenta de un
+ * número que sigue en la app del celular (y quizá el número);
+ * `FINISH_ONLY_WABA` termina sin número; `CANCEL` trae la
  * pantalla donde se abandonó o, si la persona reportó un error, su mensaje.
  */
 export function readSessionEvent(raw: unknown): SessionEvent | null {
@@ -57,7 +64,9 @@ export function readSessionEvent(raw: unknown): SessionEvent | null {
   if (event.startsWith("FINISH")) {
     const wabaId = id(data.waba_id)
     const phoneNumberId = id(data.phone_number_id)
-    return wabaId && phoneNumberId ? { kind: "finished", wabaId, phoneNumberId } : { kind: "no-number" }
+    const businessApp = event === "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"
+    if (!wabaId || (!phoneNumberId && !businessApp)) return { kind: "no-number" }
+    return { kind: "finished", wabaId, phoneNumberId, businessApp }
   }
   return null
 }

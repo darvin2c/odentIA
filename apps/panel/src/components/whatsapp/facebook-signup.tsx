@@ -1,7 +1,16 @@
-import { Alert, AlertDescription, AlertTitle, Button } from "@odentia/ui"
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Button,
+  cn,
+  FieldLabel,
+  RadioGroup,
+  RadioGroupItem,
+} from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fromFacebook, readSessionEvent, type SessionEvent } from "../../lib/whatsapp-signup-events"
 
@@ -23,11 +32,18 @@ import { fromFacebook, readSessionEvent, type SessionEvent } from "../../lib/wha
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/implementation
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/versions
  *
- * NO SE HA PROBADO CONTRA META: la ventana real nunca se abrió desde aquí. Por
- * confirmar en la primera prueba: que `extras: {}` basta (la guía de la
- * versión 4 lo dice así; el ejemplo de la guía de implementación pone
- * `extras: { setup: {} }`), el orden en que llegan el código y el aviso con el
- * número, y el comportamiento con ventanas emergentes bloqueadas.
+ * Un número que ya está en la app WhatsApp Business del celular no se puede
+ * dar de alta como nuevo: Meta responde «ya está registrado en una cuenta de
+ * WhatsApp». Para ese número la ventana se abre en el modo que lo conecta sin
+ * sacarlo de la app (coexistencia, `featureType`), y por eso se pregunta antes.
+ * https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users
+ * (leída el 2026-10-28).
+ *
+ * NO SE HA PROBADO CONTRA META: por confirmar en la primera prueba que
+ * `extras: {}` basta para un número nuevo (la guía de la versión 4 lo dice así;
+ * el ejemplo de la guía de implementación pone `extras: { setup: {} }`), el
+ * orden en que llegan el código y el aviso con el número, y el comportamiento
+ * con ventanas emergentes bloqueadas.
  */
 
 const SDK_URL = "https://connect.facebook.net/en_US/sdk.js"
@@ -112,6 +128,22 @@ function loadFacebookSdk(config: { appId: string; graphVersion: string }): Promi
 
 type Phase = "idle" | "loading" | "ready" | "window" | "saving" | "done"
 
+/** De dónde viene el número: de la app WhatsApp Business del celular, o es uno sin WhatsApp. */
+type NumberSource = "business-app" | "new"
+
+const NUMBER_SOURCES: ReadonlyArray<{ value: NumberSource; label: string; hint: string }> = [
+  {
+    value: "business-app",
+    label: "Ya lo uso en la app WhatsApp Business",
+    hint: "Sigue funcionando en el celular y Meta te pedirá escanear un código con la app. Si está en WhatsApp normal, pásalo antes a WhatsApp Business. Lo que respondas desde el celular también aparece en la Bandeja.",
+  },
+  {
+    value: "new",
+    label: "Es un número sin WhatsApp",
+    hint: "No debe estar en ninguna app de WhatsApp. Meta le enviará un código por mensaje o llamada.",
+  },
+]
+
 interface Problem {
   title: string
   text: string
@@ -159,6 +191,8 @@ export function FacebookSignup({
   const { appId, configId, graphVersion } = config
   const [phase, setPhase] = useState<Phase>("idle")
   const [problem, setProblem] = useState<Problem | null>(null)
+  const [source, setSource] = useState<NumberSource | null>(null)
+  const sourceLabelId = useId()
   /** Un intento a la vez: lo que llegue de una ventana anterior se ignora. */
   const attempt = useRef(0)
   const session = useRef<{
@@ -174,12 +208,15 @@ export function FacebookSignup({
   onConnectedRef.current = onConnected
 
   const save = useMutation({
-    mutationFn: (input: { code: string; wabaId: string; phoneNumberId: string }) =>
+    mutationFn: (input: { code: string; wabaId: string; phoneNumberId: string | null; businessApp: boolean }) =>
       apiFetch<{ data: FacebookSignupConnection }>("/api/channels/whatsapp/signup", {
         method: "POST",
         headers: { "x-odentia-org": slug },
         body: JSON.stringify({
-          ...input,
+          code: input.code,
+          wabaId: input.wabaId,
+          ...(input.phoneNumberId ? { phoneNumberId: input.phoneNumberId } : {}),
+          ...(input.businessApp ? { businessApp: true } : {}),
           ...(reconnectConnectionId ? { reconnectConnectionId } : {}),
         }),
       }),
@@ -232,7 +269,7 @@ export function FacebookSignup({
     stopWaiting()
     setPhase("saving")
     saveRef
-      .current({ code, wabaId: event.wabaId, phoneNumberId: event.phoneNumberId })
+      .current({ code, wabaId: event.wabaId, phoneNumberId: event.phoneNumberId, businessApp: event.businessApp })
       .then(({ data }) => {
         if (attempt.current !== mine) return
         attempt.current += 1
@@ -277,7 +314,7 @@ export function FacebookSignup({
     [],
   )
 
-  function openWindow(sdk: FacebookSdk) {
+  function openWindow(sdk: FacebookSdk, from: NumberSource) {
     const mine = attempt.current
     const openedAt = Date.now()
     stopWaiting()
@@ -313,17 +350,23 @@ export function FacebookSignup({
         config_id: configId,
         response_type: "code",
         override_default_response_type: true,
-        // Versión 4: se elige al crear la configuración de «Facebook Login for Business»; aquí va vacío.
-        extras: {},
+        // Versión 4: se elige al crear la configuración de «Facebook Login for Business»; para
+        // un número nuevo va vacío. El de la app del celular pide el modo de coexistencia.
+        extras:
+          from === "business-app"
+            ? { setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" }
+            : {},
       },
     )
   }
 
   function start() {
+    if (!source) return
+    const from = source
     setProblem(null)
     const loaded = (window as FacebookWindow).FB
     // Ya cargado: la ventana se abre dentro del mismo clic, que es lo que el navegador permite sin reparos.
-    if (loaded) return openWindow(loaded)
+    if (loaded) return openWindow(loaded, from)
     attempt.current += 1
     const mine = attempt.current
     const clickedAt = Date.now()
@@ -332,7 +375,7 @@ export function FacebookSignup({
       .then((sdk) => {
         if (attempt.current !== mine) return
         if (Date.now() - clickedAt > CLICK_STILL_VALID_MS) return setPhase("ready")
-        openWindow(sdk)
+        openWindow(sdk, from)
       })
       .catch(() => {
         if (attempt.current !== mine) return
@@ -357,8 +400,41 @@ export function FacebookSignup({
 
   return (
     <div className="flex flex-col gap-3">
+      <p id={sourceLabelId} className="text-sm font-medium">
+        ¿El número de la clínica ya tiene WhatsApp?
+      </p>
+      <RadioGroup
+        aria-labelledby={sourceLabelId}
+        value={source}
+        onValueChange={(next) => {
+          setSource(next as NumberSource)
+          if (phase === "ready") setPhase("idle")
+        }}
+        disabled={busy}
+      >
+        {NUMBER_SOURCES.map((option) => (
+          <FieldLabel
+            key={option.value}
+            className={cn(
+              "flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm font-normal",
+              source === option.value && "border-primary bg-primary-soft",
+            )}
+          >
+            <RadioGroupItem value={option.value} className="mt-0.5" />
+            <span className="flex flex-col gap-1">
+              <span className="font-medium">{option.label}</span>
+              <span className="text-muted-foreground">{option.hint}</span>
+            </span>
+          </FieldLabel>
+        ))}
+      </RadioGroup>
       <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton pending={busy} onClick={start} className="min-h-11 sm:min-h-9">
+        <SubmitButton
+          pending={busy}
+          disabled={!source}
+          onClick={start}
+          className="min-h-11 sm:min-h-9"
+        >
           {problem ? "Volver a intentar" : "Abrir la ventana de Meta"}
         </SubmitButton>
         {phase === "window" ? (
