@@ -2556,7 +2556,8 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     }, "aviso"))
     const asks = notifier()
     const handoff = await derive("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona", asks)
-    expect(asks.offered).toEqual([["request_human_handoff"]])
+    // Con el caso ya en el equipo puede leer su cita y las sedes para decirle algo concreto.
+    expect(asks.offered).toEqual([["ver_sedes_y_servicios", "ver_contexto_paciente", "ver_resumen_paciente", "request_human_handoff"]])
     expect(systemTextOf(asks.seen[0] ?? [])).toContain("el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso")
     expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] }])
     expect(await agentStatusOf(handoff.conversationId)).toBe("on")

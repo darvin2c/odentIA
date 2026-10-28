@@ -52,6 +52,7 @@ import {
   reportAgentNoReply,
   clinicWord,
   type ProductAgentTexts,
+  READ_TOOLS,
 } from "@odentia/services"
 import {
   KNOWLEDGE_SELECT_VERSION,
@@ -876,7 +877,10 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // El formato depende del canal del hilo: va con lo del hilo, no en el prefijo estable.
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
     const stable = [receptionPrompt(zone, cfg, { tools: available, services }, agentTexts(toolCtx)), rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
-    const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, nowLine]
+    // Todo lo que lee está en español; lo más cercano a la respuesta le recuerda el idioma de la persona.
+    const languageLine =
+      "Responde en el idioma del último mensaje de la persona, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español: si te escribe en otro idioma, tradúcelas."
+    const perTurn = [contactBlock, formatLine, crossBlock, caseBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const system = [stable, perTurn].filter(Boolean).join("\n\n")
@@ -1029,9 +1033,15 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     if (toolCtx.replySettled) return END
     // Pasó un tema sin escribirle: vuelve al modelo una vez para que responda él.
     if (toolCtx.handedOff) {
-      if (!toolCtx.handoffNeedsReply) return END
-      toolCtx.handoffNeedsReply = false
-      return "llm"
+      if (toolCtx.handoffNeedsReply) {
+        toolCtx.handoffNeedsReply = false
+        return "llm"
+      }
+      // Con el caso ya en el equipo, consultar algo (su cita, el teléfono de la sede)
+      // es para decirle algo concreto en el aviso: el turno sigue hasta que lo envíe.
+      const lastCall = [...state.messages].reverse().find((item): item is AIMessage => item instanceof AIMessage && (item.tool_calls?.length ?? 0) > 0)
+      const onlyRead = !!lastCall?.tool_calls?.every((call) => READ_TOOLS.includes(call.name))
+      if (!onlyRead) return END
     }
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
