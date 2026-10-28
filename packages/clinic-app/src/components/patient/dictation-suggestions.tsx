@@ -52,7 +52,8 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
 export function DictationBlockSuggestions({ session, kind }: { session: DictationSession; kind: DictationKind }) {
   const items = session.suggestions.filter((item) => item.kind === kind)
   const removed = session.removedByVoice.filter((item) => item.kind === kind)
-  if (!session.enabled || items.length + removed.length === 0) return null
+  const undo = session.undoRequests.filter((item) => item.kind === kind)
+  if (!session.enabled || items.length + removed.length + undo.length === 0) return null
   // La receta dictada es una sola receta con sus medicamentos (issue 109, fase 2).
   if (kind === "receta") return <PrescriptionSuggestion session={session} items={items} />
   // El descanso dictado se emite con su formulario, ya lleno (latidIA, issue 229).
@@ -93,6 +94,13 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                   <span className="font-normal text-muted-foreground">
                     {[ready ? detail : (item.note ?? detail), item.voice ? `corregido por voz, antes ${item.voice.before}` : ""].filter(Boolean).join(" · ")}
                   </span>
+                  {/* Lista, con algo por definir (la cara, la pieza): avisa sin impedir confirmarla. */}
+                  {ready && item.note ? (
+                    <span className="flex items-start gap-1.5 font-normal text-warning">
+                      <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                      {item.note}
+                    </span>
+                  ) : null}
                 </Button>
                 {!ready ? <Badge>Por revisar</Badge> : session.dictating ? <Badge variant="secondary">Sugerido</Badge> : null}
                 {item.voice ? (
@@ -121,8 +129,30 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                 </Button>
               </div>
               {choice ? <PlanChoices session={session} item={item} busy={busy} /> : null}
-              {!ready && item.kind === "plan" && !choice ? (
-                <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Elige la prestación">
+              {item.kind === "alergia" && pendingOf(item).includes("severity") ? (
+                // Qué tan fuerte fue: un aviso, no un requisito. Sin elegirla entra como «No se sabe».
+                <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0 sm:pl-8" aria-label="Qué tan fuerte fue la reacción">
+                  {ALLERGY_SEVERITIES.map((severity) => (
+                    <Button
+                      key={severity.value}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-8"
+                      disabled={busy || session.save.isPending}
+                      onClick={() => session.save.mutate({ item, patch: { severity: severity.value }, confirm: false })}
+                    >
+                      {severity.label}
+                    </Button>
+                  ))}
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <Mic className="size-3.5" aria-hidden />
+                    o dila: «fue severa»
+                  </span>
+                </fieldset>
+              ) : null}
+              {(!ready && item.kind === "plan" && !choice) || (item.kind === "procedimiento" && item.payload["source"] === "libre" && candidates.length > 0) ? (
+                <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={item.kind === "procedimiento" ? "Elige el servicio, si se cobra" : "Elige la prestación"}>
                   {candidates.map((candidate) => (
                     <Button
                       key={candidate.id}
@@ -141,7 +171,40 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                   </Button>
                 </fieldset>
               ) : null}
-              {!ready && Choices ? <Choices session={session} item={item} busy={busy} /> : null}
+              {Choices ? <Choices session={session} item={item} busy={busy} /> : null}
+              <ActError session={session} item={item} />
+            </li>
+          )
+        })}
+        {undo.map((item) => {
+          const { title } = suggestionText(item)
+          const what = UNDO_WORDS[item.kind] ?? "Quitar"
+          const acting = session.act.isPending && session.act.variables?.item.id === item.id
+          return (
+            // «Quita la endodoncia» sobre algo ya confirmado: nunca se quita solo, se decide aquí.
+            <li key={item.id} className="flex flex-col gap-2 rounded-xl border border-agent-border bg-background p-3 text-sm">
+              <div className="flex flex-col gap-0.5">
+                <p className="font-medium">
+                  {what}: {title}
+                </p>
+                <p className="text-muted-foreground">Dijiste «{item.undoRequest?.said}». Ya la habías confirmado hoy.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <SubmitButton
+                  type="button"
+                  size="sm"
+                  className="min-h-11 sm:min-h-8"
+                  pending={acting && session.act.variables?.action === "undo-confirmed"}
+                  disabled={session.act.isPending}
+                  onClick={() => session.act.mutate({ item, action: "undo-confirmed" }, { onSuccess: () => toast.success(`Se quitó: ${title}`) })}
+                >
+                  {what}
+                </SubmitButton>
+                <Button type="button" variant="secondary" size="sm" className="min-h-11 sm:min-h-8" disabled={session.act.isPending} onClick={() => session.act.mutate({ item, action: "keep" })}>
+                  Dejarla
+                </Button>
+              </div>
+              <ActError session={session} item={item} />
             </li>
           )
         })}
@@ -165,16 +228,46 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
               >
                 Deshacer
               </Button>
+              <ActError session={session} item={item} />
             </li>
           )
         })}
       </ul>
-      {session.act.isError && [...items, ...removed].some((item) => item.id === session.act.variables?.item.id) ? (
-        <p role="alert" className="text-sm text-destructive">
-          {dictationErrorText(session.act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
-        </p>
-      ) : null}
     </div>
+  )
+}
+
+/** Cómo se dice quitar lo ya confirmado, según lo que es. */
+const UNDO_WORDS: Partial<Record<DictationKind, string>> = {
+  plan: "Quitar del plan",
+  diagnostico: "Quitar el diagnóstico",
+  control: "Quitar el control",
+  alergia: "Quitar de sus alergias",
+  procedimiento: "Anular el procedimiento",
+}
+
+/** Qué tan fuerte fue una alergia: los valores de «Nueva alergia», sin «No se sabe» (es lo que queda sin tocar). */
+const ALLERGY_SEVERITIES = [
+  { value: "leve", label: "Leve" },
+  { value: "moderada", label: "Moderada" },
+  { value: "severa", label: "Severa" },
+] as const
+
+/** Lo que aún le falta a una sugerencia (la pieza, la cara, qué tan fuerte fue). */
+const pendingOf = (item: DictationSuggestion): string[] => (Array.isArray(item.payload["pending"]) ? (item.payload["pending"] as string[]) : [])
+
+/**
+ * Lo que no salió al confirmar, descartar o deshacer, dentro de su tarjeta. Si
+ * la sugerencia cambió después (se completó o se corrigió), el error ya no
+ * vale y no se muestra: nunca contradice lo que la tarjeta dice ahora.
+ */
+function ActError({ session, item }: { session: DictationSession; item: DictationSuggestion }) {
+  const failed = session.act.variables?.item
+  if (!session.act.isError || failed?.id !== item.id || failed.summary !== item.summary || failed.status !== item.status) return null
+  return (
+    <p role="alert" className="basis-full text-sm text-destructive">
+      {dictationErrorText(session.act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
+    </p>
   )
 }
 
@@ -190,10 +283,11 @@ const optionsOf = (item: DictationSuggestion): PlanOption[] => (Array.isArray(it
 const LETTER = ["A", "B", "C"]
 
 /**
- * «Dos caminos para la 46 · elige uno» (issue 109, fase 2): la opción A es la
- * recomendada y cada camino lleva su prestación y su precio. «Recomendar» hace
- * de otro camino la opción A; uno que no se ubicó en los servicios se elige con
- * un toque. Al confirmar, el presupuesto en borrador queda con estas opciones.
+ * «Pieza 46 · dos caminos, el paciente elige» (issue 109, fase 2): una fila por
+ * camino con su prestación y su precio; tocar una la deja recomendada (la
+ * opción A del presupuesto). Uno que no se ubicó en los servicios se elige con
+ * un toque. Al confirmar, el presupuesto en borrador queda con estas opciones:
+ * lo dice el aviso flotante, no la tarjeta.
  */
 function PlanChoices({ session, item, busy }: { session: DictationSession; item: DictationSuggestion; busy: boolean }) {
   const main: PlanOption = {
@@ -206,33 +300,30 @@ function PlanChoices({ session, item, busy }: { session: DictationSession; item:
   const disabled = busy || session.save.isPending
   // Otra elección ya ocupa el presupuesto: se ve lo dicho, sin nada que elegir (la nota dice qué hacer).
   const blocked = item.payload["choiceBlocked"] === true
+  const resolved = options.every((option) => option.serviceId)
   return (
     <div className="flex flex-col gap-2 sm:pl-8">
-      <div className="flex flex-wrap gap-2">
+      {resolved && !blocked ? <p className="text-muted-foreground">Toca la que recomiendas</p> : null}
+      <ul className="flex flex-col gap-2" aria-label="Caminos para elegir">
         {options.map((option, index) => (
-          <div
-            key={LETTER[index]}
-            className={`flex min-w-0 flex-1 basis-56 flex-col gap-1 rounded-lg border bg-background px-3 py-2 ${index === 0 ? "border-2 border-primary" : ""}`}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="min-w-0 flex-1 font-semibold">
-                Opción {LETTER[index]}
-                {index === 0 ? " · recomendada" : ""}
-              </p>
-              {index > 0 && option.serviceId && !blocked ? (
-                <Button type="button" variant="link" size="sm" className="min-h-11 px-1 sm:min-h-8" disabled={disabled} onClick={() => save({ recommend: index })}>
-                  Recomendar
-                </Button>
-              ) : null}
-            </div>
+          <li key={LETTER[index]}>
             {option.serviceId ? (
-              <p>
-                {option.serviceName} · <span className="whitespace-nowrap">{price(option.priceCents ?? 0, option.currency ?? "")}</span>
-              </p>
+              <button
+                type="button"
+                aria-pressed={index === 0}
+                disabled={disabled || blocked || index === 0}
+                onClick={() => save({ recommend: index })}
+                className={`flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-background px-3 py-2 text-left disabled:cursor-default ${index === 0 ? "border-2 border-primary" : "border hover:border-primary/60"}`}
+              >
+                <span aria-hidden className={`size-4 shrink-0 rounded-full border-2 ${index === 0 ? "border-primary bg-primary shadow-[inset_0_0_0_3px_var(--background)]" : "border-muted-foreground"}`} />
+                <span className="min-w-0 flex-1">{option.serviceName}</span>
+                <span className="whitespace-nowrap font-semibold">{price(option.priceCents ?? 0, option.currency ?? "")}</span>
+                {index === 0 ? <Badge variant="secondary">Recomendada</Badge> : null}
+              </button>
             ) : blocked ? (
-              <p className="text-muted-foreground">Dijiste «{option.service}».</p>
+              <p className="rounded-lg border bg-background px-3 py-2 text-muted-foreground">Dijiste «{option.service}».</p>
             ) : (
-              <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={`Elige la prestación de la opción ${LETTER[index]}`}>
+              <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 rounded-lg border bg-background p-2 px-3" aria-label={`Elige la prestación del camino ${LETTER[index]}`}>
                 <p className="w-full text-muted-foreground">Dijiste «{option.service}»: elige cuál es.</p>
                 {(option.candidates ?? []).map((candidate) => (
                   <Button
@@ -249,15 +340,9 @@ function PlanChoices({ session, item, busy }: { session: DictationSession; item:
                 ))}
               </fieldset>
             )}
-          </div>
+          </li>
         ))}
-      </div>
-      {/* «Al confirmar…» solo cuando ya se puede confirmar: antes, la nota dice qué falta. */}
-      {blocked || item.status !== "lista" ? null : (
-        <p className="self-start rounded-md bg-primary-soft px-2.5 py-1.5 text-primary-soft-foreground">
-          Al confirmar, su presupuesto en borrador queda con {options.length === 2 ? "las dos opciones" : "las tres opciones"}; lo demás que indiques hoy va en todas.
-        </p>
-      )}
+      </ul>
     </div>
   )
 }
@@ -496,7 +581,7 @@ interface EditableField {
 }
 
 /** Campos que el profesional corrige a mano en una sugerencia que no es del plan, con su rótulo. */
-const EDITABLE: Record<Exclude<DictationKind, "plan">, EditableField[]> = {
+const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, EditableField[]> = {
   nota: [
     { key: "reason", label: "Motivo de consulta", long: true },
     { key: "presentIllness", label: "Enfermedad actual", long: true },
@@ -527,11 +612,18 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, EditableField[]> = {
   examen: [{ key: "finding", label: "Hallazgo", long: true }],
   // El descanso se completa en su formulario, «Emitir descanso», ya lleno.
   descanso: [],
+  // La sustancia como se dijo, lo que le pasó y qué tan fuerte fue (leve, moderada o severa).
+  alergia: [
+    { key: "substance", label: "Sustancia" },
+    { key: "reaction", label: "Qué le pasó", long: true },
+  ],
 }
 
 /** Lo que se corrige de una sugerencia: lo que trae y, de la presión, las dos partes. */
 function fieldsOf(item: DictationSuggestion): EditableField[] {
-  if (item.kind === "plan") return []
+  if (item.kind === "plan" || item.kind === "procedimiento") return []
+  // «No tiene alergias» no tiene nada que escribir: se confirma o se descarta.
+  if (item.kind === "alergia" && item.payload["none"] === true) return []
   const all = EDITABLE[item.kind]
   if (item.kind === "nota") return all.filter((field) => item.payload[field.key] !== undefined)
   if (item.kind === "signos") {
@@ -555,7 +647,9 @@ export function DictationEditDrawer({ session }: { session: DictationSession }) 
 function EditForm({ item, session }: { item: DictationSuggestion; session: DictationSession }) {
   const payload = item.payload
   const kind = item.kind
-  const plan = kind === "plan"
+  // Lo hecho hoy se corrige como una indicación: el servicio, la pieza y las caras.
+  const plan = kind === "plan" || kind === "procedimiento"
+  const done = kind === "procedimiento"
   const fields = fieldsOf(item)
   const [draft, setDraft] = useState<Record<string, string>>(() =>
     Object.fromEntries([...fields.map((field) => field.key), "toothNumber", "detail"].map((key) => [key, payload[key] == null ? "" : String(payload[key])])),
@@ -599,7 +693,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
         const kept = surfaces.filter((surface) => (available as string[]).includes(surface))
         patch["surfaces"] = kept.length ? kept : null
       }
-      patch["detail"] = (draft["detail"] ?? "").trim() || null
+      if (!done) patch["detail"] = (draft["detail"] ?? "").trim() || null
     } else {
       for (const field of fields) {
         const value = (draft[field.key] ?? "").trim()
@@ -629,7 +723,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
       isSubmitting={session.save.isPending}
       error={review ?? dictationErrorText(session.save.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
       submitLabel="Guardar y confirmar"
-      submitDisabled={plan && !service}
+      submitDisabled={plan && !done && !service}
     >
       <div className="flex flex-col gap-4">
         {item.sourceText ? (
@@ -711,10 +805,12 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
                 )}
               </div>
             ) : null}
-            <Field>
-              <FieldLabel htmlFor={`dictado-${item.id}-detalle`}>Detalle</FieldLabel>
-              <Textarea id={`dictado-${item.id}-detalle`} rows={3} maxLength={2000} placeholder="Opcional" value={draft["detail"] ?? ""} onChange={(event) => setDraft({ ...draft, detail: event.target.value })} />
-            </Field>
+            {done ? null : (
+              <Field>
+                <FieldLabel htmlFor={`dictado-${item.id}-detalle`}>Detalle</FieldLabel>
+                <Textarea id={`dictado-${item.id}-detalle`} rows={3} maxLength={2000} placeholder="Opcional" value={draft["detail"] ?? ""} onChange={(event) => setDraft({ ...draft, detail: event.target.value })} />
+              </Field>
+            )}
           </>
         ) : (
           fields.map((field) => (

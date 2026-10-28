@@ -13,7 +13,7 @@ import {
   type TreatmentPhase,
   variantLabel,
 } from "@odentia/dental"
-import { FindingChoices } from "../../components/dental/dictation-finding-choices"
+import { FindingChoices, PlanSiteChoices } from "../../components/dental/dictation-finding-choices"
 import { LeavesFindingField, leavesFindingBody } from "../../components/dental/leaves-finding-field"
 import { SignedOdontogramFact } from "../../components/dental/odontogram-assessments"
 import { useSignedOdontogramPapers } from "../../components/dental/signed-odontogram-papers"
@@ -99,15 +99,22 @@ export const dentalUi: ProductUi = {
   site: dentalSite,
   useFindings: useActiveFindings,
   dictation: {
-    // Un hallazgo dictado al que le falta lo que pide la norma (issue 109).
+    // Un hallazgo dictado al que le falta lo que pide la norma (issue 109) y una
+    // indicación a la que le falta la pieza o la cara, que no impide confirmarla.
     SuggestionChoices: (props) =>
-      props.item.kind === "odontograma" ? <FindingChoices {...props} /> : null,
+      props.item.kind === "odontograma" ? (
+        <FindingChoices {...props} />
+      ) : props.item.kind === "plan" || props.item.kind === "procedimiento" ? (
+        <PlanSiteChoices {...props} />
+      ) : null,
     examples: [
       { block: "Consulta", say: "«Viene por dolor en la muela de abajo hace tres días»" },
       { block: "Odontograma", say: "«La 36 con caries oclusal en dentina, la 46 ausente»" },
       { block: "Plan", say: "«Resina en la 36, o si no una corona»" },
       { block: "Receta", say: "«Amoxicilina de 500, una cápsula cada 8 horas por 7 días»" },
       { block: "Control", say: "«Control en un mes»" },
+      { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
+      { block: "Procedimientos", say: "«Le hice la profilaxis» · «Terminé la resina de la 36»" },
       { block: "Corregir", say: "«No, es la veintiséis» · «Quita la endodoncia»" },
     ],
     placeholder: "En la dieciséis hay caries en dentina, le ponemos una resina en la cara oclusal…",

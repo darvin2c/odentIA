@@ -38,14 +38,20 @@ const NO_PLAN = "__sin-plan__"
 const NO_SITE: PlaceWithParts = { toothNumber: null, surfaces: [] }
 const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"]
 
-/** «36 · Oclusal», «Cuadrante 2», «Arcada superior» o «General». */
+/**
+ * «36 · Oclusal», «Cuadrante 2», «Arcada superior» o «General». Un tratamiento
+ * indicado con la pieza o la cara por definir lo dice (`scope`): no es «General».
+ */
 function procedureSiteLabel(
   proc: Pick<ProcedureItem, "toothNumber" | "surfaces" | "quadrant" | "arch">,
+  scope?: string | null,
 ) {
   if (proc.toothNumber != null) {
     const surfaces = partNames(proc.surfaces)
+    if (!surfaces && scope === "surfaces") return `Pieza ${proc.toothNumber} · cara por definir`
     return surfaces ? `Pieza ${proc.toothNumber} · ${surfaces}` : `Pieza ${proc.toothNumber}`
   }
+  if (!proc.quadrant && !proc.arch && (scope === "tooth" || scope === "surfaces")) return "Pieza por definir"
   if (proc.quadrant != null) return `Cuadrante ${proc.quadrant}`
   if (proc.arch) return proc.arch === "upper" ? "Arcada superior" : "Arcada inferior"
   return "General"
@@ -73,7 +79,12 @@ function planOptionLabel(item: PlanItem, locale: string | undefined): string {
       : locale
         ? formatMoney(item.priceCents, item.currency, locale)
         : "…"
-  const tooth = item.toothNumber == null ? "general" : `pieza ${item.toothNumber}`
+  const tooth =
+    item.toothNumber != null
+      ? `pieza ${item.toothNumber}`
+      : item.scope === "tooth" || item.scope === "surfaces"
+        ? "pieza por definir"
+        : "general"
   return `${item.title} · ${tooth} · ${planStatusLabel(item.status)} · ${price}`
 }
 
@@ -166,9 +177,15 @@ export function EncounterProcedures({
   // cuadrante, arcada o nada (general). El acto libre admite pieza opcional.
   const scope = freeMode ? "tooth-optional" : (service?.scope ?? null)
   const needsTooth = scope === "tooth" || scope === "surfaces"
-  const siteComplete =
-    Boolean(planSel) ||
-    (scope === "general" || scope === "tooth-optional" || scope === null
+  // Indicado con la pieza o la cara por definir: se elige ahora, al hacerlo.
+  const planPending = Boolean(
+    selectedPlan &&
+      (((selectedPlan.scope === "tooth" || selectedPlan.scope === "surfaces") && selectedPlan.toothNumber == null) ||
+        (selectedPlan.scope === "surfaces" && (selectedPlan.surfaces ?? []).length === 0)),
+  )
+  const siteComplete = selectedPlan
+    ? !planPending || (site.toothNumber !== null && (selectedPlan.scope !== "surfaces" || site.surfaces.length > 0))
+    : (scope === "general" || scope === "tooth-optional" || scope === null
       ? true
       : scope === "tooth"
         ? site.toothNumber !== null
@@ -230,9 +247,15 @@ export function EncounterProcedures({
     const trimmedCie = cie.trim()
     const diagnosisCode = trimmedCie === "" ? null : trimmedCie
     const diagnosisSystem = diagnosisCode ? cieSystem : null
-    // El tratamiento del plan conserva su sitio: el servidor lo toma de él.
+    // El tratamiento del plan conserva su sitio: el servidor lo toma de él. Si
+    // quedó por definir, va lo que se eligió ahora y queda también en el tratamiento.
     const body = selectedPlan
-      ? { planItemId: selectedPlan.id, diagnosisCode, diagnosisSystem }
+      ? {
+          planItemId: selectedPlan.id,
+          diagnosisCode,
+          diagnosisSystem,
+          ...(planPending ? { toothNumber: tooth, surfaces: site.surfaces } : {}),
+        }
       : freeMode
         ? {
             description: freeDescription.trim(),
@@ -486,7 +509,16 @@ export function EncounterProcedures({
                 />
               )}
 
-              {selectedPlan ? (
+              {selectedPlan && planPending ? (
+                <SiteField
+                  value={site}
+                  onChange={setSite}
+                  withSurfaces={selectedPlan.scope === "surfaces"}
+                  surfacesRequired={selectedPlan.scope === "surfaces"}
+                  label={selectedPlan.toothNumber == null ? "¿En qué pieza lo hiciste?" : "¿Qué cara trabajaste?"}
+                  disabled={busy}
+                />
+              ) : selectedPlan ? (
                 <p className="text-sm text-muted-foreground">
                   Sitio del tratamiento:{" "}
                   {procedureSiteLabel({

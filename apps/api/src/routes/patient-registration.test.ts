@@ -750,7 +750,7 @@ it("deshabilitar bloquea lo público sin borrar fichas", async () => {
   await publish(app, true)
 })
 
-it("el aviso de privacidad tiene su página mientras el registro está encendido; apagado o sin aviso, no (ADR 0099)", async () => {
+it("el aviso de privacidad tiene su página mientras el registro está encendido; apagado o sin aviso, no (ADR 0101)", async () => {
   const app = buildApp("aviso")
   await publish(app, false)
   expect((await app.request(`/api/public/patient-registration/${SLUG_A}/aviso`)).status).toBe(404)

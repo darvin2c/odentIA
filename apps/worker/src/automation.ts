@@ -95,7 +95,7 @@ export async function runAutomationTick(deps: AutomationWorkerDeps): Promise<boo
       `programados=${summary.programados} ` +
       `entregados=${summary.entregados} fallidos=${summary.fallidos} ` +
       `conversaciones insistidas=${summary.insistidas} cerradas=${summary.cerradas} ` +
-      `tareas cerradas solas=${summary.tareasCerradas} respuestas ofrecidas=${summary.respuestasOfrecidas} temas retomados=${summary.temasRetomados}`,
+      `tareas cerradas solas=${summary.tareasCerradas} respuestas ofrecidas=${summary.respuestasOfrecidas} temas retomados=${summary.temasRetomados} errores aislados=${summary.errores}`,
   )
   // El índice del agente se refresca aparte, sin esperarlo (`refreshSearchInBackground`).
   if (embedder) refreshSearchInBackground(deps, embedder)

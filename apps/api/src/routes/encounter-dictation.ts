@@ -6,11 +6,14 @@ import {
   confirmDictationSuggestion,
   countConfirmedDictation,
   dictationModelLabel,
+  dictationTeeth,
   dictationSegmentSeen,
   discardDictationSuggestion,
   discardPendingDictation,
   getAgentConfig,
   issueDictationPrescription,
+  keepConfirmedDictation,
+  listConfirmedDictation,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   productDictation,
@@ -18,6 +21,7 @@ import {
   saveDictationSegment,
   settleDictationMedicalLeave,
   settleDictationPrescription,
+  undoConfirmedDictation,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "@odentia/services"
@@ -71,6 +75,10 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         suggestions: await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId),
         // Las quitadas por voz, que se pueden devolver hasta firmar.
         removedByVoice: await listVoiceRemovedDictation(tx, orgId, at.data.id, at.data.encounterId),
+        // Ya confirmadas que se pidió quitar en voz alta: esperan «Quitar del plan» o «Dejarla».
+        undoRequests: (await listConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId)).filter((item) => item.undoRequest),
+        // Las piezas que ya se nombraron: a una indicación sin pieza se le ofrecen con un toque.
+        teeth: await dictationTeeth(tx, orgId, at.data.id, at.data.encounterId),
         // Para decir, antes de firmar, cuántas ya entraron a la atención.
         confirmed: await countConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId),
         // Con el presupuesto del mes alcanzado, Clío no escucha en una atención nueva (ADR 0085): se dice antes de dictar.
@@ -99,10 +107,21 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
           const dictation = await requireClinicalAssistant(tx, orgId)
           await saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, { drafts: [] })
           if (segmentId && (await dictationSegmentSeen(tx, orgId, at.data.id, at.data.encounterId, segmentId))) return null
-          const list = await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
-          return { list, labels: list.map((item) => ({ label: dictationModelLabel(item, dictation) })) }
+          // Las pendientes y, detrás, lo confirmado hoy: «quita la endodoncia» también alcanza a lo
+          // que ya entró, y queda propuesto para que una persona lo decida.
+          const pending = await listDictationSuggestions(tx, orgId, at.data.id, at.data.encounterId)
+          const confirmed = await listConfirmedDictation(tx, orgId, at.data.id, at.data.encounterId)
+          const list = [...pending, ...confirmed]
+          return {
+            list,
+            pendingCount: pending.length,
+            labels: [
+              ...pending.map((item) => ({ label: dictationModelLabel(item, dictation) })),
+              ...confirmed.map((item) => ({ label: `${dictationModelLabel(item, dictation)} · ya confirmada` })),
+            ],
+          }
         })
-        if (!ready) return { suggestions: [], corrected: [], removed: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
+        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
         // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))
@@ -116,11 +135,13 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         )
         // El número que usó el modelo es la posición en la lista que se le dio.
         const target = (index: number) => ready.list[index]?.id
+        // Lo ya confirmado no se corrige por voz: si lo intentó, se avisa con la frase en vez de perderlo.
+        const onConfirmed = extracted.corrections.filter((item) => item.index >= ready.pendingCount)
         const saved = await withOrgContext(deps.db, orgId, (tx) =>
           saveDictationSegment(tx, orgId, userId, at.data.id, at.data.encounterId, {
             drafts: extracted.drafts,
             corrections: extracted.corrections.flatMap((item) => {
-              const suggestionId = target(item.index)
+              const suggestionId = item.index < ready.pendingCount ? target(item.index) : undefined
               return suggestionId ? [{ suggestionId, changes: item.changes }] : []
             }),
             removals: extracted.removals.flatMap((item) => {
@@ -133,7 +154,8 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
         // Los fragmentos de este tramo que dieron lugar a algo: la pantalla los resalta en su respaldo.
         const sources = [...extracted.drafts, ...extracted.corrections, ...extracted.removals].map((item) => item.sourceText ?? "").filter(Boolean)
         // Lo que el asistente no pudo usar de este tramo, con la frase si se sabe, para avisarle al odontólogo en vez de perderlo en silencio.
-        return { ...saved, sources, omitted: extracted.omitted, unused: extracted.unused, model: extracted.model }
+        const unused = [...extracted.unused, ...onConfirmed.map((item) => item.sourceText).filter((said) => said && !extracted.unused.includes(said))]
+        return { ...saved, sources, omitted: extracted.omitted + onConfirmed.length, unused, model: extracted.model }
       })
     } catch (error) {
       if (isProviderConfigError(error)) return modelProblemResponse(c, deps, orgId, error, "asistente")
@@ -174,6 +196,28 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
       withOrgContext(deps.db, orgId, (tx) =>
         undoDictationVoiceCorrection(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId),
       ),
+    )
+  })
+
+  /**
+   * Lo ya confirmado que se pidió quitar en voz alta: «Quitar del plan» lo hace con
+   * la operación de siempre; «Dejarla» descarta el pedido. Nada se quita solo.
+   */
+  app.post(`${base}/:suggestionId/undo-confirmed`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = suggestionParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => undoConfirmedDictation(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId)),
+    )
+  })
+
+  app.post(`${base}/:suggestionId/keep`, async (c) => {
+    const { orgId, userId } = orgContextOf(c)
+    const at = suggestionParams.safeParse(c.req.param())
+    if (!at.success) return validationError(c, at.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => keepConfirmedDictation(tx, orgId, userId, at.data.id, at.data.encounterId, at.data.suggestionId)),
     )
   })
 

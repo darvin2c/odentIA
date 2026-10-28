@@ -692,7 +692,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .join("\n")
       : null
     // Quien aún no es paciente se reserva y registra aquí mismo con su sí, si la
-    // clínica tiene su aviso de privacidad publicado (ADR 0099); si no, por su
+    // clínica tiene su aviso de privacidad publicado (ADR 0101); si no, por su
     // enlace o por recepción. Se le dice desde el primer mensaje, para que no pida
     // datos que no puede usar (auditoría del 27-oct).
     async function newPersonLine(): Promise<string> {

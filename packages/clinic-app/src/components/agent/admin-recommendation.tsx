@@ -223,7 +223,7 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
 }
 
 /**
- * Las personas a las que el agente no pudo escribir en las últimas 24 horas,
+ * Las personas a las que el agente no pudo escribir en los últimos 3 días,
  * por motivo y con cómo habilitar a cada una. No es una lista de errores: cada
  * motivo es algo que una persona puede corregir.
  */
@@ -240,7 +240,7 @@ export function AdminUnreachedDrawer({ open, onClose }: { open: boolean; onClose
     <DetailDrawer
       open
       title="El agente no pudo escribirles"
-      description={data ? `${data.total} ${data.total === 1 ? "persona" : "personas"} en las últimas 24 horas` : undefined}
+      description={data ? `${data.total} ${data.total === 1 ? "persona" : "personas"} en los últimos 3 días` : undefined}
       onClose={onClose}
     >
       {query.isPending ? (
@@ -248,7 +248,7 @@ export function AdminUnreachedDrawer({ open, onClose }: { open: boolean; onClose
       ) : query.isError || !data ? (
         <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : data.total === 0 ? (
-        <p className="text-sm text-muted-foreground">Ya no queda nadie: en las últimas 24 horas el agente pudo escribirle a todos.</p>
+        <p className="text-sm text-muted-foreground">Ya no queda nadie: en los últimos 3 días el agente pudo escribirle a todos.</p>
       ) : (
         <div className="flex flex-col gap-6">
           <DetailSection title="Por qué, y cómo habilitarlo">

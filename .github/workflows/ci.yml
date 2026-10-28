@@ -121,11 +121,20 @@ jobs:
         with:
           context: .
           push: false
+          # Se carga para poder arrancar los servicios en el paso siguiente.
+          load: true
+          tags: odentia-smoke:ci
           build-args: |
             VITE_API_URL=https://api.example.invalid
             VITE_BASE_DOMAIN=example.invalid
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # La imagen se poda de dependencias de desarrollo: comprobar que cada
+      # servicio arranca con lo que quedó.
+      - name: Arrancar cada servicio de la imagen
+        run: |
+          docker image ls odentia-smoke:ci --format 'Tamaño de la imagen: {{.Size}}'
+          bash scripts/smoke-image.sh odentia-smoke:ci
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

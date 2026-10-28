@@ -54,7 +54,7 @@ import {
 } from "react"
 import { apiFetch } from "../lib/api"
 import { ADMIN_NAME } from "../lib/agent-names"
-import { type ArgosRoute, openArgos, routeArgos, useArgosLastQuestion } from "../lib/argos"
+import { ARGOS_ALLOWANCE_KEY, type ArgosRoute, getArgosAllowance, openArgos, routeArgos, useArgosLastQuestion } from "../lib/argos"
 import { timeAgo, useMyRole, useMyUserId } from "../lib/crm"
 import {
   askHelp,
@@ -267,7 +267,18 @@ function GlobalSearchDialog({
 
   // La fila de Argos (D1, tablero 1): cuando se deja de escribir, Jev decide si es una pregunta de los
   // datos, de cómo se usa odentIA o algo para buscar. Solo para quien ve Reportes; Recepción, como hoy.
-  const asksArgos = canAccess(role, "reports.read")
+  const canAskArgos = canAccess(role, "reports.read")
+  // Con Argos apagado la fila no se ofrece como si respondiera: dice que está apagado (y a quien puede, cómo encenderlo).
+  const argosState = useQuery({
+    queryKey: ARGOS_ALLOWANCE_KEY,
+    queryFn: getArgosAllowance,
+    enabled: canAskArgos,
+    staleTime: 60_000,
+    retry: false,
+  })
+  const argosOff = canAskArgos && argosState.data?.enabled === false
+  const asksArgos = canAskArgos && !argosOff
+  const canTurnArgosOn = canAccess(role, "agent.write")
   const lastAsked = useArgosLastQuestion()
   const [routeText, setRouteText] = useState("")
   useEffect(() => {
@@ -465,9 +476,28 @@ function GlobalSearchDialog({
       </span>
     </CommandItem>
   )
+  // Argos apagado: no responde. Quien puede encenderlo lo ve con su acción; los demás solo tienen Ayuda.
+  const argosOffRow =
+    argosOff && canTurnArgosOn ? (
+      <CommandItem
+        key="argos-apagado"
+        value="encender-argos"
+        onSelect={() => go("/agent/administrador")}
+        className="gap-3 px-3 py-2"
+      >
+        <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center opacity-60">
+          <AgentMark size="sm" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate font-medium">{ADMIN_NAME} está apagado</span>
+          <span className="text-xs text-muted-foreground">Enciéndelo para preguntarle por las cifras de la clínica</span>
+        </span>
+        <CommandShortcut className="hidden tracking-normal group-data-selected/command-item:sm:inline">Enter · Encender</CommandShortcut>
+      </CommandItem>
+    ) : null
   const askRows = (
     <CommandGroup heading="Preguntar" className={askFirst ? undefined : "mt-2"}>
-      {askFirst === "ayuda" ? [helpRow, argosRow] : [argosRow, helpRow]}
+      {askFirst === "ayuda" ? [helpRow, argosRow, argosOffRow] : [argosRow, helpRow, argosOffRow]}
     </CommandGroup>
   )
   const itemMeta = (item: SearchItem) =>

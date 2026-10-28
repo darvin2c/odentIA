@@ -103,7 +103,7 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
       throw error
     }
   })
-  // El aviso de privacidad que se enlaza desde el chat (ADR 0099): el mismo texto del
+  // El aviso de privacidad que se enlaza desde el chat (ADR 0101): el mismo texto del
   // registro, leído aunque el registro en línea esté apagado. Sin aviso escrito, no hay página.
   app.get("/:slug/aviso", async c => {
     const org = c.get("registrationOrganization")

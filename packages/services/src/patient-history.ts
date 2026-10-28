@@ -979,7 +979,8 @@ export async function getTimeline(
       .where(
         and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, planIds)),
       )) {
-      const where = site.words(row, "full") ?? "General"
+      // Indicado sin decir la pieza (se define al hacerlo): no es «General».
+      const where = site.words(row, "full") ?? (row.scope && site.pending?.(row, row.scope) ? "Pieza por definir" : "General")
       hydrated.set(row.id, {
         ...hydrated.get(row.id)!,
         createdAt: row.createdAt,

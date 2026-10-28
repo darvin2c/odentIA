@@ -121,6 +121,8 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
   consulta: { kinds: ["nota"] },
   // Lo dictado en un bloque del producto lo declara el bloque (odentIA: lo de una pieza, issue 109).
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
+  // Lo que se dijo hecho hoy (issue 109): sale del plan, de los servicios o como acto libre.
+  procedimientos: { kinds: ["procedimiento"], onlySuggested: "Sin procedimientos registrados" },
   // Los signos vitales y el examen por sistemas que dicta latidIA (issue 229).
   examen: { kinds: ["signos", "examen"], onlySuggested: "Sin examen registrado" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
@@ -656,6 +658,12 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
     }
     if (item.kind === "examen" && exam.withDictated) editExamination(exam.withDictated(valuesRef.current.examination, item.payload))
+    // La alergia confirmada se ve al momento en la franja de alertas, como al agregarla a mano.
+    if (item.kind === "alergia") {
+      void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+    }
     void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["odontogram", patientId] })
@@ -774,7 +782,7 @@ export function EncounterEditor({
     try {
       await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
       await dictation.refresh()
-      // Sin consentimientos por firmar, «Descartarla y firmar» firma; si falta
+      // Sin consentimientos por firmar, «Firmar con N marcadas» firma; si falta
       // alguno, sigue al cierre para firmarlo o decir por qué se sigue sin él.
       if ((closingQuery.data?.data.consents ?? []).length === 0) await handleConfirmFinalize()
       else setConfirmWithDictation(false)
@@ -1523,6 +1531,8 @@ export function EncounterEditor({
       <DeclaredQuestionnaireNotice patientId={patientId} patient={patient} disabled={locked} />
 
       {attending ? <EncounterAllergyReview patientId={patientId} patient={patient} disabled={locked} /> : null}
+      {/* La alergia dictada (o «niega alergias») va donde se pide revisarlas, junto a las alertas (issue 109). */}
+      {attending ? <DictationBlockSuggestions session={dictation} kind="alergia" /> : null}
 
       {canWrite && !attending ? (
         <div
@@ -1898,13 +1908,18 @@ export function EncounterEditor({
         session={dictation}
         signing={finalizing}
         onClose={() => setConfirmOpen(false)}
-        onReview={() => {
+        onComplete={(id) => {
           setConfirmOpen(false)
           // Lo que no se puede confirmar tal cual se abre para completarlo.
-          const first = dictation.suggestions.find((item) => item.status === "por_revisar")
-          if (first) dictation.openEdit(first)
+          const item = dictation.suggestions.find((candidate) => candidate.id === id)
+          if (item) dictation.openEdit(item)
         }}
-        onDiscardAndSign={() => void discardDictationAndContinue()}
+        onSign={(ids) =>
+          void dictation.confirmMany
+            .mutateAsync(ids)
+            .then(() => discardDictationAndContinue())
+            .catch(() => undefined)
+        }
       >
         {signFields}
       </DictationSignDialog>

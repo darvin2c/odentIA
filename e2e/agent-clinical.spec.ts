@@ -34,7 +34,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   const dictation = () => call<{ enabled: boolean; suggestions: Array<{ kind: string; status: string }> }>(page, "GET", dictationPath, org.slug)
 
   // --- Apagado: la atención no ofrece dictar y el servidor no acepta dictados ---
-  expect(await dictation()).toEqual({ enabled: false, suggestions: [], removedByVoice: [], confirmed: 0, blocked: null })
+  expect(await dictation()).toEqual({ enabled: false, suggestions: [], removedByVoice: [], undoRequests: [], teeth: [], confirmed: 0, blocked: null })
   expect((await api(page, "POST", dictationPath, org.slug, { transcript: DICTATION })).status).toBe(409)
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
@@ -216,20 +216,23 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("dictado-odontograma", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
 
-  // Una prestación a la que le falta algo queda «Por revisar»: se completa en la superficie lateral.
+  // A una prestación le falta la pieza: no frena (ADR 0099). Avisa, ofrece las piezas que ya se
+  // nombraron y se completa con un toque; también se podría confirmar así y definirla al hacerla.
+  const in16 = async () =>
+    (await call<Array<{ toothNumber: number | null }>>(page, "GET", `${apiPath}/plan`, org.slug)).filter((item) => item.toothNumber === 16).length
+  const before16 = await in16()
   await write("Hacemos endodoncia.")
   const pendingPlan = suggested("Plan de tratamiento").getByRole("listitem")
-  await expect(pendingPlan).toContainText("Por revisar")
-  await expect(pendingPlan).toContainText("no dijiste cuál")
-  await expect(review).toContainText("1 por revisar")
-  await pendingPlan.getByRole("button", { name: "Buscar otra prestación" }).click()
-  await expect(page.getByRole("combobox", { name: "Buscar otra prestación" })).toBeVisible()
-  await expect(page.getByText("Precio del servicio: S/ 650.00. No se edita aquí.")).toBeVisible()
-  await page.getByLabel("Pieza", { exact: true }).fill("26")
-  await page.getByRole("button", { name: "Guardar y confirmar" }).click()
+  await expect(pendingPlan).toContainText("¿En qué pieza?")
+  await expect(pendingPlan).not.toContainText("Por revisar")
+  await expect(pendingPlan.getByRole("button", { name: "Confirmar", exact: true })).toBeEnabled()
+  await info.attach("dictado-pieza-por-definir", { body: await pendingPlan.screenshot(), contentType: "image/png" })
+  await pendingPlan.getByRole("group", { name: "Pieza" }).getByRole("button", { name: "16", exact: true }).click()
+  await expect(pendingPlan).toContainText("Pieza 16")
+  await expect(pendingPlan).not.toContainText("¿En qué pieza?")
+  await pendingPlan.getByRole("button", { name: "Confirmar", exact: true }).click()
   await expect(idle).toBeVisible()
-  const planItems = await call<Array<{ toothNumber: number | null; serviceName?: string }>>(page, "GET", `${apiPath}/plan`, org.slug)
-  expect(planItems.filter((item) => item.toothNumber === 26)).toHaveLength(1)
+  expect(await in16()).toBe(before16 + 1)
 
   // --- Teléfono: dictar y revisar con las acciones fijas al pie, sin desbordes ---
   await page.setViewportSize({ width: 390, height: 844 })
@@ -268,21 +271,25 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await page.getByRole("dialog").getByRole("button", { name: "Cancelar" }).click()
 
-  // --- Una sugerencia sin revisar: al firmar se nombra y, si se firma, no entra a la historia ---
+  // --- Una sugerencia sin confirmar: al firmar viene marcada; desmarcada, no entra a la historia ---
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
   await expect(closing).toContainText("Si quedan sugerencias sin revisar, te lo pregunta antes de firmar.")
   await signButton.click()
-  const sign = page.getByRole("alertdialog", { name: "Queda 1 sugerencia sin revisar" })
-  await expect(sign.getByRole("list", { name: "Sugerencias sin revisar" })).toContainText("Diagnóstico · falta confirmarla")
-  await expect(sign).toContainText("Las otras 6 ya están confirmadas y se firman con la atención.")
+  const sign = page.getByRole("alertdialog", { name: "Firmar la atención" })
+  const dictated = sign.getByRole("list", { name: "Lo dictado sin confirmar" })
+  await expect(dictated).toContainText("K02.9")
+  await expect(dictated.getByRole("checkbox")).toBeChecked()
+  await expect(sign.getByRole("button", { name: "Firmar con 1 marcada" })).toBeVisible()
   await info.attach("firmar-con-sugerencias", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  // «Revisar ahora» vuelve a la atención sin firmar.
-  await sign.getByRole("button", { name: "Revisar ahora" }).click()
+  // «Volver» vuelve a la atención sin firmar.
+  await sign.getByRole("button", { name: "Volver" }).click()
   await expect(sign).toBeHidden()
   expect((await detail()).encounter.status).toBe("borrador")
   await signButton.click()
-  await sign.getByRole("button", { name: "Descartarla y firmar" }).click()
+  await dictated.getByRole("checkbox").click()
+  await expect(dictated).toContainText("desmarcada: no entra")
+  await sign.getByRole("button", { name: "Firmar sin lo dictado" }).click()
   await expect.poll(async () => (await detail()).encounter.status, { timeout: 30_000 }).toBe("finalizada")
   const final = await detail()
   expect(final.diagnoses).toHaveLength(1)
@@ -298,4 +305,62 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
     .where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, "/agent/asistente-clinico"))
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+})
+
+test("asistente clínico: la alergia dictada y lo hecho hoy se confirman donde van", async ({ owner }, info) => {
+  const { page, org } = owner
+  const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: crypto.randomUUID(),
+    answers: { demographics: { displayName: "Rosa Quispe", docType: "DNI", docNumber: "76543210" }, respondent: "staff", privacyAccepted: false },
+    contacts: [],
+  }, 201)
+  const apiPath = `/api/patients/${patient.id}`
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
+  await call(page, "POST", "/api/services", org.slug, {
+    name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
+    officialCode: "D3330",
+  }, 201)
+  const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Consulta" }, 201)
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {
+    professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345",
+  })
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
+  const write = async (text: string) => {
+    await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+    await idle.getByLabel("Escribe lo dictado").fill(text)
+    await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  }
+  await write("Es alérgica a la penicilina. Le hice la endodoncia multirradicular en la dieciséis.")
+
+  // La alergia va junto a las alertas, con su código; qué tan fuerte fue es un aviso que se toca.
+  const allergy = suggested("Alergias").getByRole("listitem").first()
+  await expect(allergy).toContainText("Alergia a penicilinas")
+  await expect(allergy).toContainText("¿Qué tan fuerte fue?")
+  await expect(allergy.getByRole("button", { name: "Confirmar", exact: true })).toBeEnabled()
+  // Lo hecho hoy va en Procedimientos, de tus servicios y con su precio.
+  const done = suggested("Procedimientos").getByRole("listitem").first()
+  await expect(done).toContainText("Hecho hoy · Endodoncia multirradicular · S/ 650.00")
+  await expect(done).toContainText("Pieza 16")
+  await expect(done).toContainText("de tus servicios")
+  await info.attach("alergia-y-hecho-hoy", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  await allergy.getByRole("button", { name: "Severa", exact: true }).click()
+  await expect(allergy).not.toContainText("¿Qué tan fuerte fue?")
+  await allergy.getByRole("button", { name: "Confirmar", exact: true }).click()
+  // Confirmada, se ve al momento en la franja: severa, en rojo y primero.
+  await expect(page.getByLabel("Alertas clínicas")).toContainText(/Alergia severa: penicilinas/i)
+  await done.getByRole("button", { name: "Confirmar", exact: true }).click()
+  await expect(suggested("Procedimientos")).toHaveCount(0)
+  const detail = await call<{ procedures: Array<{ description: string; priceCents: number | null; voidedAt: string | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
+  expect(detail.procedures.filter((item) => !item.voidedAt).map((item) => [item.description, item.priceCents])).toEqual([["Endodoncia multirradicular", 65000]])
+
+  // Ya registrada: no se propone otra vez, se avisa.
+  await write("Es alérgica a la penicilina.")
+  await expect(page.getByText("La alergia a penicilinas ya está en sus antecedentes.")).toBeVisible()
+  await expect(suggested("Alergias")).toHaveCount(0)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
 })

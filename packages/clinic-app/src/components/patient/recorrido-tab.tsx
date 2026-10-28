@@ -75,9 +75,11 @@ function decisionBadge(status: string): "default" | "secondary" | "success" | "d
 function siteLabel(item: PlanItem): string {
   if (item.scope === "tooth" && item.toothNumber != null) return `Pieza ${item.toothNumber}`
   if (item.scope === "surfaces" && item.toothNumber != null) {
-    const surfaces = item.surfaces.length > 0 ? ` (${item.surfaces.join(", ")})` : ""
+    const surfaces = item.surfaces.length > 0 ? ` (${item.surfaces.join(", ")})` : " · cara por definir"
     return `Pieza ${item.toothNumber}${surfaces}`
   }
+  // Indicado sin decir la pieza: se define al hacerlo.
+  if (item.scope === "tooth" || item.scope === "surfaces") return "Pieza por definir"
   if (item.scope === "quadrant" && item.quadrant != null) return `Cuadrante ${item.quadrant}`
   if (item.scope === "arch") return item.arch === "upper" ? "Arcada superior" : "Arcada inferior"
   return "General"

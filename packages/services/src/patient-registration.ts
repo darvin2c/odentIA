@@ -540,7 +540,7 @@ export async function getPublicPatientRegistration(
 export type RegistrationContext =
   | {
       kind: "internal"
-      /** Quien del equipo registra; `null` cuando registra Sofi en el chat (ADR 0099). */
+      /** Quien del equipo registra; `null` cuando registra Sofi en el chat (ADR 0101). */
       userId: string | null
       contactId?: string
       conversationId?: string
@@ -1533,7 +1533,7 @@ async function hasActiveWhatsApp(tx: Db, orgId: string): Promise<boolean> {
   return !!connected
 }
 
-/** Lo que Sofi pide en el chat para registrar a una persona nueva (ADR 0099). */
+/** Lo que Sofi pide en el chat para registrar a una persona nueva (ADR 0101). */
 export interface ChatRegistrationPerson {
   givenNames: string
   familyName: string
@@ -1551,7 +1551,7 @@ export interface ChatRegistrationPerson {
 const demographic = demographicsSchema.shape
 
 /**
- * Lo que el agente llena de la persona nueva (ADR 0099): los mismos campos y
+ * Lo que el agente llena de la persona nueva (ADR 0101): los mismos campos y
  * límites del registro con lo mínimo (`demographicsSchema`), más para quién es.
  */
 export const chatRegistrationSchema = z.object({
@@ -1564,7 +1564,7 @@ export const chatRegistrationSchema = z.object({
   writerName: demographic.displayName.optional().describe("Cómo se llama quien escribe, cuando la cita es para otra persona."),
 })
 
-/** El aviso que se le mostró al pedirle el sí: queda congelado en la propuesta (ADR 0099). */
+/** El aviso que se le mostró al pedirle el sí: queda congelado en la propuesta (ADR 0101). */
 export interface ChatPrivacyNotice {
   version: number
   text: string
@@ -1573,7 +1573,7 @@ export interface ChatPrivacyNotice {
 /**
  * El aviso vigente para registrar por el chat; nulo si la clínica no tiene el
  * registro de pacientes encendido o no escribió su aviso: entonces la persona
- * se registra en su enlace o en recepción (ADR 0099).
+ * se registra en su enlace o en recepción (ADR 0101).
  */
 export async function chatPrivacyNotice(tx: Db, orgId: string): Promise<ChatPrivacyNotice | null> {
   const config = await getPatientRegistrationConfig(tx, orgId)

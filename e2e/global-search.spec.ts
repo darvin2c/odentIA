@@ -6,7 +6,7 @@ import { channelConnection, contact, conversation, message } from "@odentia/db/s
 import type { Page, TestInfo } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { tenant } from "./env"
-import { expect, type OwnerFixture, test } from "./fixtures"
+import { api, expect, type OwnerFixture, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
 /**
@@ -227,4 +227,23 @@ test("en el teléfono: la lupa de la cabecera abre la búsqueda a pantalla compl
   await observe(page, info, "buscador-telefono.png")
   await dialog(page).getByRole("button", { name: "Cerrar" }).click()
   await expect(dialog(page)).toBeHidden()
+})
+
+test("con Argos apagado el buscador no lo ofrece como si respondiera; encendido, sí", async ({ owner }) => {
+  const page = owner.page
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+  await pressSearchShortcut(page)
+  await search(page, "cuanto vendi hoy")
+  // Apagado: se dice, con cómo encenderlo, y no hay una pregunta que quede sin respuesta.
+  await expect(dialog(page).getByRole("option", { name: /Argos está apagado/ })).toBeVisible()
+  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Argos/ })).toHaveCount(0)
+  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Ayuda/ })).toBeVisible()
+
+  expect((await api(page, "PUT", "/api/agent/admin/settings", owner.org.slug, { enabled: true })).status).toBe(200)
+  await gotoHydrated(page, tenant(owner.org.slug, "/home"))
+  await pressSearchShortcut(page)
+  await search(page, "cuanto vendi hoy")
+  await expect(dialog(page).getByRole("option", { name: /Preguntarle a Argos/ })).toBeVisible()
+  await expect(dialog(page).getByRole("option", { name: /Argos está apagado/ })).toHaveCount(0)
 })

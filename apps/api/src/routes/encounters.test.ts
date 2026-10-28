@@ -102,6 +102,7 @@ interface PlanItemRow {
   planId: string
   budgetId: string | null
   sourceEncounterId: string | null
+  toothNumber?: number | null
 }
 
 interface ErrorBody {
@@ -485,6 +486,30 @@ it("encounters: adenda en borrador 409 NOT_FINALIZED; tras finalizar 201 kind ad
   const detailBody = (await detail.json()) as EncounterDetailBody
   expect(detailBody.data.addenda.map((n) => n.note)).toContain("Corrección posterior")
   expect(detailBody.data.addenda.every((n) => n.kind === "adenda")).toBe(true)
+})
+
+it("encounters: un tratamiento indicado con la pieza por definir la pide al hacerlo y la deja en el plan", async () => {
+  const app = buildApp("admin")
+  const patientId = await createFreshPatient(app, "Pieza Por Definir")
+  const ctx = await setupPlan(app, patientId)
+  // Indicar no es hacer: la corona entra al plan aunque aún no se diga la pieza.
+  const item = await addPlanItem(app, patientId, ctx, { serviceId: "c1111111-1111-4111-8111-111111111111" })
+  expect(item.toothNumber).toBeNull()
+  const budgetId = await createBudget(app, patientId, ctx.planId, [item.id])
+  await deliverBudget(app, patientId, budgetId)
+  await decideBudget(app, patientId, budgetId, [item.id])
+
+  const procedures = `/patients/${patientId}/encounters/${ctx.encounterId}/procedures`
+  const post = (body: Record<string, unknown>) =>
+    app.request(procedures, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  const missing = await post({ planItemId: item.id })
+  expect(missing.status).toBe(400)
+  expect(((await missing.json()) as ErrorBody).error.message).toContain("Falta la pieza")
+  expect((await post({ planItemId: item.id, toothNumber: 26 })).status).toBe(201)
+  const plan = (await (await app.request(`/patients/${patientId}/plan`)).json()) as { data: PlanItemRow[] }
+  expect(plan.data.find((row) => row.id === item.id)?.toothNumber).toBe(26)
+  // Ya definida, la siguiente sesión conserva la pieza.
+  expect((await post({ planItemId: item.id, toothNumber: 27 })).status).toBe(400)
 })
 
 it("encounters: las sesiones mantienen en curso hasta completar explícitamente", async () => {

@@ -1120,7 +1120,7 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.status).toBe("programada")
 })
 
-it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el aviso a la vista (ADR 0099)", async () => {
+it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el aviso a la vista (ADR 0101)", async () => {
   const [createdBranch] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: "Sede Registro Chat", timezone: "America/Lima" })

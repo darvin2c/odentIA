@@ -50,6 +50,15 @@ interface PracticeDictation {
     caminos?: Array<{ pieza?: number; principal: string; otros: string[] }>
     /** El paciente ya eligió: ninguna indicación lleva otros caminos. */
     sinCaminos?: boolean
+    /** Los números (desde 1) de las pendientes que debe quitar o corregir: no basta con contar. */
+    quitarCual?: number[]
+    corrigeCual?: number[]
+    /** No debe quedar ninguna frase sin usar («No pude usar esto»). */
+    sinNoUsado?: boolean
+    /** Alergias dichas, por una palabra de la sustancia; «ninguna»: dijo que no tiene. Exactas: ni una de más. */
+    alergias?: string[]
+    /** Lo hecho hoy, por una palabra de lo que hizo y su pieza si la dijo. Exactos: ni uno de más. */
+    hechos?: Array<{ servicio: string; pieza?: number }>
   }
 }
 
@@ -180,6 +189,18 @@ for (const dictation of bank.dictados) {
   if (dictation.espera.quitar !== undefined) other("quitar", read.removals.length === dictation.espera.quitar)
   const corrige = dictation.espera.corrige
   if (corrige) other(`corrige a ${corrige}`, read.corrections.some((item) => plain(JSON.stringify(item.changes)).includes(plain(corrige))))
+  const which = (list: Array<{ index: number }>) => JSON.stringify(list.map((item) => item.index + 1).sort())
+  if (dictation.espera.quitarCual) other(`quitar la ${dictation.espera.quitarCual.join(" y la ")}`, which(read.removals) === JSON.stringify([...dictation.espera.quitarCual].sort()))
+  if (dictation.espera.corrigeCual) other(`corregir la ${dictation.espera.corrigeCual.join(" y la ")}`, which(read.corrections) === JSON.stringify([...dictation.espera.corrigeCual].sort()))
+  if (dictation.espera.sinNoUsado) other("todo lo dicho se usó", read.unused.length === 0 && read.omitted === 0)
+  const allergies = read.drafts.filter((draft) => draft.kind === "alergia").map((draft) => (draft.payload["none"] === true && !draft.payload["substance"] ? "ninguna" : plain(String(draft.payload["substance"] ?? ""))))
+  for (const word of dictation.espera.alergias ?? []) other(`alergia ${word}`, allergies.some((said) => said.includes(plain(word))))
+  if (dictation.espera.alergias) other("ninguna alergia de más", allergies.length === dictation.espera.alergias.length)
+  const done = read.drafts.filter((draft) => draft.kind === "procedimiento").map((draft) => draft.payload)
+  for (const expected of dictation.espera.hechos ?? []) {
+    other(`hecho: ${expected.servicio}${expected.pieza ? ` en la ${expected.pieza}` : ""}`, done.some((payload) => plain(String(payload["service"] ?? "")).includes(plain(expected.servicio)) && (!expected.pieza || payload["toothNumber"] === expected.pieza)))
+  }
+  if (dictation.espera.hechos) other("nada hecho de más", done.length === dictation.espera.hechos.length)
   if (dictation.espera.nuevos !== undefined) other("nada registrado otra vez", read.drafts.length === dictation.espera.nuevos)
   // Lo que no debía tocar nada pendiente («la tercera» sin tercera): no se aplica.
   if (dictation.espera.correcciones === undefined && dictation.espera.quitar === undefined && pending.length) {
@@ -188,6 +209,8 @@ for (const dictation of bank.dictados) {
   const unused = read.unused.length ? ` · no usó: ${read.unused.map((phrase) => `«${phrase}»`).join(", ")}` : ""
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
   console.log(`${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`)
+  // `--detalle`: lo que devolvió el modelo en los que fallan, para ver por qué.
+  if (notes.length && process.argv.includes("--detalle")) console.log(JSON.stringify({ drafts: read.drafts, corrections: read.corrections, removals: read.removals }, null, 1))
 }
 
 const pct = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)} %` : "—")

@@ -28,6 +28,7 @@ import { type FigureContext, formatFigure, type FigureValue, reportFigureOf } fr
 import { goalsForMonth } from "./report-goals.js"
 import { addDays, currentMonthIn, monthStart } from "./report-periods.js"
 import { reportScope, type ReportScope } from "./report-scope.js"
+import { upsertWorkspaceNotification } from "./workspace.js"
 import {
   absoluteChangeWords,
   capitalize,
@@ -143,6 +144,30 @@ export async function completeReportDigest(
     .update(reportDigestSend)
     .set({ state, detail: detail?.slice(0, 500) ?? null, ...(state === "enviado" ? { sentAt: now } : {}) })
     .where(and(eq(reportDigestSend.organizationId, orgId), eq(reportDigestSend.id, id), eq(reportDigestSend.state, "reclamado")))
+}
+
+/**
+ * Un resumen que no se pudo armar o cuyo envío no se confirmó no se reenvía solo (podría
+ * llegar dos veces), pero la persona se entera: un aviso en la campana con dónde verlo.
+ */
+export async function noticeMissedReportDigest(
+  tx: Db,
+  orgId: string,
+  userId: string,
+  week: string,
+  why: "incierto" | "no_se_pudo_armar",
+): Promise<void> {
+  await upsertWorkspaceNotification(tx, orgId, {
+    userId,
+    dedupeKey: `report-digest:${week}`,
+    title: why === "incierto" ? "No pudimos confirmar el envío de tu resumen del lunes" : "No pudimos armar tu resumen del lunes",
+    body:
+      why === "incierto"
+        ? "Puede que no te haya llegado. Las mismas cifras de la semana están en Reportes."
+        : "Las cifras de la semana están en Reportes.",
+    href: "/reports",
+    permission: "reports.read",
+  })
 }
 
 // --- Lo que dice -------------------------------------------------------------------------

@@ -39,18 +39,23 @@ export interface InviteCase {
 /**
  * Pacientes a quienes toca invitar ahora: sin venir hace 6 meses (`lapsedSql`),
  * sin invitación en los últimos 6 meses y sin «no quiere» de seguimiento. Con
- * `patientId`, dice solo si esa persona hoy le toca.
+ * `patientId`, dice solo si esa persona hoy le toca. Con `since`, solo quienes
+ * cumplieron los meses sin venir desde esa fecha: al prender la línea no se
+ * escribe a todo el atraso de golpe (el atraso se atiende con «Solo esta vez»).
  */
 export async function lapsedToInvite(
   tx: Db,
   orgId: string,
   timezone: string,
   now: Date,
-  options: { patientId?: string; limit?: number } = {},
+  options: { patientId?: string; limit?: number; since?: Date } = {},
 ): Promise<InviteCase[]> {
   const months = (await productHooks(tx, orgId)).recallMonths
   const only = options.patientId ? sql`and l.patient_id = ${options.patientId}::uuid` : sql``
   const limit = options.limit ? sql`limit ${options.limit}` : sql``
+  const fresh = options.since
+    ? sql`and l.starts_at >= ${options.since.toISOString()}::timestamptz - make_interval(months => ${months})`
+    : sql``
   const rows = await tx.execute<{
     appointment_id: string
     patient_id: string
@@ -77,6 +82,7 @@ export async function lapsedToInvite(
         where ac.organization_id = ${orgId} and ac.contact_id = p.person_id
           and ac.purpose = 'seguimiento' and ac.status = 'revoked')
       ${only}
+      ${fresh}
     order by l.starts_at asc, l.patient_id asc
     ${limit}
   `)

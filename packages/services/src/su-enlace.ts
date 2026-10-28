@@ -703,7 +703,7 @@ export async function bookedDataLink(
     contactId: string
     patientId: string
     appointmentId: string | null
-    /** Recién registrado por el chat (ADR 0099): el enlace va siempre, para llegar con todo completo. */
+    /** Recién registrado por el chat (ADR 0101): el enlace va siempre, para llegar con todo completo. */
     always?: boolean
   },
   deps: { secretsKey: Buffer },

@@ -94,6 +94,8 @@ export type ArgosResult =
 
 /** Las preguntas a Argos del mes, como las dice el panel (tablero C3). */
 export interface ArgosAllowance {
+  /** Argos está encendido: apagado, no responde y el buscador no lo ofrece como si respondiera. */
+  enabled: boolean
   limited: boolean
   used: number
   total: number

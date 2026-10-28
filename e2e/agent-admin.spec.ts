@@ -416,3 +416,24 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await info.attach("lista-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
 })
+
+test("administrador: abrir una línea no mueve la página y un enlace con la línea la deja a la vista", async ({ owner }) => {
+  const { page, org } = owner
+  await page.setViewportSize({ width: 1280, height: 700 })
+  await gotoHydrated(page, tenant(org.slug, "/agent/administrador"))
+  const line = page.locator("#linea-cobranza_vencida")
+  await line.scrollIntoViewIfNeeded()
+  await expect(line).toBeVisible()
+  const before = await page.evaluate(() => window.scrollY)
+  expect(before).toBeGreaterThan(300)
+  await line.getByRole("button", { name: /Un saldo pasa/ }).click()
+  await expect(page).toHaveURL(/linea=cobranza_vencida/)
+  await expect(line.getByText("Cómo se ejecuta, paso a paso")).toBeVisible()
+  // La página sigue donde estaba: no vuelve arriba ni pierde a quien tocó.
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(before - 5)
+
+  // Con el enlace de una línea (desde Inicio) llega y la ve.
+  await gotoHydrated(page, tenant(org.slug, "/agent/administrador?linea=cobranza_vencida"))
+  await expect(page.locator("#linea-cobranza_vencida").getByText("Cómo se ejecuta, paso a paso")).toBeVisible()
+  await expect(page.locator("#linea-cobranza_vencida")).toBeInViewport()
+})

@@ -101,7 +101,7 @@ export function AdminLine({
         : line.week
       : todayNote(line)
   return (
-    <li className="flex flex-col">
+    <li id={`linea-${line.key}`} className="flex scroll-mt-20 flex-col">
       <div className="flex items-start gap-3 p-4">
         <button
           type="button"
@@ -379,7 +379,7 @@ export function AdminLineOpen({
               setNoteDraft(null)
             }}
           />
-          <FieldDescription>La lee la persona de {line.team}; {receptionName} nunca la dice. Se guarda al salir del campo.</FieldDescription>
+          <FieldDescription>La lee quien reciba la tarea en {line.team}; {receptionName} nunca la dice. Se guarda al salir del campo.</FieldDescription>
         </Field>
       ) : null}
 

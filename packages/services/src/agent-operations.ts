@@ -1860,7 +1860,7 @@ function uuidField(payload: Record<string, unknown>, key: string, label: string,
   if (typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) throw validation(`${label} inválido`)
 }
 
-/** Los datos de quien aún no es paciente en una cita propuesta (ADR 0099); nulo si no vienen bien. */
+/** Los datos de quien aún no es paciente en una cita propuesta (ADR 0101); nulo si no vienen bien. */
 export function newPatientOf(payload: Record<string, unknown>): ChatRegistrationPerson | null {
   const raw = payload.newPatient
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
@@ -1883,7 +1883,7 @@ export function newPatientOf(payload: Record<string, unknown>): ChatRegistration
   }
 }
 
-/** El aviso que se le mostró a quien se registra por el chat, congelado al proponer (ADR 0099). */
+/** El aviso que se le mostró a quien se registra por el chat, congelado al proponer (ADR 0101). */
 function frozenNoticeOf(payload: Record<string, unknown>): ChatPrivacyNotice | null {
   const raw = payload.privacyNotice
   if (typeof raw !== "object" || raw === null) return null
@@ -1893,7 +1893,7 @@ function frozenNoticeOf(payload: Record<string, unknown>): ChatPrivacyNotice | n
 
 function validatePayload(action: ProposalAction, payload: Record<string, unknown>): void {
   if (action === "reservar_cita") {
-    // Quien aún no es paciente se registra con su sí (ADR 0099): lleva sus datos en vez del paciente.
+    // Quien aún no es paciente se registra con su sí (ADR 0101): lleva sus datos en vez del paciente.
     if (payload.newPatient !== undefined) {
       if (payload.patientId !== undefined) throw validation("Una cita es para un paciente o para alguien nuevo, no ambos")
       if (!newPatientOf(payload)) throw validation("newPatient necesita nombres y apellidos")
@@ -2056,7 +2056,7 @@ export async function createProposal(
   validatePayload(input.action, input.payload)
   const reason = cleanReason(input.reason)
   const proposedBy = input.proposedBy === "user" ? "user" : "agent"
-  // Registrar a alguien nuevo es solo del chat, con su sí (ADR 0099): el aviso que se le
+  // Registrar a alguien nuevo es solo del chat, con su sí (ADR 0101): el aviso que se le
   // muestra queda congelado en la propuesta y su documento se juzga antes de pedirle el sí.
   if (input.action === "reservar_cita" && input.payload.newPatient !== undefined) {
     if (proposedBy === "user") throw validation("Una persona nueva se registra en «Nuevo paciente», no con una propuesta")
@@ -2480,7 +2480,7 @@ export async function confirmProposalByContact(
   }
   const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
   // Registrar a alguien nuevo pide que antes le haya llegado la pregunta con el
-  // enlace del aviso de privacidad (ADR 0099): su sí cuenta desde ese mensaje.
+  // enlace del aviso de privacidad (ADR 0101): su sí cuenta desde ese mensaje.
   const fresh = newPatientOf(current.payload)
   const noticeShown = fresh
     ? items.find(
@@ -2502,7 +2502,7 @@ export async function confirmProposalByContact(
       ? latestIn
       : undefined
   // Registrar a alguien nuevo pide su sí a la pregunta que decía «Al confirmar, aceptas
-  // nuestro aviso de privacidad» (ADR 0099): lo que eligió antes no lo vio.
+  // nuestro aviso de privacidad» (ADR 0101): lo que eligió antes no lo vio.
   const confirmation = byWords ?? byIntent ?? (fresh ? undefined : byChoice)
   if (!confirmation) {
     throw new ServiceError(
@@ -2700,7 +2700,7 @@ export async function confirmProposalByPhone(
   if (!(APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(current.action)) {
     throw new ServiceError("PROPOSAL_NOT_APPOINTMENT", 409, "Solo una cita propuesta se confirma por teléfono")
   }
-  // Una persona nueva acepta el aviso con su sí en el chat (ADR 0099): por teléfono no hay ese sí.
+  // Una persona nueva acepta el aviso con su sí en el chat (ADR 0101): por teléfono no hay ese sí.
   if (newPatientOf(current.payload)) {
     throw new ServiceError("PROPOSAL_NEEDS_CHAT_YES", 409, "Esta cita es de alguien nuevo: se confirma con su sí en el chat, después de leer el aviso de privacidad")
   }
@@ -2772,7 +2772,7 @@ export async function executeProposal(
   id: string,
   opts: {
     secretsKey?: Buffer
-    /** El mensaje del sí de la persona: con él, registrar a alguien nuevo guarda su consentimiento (ADR 0099). */
+    /** El mensaje del sí de la persona: con él, registrar a alguien nuevo guarda su consentimiento (ADR 0101). */
     consentMessageId?: string
   } = {},
 ): Promise<ProposalItem> {
@@ -2817,7 +2817,7 @@ export async function executeProposal(
     let result: Record<string, unknown>
     if (action === "reservar_cita") {
       // Alguien nuevo se registra aquí, dentro del mismo punto de restauración:
-      // si la cita no se puede reservar, tampoco queda registrado (ADR 0099).
+      // si la cita no se puede reservar, tampoco queda registrado (ADR 0101).
       const fresh = newPatientOf(payload)
       const notice = frozenNoticeOf(payload)
       if (fresh && (!locked.contactId || !locked.conversationId || !notice || !opts.consentMessageId)) {

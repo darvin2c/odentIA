@@ -29,6 +29,7 @@ import {
   statusWords,
   toFieldText,
   toServerBody,
+  whatsappNumbers,
 } from "./whatsapp"
 
 // Lo que nombra a la plataforma dice el nombre del producto de la app: aquí, odentIA.
@@ -362,6 +363,23 @@ describe("la conexión, en palabras", () => {
     expect(accountWords({ number: null, name: "Clínica Dental Smile" })).toBe("Clínica Dental Smile")
     expect(accountWords({ number: " ", name: null })).toBeNull()
     expect(accountWords(null)).toBeNull()
+  })
+})
+
+describe("los números de WhatsApp de la página", () => {
+  it("sin ningún número conectado se ofrece conectar otro, aunque haya uno desconectado", () => {
+    expect(whatsappNumbers([]).offerConnect).toBe(true)
+    const off = connection({ id: "viejo", status: "disabled" })
+    expect(whatsappNumbers([off])).toMatchObject({ activeCount: 0, offerConnect: true })
+  })
+
+  it("con uno conectado no se ofrece otro, y el conectado va primero", () => {
+    const off = connection({ id: "viejo", status: "disabled" })
+    const on = connection({ id: "nuevo", status: "active" })
+    const { ordered, activeCount, offerConnect } = whatsappNumbers([off, on])
+    expect(offerConnect).toBe(false)
+    expect(activeCount).toBe(1)
+    expect(ordered.map((item) => item.id)).toEqual(["nuevo", "viejo"])
   })
 })
 

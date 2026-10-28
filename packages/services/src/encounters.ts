@@ -1,7 +1,7 @@
 import {
   parseVitals,
 } from "@odentia/clinical"
-import { type AssembledBudget, assembleEncounterBudget, readBillingModes } from "./budgets.js"
+import { type AssembledBudget, assembleEncounterBudget, readBillingModes, removeBudgetItems } from "./budgets.js"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import {
@@ -19,6 +19,7 @@ import {
   treatmentBudget,
   treatmentBudgetItem,
   treatmentPlan,
+  serviceCatalog,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { member } from "@odentia/db/schema/auth"
@@ -137,6 +138,12 @@ export interface AddEncounterProcedureInput {
   odontogramEntryId?: string | null
   /** Unidades del acto (1–99); el cargo es precio unitario × cantidad. */
   quantity?: number | null
+  /**
+   * Hacer un tratamiento que aún esperaba respuesta es aceptarlo: queda aceptado
+   * y hecho en la misma atención, como el servicio directo, y sale de su
+   * presupuesto en borrador. Uno de un presupuesto ya enviado espera su respuesta.
+   */
+  acceptWhenDone?: boolean
 }
 
 export interface ListEncountersInput {
@@ -1101,6 +1108,9 @@ export async function addEncounterProcedure(
   let planCodings: Array<{ system: string; code: string; version: string; display: string }> = []
   let planPriceCents: number | null = null
   let planCurrency: string | null = null
+  /** Esperaba respuesta y se acepta al hacerlo (`acceptWhenDone`): se cierra como el servicio directo. */
+  let acceptedNow = false
+  let draftBudgetId: string | null = null
   if (planItemIdParam) {
     const { item: plan, budget } = await lockPlanItemForExecution(
       tx,
@@ -1116,10 +1126,17 @@ export async function addEncounterProcedure(
     // Solo presupuesto aceptado o servicio directo explícito: setPlanItemStatus
     // vuelve a exigirlo, pero aquí el error es específico antes de insertar.
     if (plan.decisionStatus !== "aceptado") {
-      throw conflict(
-        "ITEM_NOT_ACCEPTED",
-        "Solo se pueden realizar tratamientos aceptados en su presupuesto vigente",
-      )
+      const awaiting = plan.decisionStatus === "pendiente" && (!budget || budget.status === "borrador")
+      if (!input.acceptWhenDone || !awaiting) {
+        throw conflict(
+          "ITEM_NOT_ACCEPTED",
+          budget && budget.status !== "borrador" && input.acceptWhenDone
+            ? "Está en un presupuesto que el paciente aún no respondió: anota su respuesta en el presupuesto"
+            : "Solo se pueden realizar tratamientos aceptados en su presupuesto vigente",
+        )
+      }
+      acceptedNow = true
+      draftBudgetId = budget?.id ?? null
     }
     // Histórico ambiguo heredado: nunca se factura como múltiples actos ni se
     // elige un principal; se pide una nueva indicación exacta.
@@ -1127,7 +1144,24 @@ export async function addEncounterProcedure(
     // Lo que llega del sitio se compara con el del tratamiento: no cambia.
     planSite = { siteSystem: plan.siteSystem, siteCode: plan.siteCode, siteQualifiers: plan.siteQualifiers }
     const given = siteInputOf(site, input)
-    if (Object.keys(given).length > 0) {
+    const pending = plan.scope ? (site.pending?.(planSite, plan.scope) ?? null) : null
+    if (pending) {
+      // Indicado con la pieza o la cara por definir: se define al hacerlo, con las
+      // reglas de su ámbito, y queda también en el tratamiento. Lo que ya se dijo
+      // al indicarlo (la pieza) no cambia.
+      if (Object.keys(given).length === 0) throw validation(pending.ask)
+      const [offer] = plan.serviceId
+        ? await tx.select().from(serviceCatalog).where(and(eq(serviceCatalog.id, plan.serviceId), eq(serviceCatalog.organizationId, orgId))).limit(1)
+        : []
+      const asked = site.columns({ ...site.fields(planSite), ...given }, { scope: plan.scope!, surfaces: offer ? await surfaceLimits(tx, orgId, offer) : undefined })
+      if (planSite.siteCode && asked.siteCode !== planSite.siteCode)
+        throw validation("El procedimiento conserva la pieza del tratamiento indicado")
+      planSite = asked
+      await tx
+        .update(treatmentPlanItem)
+        .set({ ...asked, updatedAt: new Date() })
+        .where(and(eq(treatmentPlanItem.id, plan.id), eq(treatmentPlanItem.organizationId, orgId)))
+    } else if (Object.keys(given).length > 0) {
       const asked = site.columns({ ...site.fields(planSite), ...given })
       if (!sameSite(asked, planSite))
         throw validation("El procedimiento conserva el sitio del tratamiento indicado, sin cambios")
@@ -1260,7 +1294,29 @@ export async function addEncounterProcedure(
           eq(treatmentPlanItem.organizationId, orgId),
         ),
       )
-    if (item && (item.status === "pendiente" || item.status === "programado")) {
+    if (acceptedNow) {
+      // Lo hizo, así que lo aceptó: ya no espera en el borrador y se cierra como el servicio directo.
+      if (draftBudgetId) await removeBudgetItems(tx, orgId, actorUserId, patientId, draftBudgetId, { itemIds: [input.planItemId] })
+      const now = new Date()
+      await tx
+        .update(treatmentPlanItem)
+        .set({
+          status: "realizado",
+          decisionStatus: "aceptado",
+          decisionNote: "Aceptado al hacerlo en la atención",
+          decidedAt: now,
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+        })
+        .where(and(eq(treatmentPlanItem.id, input.planItemId), eq(treatmentPlanItem.organizationId, orgId)))
+      await audit(tx, orgId, actorUserId, "plan.item_accepted_when_done", "treatment_plan_item", input.planItemId, {
+        patientId,
+        encounterId,
+        procedureId: row.id,
+      })
+      await (await productHooks(tx, orgId)).treatmentDone(tx, { orgId, actorUserId, patientId, encounterId, planItemId: input.planItemId })
+    } else if (item && (item.status === "pendiente" || item.status === "programado")) {
       await setPlanItemStatus(tx, orgId, actorUserId, patientId, input.planItemId, {
         status: "en_curso",
         encounterId,

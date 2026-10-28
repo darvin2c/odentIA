@@ -49,6 +49,12 @@ export type SiteFields = Record<string, unknown>
 export interface SiteRules {
   scope: string
   surfaces?: { min: number | null; max: number | null }
+  /**
+   * Indicar no es hacer: al indicar un tratamiento, lo que su ámbito pide y aún
+   * no se sabe (odentIA: la pieza o la cara) puede quedar por definir. Lo que sí
+   * se dijo se valida igual; al hacerlo (el procedimiento) se exige completo.
+   */
+  pending?: boolean
 }
 
 /**
@@ -87,6 +93,11 @@ export interface ProductSite {
   bodySite(row: SiteColumns): { text: string } | null
   /** Lo que se le dice a quien manda un sitio suelto que no vale («Pieza FDI inválida: 19»). */
   invalid(value: unknown): string
+  /**
+   * Lo que un tratamiento indicado dejó por definir para su ámbito (odentIA: la
+   * pieza, la cara) y cómo se le pide a quien lo hace. Sin él, nada queda pendiente.
+   */
+  pending?(row: SiteColumns, scope: string): { fields: string[]; ask: string } | null
 }
 
 /** Un producto sin «dónde»: no guarda sitio ni lo dice. */
@@ -275,8 +286,13 @@ export interface ProductDictation {
   normalizeSite(payload: Record<string, unknown>): { payload: Record<string, unknown>; invalid: string | null }
   /** El «dónde» en palabras («Pieza 16 · cara oclusal»); vacío sin sitio. */
   siteWords(payload: Record<string, unknown>): string
-  /** Una indicación ajustada al ámbito de su servicio: lo que no lleva se quita y lo que le falta la deja por revisar. */
-  fitToScope(payload: Record<string, unknown>, scope: string | null): DictationPrepared
+  /**
+   * Una indicación ajustada al ámbito de su servicio: lo que no lleva se quita y
+   * lo que le falta queda a la vista sin impedir confirmarla (ADR 0099). Con
+   * `done` es lo que se hizo hoy: eso sí necesita su sitio, así que lo que falta
+   * la deja por revisar, con la pregunta.
+   */
+  fitToScope(payload: Record<string, unknown>, scope: string | null, done?: boolean): DictationPrepared
   /** Revisa una sugerencia de una clase propia, ya validada con su operación. */
   prepare(
     tx: Db,

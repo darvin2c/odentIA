@@ -1,4 +1,4 @@
-# 0099 · Registrar por el chat con un solo sí
+# 0101 · Registrar por el chat con un solo sí
 
 **Fecha:** 2026-10-28 · **Estado:** aceptada (lienzo «Registrar por el chat», aprobado el 28 oct). Sustituye la alternativa descartada de ADR 0097 («registrar a la persona nueva por el chat»).
 

@@ -77,7 +77,7 @@ export async function fetchPublicRegistration(
   return publicFetch<{ data: PublicRegistrationInfo }>(url)
 }
 
-/** El aviso de privacidad de la clínica, para la página que se enlaza desde el chat (ADR 0099). */
+/** El aviso de privacidad de la clínica, para la página que se enlaza desde el chat (ADR 0101). */
 export interface PublicPrivacyNotice {
   organization: { name: string; logo: string | null }
   notice: string

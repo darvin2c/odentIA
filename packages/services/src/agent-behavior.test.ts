@@ -530,7 +530,7 @@ describe("obsolescencia y fallo transaccional", () => {
   })
 })
 
-describe("registrar por el chat con el mismo sí de la cita (ADR 0099)", () => {
+describe("registrar por el chat con el mismo sí de la cita (ADR 0101)", () => {
   const NOTICE = { version: 1, text: "Usamos tus datos solo para atenderte." }
 
   async function withNotice(): Promise<void> {

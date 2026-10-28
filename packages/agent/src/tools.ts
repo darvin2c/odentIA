@@ -1387,7 +1387,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   /**
-   * Quien aún no es paciente reserva en el chat (ADR 0099): la cita lleva sus
+   * Quien aún no es paciente reserva en el chat (ADR 0101): la cita lleva sus
    * datos en vez del paciente y, con su sí a la pregunta que dice «Al confirmar,
    * aceptas nuestro aviso de privacidad», queda registrado y reservado en un
    * solo paso. Sin aviso publicado (o sin registro encendido), su enlace.
@@ -1826,7 +1826,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (proposal.status === "ejecutada") {
         if (proposal.action === "enviar_mensaje") ctx.replySettled = true
         // A quien le faltan datos se le da su enlace en la misma confirmación (no hay otro aviso de esta cita).
-        // Quien se registró con este sí (ADR 0099) es el paciente que trae el resultado.
+        // Quien se registró con este sí (ADR 0101) es el paciente que trae el resultado.
         const bookedFor = typeof proposal.payload.patientId === "string" ? proposal.payload.patientId : proposal.result?.patientId
         if (proposal.action === "reservar_cita" && typeof bookedFor === "string") {
           const patientId = bookedFor

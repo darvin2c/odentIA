@@ -8,7 +8,7 @@ import { fetchPublicPrivacyNotice } from "../../lib/patient-registration"
 /**
  * El aviso de privacidad de la clínica fuera del formulario de registro: lo
  * enlaza el agente al pedir el sí que registra a alguien por el chat (ADR
- * 0099). El texto es el que la clínica escribe en Configuración › Registro de pacientes.
+ * 0101). El texto es el que la clínica escribe en Configuración › Registro de pacientes.
  */
 export const Route = createFileRoute("/aviso")({
   head: () => ({

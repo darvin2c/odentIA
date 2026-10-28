@@ -5,6 +5,8 @@ import {
   encounter,
   encounterDiagnosis,
   encounterDictationSuggestion,
+  encounterProcedure,
+  patient,
   patientAllergy,
   prescriptionItem,
   serviceCatalog,
@@ -26,11 +28,14 @@ import {
   dictationModelLabel,
   dictationSegmentSeen,
   issueDictationPrescription,
+  keepConfirmedDictation,
+  listConfirmedDictation,
   listDictationSuggestions,
   listVoiceRemovedDictation,
   previewDictationSuggestions,
   saveDictationSegment,
   saveDictationSuggestions,
+  undoConfirmedDictation,
   undoDictationVoiceCorrection,
   updateDictationSuggestion,
 } from "../encounter-dictation.js"
@@ -39,6 +44,7 @@ import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { withOrgContext } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { orgStrictVariants } from "./odontogram.js"
+import { dentalSiteOfRow } from "./site.js"
 
 /** Asistente clínico: lo dictado queda como sugerencia y solo entra a la historia cuando el odontólogo confirma. */
 setupTestDb()
@@ -160,7 +166,7 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
       ],
     })
     const [choice, second] = saved.suggestions
-    expect(choice).toMatchObject({ status: "lista", summary: expect.stringContaining("Dos caminos para la 46 · elige uno"), payload: { serviceName: "Onlay cerámico", options: [expect.objectContaining({ serviceName: "Carilla feldespática" })] } })
+    expect(choice).toMatchObject({ status: "lista", summary: expect.stringContaining("Pieza 46 · dos caminos, el paciente elige"), payload: { serviceName: "Onlay cerámico", options: [expect.objectContaining({ serviceName: "Carilla feldespática" })] } })
     expect(second).toMatchObject({ status: "por_revisar", note: expect.stringContaining("Ya hay otra elección") })
 
     // «Recomendar» la corona la hace la opción A; volver a recomendar la resina deja todo como estaba.
@@ -181,6 +187,154 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     // Otra elección después ya no cabe en ese borrador: se arma a mano en el presupuesto.
     const [later] = (await segment({ drafts: [{ kind: "plan", payload: { service: "onlay cerámico", toothNumber: 36, alternatives: ["carilla feldespática"] } }] })).suggestions
     expect(later).toMatchObject({ status: "por_revisar", note: expect.stringContaining("ya tiene opciones") })
+    await enable(false)
+  })
+
+  it("«resina en la 36, o si no una corona» se confirma: cada camino lleva solo lo suyo", async () => {
+    await enable(true)
+    const fx = await openSession("Resina fotocurable", "surfaces")
+    const [corona] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Funda metal-cerámica", scope: "tooth", source: "custom", priceCents: 90000, currency: "PEN" })
+      .returning()
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [choice] = (
+      await segment({ drafts: [{ kind: "plan", payload: { service: "resina fotocurable", toothNumber: 36, surfaces: ["oclusal"], alternatives: ["funda metal-cerámica"] } }] })
+    ).suggestions
+    expect(choice).toMatchObject({ status: "lista", payload: { toothNumber: 36, surfaces: ["occlusal"] } })
+
+    // Antes, la corona recibía las caras de la resina y la operación la rechazaba.
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id))
+    const items = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.sourceEncounterId, fx.encounter.id))
+    const siteOf = (serviceId: string) => dentalSiteOfRow(items.find((item) => item.serviceId === serviceId)!)
+    expect(siteOf(fx.service.id)).toMatchObject({ toothNumber: 36, surfaces: ["occlusal"] })
+    expect(siteOf(corona!.id)).toMatchObject({ toothNumber: 36, surfaces: [] })
+    await enable(false)
+  })
+
+  it("con la corona recomendada y la resina sin cara, avisa qué opción no tiene cara y se confirma igual", async () => {
+    await enable(true)
+    const fx = await openSession("Resina de una cara", "surfaces")
+    const [funda] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Funda libre de metal", scope: "tooth", source: "custom", priceCents: 150000, currency: "PEN" })
+      .returning()
+    const [choice] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "funda libre de metal", toothNumber: 36, alternatives: ["resina de una cara"] } }] }),
+      )
+    ).suggestions
+    expect(choice).toMatchObject({ status: "lista", payload: { pending: ["surfaces"] }, note: expect.stringMatching(/^Opción B · Resina de una cara: ¿Qué cara de la 36\?/) })
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id))
+    const items = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.sourceEncounterId, fx.encounter.id))
+    expect(dentalSiteOfRow(items.find((item) => item.serviceId === funda!.id)!)).toMatchObject({ toothNumber: 36, surfaces: [] })
+    expect(dentalSiteOfRow(items.find((item) => item.serviceId === fx.service.id)!)).toMatchObject({ toothNumber: 36, surfaces: [] })
+    await enable(false)
+  })
+
+  it("una resina sin cara entra al plan por definir; al hacerla se pide la cara y queda en el tratamiento", async () => {
+    await enable(true)
+    const fx = await openSession("Resina por definir", "surfaces")
+    const [resin] = (await fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "resina por definir", toothNumber: 46 } }] }))).suggestions
+    expect(resin).toMatchObject({ status: "lista", payload: { pending: ["surfaces"] } })
+    // Un toque en la cara la completa; si no, se confirma igual.
+    const touched = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, resin!.id, { surfaces: ["occlusal"] }))
+    expect(touched).toMatchObject({ status: "lista", note: null, payload: { surfaces: ["occlusal"] } })
+    expect(touched.payload).not.toHaveProperty("pending")
+    const [other] = (await fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "resina por definir", toothNumber: 47 } }] }))).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, other!.id))
+    const [item] = await ownerDb.select().from(treatmentPlanItem).where(and(eq(treatmentPlanItem.sourceEncounterId, fx.encounter.id), eq(treatmentPlanItem.serviceId, fx.service.id)))
+    expect(dentalSiteOfRow(item!)).toMatchObject({ toothNumber: 47, surfaces: [] })
+    await enable(false)
+  })
+})
+
+describe("quitar por voz lo ya confirmado", () => {
+  it("no se quita solo: queda propuesto; «Quitar del plan» lo cancela y «Dejarla» lo deja", async () => {
+    await enable(true)
+    const fx = await openSession("Endodoncia para quitar", "tooth")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [endo, other] = (
+      await segment({
+        drafts: [
+          { kind: "plan", payload: { service: "endodoncia para quitar", toothNumber: 36 } },
+          { kind: "plan", payload: { service: "endodoncia para quitar", toothNumber: 46 } },
+        ],
+      })
+    ).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, endo!.id))
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, other!.id))
+    const confirmed = await fx.run((tx) => listConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect(confirmed.map((item) => item.id).sort()).toEqual([endo!.id, other!.id].sort())
+
+    // «Quita también la endodoncia de la 36»: queda pedido, nada cambia todavía.
+    const asked = await segment({ drafts: [], segmentId: randomUUID(), removals: [{ suggestionId: endo!.id, said: "quita también la endodoncia" }] })
+    expect(asked).toMatchObject({ removed: [], undoRequested: [endo!.id] })
+    const planItem = async (id: string) => (await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, id)))[0]
+    const endoRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, endo!.id)))[0]!
+    expect((await planItem(endoRow.entityId!))?.status).toBe("pendiente")
+
+    await fx.run((tx) => undoConfirmedDictation(tx, ...fx.args, fx.encounter.id, endo!.id))
+    expect(await planItem(endoRow.entityId!)).toMatchObject({ status: "cancelado", statusReason: "Se quitó al dictar: «quita también la endodoncia»" })
+
+    // «Dejarla»: el pedido se va y el tratamiento sigue.
+    await segment({ drafts: [], segmentId: randomUUID(), removals: [{ suggestionId: other!.id, said: "quita la de la 46" }] })
+    await fx.run((tx) => keepConfirmedDictation(tx, ...fx.args, fx.encounter.id, other!.id))
+    const otherRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, other!.id)))[0]!
+    expect(otherRow.status).toBe("confirmada")
+    expect((await planItem(otherRow.entityId!))?.status).toBe("pendiente")
+    expect((await fx.run((tx) => listConfirmedDictation(tx, ORG, fx.patient.id, fx.encounter.id))).every((item) => item.undoRequest === null)).toBe(true)
+    await enable(false)
+  })
+})
+
+describe("lo que el asistente registra dos veces (dictados reales)", () => {
+  it("la indicación que solo agrega la pieza corrige la que estaba; la repetida o el camino suelto no se registran", async () => {
+    await enable(true)
+    const fx = await openSession("Resina para repetir", "surfaces")
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: "Funda metal base", scope: "tooth", source: "custom", priceCents: 90000, currency: "PEN" })
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const list = () => fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+
+    // «En la 36 resina, o si no una corona» y el modelo además registra la corona suelta, sin pieza.
+    const first = await segment({
+      drafts: [
+        { kind: "plan", payload: { service: "funda metal base" } },
+        { kind: "plan", payload: { service: "resina para repetir", toothNumber: 36, surfaces: ["oclusal"], alternatives: ["funda metal base"] } },
+      ],
+    })
+    expect(first.suggestions).toHaveLength(1)
+    expect(first.suggestions[0]?.payload["options"]).toEqual([expect.objectContaining({ serviceName: "Funda metal base" })])
+
+    // Otra corona, ahora sin pieza y aparte: queda pendiente. «La corona es en la 25» la corrige,
+    // y si además llega registrada otra vez en la 25, no se repite.
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, first.suggestions[0]!.id))
+    const [loose] = (await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base" } }] })).suggestions
+    // Sin pieza no frena: queda lista, con la pregunta a la vista.
+    expect(loose).toMatchObject({ status: "lista", payload: { pending: ["toothNumber"] }, note: expect.stringContaining("¿En qué pieza?") })
+    expect(dictationModelLabel(loose!, DENTAL_DICTATION)).toBe("Plan de tratamiento: Funda metal base · falta: la pieza")
+    const fixed = await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 25 } }] })
+    expect(fixed).toMatchObject({ suggestions: [], corrected: [loose!.id] })
+    const again = await segment({
+      corrections: [{ suggestionId: loose!.id, changes: { toothNumber: 25 } }],
+      drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 25 } }],
+    })
+    expect(again.suggestions).toEqual([])
+    expect(await list()).toEqual([expect.objectContaining({ id: loose!.id, status: "lista", payload: expect.objectContaining({ toothNumber: 25 }) })])
+
+    // La misma prestación en otra pieza sí es otra indicación.
+    expect((await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 26 } }] })).suggestions).toHaveLength(1)
+    await enable(false)
+  })
+
+  it("el mismo diagnóstico en la misma pieza no se repite; en otra pieza sí", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de diagnósticos")
+    const segment = (drafts: Parameters<typeof saveDictationSegment>[5]["drafts"]) =>
+      fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts }))
+    expect((await segment([{ kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 } }])).suggestions).toHaveLength(1)
+    expect((await segment([{ kind: "diagnostico", payload: { diagnosisCode: "k02.1", diagnosisType: "provisional", toothNumber: 16 } }])).suggestions).toEqual([])
+    expect((await segment([{ kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 26 } }])).suggestions).toHaveLength(1)
     await enable(false)
   })
 })
@@ -348,7 +502,7 @@ describe("dictado en la atención", () => {
 
     // El mismo tramo reenviado (la respuesta se perdió): no duplica.
     expect(await fx.run((tx) => dictationSegmentSeen(tx, ORG, fx.patient.id, fx.encounter.id, first))).toBe(true)
-    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], repeated: true })
+    expect(await segment({ drafts, segmentId: first })).toEqual({ suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], repeated: true })
     expect(await list()).toHaveLength(2)
 
     // «No, es la veintiséis»: cambia la sugerencia y recuerda cómo estaba.
@@ -408,6 +562,104 @@ describe("dictado en la atención", () => {
     // La auditoría cuenta correcciones y descartes, sin texto.
     const audits = await ownerDb.select().from(auditEvent).where(and(eq(auditEvent.entityId, fx.encounter.id), eq(auditEvent.action, "encounter.dictation_suggested")))
     expect(audits.map((row) => row.metadata)).toEqual(expect.arrayContaining([expect.objectContaining({ count: 0, corrected: 1, removed: 0 }), expect.objectContaining({ removed: 1 })]))
+    await enable(false)
+  })
+})
+
+describe("alergias y lo hecho hoy por voz (issue 109)", () => {
+  it("la alergia dictada avisa en la receta aunque no esté confirmada, entra con su código y no se repite", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de alergia")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const amoxicillin = { genericName: "amoxicilina", strength: "500 mg", dosageForm: "cápsula", dose: "1 cápsula", frequency: "cada 8 horas", duration: "7 días" }
+    const [allergy, recipe] = (
+      await segment({
+        drafts: [
+          { kind: "receta", payload: amoxicillin },
+          { kind: "alergia", payload: { substance: "penicilina", reaction: "ronchas" }, sourceText: "es alérgica a la penicilina, le salieron ronchas" },
+        ],
+      })
+    ).suggestions
+    // La alergia va antes que la receta: la que se acaba de dictar ya avisa en el mismo tramo.
+    expect(allergy).toMatchObject({ kind: "alergia", status: "lista", summary: "Alergia a penicilinas\nronchas", payload: { substanceSystem: "atc", substanceCode: "J01C", pending: ["severity"] } })
+    expect(allergy!.note).toContain("¿Qué tan fuerte fue?")
+    expect(recipe).toMatchObject({ kind: "receta", status: "por_revisar" })
+    expect(recipe!.note).toContain("Aviso de la alergia que dictaste hoy")
+    expect(dictationModelLabel(allergy!, DENTAL_DICTATION)).toBe("Alergias: penicilinas · falta: qué tan fuerte fue")
+
+    // Un toque en «Severa» la completa; descartarla quita el aviso de la receta.
+    const severe = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, allergy!.id, { severity: "severa" }))
+    expect(severe).toMatchObject({ status: "lista", note: null, payload: { severity: "severa" } })
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, allergy!.id))
+    const pending = () => fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+    expect((await pending()).find((item) => item.id === recipe!.id)).toMatchObject({ status: "lista", note: null })
+
+    // Dicha otra vez y confirmada: entra a sus alergias con su código, y la receta avisa como siempre.
+    const [again] = (await segment({ drafts: [{ kind: "alergia", payload: { substance: "Penicilina", severity: "moderada" } }] })).suggestions
+    expect((await pending()).find((item) => item.id === recipe!.id)).toMatchObject({ status: "por_revisar" })
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, again!.id))
+    const [row] = await ownerDb.select().from(patientAllergy).where(and(eq(patientAllergy.patientId, fx.patient.id), eq(patientAllergy.isActive, true)))
+    expect(row).toMatchObject({ substanceSystem: "atc", substanceCode: "J01C", severity: "moderada" })
+    expect((await pending()).find((item) => item.id === recipe!.id)?.note).toContain("Aviso de alergia:")
+
+    // Ya registrada: no se propone otra vez, se avisa. «Niega alergias» con alergias es «Sin alergias nuevas».
+    const known = await segment({ drafts: [{ kind: "alergia", payload: { substance: "penicilinas" } }, { kind: "alergia", payload: { none: true } }] })
+    expect(known.alreadyOnFile).toEqual(["penicilinas"])
+    expect(known.suggestions).toMatchObject([{ kind: "alergia", summary: "Sin alergias nuevas" }])
+    await ownerDb.update(patient).set({ allergiesReviewedAt: null }).where(eq(patient.id, fx.patient.id))
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, known.suggestions[0]!.id))
+    expect((await ownerDb.select({ at: patient.allergiesReviewedAt }).from(patient).where(eq(patient.id, fx.patient.id)))[0]?.at).not.toBeNull()
+
+    // «No, no era alérgica»: lo confirmado no se quita solo; «Quitar de sus alergias» la quita como error.
+    const asked = await segment({ drafts: [], segmentId: randomUUID(), removals: [{ suggestionId: again!.id, said: "no, no era alérgica" }] })
+    expect(asked.undoRequested).toEqual([again!.id])
+    await fx.run((tx) => undoConfirmedDictation(tx, ...fx.args, fx.encounter.id, again!.id))
+    expect((await ownerDb.select().from(patientAllergy).where(eq(patientAllergy.id, row!.id)))[0]).toMatchObject({ isActive: false, removedReason: "error" })
+    await enable(false)
+  })
+
+  it("lo hecho hoy sale del plan (y lo acepta al hacerlo), de los servicios o queda como acto libre; sin pieza, se pregunta", async () => {
+    await enable(true)
+    const fx = await openSession("Resina hecha hoy", "tooth")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+
+    // Sin pieza: lo hecho sí la necesita, se pregunta.
+    const [noTooth] = (await segment({ drafts: [{ kind: "procedimiento", payload: { service: "resina hecha hoy" } }] })).suggestions
+    expect(noTooth).toMatchObject({ status: "por_revisar", note: "¿En qué pieza lo hiciste? Tócala o dila.", payload: { source: "servicio", pending: ["toothNumber"] } })
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, noTooth!.id))
+
+    // Indicada hoy en la 36, aún sin aceptar: «le hice la resina de la 36» sale de ese tratamiento.
+    const [indicated] = (await segment({ drafts: [{ kind: "plan", payload: { service: "resina hecha hoy", toothNumber: 36 } }] })).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, indicated!.id))
+    const [done, direct, free] = (
+      await segment({
+        drafts: [
+          { kind: "procedimiento", payload: { service: "resina hecha hoy", toothNumber: 36 } },
+          { kind: "procedimiento", payload: { service: "resina hecha hoy", toothNumber: 46 } },
+          { kind: "procedimiento", payload: { service: "pulido de bordes incisales" } },
+        ],
+      })
+    ).suggestions
+    const planRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, indicated!.id)))[0]!
+    expect(done).toMatchObject({ status: "lista", payload: { source: "plan", planItemId: planRow.entityId, acceptOnDo: true, toothNumber: 36 } })
+    expect(done!.note).toContain("queda aceptado y hecho")
+    expect(done!.summary).toContain("Hecho hoy · Resina hecha hoy")
+    expect(direct).toMatchObject({ status: "lista", payload: { source: "servicio", serviceId: fx.service.id, toothNumber: 46 } })
+    expect(free).toMatchObject({ status: "lista", payload: { source: "libre" } })
+    expect(free!.note).toContain("No está en tus servicios")
+
+    for (const item of [done, direct, free]) await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, item!.id))
+    expect((await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.id, planRow.entityId!)))[0]).toMatchObject({ decisionStatus: "aceptado", decisionNote: "Aceptado al hacerlo en la atención" })
+    const procedures = await ownerDb.select().from(encounterProcedure).where(eq(encounterProcedure.encounterId, fx.encounter.id))
+    expect(procedures.map((row) => [row.planItemId === planRow.entityId, row.serviceId, row.priceCents === null]).sort()).toEqual(
+      [[true, fx.service.id, false], [false, fx.service.id, false], [false, null, true]].sort(),
+    )
+
+    // «No, eso no se hizo» sobre uno ya confirmado: «Anular el procedimiento».
+    await segment({ drafts: [], segmentId: randomUUID(), removals: [{ suggestionId: free!.id, said: "no, el pulido no se hizo" }] })
+    await fx.run((tx) => undoConfirmedDictation(tx, ...fx.args, fx.encounter.id, free!.id))
+    const freeRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, free!.id)))[0]!
+    expect((await ownerDb.select().from(encounterProcedure).where(eq(encounterProcedure.id, freeRow.entityId!)))[0]?.voidedAt).not.toBeNull()
     await enable(false)
   })
 })

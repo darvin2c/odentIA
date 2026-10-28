@@ -1,9 +1,10 @@
+import { toast } from "@odentia/ui"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento"
 
 export interface DictationSuggestion {
   id: string
@@ -17,6 +18,8 @@ export interface DictationSuggestion {
   voice: { before: string } | null
   /** Quitada por voz: lo que dijo para pedirlo. Se puede deshacer hasta firmar. */
   removal: { said: string } | null
+  /** Ya confirmada, y se pidió quitarla en voz alta: espera «Quitar del plan» o «Dejarla». */
+  undoRequest?: { said: string } | null
 }
 
 export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
@@ -29,6 +32,8 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   signos: "Signos vitales",
   examen: "Examen físico",
   descanso: "Descanso médico",
+  alergia: "Alergias",
+  procedimiento: "Procedimientos",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -92,6 +97,8 @@ interface SegmentResponse {
     /** Partes de este tramo que el asistente no pudo usar y, si se sabe, lo que se dijo para pedirlas. */
     omitted: number
     unused: string[]
+    /** Alergias dichas que ya estaban registradas: no se proponen otra vez. */
+    alreadyOnFile?: string[]
     repeated: boolean
     model: string | null
   }
@@ -145,6 +152,9 @@ export function useDictationSession({
           enabled: boolean
           suggestions: DictationSuggestion[]
           removedByVoice: DictationSuggestion[]
+          undoRequests?: DictationSuggestion[]
+          /** Las piezas nombradas en lo dictado de esta atención. */
+          teeth?: number[]
           confirmed: number
           /** Por qué Clío no escucha en esta atención (el presupuesto del mes o el saldo de prueba); null si escucha. */
           blocked?: { code: string; message: string } | null
@@ -156,6 +166,8 @@ export function useDictationSession({
   const enabled = active && query.data?.data.enabled === true
   const suggestions = useMemo(() => query.data?.data.suggestions ?? [], [query.data])
   const removedByVoice = useMemo(() => query.data?.data.removedByVoice ?? [], [query.data])
+  const undoRequests = useMemo(() => query.data?.data.undoRequests ?? [], [query.data])
+  const teeth = useMemo(() => query.data?.data.teeth ?? [], [query.data])
   const confirmed = query.data?.data.confirmed ?? 0
   const blocked = query.data?.data.blocked ?? null
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: key }), [queryClient, key])
@@ -199,6 +211,8 @@ export function useDictationSession({
       const data = response.data
       if (data.model) setDemo(data.model === "fake")
       if (data.sources.length) setHighlights((current) => [...current, ...data.sources])
+      // La alergia que ya estaba registrada no se propone otra vez: se dice y se sigue.
+      for (const name of data.alreadyOnFile ?? []) toast(`La alergia a ${name} ya está en sus antecedentes.`)
       if (data.omitted > 0) {
         setUnused((current) => ({
           phrases: [...current.phrases, ...data.unused.filter((phrase) => !current.phrases.includes(phrase))],
@@ -388,12 +402,24 @@ export function useDictationSession({
   const act = useMutation({
     retry: false,
     // «undo-voice» deshace lo hecho en voz alta: una corrección o un «quita».
-    mutationFn: async (input: { item: DictationSuggestion; action: "confirm" | "discard" | "undo-voice" }) => {
+    // «undo-confirmed» quita lo ya confirmado que se pidió quitar; «keep» lo deja como está.
+    mutationFn: async (input: { item: DictationSuggestion; action: "confirm" | "discard" | "undo-voice" | "undo-confirmed" | "keep" }) => {
       await apiFetch(`${base}/${input.item.id}/${input.action}`, { method: "POST" })
       return input
     },
     onSuccess: (input) => {
-      if (input.action === "confirm") onApplied(input.item)
+      // Quitar lo ya confirmado cambia la atención: se refresca como al confirmar.
+      if (input.action === "undo-confirmed") onApplied(input.item)
+      if (input.action !== "confirm") return
+      onApplied(input.item)
+      // Lo que cambia fuera de la tarjeta se dice al confirmar, no antes.
+      const options = Array.isArray(input.item.payload["options"]) ? input.item.payload["options"].length : 0
+      if (input.item.kind === "plan" && options > 0) {
+        toast.success(`Entró al plan. Su presupuesto en borrador quedó con ${options === 1 ? "las dos opciones" : "las tres opciones"}.`)
+      }
+      if (input.item.kind === "procedimiento" && input.item.payload["acceptOnDo"] === true) {
+        toast.success("Quedó hecho y el tratamiento, aceptado. Se cobra al cerrar la atención.")
+      }
     },
     onSettled: () => void refresh(),
   })
@@ -407,6 +433,8 @@ export function useDictationSession({
       return { item: updated.data, confirmed: true }
     },
     onSuccess: (result) => {
+      // Lo que falló antes con esta sugerencia ya no vale: se acaba de corregir.
+      if (act.variables?.item.id === result.item.id) act.reset()
       if (result.confirmed) onApplied(result.item)
     },
     onSettled: () => void refresh(),
@@ -422,6 +450,24 @@ export function useDictationSession({
         }
       } finally {
         // Las que sí entraron se reflejan aunque una posterior falle.
+        for (const item of done) onApplied(item)
+      }
+      return done
+    },
+    onSettled: () => void refresh(),
+  })
+
+  /** «Firmar con N marcadas»: confirma las marcadas, una por una, antes de firmar. */
+  const confirmMany = useMutation({
+    retry: false,
+    mutationFn: async (ids: string[]) => {
+      const done: DictationSuggestion[] = []
+      try {
+        for (const item of suggestions.filter((candidate) => ids.includes(candidate.id) && confirmable(candidate))) {
+          await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
+          done.push(item)
+        }
+      } finally {
         for (const item of done) onApplied(item)
       }
       return done
@@ -461,6 +507,10 @@ export function useDictationSession({
     suggestions,
     /** Quitadas por voz, a la vista en su bloque con «Deshacer». No cuentan como pendientes. */
     removedByVoice,
+    /** Ya confirmadas que se pidió quitar en voz alta, en su bloque con «Quitar del plan» y «Dejarla». */
+    undoRequests,
+    /** Las piezas nombradas en lo dictado de esta atención, para elegir con un toque la que falta. */
+    teeth,
     pending: suggestions.length,
     ready,
     confirmed,
@@ -494,6 +544,7 @@ export function useDictationSession({
     act,
     save,
     confirmReady,
+    confirmMany,
     issuePrescription,
     settlePrescription,
     settleMedicalLeave,
@@ -522,6 +573,7 @@ export function suggestionMissing(item: DictationSuggestion): string {
   if (item.kind === "plan" && typeof item.payload["serviceId"] !== "string") return "falta elegir la prestación"
   if (item.kind === "diagnostico") return "falta revisar el diagnóstico"
   if (item.kind === "odontograma") return "falta completar el hallazgo"
+  if (item.kind === "procedimiento") return "falta la pieza"
   return "falta completarla"
 }
 

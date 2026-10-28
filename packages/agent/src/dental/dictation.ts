@@ -7,6 +7,7 @@ import {
 } from "@odentia/services"
 import { z } from "zod"
 import {
+  allergyAndDonePrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -32,6 +33,8 @@ export const extraction = z.object({
   indicaciones: dictationList("plan.indicacion", "Un elemento por cada tratamiento que indicó para el plan."),
   recetas: dictationList("receta.medicamento", "Un elemento por cada medicamento que recetó."),
   controles: dictationList("control.crear", "Un elemento por cada control que pidió."),
+  alergias: dictationList("alergia.dictada", "Un elemento por cada alergia del paciente que se dijo, o uno con `none` si no tiene."),
+  procedimientos: dictationList("atencion.procedimiento", "Un elemento por cada cosa que el odontólogo ya hizo hoy en la atención."),
   ...dictationEdits("toothNumber"),
 })
 
@@ -42,6 +45,8 @@ const DRAFT_PARTS = [
   { key: "indicaciones", kind: "plan" },
   { key: "recetas", kind: "receta" },
   { key: "controles", kind: "control" },
+  { key: "alergias", kind: "alergia" },
+  { key: "procedimientos", kind: "procedimiento" },
 ] as const
 
 export function systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string {
@@ -52,6 +57,10 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     "En `dicho` va solo la frase de la que sale ese registro, no todo lo dictado: con ella el odontólogo ve qué se usó y qué no.",
     "Si se corrige («en la veinticinco… no, es la veintiséis»), vale lo último que dijo. Si pide quitar algo («quita la endodoncia»), no lo registres.",
     "Si recibes sugerencias pendientes numeradas y lo nuevo corrige o quita una de ellas, usa `correcciones` o `quitar` con su número en vez de registrarla otra vez. Lo marcado como ya ordenado sirve para entender lo nuevo: no lo registres de nuevo. Pero ya no está pendiente (se confirmó o se descartó): si lo nuevo lo cambia o lo vuelve a indicar con otros datos, es un registro nuevo, no una corrección.",
+    "Quitar se dice de muchas formas, casi nunca con «quita»: «quítale…», «sácale…», «borra…», «…ya no», «…no va», «eso no», «mejor no», «olvida lo de…», «no, el … no». Si señala una pendiente, va en `quitar` con su número, aunque diga además qué hará después («la dejamos en observación», «lo vemos con la radiografía»): eso que comenta no es una indicación para el paciente ni un registro nuevo. Una negación que describe al paciente (que ya no le duele, que no hay sangrado, que no tiene movilidad) no quita ni corrige nada.",
+    "Las numeradas con «· ya confirmada» ya entraron a la atención: si pide quitar una, va en `quitar` con su número y el odontólogo lo aprueba. No las corrijas: si cambia algo de una, es un registro nuevo.",
+    "Nombrar otra vez una pendiente para confirmarla o quedarse con ella («solo profilaxis», «sí, la resina») no es un registro nuevo: no la repitas.",
+    "Si una pendiente dice lo que le falta («falta: la cara», «falta: la pieza») y lo nuevo es ese dato, aunque lo diga suelto («oclusal», «en la veinticinco»), es una corrección de esa pendiente con ese campo. Si varias piden lo mismo, la más reciente.",
     "Si el odontólogo nombra una sugerencia por su número («la tercera») y no hay ninguna con ese número, no corrijas ni quites otra: déjala en `correcciones` con ese número para que se le avise.",
     "Las piezas van en numeración FDI como número (dieciséis = 16, cuarenta y seis = 46).",
     "Lo que el odontólogo ve en una pieza (una caries, una pieza ausente, una corona, una restauración, una fractura…) es un hallazgo: va en `odontograma` con su código de la lista de hallazgos, no en `diagnosticos`. El sistema le pone el diagnóstico que le corresponde.",
@@ -65,6 +74,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
+    ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
     "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")
@@ -134,13 +144,19 @@ export function demoExtraction(
       const tooth = toothIn(sentence)
       if (tooth) drafts.push({ kind: "odontograma", payload: { toothNumber: tooth, condition: "missing_tooth" }, sourceText: sentence })
     }
+    // «Es alérgica a la penicilina»; «niega alergias».
+    const allergy = /\balergic[oa] a (?:la |el |los |las )?([a-z]+)/.exec(text)
+    if (allergy?.[1]) drafts.push({ kind: "alergia", payload: { substance: allergy[1] }, sourceText: sentence })
+    else if (/\b(niega alergias|no tiene alergias|sin alergias)\b/.test(text)) drafts.push({ kind: "alergia", payload: { none: true }, sourceText: sentence })
+    // Lo contado como hecho («le hice…», «terminé…») es un procedimiento de hoy, no una indicación.
+    const done = /\b(le hice|hice|termine|terminamos|le puse)\b/.test(text)
     for (const name of services) {
       const key = plain(name).split(" ").filter((word) => word.length >= 4)[0]
       if (!key || !text.includes(key)) continue
       const tooth = toothIn(sentence)
       const surfaces = SURFACES.filter((surface) => text.includes(surface))
       drafts.push({
-        kind: "plan",
+        kind: done ? "procedimiento" : "plan",
         payload: { service: name, ...(tooth ? { toothNumber: tooth } : {}), ...(surfaces.length ? { surfaces } : {}) },
         sourceText: sentence,
       })
@@ -185,8 +201,10 @@ export function demoSegment(
     if (fix) {
       // Lo último que se dijo: una sugerencia de este mismo tramo o, si no hay, la última pendiente.
       const last = [...drafts].reverse().find((draft) => draft.kind !== "nota" && draft.kind !== "control")
+      // Lo ya confirmado no se corrige por voz: solo la última aún pendiente.
+      const open = pending.map((item, index) => ({ item, index })).filter(({ item }) => !item.label.endsWith("· ya confirmada")).at(-1)
       if (last) last.payload = { ...last.payload, toothNumber: fix }
-      else if (pending.length) corrections.push({ index: pending.length - 1, changes: { toothNumber: fix }, sourceText: sentence })
+      else if (open) corrections.push({ index: open.index, changes: { toothNumber: fix }, sourceText: sentence })
       continue
     }
     const drop = /^quita(?:r)? (?:la |el |los |las )?([a-z]{4,})/.exec(text)
