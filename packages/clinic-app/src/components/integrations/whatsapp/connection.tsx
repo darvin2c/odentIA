@@ -448,6 +448,16 @@ export function WhatsAppConnection({
             «Cambiar la clave».
           </p>
         ) : null}
+        {/* Coexistencia: el número sigue en el celular y lo que se escribe ahí llega a la Bandeja. */}
+        {active && connection.signup?.businessApp ? (
+          <p className="text-sm text-muted-foreground">
+            Este número sigue en la app WhatsApp Business del celular: lo que respondas desde ahí también aparece en la
+            Bandeja, y el agente espera mientras conversas.
+            {connection.signup.historyDeclined
+              ? " Al conectar no se compartieron las conversaciones anteriores: la Bandeja las muestra desde entonces."
+              : ""}
+          </p>
+        ) : null}
         {/* Quien solo consulta lee qué falta, con las palabras del servidor; reintentar es de quien administra. */}
         {!canWrite && pending === "signup" ? (
           <ul className="flex flex-col gap-1 rounded-xl bg-warning-soft px-3.5 py-3 text-sm text-warning">

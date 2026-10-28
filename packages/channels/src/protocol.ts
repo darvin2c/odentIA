@@ -58,6 +58,20 @@ export interface NormalizedInbound {
   /** Lo reenvió: no lo escribió la persona (WhatsApp `context.forwarded`, Telegram `forward_origin`). */
   forwarded?: boolean
   /**
+   * Lo escribió el equipo desde la app WhatsApp Business del celular, con el
+   * número conectado en coexistencia (`smb_message_echoes`, o el historial).
+   * Sale de la clínica, no de la persona: hilo y remitente son los de la
+   * persona a quien se escribió. No despierta al agente.
+   */
+  fromBusinessApp?: boolean
+  /**
+   * Llegó con el historial del celular al conectar (`history`): ya pasó. No
+   * despierta al agente ni cuenta como sin leer, y conserva su hora (`sentAt`).
+   */
+  history?: boolean
+  /** Hasta dónde llegó un mensaje del equipo del historial, si Meta lo dice. */
+  historyStatus?: "sent" | "delivered" | "read"
+  /**
    * Prueba del chat web desde Configuración: la conversación nace marcada como
    * prueba (no se cobra, no crea a nadie en Pacientes, se borra a los 7 días).
    */
@@ -181,9 +195,26 @@ export interface NormalizedTemplateCategory {
   previous: TemplateCategory | null
 }
 
+/**
+ * Un contacto de la agenda de la app WhatsApp Business del celular
+ * (`smb_app_state_sync`). Solo pone nombre a quien ya escribió por ese canal:
+ * nunca crea a una persona ni la identifica por su teléfono.
+ */
+export interface NormalizedAppContact {
+  /** Identidad del canal (`wa:<número>`), la misma con la que llegan sus mensajes. */
+  externalUserId: string
+  name: string | null
+  /** Lo quitó de la agenda del celular. */
+  removed: boolean
+}
+
 export interface WebhookParseResult {
   messages: NormalizedInbound[]
   statuses: NormalizedStatus[]
+  /** Contactos de la app WhatsApp Business del celular (coexistencia). */
+  appContacts?: NormalizedAppContact[]
+  /** La clínica no quiso compartir el historial del celular al conectar. */
+  historyDeclined?: boolean
   templateStatuses?: NormalizedTemplateStatus[]
   templateCategories?: NormalizedTemplateCategory[]
 }

@@ -145,6 +145,8 @@ export interface MessageItem {
   held: boolean
   /** Lo reenvió la persona: no lo escribió ella. */
   forwarded: boolean
+  /** Lo escribió el equipo desde la app WhatsApp Business del celular (coexistencia). */
+  fromBusinessApp: boolean
   /** La reacción de la persona a este mensaje (👍…); nula si no reaccionó. No confirma nada. */
   contactReaction: string | null
   /** Ubicación que mandó la persona (`contentType` «location»). */
@@ -179,6 +181,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
     replyToMessageId: row.replyToMessageId ?? null,
     held: row.held,
     forwarded: row.forwarded,
+    fromBusinessApp: row.fromBusinessApp,
     contactReaction: row.contactReaction,
     location: row.location ?? null,
     redactedAt: row.redactedAt ? row.redactedAt.toISOString() : null,
@@ -238,6 +241,10 @@ export async function ingestInbound(
   }
 
   const channel = connection.channel
+  // Coexistencia: lo que el equipo escribió desde la app del celular sale de la
+  // clínica, y el historial al conectar ya pasó. Ninguno es la persona escribiendo ahora.
+  const fromTeam = event.fromBusinessApp === true
+  const past = event.history === true
   if (event.content.type === "reaction")
     return applyReaction(tx, orgId, connection.id, event.externalThreadId, event.content)
   // Serializar creación/resolución/traslado de identidad bajo el mismo
@@ -257,7 +264,7 @@ export async function ingestInbound(
       .from(contact)
       .where(and(eq(contact.id, contactId), eq(contact.organizationId, orgId)))
       .limit(1)
-    if (person && !person.isActive)
+    if (person && !person.isActive && !fromTeam && !past)
       await applyContactActive(tx, orgId, contactId, true, { userId: null })
     // Escribió desde ese número: sí tiene WhatsApp (decisión 23).
     if (identity.noWhatsappAt) {
@@ -322,7 +329,8 @@ export async function ingestInbound(
     threadContactId = existing.contactId
     // Todo mensaje de la persona reabre la conversación cerrada antes que nada
     // (ADR 0024): ningún entrante queda escondido en una cerrada.
-    if (existing.status === "closed") {
+    // Lo que escribe el equipo, o lo que ya pasó, no la reabre.
+    if (existing.status === "closed" && !fromTeam && !past) {
       await reopenIfClosed(tx, orgId, existing.id, { userId: null, via: "entrante" })
     }
     // Hilo compartido (p. ej. grupo de Telegram con otro remitente):
@@ -449,6 +457,8 @@ export async function ingestInbound(
     contentType === "audio" &&
     body === null &&
     deps.transcribe &&
+    !fromTeam &&
+    !past &&
     (await agentReadsThread(tx, orgId, conversationId))
   ) {
     try {
@@ -472,18 +482,25 @@ export async function ingestInbound(
   // Dedupe: ON CONFLICT DO NOTHING sin arbiter (el índice es parcial y el
   // especificador de columnas no lo satisface; el único unique en juego es
   // el de (conversation_id, external_id)).
+  const sentAt = new Date(event.sentAt)
+  const at = Number.isNaN(sentAt.getTime()) ? new Date() : sentAt
   const inserted = await tx
     .insert(message)
     .values({
       organizationId: orgId,
       conversationId,
-      direction: "in",
-      senderKind: "contact",
+      // Del celular: lo escribió el equipo, sin una persona de odentIA que lo firme.
+      // Así el agente lo ve como el equipo conversando y espera (ADR 0050).
+      direction: fromTeam ? "out" : "in",
+      senderKind: fromTeam ? "user" : "contact",
       contentType,
       body,
       attachments,
       externalId: event.externalMessageId,
-      status: "received",
+      status: fromTeam ? (event.historyStatus ?? "sent") : "received",
+      ...(fromTeam ? { sentAt: at, fromBusinessApp: true } : {}),
+      // El historial conserva su hora: el hilo queda en orden y no parece de ahora.
+      ...(past ? { createdAt: at } : {}),
       error: mediaError,
       replyToMessageId,
       forwarded: event.forwarded === true,
@@ -510,21 +527,39 @@ export async function ingestInbound(
   const messageId = first.id
 
   const now = new Date()
-  await tx
-    .update(conversation)
-    .set({
-      lastInboundAt: now,
-      lastMessageAt: now,
-      unreadCount: sql`"unread_count" + 1`,
-      // La persona respondió: si vuelve a callar, el agente puede insistir otra vez.
-      nudgedAt: null,
-      updatedAt: now,
-    })
-    .where(eq(conversation.id, conversationId))
-  await tx
-    .update(contact)
-    .set({ lastInteractionAt: now, updatedAt: now })
-    .where(eq(contact.id, threadContactId))
+  if (fromTeam || past) {
+    // El historial llega por partes y sin orden: solo adelanta lo que es más nuevo.
+    const when = past ? at : now
+    await tx
+      .update(conversation)
+      .set({
+        lastMessageAt: sql`greatest(${conversation.lastMessageAt}, ${when.toISOString()}::timestamptz)`,
+        // Lo que escribió la persona en el historial abre las 24 horas de WhatsApp desde entonces.
+        ...(fromTeam ? {} : { lastInboundAt: sql`greatest(${conversation.lastInboundAt}, ${when.toISOString()}::timestamptz)` }),
+        updatedAt: now,
+      })
+      .where(eq(conversation.id, conversationId))
+    await tx
+      .update(contact)
+      .set({ lastInteractionAt: sql`greatest(${contact.lastInteractionAt}, ${when.toISOString()}::timestamptz)`, updatedAt: now })
+      .where(eq(contact.id, threadContactId))
+  } else {
+    await tx
+      .update(conversation)
+      .set({
+        lastInboundAt: now,
+        lastMessageAt: now,
+        unreadCount: sql`"unread_count" + 1`,
+        // La persona respondió: si vuelve a callar, el agente puede insistir otra vez.
+        nudgedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(conversation.id, conversationId))
+    await tx
+      .update(contact)
+      .set({ lastInteractionAt: now, updatedAt: now })
+      .where(eq(contact.id, threadContactId))
+  }
   if (mediaError) {
     await audit(tx, orgId, {
       action: "message.media_failed",

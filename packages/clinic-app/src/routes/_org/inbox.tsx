@@ -2662,6 +2662,10 @@ function MessageBubble({
           <span className="text-xs font-semibold text-warning">{highlight === "asked" ? "Sobre el tema" : "Tema · te toca"}</span>
         ) : null}
         {out && !byAgent && senderName ? <span className="text-xs font-semibold text-muted-foreground">{senderName}</span> : null}
+        {/* Coexistencia: lo respondió alguien del equipo desde la app del celular. */}
+        {out && !byAgent && !senderName && msg.fromBusinessApp ? (
+          <span className="text-xs font-semibold text-muted-foreground">Desde el celular</span>
+        ) : null}
         {/* Reenviado: no lo escribió la persona (fase 7). */}
         {msg.forwarded ? <span className="text-xs italic text-muted-foreground">Reenviado</span> : null}
         {quote === "missing" ? (

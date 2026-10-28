@@ -96,6 +96,9 @@ export async function processInbound(
         return
       }
       if (!result.created) return
+      // Lo que el equipo escribió desde el celular, o el historial al conectar:
+      // queda en el hilo, pero nadie lo atiende ni le responde.
+      if (msg.message.event.fromBusinessApp || msg.message.event.history) return
       // Spam y bloqueados (ADR 0054): lo que escriben queda guardado, pero el
       // agente no lo atiende y el sistema no les responde. A quien está en
       // Spam se lo vuelve a mirar solo si escribió algo nuevo (decisión 9a);

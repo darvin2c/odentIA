@@ -58,7 +58,23 @@ export interface ConnectionSignup {
   /** Cuándo quedó registrado el número para enviar y recibir. Nulo: falta. */
   registeredAt: string | null
   /** Qué pasó en el último intento de cada paso que sigue pendiente, en palabras. */
-  problems: { suscribir?: string; registrar?: string }
+  problems: { suscribir?: string; registrar?: string; sincronizar?: string }
+  /**
+   * El número sigue en la app WhatsApp Business del celular (coexistencia): ya
+   * estaba registrado y odentIA no lo registra; `registeredAt` es cuándo se conectó.
+   */
+  businessApp?: boolean
+  /**
+   * Coexistencia: cuándo se pidió a Meta la agenda de contactos y el historial
+   * del celular, con el `request_id` que devolvió cada pedido. Meta deja pedir
+   * cada uno una sola vez, dentro de las 24 horas de haber entrado con Facebook.
+   */
+  sync?: {
+    contacts?: { at: string; requestId: string | null }
+    history?: { at: string; requestId: string | null }
+    /** La clínica no quiso compartir el historial en la ventana de Meta. */
+    historyDeclinedAt?: string
+  }
   /**
    * Cuándo vence la clave que dio Meta al entrar con Facebook o al renovarla
    * sola (#121). Nulo o ausente: aún no se sabe; el worker se lo pregunta a Meta.
@@ -598,6 +614,12 @@ export const message = pgTable(
      * Telegram `forward_origin`). El agente no lo toma como dicho por ella.
      */
     forwarded: boolean("forwarded").notNull().default(false),
+    /**
+     * Lo escribió el equipo desde la app WhatsApp Business del celular, con el
+     * número en coexistencia: sale de la clínica (`direction` 'out', `sender_kind`
+     * 'user') sin una persona de odentIA que lo firme.
+     */
+    fromBusinessApp: boolean("from_business_app").notNull().default(false),
     /**
      * La reacción de la persona a este mensaje (👍, ❤️…), la última que puso; nula
      * si no reaccionó o la quitó. Una reacción no es un mensaje ni confirma nada

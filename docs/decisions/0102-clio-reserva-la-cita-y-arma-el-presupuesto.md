@@ -21,7 +21,7 @@ Dentro de la atención solo se reservaba desde un control pendiente, y el presup
 
 ## Consecuencias
 
-- Dos clases nuevas de sugerencia, comunes a los dos productos: `cita` y `presupuesto` (migración 0013).
+- Dos clases nuevas de sugerencia, comunes a los dos productos: `cita` y `presupuesto` (migración 0014).
 - Se mide con `eval:dictado` (banco de siempre y `eval/dictado-caotico.json`) y `eval:dictado-medico`.
 
 ## Referencias

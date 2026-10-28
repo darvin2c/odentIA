@@ -24,7 +24,16 @@ export interface MetaPlatformApp {
  * «renovar» y «revisar» son de la clave ya guardada, no del alta (darvin2c/odentIA#121).
  * «comprobar» y «leer» son de una conexión hecha con la app propia de la clínica.
  */
-export type MetaSignupStep = "canjear" | "suscribir" | "registrar" | "renovar" | "revisar" | "comprobar" | "leer"
+export type MetaSignupStep =
+  | "canjear"
+  | "buscar"
+  | "suscribir"
+  | "registrar"
+  | "sincronizar"
+  | "renovar"
+  | "revisar"
+  | "comprobar"
+  | "leer"
 
 /** Meta no aceptó un paso. Lleva lo que respondió, sin interpretarlo. */
 export class MetaSignupError extends Error {
@@ -227,6 +236,35 @@ export async function inspectSignupToken(
 }
 
 /**
+ * Los números de una cuenta de WhatsApp Business, con la clave de la clínica.
+ * Sirve cuando la ventana de Meta termina con un número de la app del celular
+ * (`FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`): Meta solo promete la cuenta en
+ * ese aviso, no el número.
+ *
+ * `GET /<WABA_ID>/phone_numbers?fields=id` → `{ data: [{ id }] }`
+ * https://developers.facebook.com/docs/whatsapp/business-management-api/manage-phone-numbers
+ */
+export async function listAccountNumbers(
+  app: Pick<MetaPlatformApp, "graphVersion">,
+  wabaId: string,
+  token: string,
+  deps: ChannelAdapterDeps,
+): Promise<string[]> {
+  const answer = await graph(
+    "buscar",
+    `${base(app)}/${encodeURIComponent(wabaId)}/phone_numbers?fields=id`,
+    { method: "GET", token },
+    deps,
+  )
+  if (answer.status >= 400) throw failure("buscar", answer)
+  const data = answer.json && typeof answer.json === "object" && "data" in answer.json ? answer.json.data : null
+  if (!Array.isArray(data)) throw new MetaSignupError("buscar", answer.status, null, "Meta respondió sin los números de la cuenta")
+  return data.flatMap((row: unknown) =>
+    row && typeof row === "object" && "id" in row && typeof row.id === "string" && row.id ? [row.id] : [],
+  )
+}
+
+/**
  * Paso 2: suscribe la app de odentIA a los avisos de la cuenta de WhatsApp
  * Business de la clínica. Sin esto Meta no entrega nada de esa cuenta. Los
  * avisos llegan a la dirección de la app, la misma para todas las clínicas; no
@@ -277,6 +315,37 @@ export async function registerPhoneNumber(
     deps,
   )
   if (answer.status >= 400 || !succeeded(answer.json)) throw failure("registrar", answer)
+}
+
+/**
+ * Coexistencia: pide a Meta que mande la agenda de contactos
+ * (`smb_app_state_sync`) o el historial (`history`) de la app WhatsApp
+ * Business del celular. Llegan después como avisos a la dirección de la app.
+ * Meta deja pedir cada uno una sola vez, dentro de las 24 horas de haber
+ * entrado con Facebook. Devuelve el `request_id`, que Meta pide para soporte.
+ *
+ * `POST /<PHONE_NUMBER_ID>/smb_app_data` `{ messaging_product: "whatsapp", sync_type }`
+ * https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users
+ * (leída el 2026-10-28; sin probar contra Meta)
+ */
+export async function requestBusinessAppSync(
+  app: Pick<MetaPlatformApp, "graphVersion">,
+  phoneNumberId: string,
+  token: string,
+  syncType: "smb_app_state_sync" | "history",
+  deps: ChannelAdapterDeps,
+): Promise<string | null> {
+  const answer = await graph(
+    "sincronizar",
+    `${base(app)}/${encodeURIComponent(phoneNumberId)}/smb_app_data`,
+    { method: "POST", token, body: { messaging_product: "whatsapp", sync_type: syncType } },
+    deps,
+  )
+  if (answer.status >= 400 || (answer.json && typeof answer.json === "object" && "error" in answer.json)) {
+    throw failure("sincronizar", answer)
+  }
+  const id = answer.json && typeof answer.json === "object" && "request_id" in answer.json ? answer.json.request_id : null
+  return typeof id === "string" && id ? id : null
 }
 
 /** PIN de 6 dígitos para el registro, del generador criptográfico. */
