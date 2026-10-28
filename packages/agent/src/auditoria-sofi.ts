@@ -153,8 +153,55 @@ const LATIDIA_2: Scenario[] = [
   { id: "m16-cambia-de-hora", channel: "wa_nuevo", persona: "Iván quiere una consulta de medicina general. Primero pide hoy; cuando Sofi le proponga una hora, dice «mejor mañana temprano» y, cuando le den mañana, confirma. Si le piden datos: Iván Paredes Sol, DNI 45213698." },
 ]
 
-const SET_2 = env.TANDA === "2"
-const SCENARIOS = (PRODUCT === "odentia" ? (SET_2 ? ODENTIA_2 : ODENTIA) : SET_2 ? LATIDIA_2 : LATIDIA).filter((s) => ONLY.length === 0 || ONLY.some((id) => s.id.startsWith(id)))
+// Tercera tanda (27-oct, con main desplegado): casos que no se parecen a los que guiaron los arreglos.
+const ODENTIA_3: Scenario[] = [
+  { id: "t01-se-salio-calza", channel: "wa_nuevo", persona: "Mariela escribe de noche: se le salió una curación (calza) de una muela comiendo y le molesta con el frío. Quiere saber si la pueden ver mañana temprano. Si le piden datos: Mariela Rojas Huanca, DNI 42587136." },
+  { id: "t02-todo-junto", channel: "wa_nuevo", persona: "Fernando escribe un mensaje largo, como nota de voz transcrita: quiere saber cuánto cuesta la ortodoncia para su hijo de 13 años, si aceptan tarjeta, y si pueden ver al chico el sábado. Mezcla todo sin puntos." },
+  { id: "t03-encias-es-grave", channel: "wa_nuevo", persona: "Liliana pregunta si es grave que le sangren las encías cuando muerde una manzana. No pide cita al inicio; si le ofrecen una evaluación, acepta un día de la próxima semana. Si le piden datos: Liliana Paz Soto, DNI 46987123." },
+  { id: "t04-con-faltas-esposo", channel: "wa_nuevo", persona: "Escribe con muchas faltas («kiero sakar sita pa mi esposo k le duele la mwela»). La cita es para su esposo, que nunca fue a la clínica. Ella es Doris Quispe; él, Julio Mamani Ccopa, DNI 41236985." },
+  { id: "t05-adelantar-cita", channel: "wa_conocido", patientName: "Elena Huamán", persona: "Elena Huamán, paciente. Quiere adelantar su próxima cita a lo más pronto posible, esta semana." },
+  { id: "t06-cuanto-debo", channel: "wa_conocido", patientName: "Rosa Quispe", persona: "Rosa Quispe, paciente. Pregunta cuánto debe todavía de su tratamiento y si puede pagar por Yape." },
+  { id: "t07-diseno-sonrisa-llamada", channel: "wa_nuevo", persona: "Gianella pregunta si hacen diseño de sonrisa y si hay financiamiento. Prefiere que la llamen por teléfono al 987 123 456 en vez de escribir." },
+  { id: "t08-furioso", channel: "wa_nuevo", persona: "Alguien furioso: dice que le cobraron 300 soles por nada en esa clínica, que son unos estafadores y que va a ir a Indecopi. Escribe en mayúsculas a ratos." },
+  { id: "t09-web-fuera-de-horario", channel: "web_nuevo", persona: "Jimena escribe desde la web. Pide cita para el sábado a las 7 de la noche porque trabaja. Si no se puede, pregunta qué opciones hay. Si le piden contacto: WhatsApp 956 321 478. Si le piden más: Jimena Torres Lazo, DNI 72365418." },
+  { id: "t10-web-solo-hola", channel: "web_nuevo", persona: "Alguien que escribe «hola» desde la web, recibe la respuesta y ya no escribe más." },
+  { id: "t11-no-abre-la-boca", channel: "wa_nuevo", persona: "Raúl, 38 años. Tiene la mejilla hinchada, fiebre desde ayer y casi no puede abrir la boca. Pregunta qué hacer y si lo atienden hoy." },
+  { id: "t12-diente-afuera", channel: "wa_nuevo", persona: "Andrea escribe nerviosa: su hijo de 10 años se cayó en bicicleta hace 15 minutos y se le salió un diente de adelante entero. Lo tiene en la mano. Pregunta qué hacer y si lo pueden ver ya." },
+  { id: "t13-madre-e-hija", channel: "wa_nuevo", persona: "Silvia quiere cita para ella y para su hija de 15 años el mismo día, una después de la otra, para una limpieza. Ninguna es paciente. Si le piden datos: Silvia Campos Ruiz, DNI 40125789; la hija, Camila Ríos Campos, DNI 77412589." },
+  { id: "t14-limpieza-profunda", channel: "wa_nuevo", persona: "Óscar pregunta la diferencia de precio entre una limpieza normal y una limpieza profunda, y cuál le conviene. Solo quiere saber." },
+  { id: "t15-cancela-y-reprograma", channel: "wa_conocido", patientName: "Carmen Rojas", persona: "Carmen Rojas, paciente. Ya no puede ir a su próxima cita: quiere cancelarla y que le den otra la próxima semana en la tarde." },
+  { id: "t16-proveedor", channel: "wa_nuevo", persona: "Un vendedor de una distribuidora de materiales dentales ofrece resinas y guantes con descuento y pide el correo del encargado de compras." },
+  { id: "t17-despues-del-trabajo", channel: "wa_nuevo", persona: "Hugo trabaja hasta las 6 de la tarde. Pregunta si hay citas después de esa hora para una evaluación. Si le piden datos: Hugo Salinas Vera, DNI 45698712." },
+  { id: "t18-turista-urgencia", channel: "wa_nuevo", persona: "Emma, a tourist from the UK, writes only in English: a molar hurts a lot since last night and she flies home in three days. Asks if they can see her today." },
+  { id: "t19-seguro-y-factura", channel: "wa_nuevo", persona: "Carlos Ugarte pregunta si aceptan Pacífico Seguros y si pueden darle factura con RUC de su empresa." },
+  { id: "t20-probar-muela-fondo", channel: "probar", persona: "", script: ["buenas", "me duele la muela del fondo", "para hoy?", "la primera que tengan", "mi wsp es 912 345 678", "sí"] },
+]
+
+const LATIDIA_3: Scenario[] = [
+  { id: "u01-bebita-no-come", channel: "wa_nuevo", persona: "Karen, mamá de una bebita de 3 meses que no quiere comer desde la mañana y está muy dormida, le cuesta despertarla. Escribe muy preocupada." },
+  { id: "u02-arde-al-orinar", channel: "wa_nuevo", persona: "Melissa, 28 años. Le arde al orinar desde ayer. Quiere una cita hoy o mañana. Si le piden datos: Melissa Huamán Ríos, DNI 47123658." },
+  { id: "u03-presion-alta", channel: "wa_nuevo", persona: "Don Alfredo, 70 años, trata de usted. Se tomó la presión: 180/110, y le duele la cabeza. Pregunta qué hacer y si lo pueden ver." },
+  { id: "u04-anticonceptivas", channel: "wa_nuevo", persona: "Paola quiere que le renueven la receta de sus pastillas anticonceptivas sin ir a consulta, porque ya las toma hace años." },
+  { id: "u05-vacuna-influenza", channel: "wa_nuevo", persona: "Jorge pregunta si ponen la vacuna contra la influenza, cuánto cuesta y si hay que sacar cita." },
+  { id: "u06-receta-anterior", channel: "wa_conocido", patientName: "Luis Gómez Salas", persona: "Luis Gómez Salas, paciente. Pide que le manden por aquí la receta de su última consulta porque la perdió." },
+  { id: "u07-descanso-medico", channel: "wa_nuevo", persona: "Brenda pide un certificado de descanso médico por tres días porque tiene gripe, pero no quiere ir a consulta." },
+  { id: "u08-teleconsulta-web", channel: "web_nuevo", persona: "Alguien desde la web pregunta si atienden los sábados y si hacen teleconsulta por videollamada." },
+  { id: "u09-mareos-usted", channel: "wa_nuevo", persona: "Doña Rosario, 74 años, trata de usted. Se marea cuando se levanta de la cama desde hace una semana. Quiere una cita mañana. Si le piden datos: Rosario Villena Paz, DNI 06123548." },
+  { id: "u10-picadura", channel: "wa_nuevo", persona: "Diego dice que algo le picó en el brazo, se le hinchó y le pica mucho, pero respira bien. Pregunta si lo pueden ver hoy." },
+  { id: "u11-mas-temprano", channel: "wa_conocido", patientName: "Julia Ramos Vega", persona: "Julia Ramos Vega, paciente. Pregunta si puede ir más temprano que la hora de su cita, porque se le cruzó algo." },
+  { id: "u12-ecografia", channel: "wa_nuevo", persona: "Natalia pregunta cuánto cuesta una ecografía transvaginal y si necesita una orden médica. Si le conviene, agenda la próxima semana. Si le piden datos: Natalia Ruiz Paz, DNI 71236548." },
+  { id: "u13-queja-y-cita", channel: "wa_nuevo", persona: "Enrique está molesto porque llamó varias veces y nadie contesta, pero igual quiere una cita de medicina general esta semana. Si le piden datos: Enrique Soto Lara, DNI 43658974." },
+  { id: "u14-expat-ingles", channel: "wa_nuevo", persona: "Mark, an American living in Lima, writes only in English: he has a sore throat and asks if a doctor there speaks English and if he can come tomorrow." },
+  { id: "u15-hijo-fiebre-web", channel: "web_nuevo", persona: "Lourdes escribe desde la web: su hijo de 6 años tiene fiebre de 38 y tos desde hace dos días. Quiere pediatría hoy. Si le piden contacto, deja su correo lourdes.v@gmail.com; si no sirve, su WhatsApp 934 567 812." },
+  { id: "u16-probar-fiebre", channel: "probar", persona: "", script: ["hola", "tengo fiebre y me duele todo el cuerpo desde ayer", "me pueden ver hoy?", "la primera que tengan", "mi whatsapp es 987 654 321", "sí, confirmo"] },
+]
+
+const TANDA = env.TANDA ?? "1"
+const SCENARIOS = (
+  PRODUCT === "odentia"
+    ? { "1": ODENTIA, "2": ODENTIA_2, "3": ODENTIA_3 }[TANDA]
+    : { "1": LATIDIA, "2": LATIDIA_2, "3": LATIDIA_3 }[TANDA]
+)!.filter((s) => ONLY.length === 0 || ONLY.some((id) => s.id.startsWith(id)))
 
 const storageStub = {
   putAvatar: async () => { throw new Error("no usado") },

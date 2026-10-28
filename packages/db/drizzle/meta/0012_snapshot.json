@@ -1,5 +1,5 @@
 {
-  "id": "5b68e866-2da5-400f-b7c4-fb7da610cf8f",
+  "id": "982621a4-5036-4679-8bfd-00ae4fb1696b",
   "prevId": "570ce57e-15de-4919-8259-8f64a3772c44",
   "version": "7",
   "dialect": "postgresql",
@@ -15834,6 +15834,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source_message_id": {
+          "name": "source_message_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "recorded_by": {
           "name": "recorded_by",
           "type": "text",
@@ -15964,7 +15970,11 @@
       "checkConstraints": {
         "patient_data_consent_channel_check": {
           "name": "patient_data_consent_channel_check",
-          "value": "\"patient_data_consent\".\"channel\" IN ('presencial','formulario_publico','portal')"
+          "value": "\"patient_data_consent\".\"channel\" IN ('presencial','formulario_publico','portal','chat')"
+        },
+        "patient_data_consent_chat_message_check": {
+          "name": "patient_data_consent_chat_message_check",
+          "value": "(\"patient_data_consent\".\"channel\" = 'chat') = (\"patient_data_consent\".\"source_message_id\" IS NOT NULL)"
         },
         "patient_data_consent_revoke_check": {
           "name": "patient_data_consent_revoke_check",
@@ -25399,13 +25409,6 @@
         },
         "forwarded": {
           "name": "forwarded",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "from_business_app": {
-          "name": "from_business_app",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
