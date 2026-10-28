@@ -84,7 +84,7 @@ export const orgProfile = pgTable("org_profile", {
   check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
   check(
     "org_profile_diagnosis_system_check",
-    sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11')`,
+    sql`${table.diagnosisSystem} IS NULL OR ${table.diagnosisSystem} IN ('ICD-10','ICD-11','ICD-10-PE')`,
   ),
   check("org_profile_ticket_footer_check", sql`length(trim(${table.ticketFooter})) BETWEEN 1 AND 280`),
 ])

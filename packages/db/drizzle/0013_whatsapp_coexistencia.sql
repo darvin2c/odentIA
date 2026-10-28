@@ -1,0 +1,1 @@
+ALTER TABLE "message" ADD COLUMN "from_business_app" boolean DEFAULT false NOT NULL;

@@ -3,7 +3,7 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { createHmac } from "node:crypto"
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
-import { channelConnection, channelTemplate } from "@odentia/db/schema/crm"
+import { channelConnection, channelTemplate, contact, contactIdentity } from "@odentia/db/schema/crm"
 import { createConnection, decryptConfig, secretsKeyFromEnv, type Storage } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
@@ -68,6 +68,7 @@ function fakeMeta(override?: (call: Call) => Answer) {
     if (path.endsWith("/oauth/access_token")) return { json: { access_token: `clave-de-${new URL(call.url).searchParams.get("code")}`, token_type: "bearer", expires_in: 5_184_000 } }
     if (path.endsWith("/subscribed_apps")) return { json: { success: true } }
     if (path.endsWith("/register")) return { json: { success: true } }
+    if (path.endsWith("/smb_app_data")) return { json: { request_id: `pedido-${(call.body as { sync_type: string }).sync_type}` } }
     if (call.url.includes("fields=display_phone_number")) {
       const id = path.split("/").at(-1)
       return { json: { id, display_phone_number: `+51 ${id}`, verified_name: "Clínica Sonríe" } }
@@ -161,7 +162,7 @@ beforeAll(async () => {
   ownerDb = createOwnerDb(`postgres://dentalagent:dentalagent@${host}/dentalagent`)
   await migrate(ownerDb, { migrationsFolder: "../../packages/db/drizzle" })
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}/dentalagent`)
-  for (const id of ["org_a", "org_b", "org_c", "org_d", "org_e", "org_f"]) await newOrg(id)
+  for (const id of ["org_a", "org_b", "org_c", "org_d", "org_e", "org_f", "org_g", "org_h"]) await newOrg(id)
 }, 180_000)
 
 afterAll(async () => {
@@ -299,6 +300,72 @@ describe("conectar con Facebook", () => {
     // La lista de conexiones la muestra con sus pasos hechos.
     const list = (await (await buildApp("org_a").request("/channels/connections")).json()) as { data: SignupData[] }
     expect(list.data.find((item) => item.id === data!.id)?.signup).toMatchObject({ pending: [] })
+  })
+
+  it("un número que sigue en la app WhatsApp Business del celular no se registra: ya lo está", async () => {
+    const meta = fakeMeta()
+    const { status, data } = await connect("org_g", meta, { code: "codigo-g", wabaId: "7007", phoneNumberId: "9007", businessApp: true })
+    expect(status).toBe(201)
+    expect(meta.of("POST", "/register")).toHaveLength(0)
+    // Suscrita la app, se pide la agenda y después el historial del celular, una vez cada uno.
+    expect(meta.steps().slice(0, 5)).toEqual([
+      "GET /oauth/access_token",
+      "GET /9007",
+      "POST /7007/subscribed_apps",
+      "POST /9007/smb_app_data",
+      "POST /9007/smb_app_data",
+    ])
+    expect(meta.of("POST", "/smb_app_data").map((call) => call.body)).toEqual([
+      { messaging_product: "whatsapp", sync_type: "smb_app_state_sync" },
+      { messaging_product: "whatsapp", sync_type: "history" },
+    ])
+    expect(data).toMatchObject({ externalId: "9007", signup: { pending: [], businessApp: true, historyDeclined: false } })
+    expect(data!.signup!.registeredAt).not.toBeNull()
+    expect((await rowOf(data!.id)).signup).toMatchObject({
+      businessApp: true,
+      sync: { contacts: { requestId: "pedido-smb_app_state_sync" }, history: { requestId: "pedido-history" } },
+    })
+  })
+
+  it("si el historial falla, queda pendiente y el reintento no vuelve a pedir la agenda", async () => {
+    await newOrg("org_i")
+    const meta = fakeMeta((call) =>
+      call.url.includes("/smb_app_data") && (call.body as { sync_type: string }).sync_type === "history"
+        ? { status: 500, json: { error: { message: "Error temporal", code: 2 } } }
+        : undefined,
+    )
+    const { data } = await connect("org_i", meta, { code: "codigo-i", wabaId: "7009", phoneNumberId: "9009", businessApp: true })
+    expect(data!.signup!.pending).toEqual([
+      { step: "sincronizar", title: expect.stringContaining("24 horas"), problem: "Meta no respondió. Reintenta en un momento." },
+    ])
+    const again = fakeMeta()
+    const retry = await post(buildApp("org_i", { fetch: again.fetch }), `/channels/whatsapp/signup/${data!.id}/retry`)
+    expect(retry.status).toBe(200)
+    expect(again.of("POST", "/smb_app_data").map((call) => (call.body as { sync_type: string }).sync_type)).toEqual(["history"])
+    expect(((await retry.json()) as { data: SignupData }).data.signup!.pending).toEqual([])
+    // Pasadas las 24 horas ya no se pide: Meta no lo deja; se dice que hay que volver a conectar.
+    const row = await rowOf(data!.id)
+    await ownerDb
+      .update(channelConnection)
+      .set({ signup: { ...row.signup!, grantedAt: new Date(Date.now() - 25 * 3_600_000).toISOString(), sync: {} } })
+      .where(eq(channelConnection.id, data!.id))
+    const late = fakeMeta()
+    const expired = (await (await post(buildApp("org_i", { fetch: late.fetch }), `/channels/whatsapp/signup/${data!.id}/retry`)).json()) as { data: SignupData }
+    expect(late.of("POST", "/smb_app_data")).toHaveLength(0)
+    expect(expired.data.signup!.pending[0]!.problem).toContain("Vuelve a conectar con Facebook")
+  })
+
+  it("si Meta solo dice la cuenta, el número de la app del celular se busca en ella", async () => {
+    const meta = fakeMeta((call) =>
+      call.url.includes("/7008/phone_numbers") ? { json: { data: [{ id: "9008" }] } } : undefined,
+    )
+    const { status, data } = await connect("org_h", meta, { code: "codigo-h", wabaId: "7008", businessApp: true })
+    expect(status).toBe(201)
+    expect(meta.steps().slice(0, 3)).toEqual(["GET /oauth/access_token", "GET /7008/phone_numbers", "GET /9008"])
+    expect(data).toMatchObject({ externalId: "9008", signup: { pending: [] } })
+    // Sin `businessApp` el número sigue siendo obligatorio.
+    const missing = await connect("org_h", fakeMeta(), { code: "codigo-x", wabaId: "7008" })
+    expect(missing.status).toBe(400)
   })
 
   it("el número que ya está conectado responde el mismo 409, aquí o en otra clínica", async () => {
@@ -617,6 +684,43 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect((await deliver(body(templateChange("7001", "odentia_cita_cancelada_v1", "PAUSED")))).status).toBe(200)
     expect((await templateOf("org_a", "odentia_cita_cancelada_v1"))?.status).toBe("pausada")
     expect((await templateOf("org_f", "odentia_cita_cancelada_v1"))?.status).toBe("en_revision")
+  })
+
+  it("coexistencia: lo del celular entra por la misma cola; la agenda solo nombra a quien ya escribió sin nombres", async () => {
+    const [g] = await rowsOf("org_g")
+    const person = async (name: string, number: string, given: string | null) => {
+      const [row] = await ownerDb.insert(contact).values({ organizationId: "org_g", displayName: name, givenNames: given }).returning({ id: contact.id })
+      await ownerDb.insert(contactIdentity).values({ organizationId: "org_g", contactId: row!.id, channel: "whatsapp", externalUserId: `wa:${number}` })
+      return row!.id
+    }
+    const unnamed = await person("51977000111", "51977000111", null)
+    const registered = await person("Ana Torres", "51977000222", "Ana")
+    const change = (field: string, value: Record<string, unknown>) => ({
+      id: "7007",
+      changes: [{ field, value: { messaging_product: "whatsapp", metadata: { display_phone_number: "x", phone_number_id: "9007" }, ...value } }],
+    })
+    const raw = body(
+      change("smb_message_echoes", {
+        message_echoes: [{ from: "51900000007", to: "51977000111", id: "wamid.ECO1", timestamp: "1735689600", type: "text", text: { body: "Te esperamos" } }],
+      }),
+      change("smb_app_state_sync", {
+        state_sync: [
+          { type: "contact", action: "add", contact: { full_name: "Rosa Quispe", phone_number: "51977000111" } },
+          { type: "contact", action: "add", contact: { full_name: "Anita", phone_number: "51977000222" } },
+          // Quien nunca escribió no se crea.
+          { type: "contact", action: "add", contact: { full_name: "Proveedor", phone_number: "51977000333" } },
+        ],
+      }),
+      change("history", { history: [{ errors: [{ code: 2593109, title: "History sync is turned off" }] }] }),
+    )
+    expect((await deliver(raw)).status).toBe(200)
+    expect((await queued()).at(-1)).toBe("org_g wamid.ECO1")
+    const names = await ownerDb.select({ id: contact.id, name: contact.displayName }).from(contact).where(eq(contact.organizationId, "org_g"))
+    expect(names.find((row) => row.id === unnamed)?.name).toBe("Rosa Quispe")
+    // Registrada con sus nombres (el nombre visible lo arma la base): la agenda no la cambia.
+    expect(names.find((row) => row.id === registered)?.name).toBe("Ana")
+    expect(names).toHaveLength(2)
+    expect((await rowOf(g!.id)).signup?.sync?.historyDeclinedAt).toBeTruthy()
   })
 
   it("la dirección propia de una conexión hecha con el botón no acepta avisos; la de una hecha a mano sigue igual", async () => {

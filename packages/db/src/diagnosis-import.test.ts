@@ -2,12 +2,14 @@ import { createHash } from "node:crypto"
 import { deflateRawSync } from "node:zlib"
 import { expect, it } from "vitest"
 import {
+  assertCompleteIcd10,
   assertSha256,
   diagnosisFileText,
   parseClaml,
   parseDelimited,
   parseDiagnosisFile,
   prepareDiagnosisRows,
+  readDiagnosisFile,
   readZipEntries,
 } from "./diagnosis-import.js"
 
@@ -145,6 +147,102 @@ it("lee el .zip tal como se descarga: su único archivo de datos, sin el readme"
     "b.csv": { text: "code,description\n", deflate: false },
   })
   expect(() => diagnosisFileText(two)).toThrow(/un solo archivo de datos/)
+})
+
+/** Un .xlsx mínimo con una sola hoja: cada fila, sus textos en la columna A (o en A y B). */
+function xlsxOf(rows: string[][], { sheetPath = "worksheets/hoja.xml" } = {}): Uint8Array {
+  const strings: string[] = []
+  const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  const sheetRows = rows
+    .map((cells, r) => {
+      const xml = cells
+        .map((value, c) => {
+          strings.push(value)
+          return `<c r="${String.fromCharCode(65 + c)}${r + 1}" t="s"><v>${strings.length - 1}</v></c>`
+        })
+        .join("")
+      return `<row r="${r + 1}">${xml}</row>`
+    })
+    .join("")
+  return zipOf({
+    "[Content_Types].xml": { text: "<Types/>", deflate: false },
+    "xl/workbook.xml": {
+      text: '<workbook><sheets><sheet name="VOLUMEN VIGENTE" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      deflate: true,
+    },
+    "xl/_rels/workbook.xml.rels": {
+      text: `<Relationships><Relationship Id="rId1" Type="worksheet" Target="${sheetPath}"/></Relationships>`,
+      deflate: false,
+    },
+    "xl/sharedStrings.xml": {
+      // Un texto con formato llega partido en tramos: se juntan.
+      text: `<sst>${strings.map((s) => (s.includes("COLERA") ? `<si><r><t>${escape(s.slice(0, 4))}</t></r><r><t xml:space="preserve">${escape(s.slice(4))}</t></r></si>` : `<si><t>${escape(s)}</t></si>`)).join("")}</sst>`,
+      deflate: true,
+    },
+    [`xl/${sheetPath}`]: { text: `<worksheet><sheetData>${sheetRows}</sheetData></worksheet>`, deflate: true },
+  })
+}
+
+it("lee la CIE-10 del MINSA en su hoja .xlsx: solo los códigos, sin capítulos ni agrupaciones", () => {
+  const bytes = xlsxOf([
+    ["CIE-10 MINSA OFICIAL"],
+    ["CAPITULO/GRUPO/CATEGORIA/SUBCATEGORIA"],
+    ["CAPITULO I: CIERTAS ENFERMEDADES INFECCIOSAS Y PARASITARIAS"],
+    ["(A00 - A09) ENFERMEDADES INFECCIOSAS INTESTINALES"],
+    ["A00 - COLERA"],
+    ["A000 - COLERA DEBIDO A VIBRIO CHOLERAE 01, BIOTIPO CHOLERAE"],
+    ["P0711 - RECIEN NACIDO DE MUY BAJO PESO AL NACER (< 1500 GRAMOS)"],
+    ["Z30051 - PRESCRIPCION INICIAL DE METODO INYECTABLE MENSUAL"],
+    ["Z33X21 - FALLA ANTICONCEPTIVO ORAL COMBINADO"],
+    [""],
+  ])
+  const rows = readDiagnosisFile(bytes)
+  expect(rows.map((row) => row.code)).toEqual(["A00", "A000", "P0711", "Z30051", "Z33X21"])
+  expect(rows[2]?.title).toBe("RECIEN NACIDO DE MUY BAJO PESO AL NACER (< 1500 GRAMOS)")
+  expect(rows[0]?.title).toBe("COLERA")
+  const prepared = prepareDiagnosisRows("ICD-10-PE", rows)
+  expect(prepared.map((row) => [row.code, row.isCategory])).toEqual([
+    ["A00", true],
+    ["A00.0", false],
+    ["P07.11", false],
+    ["Z30.051", false],
+    ["Z33.X21", false],
+  ])
+  // En la CIE-10 de la OMS el sexto carácter no existe: no entra como si fuera de ella.
+  expect(() => prepareDiagnosisRows("ICD-10", rows)).toThrow(/Código inválido para ICD-10: Z30051/)
+})
+
+it("una CIE-10 oficial incompleta no se carga: le falta un capítulo o tiene muy pocos códigos", () => {
+  const letters = [..."ABCDEFGHIJKLMNOPQRSTVWXYZ"]
+  const full = letters.flatMap((letter) =>
+    Array.from({ length: 400 }, (_, i) => ({ code: `${letter}${String(i % 100).padStart(2, "0")}${Math.floor(i / 100)}` })),
+  )
+  expect(() => assertCompleteIcd10(full)).not.toThrow()
+  expect(() => assertCompleteIcd10(full.filter((row) => row.code[0] !== "K"))).toThrow(
+    "La CIE-10 viene incompleta: no trae códigos con K",
+  )
+  expect(() => assertCompleteIcd10(full.filter((_, i) => i % 2 === 0))).toThrow(/trae 5000 códigos/)
+})
+
+it("una fila que no se reconoce después del primer código detiene la carga de la hoja del MINSA", () => {
+  const bytes = xlsxOf([["A00 - COLERA"], ["A000 COLERA SIN GUION"]])
+  expect(() => readDiagnosisFile(bytes)).toThrow(/Fila 2: no se reconoce/)
+})
+
+it("una hoja .xlsx con encabezado de código y descripción se lee como una tabla", () => {
+  const bytes = xlsxOf(
+    [
+      ["Lista de prueba"],
+      ["Código", "Descripción"],
+      ["K02.1", "Caries de la dentina"],
+    ],
+    { sheetPath: "worksheets/sheet1.xml" },
+  )
+  expect(readDiagnosisFile(bytes)).toEqual([{ code: "K02.1", title: "Caries de la dentina", uri: null }])
+  // Un CSV suelto sigue leyéndose igual.
+  expect(readDiagnosisFile(new TextEncoder().encode("code,description\nK02.1,Caries\n"))).toEqual([
+    { code: "K02.1", title: "Caries", uri: null },
+  ])
 })
 
 it("lee ClaML: cada categoría con su rúbrica preferida en español", () => {

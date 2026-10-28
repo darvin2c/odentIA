@@ -13,6 +13,7 @@ import { SubmitButton } from "@odentia/ui-patterns"
 import { type ReactNode, useEffect, useState } from "react"
 import { productUi } from "../../product/product-ui"
 import { confirmable, DICTATION_KIND_LABEL, type DictationSession, dictationErrorText, suggestionText } from "./dictation-session"
+import { AppointmentChoices, BudgetLines } from "./dictation-suggestions"
 
 /**
  * Firmar con lo dictado sin confirmar: la lista viene marcada y firmar
@@ -106,6 +107,9 @@ export function DictationSignDialog({
                       </span>
                     </div>
                     {Choices && can ? <Choices session={session} item={item} busy={busy} /> : null}
+                    {/* La cita lleva sus huecos (por si el elegido se ocupó) y el presupuesto, lo que lleva. */}
+                    {item.kind === "cita" ? <AppointmentChoices session={session} item={item} busy={busy} /> : null}
+                    {item.kind === "presupuesto" && can ? <BudgetLines item={item} /> : null}
                     {!can && item.kind !== "receta" && item.kind !== "descanso" ? (
                       <Button type="button" variant="outline" size="sm" className="min-h-11 self-start sm:ml-7 sm:min-h-8" disabled={busy} onClick={() => onComplete(item.id)}>
                         Completar

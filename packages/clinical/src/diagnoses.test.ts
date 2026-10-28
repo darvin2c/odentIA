@@ -3,7 +3,10 @@ import { clinicalProfileFor } from "./country-profiles.js"
 import {
   diagnosisCodeLabel,
   findingDiagnosisCode,
+  findingDiagnosisCodes,
   hisDiagnosisType,
+  isDiagnosisCodeFormat,
+  isSelectableDiagnosisSystem,
   normalizeDiagnosisCode,
   normalizeSearchText,
 } from "./diagnoses.js"
@@ -11,14 +14,28 @@ import { hl7DocumentTypeCode, maritalStatusToHl7 } from "./identity.js"
 import { validateDemographics } from "./patient-registration.js"
 
 describe("listas de diagnósticos", () => {
-  it("cada país recomienda su lista: CIE-10 en Perú y en general, CIE-11 en Colombia; Perú avisa por el HIS", () => {
-    expect(clinicalProfileFor("PE").diagnosis.recommended).toBe("ICD-10")
+  it("cada país recomienda su lista: la del MINSA en Perú, CIE-10 en general, CIE-11 en Colombia; Perú avisa por el HIS", () => {
+    expect(clinicalProfileFor("PE").diagnosis.recommended).toBe("ICD-10-PE")
     expect(clinicalProfileFor("CL").diagnosis.recommended).toBe("ICD-10")
     expect(clinicalProfileFor(null).diagnosis.recommended).toBe("ICD-10")
     expect(clinicalProfileFor("CO").diagnosis.recommended).toBe("ICD-11")
     expect(clinicalProfileFor("PE").diagnosis.notices["ICD-11"]).toBe(
-      "En Perú, el registro oficial (HIS) pide la CIE-10. Con la CIE-11, esa hoja no se podrá llenar.",
+      "En Perú, el registro oficial (HIS) pide la CIE-10 del MINSA. Con la CIE-11, esa hoja no se podrá llenar.",
     )
+    expect(clinicalProfileFor("PE").diagnosis.notices["ICD-10"]).toMatch(/CIE-10 del MINSA/)
+  })
+
+  it("la CIE-10 del MINSA: sus códigos de seis caracteres y lo mismo que propone el odontograma en la de la OMS", () => {
+    expect(normalizeDiagnosisCode("ICD-10-PE", "Z30051")).toBe("Z30.051")
+    expect(normalizeDiagnosisCode("ICD-10-PE", "Z33X21")).toBe("Z33.X21")
+    expect(normalizeDiagnosisCode("ICD-10-PE", "K021")).toBe("K02.1")
+    expect(isDiagnosisCodeFormat("ICD-10-PE", "Z30.051")).toBe(true)
+    // La de la OMS no tiene sexto carácter: queda como vino y no tiene su forma.
+    expect(normalizeDiagnosisCode("ICD-10", "Z30051")).toBe("Z30051")
+    expect(isDiagnosisCodeFormat("ICD-10", "Z30.051")).toBe(false)
+    expect(isSelectableDiagnosisSystem("ICD-10-PE")).toBe(true)
+    expect(findingDiagnosisCode("ICD-10-PE", "caries", "dentin")).toBe("K02.1")
+    expect(findingDiagnosisCodes("ICD-10-PE")).toEqual(findingDiagnosisCodes("ICD-10"))
   })
 
   it("el hallazgo del odontograma propone su código en cada lista, sin convertir de una a otra", () => {

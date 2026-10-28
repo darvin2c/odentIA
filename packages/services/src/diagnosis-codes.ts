@@ -106,6 +106,26 @@ export async function resolveDiagnosisCode(
   const found = await findDiagnosisCode(tx, requested, raw)
   if (!found) throw validation(`El código ${raw.toUpperCase()} no está en ${listName(requested)}`)
   if (options.codable && found.isCategory) {
+    // La CIE-10 del MINSA escribe con X la categoría sin subdivisiones («I10X»):
+    // si es su único subcódigo, «I10» es ese mismo diagnóstico y se registra así.
+    if (requested === "ICD-10-PE") {
+      const children = await tx
+        .select({ code: diagnosisCatalog.code })
+        .from(diagnosisCatalog)
+        .where(
+          and(
+            eq(diagnosisCatalog.systemKey, requested),
+            sql`starts_with(${diagnosisCatalog.code}, ${found.code})`,
+            ne(diagnosisCatalog.code, found.code),
+          ),
+        )
+        .limit(2)
+      const only = children.length === 1 ? children[0]!.code : null
+      if (only === `${found.code}.X`) {
+        const coded = await findDiagnosisCode(tx, requested, only)
+        if (coded) return coded
+      }
+    }
     const [sub] = await tx
       .select({ code: diagnosisCatalog.code })
       .from(diagnosisCatalog)
@@ -371,7 +391,8 @@ export async function setOrgDiagnosisSystem(
   actorUserId: string,
   system: string,
 ): Promise<{ diagnosisSystem: SelectableDiagnosisSystem }> {
-  if (!isSelectableDiagnosisSystem(system)) throw validation("Elige la CIE-10 o la CIE-11")
+  if (!isSelectableDiagnosisSystem(system))
+    throw validation("Elige la CIE-10 del MINSA, la CIE-10 de la OMS o la CIE-11")
   const [current] = await tx
     .select({ system: orgProfile.diagnosisSystem })
     .from(orgProfile)

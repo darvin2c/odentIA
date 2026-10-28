@@ -40,7 +40,7 @@ it("la historia de una pieza reúne sus hechos del más reciente al más antiguo
   expect(events.map((e) => e.kind)).toEqual(["diagnostico", "hallazgo"])
   expect(events[0]).toMatchObject({
     title: "Caries de la dentina",
-    code: "CIE-10 · K02.1",
+    code: "CIE-10 MINSA · K02.1",
     surfaces: ["occlusal"],
     status: "activo",
     encounterOpen: true,

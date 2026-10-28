@@ -1,7 +1,10 @@
 import { BUNDLED_DIAGNOSIS_LISTS, loadDiagnosisList, withOrgContext } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { clinicalFixture } from "./clinical-test-fixture.js"
 import { searchDiagnosisCodes } from "./diagnosis-codes.js"
+import { addEncounterDiagnosis } from "./encounter-diagnoses.js"
+import { finalizeEncounter, updateEncounterDraft } from "./encounters.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -30,4 +33,33 @@ it("con la lista completa, el buscador encuentra lo odontológico primero y el c
   expect((await search("da0a3"))[0]?.code).toBe("DA0A.3")
   // Fuera de la boca también: la fractura de la mandíbula y la de los huesos de la cara.
   expect((await search("fractura mandibula")).map((row) => row.code)).toContain("NA02.7Z")
+})
+
+const minsa = BUNDLED_DIAGNOSIS_LISTS.find((load) => load.system === "ICD-10-PE")!
+
+it("la CIE-10 del MINSA se carga entera y una clínica de Perú cierra una atención con ella", async () => {
+  expect(await loadDiagnosisList(ownerDb, minsa)).toEqual({ codes: 15_037, written: 15_037 })
+  expect(await loadDiagnosisList(ownerDb, minsa)).toEqual({ codes: 15_037, written: 0 })
+  // La clínica de prueba es de Perú y no eligió lista: trabaja con la del MINSA.
+  await ownerDb.execute(
+    sql`update "org_profile" set "diagnosis_system" = null where "organization_id" = 'org_a'`,
+  )
+  const search = (q: string) =>
+    withOrgContext(appDb, "org_a", (tx) => searchDiagnosisCodes(tx, "org_a", q))
+  expect((await search("caries dentina"))[0]).toMatchObject({
+    system: "ICD-10-PE",
+    code: "K02.1",
+    description: "Caries de la dentina",
+  })
+  const f = await clinicalFixture()
+  const hypertension = await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "I10", diagnosisType: "confirmed" }),
+  )
+  expect(hypertension).toMatchObject({ diagnosisSystem: "ICD-10-PE", diagnosisCode: "I10.X" })
+  await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "k021", diagnosisType: "provisional" }),
+  )
+  await f.run((tx) => updateEncounterDraft(tx, ...f.args, f.encounter.id, { evolution: "Evolución favorable" }))
+  const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  expect(closed.encounter.status).toBe("finalizada")
 })
