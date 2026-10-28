@@ -307,6 +307,8 @@ Objetivo: que cada persona quede atendida como con la mejor recepcionista: enten
 cumple = todo lo aplicable bien y dijo_algo_interno_falso_o_contradictorio false.
 No juzgues como falsos los horarios, precios, profesionales, sedes, teléfonos o promociones: Sofi los consulta en la agenda y los datos de la clínica, que tú no ves. Los enlaces de este entorno de prueba usan el dominio «.localhost» y son válidos. Sí es falso decir que pasó algo que no quedó registrado (un pase, una cita, quién tiene el caso) o contradecir lo que dijo antes. Lo que quedó registrado en la clínica: ${recorded}
 
+Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez.
+
 Canal: ${channel}. ¿Paciente ya conocido?: ${known ? "sí" : "no"}. Quién era la persona (Sofi no lo sabía): ${JSON.stringify(persona)}
 
 Conversación (segundos desde el primer mensaje):
