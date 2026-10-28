@@ -15,10 +15,13 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { findDraftBudget } from "../budgets.js"
-import { auditEvent } from "@odentia/db/schema/org"
+import { appointment } from "@odentia/db/schema/agenda"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import { upsertAgentConfig } from "../agentConfig.js"
+import { createAppointment, createRoom } from "../appointments.js"
+import { setProfessionalSchedule, zonedTimeToUtc } from "../availability.js"
 import { clinicalFixture, makeSigner, seedDiagnosisCodes } from "../clinical-test-fixture.js"
 import {
   confirmDictationSuggestion,
@@ -41,6 +44,8 @@ import {
 } from "../encounter-dictation.js"
 import { DENTAL_DICTATION } from "./dictation.js"
 import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
+import { nextPatientNumber } from "../patients.js"
+import { insertTestPatients } from "../test-patient.js"
 import { withOrgContext } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { orgStrictVariants } from "./odontogram.js"
@@ -378,7 +383,7 @@ describe("dictado en la atención", () => {
     expect(note?.payload).toEqual({ reason: "Dolor al masticar del lado derecho", illnessDuration: "una semana" })
     expect(note?.sourceText).toBe("Viene por dolor al masticar.")
     expect(diagnosis).toMatchObject({ payload: { diagnosisCode: "K02.1", description: "Caries de la dentina", toothNumber: 16 }, summary: "K02.1 · Caries de la dentina\nPieza 16 · Presuntivo" })
-    expect(unknownCode?.note).toContain("no está en la lista CIE-10 (OMS) de la clínica")
+    expect(unknownCode?.note).toContain("no está en la lista CIE-10 MINSA de la clínica")
     // La prestación se reconoce por su nombre y trae la tarifa del tarifario, que no se dicta.
     expect(plan?.payload).toMatchObject({ serviceId: fx.service.id, serviceName: "Resina compuesta", priceCents: 120000, currency: "PEN" })
     expect(plan?.summary).toMatch(/^Resina compuesta · S\/\s1,200\.00\nPieza 16 · cara oclusal$/)
@@ -660,6 +665,95 @@ describe("alergias y lo hecho hoy por voz (issue 109)", () => {
     await fx.run((tx) => undoConfirmedDictation(tx, ...fx.args, fx.encounter.id, free!.id))
     const freeRow = (await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, free!.id)))[0]!
     expect((await ownerDb.select().from(encounterProcedure).where(eq(encounterProcedure.id, freeRow.entityId!)))[0]?.voidedAt).not.toBeNull()
+    await enable(false)
+  })
+})
+
+describe("la próxima cita y el presupuesto por voz (issue 109, paso 2)", () => {
+  /** Una sede con su unidad dental y el horario de quien atiende: lunes a domingo, de 9 a 18. */
+  async function withAgenda(fx: Awaited<ReturnType<typeof openSession>>) {
+    const [place] = await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${fx.actor.slice(0, 6)}`, timezone: "America/Lima" }).returning()
+    await ownerDb.update(encounter).set({ branchId: place!.id }).where(eq(encounter.id, fx.encounter.id))
+    await fx.run(async (tx) => {
+      await createRoom(tx, ORG, { branchId: place!.id, name: "Unidad dental 1" })
+      await setProfessionalSchedule(tx, ORG, fx.actor, {
+        branchId: place!.id,
+        professionalUserId: fx.actor,
+        rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 18 * 60 })),
+      })
+    })
+    return place!
+  }
+  const inDays = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
+  const at = (date: string, time: string) => zonedTimeToUtc(date, Number(time.slice(0, 2)) * 60 + Number(time.slice(3)), "America/Lima").toISOString()
+
+  it("«cítalo en quince días» propone tu primer hueco y otros para tocar; reservar es «Nueva cita»; si se ocupó, deja el más cercano", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de cita")
+    const place = await withAgenda(fx)
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const day = inDays(15)
+    const [first] = (await segment({ drafts: [{ kind: "cita", payload: { date: day, service: "obturación de cita" } }] })).suggestions
+    expect(first).toMatchObject({ kind: "cita", status: "lista", note: null, payload: { startsAt: at(day, "09:00"), serviceId: fx.service.id, branchId: place.id } })
+    expect(first!.payload["slots"]).toHaveLength(3)
+    expect(first!.summary).toContain("Cita · ")
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, first!.id))
+
+    // Con la hora dicha, esa; tocar otro de los huecos lo deja elegido.
+    const [timed] = (await segment({ drafts: [{ kind: "cita", payload: { date: day, time: "16:00" } }] })).suggestions
+    expect(timed).toMatchObject({ status: "lista", note: null, payload: { startsAt: at(day, "16:00") } })
+    const other = (timed!.payload["slots"] as string[]).find((startsAt) => startsAt !== at(day, "16:00"))!
+    const picked = await fx.run((tx) => updateDictationSuggestion(tx, ...fx.args, fx.encounter.id, timed!.id, { startsAt: other }))
+    expect(picked.payload["startsAt"]).toBe(other)
+
+    // Ese hueco se ocupa mientras atiende: no se reserva, queda el más cercano con el aviso.
+    const [someone] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Otra persona", patientNumber: await nextPatientNumber(ownerDb, ORG) })
+    await fx.run((tx) => createAppointment(tx, ORG, fx.actor, { patientId: someone!.id, professionalUserId: fx.actor, branchId: place.id, startsAt: other, durationMin: 60 }))
+    const moved = await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, timed!.id))
+    expect(moved.status).toBe("lista")
+    expect(moved.note).toContain("se ocupó")
+    expect(moved.payload["startsAt"]).not.toBe(other)
+
+    // Ahora sí: se reserva con quien atiende, en su sede.
+    const booked = await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, timed!.id))
+    expect(booked.status).toBe("confirmada")
+    const [row] = await ownerDb.select().from(appointment).where(and(eq(appointment.patientId, fx.patient.id), eq(appointment.organizationId, ORG)))
+    expect(row).toMatchObject({ professionalUserId: fx.actor, branchId: place.id, status: "programada" })
+    expect(row!.startsAt.toISOString()).toBe(moved.payload["startsAt"])
+
+    // Ya tiene cita cerca de ese día: no se reserva otra, se usa esa.
+    const [again] = (await segment({ drafts: [{ kind: "cita", payload: { date: day } }] })).suggestions
+    expect(again).toMatchObject({ status: "lista", payload: { existing: { id: row!.id } } })
+    expect(again!.note).toContain("no se reserva otra")
+    await enable(false)
+  })
+
+  it("«arma el presupuesto» lleva lo indicado hoy y lo dictado; armarlo confirma lo dictado y deja el borrador, sin enviar nada", async () => {
+    await enable(true)
+    const fx = await openSession("Corona para presupuestar", "tooth")
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    // Nada con precio todavía: se dice, sin armar un presupuesto vacío.
+    const [empty] = (await segment({ drafts: [{ kind: "presupuesto", payload: { show: true } }] })).suggestions
+    expect(empty).toMatchObject({ kind: "presupuesto", status: "por_revisar" })
+    expect(empty!.note).toContain("Aún no hay nada con precio")
+
+    const [confirmedPlan] = (await segment({ drafts: [{ kind: "plan", payload: { service: "corona para presupuestar", toothNumber: 36 } }] })).suggestions
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, confirmedPlan!.id))
+    const [dictated] = (await segment({ drafts: [{ kind: "plan", payload: { service: "corona para presupuestar", toothNumber: 46 } }] })).suggestions
+    // El pedido que esperaba se puso al día: lo indicado hoy y lo dictado.
+    const request = (await fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))).find((item) => item.id === empty!.id)!
+    expect(request).toMatchObject({ status: "lista", payload: { totalCents: 240000, currency: "PEN" } })
+    expect((request.payload["lines"] as Array<{ dictated: boolean }>).map((line) => line.dictated).sort()).toEqual([false, true])
+    expect(request.summary).toContain("Presupuesto · 2 tratamientos")
+
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, request.id))
+    const draft = await fx.run((tx) => findDraftBudget(tx, ORG, fx.patient.id))
+    expect(draft).not.toBeNull()
+    expect(draft!.status).toBe("borrador")
+    const lines = await ownerDb.select().from(treatmentBudgetItem).where(eq(treatmentBudgetItem.budgetId, draft!.id))
+    expect(new Set(lines.map((line) => line.planItemId)).size).toBe(2)
+    // Lo dictado quedó confirmado al armarlo.
+    expect((await ownerDb.select().from(encounterDictationSuggestion).where(eq(encounterDictationSuggestion.id, dictated!.id)))[0]?.status).toBe("confirmada")
     await enable(false)
   })
 })

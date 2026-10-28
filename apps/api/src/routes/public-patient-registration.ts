@@ -1,10 +1,10 @@
 import { registrationAnswersSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { findOrgLocale, getPublicPatientRegistration, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
+import { chatPrivacyNotice, findOrgLocale, getPublicPatientRegistration, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { eq } from "drizzle-orm"
-import { type Context, Hono } from "hono"
+import { type Context, Hono, type MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
@@ -34,7 +34,8 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
   app.use("*", bodyLimit({ maxSize: 64 * 1024, onError: c => c.json(errorBody(c, "BODY_TOO_LARGE", "El formulario excede el tamaño permitido"), 413) }))
   // No trasladar errores inesperados al logger global: podrían contener SQL y respuestas clínicas.
   app.onError((_error, c) => c.json(errorBody(c, "INTERNAL", "No pudimos completar la solicitud"), 500))
-  app.use("/:slug", async (c, next) => {
+  // El registro y su aviso de privacidad pasan por el mismo límite por clínica y dirección.
+  const limited: MiddlewareHandler<{ Variables: { registrationOrganization: { id: string; name: string; logo: string | null } } }, "/:slug"> = async (c, next) => {
     if (c.req.method !== "GET" && c.req.method !== "POST") return unavailable(c)
     const [org] = await deps.db.select({ id: organization.id, name: organization.name, logo: organization.logo }).from(organization).where(eq(organization.slug, c.req.param("slug"))).limit(1)
     const now = Date.now()
@@ -59,7 +60,9 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
     if (!org) return unavailable(c)
     c.set("registrationOrganization", org)
     await next()
-  })
+  }
+  app.use("/:slug", limited)
+  app.use("/:slug/aviso", limited)
   app.get("/:slug", async c => {
     const query = z.strictObject({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional() }).safeParse(c.req.query())
     if (!query.success) return unavailable(c)
@@ -99,6 +102,14 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
       }
       throw error
     }
+  })
+  // El aviso de privacidad que se enlaza desde el chat (ADR 0101): el mismo texto del
+  // registro, leído aunque el registro en línea esté apagado. Sin aviso escrito, no hay página.
+  app.get("/:slug/aviso", async c => {
+    const org = c.get("registrationOrganization")
+    const notice = await withOrgContext(deps.db, org.id, tx => chatPrivacyNotice(tx, org.id))
+    if (!notice) return unavailable(c)
+    return c.json({ data: { organization: { name: org.name, logo: org.logo }, notice: notice.text, version: notice.version } })
   })
   // Terminal: nunca continuar hacia requireSession ni ampliar excepciones a otros /api/*.
   app.all("*", unavailable)

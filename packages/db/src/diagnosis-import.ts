@@ -10,8 +10,9 @@ import {
 /**
  * Lectura de los archivos de una lista de diagnósticos (ADR 0041), sin base de
  * datos: CSV o TSV con comillas dobles (RFC 4180) y un solo separador por
- * archivo, que se decide con el encabezado; o ClaML (ISO 13120), el XML en
- * que la OMS publica la CIE-10. Acepta los códigos con † y * y los que vienen
+ * archivo, que se decide con el encabezado; ClaML (ISO 13120), el XML en
+ * que la OMS publica la CIE-10; o la hoja .xlsx en que el MINSA publica su
+ * CIE-10. Acepta los códigos con † y * y los que vienen
  * sin punto («K021»), y la tabulación de la CIE-11 de la OMS (columnas
  * «Code», «Title», «ClassKind», «ChapterNo» y la URI de la linealización),
  * también dentro del .zip tal como se descarga.
@@ -26,6 +27,8 @@ export interface DiagnosisSourceRow {
 export interface DiagnosisCatalogRow extends DiagnosisSourceRow {
   isCategory: boolean
   searchText: string
+  /** El título como lo publica su editor, si el que se muestra es otro (ADR 0103); si no, null. */
+  officialTitle: string | null
 }
 
 /** Falla si los bytes no son los publicados: un archivo distinto no entra. */
@@ -133,7 +136,12 @@ const ICD11_REGISTRABLE_CHAPTER = /^(0[1-9]|1\d|2[0-5])$/
 
 /** Filas de un CSV o TSV con encabezado (código y título; URI y tipo de clase si los trae). */
 export function parseDiagnosisDelimited(text: string): DiagnosisSourceRow[] {
-  const [header, ...lines] = parseDelimited(text)
+  return parseDiagnosisTable(parseDelimited(text))
+}
+
+/** Filas de una tabla con encabezado, venga de un CSV, un TSV o una hoja de cálculo. */
+function parseDiagnosisTable(table: readonly string[][]): DiagnosisSourceRow[] {
+  const [header, ...lines] = table
   if (!header) throw new Error("El archivo está vacío")
   const keys = header.map(headerKey)
   const codeAt = keys.findIndex((key) => CODE_HEADERS.has(key))
@@ -281,6 +289,122 @@ export function parseDiagnosisFile(text: string): DiagnosisSourceRow[] {
   return head.startsWith("<") ? parseClaml(text) : parseDiagnosisDelimited(text)
 }
 
+/** Índice de la columna de una celda («A1» → 0, «AB7» → 27). */
+function columnIndex(ref: string): number {
+  const letters = /^[A-Z]+/.exec(ref)?.[0] ?? "A"
+  let index = 0
+  for (const letter of letters) index = index * 26 + (letter.charCodeAt(0) - 64)
+  return index - 1
+}
+
+/** El texto de un `<si>` o un `<is>`: sus `<t>`, también los de cada tramo con formato. */
+function xmlRunsText(xml: string): string {
+  return decodeXml([...xml.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => m[1] ?? "").join(""))
+}
+
+/**
+ * Las filas de la primera hoja de un .xlsx (ECMA-376, SpreadsheetML), con las
+ * entradas de su .zip: textos compartidos, textos en la celda y números, cada
+ * uno en su columna. Basta lo que usan las listas oficiales que se publican
+ * así (la CIE-10 del MINSA): sin fórmulas que haya que calcular.
+ */
+export function readXlsxRows(entries: ReadonlyMap<string, Buffer>): string[][] {
+  const workbook = entries.get("xl/workbook.xml")?.toString("utf8")
+  if (!workbook) throw new Error("El .xlsx no trae xl/workbook.xml")
+  const firstSheetId = /<sheet\b[^>]*\br:id="([^"]+)"/.exec(workbook)?.[1]
+  const rels = entries.get("xl/_rels/workbook.xml.rels")?.toString("utf8") ?? ""
+  const target = firstSheetId
+    ? new RegExp(`<Relationship\\b[^>]*\\bId="${firstSheetId}"[^>]*\\bTarget="([^"]+)"`).exec(rels)?.[1] ??
+      new RegExp(`<Relationship\\b[^>]*\\bTarget="([^"]+)"[^>]*\\bId="${firstSheetId}"`).exec(rels)?.[1]
+    : undefined
+  const sheetPath = target ? `xl/${target.replace(/^\/?xl\//, "")}` : "xl/worksheets/sheet1.xml"
+  const sheet = entries.get(sheetPath)?.toString("utf8")
+  if (!sheet) throw new Error(`El .xlsx no trae su primera hoja (${sheetPath})`)
+  const shared = [
+    ...(entries.get("xl/sharedStrings.xml")?.toString("utf8") ?? "").matchAll(/<si>([\s\S]*?)<\/si>/g),
+  ].map((m) => xmlRunsText(m[1] ?? ""))
+  const rows: string[][] = []
+  for (const row of sheet.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const cells: string[] = []
+    for (const cell of (row[1] ?? "").matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+      const attrs = cell[1] ?? ""
+      const body = cell[2] ?? ""
+      const type = /\bt="([^"]+)"/.exec(attrs)?.[1]
+      const value = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1]
+      const text =
+        type === "s"
+          ? (shared[Number(value)] ?? "")
+          : type === "inlineStr"
+            ? xmlRunsText(body)
+            : decodeXml(value ?? "")
+      cells[columnIndex(/\br="([A-Z]+)\d+"/.exec(attrs)?.[1] ?? String.fromCharCode(65 + cells.length))] =
+        text
+    }
+    rows.push(Array.from(cells, (cell) => cell ?? ""))
+  }
+  return rows
+}
+
+/**
+ * La CIE-10 del MINSA en su hoja publicada: una sola columna con capítulos
+ * («CAPITULO I: …»), agrupaciones («(A00 - A09) …») y cada código con su
+ * título («A000 - COLERA DEBIDO A …»). Solo los códigos se cargan; el título
+ * se guarda como lo escribe el MINSA. Lo que no se reconoce después del primer
+ * código detiene la carga: mejor eso que perder un código en silencio.
+ */
+const CODE_DASH_TITLE = /^([A-Z][0-9]{2}[0-9X]{0,3})\s+-\s+(.+)$/
+
+export function parseCodeDashTitle(table: readonly string[][]): DiagnosisSourceRow[] {
+  const rows: DiagnosisSourceRow[] = []
+  table.forEach((cells, index) => {
+    const value = (cells.find((cell) => cell.trim() !== "") ?? "").trim()
+    if (!value || /^CAP[IÍ]TULO\b/i.test(value) || value.startsWith("(")) return
+    const match = CODE_DASH_TITLE.exec(value)
+    if (match) {
+      rows.push({ code: match[1]!, title: match[2]!, uri: null })
+      return
+    }
+    // Antes del primer código solo hay el título de la hoja y su encabezado.
+    if (rows.length > 0) throw new Error(`Fila ${index + 1}: no se reconoce «${value}»`)
+  })
+  if (rows.length === 0) throw new Error("La hoja no trae códigos con la forma «A000 - TÍTULO»")
+  return rows
+}
+
+/**
+ * Los códigos del archivo tal como se descargó: CSV, TSV o ClaML (sueltos o en
+ * un .zip) o una hoja de cálculo .xlsx, con encabezado de código y descripción
+ * o con la forma de la CIE-10 del MINSA. El SHA-256 se verifica antes.
+ */
+export function readDiagnosisFile(bytes: Uint8Array): DiagnosisSourceRow[] {
+  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04
+  const entries = isZip ? readZipEntries(bytes) : null
+  if (!entries?.has("xl/workbook.xml")) return parseDiagnosisFile(diagnosisFileText(bytes))
+  const table = readXlsxRows(entries)
+  const headerAt = table.findIndex((cells) => cells.some((cell) => CODE_HEADERS.has(headerKey(cell))))
+  return headerAt >= 0 ? parseDiagnosisTable(table.slice(headerAt)) : parseCodeDashTitle(table)
+}
+
+/**
+ * Una CIE-10 oficial llega entera o no se carga: un archivo cortado (una hoja
+ * guardada a medias, una descarga interrumpida) dejaría a una clínica sin
+ * diagnósticos de capítulos enteros. Se comprueba lo que toda edición tiene:
+ * códigos en cada letra de los capítulos I a XXI (de la A a la Z, sin la U, que
+ * es de uso especial) y al menos 10 000 códigos (la de la OMS pasa de 12 000).
+ */
+export const ICD10_MIN_CODES = 10_000
+
+export function assertCompleteIcd10(rows: readonly { code: string }[]): void {
+  const letters = new Set(rows.map((row) => row.code[0]))
+  const missing = [..."ABCDEFGHIJKLMNOPQRSTVWXYZ"].filter((letter) => !letters.has(letter))
+  if (missing.length > 0)
+    throw new Error(`La CIE-10 viene incompleta: no trae códigos con ${missing.join(", ")}`)
+  if (rows.length < ICD10_MIN_CODES)
+    throw new Error(
+      `La CIE-10 viene incompleta: trae ${rows.length} códigos y una edición completa pasa de ${ICD10_MIN_CODES}`,
+    )
+}
+
 /**
  * Las filas listas para el catálogo: código normalizado y con la forma de su
  * lista, sin repetidos ni títulos vacíos, con lo que se calcula al cargar
@@ -310,5 +434,6 @@ export function prepareDiagnosisRows(
     ...row,
     isCategory: prefixes.has(row.code),
     searchText: diagnosisSearchText(row.code, row.title),
+    officialTitle: null,
   }))
 }

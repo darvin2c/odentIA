@@ -90,6 +90,8 @@ export const diagnosisCatalog = catalogSchema.table(
     code: text("code").notNull(),
     edition: text("edition").notNull(),
     title: text("title").notNull(),
+    /** El título como lo publica su editor, cuando el que se muestra es otro (la CIE-10 del MINSA, ADR 0103). */
+    officialTitle: text("official_title"),
     uri: text("uri"),
     isCategory: boolean("is_category").notNull().default(false),
     searchText: text("search_text").notNull(),
@@ -1813,6 +1815,13 @@ export const patientDataConsent = pgTable(
     grantedByContactId: uuid("granted_by_contact_id").references(() => contact.id),
     grantedByName: text("granted_by_name").notNull(),
     channel: text("channel").notNull(),
+    /**
+     * En el chat (ADR 0101), el mensaje con que dijo que sí: la pregunta que lo
+     * pedía decía «Al confirmar, aceptas nuestro aviso de privacidad». Nulo en los demás canales.
+     * Sin clave foránea: una conversación de prueba se borra con su persona; el
+     * servicio comprueba que el mensaje es de esa conversación y organización.
+     */
+    sourceMessageId: uuid("source_message_id"),
     recordedBy: text("recorded_by").references(() => user.id),
     grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -1823,7 +1832,11 @@ export const patientDataConsent = pgTable(
     index("patient_data_consent_org_patient_idx").on(table.organizationId, table.patientId),
     check(
       "patient_data_consent_channel_check",
-      sql`${table.channel} IN ('presencial','formulario_publico','portal')`,
+      sql`${table.channel} IN ('presencial','formulario_publico','portal','chat')`,
+    ),
+    check(
+      "patient_data_consent_chat_message_check",
+      sql`(${table.channel} = 'chat') = (${table.sourceMessageId} IS NOT NULL)`,
     ),
     check(
       "patient_data_consent_revoke_check",
@@ -1932,11 +1945,12 @@ export const clinicalFollowUp = pgTable(
 
 /**
  * Las clases de sugerencia de Clío: las de todo producto (con la alergia que
- * se dice y lo que se hizo hoy, issue 109), el odontograma de odentIA y los
+ * se dice, lo que se hizo hoy, la próxima cita y el presupuesto a pedido,
+ * issue 109), el odontograma de odentIA y los
  * signos vitales, el examen por sistemas y el descanso médico de latidIA
  * (issue 229, entrega 10).
  */
-export const DICTATION_KINDS = ["nota", "diagnostico", "plan", "control", "odontograma", "receta", "signos", "examen", "descanso", "alergia", "procedimiento"] as const
+export const DICTATION_KINDS = ["nota", "diagnostico", "plan", "control", "odontograma", "receta", "signos", "examen", "descanso", "alergia", "procedimiento", "cita", "presupuesto"] as const
 export type DictationKind = (typeof DICTATION_KINDS)[number]
 
 /**
@@ -1976,7 +1990,7 @@ export const encounterDictationSuggestion = pgTable(
   },
   (table) => [
     index("encounter_dictation_suggestion_idx").on(table.organizationId, table.encounterId, table.status),
-    check("encounter_dictation_suggestion_kind_check", sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento')`),
+    check("encounter_dictation_suggestion_kind_check", sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto')`),
     check(
       "encounter_dictation_suggestion_status_check",
       sql`${table.status} IN ('lista','por_revisar','confirmada','descartada')`,

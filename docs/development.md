@@ -14,7 +14,7 @@ pnpm --filter @odentia/db seed:procedures
 pnpm db:seed
 ```
 
-`seed:diagnoses` carga la CIE-11 oficial de la OMS que vive en el repositorio (`packages/db/seeds/oficiales/ICD-11/2026-01/`, el .zip tal como se descarga, verificado con su SHA-256; capítulos 01 a 25, 17 255 códigos) y, fuera de producción, la semilla mínima de desarrollo de la CIE-10 (K00–K14 y Z01.2), que no es oficial ni tiene fuente verificada. Producción la ejecuta en el servicio `migrate` de cada despliegue; sin cambios no escribe nada. Otra lista oficial se carga con su archivo (CSV, TSV, ClaML o su .zip), su SHA-256, su edición y su licencia (`DIAGNOSIS_SYSTEM`, `DIAGNOSIS_FILE`, `DIAGNOSIS_SHA256`, `DIAGNOSIS_EDITION`, `DIAGNOSIS_LICENSE`, `DIAGNOSIS_SOURCE_URL`); una edición nueva de la CIE-11, con `CIE11_FILE`, `CIE11_SHA256` y `CIE11_EDITION`, y la lista incluida no la pisa después. El archivo se rechaza si su hash no coincide. La CIE-10 en español tiene derechos de la OPS: no se incluye ni se carga completa sin su permiso escrito. Formatos y ejemplos en `packages/db/src/seed-diagnoses.ts`.
+`seed:diagnoses` carga la CIE-11 oficial de la OMS que vive en el repositorio (`packages/db/seeds/oficiales/ICD-11/2026-01/`, el .zip tal como se descarga, verificado con su SHA-256; capítulos 01 a 25, 17 255 códigos) y la CIE-10 oficial del MINSA (`ICD-10-PE`), la lista que usa una clínica de Perú (`packages/db/seeds/oficiales/ICD-10-PE/2024-07/`, la hoja .xlsx tal como se descarga, verificada con su SHA-256; 15 037 códigos; ADR 0103). Fuera de producción carga además la semilla mínima de desarrollo de la CIE-10 de la OMS (K00–K14 y Z01.2), que no es oficial ni tiene fuente verificada. Producción la ejecuta en el servicio `migrate` de cada despliegue; sin cambios no escribe nada. Otra lista oficial se carga con su archivo (CSV, TSV, ClaML o su .zip), su SHA-256, su edición y su licencia (`DIAGNOSIS_SYSTEM`, `DIAGNOSIS_FILE`, `DIAGNOSIS_SHA256`, `DIAGNOSIS_EDITION`, `DIAGNOSIS_LICENSE`, `DIAGNOSIS_SOURCE_URL`); una edición nueva de la CIE-11, con `CIE11_FILE`, `CIE11_SHA256` y `CIE11_EDITION`, y la lista incluida no la pisa después. El archivo se rechaza si su hash no coincide. La CIE-10 en español tiene derechos de la OPS: no se incluye ni se carga completa sin su permiso escrito. Formatos y ejemplos en `packages/db/src/seed-diagnoses.ts`.
 
 `.env` con finales LF: CRLF rompe su carga en sh. Los scripts tsx de db/services cargan `infra/dev/.env` con `--env-file-if-exists`; variables existentes tienen prioridad. Semilla manual determinista/idempotente, no para tests/CI.
 
@@ -197,17 +197,26 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    verificación el valor de `META_WEBHOOK_VERIFY_TOKEN`; suscribir los campos
    `messages`, `message_template_status_update` y `template_category_update`, que son los que odentIA usa, y
    `account_update`, que la guía de Meta exige (odentIA lo recibe y no hace nada
-   con él). Es una sola dirección para todas las clínicas. La API debe estar
-   arriba con las variables puestas para responder la verificación.
+   con él). Para los números que siguen en la app WhatsApp Business del celular
+   (coexistencia), además `smb_message_echoes` (lo que el equipo escribe desde
+   el celular), `history` (las conversaciones anteriores, al conectar) y
+   `smb_app_state_sync` (la agenda de contactos). Es una sola dirección para
+   todas las clínicas. La API debe estar arriba con las variables puestas para
+   responder la verificación.
 7. Con la API reiniciada, conectar una cuenta de prueba y comprobar: el canje
    del código, la suscripción, el registro del número, un mensaje que entra, uno
-   que sale y el aviso de una plantilla aprobada.
+   que sale y el aviso de una plantilla aprobada. Con un número de la app del
+   celular: que no se registra, que llegan la agenda y el historial, y que lo
+   escrito desde el celular aparece en la Bandeja como «Desde el celular».
 
 Límites que pone Meta: al principio se pueden conectar hasta 10 clínicas nuevas
 cada 7 días (200 al completar la verificación de la empresa, App Review y la
 verificación de acceso). El código que devuelve la ventana vive 30 segundos. Un
 número debe registrarse dentro de los 14 días siguientes a la ventana, con un
-máximo de 10 intentos cada 72 horas. La forma de pago la agrega cada clínica en
+máximo de 10 intentos cada 72 horas. Un número de la app del celular no se
+registra (ya lo está); su agenda y su historial se piden una sola vez cada uno,
+dentro de las 24 horas siguientes a la ventana, y ese número envía como mucho
+20 mensajes por segundo. La forma de pago la agrega cada clínica en
 su cuenta de WhatsApp: no hay llamada que lo haga por ella.
 
 Hoy la plataforma no envía una política de seguridad de contenido. Si llega a

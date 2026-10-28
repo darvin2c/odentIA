@@ -15,11 +15,11 @@ no se comparte con OpenShip ni con las demás aplicaciones.
 - PostgreSQL 18 lleva PGMQ y pg_cron mediante `infra/dev/postgres/Dockerfile`.
   Cambiarlo por una imagen stock sin esas extensiones no es una sustitución válida.
 - `migrate` aplica las migraciones y carga las listas de diagnósticos oficiales
-  del repositorio (`seed:diagnoses`: la CIE-11 de la OMS; sin cambios no escribe
-  nada, y con `NODE_ENV=production` nunca carga las semillas de desarrollo).
-  Termina después; detenido con código cero es su estado normal. API y worker
-  dependen de su finalización. La CIE-10 no está incluida: con el permiso escrito
-  de la OPS se carga una vez con su archivo (ver `docs/development.md`).
+  del repositorio (`seed:diagnoses`: la CIE-11 de la OMS y la CIE-10 del MINSA, la
+  de Perú, ADR 0103; sin cambios no escribe nada, y con `NODE_ENV=production` nunca
+  carga las semillas de desarrollo). Termina después; detenido con código cero es
+  su estado normal. API y worker dependen de su finalización. La CIE-10 de la OMS
+  no está incluida: se carga con su archivo (`docs/development.md`).
 - La historia de migraciones empieza en la base del 2026-10-24 (ADR 0088). Una
   base creada antes no se migra a ella, tampoco la de producción: se recrea su
   volumen antes de desplegar. Antes de esa fecha no hubo datos reales.
@@ -315,6 +315,32 @@ a esa directiva. CI sigue utilizando BuildKit mediante buildx.
 Las demos se crean en la administración, en Clínicas › «Crear demo» (ADR 0096): producto, tipo de clínica o consultorio, tamaño, meses de historia, país y quién la presenta. Las arma el worker en una sola transacción (unos segundos a un par de minutos), cada día de su zona las pone al día y borra solas las que nadie abre en 60 días. Necesitan el plan de lista de su producto («Plan odentIA» o «Plan latidIA») y la biblioteca de servicios (`seed:procedures`). Su canal tiene claves falsas y su equipo, correos de `example.com`: nada sale a una persona.
 
 Borrar una demo (y volver a empezar) borra su clínica entera con las comprobaciones de la base suspendidas dentro de esa transacción, así que necesita la conexión owner (`DATABASE_URL`, superusuario de la imagen). Solo actúa sobre una clínica con su fila en `admin.saas_demo`: una clínica real nunca se borra. La semilla de desarrollo se niega a correr con `NODE_ENV=production`.
+
+## CIE-10 del MINSA en producción
+
+Perú trabaja con la CIE-10 del MINSA, la del registro HIS (ADR 0103). Su hoja
+oficial vive en el repositorio (`packages/db/seeds/oficiales/ICD-10-PE/2024-07/`) y
+`migrate` la carga en cada despliegue, como la CIE-11: no hay que hacer nada a mano.
+Antes de escribir comprueba su SHA-256 y que venga completa (cada letra de la A a la
+Z, sin la U, y más de 10 000 códigos); si no, no escribe nada y el despliegue se
+detiene.
+
+Para comprobar en producción, después del primer despliegue con ella:
+
+```sql
+SELECT edition, official, code_count, loaded_at
+FROM catalog.diagnosis_code_release WHERE system_key = 'ICD-10-PE';
+```
+
+Debe aparecer la edición `2024-07`, `official = true` y `15037` códigos. En una
+clínica de Perú que no eligió otra lista (las demos nacen con la CIE-11), buscar
+«caries» en una atención, elegir K02.1 y cerrarla.
+
+Una edición nueva del MINSA se descarga desde REUNIS
+(https://www.minsa.gob.pe/reunis/?op=3&niv=1, «Manuales y Códigos» › «CIE-10 (MINSA –
+Excel)») tal como viene, sin abrirla ni guardarla con Excel. Va en su carpeta con su
+edición, con su SHA-256 y su edición en `diagnosis-catalog.ts`. Antes de cambiar la
+cantidad de códigos que fija la prueba, comparar con la anterior.
 
 ## Backups y recuperación
 

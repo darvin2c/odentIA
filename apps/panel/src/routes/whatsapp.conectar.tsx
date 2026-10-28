@@ -166,8 +166,7 @@ function WhatsAppConnectPage() {
         <>
           <p className="text-sm text-muted-foreground">
             Entras con el Facebook de quien administra la clínica, eliges el número y vuelves a{" "}
-            {clinic.organizationName} con él conectado. Ten a mano el teléfono de ese número, para
-            recibir un código.
+            {clinic.organizationName} con él conectado. Ten a mano el teléfono de ese número.
           </p>
           <FacebookSignup
             slug={clinic.slug}

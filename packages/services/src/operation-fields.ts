@@ -410,6 +410,24 @@ export const OPERATIONS = {
       quantity: { kind: "int", min: 1, max: 99, label: "Cantidad", description: "Cuántas unidades, solo si lo dijo («dos carillas» = 2).", body: "optional", nullable: true, agent: "fills" },
     },
   },
+  // La próxima cita que se pide reservar en la atención (issue 109, paso 2): el servicio busca el
+  // hueco del profesional y la reserva `createAppointment`, como «Nueva cita».
+  "cita.dictada": {
+    label: "Próxima cita",
+    fields: {
+      service: { kind: "text", max: 200, label: "Para qué", description: "Para qué es la cita, con sus palabras («el tratamiento», «el control»). Vacío si no lo dijo.", body: "optional", nullable: true, agent: "fills" },
+      date: { kind: "text", min: 10, max: 10, label: "Día", description: "El día de la cita en AAAA-MM-DD: el que dijo («el jueves») o el que resulta de contar desde la fecha de hoy que se te da («en quince días»).", body: "required", agent: "requires" },
+      time: { kind: "text", max: 5, label: "Hora", description: "La hora en HH:MM de 24 horas, solo si la dijo («a las cuatro de la tarde» = 16:00).", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
+  // «Arma el presupuesto» (issue 109, paso 2): lo indicado en la atención entra al borrador ahora,
+  // con la misma regla que al firmar (`assembleEncounterBudget`).
+  "presupuesto.armar": {
+    label: "Presupuesto",
+    fields: {
+      show: { kind: "flag", label: "Para mostrárselo", description: "true si pidió armarlo para enseñárselo o explicárselo al paciente ahora; false si solo pidió armarlo o enviarlo.", body: "optional", agent: "requires" },
+    },
+  },
   "control.crear": {
     label: "Control",
     fields: {
@@ -619,6 +637,7 @@ export const TOOLS_WITHOUT_OPERATION: Record<string, string> = {
   pedir_volver_al_portal: "No lleva campos: el pedido es de la persona del chat y lo atiende recepción.",
   anotar_caso: "La nota del caso es propia del agente; ninguna pantalla la crea.",
   recordar_tema: "Solo lleva el id del tema: anota que la persona volvió a preguntar y avisa a quien lo tiene (ADR 0050).",
+  reservar_paciente_nuevo: "Los campos del hueco son los de «Reservar una cita» (`cita.reservar`, sin paciente) y los de la persona, los del registro con lo mínimo de recepción (nombres, apellidos y, si la clínica lo pide, documento); el registro lo hace `registerFromConversation` con su sí (ADR 0101).",
   guardar_contacto: "Los mismos dos campos y reglas que «¿Dónde te avisamos?» del chat web (`saveWebchatContactForConversation`): su WhatsApp o su correo.",
   cancelar_cita: "En la pantalla cancelar es un cambio de estado; el agente propone con la cita y un motivo.",
   add_tags: "Pendiente: las etiquetas se normalizan en la ruta de contactos, que aún declara sus campos.",

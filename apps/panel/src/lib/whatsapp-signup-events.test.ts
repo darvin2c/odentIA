@@ -27,14 +27,28 @@ describe("cómo terminó la ventana de Meta", () => {
       kind: "finished",
       wabaId: "524126980791429",
       phoneNumberId: "106540352242922",
+      businessApp: false,
     })
-    // También si el número venía de la aplicación de WhatsApp Business de un teléfono.
-    expect(readSessionEvent(event("FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", { phone_number_id: "1", waba_id: "2" }))).toMatchObject({ kind: "finished" })
+    // También si el número sigue en la aplicación de WhatsApp Business de un teléfono.
+    expect(readSessionEvent(event("FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", { phone_number_id: "1", waba_id: "2" }))).toEqual({
+      kind: "finished",
+      wabaId: "2",
+      phoneNumberId: "1",
+      businessApp: true,
+    })
+    // Meta solo promete la cuenta en ese aviso: el número lo busca el servidor.
+    expect(readSessionEvent(event("FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING", { waba_id: "2" }))).toEqual({
+      kind: "finished",
+      wabaId: "2",
+      phoneNumberId: null,
+      businessApp: true,
+    })
     // Ya leído como objeto, o con los identificadores como número, vale igual.
     expect(readSessionEvent({ type: "WA_EMBEDDED_SIGNUP", event: "FINISH", data: { phone_number_id: 11, waba_id: 22 } })).toEqual({
       kind: "finished",
       wabaId: "22",
       phoneNumberId: "11",
+      businessApp: false,
     })
   })
 

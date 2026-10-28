@@ -13,13 +13,14 @@ import {
  * Carga las listas de diagnósticos (ADR 0041). Idempotente y sin escribir nada
  * si no hubo cambios: corre en cada despliegue, después de las migraciones.
  *
- * Sin variables carga la CIE-11 oficial de la OMS que vive en el repositorio
- * (`seeds/oficiales/ICD-11/`, verificada con su SHA-256) y, fuera de
- * producción (`NODE_ENV` distinto de `production`), la semilla mínima de
- * desarrollo de la CIE-10, que NO es oficial.
+ * Sin variables carga las listas oficiales que viven en el repositorio,
+ * verificadas con su SHA-256: la CIE-11 de la OMS (`seeds/oficiales/ICD-11/`)
+ * y la CIE-10 del MINSA (`seeds/oficiales/ICD-10-PE/`, ADR 0103). Fuera de
+ * producción (`NODE_ENV` distinto de `production`) carga además la semilla
+ * mínima de desarrollo de la CIE-10, que NO es oficial.
  *
- * Un archivo oficial que no vive en el repositorio (la CIE-10 con el permiso
- * escrito de la OPS, una lista nacional o una edición nueva) entra con su
+ * Un archivo oficial que no vive en el repositorio (la CIE-10 de la OMS con el
+ * permiso escrito de la OPS, otra lista nacional o una edición nueva) entra con su
  * lista, su edición, su licencia y el SHA-256 calculado al descargarlo; se
  * acepta el .zip tal como se descargó:
  *

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto"
 
 export interface DictationSuggestion {
   id: string
@@ -34,6 +34,8 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   descanso: "Descanso médico",
   alergia: "Alergias",
   procedimiento: "Procedimientos",
+  cita: "Próxima cita",
+  presupuesto: "Presupuesto",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -404,14 +406,21 @@ export function useDictationSession({
     // «undo-voice» deshace lo hecho en voz alta: una corrección o un «quita».
     // «undo-confirmed» quita lo ya confirmado que se pidió quitar; «keep» lo deja como está.
     mutationFn: async (input: { item: DictationSuggestion; action: "confirm" | "discard" | "undo-voice" | "undo-confirmed" | "keep" }) => {
-      await apiFetch(`${base}/${input.item.id}/${input.action}`, { method: "POST" })
-      return input
+      const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${input.item.id}/${input.action}`, { method: "POST" })
+      return { ...input, result: response?.data ?? null }
     },
     onSuccess: (input) => {
       // Quitar lo ya confirmado cambia la atención: se refresca como al confirmar.
       if (input.action === "undo-confirmed") onApplied(input.item)
       if (input.action !== "confirm") return
+      // La cita cuyo hueco se ocupó mientras atendía no se reservó: queda con el más cercano, para tocar otra vez.
+      if (input.result && input.result.status !== "confirmada") {
+        toast(input.result.note ?? "No se pudo reservar ese hueco: elige otro.")
+        return
+      }
       onApplied(input.item)
+      if (input.item.kind === "cita") toast.success(input.item.payload["existing"] ? "Queda la cita que ya tenía." : "Cita reservada. Le llega el aviso como cuando reserva recepción.")
+      if (input.item.kind === "presupuesto") toast.success("Presupuesto armado. Muéstralo, imprímelo o envíalo desde «Plan y controles».")
       // Lo que cambia fuera de la tarjeta se dice al confirmar, no antes.
       const options = Array.isArray(input.item.payload["options"]) ? input.item.payload["options"].length : 0
       if (input.item.kind === "plan" && options > 0) {
@@ -464,7 +473,11 @@ export function useDictationSession({
       const done: DictationSuggestion[] = []
       try {
         for (const item of suggestions.filter((candidate) => ids.includes(candidate.id) && confirmable(candidate))) {
-          await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
+          const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
+          // Un hueco que se ocupó no se reserva: se firma después de elegir el que quedó.
+          if (response?.data && response.data.status !== "confirmada") {
+            throw new ApiError(409, { code: "SLOT_TAKEN", message: `${response.data.note ?? "Un hueco se ocupó."} Revísalo y vuelve a firmar.` })
+          }
           done.push(item)
         }
       } finally {
@@ -574,6 +587,8 @@ export function suggestionMissing(item: DictationSuggestion): string {
   if (item.kind === "diagnostico") return "falta revisar el diagnóstico"
   if (item.kind === "odontograma") return "falta completar el hallazgo"
   if (item.kind === "procedimiento") return "falta la pieza"
+  if (item.kind === "cita") return "falta elegir el horario"
+  if (item.kind === "presupuesto") return "falta algo con precio"
   return "falta completarla"
 }
 

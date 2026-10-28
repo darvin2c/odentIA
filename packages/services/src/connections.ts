@@ -36,8 +36,11 @@ type ConnectionRow = typeof channelConnection.$inferSelect
 export type ProviderCheck = Awaited<ReturnType<ChannelAdapter["validateConnection"]>>
 
 /** Pasos que odentIA hace en Meta después de «Conectar con Facebook», en orden. */
-export const SIGNUP_STEPS = ["suscribir", "registrar"] as const
+export const SIGNUP_STEPS = ["suscribir", "registrar", "sincronizar"] as const
 export type SignupStep = (typeof SIGNUP_STEPS)[number]
+
+/** Horas que da Meta para pedir la agenda y el historial del celular (coexistencia). */
+export const BUSINESS_APP_SYNC_HOURS = 24
 
 /** Qué falta y qué no funciona mientras tanto. */
 const SIGNUP_STEP_TITLE: Record<SignupStep, string> = {
@@ -45,6 +48,25 @@ const SIGNUP_STEP_TITLE: Record<SignupStep, string> = {
     "Falta que WhatsApp le avise a odentIA: lo que escriban a este número todavía no llega a la Bandeja.",
   registrar:
     "Falta registrar el número en WhatsApp: todavía no puede enviar ni recibir. Meta da 14 días desde que se entró con Facebook; pasado ese plazo hay que volver a conectar.",
+  sincronizar:
+    "Falta traer del celular los nombres de tu agenda y las conversaciones anteriores. Meta da 24 horas desde que se entró con Facebook; pasado ese plazo hay que volver a conectar para traerlas.",
+}
+
+/**
+ * Cuándo quedó hecho cada paso; nulo: falta. «sincronizar» solo es de un
+ * número de la app del celular: en los demás no hay nada que traer.
+ */
+export function signupStepsDone(signup: ConnectionSignup): Record<SignupStep, string | null> {
+  const sync = signup.sync
+  return {
+    suscribir: signup.subscribedAt,
+    registrar: signup.registeredAt,
+    sincronizar: !signup.businessApp
+      ? signup.grantedAt
+      : sync?.contacts && sync.history
+        ? sync.history.at
+        : null,
+  }
 }
 
 /** Un paso de «Conectar con Facebook» que falta. */
@@ -62,6 +84,10 @@ export interface ConnectionSignupView {
   registeredAt: string | null
   /** Lo que falta, en orden. Vacío: quedó completa. */
   pending: SignupPending[]
+  /** El número sigue en la app WhatsApp Business del celular (coexistencia). */
+  businessApp: boolean
+  /** La clínica no quiso compartir el historial del celular al conectar. */
+  historyDeclined: boolean
 }
 
 /**
@@ -115,10 +141,7 @@ export interface ConnectionOverview extends ConnectionPublic {
 
 function signupView(signup: ConnectionSignup | null): ConnectionSignupView | null {
   if (!signup) return null
-  const done: Record<SignupStep, string | null> = {
-    suscribir: signup.subscribedAt,
-    registrar: signup.registeredAt,
-  }
+  const done = signupStepsDone(signup)
   return {
     grantedAt: signup.grantedAt,
     subscribedAt: signup.subscribedAt,
@@ -128,6 +151,8 @@ function signupView(signup: ConnectionSignup | null): ConnectionSignupView | nul
       title: SIGNUP_STEP_TITLE[step],
       problem: signup.problems?.[step] ?? null,
     })),
+    businessApp: signup.businessApp === true,
+    historyDeclined: Boolean(signup.sync?.historyDeclinedAt),
   }
 }
 
@@ -257,6 +282,8 @@ export interface SignupOrigin {
   at: Date
   /** Cuándo vence el permiso recién dado; nulo si el proveedor no lo dijo. */
   tokenExpiresAt: Date | null
+  /** El número sigue en la app WhatsApp Business del celular: ya está registrado. */
+  businessApp?: boolean
 }
 
 /** Canales cuya dirección de avisos se da de alta a mano en la página de Meta. */
@@ -677,8 +704,10 @@ export async function createConnection(
                 signup: {
                   grantedAt: origin.at.toISOString(),
                   subscribedAt: null,
-                  registeredAt: null,
+                  // El de la app del celular ya está registrado: registrarlo otra vez lo sacaría de ella.
+                  registeredAt: origin.businessApp ? origin.at.toISOString() : null,
                   problems: {},
+                  ...(origin.businessApp ? { businessApp: true } : {}),
                   tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
                   tokenProblem: null,
                 },
@@ -987,6 +1016,15 @@ export async function changeConnectionCredentials(
             // Clave nueva: su vencimiento es otro y lo que falló con la anterior ya no cuenta.
             signup: {
               ...row.signup,
+              ...(origin.businessApp
+                ? {
+                    businessApp: true,
+                    // Entrar otra vez con Facebook abre otras 24 horas para traer agenda e historial.
+                    sync: {},
+                    registeredAt: row.signup.registeredAt ?? origin.at.toISOString(),
+                    problems: row.signup.problems.suscribir ? { suscribir: row.signup.problems.suscribir } : {},
+                  }
+                : {}),
               grantedAt: origin.at.toISOString(),
               tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
               tokenNeverExpires: false,

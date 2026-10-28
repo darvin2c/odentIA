@@ -6,9 +6,10 @@
  * calcula un código de una lista a partir de la otra: la tabla de la OMS no
  * sirve para convertir datos.
  *
- * Las listas nacionales (la CIE-10 del MINSA, la CIE-10-ES) son sistemas
- * aparte, preparados pero sin cargar: entran cuando haya un archivo oficial y
- * permiso para usarlo.
+ * Las listas nacionales son sistemas aparte, nunca en lugar de la de la OMS.
+ * La CIE-10 del MINSA (la que pide el registro HIS) viene con la hoja oficial
+ * del MINSA y es la que se propone en Perú (ADR 0103); la CIE-10-ES está
+ * preparada pero sin cargar.
  */
 
 export const DIAGNOSIS_SYSTEMS = ["ICD-10", "ICD-11", "ICD-10-PE", "ICD-10-ES"] as const
@@ -17,6 +18,7 @@ export type DiagnosisSystemKey = (typeof DIAGNOSIS_SYSTEMS)[number]
 export const SELECTABLE_DIAGNOSIS_SYSTEMS = [
   "ICD-10",
   "ICD-11",
+  "ICD-10-PE",
 ] as const satisfies readonly DiagnosisSystemKey[]
 export type SelectableDiagnosisSystem = (typeof SELECTABLE_DIAGNOSIS_SYSTEMS)[number]
 
@@ -120,17 +122,19 @@ export function hisDiagnosisType(
  * Código sin †, *, espacios ni minúsculas; en la CIE-10, el punto que falte
  * después del tercer carácter («K021» → «K02.1»). Los signos † y * son del
  * sistema de doble clasificación de la CIE-10 y no forman parte del código.
+ * La CIE-10 del MINSA agrega un sexto carácter en unos pocos códigos de
+ * planificación familiar («Z30051» → «Z30.051», «Z33X21» → «Z33.X21»).
  */
 export function normalizeDiagnosisCode(system: DiagnosisSystemKey, raw: string): string {
   const code = raw.replace(/[†*✝\s]/g, "").toUpperCase()
-  if (system !== "ICD-11" && /^[A-Z][0-9]{2}[0-9X]{1,2}$/.test(code))
-    return `${code.slice(0, 3)}.${code.slice(3)}`
+  const tail = system === "ICD-10-PE" ? /^[A-Z][0-9]{2}[0-9X]{1,3}$/ : /^[A-Z][0-9]{2}[0-9X]{1,2}$/
+  if (system !== "ICD-11" && tail.test(code)) return `${code.slice(0, 3)}.${code.slice(3)}`
   return code
 }
 
 const CODE_FORMAT: Record<DiagnosisSystemKey, RegExp> = {
   "ICD-10": /^[A-Z][0-9]{2}(\.[0-9X]{1,2})?$/,
-  "ICD-10-PE": /^[A-Z][0-9]{2}(\.[0-9X]{1,2})?$/,
+  "ICD-10-PE": /^[A-Z][0-9]{2}(\.[0-9X]{1,3})?$/,
   "ICD-10-ES": /^[A-Z][0-9][0-9A-Z](\.[0-9A-Z]{1,4})?$/,
   // CIE-11 MMS: cuatro caracteres de raíz (DA08) y hasta dos niveles tras el punto (DA08.0, NA0D.01).
   "ICD-11": /^[0-9A-HJ-NP-Z]{4}(\.[0-9A-HJ-NP-Z]{1,2})?$/,
@@ -170,7 +174,8 @@ export function diagnosisSearchText(code: string, title: string): string {
  * compromiso de la pulpa, K02.5 «caries con exposición pulpar», que solo se
  * propone si la edición cargada la trae), fractura S02.5, raíz retenida K08.3,
  * supernumerario K00.1, tamaño o forma K00.2, fluorosis K00.3, impactación
- * K01.1, posición K07.3 y ausencia por extracción K08.1.
+ * K01.1, posición K07.3 y ausencia por extracción K08.1. La CIE-10 del MINSA
+ * trae esos mismos códigos (`FINDING_DIAGNOSIS` los comparte).
  * CIE-11, con los títulos de la edición oficial en español (2026-01): caries
  * DA08.0 (la CIE-11 no la divide por profundidad), fractura NA0D.0Z
  * («traumatismo de los tejidos dentales duros y la pulpa, sin
@@ -228,9 +233,14 @@ const FINDING_DIAGNOSIS: Partial<
   },
 }
 
+/** Lo que propone el odontograma en una lista; la del MINSA, lo mismo que la CIE-10 de la OMS. */
+function findingsOf(system: DiagnosisSystemKey) {
+  return FINDING_DIAGNOSIS[system === "ICD-10-PE" ? "ICD-10" : system]
+}
+
 /** Todos los códigos que el odontograma puede proponer en una lista (para comprobarlos contra la oficial). */
 export function findingDiagnosisCodes(system: DiagnosisSystemKey): string[] {
-  const entries = Object.values(FINDING_DIAGNOSIS[system] ?? {})
+  const entries = Object.values(findingsOf(system) ?? {})
   return [
     ...new Set(entries.flatMap((entry) => (typeof entry === "string" ? [entry] : Object.values(entry)))),
   ]
@@ -241,7 +251,7 @@ export function findingDiagnosisCode(
   condition: string,
   variant?: string | null,
 ): string | null {
-  const entry = FINDING_DIAGNOSIS[system]?.[condition]
+  const entry = findingsOf(system)?.[condition]
   if (!entry) return null
   if (typeof entry === "string") return entry
   return entry[variant ?? ""] ?? null

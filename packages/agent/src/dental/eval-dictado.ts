@@ -59,6 +59,12 @@ interface PracticeDictation {
     alergias?: string[]
     /** Lo hecho hoy, por una palabra de lo que hizo y su pieza si la dijo. Exactos: ni uno de más. */
     hechos?: Array<{ servicio: string; pieza?: number }>
+    /** La próxima cita pedida: en cuántos días desde hoy (con su margen, 1 por defecto) y la hora si la dijo. Exactas. */
+    citas?: Array<{ enDias?: number; margen?: number; hora?: string }>
+    /** Pidió reservar: no es un control. */
+    sinControles?: boolean
+    /** Pidió armar el presupuesto ahora (true) o no (false). */
+    presupuesto?: boolean
   }
 }
 
@@ -201,6 +207,17 @@ for (const dictation of bank.dictados) {
     other(`hecho: ${expected.servicio}${expected.pieza ? ` en la ${expected.pieza}` : ""}`, done.some((payload) => plain(String(payload["service"] ?? "")).includes(plain(expected.servicio)) && (!expected.pieza || payload["toothNumber"] === expected.pieza)))
   }
   if (dictation.espera.hechos) other("nada hecho de más", done.length === dictation.espera.hechos.length)
+  const bookings = read.drafts.filter((draft) => draft.kind === "cita").map((draft) => draft.payload)
+  for (const expected of dictation.espera.citas ?? []) {
+    const found = bookings.find((payload) => {
+      const days = Math.round((Date.parse(`${String(payload["date"] ?? "")}T12:00:00Z`) - Date.parse(`${now.toISOString().slice(0, 10)}T12:00:00Z`)) / 86_400_000)
+      return (expected.enDias === undefined || Math.abs(days - expected.enDias) <= (expected.margen ?? 1)) && (expected.hora === undefined || payload["time"] === expected.hora)
+    })
+    other(`cita${expected.enDias !== undefined ? ` en ${expected.enDias} días` : ""}${expected.hora ? ` a las ${expected.hora}` : ""}`, Boolean(found))
+  }
+  if (dictation.espera.citas) other("ninguna cita de más", bookings.length === dictation.espera.citas.length)
+  if (dictation.espera.sinControles) other("sin control: pidió reservar", read.drafts.every((draft) => draft.kind !== "control"))
+  if (dictation.espera.presupuesto !== undefined) other(dictation.espera.presupuesto ? "armar el presupuesto" : "no armar el presupuesto", read.drafts.some((draft) => draft.kind === "presupuesto") === dictation.espera.presupuesto)
   if (dictation.espera.nuevos !== undefined) other("nada registrado otra vez", read.drafts.length === dictation.espera.nuevos)
   // Lo que no debía tocar nada pendiente («la tercera» sin tercera): no se aplica.
   if (dictation.espera.correcciones === undefined && dictation.espera.quitar === undefined && pending.length) {

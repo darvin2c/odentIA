@@ -55,11 +55,12 @@ export async function makeSigner(orgId: string, userId: string): Promise<void> {
  */
 /**
  * Códigos de una lista para la prueba, en una edición de prueba que no es
- * oficial (como la semilla de desarrollo). Sin `system`, la CIE-10.
+ * oficial (como la semilla de desarrollo). Sin `system`, la CIE-10 del MINSA:
+ * la que usa una clínica de Perú, el país de las clínicas de prueba.
  */
 export async function seedDiagnosisCodes(
   codes: Array<{ code: string; title: string; isCategory?: boolean }>,
-  system: DiagnosisSystemKey = "ICD-10",
+  system: DiagnosisSystemKey = "ICD-10-PE",
 ): Promise<void> {
   await ownerDb
     .insert(diagnosisCodeRelease)

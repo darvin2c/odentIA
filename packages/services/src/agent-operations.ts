@@ -1,4 +1,5 @@
 import { canAccess } from "@odentia/auth/permissions"
+import { IDENTITY_DOC_TYPES } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   agentHandoff,
@@ -63,6 +64,13 @@ import { type SendBudgetDeps, sendBudget } from "./budget-send.js"
 import { type BudgetLineWithStatus, type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
 import { OPERATIONS } from "./operation-fields.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
+import {
+  type ChatPrivacyNotice,
+  type ChatRegistrationPerson,
+  chatDocumentError,
+  chatPrivacyNotice,
+  registerFromConversation,
+} from "./patient-registration.js"
 import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
@@ -1357,7 +1365,9 @@ async function summarizeAfter(
   }
   // La cita se dice con su día y su hora, nunca con su identificador.
   const startsAt = payloadWhen(payload.startsAt, zone)
-  return startsAt ? `Cita: ${startsAt}` : label
+  const fresh = action === "reservar_cita" ? newPatientOf(payload) : null
+  const forWhom = fresh ? ` · paciente nueva/o: ${fresh.givenNames} ${fresh.familyName}` : ""
+  return startsAt ? `Cita: ${startsAt}${forWhom}` : label
 }
 
 /**
@@ -1850,9 +1860,44 @@ function uuidField(payload: Record<string, unknown>, key: string, label: string,
   if (typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) throw validation(`${label} inválido`)
 }
 
+/** Los datos de quien aún no es paciente en una cita propuesta (ADR 0101); nulo si no vienen bien. */
+export function newPatientOf(payload: Record<string, unknown>): ChatRegistrationPerson | null {
+  const raw = payload.newPatient
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null
+  const value = raw as Record<string, unknown>
+  const text = (item: unknown, max: number) => (typeof item === "string" && item.trim() && item.length <= max ? item.trim() : null)
+  const givenNames = text(value.givenNames, 100)
+  const familyName = text(value.familyName, 200)
+  if (!givenNames || !familyName) return null
+  const docType = typeof value.docType === "string" && (IDENTITY_DOC_TYPES as readonly string[]).includes(value.docType)
+    ? (value.docType as ChatRegistrationPerson["docType"])
+    : null
+  return {
+    givenNames,
+    familyName,
+    docType,
+    docNumber: docType ? text(value.docNumber, 20) : null,
+    forOther: value.forOther === true,
+    minor: value.forOther === true && value.minor === true,
+    writerName: text(value.writerName, 200),
+  }
+}
+
+/** El aviso que se le mostró a quien se registra por el chat, congelado al proponer (ADR 0101). */
+function frozenNoticeOf(payload: Record<string, unknown>): ChatPrivacyNotice | null {
+  const raw = payload.privacyNotice
+  if (typeof raw !== "object" || raw === null) return null
+  const { version, text } = raw as Record<string, unknown>
+  return typeof version === "number" && typeof text === "string" && text.trim() ? { version, text } : null
+}
+
 function validatePayload(action: ProposalAction, payload: Record<string, unknown>): void {
   if (action === "reservar_cita") {
-    if (typeof payload.patientId !== "string" || !payload.patientId) throw validation("patientId es obligatorio")
+    // Quien aún no es paciente se registra con su sí (ADR 0101): lleva sus datos en vez del paciente.
+    if (payload.newPatient !== undefined) {
+      if (payload.patientId !== undefined) throw validation("Una cita es para un paciente o para alguien nuevo, no ambos")
+      if (!newPatientOf(payload)) throw validation("newPatient necesita nombres y apellidos")
+    } else if (typeof payload.patientId !== "string" || !payload.patientId) throw validation("patientId es obligatorio")
     if (typeof payload.professionalUserId !== "string" || !payload.professionalUserId) throw validation("professionalUserId es obligatorio")
     if (typeof payload.roomId !== "string" || !payload.roomId) throw validation("roomId es obligatorio")
     if (typeof payload.startsAt !== "string" || Number.isNaN(Date.parse(payload.startsAt))) throw validation("startsAt inválido")
@@ -2011,6 +2056,17 @@ export async function createProposal(
   validatePayload(input.action, input.payload)
   const reason = cleanReason(input.reason)
   const proposedBy = input.proposedBy === "user" ? "user" : "agent"
+  // Registrar a alguien nuevo es solo del chat, con su sí (ADR 0101): el aviso que se le
+  // muestra queda congelado en la propuesta y su documento se juzga antes de pedirle el sí.
+  if (input.action === "reservar_cita" && input.payload.newPatient !== undefined) {
+    if (proposedBy === "user") throw validation("Una persona nueva se registra en «Nuevo paciente», no con una propuesta")
+    const fresh = newPatientOf(input.payload)
+    const documentError = fresh ? chatDocumentError(fresh) : null
+    if (documentError) throw validation(documentError)
+    const notice = await chatPrivacyNotice(tx, orgId)
+    if (!notice) throw new ServiceError("NO_PRIVACY_NOTICE", 409, "La clínica no registra pacientes por el chat: no tiene su aviso de privacidad publicado")
+    input.payload = { ...input.payload, privacyNotice: notice }
+  }
   let finalKey = key
   if (!input.conversationId) throw validation("conversationId es obligatorio")
   const [conv] = await tx
@@ -2332,10 +2388,58 @@ export async function proposalReplyOf(
   if (current.contactId !== contactId) throw notFound("Propuesta")
   const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
   const after = items.filter((m) => new Date(m.createdAt).getTime() >= current.createdAt.getTime())
-  const reply = after.filter((m) => m.direction === "in" && m.body).at(-1)
+  // Todo lo que escribió desde su última respuesta: «Sí, resérvenme el de las 11» seguido de
+  // «pero confírmenme el costo» es un sí; leer solo el último pedazo lo perdía.
+  const lastOut = after.findLastIndex((m) => m.direction === "out")
+  const said = after.slice(lastOut + 1).filter((m) => m.direction === "in" && m.body)
+  const reply = said.at(-1)
   const proposed = after.find((m) => m.direction === "out" && m.body)
-  return { reply: reply ? { id: reply.id, body: reply.body ?? "" } : null, proposed: proposed?.body ?? null }
+  return {
+    reply: reply ? { id: reply.id, body: said.map((m) => m.body).join("\n") } : null,
+    proposed: proposed?.body ?? null,
+  }
 }
+
+/**
+ * Lo que la persona escribió justo antes de que se le propusiera la cita (sus
+ * mensajes desde la última respuesta de la clínica) y lo propuesto: con esto
+ * el agente pregunta al modelo de decisión si ya pidió reservar esa misma hora
+ * (ADR 0097). Nulo si ya respondió después de la propuesta o no escribió nada.
+ */
+export async function chosenBeforeProposalOf(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  id: string,
+): Promise<{ messageId: string; said: string; proposed: string } | null> {
+  const current = await requireProposal(tx, orgId, id)
+  if (current.contactId !== contactId) throw notFound("Propuesta")
+  const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
+  const isBefore = (m: (typeof items)[number]) => new Date(m.createdAt).getTime() < current.createdAt.getTime()
+  if (items.some((m) => m.direction === "in" && !isBefore(m))) return null
+  const before = items.filter(isBefore)
+  const lastOut = before.findLastIndex((m) => m.direction === "out")
+  const said = before.slice(lastOut + 1).filter((m) => m.direction === "in" && m.body)
+  const latest = said.at(-1)
+  if (!latest) return null
+  // Lo que el modelo de decisión compara: día y hora, con quién, dónde, para quién y qué día es hoy.
+  const item = await getProposal(tx, orgId, id)
+  const zone = await getOrgLocale(tx, orgId)
+  const fresh = newPatientOf(current.payload)
+  const proposed = [
+    item.context.afterSummary,
+    item.context.professionalName ? `con ${item.context.professionalName}` : null,
+    item.context.branchName ? `en ${item.context.branchName}` : null,
+    item.context.patientName ? `para ${item.context.patientName}` : fresh ? `para ${fresh.givenNames} ${fresh.familyName}` : null,
+    `(hoy es ${formatZoned(new Date(), zone)})`,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  return { messageId: latest.id, said: said.map((m) => m.body).join("\n"), proposed }
+}
+
+/** Cuánto antes de la propuesta puede estar el mensaje que eligió la hora. */
+const CHOSEN_BEFORE_PROPOSAL_MS = 10 * 60 * 1000
 
 export async function confirmProposalByContact(
   tx: Db,
@@ -2350,6 +2454,13 @@ export async function confirmProposalByContact(
      * («perfecto, ahí estaré»). Vale solo si es de la persona y posterior a la propuesta.
      */
     understoodMessageId?: string
+    /**
+     * El mensaje con que la persona eligió esa misma hora y pidió reservarla
+     * («resérvame mañana a las 2 con la Dra. Ana»), anterior a la propuesta:
+     * su sí ya está dado y no se le vuelve a pedir (ADR 0097). Vale solo si es
+     * su último mensaje y de los minutos previos a la propuesta.
+     */
+    chosenMessageId?: string
   } = {},
 ): Promise<ProposalItem> {
   const current = await requireProposal(tx, orgId, id)
@@ -2368,11 +2479,31 @@ export async function confirmProposalByContact(
     )
   }
   const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
-  const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= current.createdAt.getTime()
+  // Registrar a alguien nuevo pide que antes le haya llegado la pregunta con el
+  // enlace del aviso de privacidad (ADR 0101): su sí cuenta desde ese mensaje.
+  const fresh = newPatientOf(current.payload)
+  const noticeShown = fresh
+    ? items.find(
+        (m) => m.direction === "out" && new Date(m.createdAt).getTime() >= current.createdAt.getTime() && (m.body ?? "").includes("/aviso"),
+      )
+    : undefined
+  if (fresh && !noticeShown) {
+    throw new ServiceError("PROPOSAL_NOTICE_NOT_SENT", 409, "Aún no le llegó la pregunta con el aviso de privacidad")
+  }
+  const since = new Date(noticeShown?.createdAt ?? current.createdAt).getTime()
+  const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= since
   const byWords = items.find((m) => afterProposal(m) && isAffirmative(m.body))
   // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
   const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
-  const confirmation = byWords ?? byIntent
+  const latestIn = items.filter((m) => m.direction === "in").at(-1)
+  const byChoice =
+    opts.chosenMessageId && latestIn?.id === opts.chosenMessageId &&
+    current.createdAt.getTime() - new Date(latestIn.createdAt).getTime() <= CHOSEN_BEFORE_PROPOSAL_MS
+      ? latestIn
+      : undefined
+  // Registrar a alguien nuevo pide su sí a la pregunta que decía «Al confirmar, aceptas
+  // nuestro aviso de privacidad» (ADR 0101): lo que eligió antes no lo vio.
+  const confirmation = byWords ?? byIntent ?? (fresh ? undefined : byChoice)
   if (!confirmation) {
     throw new ServiceError(
       "PROPOSAL_NOT_CONFIRMED",
@@ -2394,9 +2525,9 @@ export async function confirmProposalByContact(
     action: "agent.proposal_confirmed",
     entity: "agent_proposal",
     entityId: id,
-    metadata: { via: opts.staffUserId ? "staff" : "contact", messageId: confirmationId, understood: byWords ? "palabras" : "modelo_de_decision" },
+    metadata: { via: opts.staffUserId ? "staff" : "contact", messageId: confirmationId, understood: byWords ? "palabras" : byIntent ? "modelo_de_decision" : "eligio_esa_hora" },
   })
-  return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey })
+  return executeProposal(tx, orgId, decidedBy, id, { secretsKey: opts.secretsKey, consentMessageId: confirmationId })
 }
 
 /* ------------------------------ «Esperan su sí» ------------------------------ */
@@ -2569,6 +2700,10 @@ export async function confirmProposalByPhone(
   if (!(APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(current.action)) {
     throw new ServiceError("PROPOSAL_NOT_APPOINTMENT", 409, "Solo una cita propuesta se confirma por teléfono")
   }
+  // Una persona nueva acepta el aviso con su sí en el chat (ADR 0101): por teléfono no hay ese sí.
+  if (newPatientOf(current.payload)) {
+    throw new ServiceError("PROPOSAL_NEEDS_CHAT_YES", 409, "Esta cita es de alguien nuevo: se confirma con su sí en el chat, después de leer el aviso de privacidad")
+  }
   if (current.action === "reservar_cita" && !(await proposedSlotFree(tx, orgId, current.payload))) {
     throw new ServiceError("SLOT_TAKEN", 409, SLOT_TAKEN_WORDS)
   }
@@ -2635,7 +2770,11 @@ export async function executeProposal(
   orgId: string,
   actorUserId: string,
   id: string,
-  opts: { secretsKey?: Buffer } = {},
+  opts: {
+    secretsKey?: Buffer
+    /** El mensaje del sí de la persona: con él, registrar a alguien nuevo guarda su consentimiento (ADR 0101). */
+    consentMessageId?: string
+  } = {},
 ): Promise<ProposalItem> {
   const [locked] = await tx
     .select()
@@ -2677,7 +2816,25 @@ export async function executeProposal(
   try {
     let result: Record<string, unknown>
     if (action === "reservar_cita") {
-      const patientId = payload.patientId as string
+      // Alguien nuevo se registra aquí, dentro del mismo punto de restauración:
+      // si la cita no se puede reservar, tampoco queda registrado (ADR 0101).
+      const fresh = newPatientOf(payload)
+      const notice = frozenNoticeOf(payload)
+      if (fresh && (!locked.contactId || !locked.conversationId || !notice || !opts.consentMessageId)) {
+        throw validation("Registrar a alguien nuevo necesita su conversación, el aviso que se le mostró y su sí")
+      }
+      const patientId = fresh
+        ? (
+            await registerFromConversation(tx, orgId, {
+              conversationId: locked.conversationId as string,
+              contactId: locked.contactId as string,
+              submissionId: locked.id,
+              person: fresh,
+              notice: notice as ChatPrivacyNotice,
+              consentMessageId: opts.consentMessageId as string,
+            })
+          ).patientId
+        : (payload.patientId as string)
       if (locked.contactId) {
         await resolveAgentPatientContext(tx, orgId, locked.contactId, patientId)
       } else {
@@ -2701,7 +2858,12 @@ export async function executeProposal(
         // Se le dijo en la misma conversación: «Recordar la cita» no repite el aviso.
         notice: false,
       })
-      result = { appointmentId: created.id, startsAt: created.startsAt, professionalName: created.professionalName }
+      result = {
+        appointmentId: created.id,
+        startsAt: created.startsAt,
+        professionalName: created.professionalName,
+        ...(fresh ? { patientId, registered: true } : {}),
+      }
     } else if (action === "reprogramar_cita") {
       const appointmentId = payload.appointmentId as string
       const [liveAppt] = await tx

@@ -32,6 +32,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { DictationMobileBar, dictationMobileBarVisible, DictationPanel, DictationTranscript } from "./dictation-panel"
 import { type DictationKind, type DictationSuggestion, useDictationSession } from "./dictation-session"
 import { DictationSignDialog } from "./dictation-sign-dialog"
+import { PLAN_QUERY_KEYS } from "../../lib/budgets"
 import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
 import {
   clinicDateTimeValue,
@@ -65,7 +66,7 @@ import { EncounterClosingDialog } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
-import { EncounterPlanPanel } from "./encounter-plan-panel"
+import { EncounterBudgetSend, EncounterPlanPanel } from "./encounter-plan-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 import { EncounterProcedures } from "./encounter-procedures"
 import { PatientClinicalStrip } from "./patient-header"
@@ -126,7 +127,7 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
   // Los signos vitales y el examen por sistemas que dicta latidIA (issue 229).
   examen: { kinds: ["signos", "examen"], onlySuggested: "Sin examen registrado" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
-  plan: { kinds: ["plan", "control"], onlySuggested: "Sin indicaciones confirmadas" },
+  plan: { kinds: ["plan", "control", "cita", "presupuesto"], onlySuggested: "Sin indicaciones confirmadas" },
   // La receta dictada se emite desde su bloque, con «Emitir receta» (issue 109, fase 2); el descanso, con «Emitir descanso».
   documentos: { kinds: ["receta", "descanso"], onlySuggested: "Sin documentos" },
 }
@@ -663,6 +664,11 @@ export function EncounterEditor({
       void queryClient.invalidateQueries({ queryKey: ["patient-health", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+    }
+    // La cita reservada y el presupuesto armado se ven al momento: en «Qué sigue» y en «Presupuesto por enviar».
+    if (item.kind === "cita" || item.kind === "presupuesto") {
+      for (const key of PLAN_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
+      void queryClient.invalidateQueries({ queryKey: ["plan-next", patientId] })
     }
     void queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["follow-ups", patientId] })
@@ -1388,6 +1394,7 @@ export function EncounterEditor({
         attentionItems={attentionItems}
         disabled={locked}
         autoOpen={justAdded === "plan"}
+        patientName={patient.patient.displayName}
         beforeWrite={flush}
         onChanged={handleChildChanged}
         onPendingChange={handlePendingChange}
@@ -1624,8 +1631,12 @@ export function EncounterEditor({
                 ) : null}
               </div>
               {(dictationOf(section.key)?.kinds ?? []).map((kind) => (
-                <DictationBlockSuggestions key={kind} session={dictation} kind={kind} />
+                <DictationBlockSuggestions key={kind} session={dictation} kind={kind} patientName={patient.patient.displayName} />
               ))}
+              {/* El presupuesto en borrador (también el que armó Clío) se muestra, imprime o envía sin abrir el bloque. */}
+              {section.key === "plan" && openSection !== "plan" ? (
+                <EncounterBudgetSend patientId={patientId} patientName={patient.patient.displayName} beforeWrite={flush} compact />
+              ) : null}
               {/* Al registrar o indicar un servicio que lo pide, se propone sin abrir el bloque. */}
               {section.key === "documentos" && docs.toPrepare.length > 0 ? (
                 <div className="flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2">

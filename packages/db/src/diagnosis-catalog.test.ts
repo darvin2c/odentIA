@@ -19,6 +19,37 @@ it("la CIE-11 incluida es la de la OMS (SHA-256 del .zip) y trae los capítulos 
   expect(byCode.get("QA47.6")?.title).toBe("Multiple other than twins, born in hospital")
 })
 
+it("la CIE-10 del MINSA incluida es la hoja oficial (SHA-256 del .xlsx) y viene completa", () => {
+  const minsa = BUNDLED_DIAGNOSIS_LISTS.find((load) => load.system === "ICD-10-PE")!
+  const { sha, rows } = readDiagnosisList(minsa)
+  expect(sha).toBe(minsa.sha256)
+  // Verificada el 2026-10-28: 2 051 de 3 caracteres, 12 634 de 4, 329 de 5 y 23 de 6 (ADR 0103).
+  expect(rows).toHaveLength(15_037)
+  const byLength = (n: number) => rows.filter((row) => row.code.replace(".", "").length === n).length
+  expect([byLength(3), byLength(4), byLength(5), byLength(6)]).toEqual([2_051, 12_634, 329, 23])
+  // Ningún subcódigo sin su categoría de tres caracteres.
+  const codes = new Set(rows.map((row) => row.code))
+  expect(rows.filter((row) => row.code.length > 3 && !codes.has(row.code.slice(0, 3)))).toEqual([])
+  const byCode = new Map(rows.map((row) => [row.code, row]))
+  // Se lee como frase; el título oficial del MINSA se guarda aparte, sin cambios.
+  expect(byCode.get("K02")).toMatchObject({ title: "Caries dental", officialTitle: "CARIES DENTAL", isCategory: true })
+  expect(byCode.get("K02.1")).toMatchObject({ title: "Caries de la dentina", officialTitle: "CARIES DE LA DENTINA" })
+  // La categoría sin subdivisiones va con su X, y los códigos propios del MINSA tienen seis caracteres.
+  expect(byCode.get("I10.X")).toMatchObject({ isCategory: false })
+  expect(byCode.get("Z30.051")).toMatchObject({ isCategory: false })
+  expect(byCode.get("P07.11")?.officialTitle).toBe("RECIEN NACIDO DE MUY BAJO PESO AL NACER (< 1500 GRAMOS)")
+  expect(byCode.get("Q90.9")?.title).toBe("Síndrome de Down, no especificado")
+  expect(byCode.get("B20.0")?.title).toBe("Enfermedad por VIH, resultante en infección por micobacterias")
+})
+
+it("cada código que propone el odontograma en la CIE-10 del MINSA existe y se puede registrar", () => {
+  const minsa = BUNDLED_DIAGNOSIS_LISTS.find((load) => load.system === "ICD-10-PE")!
+  const byCode = new Map(readDiagnosisList(minsa).rows.map((row) => [row.code, row]))
+  for (const code of findingDiagnosisCodes("ICD-10-PE")) {
+    expect(byCode.get(code), code).toMatchObject({ isCategory: false })
+  }
+})
+
 it("cada código que propone el odontograma en la CIE-11 existe y se puede registrar", () => {
   const icd11 = BUNDLED_DIAGNOSIS_LISTS.find((load) => load.system === "ICD-11")!
   const byCode = new Map(readDiagnosisList(icd11).rows.map((row) => [row.code, row]))
