@@ -1,5 +1,5 @@
 {
-  "id": "5903d9f4-cae5-462d-a0f7-33b82f70e5db",
+  "id": "570ce57e-15de-4919-8259-8f64a3772c44",
   "prevId": "a27ae360-2f9d-4b17-93bb-b97d39b6037d",
   "version": "7",
   "dialect": "postgresql",
@@ -13018,7 +13018,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -25399,13 +25399,6 @@
         },
         "forwarded": {
           "name": "forwarded",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "from_business_app": {
-          "name": "from_business_app",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,

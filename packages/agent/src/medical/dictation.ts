@@ -7,6 +7,7 @@ import {
 } from "@odentia/services"
 import { z } from "zod"
 import {
+  allergyAndDonePrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -29,6 +30,10 @@ import {
 const WORDS = { clinician: "médico" }
 
 const diagnosis = operationAgentSchema("atencion.diagnostico", WORDS).omit({
+  toothNumber: true,
+  surfaces: true,
+})
+const done = operationAgentSchema("atencion.procedimiento", WORDS).omit({
   toothNumber: true,
   surfaces: true,
 })
@@ -62,6 +67,16 @@ export const extraction = z.object({
   ),
   recetas: dictationList("receta.medicamento", "Un elemento por cada medicamento que recetó."),
   controles: dictationList("control.crear", "Un elemento por cada control que pidió."),
+  alergias: dictationList("alergia.dictada", "Un elemento por cada alergia del paciente que se dijo, o uno con `none` si no tiene."),
+  procedimientos: dictationItems(
+    done.extend({
+      service: done.shape.service.describe(
+        "Lo que hizo hoy, con las palabras del médico (una nebulización, un inyectable, una curación). El sistema lo busca en el plan del paciente y en los servicios de la clínica.",
+      ),
+      quantity: done.shape.quantity.describe("Cuántas unidades, solo si lo dijo («dos ampollas» = 2)."),
+    }),
+    "Un elemento por cada cosa que el médico ya hizo hoy en la atención.",
+  ),
   descanso: operationAgentSchema("descanso.medico")
     .extend({ dicho: dictationSaid })
     .optional()
@@ -77,6 +92,8 @@ const DRAFT_PARTS = [
   { key: "indicaciones", kind: "plan" },
   { key: "recetas", kind: "receta" },
   { key: "controles", kind: "control" },
+  { key: "alergias", kind: "alergia" },
+  { key: "procedimientos", kind: "procedimiento" },
   { key: "descanso", kind: "descanso", single: true },
 ] as const
 
@@ -104,6 +121,7 @@ export function systemPrompt(input: {
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
+    ...allergyAndDonePrompt("médico", "«le hice la nebulización», «ya le puse el inyectable»"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")

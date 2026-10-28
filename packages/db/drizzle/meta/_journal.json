@@ -82,8 +82,15 @@
     {
       "idx": 11,
       "version": "7",
-      "when": 1793210337701,
-      "tag": "0011_whatsapp_coexistencia",
+      "when": 1793206043887,
+      "tag": "0011_clio_alergias_y_procedimientos",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793215301062,
+      "tag": "0012_whatsapp_coexistencia",
       "breakpoints": true
     }
   ]

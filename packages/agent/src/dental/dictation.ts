@@ -7,6 +7,7 @@ import {
 } from "@odentia/services"
 import { z } from "zod"
 import {
+  allergyAndDonePrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -32,6 +33,8 @@ export const extraction = z.object({
   indicaciones: dictationList("plan.indicacion", "Un elemento por cada tratamiento que indicó para el plan."),
   recetas: dictationList("receta.medicamento", "Un elemento por cada medicamento que recetó."),
   controles: dictationList("control.crear", "Un elemento por cada control que pidió."),
+  alergias: dictationList("alergia.dictada", "Un elemento por cada alergia del paciente que se dijo, o uno con `none` si no tiene."),
+  procedimientos: dictationList("atencion.procedimiento", "Un elemento por cada cosa que el odontólogo ya hizo hoy en la atención."),
   ...dictationEdits("toothNumber"),
 })
 
@@ -42,6 +45,8 @@ const DRAFT_PARTS = [
   { key: "indicaciones", kind: "plan" },
   { key: "recetas", kind: "receta" },
   { key: "controles", kind: "control" },
+  { key: "alergias", kind: "alergia" },
+  { key: "procedimientos", kind: "procedimiento" },
 ] as const
 
 export function systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string {
@@ -69,6 +74,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
     input.services.length
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
+    ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
     "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")
@@ -138,13 +144,19 @@ export function demoExtraction(
       const tooth = toothIn(sentence)
       if (tooth) drafts.push({ kind: "odontograma", payload: { toothNumber: tooth, condition: "missing_tooth" }, sourceText: sentence })
     }
+    // «Es alérgica a la penicilina»; «niega alergias».
+    const allergy = /\balergic[oa] a (?:la |el |los |las )?([a-z]+)/.exec(text)
+    if (allergy?.[1]) drafts.push({ kind: "alergia", payload: { substance: allergy[1] }, sourceText: sentence })
+    else if (/\b(niega alergias|no tiene alergias|sin alergias)\b/.test(text)) drafts.push({ kind: "alergia", payload: { none: true }, sourceText: sentence })
+    // Lo contado como hecho («le hice…», «terminé…») es un procedimiento de hoy, no una indicación.
+    const done = /\b(le hice|hice|termine|terminamos|le puse)\b/.test(text)
     for (const name of services) {
       const key = plain(name).split(" ").filter((word) => word.length >= 4)[0]
       if (!key || !text.includes(key)) continue
       const tooth = toothIn(sentence)
       const surfaces = SURFACES.filter((surface) => text.includes(surface))
       drafts.push({
-        kind: "plan",
+        kind: done ? "procedimiento" : "plan",
         payload: { service: name, ...(tooth ? { toothNumber: tooth } : {}), ...(surfaces.length ? { surfaces } : {}) },
         sourceText: sentence,
       })

@@ -121,7 +121,7 @@ export function createEncounterDictationRoute(deps: EncounterDictationDeps) {
             ],
           }
         })
-        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
+        if (!ready) return { suggestions: [], corrected: [], removed: [], undoRequested: [], alreadyOnFile: [], sources: [], omitted: 0, unused: [], repeated: true, model: null }
         // Sin saldo de prueba los agentes están en pausa (ADR 0031); con el presupuesto del mes
         // alcanzado, Clío no empieza a escuchar en esta atención (ADR 0085): no se gasta una llamada.
         await withOrgContext(deps.db, orgId, (tx) => assertClioCanListen(tx, orgId, at.data.encounterId))

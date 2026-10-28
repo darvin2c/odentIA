@@ -46,6 +46,8 @@ export const medicalUi: ProductUi = {
       { block: "Receta", say: "«Amoxicilina de 500 cada 8 horas por 10 días»" },
       { block: "Control", say: "«Control en una semana si no mejora»" },
       { block: "Descanso", say: "«Descanso de tres días»" },
+      { block: "Alergias", say: "«Es alérgica a la penicilina» · «Niega alergias»" },
+      { block: "Procedimientos", say: "«Le hice la nebulización»" },
       { block: "Corregir", say: "«No, la temperatura es 38,4» · «Quita el ibuprofeno»" },
     ],
     placeholder: "Presión 118 con 76, temperatura 38 y medio, amígdalas con placas, pulmones limpios…",

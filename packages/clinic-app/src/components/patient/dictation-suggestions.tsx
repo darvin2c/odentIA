@@ -129,8 +129,30 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                 </Button>
               </div>
               {choice ? <PlanChoices session={session} item={item} busy={busy} /> : null}
-              {!ready && item.kind === "plan" && !choice ? (
-                <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Elige la prestación">
+              {item.kind === "alergia" && pendingOf(item).includes("severity") ? (
+                // Qué tan fuerte fue: un aviso, no un requisito. Sin elegirla entra como «No se sabe».
+                <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0 sm:pl-8" aria-label="Qué tan fuerte fue la reacción">
+                  {ALLERGY_SEVERITIES.map((severity) => (
+                    <Button
+                      key={severity.value}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11 sm:min-h-8"
+                      disabled={busy || session.save.isPending}
+                      onClick={() => session.save.mutate({ item, patch: { severity: severity.value }, confirm: false })}
+                    >
+                      {severity.label}
+                    </Button>
+                  ))}
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <Mic className="size-3.5" aria-hidden />
+                    o dila: «fue severa»
+                  </span>
+                </fieldset>
+              ) : null}
+              {(!ready && item.kind === "plan" && !choice) || (item.kind === "procedimiento" && item.payload["source"] === "libre" && candidates.length > 0) ? (
+                <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label={item.kind === "procedimiento" ? "Elige el servicio, si se cobra" : "Elige la prestación"}>
                   {candidates.map((candidate) => (
                     <Button
                       key={candidate.id}
@@ -220,7 +242,19 @@ const UNDO_WORDS: Partial<Record<DictationKind, string>> = {
   plan: "Quitar del plan",
   diagnostico: "Quitar el diagnóstico",
   control: "Quitar el control",
+  alergia: "Quitar de sus alergias",
+  procedimiento: "Anular el procedimiento",
 }
+
+/** Qué tan fuerte fue una alergia: los valores de «Nueva alergia», sin «No se sabe» (es lo que queda sin tocar). */
+const ALLERGY_SEVERITIES = [
+  { value: "leve", label: "Leve" },
+  { value: "moderada", label: "Moderada" },
+  { value: "severa", label: "Severa" },
+] as const
+
+/** Lo que aún le falta a una sugerencia (la pieza, la cara, qué tan fuerte fue). */
+const pendingOf = (item: DictationSuggestion): string[] => (Array.isArray(item.payload["pending"]) ? (item.payload["pending"] as string[]) : [])
 
 /**
  * Lo que no salió al confirmar, descartar o deshacer, dentro de su tarjeta. Si
@@ -547,7 +581,7 @@ interface EditableField {
 }
 
 /** Campos que el profesional corrige a mano en una sugerencia que no es del plan, con su rótulo. */
-const EDITABLE: Record<Exclude<DictationKind, "plan">, EditableField[]> = {
+const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, EditableField[]> = {
   nota: [
     { key: "reason", label: "Motivo de consulta", long: true },
     { key: "presentIllness", label: "Enfermedad actual", long: true },
@@ -578,11 +612,18 @@ const EDITABLE: Record<Exclude<DictationKind, "plan">, EditableField[]> = {
   examen: [{ key: "finding", label: "Hallazgo", long: true }],
   // El descanso se completa en su formulario, «Emitir descanso», ya lleno.
   descanso: [],
+  // La sustancia como se dijo, lo que le pasó y qué tan fuerte fue (leve, moderada o severa).
+  alergia: [
+    { key: "substance", label: "Sustancia" },
+    { key: "reaction", label: "Qué le pasó", long: true },
+  ],
 }
 
 /** Lo que se corrige de una sugerencia: lo que trae y, de la presión, las dos partes. */
 function fieldsOf(item: DictationSuggestion): EditableField[] {
-  if (item.kind === "plan") return []
+  if (item.kind === "plan" || item.kind === "procedimiento") return []
+  // «No tiene alergias» no tiene nada que escribir: se confirma o se descarta.
+  if (item.kind === "alergia" && item.payload["none"] === true) return []
   const all = EDITABLE[item.kind]
   if (item.kind === "nota") return all.filter((field) => item.payload[field.key] !== undefined)
   if (item.kind === "signos") {
@@ -606,7 +647,9 @@ export function DictationEditDrawer({ session }: { session: DictationSession }) 
 function EditForm({ item, session }: { item: DictationSuggestion; session: DictationSession }) {
   const payload = item.payload
   const kind = item.kind
-  const plan = kind === "plan"
+  // Lo hecho hoy se corrige como una indicación: el servicio, la pieza y las caras.
+  const plan = kind === "plan" || kind === "procedimiento"
+  const done = kind === "procedimiento"
   const fields = fieldsOf(item)
   const [draft, setDraft] = useState<Record<string, string>>(() =>
     Object.fromEntries([...fields.map((field) => field.key), "toothNumber", "detail"].map((key) => [key, payload[key] == null ? "" : String(payload[key])])),
@@ -650,7 +693,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
         const kept = surfaces.filter((surface) => (available as string[]).includes(surface))
         patch["surfaces"] = kept.length ? kept : null
       }
-      patch["detail"] = (draft["detail"] ?? "").trim() || null
+      if (!done) patch["detail"] = (draft["detail"] ?? "").trim() || null
     } else {
       for (const field of fields) {
         const value = (draft[field.key] ?? "").trim()
@@ -680,7 +723,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
       isSubmitting={session.save.isPending}
       error={review ?? dictationErrorText(session.save.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
       submitLabel="Guardar y confirmar"
-      submitDisabled={plan && !service}
+      submitDisabled={plan && !done && !service}
     >
       <div className="flex flex-col gap-4">
         {item.sourceText ? (
@@ -762,10 +805,12 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
                 )}
               </div>
             ) : null}
-            <Field>
-              <FieldLabel htmlFor={`dictado-${item.id}-detalle`}>Detalle</FieldLabel>
-              <Textarea id={`dictado-${item.id}-detalle`} rows={3} maxLength={2000} placeholder="Opcional" value={draft["detail"] ?? ""} onChange={(event) => setDraft({ ...draft, detail: event.target.value })} />
-            </Field>
+            {done ? null : (
+              <Field>
+                <FieldLabel htmlFor={`dictado-${item.id}-detalle`}>Detalle</FieldLabel>
+                <Textarea id={`dictado-${item.id}-detalle`} rows={3} maxLength={2000} placeholder="Opcional" value={draft["detail"] ?? ""} onChange={(event) => setDraft({ ...draft, detail: event.target.value })} />
+              </Field>
+            )}
           </>
         ) : (
           fields.map((field) => (
