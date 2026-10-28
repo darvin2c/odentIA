@@ -525,6 +525,27 @@ it("derivar con aviso envía el mensaje y registra la derivación en una sola ll
   ])
 })
 
+it("si pasa un tema sin escribirle, el modelo responde él lo demás que preguntó; el aviso fijo no sale", async () => {
+  const { conversationId, messageId } = await ingestText(
+    "tg:ag-deriva-sin-aviso",
+    "evt-ag-deriva-sin-aviso",
+    "¿Debo tomar algo para la fiebre? ¿Y hay cita hoy?",
+  )
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall("request_human_handoff", { reason: "Pregunta qué tomar", summary: "Pregunta qué tomar para la fiebre", clinical: true }, "call-1")
+      : toolCall("send_reply", { text: "Lo de la fiebre lo verá el equipo clínico. ¿Para qué hora de hoy buscas la cita?" }, "call-2"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen.length).toBe(2)
+  const handoffResult = (model.seen[1] ?? []).filter((m) => m.getType() === "tool").map((m) => String(m.content))
+  expect(handoffResult.at(-1)).toContain("Falta tu respuesta")
+  expect(await agentMessages(conversationId)).toEqual(["Lo de la fiebre lo verá el equipo clínico. ¿Para qué hora de hoy buscas la cita?"])
+  expect(await ledgerRows(conversationId)).toEqual([
+    { status: "handoff", llmCalls: 2, toolsUsed: ["request_human_handoff", "send_reply"] },
+  ])
+})
+
 /** Servidor compatible con OpenAI que siempre rechaza la credencial. */
 async function rejectingProvider() {
   let hits = 0

@@ -1013,7 +1013,13 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   async function routeAfterTools(state: typeof AgentState.State): Promise<string> {
     // La respuesta ya salió o espera decisión: otra llamada al modelo solo
     // produciría texto que no llega a nadie.
-    if (toolCtx.handedOff || toolCtx.replySettled) return END
+    if (toolCtx.replySettled) return END
+    // Pasó un tema sin escribirle: vuelve al modelo una vez para que responda él.
+    if (toolCtx.handedOff) {
+      if (!toolCtx.handoffNeedsReply) return END
+      toolCtx.handoffNeedsReply = false
+      return "llm"
+    }
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
       return cfg.maxTurns

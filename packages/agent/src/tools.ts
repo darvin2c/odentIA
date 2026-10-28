@@ -231,6 +231,11 @@ export interface AgentToolCtx {
   secretsKey: Buffer
   /** La herramienta de handoff lo marca; el grafo termina el turno. */
   handedOff: boolean
+  /**
+   * El modelo pasó un tema al equipo sin escribirle nada a la persona: le toca
+   * responder a él (quién lo verá y lo demás que preguntó) antes del aviso fijo.
+   */
+  handoffNeedsReply?: boolean
   /** La derivación registrada en esta corrida, para completarla con el aviso que recibió la persona. */
   handoffId?: string
   /** Simulación: las herramientas no escriben nada, solo describen. */
@@ -1965,6 +1970,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  /** Lo que se le pide al modelo que pasó un tema sin escribirle a la persona. */
+  const REPLY_AFTER_HANDOFF =
+    "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje. Di en una frase quién verá ese tema, sin prometer hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender (horarios, precio, cómo reservar): eso no se pasa al equipo."
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
@@ -2003,7 +2011,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         await inOrg((tx) => recordTopicAskedAgain(tx, ctx.orgId, { handoffId: open.id, messageId: ctx.triggerId ?? null }))
         ctx.handedOff = true
         ctx.handoffId = open.id
-        if (!notice) return "Ese tema ya lo tiene el equipo: lo anoté en él. Falta el aviso al interlocutor: llama de nuevo con message."
+        if (!notice) {
+          ctx.handoffNeedsReply = true
+          return `Ese tema ya lo tiene el equipo: lo anoté en él. ${REPLY_AFTER_HANDOFF}`
+        }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
         return ctx.replySettled ? "Ese tema ya lo tiene el equipo: lo anoté en él y salió el aviso. No envíes más mensajes." : `El aviso al interlocutor no salió: ${outcome}`
@@ -2028,12 +2039,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const destino = handoff.assigneeUserId ? "con responsable asignado" : "en la cola del equipo por recoger"
       // El aviso sale después de crear la derivación: si esta falla, no se le
       // promete al interlocutor una atención que nadie registró.
-      let noticeResult = ""
-      if (notice) {
-        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
-        noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
-        if (ctx.replySettled) await annotate(true)
+      if (!notice) {
+        ctx.handoffNeedsReply = true
+        return `Tema pasado al equipo (${destino}). ${REPLY_AFTER_HANDOFF}`
       }
+      const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+      const noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
+      if (ctx.replySettled) await annotate(true)
       return `Tema pasado al equipo (${destino}).${noticeResult} No envíes nada más por este mensaje; en los siguientes sigues atendiendo todo lo demás.`
     },
     {
