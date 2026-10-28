@@ -410,10 +410,24 @@ function settlePlan(payload: Record<string, unknown>, services: ServiceOption[],
       }
   if (!Array.isArray(rawOptions) || rawOptions.length === 0) return fitted
   const options = (rawOptions as PlanChoice[]).slice(0, BUDGET_OPTIONS_MAX - 1).map((option) => chooseService(option, services))
-  const ready: Prepared = { ...fitted, payload: { ...fitted.payload, options } }
+  // La elección guarda la pieza y las caras como se dijeron: cada camino toma de ahí lo suyo al
+  // confirmarse (`confirmPlanChoice`), y la corona no se queda sin las caras que pide la resina.
+  const site = choiceSite(base)
+  const ready: Prepared = { ...fitted, payload: { ...fitted.payload, ...site, options } }
   // Cada opción dice qué se dijo y sus candidatas; arriba basta una línea.
   if (!main.serviceId || (fitted.status === "lista" && options.some((option) => !option.serviceId))) return { ...ready, status: "por_revisar", note: CHOOSE_EACH_OPTION }
+  if (fitted.status !== "lista") return ready
+  // Resina (por caras) o corona (por pieza): cada camino se revisa con su propio ámbito.
+  for (const [index, option] of options.entries()) {
+    const own = dictation.fitToScope(site, option.serviceScope ?? null)
+    if (own.status !== "lista") return { ...ready, status: "por_revisar", note: `Opción ${OPTION_LETTER[index + 1]} · ${option.serviceName ?? option.service}: ${own.note}` }
+  }
   return ready
+}
+
+/** La pieza y las caras de una elección de caminos, tal como se dijeron. */
+function choiceSite(payload: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(["toothNumber", "surfaces"].filter((key) => payload[key] !== undefined && payload[key] !== null).map((key) => [key, payload[key]]))
 }
 
 const CHOOSE_EACH_OPTION = "Elige la prestación en cada opción."
@@ -646,6 +660,53 @@ function describeBefore(
   return parts.length ? parts.join(", ") : null
 }
 
+/** Dónde va una indicación o un diagnóstico: la pieza y sus caras, ordenadas. */
+interface Place {
+  tooth: number | null
+  surfaces: string[]
+}
+
+const placeOf = (payload: Record<string, unknown>): Place => ({
+  tooth: typeof payload["toothNumber"] === "number" ? payload["toothNumber"] : null,
+  surfaces: Array.isArray(payload["surfaces"]) ? [...(payload["surfaces"] as string[])].sort() : [],
+})
+
+/** ¿`wide` ya dice todo lo de `narrow`? Sin pieza no dice nada; con pieza, la misma, y las mismas caras si las tiene. */
+function covers(wide: Place, narrow: Place): boolean {
+  if (narrow.tooth === null) return true
+  if (wide.tooth !== narrow.tooth) return false
+  return narrow.surfaces.length === 0 || JSON.stringify(wide.surfaces) === JSON.stringify(narrow.surfaces)
+}
+
+const siteOf = (place: Place): Record<string, unknown> => ({
+  ...(place.tooth !== null ? { toothNumber: place.tooth } : {}),
+  ...(place.surfaces.length ? { surfaces: place.surfaces } : {}),
+})
+
+const isPlanChoice = (kind: DictationKind, payload: Record<string, unknown>) =>
+  kind === "plan" && Array.isArray(payload["options"]) && payload["options"].length > 0
+
+/** Una indicación pendiente del plan: sus prestaciones (la principal y sus caminos) y dónde va. */
+interface PendingPlan {
+  id: string | null
+  names: string[]
+  place: Place
+  choice: boolean
+}
+
+/** Cada prestación se reconoce por su servicio o, si no se ubicó, por cómo se dijo. */
+function planEntry(id: string | null, payload: Record<string, unknown>): PendingPlan {
+  const choices = [payload as PlanChoice, ...(Array.isArray(payload["options"]) ? (payload["options"] as PlanChoice[]) : [])]
+  const names = choices.flatMap((choice) => [
+    ...(choice.serviceId ? [`id:${choice.serviceId}`] : []),
+    ...(choice.service ? [`dicho:${normalizeForSearch(String(choice.service))}`] : []),
+  ])
+  return { id, names, place: placeOf(payload), choice: choices.length > 1 }
+}
+
+const diagnosisKey = (payload: Record<string, unknown>) =>
+  JSON.stringify([String(payload["diagnosisCode"] ?? "").trim().toUpperCase(), placeOf(payload)])
+
 /** Una corrección dicha en voz alta sobre una sugerencia que sigue sin decidir. */
 export interface DictationVoiceCorrection {
   suggestionId: string
@@ -730,29 +791,32 @@ export async function saveDictationSegment(
   }
 
   const corrected: string[] = []
-  for (const correction of (segment.corrections ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
-    const row = await pendingRow(correction.suggestionId)
-    if (!row) continue
+  /** Aplica a una sugerencia pendiente lo que se corrigió en voz alta. `false`: no encaja o no cambia nada. */
+  const correct = async (suggestionId: string, changes: Record<string, unknown>): Promise<boolean> => {
+    const row = await pendingRow(suggestionId)
+    if (!row) return false
     const { data, meta } = splitMeta(row.payload)
     const schema = operationAgentSchema(DICTATION_OPERATION[row.kind])
-    const patch = Object.fromEntries(Object.entries(correction.changes).filter(([key, value]) => key in schema.shape && value !== undefined && value !== null))
-    if (Object.keys(patch).length === 0 || !schema.safeParse({ ...data, ...patch }).success) continue
+    const patch = Object.fromEntries(Object.entries(changes).filter(([key, value]) => key in schema.shape && value !== undefined && value !== null))
+    if (Object.keys(patch).length === 0 || !schema.safeParse({ ...data, ...patch }).success) return false
     const revised = await revise(tx, row.kind, data, patch, scope)
-    if (!revised) continue
+    if (!revised) return false
     const ready =
       row.kind === "plan" || row.kind === "receta"
         ? checkAgainstPatient(row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope.medications)
         : revised
     const before = describeBefore(row.kind, data, ready.payload, Object.keys(patch), dictation)
-    if (!before) continue
+    if (!before) return false
     // Se conserva cómo estaba antes de la primera corrección: deshacer vuelve ahí.
     const voice = meta.voice ?? { payload: data, status: row.status as "lista" | "por_revisar", note: row.note, before }
     await tx
       .update(encounterDictationSuggestion)
       .set({ payload: withMeta(ready.payload, stamp({ ...meta, voice })), status: ready.status, note: ready.note, updatedAt: new Date() })
       .where(eq(encounterDictationSuggestion.id, row.id))
-    corrected.push(row.id)
+    if (!corrected.includes(row.id)) corrected.push(row.id)
+    return true
   }
+  for (const correction of (segment.corrections ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) await correct(correction.suggestionId, correction.changes)
 
   const removed: string[] = []
   for (const removal of (segment.removals ?? []).slice(0, DICTATION_MAX_SUGGESTIONS)) {
@@ -779,14 +843,22 @@ export async function saveDictationSegment(
   const pendingNow = await listDictationSuggestions(tx, orgId, patientId, encounterId)
   const pendingOwn = new Set(pendingNow.flatMap((item) => sameKey(item.kind, item.payload) ?? []))
   const pendingRecipes = new Set(pendingNow.filter((item) => item.kind === "receta").map((item) => recipeKey(item.payload)))
+  // Lo mismo con el plan y los diagnósticos: la misma prestación o el mismo diagnóstico en el mismo sitio.
+  const pendingPlans: PendingPlan[] = pendingNow.filter((item) => item.kind === "plan").map((item) => planEntry(item.id, item.payload))
+  const pendingDiagnoses = new Set(pendingNow.filter((item) => item.kind === "diagnostico").map((item) => diagnosisKey(item.payload)))
   const rows: Array<typeof encounterDictationSuggestion.$inferInsert> = []
   const checks = await patientChecks(tx, orgId, patientId, encounterId)
+  const preparedDrafts: Array<{ draft: DictationDraft; prepared: Prepared }> = []
   for (const draft of segment.drafts.slice(0, DICTATION_MAX_SUGGESTIONS)) {
     const prepared = await prepare(tx, draft, scope)
-    if (!prepared) continue
+    if (prepared) preparedDrafts.push({ draft, prepared })
+  }
+  // La elección de caminos va antes: así la indicación suelta de uno de sus caminos se reconoce repetida.
+  preparedDrafts.sort((a, b) => Number(isPlanChoice(b.draft.kind, b.prepared.payload)) - Number(isPlanChoice(a.draft.kind, a.prepared.payload)))
+  for (const { draft, prepared } of preparedDrafts) {
     const ready = checkAgainstPatient(draft.kind, prepared, checks, scope.medications)
     // Una sola elección por presupuesto (decisión 3): la siguiente de este mismo tramo también espera.
-    if (draft.kind === "plan" && Array.isArray(ready.payload["options"])) checks.choiceBlocked ??= CHOICE_ALREADY_HERE
+    if (isPlanChoice(draft.kind, ready.payload)) checks.choiceBlocked ??= CHOICE_ALREADY_HERE
     const own = sameKey(draft.kind, ready.payload)
     if (own !== null) {
       if (pendingOwn.has(own)) continue
@@ -796,6 +868,30 @@ export async function saveDictationSegment(
       const key = recipeKey(ready.payload)
       if (pendingRecipes.has(key)) continue
       pendingRecipes.add(key)
+    }
+    if (draft.kind === "diagnostico") {
+      const key = diagnosisKey(ready.payload)
+      if (pendingDiagnoses.has(key)) continue
+      pendingDiagnoses.add(key)
+    }
+    if (draft.kind === "plan") {
+      const entry = planEntry(null, ready.payload)
+      const same = pendingPlans.filter((item) => item.names.some((name) => entry.names.includes(name)))
+      // Ya está (o está con más precisión, o es un camino de una elección): no se registra otra vez.
+      // Una elección nueva solo se repite si es la misma elección; si no, es otra decisión y se ve.
+      const repeated = entry.choice
+        ? same.some((item) => item.choice && covers(item.place, entry.place) && entry.names.every((name) => item.names.includes(name)))
+        : same.some((item) => covers(item.place, entry.place))
+      if (repeated) continue
+      // Lo nuevo solo agrega lo que le faltaba a una pendiente («la corona es en la 25»): se corrige esa.
+      if (!entry.choice) {
+        const vaguer = same.find((item) => item.id && !item.choice && covers(entry.place, item.place))
+        if (vaguer?.id && (await correct(vaguer.id, siteOf(entry.place)))) {
+          vaguer.place = entry.place
+          continue
+        }
+      }
+      pendingPlans.push(entry)
     }
     rows.push({
       organizationId: orgId,
@@ -1102,17 +1198,27 @@ async function confirmPlanChoice(
 ): Promise<string> {
   const checks = await patientChecks(tx, orgId, patientId, encounterId, suggestionId)
   if (checks.choiceBlocked) throw conflict("BUDGET_CHOICE_TAKEN", checks.choiceBlocked)
-  const site = {
-    toothNumber: (payload["toothNumber"] as number | undefined) ?? null,
-    surfaces: (payload["surfaces"] as string[] | undefined) ?? null,
-    detail: (payload["detail"] as string | undefined) ?? null,
+  const dictation = await requireDictatingProduct(tx, orgId)
+  const services = await activeServices(tx, orgId)
+  const site = choiceSite(payload)
+  const detail = (payload["detail"] as string | undefined) ?? null
+  // Cada camino toma de lo dicho solo lo que su prestación lleva: la corona, la pieza; la resina, también las caras.
+  const indicate = (serviceId: string) => {
+    const scope = services.find((service) => service.id === serviceId)?.scope ?? null
+    const own = dictation.fitToScope(site, scope).payload
+    return addPlanItem(tx, orgId, actorUserId, patientId, {
+      serviceId,
+      planId: null,
+      sourceEncounterId: encounterId,
+      toothNumber: (own["toothNumber"] as number | undefined) ?? null,
+      surfaces: (own["surfaces"] as string[] | undefined) ?? null,
+      detail,
+    })
   }
-  const indicate = (serviceId: string) =>
-    addPlanItem(tx, orgId, actorUserId, patientId, { serviceId, planId: null, sourceEncounterId: encounterId, ...site })
   const main = await indicate(String(payload["serviceId"]))
   const others = []
   for (const option of payload["options"] as PlanChoice[]) others.push(await indicate(String(option.serviceId)))
-  const tooth = typeof site.toothNumber === "number" ? ` para la ${site.toothNumber}` : ""
+  const tooth = typeof site["toothNumber"] === "number" ? ` para la ${site["toothNumber"]}` : ""
   const draft = await findDraftBudget(tx, orgId, patientId)
   const budget = draft
     ? await addBudgetItems(tx, orgId, actorUserId, patientId, draft.id, { itemIds: [main.id] })

@@ -407,6 +407,8 @@ export function useDictationSession({
       return { item: updated.data, confirmed: true }
     },
     onSuccess: (result) => {
+      // Lo que falló antes con esta sugerencia ya no vale: se acaba de corregir.
+      if (act.variables?.item.id === result.item.id) act.reset()
       if (result.confirmed) onApplied(result.item)
     },
     onSettled: () => void refresh(),

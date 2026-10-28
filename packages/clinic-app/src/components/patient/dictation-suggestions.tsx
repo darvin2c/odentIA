@@ -142,6 +142,7 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                 </fieldset>
               ) : null}
               {!ready && Choices ? <Choices session={session} item={item} busy={busy} /> : null}
+              <ActError session={session} item={item} />
             </li>
           )
         })}
@@ -165,16 +166,27 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
               >
                 Deshacer
               </Button>
+              <ActError session={session} item={item} />
             </li>
           )
         })}
       </ul>
-      {session.act.isError && [...items, ...removed].some((item) => item.id === session.act.variables?.item.id) ? (
-        <p role="alert" className="text-sm text-destructive">
-          {dictationErrorText(session.act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
-        </p>
-      ) : null}
     </div>
+  )
+}
+
+/**
+ * Lo que no salió al confirmar, descartar o deshacer, dentro de su tarjeta. Si
+ * la sugerencia cambió después (se completó o se corrigió), el error ya no
+ * vale y no se muestra: nunca contradice lo que la tarjeta dice ahora.
+ */
+function ActError({ session, item }: { session: DictationSession; item: DictationSuggestion }) {
+  const failed = session.act.variables?.item
+  if (!session.act.isError || failed?.id !== item.id || failed.summary !== item.summary || failed.status !== item.status) return null
+  return (
+    <p role="alert" className="basis-full text-sm text-destructive">
+      {dictationErrorText(session.act.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
+    </p>
   )
 }
 

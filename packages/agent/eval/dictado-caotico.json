@@ -1,0 +1,146 @@
+{
+  "_nota": "Dictados caóticos, como se habla de verdad con el paciente en la unidad dental: frases a medias, muletillas, autocorrecciones, charla con el paciente o la asistente y órdenes de quitar o corregir dichas de muchas formas. Ninguno es de un paciente real. Los usa eval:dictado con --file=eval/dictado-caotico.json. «quitarCual» y «corrigeCual» son los números (desde 1) de las pendientes que debe tocar; «sinNoUsado» exige que no quede ninguna frase sin usar.",
+  "servicios": [
+    "Obturación con resina",
+    "Resina fotocurable, 1 superficie, posterior",
+    "Endodoncia unirradicular",
+    "Endodoncia multirradicular",
+    "Exodoncia simple",
+    "Exodoncia de tercera molar",
+    "Corona metal-cerámica, metal base",
+    "Corona de zirconio",
+    "Profilaxis",
+    "Destartraje supragingival",
+    "Sellante de fosas y fisuras",
+    "Pulpotomía",
+    "Radiografía periapical",
+    "Consulta de evaluación"
+  ],
+  "dictados": [
+    {
+      "id": "caos-autocorrige-pieza",
+      "texto": "Abre, abre un poquito más... a ver. Eh, la dieciséis, la dieciséis tiene caries, este, oclusal, en esmalte. Pásame el espejo, porfa. La diecisiete está bien. La veinticinco... no, perdón, la veintiséis, caries por mesial.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 16, "hallazgo": "caries", "variante": "enamel" },
+          { "pieza": 26, "hallazgo": "caries" }
+        ]
+      }
+    },
+    {
+      "id": "caos-quita-tambien",
+      "pendientes": [
+        "Plan de tratamiento: Endodoncia multirradicular, Pieza 36",
+        "Plan de tratamiento: Corona metal-cerámica, metal base, Pieza 36",
+        "Plan de tratamiento: Profilaxis"
+      ],
+      "contexto": "En la treinta y seis endodoncia y después corona. Profilaxis hoy. No, quita la corona, primero vemos cómo responde.",
+      "texto": "Quita también la endodoncia, mejor la derivamos.",
+      "espera": { "quitar": 1, "quitarCual": [1], "nuevos": 0 }
+    },
+    {
+      "id": "caos-quitale",
+      "pendientes": [
+        "Odontograma: fracture, Pieza 11",
+        "Plan de tratamiento: Endodoncia unirradicular, Pieza 11"
+      ],
+      "texto": "Quítale endodoncia, eso lo vemos después con la radiografía.",
+      "espera": { "quitar": 1, "quitarCual": [2], "nuevos": 0 }
+    },
+    {
+      "id": "caos-ya-no",
+      "pendientes": [
+        "Plan de tratamiento: Exodoncia de tercera molar, Pieza 38",
+        "Controles: Control en 1 semana"
+      ],
+      "texto": "Eh, no, la exodoncia de la treinta y ocho ya no, mejor la dejamos en observación.",
+      "espera": { "quitar": 1, "quitarCual": [1] }
+    },
+    {
+      "id": "caos-borra-lo-ultimo",
+      "pendientes": [
+        "Diagnóstico: K02.1 Caries de la dentina, Pieza 16",
+        "Plan de tratamiento: Sellante de fosas y fisuras, Pieza 17",
+        "Controles: Control en 6 meses"
+      ],
+      "texto": "Borra eso último del control, no va. Ya le toca la próxima semana con la doctora.",
+      "espera": { "quitar": 1, "quitarCual": [3] }
+    },
+    {
+      "id": "caos-corona-en-la-25",
+      "pendientes": [
+        "Plan de tratamiento: Corona metal-cerámica, metal base"
+      ],
+      "texto": "La corona es en la veinticinco.",
+      "espera": { "correcciones": 1, "corrigeCual": [1], "nuevos": 0 }
+    },
+    {
+      "id": "caos-corrige-las-dos",
+      "pendientes": [
+        "Odontograma: caries, Pieza 46",
+        "Plan de tratamiento: Obturación con resina, Pieza 46"
+      ],
+      "texto": "Perdón, no es la cuarenta y seis, es la treinta y seis. Las dos cosas.",
+      "espera": { "correcciones": 2, "corrigeCual": [1, 2], "nuevos": 0 }
+    },
+    {
+      "id": "caos-caminos-con-dudas",
+      "texto": "Ya. En la treinta y seis le ponemos, eh, resina, o si no, si no quiere, una corona, una corona de zirconio. Eso.",
+      "espera": {
+        "caminos": [{ "pieza": 36, "principal": "resina", "otros": ["corona"] }],
+        "nuevos": 1
+      }
+    },
+    {
+      "id": "caos-cambia-de-opinion-receta",
+      "texto": "Le voy a dar amoxicilina... no, espera, es alérgica, ¿no? Sí, alérgica a la penicilina, ya me dijo. Entonces clindamicina de trescientos, una cápsula cada ocho horas por siete días.",
+      "espera": {
+        "recetas": [{ "dci": "clindamicina", "concentracion": "300", "duracion": "7" }]
+      }
+    },
+    {
+      "id": "caos-numeros-revueltos",
+      "texto": "Treinta y seis, oclusal y distal, caries profunda, llega a dentina. Treinta y siete también, oclusal nomás, en esmalte. La treinta y ocho no está, se la sacaron.",
+      "espera": {
+        "hallazgos": [
+          { "pieza": 36, "hallazgo": "caries", "variante": "dentin" },
+          { "pieza": 37, "hallazgo": "caries", "variante": "enamel" },
+          { "pieza": 38, "hallazgo": "missing_tooth" }
+        ]
+      }
+    },
+    {
+      "id": "caos-interrumpido",
+      "texto": "Motivo... dolor en la, en la muela de arriba, lado derecho, desde hace, ¿cuánto?, una semana, dice. Ajá. La dieciséis. Sí, la dieciséis con caries profunda, en dentina. Vamos a hacer endodoncia multirradicular de la dieciséis.",
+      "espera": {
+        "hallazgos": [{ "pieza": 16, "hallazgo": "caries", "variante": "dentin" }],
+        "planes": [16],
+        "nota": true
+      }
+    },
+    {
+      "id": "caos-charla-y-control",
+      "texto": "Muy bien, enjuágate. ¿Te duele? ¿No? Ok, perfecto. Profilaxis hoy y control en seis meses.",
+      "espera": { "controles": 1, "nota": true }
+    },
+    {
+      "id": "caos-quita-lo-de-hoy",
+      "pendientes": [
+        "Consulta: Motivo de consulta, Evolución",
+        "Plan de tratamiento: Profilaxis",
+        "Plan de tratamiento: Destartraje supragingival"
+      ],
+      "texto": "No, el destartraje no, solo profilaxis.",
+      "espera": { "quitar": 1, "quitarCual": [3], "nuevos": 0 }
+    },
+    {
+      "id": "caos-mejor-otra-prestacion",
+      "pendientes": [
+        "Plan de tratamiento: Exodoncia simple, Pieza 46"
+      ],
+      "texto": "Mejor no la sacamos, hagamos endodoncia multirradicular en la cuarenta y seis.",
+      "_nota": "Otro tratamiento es otra indicación: se quita la exodoncia y se indica la endodoncia.",
+      "espera": { "quitar": 1, "quitarCual": [1], "planes": [46], "nuevos": 1 }
+    }
+  ]
+}

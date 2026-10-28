@@ -39,6 +39,7 @@ import { appDb, ownerDb, setupTestDb } from "../test-setup.js"
 import { withOrgContext } from "@odentia/db"
 import { odontogramEntry } from "@odentia/db/schema/dental"
 import { orgStrictVariants } from "./odontogram.js"
+import { dentalSiteOfRow } from "./site.js"
 
 /** Asistente clínico: lo dictado queda como sugerencia y solo entra a la historia cuando el odontólogo confirma. */
 setupTestDb()
@@ -181,6 +182,90 @@ describe("receta y caminos por voz (issue 109, fase 2)", () => {
     // Otra elección después ya no cabe en ese borrador: se arma a mano en el presupuesto.
     const [later] = (await segment({ drafts: [{ kind: "plan", payload: { service: "onlay cerámico", toothNumber: 36, alternatives: ["carilla feldespática"] } }] })).suggestions
     expect(later).toMatchObject({ status: "por_revisar", note: expect.stringContaining("ya tiene opciones") })
+    await enable(false)
+  })
+
+  it("«resina en la 36, o si no una corona» se confirma: cada camino lleva solo lo suyo", async () => {
+    await enable(true)
+    const fx = await openSession("Resina fotocurable", "surfaces")
+    const [corona] = await ownerDb
+      .insert(serviceCatalog)
+      .values({ organizationId: ORG, name: "Funda metal-cerámica", scope: "tooth", source: "custom", priceCents: 90000, currency: "PEN" })
+      .returning()
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const [choice] = (
+      await segment({ drafts: [{ kind: "plan", payload: { service: "resina fotocurable", toothNumber: 36, surfaces: ["oclusal"], alternatives: ["funda metal-cerámica"] } }] })
+    ).suggestions
+    expect(choice).toMatchObject({ status: "lista", payload: { toothNumber: 36, surfaces: ["occlusal"] } })
+
+    // Antes, la corona recibía las caras de la resina y la operación la rechazaba.
+    await fx.run((tx) => confirmDictationSuggestion(tx, ...fx.args, fx.encounter.id, choice!.id))
+    const items = await ownerDb.select().from(treatmentPlanItem).where(eq(treatmentPlanItem.sourceEncounterId, fx.encounter.id))
+    const siteOf = (serviceId: string) => dentalSiteOfRow(items.find((item) => item.serviceId === serviceId)!)
+    expect(siteOf(fx.service.id)).toMatchObject({ toothNumber: 36, surfaces: ["occlusal"] })
+    expect(siteOf(corona!.id)).toMatchObject({ toothNumber: 36, surfaces: [] })
+    await enable(false)
+  })
+
+  it("con la corona recomendada y la resina sin cara, dice qué opción necesita la cara", async () => {
+    await enable(true)
+    const fx = await openSession("Resina de una cara", "surfaces")
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: "Funda libre de metal", scope: "tooth", source: "custom", priceCents: 150000, currency: "PEN" })
+    const [choice] = (
+      await fx.run((tx) =>
+        saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts: [{ kind: "plan", payload: { service: "funda libre de metal", toothNumber: 36, alternatives: ["resina de una cara"] } }] }),
+      )
+    ).suggestions
+    expect(choice).toMatchObject({ status: "por_revisar", note: expect.stringMatching(/^Opción B · Resina de una cara: Falta la cara de la 36/) })
+    await enable(false)
+  })
+})
+
+describe("lo que el asistente registra dos veces (dictados reales)", () => {
+  it("la indicación que solo agrega la pieza corrige la que estaba; la repetida o el camino suelto no se registran", async () => {
+    await enable(true)
+    const fx = await openSession("Resina para repetir", "surfaces")
+    await ownerDb.insert(serviceCatalog).values({ organizationId: ORG, name: "Funda metal base", scope: "tooth", source: "custom", priceCents: 90000, currency: "PEN" })
+    const segment = (input: Parameters<typeof saveDictationSegment>[5]) => fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, input))
+    const list = () => fx.run((tx) => listDictationSuggestions(tx, ORG, fx.patient.id, fx.encounter.id))
+
+    // «En la 36 resina, o si no una corona» y el modelo además registra la corona suelta, sin pieza.
+    const first = await segment({
+      drafts: [
+        { kind: "plan", payload: { service: "funda metal base" } },
+        { kind: "plan", payload: { service: "resina para repetir", toothNumber: 36, surfaces: ["oclusal"], alternatives: ["funda metal base"] } },
+      ],
+    })
+    expect(first.suggestions).toHaveLength(1)
+    expect(first.suggestions[0]?.payload["options"]).toEqual([expect.objectContaining({ serviceName: "Funda metal base" })])
+
+    // Otra corona, ahora sin pieza y aparte: queda pendiente. «La corona es en la 25» la corrige,
+    // y si además llega registrada otra vez en la 25, no se repite.
+    await fx.run((tx) => discardDictationSuggestion(tx, ...fx.args, fx.encounter.id, first.suggestions[0]!.id))
+    const [loose] = (await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base" } }] })).suggestions
+    expect(loose).toMatchObject({ status: "por_revisar" })
+    const fixed = await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 25 } }] })
+    expect(fixed).toMatchObject({ suggestions: [], corrected: [loose!.id] })
+    const again = await segment({
+      corrections: [{ suggestionId: loose!.id, changes: { toothNumber: 25 } }],
+      drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 25 } }],
+    })
+    expect(again.suggestions).toEqual([])
+    expect(await list()).toEqual([expect.objectContaining({ id: loose!.id, status: "lista", payload: expect.objectContaining({ toothNumber: 25 }) })])
+
+    // La misma prestación en otra pieza sí es otra indicación.
+    expect((await segment({ drafts: [{ kind: "plan", payload: { service: "funda metal base", toothNumber: 26 } }] })).suggestions).toHaveLength(1)
+    await enable(false)
+  })
+
+  it("el mismo diagnóstico en la misma pieza no se repite; en otra pieza sí", async () => {
+    await enable(true)
+    const fx = await openSession("Obturación de diagnósticos")
+    const segment = (drafts: Parameters<typeof saveDictationSegment>[5]["drafts"]) =>
+      fx.run((tx) => saveDictationSegment(tx, ...fx.args, fx.encounter.id, { drafts }))
+    expect((await segment([{ kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 16 } }])).suggestions).toHaveLength(1)
+    expect((await segment([{ kind: "diagnostico", payload: { diagnosisCode: "k02.1", diagnosisType: "provisional", toothNumber: 16 } }])).suggestions).toEqual([])
+    expect((await segment([{ kind: "diagnostico", payload: { diagnosisCode: "K02.1", diagnosisType: "provisional", toothNumber: 26 } }])).suggestions).toHaveLength(1)
     await enable(false)
   })
 })
