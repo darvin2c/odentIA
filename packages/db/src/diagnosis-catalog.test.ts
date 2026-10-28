@@ -38,8 +38,8 @@ it("la CIE-10 del MINSA incluida es la hoja oficial (SHA-256 del .xlsx) y viene 
   expect(byCode.get("I10.X")).toMatchObject({ isCategory: false })
   expect(byCode.get("Z30.051")).toMatchObject({ isCategory: false })
   expect(byCode.get("P07.11")?.officialTitle).toBe("RECIEN NACIDO DE MUY BAJO PESO AL NACER (< 1500 GRAMOS)")
-  expect(byCode.get("Q90.9")?.title).toBe("Sindrome de Down, no especificado")
-  expect(byCode.get("B20.0")?.title).toBe("Enfermedad por VIH, resultante en infeccion por micobacterias")
+  expect(byCode.get("Q90.9")?.title).toBe("Síndrome de Down, no especificado")
+  expect(byCode.get("B20.0")?.title).toBe("Enfermedad por VIH, resultante en infección por micobacterias")
 })
 
 it("cada código que propone el odontograma en la CIE-10 del MINSA existe y se puede registrar", () => {

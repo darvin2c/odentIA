@@ -1,8 +1,10 @@
+import { MINSA_ACCENTS } from "./diagnosis-accents.js"
+
 /**
  * Títulos de la CIE-10 del MINSA para leer en pantalla (ADR 0103). El MINSA los
- * publica en mayúsculas y sin tildes («CARIES DE LA DENTINA»); en odentIA se
- * leen como frase («Caries de la dentina») y el título oficial se guarda aparte,
- * sin cambios. Las tildes no se agregan: no hay de dónde saber dónde van.
+ * publica en mayúsculas y sin tildes («SINDROME DE DOWN»); en odentIA se leen
+ * como frase y con sus tildes («Síndrome de Down»), y el título oficial se
+ * guarda aparte, sin cambios. Las tildes salen de `MINSA_ACCENTS`.
  *
  * Conservan su forma las siglas, los nombres propios y los géneros de
  * microorganismos («VIH», «Down», «Salmonella»). Salen de la CIE-10 de Chile
@@ -44,23 +46,42 @@ const ROMAN = /^(X{0,3})(IX|IV|V?I{0,3})$/
 /** Una vocal sola es una palabra («A», «O», «U»), salvo después de estas: hepatitis A, vitamina E. */
 const LETTER_AFTER = new Set(["HEPATITIS", "VITAMINA", "TIPO", "GRUPO", "FACTOR", "INFLUENZA", "VIRUS", "CLASE"])
 
+/** La palabra con sus tildes, en la misma forma: «sindrome» → «síndrome», «Barre» → «Barré». */
+function withAccents(word: string): string {
+  return word.replace(/\p{L}+/gu, (part) => {
+    const accented = MINSA_ACCENTS[part.toLowerCase()]
+    if (!accented) return part
+    // Una sigla no lleva tilde; un nombre propio conserva su mayúscula.
+    if (part.length > 1 && part === part.toUpperCase()) return part
+    return part[0] === part[0]!.toUpperCase() ? accented[0]!.toUpperCase() + accented.slice(1) : accented
+  })
+}
+
 function wordForDisplay(word: string, previous: string | undefined, inBrackets: boolean): string {
+  return withAccents(casedWord(word, previous, inBrackets))
+}
+
+function casedWord(word: string, previous: string | undefined, inBrackets: boolean): string {
   const proper = PROPER.get(word)
   if (proper) return proper
-  // Un código («J17.1»), una sigla entre corchetes («[SRAG]») o con cifras («COVID-19») quedan igual.
+  // Un código («J17.1»), una sigla sola entre corchetes («[SRAG]») o con cifras («COVID-19») quedan igual.
   if (/\d/.test(word) || inBrackets) return word
   if (ROMAN.test(word)) return word
   // Sin vocales no es una palabra del español: es una sigla («VPH», «LCR»).
   if (word.length > 1 && !/[AEIOUY]/.test(word)) return word
-  if (word.length === 1 && previous && LETTER_AFTER.has(previous)) return word
+  // La «y» suelta siempre es la conjunción.
+  if (word.length === 1 && word !== "Y" && previous && LETTER_AFTER.has(previous)) return word
   return word.toLowerCase()
 }
 
-/** «CARIES DE LA DENTINA» → «Caries de la dentina»; «SINDROME DE DOWN» → «Sindrome de Down». */
+/** «CARIES DE LA DENTINA» → «Caries de la dentina»; «SINDROME DE DOWN» → «Síndrome de Down». */
 export function minsaTitleForDisplay(title: string): string {
   let previous: string | undefined
+  // Entre corchetes va una sigla («[SRAG]») o un sinónimo («[HERPES SIMPLE]»): solo la sigla queda igual.
+  const acronymInBrackets = (offset: number) =>
+    /^\[[A-ZÑÜ0-9-]+\]/.test(title.slice(title.lastIndexOf("[", offset), title.indexOf("]", offset) + 1))
   let depth = 0
-  const out = title.replace(/\[|\]|[A-ZÑÜ0-9][A-ZÑÜ0-9'.*†-]*/g, (token) => {
+  const out = title.replace(/\[|\]|[A-ZÑÜ0-9][A-ZÑÜ0-9'.*†-]*/g, (token, offset: number) => {
     if (token === "[") {
       depth += 1
       return token
@@ -69,7 +90,7 @@ export function minsaTitleForDisplay(title: string): string {
       depth = Math.max(0, depth - 1)
       return token
     }
-    const shown = wordForDisplay(token, previous, depth > 0)
+    const shown = wordForDisplay(token, previous, depth > 0 && acronymInBrackets(offset))
     previous = token
     return shown
   })
