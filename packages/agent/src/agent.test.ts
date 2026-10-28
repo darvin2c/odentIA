@@ -1165,7 +1165,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const proposed = String(await reprogram.invoke({
     appointmentId: booked.id, startsAt: dayAt(1, 16), expectedVersion: booked.version,
   }))
-  expect(proposed).toContain("pide al interlocutor que confirme")
+  expect(proposed).toContain("pregúntale con naturalidad si se la reservas")
   const proposalId = /Propuesta ([0-9a-f-]{36})/.exec(proposed)?.[1]
   expect(proposalId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-1", "Sí, confirmo")
@@ -1202,7 +1202,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
-  expect(pendingMsg).toContain("pide al interlocutor que confirme")
+  expect(pendingMsg).toContain("pregúntale con naturalidad si se la reservas")
   const repeatedMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   const cancelId = /Propuesta ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
   expect(cancelId).toBeTruthy()
@@ -1309,7 +1309,7 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
     patientId: randomUUID(), professionalUserId: professionalRef("org_a", professionalId), roomId: randomUUID(),
     startsAt: "2026-11-02T15:00:00.000Z", branchId: randomUUID(), durationMin: 45,
   }))
-  expect(booked).toContain("pide al interlocutor que confirme")
+  expect(booked).toContain("pregúntale con naturalidad si se la reservas")
   const before = await withOrgContext(appDb, "org_a", (tx) =>
     listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
   const second = String(await tools.find((t) => t.name === "create_opportunity")!.invoke({ title: "Plan alternativo" }))
@@ -2377,8 +2377,8 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     expect([...(info.offered[0] ?? [])].sort()).toEqual(
       [
         "ampliar_herramientas", "anotar_respuesta_presupuesto", "buscar_en_la_clinica", "consultar_conocimiento", "elegir_mensajes",
-        "enviar_comprobante", "pedir_volver_al_portal", "recordar_tema", "reenviar_presupuesto", "request_human_handoff", "send_reply", "ver_presupuesto",
-        "ver_sedes_y_servicios",
+        "enviar_comprobante", "pedir_volver_al_portal", "recordar_tema", "reenviar_presupuesto", "request_human_handoff", "send_reply", "update_contact",
+        "ver_presupuesto", "ver_sedes_y_servicios",
       ],
     )
 
@@ -2817,6 +2817,22 @@ it("si el equipo toma o cierra la conversación mientras el modelo escribe, lo r
     const [conv] = await ownerDb.select({ status: conversation.status }).from(conversation).where(eq(conversation.id, conversationId))
     expect(conv?.status).toBe(thread === "tg:cerrada-en-curso" ? "closed" : "open")
   }
+})
+
+it("si la persona sigue escribiendo mientras el modelo responde, lo redactado no sale: lo responde la corrida de su último mensaje (ADR 0097)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:sigue-escribiendo", "evt-sigue-1", "tengo un problema")
+  const model = new SlowScriptedModel(
+    () => toolCall("send_reply", { text: "¿Qué problema tienes?" }, "call-1"),
+    // Mientras escribe, llega el resto: «en el diente».
+    () => ingestText("tg:sigue-escribiendo", "evt-sigue-2", "en el diente"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(await agentMessages(conversationId)).toEqual([])
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+  expect(row).toEqual({ status: "omitida", error: "persona-siguio-escribiendo" })
+  // No queda como «sin respuesta» ni pasa a una persona: la siguiente corrida responde todo junto.
+  expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.conversationId, conversationId))).toEqual([])
 })
 
 it("quien escribe mucho sigue atendido: no hay tope por persona ni por día (ADR 0085)", async () => {

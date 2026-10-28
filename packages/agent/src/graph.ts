@@ -5,6 +5,8 @@ import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
 import { ToolNode } from "@langchain/langgraph/prebuilt"
 import { withOrgContext } from "@odentia/db"
 import { DEFAULT_AUTONOMY_MODES } from "@odentia/db/schema/agent"
+import { contact } from "@odentia/db/schema/crm"
+import { eq } from "drizzle-orm"
 import {
   AGENT_BASE_PRINCIPLES,
   AGENT_ROLES,
@@ -30,6 +32,8 @@ import {
   getOrgLocale,
   getPersonMemory,
   getPatientRegistrationConfig,
+  LESSON_PERSON_NAME,
+  PROBAR_PERSON_NAME,
   listAgentContextCandidates,
   listContactChannelHistory,
   listContactNotes,
@@ -328,6 +332,10 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     on("seguimiento")
       ? "Cuando alguien pregunta por el precio o la disponibilidad de un servicio concreto, el sistema anota solo su interés como oportunidad: no hace falta que la registres tú."
       : whenOff("seguimiento"),
+    // El objetivo de Sofi (ADR 0097): atender como la mejor recepcionista.
+    `Sabes con quién hablas: si la línea del interlocutor dice que aún no sabes cómo se llama, en tu primera respuesta útil pregúntale su nombre con naturalidad, al final y sin frenar lo que pidió (por ejemplo «¿Con quién tengo el gusto?»), y desde entonces llámalo por su nombre${has("update_contact") ? "; cuando te lo diga, guárdalo con update_contact (nombres y apellidos) en ese mismo paso" : ""}. Si la cita o la consulta es para otra persona, pregunta también cómo se llama esa persona. No le vuelvas a preguntar algo que ya te dijo.`,
+    "Hablas como una recepcionista, no como un sistema: nunca menciones herramientas, propuestas, el sistema, el «estado del caso», la «filiación» ni «vincular», y nunca le pidas que escriba una frase para confirmar: un «sí», «ok», «dale» o «ya» basta. Un mensaje corto y natural por turno; no repitas lo que ya dijiste. Si te equivocas, corrígelo sin culpar a nada.",
+    "Lo que tiene el equipo se dice una sola vez: si ya le contaste que un tema lo verá el equipo, no lo repitas en los mensajes siguientes salvo que pregunte por él. Nunca digas que recepción o el equipo verá algo si no lo pasaste al equipo ni figura en «Temas con el equipo».",
     `Si el interlocutor cuenta un síntoma (un dolor, fiebre, tos, un golpe) y quiere que lo atiendan o pregunta dónde, no es un caso para el equipo: ${has("buscar_huecos") ? "búscale con buscar_huecos los horarios más próximos y ofréceselos" : "ofrécele la cita"}, sin diagnosticar ni opinar sobre lo que siente. Usa request_human_handoff solo si pide hablar con una persona, se queja, pide un consejo clínico (qué tomar, si es grave, qué hacer) o su vida puede estar en peligro: con motivo, resumen factual, prioridad (clinical si es una duda de salud) y, en message, el aviso de quién lo verá, sin prometer una hora ni un plazo; no uses send_reply para ese aviso.${has("buscar_huecos") ? " Si en ese mismo mensaje también pide una cita, busca antes los horarios y ofréceselos en ese mismo aviso." : ""} No te apaga: después sigues atendiendo todo lo demás, pero nunca respondes un tema que tiene el equipo («Temas con el equipo») y no lo mencionas si la persona no pregunta por él.`,
     "Si lo que cuenta no puede esperar (un dolor que no lo deja dormir, sangrado, hinchazón, fiebre, un golpe), ofrécele la cita más próxima, hoy si hay, y dale también el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; eso no es motivo para pasar el tema al equipo. Solo si su vida puede estar en peligro (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar), dile primero que llame ahora al número de emergencias del país que figura ahí o que vaya a la emergencia más cercana, y pasa el tema con prioridad alta. El vencimiento de una tarea es un plazo interno del equipo: nunca lo digas como hora de respuesta.",
     // Lo del producto (odentIA: la tomografía llega en CD, USB o ZIP).
@@ -690,6 +698,24 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
         ? "Este interlocutor aún no es paciente de la clínica. Por aquí no le reservas ni lo registras, y no le pidas documento ni otros datos para eso: si quiere una cita, ofrécele los horarios y, cuando elija uno, envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos ahí; díselo así."
         : "Este interlocutor aún no es paciente de la clínica y la clínica no registra pacientes en línea. Por aquí no le reservas ni lo registras: si quiere una cita, pregúntale solo su nombre y qué día y hora prefiere, y pasa el caso a recepción una sola vez con request_human_handoff para que lo registre y le confirme; no le pidas documento ni le digas que la cita quedó reservada."
     }
+    // Saber con quién habla (objetivo de Sofi, ADR 0097): el nombre del perfil de
+    // WhatsApp o «Visitante del chat web» no es su nombre. Se conoce cuando la ficha
+    // tiene nombres y apellidos, o cuando lo dijo en esta conversación.
+    const [person] = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+      tx
+        .select({ givenNames: contact.givenNames, familyName: contact.familyName, isTest: contact.isTest })
+        .from(contact)
+        .where(eq(contact.id, toolCtx.contactId))
+        .limit(1),
+    )
+    // La persona de «Probar» nace llamándose «Paciente de prueba»: ese no es su nombre.
+    const fullName = `${person?.givenNames ?? ""} ${person?.familyName ?? ""}`.trim()
+    const nameKnown = Boolean(
+      person?.givenNames?.trim() && person.familyName?.trim() && !(person.isTest && (fullName === PROBAR_PERSON_NAME || fullName === LESSON_PERSON_NAME)),
+    )
+    const nameLine = nameKnown
+      ? `Se llama ${person?.givenNames} ${person?.familyName}.`
+      : "Aún no sabes cómo se llama: lo que figura es el nombre de su perfil o del chat, no su nombre."
     // Personas a las que este interlocutor está vinculado: mismo listado
     // autorizado que ver_contexto_paciente (solo nombre y vínculo, sin clínica).
     const linkedPatients = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
@@ -707,7 +733,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       formatPersonMemoryForPrompt(await getPersonMemory(tx, toolCtx.orgId, toolCtx.contactId), zone),
     )
     const contactBlock = [
-      `Interlocutor: ${contactDetail.displayName}. Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
+      `Interlocutor: ${contactDetail.displayName}. ${nameLine} Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
       patientsLine,
       notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
       customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,

@@ -28,6 +28,7 @@ import {
   requestPortalReentry,
   annotateHandoff,
   agentReplyBlockedReason,
+  newerInboundThan,
   closeConversationWith,
   closurePendingReason,
   createHandoff,
@@ -346,6 +347,11 @@ export interface AgentToolCtx {
    * redactado no sale y la corrida termina sin respuesta del agente.
    */
   takenOver?: boolean
+  /**
+   * La persona siguió escribiendo mientras se preparaba la respuesta: no sale
+   * y la corrida de su último mensaje responde todo junto (ADR 0097).
+   */
+  superseded?: boolean
   /** En una prueba, los servicios cuyo precio ya dijo el agente (no hay traza que leer). */
   pricedSubjects?: string[]
 }
@@ -547,6 +553,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * el modelo redactaba, no sale nada y el turno termina (`takenOver`). Con
    * una derivación de esta misma corrida el agente ya se apagó a sí mismo.
    */
+  const personKeptWriting = async (): Promise<string | null> => {
+    if (ctx.dryRun || !ctx.triggerId) return null
+    const triggerId = ctx.triggerId
+    if (!(await inOrg((tx) => newerInboundThan(tx, ctx.orgId, ctx.conversationId, triggerId)).catch(() => false))) return null
+    ctx.superseded = true
+    ctx.replySettled = true
+    return "La persona siguió escribiendo mientras preparabas esto: no envíes nada. La respuesta saldrá con todo lo que escribió."
+  }
   const teamTookOver = async (): Promise<string | null> => {
     if (ctx.dryRun || ctx.handedOff) return null
     const reason = await inOrg((tx) => agentReplyBlockedReason(tx, ctx.orgId, ctx.conversationId))
@@ -595,7 +609,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       onProposal?.(proposal)
     } catch (e) {
       if (e instanceof ServiceError && e.code === "PROPOSAL_PENDING_CONFIRM") {
-        return "Ya hay una propuesta esperando la confirmación del interlocutor en este hilo: pídele que confirme con un sí claro y luego usa confirmar_propuesta, no crees otra."
+        return "Ya hay una cita esperando su sí en esta conversación: pregúntale con naturalidad si se la reservas (sin pedirle una frase exacta ni hablar de propuestas) y con su sí usa confirmar_propuesta; no crees otra."
       }
       throw e
     }
@@ -617,7 +631,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (proposal.status === "expirada") {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
-    return `Propuesta ${proposal.id} creada: pide al interlocutor que confirme con un sí claro y luego usa confirmar_propuesta.`
+    return `Propuesta ${proposal.id} creada. En tu mensaje di el día, la hora, la sede y con quién, y pregúntale con naturalidad si se la reservas (por ejemplo «¿Te la reservo?»), sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
   }
 
   /**
@@ -803,6 +817,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // no reintenta la corrida: ToolNode lo devuelve al modelo como mensaje.
       const takenOver = await teamTookOver()
       if (takenOver) return takenOver
+      const kept = await personKeptWriting()
+      if (kept) return kept
       const sent: ProposalItem[] = []
       // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
       const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
@@ -840,6 +856,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       const takenOver = await teamTookOver()
       if (takenOver) return takenOver
+      const kept = await personKeptWriting()
+      if (kept) return kept
       const sent: ProposalItem[] = []
       const outcome = await propose("enviar_mensaje", { kind: "text", text }, "despedirse_y_cerrar", undefined, (proposal) => {
         sent.push(proposal)
@@ -880,21 +898,35 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   const updateContactTool = tool(
     async ({
       displayName,
+      givenNames,
+      familyName,
       customFields,
     }: {
       displayName?: string
+      givenNames?: string
+      familyName?: string
       customFields?: Record<string, unknown>
     }) => {
       const contactId = ctx.contactId
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
-      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { displayName, customFields }, { userId: null, origin: "agent" }))
+      const naming = Boolean(displayName || givenNames || familyName)
+      // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
+      if (naming && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, contactId))).some((item) => item.relationship === "self")) {
+        return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      }
+      const names = givenNames?.trim() && familyName?.trim()
+        ? { givenNames: givenNames.trim(), familyName: familyName.trim(), displayName: displayName ?? `${givenNames.trim()} ${familyName.trim()}` }
+        : displayName ? { displayName } : {}
+      await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { ...names, customFields }, { userId: null, origin: "agent" }))
       return "Contacto actualizado."
     },
     {
       name: "update_contact",
       description:
-        "Actualiza los campos personalizados del contacto o el nombre de quien aún no es paciente (el nombre de un paciente lo cambia el equipo en su ficha).",
+        "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente, o los campos personalizados del contacto. El nombre de un paciente lo cambia el equipo en su ficha.",
       schema: z.object({
+        givenNames: z.string().min(1).max(120).optional().describe("Sus nombres, como los dijo."),
+        familyName: z.string().min(1).max(120).optional().describe("Sus apellidos, como los dijo."),
         displayName: z.string().min(1).max(200).optional(),
         customFields: z.record(z.string(), z.unknown()).optional(),
       }),
@@ -1665,6 +1697,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         )
       } catch (e) {
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONTACT_CONFIRMABLE") return e.message
+        // Lo que el modelo lee se lo repite a la persona: nada de «confirmación explícita» ni de sistemas.
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONFIRMED") {
+          return "Su último mensaje no es un sí a esa cita. Pregúntale con naturalidad si se la reservas, sin hablar de confirmaciones, propuestas ni sistemas."
+        }
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_PENDING") {
+          return "Esa cita ya no espera su sí: si ya quedó reservada, díselo con el día y la hora; si no, ofrécele horarios de nuevo. No hables de propuestas ni de sistemas."
+        }
         throw e
       }
       if (proposal.status === "ejecutada") {

@@ -68,6 +68,8 @@ interface Persona {
   datos_si_los_piden: string
   como_escribe: string
   que_quiere_lograr: string
+  estilo_pedido?: string
+  caotico?: boolean
 }
 
 /** Pistas sueltas para que las personas inventadas cubran de todo; el modelo decide el caso concreto. */
@@ -86,9 +88,24 @@ const STYLES = [
   "normal y claro",
 ]
 
+/** Conversaciones caóticas: lo que hace la gente cuando no escribe en orden. */
+const CHAOS = [
+  "cambia de opinión a mitad (otro día, otra sede u otra persona)",
+  "se corrige a sí mismo («no perdón, quise decir el jueves»)",
+  "mete mensajes sueltos que no aportan («jajaja», «?», «ok», un emoji solo)",
+  "contesta otra cosa distinta de lo que le preguntaron",
+  "se va y vuelve varios minutos después, como si nada",
+  "da un dato equivocado y luego lo corrige",
+  "pregunta dos veces lo mismo",
+  "se molesta si siente que no le entienden",
+]
+
 async function invent(channel: Channel, known: string | null): Promise<Persona | null> {
-  const style = [pick(STYLES), Math.random() < 0.4 ? pick(STYLES) : null].filter(Boolean).join("; ")
-  return askJson<Persona>(
+  const chaotic = Math.random() < 0.25
+  const style = [pick(STYLES), Math.random() < 0.4 ? pick(STYLES) : null, chaotic ? `caótico: ${pick(CHAOS)}` : null, chaotic && Math.random() < 0.5 ? pick(CHAOS) : null]
+    .filter(Boolean)
+    .join("; ")
+  const persona = await askJson<Persona>(
     inventor,
     `Inventa UNA persona real y distinta que le escribe a ${CLINIC} por ${channel === "web" ? "el chat de su página web" : "WhatsApp"}. ${
       known ? `Es ${known}, que ya es paciente de la clínica.` : "Es alguien que la clínica no conoce."
@@ -100,6 +117,7 @@ ${
     } Puede ser para sí o para otra persona. Cómo escribe: ${style}.
 Devuelve solo un JSON con: nombre_perfil (el nombre que se ve en su WhatsApp o «» si es web), quien_es, por_que_escribe, detalles (lo que sabe y lo que no), datos_si_los_piden (nombre completo, documento, celular o correo inventados, y los de la otra persona si aplica), como_escribe, que_quiere_lograr.`,
   )
+  return persona ? { ...persona, estilo_pedido: style, caotico: chaotic } : null
 }
 
 interface Fragment {
@@ -114,7 +132,7 @@ async function nextFragments(persona: Persona, transcript: Line[]): Promise<{ fr
     `Eres esta persona y le escribes a ${CLINIC}:
 ${JSON.stringify(persona, null, 1)}
 
-Escribe como escribe de verdad la gente por chat en Perú: como dice «como_escribe». Muchas veces un mismo pensamiento sale en varios mensajes cortos seguidos (por ejemplo «hola» / «tengo un problema» / «con mi muela»), con pausas de 2 a 20 segundos entre ellos mientras escribes. No des datos que no te pidieron. Reacciona a lo que te dijeron: si te confunden, te molestas o lo dices; si te resuelven, agradeces y terminas. Si te piden datos, usa «datos_si_los_piden». No inventes otro objetivo.
+Escribe como escribe de verdad la gente por chat en Perú: como dice «como_escribe». Muchas veces un mismo pensamiento sale en varios mensajes cortos seguidos (por ejemplo «hola» / «tengo un problema» / «con mi muela»), con pausas de 2 a 20 segundos entre ellos mientras escribes (si tu forma de escribir dice que te vas y vuelves, una pausa puede llegar a 45). No des datos que no te pidieron. Reacciona a lo que te dijeron: si te confunden, te molestas o lo dices; si te resuelven, agradeces y terminas. Si te piden datos, usa «datos_si_los_piden». No inventes otro objetivo.
 
 Conversación hasta ahora:
 ${history || "(todavía no escribiste nada)"}
@@ -185,7 +203,8 @@ async function converse(index: number) {
     const next = await nextFragments(persona, transcript)
     if (next.done) break
     for (const fragment of next.fragments) {
-      await sleep(Math.min(20, Math.max(1, Number(fragment.pausa_seg) || 3)) * 1000)
+      // Hasta 45 s: quien se va y vuelve también es real.
+      await sleep(Math.min(45, Math.max(1, Number(fragment.pausa_seg) || 3)) * 1000)
       sequence += 1
       const id = `masiva-${index}-${started}-${sequence}`
       const event =

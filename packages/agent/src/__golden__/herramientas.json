@@ -262,11 +262,23 @@
   },
   {
     "name": "update_contact",
-    "description": "Actualiza los campos personalizados del contacto o el nombre de quien aún no es paciente (el nombre de un paciente lo cambia el equipo en su ficha).",
+    "description": "Guarda el nombre que la persona te dijo (nombres y apellidos) si aún no es paciente, o los campos personalizados del contacto. El nombre de un paciente lo cambia el equipo en su ficha.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "givenNames": {
+          "description": "Sus nombres, como los dijo.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "familyName": {
+          "description": "Sus apellidos, como los dijo.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
         "displayName": {
           "type": "string",
           "minLength": 1,

@@ -512,6 +512,21 @@ export async function agentReplyBlockedReason(tx: Db, orgId: string, id: string)
   return null
 }
 
+/**
+ * ¿La persona escribió algo después del mensaje que se está respondiendo? En
+ * el chat se escribe en pedazos: lo redactado responde a una parte y llegaría
+ * viejo. La corrida de su último mensaje responde todo junto (ADR 0097).
+ */
+export async function newerInboundThan(tx: Db, orgId: string, conversationId: string, messageId: string): Promise<boolean> {
+  const [row] = await tx.execute<{ newer: boolean }>(sql`
+    select exists (
+      select 1 from message m
+      where m.organization_id = ${orgId} and m.conversation_id = ${conversationId}::uuid and m.direction = 'in'
+        and m.created_at > (select t.created_at from message t where t.id = ${messageId}::uuid and t.organization_id = ${orgId})
+    ) as newer`)
+  return row?.newer === true
+}
+
 /* ------------------------------ El ciclo: insistir y cerrar ------------------------------ */
 
 export interface ConversationCareDeps {

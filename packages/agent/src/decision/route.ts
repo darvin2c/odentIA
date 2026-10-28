@@ -133,7 +133,8 @@ export function routeOutcome(route: AgentRoute): Record<string, unknown> {
  * caminos que no figuran aquí reciben todas.
  */
 // `recordar_tema`: con un tema abierto, la persona puede preguntar por él en cualquier camino (ADR 0050).
-const ALWAYS = ["send_reply", "request_human_handoff", "recordar_tema"] as const
+// El nombre que dice la persona se guarda en cualquier camino (objetivo de Sofi, ADR 0097).
+const ALWAYS = ["send_reply", "request_human_handoff", "recordar_tema", "update_contact"] as const
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   derivar: ["request_human_handoff"],
