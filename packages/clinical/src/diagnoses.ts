@@ -7,8 +7,8 @@
  * sirve para convertir datos.
  *
  * Las listas nacionales son sistemas aparte, nunca en lugar de la de la OMS.
- * La CIE-10 del MINSA (la que pide el registro HIS) se carga con la hoja que
- * publica el MINSA y es la que se propone en Perú; la CIE-10-ES está
+ * La CIE-10 del MINSA (la que pide el registro HIS) viene con la hoja oficial
+ * del MINSA y es la que se propone en Perú (ADR 0103); la CIE-10-ES está
  * preparada pero sin cargar.
  */
 

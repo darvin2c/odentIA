@@ -723,7 +723,7 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await expect(suggested("Signos vitales")).toContainText("PA 118/76 mmHg · FC 96 lpm · T 38.5 °C")
   await expect(suggested("Examen físico")).toContainText("Boca y garganta · con hallazgos")
   await expect(suggested("Examen físico")).toContainText("Tórax y pulmones · sin alteraciones")
-  await expect(suggested("Diagnóstico")).toContainText("J03.9 · Amigdalitis aguda, no especificada")
+  await expect(suggested("Diagnóstico")).toContainText("J03.9 · AMIGDALITIS AGUDA, NO ESPECIFICADA")
   await expect(review).toContainText("5 listas")
   await expect(suggested("Descanso médico")).toContainText("Descanso médico · 3 días desde hoy")
   await shot("clio-sugerencias")
