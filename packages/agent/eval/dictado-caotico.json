@@ -134,6 +134,59 @@
       "espera": { "quitar": 1, "quitarCual": [3], "nuevos": 0 }
     },
     {
+      "id": "otra-frase-cancelalo",
+      "_nota": "Desde aquí, frases que no aparecen en el prompt: miden que entiende por el contexto, no por palabras aprendidas.",
+      "pendientes": [
+        "Plan de tratamiento: Exodoncia de tercera molar, Pieza 38",
+        "Plan de tratamiento: Profilaxis"
+      ],
+      "texto": "Lo de la extracción de la treinta y ocho, cancélalo, que lo vea el cirujano.",
+      "espera": { "quitar": 1, "quitarCual": [1], "nuevos": 0 }
+    },
+    {
+      "id": "otra-frase-para-otra-cita",
+      "pendientes": [
+        "Plan de tratamiento: Endodoncia multirradicular, Pieza 36",
+        "Plan de tratamiento: Corona metal-cerámica, metal base, Pieza 36"
+      ],
+      "texto": "La endodoncia sí va. La corona, espera, esa déjala para cuando terminemos, no la pongas todavía.",
+      "espera": { "quitar": 1, "quitarCual": [2], "nuevos": 0 }
+    },
+    {
+      "id": "otra-frase-olvidalo",
+      "pendientes": [
+        "Plan de tratamiento: Radiografía periapical, Pieza 46",
+        "Diagnóstico: K04.0 Pulpitis, Pieza 46"
+      ],
+      "texto": "La radiografía, olvídala, ya trajo una de la semana pasada.",
+      "espera": { "quitar": 1, "quitarCual": [1], "nuevos": 0 }
+    },
+    {
+      "id": "otra-frase-cambia-caras",
+      "pendientes": [
+        "Plan de tratamiento: Obturación con resina, Pieza 16 · cara oclusal"
+      ],
+      "texto": "Mmm, la resina de la dieciséis mejor en dos caras, oclusal y mesial.",
+      "espera": { "correcciones": 1, "corrigeCual": [1], "nuevos": 0 }
+    },
+    {
+      "id": "negacion-no-quita-receta",
+      "pendientes": [
+        "Receta: ibuprofeno 400 mg, 1 tableta cada 8 horas, 3 días"
+      ],
+      "texto": "Ya no le duele desde que tomó el ibuprofeno, dice.",
+      "espera": {}
+    },
+    {
+      "id": "negacion-no-quita-plan",
+      "pendientes": [
+        "Plan de tratamiento: Destartraje supragingival",
+        "Odontograma: caries, Pieza 26"
+      ],
+      "texto": "No hay sangrado al sondaje, encías sin inflamación. La veintiséis no tiene movilidad.",
+      "espera": {}
+    },
+    {
       "id": "caos-mejor-otra-prestacion",
       "pendientes": [
         "Plan de tratamiento: Exodoncia simple, Pieza 46"
