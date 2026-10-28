@@ -287,6 +287,20 @@ describe("recorrido comercial directo", () => {
     expect(audit?.metadata.understood).toBe("eligio_esa_hora")
   })
 
+  it("el sí en dos pedazos se lee entero: «sí, resérvenme» seguido de una pregunta", async () => {
+    const { conversationId, contactId, connectionId: connId } = await openConversation("comercial-9", "evt-com-9")
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, { conversationId, action: "reservar_cita", payload: booking(), idempotencyKey: "test:crm-agent:pieces-1" }),
+    )
+    await inbound("comercial-9", connId, "evt-com-9b", "Sí, resérvenme el de las 11, por favor.")
+    await inbound("comercial-9", connId, "evt-com-9c", "Pero confírmenme si la revisión tiene costo adicional.")
+    const pending = await run((tx) => proposalReplyOf(tx, ORG, contactId, proposal.id))
+    expect(pending.reply?.body).toBe("Sí, resérvenme el de las 11, por favor.\nPero confírmenme si la revisión tiene costo adicional.")
+    // El id es el del último pedazo: es de la persona y posterior, así que el servicio lo acepta.
+    const done = await run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { understoodMessageId: pending.reply!.id }))
+    expect(done.status).not.toBe("propuesta")
+  })
+
   it("si ya respondió después de la propuesta, lo de antes no cuenta como elección", async () => {
     const { conversationId, contactId, connectionId: connId } = await openConversation("comercial-8", "evt-com-8")
     await inbound("comercial-8", connId, "evt-com-8b", "Resérvame el lunes a las 10")

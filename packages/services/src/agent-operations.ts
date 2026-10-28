@@ -2332,9 +2332,16 @@ export async function proposalReplyOf(
   if (current.contactId !== contactId) throw notFound("Propuesta")
   const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
   const after = items.filter((m) => new Date(m.createdAt).getTime() >= current.createdAt.getTime())
-  const reply = after.filter((m) => m.direction === "in" && m.body).at(-1)
+  // Todo lo que escribió desde su última respuesta: «Sí, resérvenme el de las 11» seguido de
+  // «pero confírmenme el costo» es un sí; leer solo el último pedazo lo perdía.
+  const lastOut = after.findLastIndex((m) => m.direction === "out")
+  const said = after.slice(lastOut + 1).filter((m) => m.direction === "in" && m.body)
+  const reply = said.at(-1)
   const proposed = after.find((m) => m.direction === "out" && m.body)
-  return { reply: reply ? { id: reply.id, body: reply.body ?? "" } : null, proposed: proposed?.body ?? null }
+  return {
+    reply: reply ? { id: reply.id, body: said.map((m) => m.body).join("\n") } : null,
+    proposed: proposed?.body ?? null,
+  }
 }
 
 /**

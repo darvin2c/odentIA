@@ -15,8 +15,8 @@ export const CONFIRMS_QUESTION: DecisionQuestion = {
   instructions:
     "La clínica le propuso algo a esta persona y le pidió que lo confirme. ¿Su respuesta acepta lo propuesto, tal cual?",
   criteria: {
-    yes: "Acepta lo propuesto, aunque lo diga con otras palabras: «perfecto», «sí, gracias», «sí, por favor», «me sirve», «ahí estaré», «resérvala».",
-    no: "No acepta o no está claro: dice que no, pide otra cosa (otro horario, otro día, otro profesional), pone una condición, pregunta algo o habla de otro tema.",
+    yes: "Acepta lo propuesto, aunque lo diga con otras palabras: «perfecto», «sí, gracias», «sí, por favor», «me sirve», «ahí estaré», «resérvala». Si acepta y además pregunta o comenta otra cosa («sí, resérvala; ¿y cuánto cuesta?»), también acepta.",
+    no: "No acepta o no está claro: dice que no, pide otra cosa (otro horario, otro día, otro profesional), acepta solo si se cumple algo («si no cuesta más, sí»), o solo pregunta o habla de otro tema sin aceptar.",
   },
 }
 /** Por encima de esto se da por dicho el sí; por debajo, el agente vuelve a preguntar. */
@@ -62,8 +62,8 @@ export const CHOSE_QUESTION: DecisionQuestion = {
   instructions:
     "La persona escribió esto antes de que la clínica le ofreciera una cita. ¿Ya pidió reservar exactamente esa cita?",
   criteria: {
-    yes: "Pide reservarla, sin dudas: el mismo día y la misma hora, y si nombró profesional o sede, los mismos («resérvame mañana a las 2 con la Dra. Ana», «agéndame el jueves 10 am»).",
-    no: "Solo pregunta qué hay, duda, da varias opciones, pide otro día, hora o profesional, o no dice día y hora.",
+    yes: "Pide que le reserven o separen esa cita: el mismo día y la misma hora, y si nombró profesional o sede, los mismos; si dijo «con cualquiera», cualquiera sirve («resérvame mañana a las 2 con la Dra. Ana», «el viernes a las 5 me sirve, me la separan?»). Si además pregunta otra cosa (un precio, una promoción, si tiene costo), igual la pidió.",
+    no: "Solo pregunta qué horarios hay, duda entre varias horas, pide otro día, hora o profesional, la pide solo si se cumple algo («si no cuesta, sepárala»), o no dice día y hora.",
   },
 }
 

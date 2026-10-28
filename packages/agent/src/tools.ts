@@ -1263,8 +1263,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const url = new URL("/reserva", origin)
         url.searchParams.set("token", link.token)
         const who = link.patientName ?? "la persona"
-        const data = link.needsRegistration ? " Como aún no es paciente, la página le pedirá sus datos antes de reservar: díselo." : ""
-        return `Su enlace, para que ${who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje, y ofrece también seguir por aquí si lo prefiere.${data} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
+        // Quien aún no es paciente no puede reservar por aquí: ofrecerle «seguir por aquí» lo contradecía.
+        const next = link.needsRegistration
+          ? " Como aún no es paciente, ahí deja sus datos y reserva: díselo en una frase y no le ofrezcas reservar por aquí. Si ya eligió una hora contigo, dile que elija esa misma en la página (por ejemplo «ahí eliges el jueves a las 8:00»), sin pedirle que vuelva a decidir."
+          : " Ofrece también seguir por aquí si lo prefiere."
+        return `Su enlace, para que ${who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje.${next} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
       } catch (error) {
         if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
           return "Es una prueba del chat web: no se envía el enlace. Dile que en la prueba no se reserva nada y ofrece seguir por aquí."
@@ -1973,6 +1976,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   /** Lo que se le pide al modelo que pasó un tema sin escribirle a la persona. */
   const REPLY_AFTER_HANDOFF =
     "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje. Di en una frase quién verá ese tema, sin prometer hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender (horarios, precio, cómo reservar): eso no se pasa al equipo."
+  /** Cuando insiste en un tema que el equipo ya tiene: reconocerlo sin repetir la misma frase. */
+  const REPLY_ASKED_AGAIN =
+    "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje y sin repetir lo que ya le dijiste. Si añadió algo (que lo necesita hoy, un dato nuevo), dile que se lo hiciste llegar al equipo; si solo insiste, reconócelo en pocas palabras. No prometas hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender."
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
@@ -2013,7 +2019,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ctx.handoffId = open.id
         if (!notice) {
           ctx.handoffNeedsReply = true
-          return `Ese tema ya lo tiene el equipo: lo anoté en él. ${REPLY_AFTER_HANDOFF}`
+          return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él. ${REPLY_ASKED_AGAIN}`
         }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
