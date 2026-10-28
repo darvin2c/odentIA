@@ -388,6 +388,28 @@ export const OPERATIONS = {
       startsOn: { kind: "text", max: 10, label: "Desde", description: "El primer día del descanso en AAAA-MM-DD, contado desde la fecha de hoy que se te da. Vacío si es desde hoy.", body: "optional", nullable: true, agent: "fills" },
     },
   },
+  // Una alergia que se dice en la atención (issue 109): entra con `addPatientAllergy`, una por
+  // una, o responde «Pregúntale si tiene alergias» con `markAllergiesReviewed`.
+  "alergia.dictada": {
+    label: "Alergia",
+    fields: {
+      substance: { kind: "text", max: 200, label: "Sustancia", description: "A qué es alérgico, por el nombre de la sustancia en singular (penicilina, látex, ibuprofeno), aunque nombre una marca. Vacío si dijo que no tiene alergias.", body: "optional", nullable: true, agent: "fills" },
+      reaction: { kind: "text", max: 2000, label: "Qué le pasó", description: "Lo que le pasó, como lo dijo («ronchas», «le costó respirar»). Vacío si no lo dijo.", body: "optional", nullable: true, agent: "fills" },
+      severity: { kind: "enum", values: ["leve", "moderada", "severa"], label: "Qué tan fuerte fue", description: "Solo si dijo con esas palabras qué tan fuerte fue la reacción; no lo deduzcas de lo que le pasó.", body: "optional", nullable: true, agent: "fills" },
+      none: { kind: "flag", label: "No tiene alergias", description: "true si dijo que no tiene alergias o ninguna nueva («niega alergias», «de alergias sigue igual»), sin sustancia.", body: "optional", agent: "fills" },
+    },
+  },
+  // Lo que se hizo hoy (issue 109): entra con `addEncounterProcedure`, del plan, de los
+  // servicios o como acto libre, como «Registrar procedimiento».
+  "atencion.procedimiento": {
+    label: "Procedimiento realizado",
+    fields: {
+      service: { kind: "text", min: 2, max: 200, label: "Procedimiento", description: "Lo que hizo hoy, con las palabras del profesional (profilaxis, resina, exodoncia). El sistema lo busca en el plan del paciente y en los servicios de la clínica.", body: "none", agent: "requires" },
+      toothNumber: { kind: "int", min: 11, max: 85, label: "Pieza", description: "La pieza en numeración FDI donde lo hizo.", body: "optional", nullable: true, agent: "fills" },
+      surfaces: { kind: "textList", maxItems: 5, maxLength: 20, label: "Superficies", description: "Caras de la pieza que trabajó, como las dijo.", body: "optional", nullable: true, agent: "fills" },
+      quantity: { kind: "int", min: 1, max: 99, label: "Cantidad", description: "Cuántas unidades, solo si lo dijo («dos carillas» = 2).", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
   "control.crear": {
     label: "Control",
     fields: {

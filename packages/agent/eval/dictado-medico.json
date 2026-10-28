@@ -49,7 +49,7 @@
         "signos": { "peso": 16.5, "temperatura": 36.8, "frecuenciaRespiratoria": 32, "saturacionOxigeno": 94 },
         "examen": [{ "sistema": "toraxPulmones", "estado": "con_hallazgos" }],
         "diagnosticos": ["J45"],
-        "indicaciones": ["nebuliz"],
+        "hechos": ["nebuliz"],
         "recetas": [{ "dci": "salbutamol", "concentracion": "", "duracion": "5" }],
         "controles": 1
       }
@@ -77,7 +77,8 @@
       "id": "m06-quita-un-medicamento",
       "pendientes": ["Receta: amoxicilina 500 mg por 10 días", "Receta: ibuprofeno 400 mg por 3 días"],
       "texto": "Quita el ibuprofeno, es alérgica a los antiinflamatorios.",
-      "espera": { "quitar": 1, "nuevos": 0 }
+      "_nota": "Quitar el medicamento y, además, la alergia que dijo: es lo único nuevo (issue 109).",
+      "espera": { "quitar": 1, "nuevos": 1 }
     },
     {
       "id": "m07-cambia-un-medicamento",
@@ -141,6 +142,16 @@
         "recetas": [{ "dci": "naproxeno", "concentracion": "500", "duracion": "5" }],
         "descanso": 5
       }
+    },
+    {
+      "id": "m14-alergia-y-lo-hecho",
+      "texto": "Es alérgico al ibuprofeno, le dio ronchas. Le hicimos la nebulización y ya satura mejor. Alta con control en dos días.",
+      "espera": { "alergias": ["ibuprofeno"], "hechos": ["nebuliz"], "controles": 1 }
+    },
+    {
+      "id": "m15-niega-alergias-y-solo-indica",
+      "texto": "Niega alergias. Vamos a pedirle una ecografía abdominal para la próxima.",
+      "espera": { "alergias": ["ninguna"], "indicaciones": ["ecograf"] }
     }
   ]
 }

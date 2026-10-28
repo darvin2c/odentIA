@@ -37,6 +37,10 @@ interface PracticeDictation {
     diagnosticos?: string[]
     /** Las prestaciones indicadas, por una palabra de cada una. */
     indicaciones?: string[]
+    /** Lo que hizo en la consulta («le hacemos una nebulización ahora»), por una palabra de cada uno. */
+    hechos?: string[]
+    /** Alergias dichas, por una palabra de la sustancia; «ninguna»: dijo que no tiene. Exactas: ni una de más. */
+    alergias?: string[]
     /** Medicamentos recetados: DCI, cifras de la concentración y días (null: no dijo la duración). */
     recetas?: Array<{ dci: string; concentracion: string; duracion: string | null }>
     controles?: number
@@ -209,6 +213,19 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
       `indicación ${word}`,
       indicated.some((service) => service.includes(plain(word))),
     )
+  const done = read.drafts
+    .filter((draft) => draft.kind === "procedimiento")
+    .map((draft) => plain(String(draft.payload["service"] ?? "")))
+  for (const word of dictation.espera.hechos ?? [])
+    other(
+      `hecho ${word}`,
+      done.some((service) => service.includes(plain(word))),
+    )
+  const allergies = read.drafts
+    .filter((draft) => draft.kind === "alergia")
+    .map((draft) => (draft.payload["none"] === true && !draft.payload["substance"] ? "ninguna" : plain(String(draft.payload["substance"] ?? ""))))
+  for (const word of dictation.espera.alergias ?? []) other(`alergia ${word}`, allergies.some((said) => said.includes(plain(word))))
+  if (dictation.espera.alergias) other("ninguna alergia de más", allergies.length === dictation.espera.alergias.length)
   const recipes = read.drafts
     .filter((draft) => draft.kind === "receta")
     .map((draft) => draft.payload)
@@ -268,9 +285,12 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
     ? ` · no usó: ${read.unused.map((phrase) => `«${phrase}»`).join(", ")}`
     : ""
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
+  // Más de una llamada a la herramienta en una respuesta: se lee solo la primera, y eso explica lo perdido.
+  const calls = (reply.tool_calls ?? []).length
   console.log(
-    `${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`,
+    `${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}${calls > 1 ? `, ${calls} llamadas` : ""})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`,
   )
+  if (notes.length && process.argv.includes("--detalle")) console.log(JSON.stringify((reply.tool_calls ?? []).map((call) => call.args), null, 1))
 }
 
 const pct = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)} %` : "—")

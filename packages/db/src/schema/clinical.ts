@@ -1931,11 +1931,12 @@ export const clinicalFollowUp = pgTable(
 )
 
 /**
- * Las clases de sugerencia de Clío: las de todo producto, el odontograma de
- * odentIA y los signos vitales, el examen por sistemas y el descanso médico de
- * latidIA (issue 229, entrega 10).
+ * Las clases de sugerencia de Clío: las de todo producto (con la alergia que
+ * se dice y lo que se hizo hoy, issue 109), el odontograma de odentIA y los
+ * signos vitales, el examen por sistemas y el descanso médico de latidIA
+ * (issue 229, entrega 10).
  */
-export const DICTATION_KINDS = ["nota", "diagnostico", "plan", "control", "odontograma", "receta", "signos", "examen", "descanso"] as const
+export const DICTATION_KINDS = ["nota", "diagnostico", "plan", "control", "odontograma", "receta", "signos", "examen", "descanso", "alergia", "procedimiento"] as const
 export type DictationKind = (typeof DICTATION_KINDS)[number]
 
 /**
@@ -1975,7 +1976,7 @@ export const encounterDictationSuggestion = pgTable(
   },
   (table) => [
     index("encounter_dictation_suggestion_idx").on(table.organizationId, table.encounterId, table.status),
-    check("encounter_dictation_suggestion_kind_check", sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso')`),
+    check("encounter_dictation_suggestion_kind_check", sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento')`),
     check(
       "encounter_dictation_suggestion_status_check",
       sql`${table.status} IN ('lista','por_revisar','confirmada','descartada')`,

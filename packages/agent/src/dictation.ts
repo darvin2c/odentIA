@@ -106,6 +106,18 @@ export function dictationEdits(example: string) {
 export const DICTATION_TOOL = "registrar_dictado"
 
 /**
+ * Lo que todo producto ordena igual (issue 109): las alergias que se dicen y lo
+ * que se hizo hoy. `clinician`: cómo se nombra a quien dicta; `done`: un ejemplo
+ * de lo que se cuenta como hecho, con las palabras del producto.
+ */
+export function allergyAndDonePrompt(clinician: string, done: string): string[] {
+  return [
+    "En `alergias` va cada alergia del paciente que se dijo («es alérgica a la penicilina», «el látex le da ronchas»): la sustancia en singular y por su nombre genérico, lo que le pasó si lo dijo y qué tan fuerte fue solo si lo dijo con esas palabras. Si dice que no tiene alergias, o ninguna nueva, va una sola con `none` y sin sustancia. Un medicamento que toma o que se receta no es una alergia.",
+    `En \`procedimientos\` va lo que el ${clinician} ya hizo hoy en esta atención, contado como hecho (${done}), con \`service\` en sus palabras: el sistema lo busca en el plan del paciente y en los servicios. Lo que queda por hacer es una indicación, aunque lo diga en la misma frase. Si no queda claro si ya lo hizo, es una indicación. Contarlo en la evolución está bien: además va en \`procedimientos\`.`,
+  ]
+}
+
+/**
  * El dictado de un producto: qué le pide al modelo y cómo se ordena sin él.
  * La consulta (`nota`), las correcciones y los «quita» son de todos; cada
  * producto suma sus listas (odentIA: el odontograma, los diagnósticos, el

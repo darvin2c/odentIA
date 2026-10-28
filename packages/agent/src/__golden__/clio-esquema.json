@@ -349,6 +349,96 @@
         "additionalProperties": false
       }
     },
+    "alergias": {
+      "default": [],
+      "description": "Un elemento por cada alergia del paciente que se dijo, o uno con `none` si no tiene.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "substance": {
+            "description": "A qué es alérgico, por el nombre de la sustancia en singular (penicilina, látex, ibuprofeno), aunque nombre una marca. Vacío si dijo que no tiene alergias.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 200
+          },
+          "reaction": {
+            "description": "Lo que le pasó, como lo dijo («ronchas», «le costó respirar»). Vacío si no lo dijo.",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          },
+          "severity": {
+            "description": "Solo si dijo con esas palabras qué tan fuerte fue la reacción; no lo deduzcas de lo que le pasó.",
+            "type": "string",
+            "enum": [
+              "leve",
+              "moderada",
+              "severa"
+            ]
+          },
+          "none": {
+            "description": "true si dijo que no tiene alergias o ninguna nueva («niega alergias», «de alergias sigue igual»), sin sustancia.",
+            "type": "boolean"
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "procedimientos": {
+      "default": [],
+      "description": "Un elemento por cada cosa que el odontólogo ya hizo hoy en la atención.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "Lo que hizo hoy, con las palabras del profesional (profilaxis, resina, exodoncia). El sistema lo busca en el plan del paciente y en los servicios de la clínica."
+          },
+          "toothNumber": {
+            "description": "La pieza en numeración FDI donde lo hizo.",
+            "type": "integer",
+            "minimum": 11,
+            "maximum": 85
+          },
+          "surfaces": {
+            "description": "Caras de la pieza que trabajó, como las dijo.",
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20
+            }
+          },
+          "quantity": {
+            "description": "Cuántas unidades, solo si lo dijo («dos carillas» = 2).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 99
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "service"
+        ],
+        "additionalProperties": false
+      }
+    },
     "correcciones": {
       "default": [],
       "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
@@ -417,6 +507,8 @@
     "indicaciones",
     "recetas",
     "controles",
+    "alergias",
+    "procedimientos",
     "correcciones",
     "quitar"
   ],

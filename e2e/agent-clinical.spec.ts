@@ -306,3 +306,61 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   await gotoHydrated(page, tenant(org.slug, "/agent/asistente-clinico"))
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
 })
+
+test("asistente clínico: la alergia dictada y lo hecho hoy se confirman donde van", async ({ owner }, info) => {
+  const { page, org } = owner
+  const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: crypto.randomUUID(),
+    answers: { demographics: { displayName: "Rosa Quispe", docType: "DNI", docNumber: "76543210" }, respondent: "staff", privacyAccepted: false },
+    contacts: [],
+  }, 201)
+  const apiPath = `/api/patients/${patient.id}`
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
+  await call(page, "POST", "/api/services", org.slug, {
+    name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
+    officialCode: "D3330",
+  }, 201)
+  const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Consulta" }, 201)
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {
+    professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345",
+  })
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
+  const write = async (text: string) => {
+    await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+    await idle.getByLabel("Escribe lo dictado").fill(text)
+    await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  }
+  await write("Es alérgica a la penicilina. Le hice la endodoncia multirradicular en la dieciséis.")
+
+  // La alergia va junto a las alertas, con su código; qué tan fuerte fue es un aviso que se toca.
+  const allergy = suggested("Alergias").getByRole("listitem").first()
+  await expect(allergy).toContainText("Alergia a penicilinas")
+  await expect(allergy).toContainText("¿Qué tan fuerte fue?")
+  await expect(allergy.getByRole("button", { name: "Confirmar", exact: true })).toBeEnabled()
+  // Lo hecho hoy va en Procedimientos, de tus servicios y con su precio.
+  const done = suggested("Procedimientos").getByRole("listitem").first()
+  await expect(done).toContainText("Hecho hoy · Endodoncia multirradicular · S/ 650.00")
+  await expect(done).toContainText("Pieza 16")
+  await expect(done).toContainText("de tus servicios")
+  await info.attach("alergia-y-hecho-hoy", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  await allergy.getByRole("button", { name: "Severa", exact: true }).click()
+  await expect(allergy).not.toContainText("¿Qué tan fuerte fue?")
+  await allergy.getByRole("button", { name: "Confirmar", exact: true }).click()
+  // Confirmada, se ve al momento en la franja: severa, en rojo y primero.
+  await expect(page.getByLabel("Alertas clínicas")).toContainText(/Alergia severa: penicilinas/i)
+  await done.getByRole("button", { name: "Confirmar", exact: true }).click()
+  await expect(suggested("Procedimientos")).toHaveCount(0)
+  const detail = await call<{ procedures: Array<{ description: string; priceCents: number | null; voidedAt: string | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
+  expect(detail.procedures.filter((item) => !item.voidedAt).map((item) => [item.description, item.priceCents])).toEqual([["Endodoncia multirradicular", 65000]])
+
+  // Ya registrada: no se propone otra vez, se avisa.
+  await write("Es alérgica a la penicilina.")
+  await expect(page.getByText("La alergia a penicilinas ya está en sus antecedentes.")).toBeVisible()
+  await expect(suggested("Alergias")).toHaveCount(0)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+})
