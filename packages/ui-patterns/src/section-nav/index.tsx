@@ -6,6 +6,7 @@ import {
   BADGE_CLASSES,
   GROUP_LABEL_CLASSES,
   GROUP_LIST_CLASSES,
+  GROUP_SEPARATOR_CLASSES,
   ITEM_ACTIVE_CLASSES,
   ITEM_CLASSES,
   resolveActiveTo,
@@ -249,8 +250,12 @@ export function SectionNav({
                   aria-labelledby={headingId}
                   // `shrink-0`: en una pantalla baja la lista se desplaza; un grupo
                   // nunca se encoge recortando sus filas.
-                  className={cn("flex shrink-0 flex-col", index === 0 ? "lg:pt-1" : "lg:pt-3")}
+                  className={cn("flex shrink-0 flex-col", index === 0 && "lg:pt-1")}
                 >
+                  {/* En el riel, una línea separa cada grupo del anterior; solo
+                      visual, porque el grupo ya se anuncia con su título. En el
+                      selector lo separa su tarjeta. */}
+                  {index > 0 ? <div aria-hidden className={GROUP_SEPARATOR_CLASSES} /> : null}
                   <p id={headingId} className={GROUP_LABEL_CLASSES}>
                     {group.label}
                   </p>
@@ -264,10 +269,7 @@ export function SectionNav({
               <>
                 {/* En el riel, una línea separa lo que no pertenece a un grupo;
                     en el selector ya lo separa su propia tarjeta. */}
-                <div
-                  role="separator"
-                  className="mx-3 my-2 hidden h-px shrink-0 bg-sidebar-border lg:block"
-                />
+                <div role="separator" className={GROUP_SEPARATOR_CLASSES} />
                 <ul className={cn(GROUP_LIST_CLASSES, "shrink-0")}>
                   {items.map((item) => renderEntry(item, "group"))}
                 </ul>

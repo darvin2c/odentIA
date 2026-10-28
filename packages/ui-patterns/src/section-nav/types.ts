@@ -58,9 +58,15 @@ export const ITEM_CLASSES =
  * hereda `text-sidebar-foreground` de la superficie, como en el sidebar. */
 export const ITEM_ACTIVE_CLASSES = "bg-sidebar-accent font-semibold text-sidebar-accent-foreground"
 
-/** Título de un grupo: rótulo corto en mayúsculas, sin competir con las entradas. */
+/** Título de un grupo: rótulo corto en mayúsculas, más pequeño y gris que las
+ * entradas y pegado a ellas (poco aire debajo; la separación va arriba, con la
+ * línea entre grupos), para que se lea como encabezado y no como otra opción. */
 export const GROUP_LABEL_CLASSES =
-  "px-1 pb-1 text-[0.6875rem] font-bold tracking-[0.08em] text-muted-foreground uppercase lg:px-3"
+  "px-1 pb-0.5 text-[0.5625rem] leading-4 font-bold tracking-[0.1em] text-muted-foreground uppercase lg:px-3"
+
+/** Línea entre grupos (y antes de las sueltas): solo en el riel; en el
+ * selector cada grupo ya es su propia tarjeta. */
+export const GROUP_SEPARATOR_CLASSES = "mx-3 my-3 hidden h-px shrink-0 bg-sidebar-border lg:block"
 
 /**
  * Lista de un grupo. En la barra (tablet y móvil) es una tarjeta con sus filas
