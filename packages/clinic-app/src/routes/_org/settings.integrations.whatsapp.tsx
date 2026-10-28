@@ -10,7 +10,7 @@ import { WhatsAppConnection } from "../../components/integrations/whatsapp/conne
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { apiFetch } from "../../lib/api"
 import { type ConnectionItem, usePermission } from "../../lib/crm"
-import type { ConnectResult } from "../../lib/whatsapp"
+import { type ConnectResult, whatsappNumbers } from "../../lib/whatsapp"
 
 export const Route = createFileRoute("/_org/settings/integrations/whatsapp")({
   // `?mensaje=` abre ese mensaje: «Cambiar el texto» de «Te espera» llega así (ADR 0040).
@@ -90,17 +90,17 @@ function WhatsAppPage() {
     enabled: canRead,
     retry: 1,
   })
-  const connections = useMemo(
-    () => (listQuery.data?.data ?? []).filter((connection) => connection.channel === "whatsapp"),
+  const { ordered: connections, activeCount, offerConnect } = useMemo(
+    () => whatsappNumbers((listQuery.data?.data ?? []).filter((connection) => connection.channel === "whatsapp")),
     [listQuery.data],
   )
-  const activeCount = connections.filter((connection) => connection.status === "active").length
-  const none = listQuery.data !== undefined && connections.length === 0
-  // Sin ningún número la página ofrece conectar. El bloque sigue montado hasta que el intento
+  const offering = listQuery.data !== undefined && offerConnect
+  // Sin ningún número conectado la página ofrece conectar uno: la clínica sin números y la que
+  // desconectó el suyo, que así puede poner otro. El bloque sigue montado hasta que el intento
   // termina, aunque la lista ya traiga la conexión: el botón de Facebook entrega su resultado al final.
   useEffect(() => {
-    if (none) setConnectOpen(true)
-  }, [none])
+    if (offering) setConnectOpen(true)
+  }, [offering])
   // De vuelta del panel con la conexión hecha con el botón: se dice como si se hubiera hecho aquí.
   // Lo pendiente y los mensajes los lee la tarjeta del servidor; `conectado` solo dice cuál fue.
   useEffect(() => {
@@ -123,6 +123,7 @@ function WhatsAppPage() {
 
   const connect = (
     <WhatsAppConnect
+      another={connections.length > 0}
       onCreated={(result) => {
         setConnectOpen(false)
         setFresh({ result, byButton: false, read: false })
@@ -165,6 +166,7 @@ function WhatsAppPage() {
                 freshRead={own?.read ?? false}
                 freshByButton={own?.byButton ?? false}
                 showAccount={connections.length > 1}
+                otherActive={connection.status !== "active" && activeCount > 0}
                 canWrite={canWrite}
                 fixedCreate={activeCount === 1}
                 initialMessageId={mensaje ?? null}
@@ -172,9 +174,9 @@ function WhatsAppPage() {
               />
             )
           })}
-          {/* No se ofrece conectar otro número: lo automático sale por uno solo y una conexión
-              no pertenece a una sede. Si ya hay varias, se muestran todas. */}
-          {canWrite && connectOpen ? connect : null}
+          {/* Con un número conectado no se ofrece otro: lo automático sale por uno solo y una conexión
+              no pertenece a una sede. Quien lo desconecta puede conectar otro; el anterior queda de historial. */}
+          {canWrite && connectOpen && offerConnect ? connect : null}
         </>
       )}
     </div>

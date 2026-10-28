@@ -428,6 +428,68 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await info.attach("whatsapp-telefono", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })
 
+test("whatsapp: al desconectar el número se puede conectar otro y el anterior queda de historial", async ({ owner }, info) => {
+  const { page, org } = owner
+  const first = await createWhatsApp(page, org.slug, [REMINDER, RESUME])
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
+  const another = page.getByRole("heading", { name: "Conecta otro número de WhatsApp", exact: true })
+
+  // Conectado: no se ofrece otro número.
+  const card = page.getByRole("region", { name: "Conexión", exact: true })
+  await expect(card.getByRole("button", { name: "Probar conexión", exact: true })).toBeVisible()
+  await expect(another).toHaveCount(0)
+  await info.attach("whatsapp-un-numero-conectado", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // Desconectado: la conexión sigue ahí con su «Volver a conectar» y ya se puede conectar otro número.
+  await card.getByRole("button", { name: "Desconectar", exact: true }).click()
+  await page.getByRole("alertdialog", { name: "Desconectar WhatsApp" }).getByRole("button", { name: "Desconectar", exact: true }).click()
+  await expect(card).toContainText("Desconectado.")
+  await expect(card.getByRole("button", { name: "Volver a conectar", exact: true })).toBeVisible()
+  await expect(another).toBeVisible()
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("whatsapp-desconectado-conectar-otro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(another).toBeVisible()
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("whatsapp-desconectado-conectar-otro-telefono", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Con otro número conectado, el anterior queda desconectado, sin volver a conectarlo, y no se ofrece un tercero.
+  const second = await call<WhatsAppConnection>(
+    page,
+    "POST",
+    "/api/channels/connections",
+    org.slug,
+    {
+      channel: "whatsapp",
+      provider: "whatsapp_cloud_api",
+      displayName: "WA E2E nuevo",
+      config: { phoneNumberId: `${PHONE_NUMBER_ID}-2`, wabaId: "E2E-WABA-2", accessToken: "e2e", appSecret: APP_SECRET, templates: [REMINDER, RESUME] },
+    },
+    201,
+  )
+  await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
+  const current = page.getByRole("region", { name: "Conexión de WA E2E nuevo", exact: true })
+  await expect(current.getByRole("button", { name: "Probar conexión", exact: true })).toBeVisible()
+  await expect(current).not.toContainText("Desconectado.")
+  const previous = page.getByRole("region", { name: "Conexión de WA E2E", exact: true })
+  await expect(previous).toContainText("Desconectado.")
+  await expect(previous).toContainText("Número anterior.")
+  await expect(previous.getByRole("button", { name: "Volver a conectar", exact: true })).toHaveCount(0)
+  await expect(another).toHaveCount(0)
+  await info.attach("whatsapp-numero-anterior", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  await info.attach("whatsapp-numero-anterior-telefono", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // Las dos conexiones se conservan: nada se borró.
+  const whatsapps = (await call<Array<{ id: string; channel: string }>>(page, "GET", "/api/channels/connections", org.slug)).filter(
+    (item) => item.channel === "whatsapp",
+  )
+  expect(whatsapps.map((item) => item.id).sort()).toEqual([first.id, second.id].sort())
+})
+
 test("bandeja: pasadas las 24 horas lo dice antes de escribir, ofrece el mensaje aprobado por lo que dice y lo envía", async ({ owner, fixtureDb }, info) => {
   const { page, org } = owner
   const wa = await createWhatsApp(page, org.slug, [RESUME])
