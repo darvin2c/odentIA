@@ -1,19 +1,22 @@
 import {
   channelAdapters,
   exchangeSignupCode,
+  listAccountNumbers,
   type MetaPlatformApp,
   MetaSignupError,
+  type NormalizedAppContact,
   newRegistrationPin,
   type ProviderAccount,
   registerPhoneNumber,
+  requestBusinessAppSync,
   type SignupTokenState,
   subscribeAppToAccount,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
-import { channelConnection, type ConnectionSignup } from "@odentia/db/schema/crm"
+import { channelConnection, type ConnectionSignup, contact, contactIdentity } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, eq, inArray, isNotNull } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import {
   changeConnectionCredentials,
   completeConnectionAccount,
@@ -22,9 +25,11 @@ import {
   createConnection,
   getConnectionSecrets,
   type ProviderCheck,
+  BUSINESS_APP_SYNC_HOURS,
   SIGNUP_STEPS,
   type SignupOrigin,
   type SignupStep,
+  signupStepsDone,
 } from "./connections.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
@@ -63,8 +68,17 @@ export interface SignupInput {
   code: string
   /** Cuenta de WhatsApp Business que eligió la clínica. */
   wabaId: string
-  /** Número que eligió la clínica. */
-  phoneNumberId: string
+  /**
+   * Número que eligió la clínica. Puede faltar solo con `businessApp`: en ese
+   * aviso Meta solo promete la cuenta, y el número se busca en ella.
+   */
+  phoneNumberId?: string | undefined
+  /**
+   * El número sigue en la app WhatsApp Business del celular (coexistencia). Ya
+   * está registrado: odentIA no lo registra, solo suscribe la app.
+   * https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users
+   */
+  businessApp?: boolean | undefined
 }
 
 /** El permiso recién canjeado y lo que Meta respondió por el número con él. */
@@ -75,6 +89,7 @@ export interface SignupGrant {
   wabaId: string
   phoneNumberId: string
   checked: ProviderCheck
+  businessApp: boolean
 }
 
 /** Lo que falta hacer en Meta por una conexión, con lo necesario para hacerlo. */
@@ -87,6 +102,10 @@ export interface SignupWork {
   steps: SignupStep[]
   /** Lo que Meta dijo de la cuenta en este recorrido; nulo en un reintento. */
   account: ProviderAccount | null
+  /** Cuándo se entró con Facebook: desde ahí corren las 24 horas para traer lo del celular. */
+  grantedAt: string
+  /** Lo ya pedido del celular (coexistencia): cada pedido se hace una sola vez. */
+  sync: NonNullable<ConnectionSignup["sync"]>
 }
 
 export interface SignupStepResult {
@@ -94,6 +113,8 @@ export interface SignupStepResult {
   ok: boolean
   /** Qué pasó y qué hacer, cuando no salió. */
   problem: string | null
+  /** «sincronizar»: lo que quedó pedido, aunque falte una parte. */
+  sync?: NonNullable<ConnectionSignup["sync"]>
 }
 
 const WHATSAPP = { channel: "whatsapp", provider: "whatsapp_cloud_api" } as const
@@ -185,9 +206,10 @@ export async function redeemWhatsAppSignup(
 ): Promise<SignupGrant> {
   const code = input.code.trim()
   const wabaId = input.wabaId.trim()
-  const phoneNumberId = input.phoneNumberId.trim()
+  const businessApp = input.businessApp === true
+  let phoneNumberId = input.phoneNumberId?.trim() ?? ""
   if (!code) throw validation("Falta el permiso que devuelve la ventana de Meta.")
-  if (!wabaId || !phoneNumberId) {
+  if (!wabaId || (!phoneNumberId && !businessApp)) {
     throw validation("La ventana de Meta no dijo qué cuenta y qué número se eligieron.")
   }
   let token: string
@@ -198,6 +220,25 @@ export async function redeemWhatsAppSignup(
     expiresAt = exchanged.expiresInSeconds ? new Date(Date.now() + exchanged.expiresInSeconds * 1000) : null
   } catch (error) {
     throw redeemFailure(error)
+  }
+  if (!phoneNumberId) {
+    let numbers: string[]
+    try {
+      numbers = await listAccountNumbers(app, wabaId, token, { fetch: deps.fetch })
+    } catch (error) {
+      throw redeemFailure(error)
+    }
+    // Con más de uno no se adivina cuál es el de la clínica.
+    if (numbers.length !== 1) {
+      throw new ServiceError(
+        "CONNECTION_REJECTED",
+        400,
+        numbers.length === 0
+          ? "Meta no dijo qué número conectaste y la cuenta no tiene ninguno. No se conectó nada: vuelve a intentarlo y termina la ventana de Meta hasta el final."
+          : "Meta no dijo qué número conectaste y la cuenta tiene varios. No se conectó nada: vuelve a intentarlo.",
+      )
+    }
+    phoneNumberId = numbers[0] as string
   }
   const adapter = channelAdapters[WHATSAPP.provider]
   if (!adapter) throw validation(`Proveedor desconocido o no registrado: ${WHATSAPP.provider}`)
@@ -218,7 +259,7 @@ export async function redeemWhatsAppSignup(
         )
       : redeemFailure(error)
   }
-  return { token, expiresAt, wabaId, phoneNumberId, checked }
+  return { token, expiresAt, wabaId, phoneNumberId, checked, businessApp }
 }
 
 /**
@@ -243,6 +284,7 @@ export async function openWhatsAppSignup(
     accountId: grant.wabaId,
     at: new Date(),
     tokenExpiresAt: grant.expiresAt,
+    businessApp: grant.businessApp,
   }
   const account = grant.checked.account ?? null
   if (options.reconnectConnectionId) {
@@ -284,8 +326,12 @@ export async function openWhatsAppSignup(
     wabaId: grant.wabaId,
     phoneNumberId: grant.phoneNumberId,
     pin,
-    steps: [...SIGNUP_STEPS],
+    // El número de la app del celular ya está registrado (`registeredAt` lo dice)
+    // y trae su agenda y su historial; uno nuevo no tiene nada que traer.
+    steps: SIGNUP_STEPS.filter((step) => (grant.businessApp ? step !== "registrar" : step !== "sincronizar")),
     account,
+    grantedAt: origin.at.toISOString(),
+    sync: {},
   }
 }
 
@@ -310,10 +356,7 @@ export async function pendingSignupWork(
     }
     return value
   }
-  const done: Record<SignupStep, string | null> = {
-    suscribir: row.signup.subscribedAt,
-    registrar: row.signup.registeredAt,
-  }
+  const done = signupStepsDone(row.signup)
   return {
     connectionId,
     token: pick("accessToken"),
@@ -322,6 +365,46 @@ export async function pendingSignupWork(
     pin: pick("registrationPin"),
     steps: SIGNUP_STEPS.filter((step) => !done[step]),
     account: null,
+    grantedAt: row.signup.grantedAt,
+    sync: row.signup.sync ?? {},
+  }
+}
+
+/** Qué se le dice a quien conecta cuando no se pudo pedir lo del celular. */
+const SYNC_NOT_SUBSCRIBED =
+  "Primero tiene que quedar el aviso de WhatsApp a odentIA; si no, lo que mande el celular no llega. Reintenta cuando esté."
+const SYNC_EXPIRED =
+  "Pasaron las 24 horas que da Meta para traer la agenda y las conversaciones del celular. Vuelve a conectar con Facebook para traerlas."
+
+/**
+ * Coexistencia: pide la agenda y después el historial del celular, lo que
+ * falte de los dos. Cada pedido se hace una sola vez: lo que salió queda en
+ * `sync` aunque el otro falle, para no repetirlo al reintentar.
+ */
+async function requestBusinessAppData(
+  app: Pick<MetaPlatformApp, "graphVersion">,
+  work: SignupWork,
+  subscribed: boolean,
+  deps: Pick<ConnectionDeps, "fetch">,
+): Promise<SignupStepResult> {
+  const step = "sincronizar"
+  const sync = { ...work.sync }
+  if (!subscribed) return { step, ok: false, problem: SYNC_NOT_SUBSCRIBED, sync }
+  if (Date.now() - Date.parse(work.grantedAt) > BUSINESS_APP_SYNC_HOURS * 3_600_000) {
+    return { step, ok: false, problem: SYNC_EXPIRED, sync }
+  }
+  try {
+    if (!sync.contacts) {
+      const requestId = await requestBusinessAppSync(app, work.phoneNumberId, work.token, "smb_app_state_sync", deps)
+      sync.contacts = { at: new Date().toISOString(), requestId }
+    }
+    if (!sync.history) {
+      const requestId = await requestBusinessAppSync(app, work.phoneNumberId, work.token, "history", deps)
+      sync.history = { at: new Date().toISOString(), requestId }
+    }
+    return { step, ok: true, problem: null, sync }
+  } catch (error) {
+    return { step, ok: false, problem: stepProblem(step, error), sync }
   }
 }
 
@@ -337,6 +420,12 @@ export async function runSignupSteps(
   const results: SignupStepResult[] = []
   for (const step of SIGNUP_STEPS) {
     if (!work.steps.includes(step)) continue
+    if (step === "sincronizar") {
+      // Solo con la app suscrita: lo que mande el celular llega como aviso a odentIA.
+      const subscribed = !work.steps.includes("suscribir") || results.some((r) => r.step === "suscribir" && r.ok)
+      results.push(await requestBusinessAppData(app, work, subscribed, { fetch: deps.fetch }))
+      continue
+    }
     try {
       if (step === "suscribir") {
         await subscribeAppToAccount(app, work.wabaId, work.token, { fetch: deps.fetch })
@@ -374,6 +463,13 @@ export async function closeWhatsAppSignup(
   const now = new Date().toISOString()
   const signup: ConnectionSignup = { ...row.signup, problems: { ...row.signup.problems } }
   for (const result of results) {
+    if (result.step === "sincronizar") {
+      // Lo que quedó pedido se guarda aunque falte una parte: no se pide dos veces.
+      signup.sync = { ...signup.sync, ...result.sync }
+      if (result.ok) delete signup.problems.sincronizar
+      else signup.problems.sincronizar = result.problem ?? "No se pudo completar."
+      continue
+    }
     const field = result.step === "suscribir" ? "subscribedAt" : "registeredAt"
     if (result.ok) {
       signup[field] = now
@@ -389,6 +485,77 @@ export async function closeWhatsAppSignup(
     .set({ signup, updatedAt: new Date() })
     .where(and(eq(channelConnection.id, work.connectionId), eq(channelConnection.organizationId, orgId)))
   return completeConnectionAccount(tx, orgId, work.connectionId, secretsKey, work.account, deps)
+}
+
+/* ---------- Coexistencia: lo que llega de la app WhatsApp Business del celular ---------- */
+
+/**
+ * La agenda de contactos del celular (`smb_app_state_sync`) solo pone nombre a
+ * quien ya escribió por ese número y aún no tiene nombres registrados: no crea
+ * personas, no cambia a nadie registrado y no identifica a nadie por su
+ * teléfono (la identidad del canal es la misma con la que llegan sus mensajes).
+ * Quitar a alguien de la agenda no cambia nada en odentIA.
+ */
+export async function applyAppContacts(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  contacts: NormalizedAppContact[],
+): Promise<{ named: number }> {
+  const [connection] = await tx
+    .select({ channel: channelConnection.channel })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+    .limit(1)
+  if (!connection) return { named: 0 }
+  let named = 0
+  for (const item of contacts) {
+    if (item.removed || !item.name) continue
+    const rows = await tx
+      .update(contact)
+      .set({ displayName: item.name, updatedAt: new Date() })
+      .where(
+        and(
+          eq(contact.organizationId, orgId),
+          isNull(contact.givenNames),
+          isNull(contact.familyName),
+          inArray(
+            contact.id,
+            tx
+              .select({ id: contactIdentity.contactId })
+              .from(contactIdentity)
+              .where(
+                and(
+                  eq(contactIdentity.organizationId, orgId),
+                  eq(contactIdentity.channel, connection.channel),
+                  eq(contactIdentity.externalUserId, item.externalUserId),
+                ),
+              ),
+          ),
+        ),
+      )
+      .returning({ id: contact.id })
+    named += rows.length
+  }
+  return { named }
+}
+
+/** La clínica no quiso compartir el historial del celular en la ventana de Meta: se anota para decirlo. */
+export async function noteHistoryDeclined(tx: Db, orgId: string, connectionId: string): Promise<void> {
+  const [row] = await tx
+    .select({ signup: channelConnection.signup })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!row?.signup?.businessApp || row.signup.sync?.historyDeclinedAt) return
+  await tx
+    .update(channelConnection)
+    .set({
+      signup: { ...row.signup, sync: { ...row.signup.sync, historyDeclinedAt: new Date().toISOString() } },
+      updatedAt: new Date(),
+    })
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
 }
 
 /* ---------- La clave de Meta se renueva sola (darvin2c/odentIA#121) ---------- */

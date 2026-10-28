@@ -197,17 +197,26 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    verificación el valor de `META_WEBHOOK_VERIFY_TOKEN`; suscribir los campos
    `messages`, `message_template_status_update` y `template_category_update`, que son los que odentIA usa, y
    `account_update`, que la guía de Meta exige (odentIA lo recibe y no hace nada
-   con él). Es una sola dirección para todas las clínicas. La API debe estar
-   arriba con las variables puestas para responder la verificación.
+   con él). Para los números que siguen en la app WhatsApp Business del celular
+   (coexistencia), además `smb_message_echoes` (lo que el equipo escribe desde
+   el celular), `history` (las conversaciones anteriores, al conectar) y
+   `smb_app_state_sync` (la agenda de contactos). Es una sola dirección para
+   todas las clínicas. La API debe estar arriba con las variables puestas para
+   responder la verificación.
 7. Con la API reiniciada, conectar una cuenta de prueba y comprobar: el canje
    del código, la suscripción, el registro del número, un mensaje que entra, uno
-   que sale y el aviso de una plantilla aprobada.
+   que sale y el aviso de una plantilla aprobada. Con un número de la app del
+   celular: que no se registra, que llegan la agenda y el historial, y que lo
+   escrito desde el celular aparece en la Bandeja como «Desde el celular».
 
 Límites que pone Meta: al principio se pueden conectar hasta 10 clínicas nuevas
 cada 7 días (200 al completar la verificación de la empresa, App Review y la
 verificación de acceso). El código que devuelve la ventana vive 30 segundos. Un
 número debe registrarse dentro de los 14 días siguientes a la ventana, con un
-máximo de 10 intentos cada 72 horas. La forma de pago la agrega cada clínica en
+máximo de 10 intentos cada 72 horas. Un número de la app del celular no se
+registra (ya lo está); su agenda y su historial se piden una sola vez cada uno,
+dentro de las 24 horas siguientes a la ventana, y ese número envía como mucho
+20 mensajes por segundo. La forma de pago la agrega cada clínica en
 su cuenta de WhatsApp: no hay llamada que lo haga por ella.
 
 Hoy la plataforma no envía una política de seguridad de contenido. Si llega a

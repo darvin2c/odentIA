@@ -146,3 +146,56 @@ it("el mismo texto cinco veces en una hora va a Spam y ya no encola corrida; a u
     await ownerDb.execute(sql`delete from "agent_config" where "organization_id" = 'org_a'`)
   }
 })
+
+it("coexistencia: lo escrito desde el celular queda como del equipo y no despierta al agente", async () => {
+  await ownerDb.execute(sql`insert into "agent_config" ("organization_id", "enabled") values ('org_a', true)`)
+  try {
+    await ownerDb.execute(sql`select pgmq.purge_queue('agent_runs')`)
+    await consumeInbound(appDb, deps, job("evt-co1", "tg:770"))
+    expect(await queueDepth("agent_runs")).toBe(1)
+    const echo = job("evt-co2", "tg:770", "Te esperamos mañana")
+    echo.message.event = { ...echo.message.event, fromBusinessApp: true }
+    await consumeInbound(appDb, deps, echo)
+    // La persona no escribió: no hay otra corrida.
+    expect(await queueDepth("agent_runs")).toBe(1)
+    const rows = await withOrgContext(appDb, "org_a", (tx) =>
+      tx
+        .select({ direction: message.direction, senderKind: message.senderKind, senderUserId: message.senderUserId, status: message.status, fromBusinessApp: message.fromBusinessApp, unread: conversation.unreadCount })
+        .from(message)
+        .innerJoin(conversation, eq(conversation.id, message.conversationId))
+        .where(eq(message.externalId, "evt-co2")),
+    )
+    expect(rows).toEqual([{ direction: "out", senderKind: "user", senderUserId: null, status: "sent", fromBusinessApp: true, unread: 1 }])
+  } finally {
+    await ownerDb.execute(sql`delete from "agent_config" where "organization_id" = 'org_a'`)
+  }
+})
+
+it("coexistencia: el historial conserva su hora, no reabre la conversación ni cuenta como sin leer", async () => {
+  await consumeInbound(appDb, deps, job("evt-hi1", "tg:771"))
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ id: conversation.id }).from(conversation).where(eq(conversation.externalThreadId, "tg:771")),
+  )
+  await withOrgContext(appDb, "org_a", (tx) => closeConversationWith(tx, "org_a", conv!.id, { reason: "manual", byUserId: null }))
+  const then = "2026-01-15T10:00:00.000Z"
+  const theirs = job("evt-hi2", "tg:771", "¿Tienen cita el lunes?")
+  theirs.message.event = { ...theirs.message.event, history: true, sentAt: then }
+  const ours = job("evt-hi3", "tg:771", "Sí, a las 10")
+  ours.message.event = { ...ours.message.event, history: true, fromBusinessApp: true, historyStatus: "read", sentAt: then }
+  await consumeInbound(appDb, deps, theirs)
+  await consumeInbound(appDb, deps, ours)
+  const rows = await withOrgContext(appDb, "org_a", (tx) =>
+    tx
+      .select({ id: message.externalId, direction: message.direction, status: message.status, createdAt: message.createdAt })
+      .from(message)
+      .where(eq(message.conversationId, conv!.id)),
+  )
+  expect(rows.filter((row) => row.id !== "evt-hi1").map((row) => [row.id, row.direction, row.status, row.createdAt.toISOString()])).toEqual([
+    ["evt-hi2", "in", "received", then],
+    ["evt-hi3", "out", "read", then],
+  ])
+  const [after] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: conversation.status, unread: conversation.unreadCount }).from(conversation).where(eq(conversation.id, conv!.id)),
+  )
+  expect(after).toEqual({ status: "closed", unread: 1 })
+})

@@ -631,3 +631,89 @@ it("la nota de voz, el audio y el video entran como media; el sticker no entra",
   ])
   expect(got.messages[2]?.senderDisplayName).toBe("Ana Paz")
 })
+
+/*
+ * Coexistencia: las formas que publica la guía de Meta para un número que sigue
+ * en la app WhatsApp Business del celular. No acredita lo que Meta envía de verdad.
+ * https://developers.facebook.com/docs/whatsapp/embedded-signup/custom-flows/onboarding-business-app-users
+ */
+const metadata = { display_phone_number: "51987654321", phone_number_id: "PNID" }
+
+it("lo que el equipo escribe desde el celular llega en el hilo de la persona, como del equipo", () => {
+  const parsed = parse(
+    {
+      messaging_product: "whatsapp",
+      metadata,
+      message_echoes: [
+        { from: "51987654321", to: "51999000111", id: "wamid.E1", timestamp: "1735689600", type: "text", text: { body: "Te esperamos" } },
+        // Una reacción del equipo no es un mensaje que la Bandeja muestre.
+        { from: "51987654321", to: "51999000111", id: "wamid.E2", timestamp: "1735689601", type: "reaction", reaction: { message_id: "wamid.X", emoji: "👍" } },
+      ],
+    },
+    "smb_message_echoes",
+  )
+  expect(parsed.messages).toEqual([
+    {
+      externalEventId: "wamid.E1",
+      externalMessageId: "wamid.E1",
+      externalThreadId: "wa:51999000111",
+      senderExternalId: "wa:51999000111",
+      sentAt: "2025-01-01T00:00:00.000Z",
+      content: { type: "text", text: "Te esperamos" },
+      fromBusinessApp: true,
+    },
+  ])
+})
+
+it("el historial trae lo de cada lado con su hora, y dice si la clínica no lo compartió", () => {
+  const parsed = parse(
+    {
+      messaging_product: "whatsapp",
+      metadata,
+      history: [
+        {
+          metadata: { phase: 0, chunk_order: 1, progress: 100 },
+          threads: [
+            {
+              id: "51999000111",
+              messages: [
+                { from: "51999000111", id: "wamid.H1", timestamp: "1735689600", type: "text", text: { body: "¿Hay cita?" }, history_context: { status: "DELIVERED" } },
+                { from: "51987654321", id: "wamid.H2", timestamp: "1735689660", type: "text", text: { body: "Sí" }, history_context: { status: "READ" } },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    "history",
+  )
+  expect(parsed.messages.map((m) => [m.externalMessageId, m.externalThreadId, m.fromBusinessApp ?? false, m.history, m.historyStatus])).toEqual([
+    ["wamid.H1", "wa:51999000111", false, true, undefined],
+    ["wamid.H2", "wa:51999000111", true, true, "read"],
+  ])
+  expect(parsed.historyDeclined).toBeUndefined()
+  const declined = parse({ messaging_product: "whatsapp", metadata, history: [{ errors: [{ code: 2593109, title: "History sync is turned off" }] }] }, "history")
+  expect(declined).toEqual({ messages: [], statuses: [], historyDeclined: true })
+  // Se reparte al número aunque no traiga mensajes.
+  const split = splitWhatsAppWebhook(JSON.stringify({ entry: [{ id: "WABA", changes: [{ field: "history", value: { metadata, history: [{ errors: [{ code: 2593109 }] }] } }] }] }))
+  expect(split).toMatchObject([{ kind: "number", phoneNumberId: "PNID", historyDeclined: true }])
+})
+
+it("la agenda del celular llega como contactos del canal, sin más", () => {
+  const parsed = parse(
+    {
+      messaging_product: "whatsapp",
+      metadata,
+      state_sync: [
+        { type: "contact", contact: { full_name: "Rosa Quispe", first_name: "Rosa", phone_number: "+51 999 000 111" }, action: "add", metadata: { timestamp: "1735689600" } },
+        { type: "contact", contact: { phone_number: "51999000222" }, action: "remove", metadata: { timestamp: "1735689600" } },
+        { type: "contact", contact: { full_name: "Sin número" }, action: "add" },
+      ],
+    },
+    "smb_app_state_sync",
+  )
+  expect(parsed.appContacts).toEqual([
+    { externalUserId: "wa:51999000111", name: "Rosa Quispe", removed: false },
+    { externalUserId: "wa:51999000222", name: null, removed: true },
+  ])
+})

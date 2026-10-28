@@ -9,12 +9,14 @@ import {
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
 import {
+  applyAppContacts,
   applyStatus,
   applyTemplateCategories,
   applyTemplateUpdates,
   clearOwnAppSignatureRejected,
   decryptConfig,
   markWebhookVerified,
+  noteHistoryDeclined,
   noteOwnAppSignatureRejected,
 } from "@odentia/services"
 import { and, eq, isNotNull } from "drizzle-orm"
@@ -100,6 +102,15 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       )
     }
 
+    // Coexistencia: la agenda del celular solo pone nombre a quien ya escribió por ese número.
+    if (parsed.appContacts?.length) {
+      const contacts = parsed.appContacts
+      await withOrgContext(deps.db, orgId, (tx) => applyAppContacts(tx, orgId, connection.id, contacts).then(() => {}))
+    }
+    if (parsed.historyDeclined) {
+      await withOrgContext(deps.db, orgId, (tx) => noteHistoryDeclined(tx, orgId, connection.id))
+    }
+
     for (const event of parsed.messages) {
       const inserted = await deps.ownerDb
         .insert(inboundEvent)
@@ -181,7 +192,12 @@ export function createWebhooksRoute(deps: WebhookDeps) {
           )
           continue
         }
-        await ingest(provider, connection, { messages: delivery.messages, statuses: delivery.statuses })
+        await ingest(provider, connection, {
+          messages: delivery.messages,
+          statuses: delivery.statuses,
+          ...(delivery.appContacts.length > 0 ? { appContacts: delivery.appContacts } : {}),
+          ...(delivery.historyDeclined ? { historyDeclined: true } : {}),
+        })
         continue
       }
       // Una cuenta puede tener más de un número conectado: el cambio vale para todos.

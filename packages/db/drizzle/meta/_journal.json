@@ -92,6 +92,13 @@
       "when": 1793211067912,
       "tag": "0012_sofi_registra_por_el_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793216065724,
+      "tag": "0013_whatsapp_coexistencia",
+      "breakpoints": true
     }
   ]
 }

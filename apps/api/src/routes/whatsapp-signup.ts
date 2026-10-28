@@ -68,13 +68,21 @@ export interface WhatsAppSignupDeps extends CrmDeps {
 }
 
 // Los identificadores de Meta son numéricos; el código es una cadena opaca.
-const signupInput = z.object({
-  code: z.string().min(1).max(4096),
-  wabaId: z.string().regex(/^\d{1,40}$/),
-  phoneNumberId: z.string().regex(/^\d{1,40}$/),
-  /** Volver a conectar: la conexión que ya existe, hecha con el botón. */
-  reconnectConnectionId: z.string().uuid().optional(),
-})
+const signupInput = z
+  .object({
+    code: z.string().min(1).max(4096),
+    wabaId: z.string().regex(/^\d{1,40}$/),
+    /** Puede faltar solo con `businessApp`: Meta solo promete la cuenta y el número se busca en ella. */
+    phoneNumberId: z.string().regex(/^\d{1,40}$/).optional(),
+    /** El número sigue en la app WhatsApp Business del celular: no se registra. */
+    businessApp: z.boolean().optional(),
+    /** Volver a conectar: la conexión que ya existe, hecha con el botón. */
+    reconnectConnectionId: z.string().uuid().optional(),
+  })
+  .refine((input) => input.phoneNumberId || input.businessApp, {
+    path: ["phoneNumberId"],
+    message: "Falta el número que eligió la clínica",
+  })
 
 /**
  * «Conectar con Facebook» de WhatsApp (Embedded Signup de Meta, versión 4).
@@ -147,7 +155,7 @@ export function createWhatsAppSignupRoute(deps: WhatsAppSignupDeps) {
       if (!enabled || !meta) throw unavailable()
       // Un solo WhatsApp por clínica: se dice antes de gastar el código de Meta.
       if (!reconnectConnectionId) {
-        await withOrgContext(deps.db, orgId, (tx) => assertSingleWhatsApp(tx, orgId, null, input.phoneNumberId))
+        await withOrgContext(deps.db, orgId, (tx) => assertSingleWhatsApp(tx, orgId, null, input.phoneNumberId ?? null))
       }
       // 1. Sin base: el código vive 30 segundos y se canjea enseguida.
       const grant = await redeemWhatsAppSignup(meta, input, providerDeps)
