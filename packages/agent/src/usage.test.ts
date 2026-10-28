@@ -271,7 +271,8 @@ it("el prompt pone primero lo que comparte toda la clínica y acota el conocimie
   // prefijo que el proveedor puede servir desde su caché.
   expect(one.toolsJson()).toBe(two.toolsJson())
   const shared = sharedPrefix(promptA, promptB)
-  expect(shared).toBeGreaterThanOrEqual(promptA.indexOf("Interlocutor:"))
+  expect(promptA.indexOf("Con quién hablas:")).toBeGreaterThan(0)
+  expect(shared).toBeGreaterThanOrEqual(promptA.indexOf("Con quién hablas:"))
   expect(promptA.slice(0, shared)).toContain("Política de autonomía")
   expect(promptA.slice(0, shared)).toContain("Pregunta frecuente 10")
   // Lo que cambia en cada corrida va al final.

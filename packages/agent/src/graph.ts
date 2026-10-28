@@ -181,8 +181,16 @@ const POLICY_LINE = `Política de autonomía: ${Object.entries(DEFAULT_AUTONOMY_
 /** Herramientas que comunican algo al interlocutor. */
 const SEND_TOOLS = new Set(["send_reply", "despedirse_y_cerrar"])
 
+/**
+ * Lo que solo guarda lo que dijo la persona (ADR 0104): puede ir en el mismo
+ * paso que send_reply, porque la respuesta no depende de su resultado. Así
+ * anotar o guardar su nombre no cuesta otra llamada al modelo. Nunca con la
+ * despedida: esa cierra la atención y su memoria.
+ */
+const MEMORY_TOOLS = new Set(["anotar_caso", "recordar_dato", "update_contact"])
+
 const NOT_SENT =
-  "No enviado: la respuesta al interlocutor debe ir sola en su paso. Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
+  "No enviado: la respuesta al interlocutor debe ir sola en su paso (solo puede acompañarla lo que guarda lo que te dijo: anotar_caso, recordar_dato o update_contact). Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
 
 /**
  * El modelo escribió texto sin herramienta: ese texto no llega a nadie. Se le
@@ -286,6 +294,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
   const has = (name: string) => facts.tools.has(name)
   const whenOff = (id: string) => ficha.functions.find((fn) => fn.id === id)?.whenOff ?? null
   const lookups = ["buscar_en_la_clinica", "ver_sedes_y_servicios", "consultar_conocimiento", "buscar_huecos"].filter(has)
+  // Lo que puede ir en el mismo paso que la respuesta (`MEMORY_TOOLS`, ADR 0104).
+  const remembers = [...MEMORY_TOOLS].filter(has)
   // Lo que de verdad va más abajo: las sedes siempre; los servicios, enteros o solo su índice.
   const below =
     facts.services === "lista"
@@ -368,10 +378,10 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
     on("presupuestos")
       ? "Si la persona pide su presupuesto, míralo con ver_presupuesto y reenvíaselo con reenviar_presupuesto: solo lo que la clínica ya entregó; si no está listo, la herramienta deja la tarea a recepción y te da la frase. Si responde qué acepta, qué deja para después o qué opción prefiere, usa anotar_respuesta_presupuesto con los ids de ver_presupuesto: te devuelve la pregunta para confirmar la lista; se anota solo con su sí, con confirmar_propuesta, y si corrige algo vuelves a llamarla con la lista corregida. Nunca cambias un precio ni armas un presupuesto."
       : whenOff("presupuestos"),
-    "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Cuando el interlocutor dé un dato que hará falta más adelante (para quién es la cita, servicio y sede elegidos, preferencia de horario), guárdalo con anotar_caso; nunca anotes datos clínicos.",
+    "El «Estado del caso» lo registra el sistema y manda sobre tu recuerdo: si hay una propuesta pendiente de que el interlocutor confirme y su último mensaje es un sí claro, ejecútala con confirmar_propuesta y el id indicado, sin volver a buscar ni a proponer. Lo que te dice y hará falta más adelante en esta atención (para quién es, qué pide, qué prefiere) anótalo con anotar_caso en el mismo paso en que respondes; nunca anotes datos clínicos.",
     "Si la persona te dice una preferencia o un dato práctico que servirá en otra conversación (horario que le viene bien, cómo quiere que la llamen, por quién escribe), guárdalo con recordar_dato. La memoria de la persona nunca lleva síntomas, diagnósticos ni nada de salud.",
     "Cada precio, fecha y hora de tu respuesta se comprueba contra lo que consultaste para este mensaje o figura en este contexto: si un dato no está, la respuesta no sale. Consulta antes de afirmarlo y no calcules precios por tu cuenta.",
-    "El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, terminaste con este mensaje; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y terminaste con este mensaje: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.",
+    `El interlocutor solo recibe lo que envías con send_reply. Envía una única respuesta completa, sola en su paso${remembers.length ? ` (solo ${remembers.length > 1 ? "pueden" : "puede"} acompañarla ${listed(remembers)}, que guardan lo que te dijo)` : ""} y después de ver el resultado de cualquier otra herramienta: cuando el mensaje sale o queda pendiente de decisión, terminaste con este mensaje; si la herramienta devuelve un error, sigue sus indicaciones. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación con un mensaje aprobado y terminaste con este mensaje: tú nunca eliges plantillas. Un texto fuera de esas herramientas no llega a nadie.`,
   ]
     .filter(Boolean)
     .join("\n")
@@ -603,32 +613,25 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       listContactNotes(tx, toolCtx.orgId, toolCtx.contactId, { limit: 5 }),
     )
     // Contexto comercial autorizado y paginado: si hay más oportunidades de
-    // las mostradas se avisa (nunca corte mudo).
+    // las mostradas se avisa (nunca corte mudo). Es interno y va solo si hay
+    // algo (ADR 0104). Las tareas van sin su vencimiento: es un plazo del
+    // equipo, nunca una hora para la persona (ADR 0097).
     const commercialLine = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const { items, nextCursor } = await listOpportunities(tx, toolCtx.orgId, {
         contactId: toolCtx.contactId,
         status: "open",
         limit: 10,
       })
-      const parts: string[] = []
-      if (!items.length) {
-        parts.push("sin oportunidades abiertas")
-      } else {
-        for (const o of items) {
-          const followup = o.nextTask
-            ? `; tarea «${o.nextTask.title}»${o.nextTask.dueAt ? ` para ${formatZoned(new Date(o.nextTask.dueAt), zone)}` : ""}`
-            : ""
-          // El valor de la oportunidad es una cifra interna de ventas, no un precio: no llega al
-          // agente, que podría decirlo a la persona y la comprobación lo daría por bueno (ADR 0021).
-          parts.push(`${o.title} (etapa ${o.stageName}${followup})`)
-        }
-        if (nextCursor) {
-          parts.push(
-            available.has("listar_oportunidades")
-              ? "hay más oportunidades: usa listar_oportunidades para verlas todas"
-              : "hay más oportunidades abiertas que no van aquí",
-          )
-        }
+      if (!items.length) return null
+      // El valor de la oportunidad es una cifra interna de ventas, no un precio: no llega al
+      // agente, que podría decirlo a la persona y la comprobación lo daría por bueno (ADR 0021).
+      const parts = items.map((o) => `${o.title} (etapa ${o.stageName}${o.nextTask ? `; tarea «${o.nextTask.title}»` : ""})`)
+      if (nextCursor) {
+        parts.push(
+          available.has("listar_oportunidades")
+            ? "hay más oportunidades: usa listar_oportunidades para verlas todas"
+            : "hay más oportunidades abiertas que no van aquí",
+        )
       }
       return parts.join("; ")
     })
@@ -637,10 +640,15 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const followupLine = full.openTasks.length
       ? full.openTasks
           .slice(0, 10)
-          .map((t) => `${t.title}${t.dueAt ? ` (vence ${formatZoned(new Date(t.dueAt), zone)})` : ""}`)
-          .join("; ") + (full.openTasks.length > 10 ? "; hay más tareas: usa listar_tareas para verlas todas" : "")
-      : "sin seguimientos pendientes"
-    const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : "sin etiquetas"
+          .map((t) => t.title)
+          .join("; ") +
+        (full.openTasks.length > 10
+          ? available.has("listar_tareas")
+            ? "; hay más tareas: usa listar_tareas para verlas todas"
+            : "; hay más tareas que no van aquí"
+          : "")
+      : null
+    const tagsLine = contactDetail.tags.length ? contactDetail.tags.join(", ") : null
     const customLine = Object.entries(contactDetail.customFields ?? {})
       .slice(0, 10)
       .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
@@ -708,12 +716,17 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // clínica tiene su aviso de privacidad publicado (ADR 0101); si no, por su
     // enlace o por recepción. Se le dice desde el primer mensaje, para que no pida
     // datos que no puede usar (auditoría del 27-oct).
-    async function newPersonLine(): Promise<string> {
+    // Lo que ya se sabe de quien escribe no se le vuelve a pedir (ADR 0104): con su
+    // nombre en la ficha, la indicación no dice «pídele sus nombres» ni «cómo se llama».
+    async function newPersonLine(known: boolean): Promise<string> {
       const config = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getPatientRegistrationConfig(tx, toolCtx.orgId)).catch(() => null)
       if (available.has("reservar_paciente_nuevo") && config?.enabled && config.privacyNotice.trim() && toolCtx.publicUrl) {
         const document =
           config.fields.docNumber === "required" ? " y, porque la clínica lo pide, su documento (si no lo tiene a la mano, sigue sin él)" : ""
-        return `Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, pídele sus nombres y apellidos${document} y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo. Si la cita es para otra persona, pide los nombres y apellidos de esa persona, cómo se llama quien escribe y, si no lo dijo, si es su hijo o hija menor de edad. No le pidas nada de salud ni otros datos. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita.`
+        const book = known
+          ? `resérvalo con reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo. Ya tienes sus nombres y apellidos${config.fields.docNumber === "required" ? "; porque la clínica lo pide, pídele también su documento (si no lo tiene a la mano, sigue sin él)" : ""}.`
+          : `pídele sus nombres y apellidos${document} y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo.`
+        return `Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, ${book} Si la cita es para otra persona, pide los nombres y apellidos de esa persona${known ? "" : ", cómo se llama quien escribe"} y, si no lo dijo, si es su hijo o hija menor de edad. No le pidas nada de salud ni otros datos. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita.`
       }
       const online = available.has("enviar_enlace_cita") && config?.enabled === true
       return online
@@ -738,10 +751,10 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // Con solo sus nombres ya se sabe con quién habla: los apellidos se piden cuando hacen falta.
     const onlyGivenNames = !nameKnown && Boolean(person?.givenNames?.trim()) && !person?.isTest
     const nameLine = nameKnown
-      ? `Se llama ${person?.givenNames} ${person?.familyName}.`
+      ? `${person?.givenNames} ${person?.familyName}.`
       : onlyGivenNames
-        ? `Se llama ${person?.givenNames}; aún no sabes sus apellidos (pídelos solo si hacen falta, por ejemplo para registrarla).`
-        : "Su ficha no tiene su nombre (lo que figura es el de su perfil o del chat). Si ya te lo dijo en esta conversación, úsalo y no se lo vuelvas a pedir; si no, aún no sabes cómo se llama."
+        ? `${person?.givenNames}; aún no sabes sus apellidos (pídelos solo si hacen falta, por ejemplo para registrarla).`
+        : `su ficha no tiene su nombre («${contactDetail.displayName}» es el de su perfil o del chat). Si ya te lo dijo en esta conversación, úsalo y no se lo vuelvas a pedir; si no, aún no sabes cómo se llama.`
     // Personas a las que este interlocutor está vinculado: mismo listado
     // autorizado que ver_contexto_paciente (solo nombre y vínculo, sin clínica).
     const linkedPatients = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
@@ -752,18 +765,34 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .slice(0, 5)
           .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
           .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente. Si la cita es para alguien que no es el propio interlocutor, di su nombre completo al proponerla y, si no coincide con lo que contó (pide por su hija y el vinculado es otra persona), no la propongas: toma su nombre y el horario que prefiere y pasa el caso a recepción para que la registre.`
-      : await newPersonLine()
+      : await newPersonLine(nameKnown)
     // Lo que el agente recuerda de la persona, venga del canal que venga: sus
     // datos guardados (nunca clínicos) y lo que sale de vínculos y citas.
     const memoryBlock = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) =>
       formatPersonMemoryForPrompt(await getPersonMemory(tx, toolCtx.orgId, toolCtx.contactId), zone),
     )
+    // Dónde avisarle (ADR 0097): en el chat de la web se sabe si ya dejó su
+    // WhatsApp o su correo; en los demás canales se le responde por donde escribe.
+    const webchat = (await conversationChannel(toolCtx)) === "webchat"
+    const where = [contactDetail.phone ? `su WhatsApp ${contactDetail.phone}` : null, contactDetail.email ? `su correo ${contactDetail.email}` : null]
+      .filter(Boolean)
+      .join(" y ")
+    const whereLine = webchat ? (where ? ` Ya dejó dónde avisarle: ${where}.` : " Aún no dejó su WhatsApp ni su correo para avisarle.") : ""
+    const internal = [
+      tagsLine ? `etiquetas: ${tagsLine}` : null,
+      commercialLine ? `oportunidades abiertas: ${commercialLine}` : null,
+      followupLine ? `seguimientos pendientes: ${followupLine}` : null,
+    ].filter(Boolean)
+    const reads = available.has("leer_contexto_comercial")
+    // Una sola memoria de la persona (ADR 0104): quién es, por quién escribe, lo
+    // que se recuerda de ella y, aparte, lo interno de su ficha.
     const contactBlock = [
-      `Interlocutor: ${contactDetail.displayName}. ${nameLine} Etiquetas: ${tagsLine}. Oportunidades abiertas: ${commercialLine}. Seguimientos: ${followupLine}.`,
+      `Con quién hablas: ${nameLine}${whereLine}`,
       patientsLine,
-      notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : ""}` : null,
-      customLine ? `Campos (resumen; valores completos en leer_contexto_comercial): ${customLine}.` : null,
       memoryBlock,
+      internal.length ? `De su ficha, para ti (interno; no se lo digas así): ${internal.join(". ")}.` : null,
+      notes.items.length ? `Notas operativas recientes (internas; no las reproduzcas al interlocutor):\n${notes.items.map(n => `${n.at}: ${n.body}`).join("\n")}${notes.nextCursor ? (reads ? "\nHay más notas: usa leer_contexto_comercial con cursor de notas para consultarlas." : "\nHay más notas que no van aquí.") : ""}` : null,
+      customLine ? `Campos (resumen${reads ? "; valores completos en leer_contexto_comercial" : ""}): ${customLine}.` : null,
     ]
       .filter(Boolean)
       .join("\n\n")
@@ -984,12 +1013,16 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
    * Una respuesta al interlocutor solo sale si es la única llamada del paso:
    * junto a otras herramientas se ejecutaría en paralelo y podría afirmar
    * algo cuyo resultado el modelo aún no vio. En ese caso no se envía y el
-   * modelo recibe la indicación de reenviarla sola.
+   * modelo recibe la indicación de reenviarla sola. Lo único que puede
+   * acompañar a send_reply es lo que solo guarda lo que dijo (`MEMORY_TOOLS`).
    */
   async function runTools(state: typeof AgentState.State) {
     const last = state.messages[state.messages.length - 1]
     const calls = last instanceof AIMessage ? (last.tool_calls ?? []) : []
-    const held = calls.length > 1 ? calls.filter((call) => SEND_TOOLS.has(call.name)) : []
+    const sends = calls.filter((call) => SEND_TOOLS.has(call.name))
+    const remembers =
+      sends.length === 1 && sends[0]?.name === "send_reply" && calls.every((call) => SEND_TOOLS.has(call.name) || MEMORY_TOOLS.has(call.name))
+    const held = calls.length > 1 && !remembers ? sends : []
     const executed = calls.filter((call) => !held.includes(call))
     for (const call of executed) {
       if (call.name && !toolCtx.toolsUsed.includes(call.name)) toolCtx.toolsUsed.push(call.name)

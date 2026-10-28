@@ -23,6 +23,18 @@ import { formatZoned, type OrgLocale } from "./locale.js"
 
 export const CASE_NOTE_LIMIT = 12
 export const CASE_NOTE_CHARS = 300
+/**
+ * Lo que el agente anota con nombre propio (ADR 0104): de cada cosa vale la
+ * última, así «mejor el jueves» reemplaza a «prefiere el martes» en vez de
+ * quedar las dos. Con su nombre la lee el agente y quien toma el caso.
+ */
+export const CASE_SLOTS = { para_quien: "Para quién", servicio: "Qué pide", preferencia: "Prefiere" } as const
+export type CaseSlot = keyof typeof CASE_SLOTS
+
+/** El nombre con que se lee una nota anotada con nombre propio; nulo si es libre o del sistema. */
+export function caseSlotLabel(kind: AgentCaseNote["kind"]): string | null {
+  return kind !== undefined && kind in CASE_SLOTS ? CASE_SLOTS[kind as CaseSlot] : null
+}
 /** Cabe lo que se consultó en un turno: los huecos de dos sedes (unos 2 300 caracteres) no se recortan. */
 export const CASE_LOOKUP_CHARS = 4000
 /** Una consulta más antigua ya no se muestra: la agenda y los saldos cambian. */
@@ -211,13 +223,16 @@ ${state.topics
   }
   // Cómo terminó la atención anterior del hilo (la deja el sistema al cerrar): las notas de entonces no siguen.
   const previous = state.notes.filter((n) => n.kind === "atencion_anterior")
-  const own = state.notes.filter((n) => n.kind !== "atencion_anterior")
+  const own = state.notes.filter((n) => !n.kind)
   for (const note of previous) {
     sections.push(`${note.text} Esta es una atención nueva: no des por pendiente lo de entonces salvo que la persona lo retome.`)
   }
-  if (own.length) {
+  const named = (Object.keys(CASE_SLOTS) as CaseSlot[]).flatMap((slot) =>
+    state.notes.filter((n) => n.kind === slot).map((n) => `- ${CASE_SLOTS[slot]}: ${n.text}`),
+  )
+  if (named.length || own.length) {
     sections.push(
-      `Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso):\n${own.map((n) => `- ${n.text}`).join("\n")}`,
+      `Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso; de cada cosa vale lo último que anotaste):\n${[...named, ...own.map((n) => `- ${n.text}`)].join("\n")}`,
     )
   }
   if (state.lookups.length) {
@@ -262,20 +277,31 @@ async function upsertCaseMemory(
 }
 
 /**
- * Añade una nota del agente sobre el caso. Acotada: al pasar del límite se
- * descarta la más antigua; una nota repetida no se duplica.
+ * Añade una nota del agente sobre el caso. Con `slot`, reemplaza lo que había
+ * anotado de esa cosa (ADR 0104). Las libres son acotadas: al pasar del
+ * límite se descarta la más antigua; una nota repetida no se duplica.
  */
 export async function addAgentCaseNote(
   tx: Db,
   orgId: string,
   conversationId: string,
   text: string,
+  slot?: CaseSlot,
 ): Promise<AgentCaseNote[]> {
   const clean = text.replace(/\s+/g, " ").trim().slice(0, CASE_NOTE_CHARS)
   if (!clean) throw validation("La nota del caso no puede estar vacía")
   const current = (await caseMemoryRow(tx, orgId, conversationId))?.notes ?? []
-  if (current.some((note) => note.text === clean)) return current
-  const next = [...current, { text: clean, at: new Date().toISOString() }].slice(-CASE_NOTE_LIMIT)
+  const at = new Date().toISOString()
+  if (slot) {
+    if (current.some((note) => note.kind === slot && note.text === clean)) return current
+    const next = [...current.filter((note) => note.kind !== slot), { text: clean, at, kind: slot }]
+    await upsertCaseMemory(tx, orgId, conversationId, { notes: next })
+    return next
+  }
+  if (current.some((note) => !note.kind && note.text === clean)) return current
+  // Lo del sistema y lo anotado con nombre no cuentan para el límite de las libres.
+  const free = [...current.filter((note) => !note.kind), { text: clean, at }].slice(-CASE_NOTE_LIMIT)
+  const next = [...current.filter((note) => note.kind), ...free]
   await upsertCaseMemory(tx, orgId, conversationId, { notes: next })
   return next
 }

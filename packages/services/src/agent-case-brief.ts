@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { and, desc, eq } from "drizzle-orm"
-import { getAgentCaseState } from "./agent-case.js"
+import { caseSlotLabel, getAgentCaseState } from "./agent-case.js"
 import { type HandoffItem, listHandoffs } from "./agent-operations.js"
 import { getPersonMemory } from "./agent-person-memory.js"
 import { notFound } from "./errors.js"
@@ -105,7 +105,8 @@ export async function getCaseBrief(
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, conversationId)))
     .limit(1)
 
-  const known: CaseBrief["known"] = state.notes.map((note) => ({ label: null, text: note.text, origin: "caso", channel: null, notedBy: null, at: note.at }))
+  // Lo que el agente anotó con nombre propio llega con ese nombre: «Para quién», «Qué pide», «Prefiere» (ADR 0104).
+  const known: CaseBrief["known"] = state.notes.map((note) => ({ label: caseSlotLabel(note.kind), text: note.text, origin: "caso", channel: null, notedBy: null, at: note.at }))
   if (options.includePerson !== false) {
     const memory = await getPersonMemory(tx, orgId, conv.contactId)
     for (const fact of memory.facts) known.push({ label: null, text: fact.text, origin: "persona", channel: fact.channel, notedBy: fact.source, at: fact.createdAt })

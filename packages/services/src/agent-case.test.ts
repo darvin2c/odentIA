@@ -15,6 +15,7 @@ import {
   recordAgentCaseLookup,
   recordAnswerTrace,
 } from "./agent-case.js"
+import { getCaseBrief } from "./agent-case-brief.js"
 import { createProposal, getAgentRunStats, recordAgentRun } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound } from "./conversations.js"
@@ -122,6 +123,33 @@ it("las notas del caso son acotadas y no se repiten", async () => {
   expect(state.notes).toHaveLength(CASE_NOTE_LIMIT)
   expect(state.notes[0]?.text).toBe("Nota 3")
   expect(formatAgentCaseForPrompt(state, ZONE)).toContain("Notas del caso")
+})
+
+it("lo anotado con nombre propio se reemplaza: de cada cosa vale lo último, y quien toma el caso lo ve con su nombre (ADR 0104)", async () => {
+  const conversationId = await openConversation("ranuras")
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "el martes por la mañana", "preferencia"))
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "su hija Ana", "para_quien"))
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "Pregunta también por el blanqueamiento."))
+  // Cambia de opinión: queda solo lo último, no las dos.
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "mejor el jueves por la tarde", "preferencia"))
+  // Muchas notas libres no se llevan lo anotado con nombre.
+  for (let i = 1; i <= CASE_NOTE_LIMIT + 1; i++) await run((tx) => addAgentCaseNote(tx, ORG, conversationId, `Nota ${i}`))
+  const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
+  expect(state.notes.filter((note) => note.kind).map((note) => [note.kind, note.text])).toEqual([
+    ["para_quien", "su hija Ana"],
+    ["preferencia", "mejor el jueves por la tarde"],
+  ])
+  expect(state.notes.filter((note) => !note.kind)).toHaveLength(CASE_NOTE_LIMIT)
+  const prompt = formatAgentCaseForPrompt(state, ZONE) ?? ""
+  expect(prompt).toContain(
+    "Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso; de cada cosa vale lo último que anotaste):\n- Para quién: su hija Ana\n- Prefiere: mejor el jueves por la tarde\n- Nota 2",
+  )
+  expect(prompt).not.toContain("martes")
+  const brief = await run((tx) => getCaseBrief(tx, ORG, conversationId, { includePerson: false }))
+  expect(brief.known.filter((item) => item.label)).toEqual([
+    expect.objectContaining({ label: "Para quién", text: "su hija Ana", origin: "caso" }),
+    expect.objectContaining({ label: "Prefiere", text: "mejor el jueves por la tarde", origin: "caso" }),
+  ])
 })
 
 it("solo se conserva la última consulta de las herramientas previstas, recortada y con caducidad", async () => {

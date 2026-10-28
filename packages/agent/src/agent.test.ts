@@ -495,6 +495,28 @@ it("una respuesta emitida junto a otra herramienta no sale hasta ir sola en su p
   ])
 })
 
+it("lo que solo guarda lo que dijo va en el mismo paso que la respuesta: sale en una sola llamada y queda anotado (ADR 0104)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-anota", "evt-ag-anota", "Es para mi hija Ana, prefiero en Miraflores")
+  const model = new ScriptedModel(() =>
+    new AIMessage({
+      content: "",
+      tool_calls: [
+        { name: "anotar_caso", args: { para_quien: "su hija Ana", preferencia: "en Miraflores" }, id: "call-1a", type: "tool_call" },
+        { name: "send_reply", args: { text: "Perfecto, te ayudo con la cita de Ana." }, id: "call-1b", type: "tool_call" },
+      ],
+    }),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(model.seen).toHaveLength(1)
+  expect(await agentMessages(conversationId)).toEqual(["Perfecto, te ayudo con la cita de Ana."])
+  const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
+  expect(state.notes.map((note) => [note.kind, note.text])).toEqual([
+    ["para_quien", "su hija Ana"],
+    ["preferencia", "en Miraflores"],
+  ])
+  expect(await ledgerRows(conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["anotar_caso", "send_reply"] }])
+})
+
 it("derivar con aviso envía el mensaje y registra la derivación en una sola llamada al modelo", async () => {
   const { conversationId, messageId } = await ingestText("tg:ag-deriva", "evt-ag-deriva", "Quiero que me atienda alguien")
   const model = new ScriptedModel(() =>
@@ -2290,6 +2312,8 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
   })
   const second = await write("Sí")
   expect(await runScripted(turnTwo, second.conversationId, second.messageId)).toBe("done")
+  // En el chat web, lo que ya dejó para avisarle está a la vista: no se lo vuelve a pedir (ADR 0104).
+  expect(systemTextOf(turnTwo.seen[0] ?? [])).toMatch(/Ya dejó dónde avisarle: [^\n]*su correo prueba@example\.com\./)
 
   // La cita existe de verdad, de la persona de prueba, y la base la marca «Prueba».
   const [booked] = await ownerDb.select().from(appointment).where(eq(appointment.conversationId, opened.conversationId))

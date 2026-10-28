@@ -8,6 +8,8 @@ import {
   addAgentCaseNote,
   addPersonFact,
   type AgentPatientBudgets,
+  CASE_SLOTS,
+  type CaseSlot,
   budgetAnswerQuestion,
   budgetLineWords,
   budgetNumberText,
@@ -843,7 +845,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
+        "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción; en su mismo paso solo pueden ir anotar_caso, recordar_dato y update_contact. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -1871,17 +1873,31 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       schema: z.object({ proposalId: z.string().uuid() }),
     },
   )
+  // De cada cosa vale lo último que anota (ADR 0104): «mejor el jueves» reemplaza a «el martes».
   const noteCase = tool(
-    async ({ nota }: { nota: string }) => {
-      if (ctx.dryRun) return `[SIMULACIÓN] Se anotaría en el caso: ${nota}`
-      await inOrg((tx) => addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, nota))
+    async (input: Partial<Record<CaseSlot | "nota", string>>) => {
+      const named = (Object.keys(CASE_SLOTS) as CaseSlot[]).filter((slot) => input[slot]?.trim())
+      const free = input.nota?.trim()
+      if (!named.length && !free) return "No se anotó nada: no venía ningún dato."
+      if (ctx.dryRun) {
+        return `[SIMULACIÓN] Se anotaría en el caso: ${[...named.map((slot) => `${CASE_SLOTS[slot]}: ${input[slot]}`), free].filter(Boolean).join(" · ")}`
+      }
+      await inOrg(async (tx) => {
+        for (const slot of named) await addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, input[slot] ?? "", slot)
+        if (free) await addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, free)
+      })
       return "Anotado en el caso."
     },
     {
       name: "anotar_caso",
       description:
-        "Guarda una nota breve del caso para los próximos mensajes: para quién es la cita, servicio y sede elegidos, preferencia de horario o lo que quedó pendiente. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
-      schema: z.object({ nota: z.string().min(3).max(300) }),
+        "Anota lo que hará falta en los próximos mensajes de esta atención: para quién es, qué pide y qué prefiere. De cada cosa vale lo último que anotes: si cambia de opinión, vuelve a anotarla. Puede ir en el mismo paso que send_reply. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
+      schema: z.object({
+        para_quien: z.string().min(2).max(160).optional().describe("Para quién es la cita o la consulta, con su nombre y vínculo si lo dijo («su hija Ana, de 8 años»)."),
+        servicio: z.string().min(2).max(160).optional().describe("Qué pide, sin datos de salud («una consulta», «un control», «el precio de un servicio»)."),
+        preferencia: z.string().min(2).max(160).optional().describe("Día, hora, sede o profesional que prefiere («mañanas, en Miraflores»)."),
+        nota: z.string().min(3).max(300).optional().describe("Otra cosa que hará falta más adelante."),
+      }),
     },
   )
 

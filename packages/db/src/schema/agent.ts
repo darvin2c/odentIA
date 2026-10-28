@@ -454,8 +454,10 @@ export interface AgentCaseNote {
   /**
    * `atencion_anterior`: la deja el sistema al cerrar la conversación, con
    * cómo terminó; las notas del agente de esa atención no pasan a la siguiente.
+   * `para_quien`, `servicio` y `preferencia`: lo que el agente anota con nombre
+   * propio (ADR 0104); de cada una vale la última. Sin `kind`, una nota libre.
    */
-  kind?: "atencion_anterior"
+  kind?: "atencion_anterior" | "para_quien" | "servicio" | "preferencia"
 }
 
 /** Última consulta de una herramienta de lectura en el hilo, tal como la vio el modelo. */
