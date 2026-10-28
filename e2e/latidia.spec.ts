@@ -793,3 +793,62 @@ test("latidIA: Clío dicta la consulta, los signos vitales, el examen y el desca
   await shot("clio-confirmado")
   await context.close()
 })
+
+test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP, la guarda y firma", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug } = await openConsultorio(page, vela)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Luis Gómez", docType: "DNI", docNumber: "40998877", birthDate: "1979-03-10" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const opened = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/encounters`, slug, {
+    reason: "Fiebre y dolor de garganta",
+  })
+  expect(opened.status).toBe(201)
+  const path = `/api/patients/${patientId}/encounters/${opened.body.data.id}`
+  expect(
+    (await request(page, api, "POST", `${path}/diagnoses`, slug, { diagnosisCode: "J03.9", diagnosisType: "provisional" }))
+      .status,
+  ).toBe(201)
+  expect((await request(page, api, "PATCH", path, slug, { evolution: "Amigdalitis; reposo e hidratación." })).status).toBe(
+    200,
+  )
+
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  const firma = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await expect(firma.getByText("Falta tu colegiatura para firmar")).toBeVisible()
+  await expect(firma.getByLabel("Título profesional")).toHaveValue("Médico cirujano")
+  await expect(firma.getByLabel("Colegio")).toHaveValue("CMP")
+  await page.screenshot({ path: test.info().outputPath("latidia-cierre-pide-colegiatura.png"), fullPage: true })
+  await firma.getByLabel("Número de colegiatura").fill("045678")
+  await firma.getByRole("button", { name: "Guardar y firmar", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Atención finalizada" })).toBeVisible()
+
+  const profile = await request<{ data: { professionalTitle: string; registrationBody: string; registrationNumber: string } }>(
+    page,
+    api,
+    "GET",
+    "/api/clinical-forms/professionals/me/profile",
+    slug,
+  )
+  expect(profile.body.data).toMatchObject({
+    professionalTitle: "Médico cirujano",
+    registrationBody: "CMP",
+    registrationNumber: "045678",
+  })
+  await context.close()
+})

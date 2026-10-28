@@ -1,5 +1,10 @@
 import { bareProduct, type ProductUi } from "@odentia/clinic-app/product/product-ui"
-import { MEDICAL_CATEGORY_LABELS, MEDICAL_IMAGING_TYPES, MEDICAL_SERVICE_KINDS } from "@odentia/medical"
+import {
+  MEDICAL_CATEGORY_LABELS,
+  MEDICAL_IMAGING_TYPES,
+  MEDICAL_SERVICE_KINDS,
+  medicalProfessionalFor,
+} from "@odentia/medical"
 import { medicalExamination } from "./examination"
 import { medicalHealth } from "./health"
 import { medicalPrescribing } from "./prescribing"
@@ -29,8 +34,13 @@ export const medicalUi: ProductUi = {
       },
     ],
   },
-  // Las cinco especialidades son las mismas en todo país: no salen de una norma.
-  country: { ...bare.country, specialtiesNorm: () => "Lista general de latidIA" },
+  // Las cinco especialidades son las mismas en todo país: no salen de una norma. En
+  // Perú, el perfil profesional propone «Médico cirujano» y el CMP.
+  country: {
+    ...bare.country,
+    specialtiesNorm: () => "Lista general de latidIA",
+    professional: medicalProfessionalFor,
+  },
   // Los tipos de su biblioteca, para filtrarla; nada queda dibujado al completar un servicio.
   services: { kinds: MEDICAL_SERVICE_KINDS.map((kind) => ({ key: kind.key, name: kind.name })), leaves: null },
   // Lo indicado queda aceptado al indicarlo: el presupuesto es opcional (decisión
