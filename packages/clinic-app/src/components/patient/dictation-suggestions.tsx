@@ -5,7 +5,8 @@ import { Check, CircleAlert, Mic, X } from "lucide-react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
-import { activeOrgLocale } from "../../lib/locale"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
 import type { ServiceCatalogItem } from "../../lib/services"
 import {
   DICTATION_KIND_LABEL,
@@ -49,7 +50,7 @@ const candidatesOf = (item: DictationSuggestion): Candidate[] =>
  * quedar. Mientras se dicta solo se pueden quitar o abrir; al terminar se
  * confirman, se editan o se descartan.
  */
-export function DictationBlockSuggestions({ session, kind }: { session: DictationSession; kind: DictationKind }) {
+export function DictationBlockSuggestions({ session, kind, patientName }: { session: DictationSession; kind: DictationKind; patientName?: string }) {
   const items = session.suggestions.filter((item) => item.kind === kind)
   const removed = session.removedByVoice.filter((item) => item.kind === kind)
   const undo = session.undoRequests.filter((item) => item.kind === kind)
@@ -111,9 +112,9 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                 {ready && !session.dictating ? (
                   <>
                     <SubmitButton type="button" size="sm" className="max-sm:hidden" pending={acting(item) && session.act.variables?.action === "confirm"} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
-                      Confirmar
+                      {confirmWord(item)}
                     </SubmitButton>
-                    <Button type="button" size="icon" className="size-11 sm:hidden" aria-label={`Confirmar: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
+                    <Button type="button" size="icon" className="size-11 sm:hidden" aria-label={`${confirmWord(item)}: ${title}`} disabled={busy} onClick={() => session.act.mutate({ item, action: "confirm" })}>
                       <Check className="size-4" aria-hidden />
                     </Button>
                   </>
@@ -129,6 +130,8 @@ export function DictationBlockSuggestions({ session, kind }: { session: Dictatio
                 </Button>
               </div>
               {choice ? <PlanChoices session={session} item={item} busy={busy} /> : null}
+              {item.kind === "cita" ? <AppointmentChoices session={session} item={item} busy={busy} patientName={patientName} /> : null}
+              {item.kind === "presupuesto" ? <BudgetLines item={item} /> : null}
               {item.kind === "alergia" && pendingOf(item).includes("severity") ? (
                 // Qué tan fuerte fue: un aviso, no un requisito. Sin elegirla entra como «No se sabe».
                 <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0 sm:pl-8" aria-label="Qué tan fuerte fue la reacción">
@@ -246,6 +249,96 @@ const UNDO_WORDS: Partial<Record<DictationKind, string>> = {
   procedimiento: "Anular el procedimiento",
 }
 
+/** Lo que hace confirmar, dicho como lo que es: reservar la cita, armar el presupuesto. */
+function confirmWord(item: DictationSuggestion): string {
+  if (item.kind === "cita") return item.payload["existing"] ? "Usar esa cita" : "Reservar"
+  if (item.kind === "presupuesto") return "Armar"
+  return "Confirmar"
+}
+
+/** Un hueco en la tarjeta: «Jue 12 · 10:00», en la zona de la clínica. */
+function slotChip(startsAt: string): string {
+  const at = new Date(startsAt)
+  const zone = { timeZone: activeOrgTimeZone() }
+  const day = at.toLocaleDateString(activeOrgLocale(), { ...zone, weekday: "short", day: "numeric" }).replace(".", "")
+  const time = at.toLocaleTimeString(activeOrgLocale(), { ...zone, hour: "2-digit", minute: "2-digit", hour12: false })
+  return `${day.charAt(0).toUpperCase()}${day.slice(1)} · ${time}`
+}
+
+/**
+ * La próxima cita dictada (issue 109, paso 2): los huecos libres de quien
+ * atiende cerca del día pedido, para tocar otro; «Otro horario…» abre «Nueva
+ * cita» con lo dicho, y si se reserva ahí, la sugerencia ya no hace falta.
+ */
+export function AppointmentChoices({ session, item, busy, patientName }: { session: DictationSession; item: DictationSuggestion; busy: boolean; patientName?: string }) {
+  const options = Array.isArray(item.payload["slots"]) ? (item.payload["slots"] as string[]) : []
+  const chosen = typeof item.payload["startsAt"] === "string" ? item.payload["startsAt"] : null
+  const disabled = busy || session.save.isPending
+  // Reservada desde «Nueva cita» para este paciente: la que propuso Clío se descarta.
+  useAppointmentSaved((appointment) => {
+    if (appointment.patientId === session.patientId && item.status !== "confirmada") session.act.mutate({ item, action: "discard" })
+  })
+  if (item.payload["existing"]) return null
+  const other = () =>
+    openBookingAnywhere({
+      ...(patientName ? { patient: { id: session.patientId, name: patientName } } : {}),
+      lockedPatient: true,
+      ...(typeof item.payload["serviceId"] === "string" ? { serviceId: item.payload["serviceId"] } : {}),
+      ...(typeof item.payload["date"] === "string" ? { date: item.payload["date"] } : {}),
+    })
+  return (
+    <div className="flex flex-col gap-2 sm:pl-8">
+      {options.length > 1 ? <p className="text-muted-foreground">Tus huecos libres cerca de esa fecha. Toca otro si le queda mejor:</p> : null}
+      <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0" aria-label="Otros horarios libres">
+        {options.map((startsAt) => (
+          <Button
+            key={startsAt}
+            type="button"
+            variant={startsAt === chosen ? "default" : "outline"}
+            size="sm"
+            aria-pressed={startsAt === chosen}
+            className="min-h-11 sm:min-h-8"
+            disabled={disabled || startsAt === chosen}
+            onClick={() => session.save.mutate({ item, patch: { startsAt }, confirm: false })}
+          >
+            {slotChip(startsAt)}
+          </Button>
+        ))}
+        <Button type="button" variant="link" size="sm" className="min-h-11 px-1 sm:min-h-8" disabled={disabled} onClick={other}>
+          Otro horario…
+        </Button>
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Mic className="size-3.5" aria-hidden />
+          o dilo: «mejor en la tarde»
+        </span>
+      </fieldset>
+      {chosen ? <p className="text-muted-foreground">Al reservar, {patientName ? patientName.split(" ")[0] : "la persona"} recibe el aviso de la cita, como cuando reserva recepción.</p> : null}
+    </div>
+  )
+}
+
+/** Lo que llevaría el presupuesto pedido: lo indicado hoy y lo dictado, que entra al plan al armarlo. */
+export function BudgetLines({ item }: { item: DictationSuggestion }) {
+  const lines = Array.isArray(item.payload["lines"])
+    ? (item.payload["lines"] as Array<{ title: string; site: string; priceCents: number; currency: string; dictated: boolean }>)
+    : []
+  if (lines.length === 0) return null
+  return (
+    <div className="flex flex-col gap-2 sm:pl-8">
+      <ul aria-label="Lo que lleva el presupuesto" className="flex flex-col gap-1.5">
+        {lines.map((line) => (
+          <li key={`${line.title}-${line.site}-${line.dictated}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-background px-3 py-2">
+            <span className="min-w-0 flex-1">{[line.title, line.site].filter(Boolean).join(" · ")}</span>
+            {line.dictated ? <Badge variant="secondary">dictada hoy: entra al plan</Badge> : <span className="text-xs text-muted-foreground">indicada hoy</span>}
+            <span className="whitespace-nowrap font-semibold">{price(line.priceCents, line.currency)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-muted-foreground">«Armar» confirma las indicaciones dictadas que lleva y deja el presupuesto en borrador: todavía no le llega a nadie.</p>
+    </div>
+  )
+}
+
 /** Qué tan fuerte fue una alergia: los valores de «Nueva alergia», sin «No se sabe» (es lo que queda sin tocar). */
 const ALLERGY_SEVERITIES = [
   { value: "leve", label: "Leve" },
@@ -278,7 +371,8 @@ interface PlanOption extends Partial<Candidate> {
   candidates?: Candidate[]
 }
 
-const optionsOf = (item: DictationSuggestion): PlanOption[] => (Array.isArray(item.payload["options"]) ? (item.payload["options"] as PlanOption[]) : [])
+/** Los otros caminos de una indicación («resina, o si no una corona»): solo el plan los tiene. */
+const optionsOf = (item: DictationSuggestion): PlanOption[] => (item.kind === "plan" && Array.isArray(item.payload["options"]) ? (item.payload["options"] as PlanOption[]) : [])
 
 const LETTER = ["A", "B", "C"]
 
@@ -612,6 +706,13 @@ const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, Editabl
   examen: [{ key: "finding", label: "Hallazgo", long: true }],
   // El descanso se completa en su formulario, «Emitir descanso», ya lleno.
   descanso: [],
+  // El día y la hora pedidos: se vuelve a buscar el hueco libre más cercano. Otro profesional o sede, en «Otro horario…».
+  cita: [
+    { key: "date", label: "Día (AAAA-MM-DD)" },
+    { key: "time", label: "Hora (HH:MM, opcional)" },
+  ],
+  // Lleva lo indicado en la atención: no hay nada que escribir, se arma o se descarta.
+  presupuesto: [],
   // La sustancia como se dijo, lo que le pasó y qué tan fuerte fue (leve, moderada o severa).
   alergia: [
     { key: "substance", label: "Sustancia" },

@@ -319,7 +319,7 @@ Borrar una demo (y volver a empezar) borra su clínica entera con las comprobaci
 
 ## CIE-10 del MINSA en producción
 
-Perú trabaja con la CIE-10 del MINSA, la del registro HIS (ADR 0100). Cerrar una
+Perú trabaja con la CIE-10 del MINSA, la del registro HIS (ADR 0103). Cerrar una
 atención exige un diagnóstico: sin esta lista cargada, una clínica de Perú no
 encuentra ningún código y no cierra ninguna atención. Abrir la primera clínica real
 de Perú solo después de este paso (issue 141).
@@ -357,7 +357,7 @@ cargan la CIE-11 del repositorio) no la tocan.
    (le falta una letra de la A a la Z, sin la U, o tiene menos de 10 000 códigos),
    no escribe nada. Responde con la cantidad de códigos: 15 037 en la edición de
    2024-07. Otra cantidad es otra edición: compararla con la anterior antes de
-   seguir (ADR 0100).
+   seguir (ADR 0103).
 4. Comprobar la carga:
 
    ```sql

@@ -8,6 +8,7 @@ import {
 import { z } from "zod"
 import {
   allergyAndDonePrompt,
+  appointmentAndBudgetPrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -77,6 +78,11 @@ export const extraction = z.object({
     }),
     "Un elemento por cada cosa que el médico ya hizo hoy en la atención.",
   ),
+  citas: dictationList("cita.dictada", "La próxima cita, solo si pidió reservarla (normalmente una sola)."),
+  presupuesto: operationAgentSchema("presupuesto.armar")
+    .extend({ dicho: dictationSaid })
+    .optional()
+    .describe("Solo si pidió armar el presupuesto ahora."),
   descanso: operationAgentSchema("descanso.medico")
     .extend({ dicho: dictationSaid })
     .optional()
@@ -94,6 +100,8 @@ const DRAFT_PARTS = [
   { key: "controles", kind: "control" },
   { key: "alergias", kind: "alergia" },
   { key: "procedimientos", kind: "procedimiento" },
+  { key: "citas", kind: "cita" },
+  { key: "presupuesto", kind: "presupuesto", single: true },
   { key: "descanso", kind: "descanso", single: true },
 ] as const
 
@@ -122,6 +130,7 @@ export function systemPrompt(input: {
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
     ...allergyAndDonePrompt("médico", "«le hice la nebulización», «ya le puse el inyectable»"),
+    ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")

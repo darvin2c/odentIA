@@ -1,5 +1,5 @@
 {
-  "id": "2297543f-cf25-43b8-96da-a6cba94c9544",
+  "id": "80a61be5-3177-41bb-9633-8998f849d2b8",
   "prevId": "d16a6d92-6bb9-42e8-81cc-6c9acfdb986b",
   "version": "7",
   "dialect": "postgresql",
@@ -13018,7 +13018,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -29584,7 +29584,7 @@
         },
         "org_profile_diagnosis_system_check": {
           "name": "org_profile_diagnosis_system_check",
-          "value": "\"org_profile\".\"diagnosis_system\" IS NULL OR \"org_profile\".\"diagnosis_system\" IN ('ICD-10','ICD-11','ICD-10-PE')"
+          "value": "\"org_profile\".\"diagnosis_system\" IS NULL OR \"org_profile\".\"diagnosis_system\" IN ('ICD-10','ICD-11')"
         },
         "org_profile_ticket_footer_check": {
           "name": "org_profile_ticket_footer_check",

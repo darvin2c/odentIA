@@ -304,6 +304,46 @@
       "id": "hecho-radiografia",
       "texto": "Le tomé una periapical de la veintiuno, se ve la lesión.",
       "espera": { "hechos": [{ "servicio": "periapical", "pieza": 21}]}
+    },
+    {
+      "id": "cita-quince-dias",
+      "texto": "Listo por hoy. Cítalo en quince días para seguir con la endodoncia.",
+      "espera": {"citas": [{"enDias": 15}], "sinControles": true, "presupuesto": false}
+    },
+    {
+      "id": "cita-dia-y-hora",
+      "texto": "Ya está. Que vuelva el jueves a las cuatro de la tarde.",
+      "espera": {"citas": [{"hora": "16:00"}], "sinControles": true}
+    },
+    {
+      "id": "control-no-es-cita",
+      "texto": "Bueno, control en seis meses, nada más por hoy.",
+      "espera": {"citas": [], "controles": 1}
+    },
+    {
+      "id": "cita-entre-charla",
+      "texto": "Ya, enjuágate. Muy bien. Agéndale para la próxima semana, para la corona.",
+      "espera": {"citas": [{"enDias": 7, "margen": 3}], "sinControles": true}
+    },
+    {
+      "id": "dudoso-es-control",
+      "texto": "Lo vemos en un mes, a ver cómo evoluciona.",
+      "espera": {"citas": [], "controles": 1}
+    },
+    {
+      "id": "presupuesto-para-ensenar",
+      "texto": "La treinta y seis necesita corona. Arma el presupuesto para enseñárselo.",
+      "espera": {"presupuesto": true, "planes": [36], "citas": []}
+    },
+    {
+      "id": "presupuesto-y-envialo",
+      "texto": "Arma el presupuesto y envíaselo por WhatsApp a la mamá.",
+      "espera": {"presupuesto": true}
+    },
+    {
+      "id": "presupuesto-otro-dia",
+      "texto": "El presupuesto lo conversamos la próxima vez, hoy no.",
+      "espera": {"presupuesto": false}
     }
   ]
 }

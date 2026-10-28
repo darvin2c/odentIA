@@ -41,6 +41,12 @@ interface PracticeDictation {
     hechos?: string[]
     /** Alergias dichas, por una palabra de la sustancia; «ninguna»: dijo que no tiene. Exactas: ni una de más. */
     alergias?: string[]
+    /** La próxima cita pedida: en cuántos días desde hoy (con su margen, 1 por defecto) y la hora si la dijo. Exactas. */
+    citas?: Array<{ enDias?: number; margen?: number; hora?: string }>
+    /** Pidió reservar: no es un control. */
+    sinControles?: boolean
+    /** Pidió armar el presupuesto ahora (true) o no (false). */
+    presupuesto?: boolean
     /** Medicamentos recetados: DCI, cifras de la concentración y días (null: no dijo la duración). */
     recetas?: Array<{ dci: string; concentracion: string; duracion: string | null }>
     controles?: number
@@ -226,6 +232,17 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
     .map((draft) => (draft.payload["none"] === true && !draft.payload["substance"] ? "ninguna" : plain(String(draft.payload["substance"] ?? ""))))
   for (const word of dictation.espera.alergias ?? []) other(`alergia ${word}`, allergies.some((said) => said.includes(plain(word))))
   if (dictation.espera.alergias) other("ninguna alergia de más", allergies.length === dictation.espera.alergias.length)
+  const bookings = read.drafts.filter((draft) => draft.kind === "cita").map((draft) => draft.payload)
+  for (const expected of dictation.espera.citas ?? []) {
+    const found = bookings.find((payload) => {
+      const days = Math.round((Date.parse(`${String(payload["date"] ?? "")}T12:00:00Z`) - Date.parse(`${now.toISOString().slice(0, 10)}T12:00:00Z`)) / 86_400_000)
+      return (expected.enDias === undefined || Math.abs(days - expected.enDias) <= (expected.margen ?? 1)) && (expected.hora === undefined || payload["time"] === expected.hora)
+    })
+    other(`cita${expected.enDias !== undefined ? ` en ${expected.enDias} días` : ""}${expected.hora ? ` a las ${expected.hora}` : ""}`, Boolean(found))
+  }
+  if (dictation.espera.citas) other("ninguna cita de más", bookings.length === dictation.espera.citas.length)
+  if (dictation.espera.sinControles) other("sin control: pidió reservar", read.drafts.every((draft) => draft.kind !== "control"))
+  if (dictation.espera.presupuesto !== undefined) other(dictation.espera.presupuesto ? "armar el presupuesto" : "no armar el presupuesto", read.drafts.some((draft) => draft.kind === "presupuesto") === dictation.espera.presupuesto)
   const recipes = read.drafts
     .filter((draft) => draft.kind === "receta")
     .map((draft) => draft.payload)

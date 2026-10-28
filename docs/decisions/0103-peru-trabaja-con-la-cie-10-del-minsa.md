@@ -1,4 +1,4 @@
-# 0100 · Perú trabaja con la CIE-10 del MINSA
+# 0103 · Perú trabaja con la CIE-10 del MINSA
 
 Fecha: 2026-10-28 · Estado: aceptada · Precisa [0041](0041-diagnosticos-por-lista-y-demografia-con-codigos-internacionales.md) y [0053](0053-la-cie-11-oficial-vive-en-el-repositorio.md) · Issue 141
 

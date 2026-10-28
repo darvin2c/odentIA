@@ -1086,6 +1086,10 @@ export interface AssembledBudget {
  * envía nada: el cierre pregunta «¿Enviárselo ahora?». Donde lo indicado
  * queda aceptado al indicarlo (latidIA, decisión 15 del issue 229), el
  * presupuesto es opcional y no se arma solo.
+ *
+ * `onRequest`: lo pidió el profesional antes de firmar («Arma el presupuesto»,
+ * issue 109): se arma igual, ahora, y también donde es opcional, con lo
+ * indicado que ya quedó aceptado.
  */
 export async function assembleEncounterBudget(
   tx: Db,
@@ -1093,8 +1097,10 @@ export async function assembleEncounterBudget(
   actorUserId: string,
   patientId: string,
   encounterId: string,
+  opts: { onRequest?: boolean } = {},
 ): Promise<AssembledBudget | null> {
-  if (!(await productHooks(tx, orgId)).budgetRequired) return null
+  const required = (await productHooks(tx, orgId)).budgetRequired
+  if (!required && !opts.onRequest) return null
   const candidates = await tx
     .select()
     .from(treatmentPlanItem)
@@ -1105,7 +1111,7 @@ export async function assembleEncounterBudget(
         eq(treatmentPlanItem.sourceEncounterId, encounterId),
         isNull(treatmentPlanItem.budgetId),
         eq(treatmentPlanItem.status, "pendiente"),
-        eq(treatmentPlanItem.decisionStatus, "pendiente"),
+        eq(treatmentPlanItem.decisionStatus, required ? "pendiente" : "aceptado"),
       ),
     )
     .orderBy(asc(treatmentPlanItem.sortOrder), asc(treatmentPlanItem.createdAt), asc(treatmentPlanItem.id))
