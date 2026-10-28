@@ -1859,9 +1859,30 @@ it("con la comprobación apagada la respuesta sale sin revisar y la traza no afi
   }
 })
 
-it("en un hilo largo el contexto avisa de lo que no ve y la simulación comprueba sin dejar rastro", async () => {
-  const first = await ingestText("tg:hilo-largo", "evt-largo-0", "mensaje 0")
-  for (let i = 1; i <= 22; i++) await ingestText("tg:hilo-largo", `evt-largo-${i}`, `mensaje ${i}`)
+it("Sofi ve la atención entera: lo que dijo al empezar sigue a la vista aunque escriba en muchos pedazos (ADR 0104)", async () => {
+  const first = await ingestText("tg:atencion-entera", "evt-entera-0", "Hola, soy Carla Ríos y quiero una limpieza para mi hija Ana")
+  for (let i = 1; i <= 29; i++) await ingestText("tg:atencion-entera", `evt-entera-${i}`, `pedazo ${i}`)
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, first.conversationId)))
+  const toolCtx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId: first.conversationId, contactId: conv!.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: true, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(), draftText: "¿y para cuándo hay?",
+  }
+  const model = new ScriptedModel((_messages, call) => toolCall("send_reply", { text: "Te busco horarios, Carla." }, `envia-${call}`))
+  await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
+  const seen = model.seen[0] ?? []
+  // Con 20 mensajes de ventana, a los 30 pedazos el primero ya no se veía y volvía a pedir el nombre.
+  expect(seen.filter((m) => m.getType() === "human").map((m) => String(m.content)).join("\n")).toContain("soy Carla Ríos y quiero una limpieza para mi hija Ana")
+  expect(seen.filter((m) => m.getType() === "human")).toHaveLength(31)
+  expect(systemTextOf(seen)).not.toContain("De esta atención no ves")
+})
+
+it("una atención que no cabe entera avisa de lo que no ve, conserva cómo empezó y la simulación comprueba sin dejar rastro", async () => {
+  // Pedazos largos: la atención pasa del tope de lo que lee el modelo.
+  const long = (i: number) => `mensaje ${i} ${"con muchos detalles de lo que necesita y de sus horarios ".repeat(25)}`
+  const first = await ingestText("tg:hilo-largo", "evt-largo-0", long(0))
+  for (let i = 1; i <= 22; i++) await ingestText("tg:hilo-largo", `evt-largo-${i}`, long(i))
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, first.conversationId)))
   const toolCtx: AgentToolCtx = {
@@ -1874,7 +1895,11 @@ it("en un hilo largo el contexto avisa de lo que no ve y la simulación comprueb
       ? toolCall("anotar_caso", { nota: "Pregunta por precios." }, "nota")
       : toolCall("send_reply", { text: "Cuesta S/ 61." }, `envia-${call}`))
   await compileAgentGraph(model, toolCtx).invoke({ messages: [], turnCount: 0 })
-  expect(systemTextOf(model.seen[0] ?? [])).toContain("Solo ves los últimos 20 mensajes de 23")
+  expect(systemTextOf(model.seen[0] ?? [])).toMatch(/De esta atención no ves \d+ de sus 23 mensajes, los del medio/)
+  const read = (model.seen[0] ?? []).filter((m) => m.getType() === "human").map((m) => String(m.content)).join("\n")
+  expect(read).toContain("mensaje 0 ")
+  expect(read).toContain("mensaje 22 ")
+  expect(read).not.toContain("mensaje 10 ")
   expect(toolCtx.lastChecks).toEqual([{ kind: "precio", value: "S/ 61", ok: false, source: null }])
   expect(toolCtx.handedOff).toBe(true)
   // Simulación: ni nota, ni traza, ni derivación real.
@@ -3094,8 +3119,8 @@ it("una imagen sin texto llega al modelo dicha como imagen que no puede ver, no 
 it("quien responde citando uno de dos avisos de cita llega al modelo con el aviso que citó, aunque sea más viejo que lo leído", async () => {
   // darvin2c/odentIA#96: Rosa cita el segundo aviso y escribe «esta no puedo».
   const { conversationId } = await ingestText("tg:cita-citada", "evt-cita-0", "Hola")
-  // Los avisos y lo que siguió, hace unos minutos; la respuesta de Rosa llega ahora.
-  const at = (seconds: number) => new Date(Date.now() - 300_000 + seconds * 1000)
+  // Los avisos y lo que siguió, antes de esta atención; la respuesta de Rosa llega ahora.
+  const at = (seconds: number) => new Date(Date.now() - 3_600_000 + seconds * 1000)
   const out = (body: string, externalId: string, seconds: number) => ({
     organizationId: "org_a", conversationId, direction: "out", senderKind: "agent", status: "sent",
     contentType: "text", body, externalId, createdAt: at(seconds),
@@ -3103,7 +3128,7 @@ it("quien responde citando uno de dos avisos de cita llega al modelo con el avis
   await ownerDb.insert(message).values([
     out("Tu cita de limpieza es el martes 20 a las 10:00", "tg:cita-citada:101", 1),
     out("Tu control de ortodoncia es el jueves 22 a las 15:00", "tg:cita-citada:102", 2),
-    // Después se habló de otra cosa: los avisos quedan fuera de los últimos 20 mensajes que lee el agente.
+    // Después se habló de otra cosa: los avisos quedan fuera de lo que lee el agente (la atención y los últimos 20).
     ...Array.from({ length: 20 }, (_, n) => out(`Te cuento lo del pago, parte ${n + 1}.`, `tg:cita-citada:${200 + n}`, 3 + n)),
   ])
   const { messageId } = await withOrgContext(appDb, "org_a", (tx) =>

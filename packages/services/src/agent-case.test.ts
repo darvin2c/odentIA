@@ -80,8 +80,8 @@ async function openConversation(sender: string): Promise<string> {
 it("un hilo nuevo no tiene estado que contar y no gasta prompt en una sección vacía", async () => {
   const conversationId = await openConversation("vacio")
   const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(state).toEqual({ topics: [], pending: [], recent: [], notes: [], lookups: [], totalMessages: 1 })
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toBeNull()
+  expect(state).toEqual({ topics: [], pending: [], recent: [], notes: [], lookups: [] })
+  expect(formatAgentCaseForPrompt(state, ZONE)).toBeNull()
 })
 
 it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo con su motivo", async () => {
@@ -93,7 +93,7 @@ it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo co
   }))
   const pending = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(pending.pending.map((item) => item.action)).toEqual(["reservar_cita"])
-  const prompt = formatAgentCaseForPrompt(pending, ZONE, 20) ?? ""
+  const prompt = formatAgentCaseForPrompt(pending, ZONE) ?? ""
   expect(prompt).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita — ")
   expect(prompt).toContain(`(id ${booking.id}`)
 
@@ -102,7 +102,7 @@ it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo co
   const after = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(after.pending).toEqual([])
   expect(after.recent).toMatchObject([{ action: "reservar_cita", status: "fallida", detail: "El horario ya no está libre" }])
-  const afterPrompt = formatAgentCaseForPrompt(after, ZONE, 20) ?? ""
+  const afterPrompt = formatAgentCaseForPrompt(after, ZONE) ?? ""
   expect(afterPrompt).toContain("No se hizo: Reservar cita — ")
   expect(afterPrompt).toContain("(fallida: El horario ya no está libre;")
 })
@@ -121,7 +121,7 @@ it("las notas del caso son acotadas y no se repiten", async () => {
   state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(state.notes).toHaveLength(CASE_NOTE_LIMIT)
   expect(state.notes[0]?.text).toBe("Nota 3")
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Notas del caso")
+  expect(formatAgentCaseForPrompt(state, ZONE)).toContain("Notas del caso")
 })
 
 it("solo se conserva la última consulta de las herramientas previstas, recortada y con caducidad", async () => {
@@ -133,7 +133,7 @@ it("solo se conserva la última consulta de las herramientas previstas, recortad
   expect(state.lookups).toHaveLength(1)
   expect(state.lookups[0]?.tool).toBe("buscar_huecos")
   expect(state.lookups[0]?.text.endsWith("(recortado: vuelve a consultar)")).toBe(true)
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Consultas de mensajes anteriores")
+  expect(formatAgentCaseForPrompt(state, ZONE)).toContain("Consultas de mensajes anteriores")
 
   // Pasadas unas horas la consulta ya no se muestra: la agenda pudo cambiar.
   const old = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
@@ -145,11 +145,12 @@ it("solo se conserva la última consulta de las herramientas previstas, recortad
   expect(state.lookups).toEqual([])
 })
 
-it("el contexto avisa cuando el hilo tiene más mensajes de los que el modelo ve", async () => {
+it("el contexto avisa cuando la atención no cabe entera en lo que lee el modelo, y calla cuando la ve toda (ADR 0104)", async () => {
   const conversationId = await openConversation("largo")
   const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(formatAgentCaseForPrompt({ ...state, totalMessages: 45 }, ZONE, 20)).toBe(
-    "Solo ves los últimos 20 mensajes de 45: lo anterior no está a la vista. Apóyate en las notas del caso y, si falta un dato, pregúntalo.",
+  expect(formatAgentCaseForPrompt(state, ZONE, { total: 45, omitted: 0 })).toBeNull()
+  expect(formatAgentCaseForPrompt(state, ZONE, { total: 260, omitted: 70 })).toBe(
+    "De esta atención no ves 70 de sus 260 mensajes, los del medio: ves cómo empezó y lo último. Apóyate en tus notas y en el estado del caso; si falta un dato, pregúntalo.",
   )
 })
 

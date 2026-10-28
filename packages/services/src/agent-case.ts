@@ -12,7 +12,7 @@ import {
   type AnswerTraceOutcome,
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { handoffOpenSql } from "./handoff-state.js"
 import { listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
 import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
@@ -64,7 +64,14 @@ export interface AgentCaseState {
   recent: AgentCaseProposal[]
   notes: AgentCaseNote[]
   lookups: Array<{ tool: string; text: string; at: string }>
-  totalMessages: number
+}
+
+/** Cuánto de la atención en curso lee el agente en este turno (ADR 0104). */
+export interface AgentCaseHistory {
+  /** Mensajes de la atención, o los leídos si son más (el aviso que la abrió). */
+  total: number
+  /** Los del medio que no caben en lo que lee. */
+  omitted: number
 }
 
 async function requireConversation(tx: Db, orgId: string, conversationId: string): Promise<void> {
@@ -130,10 +137,6 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     .filter(([, value]) => now - Date.parse(value.at) <= CASE_LOOKUP_TTL_MS)
     .map(([tool, value]) => ({ tool, text: value.text, at: value.at }))
     .sort((a, b) => a.at.localeCompare(b.at))
-  const [total] = await tx
-    .select({ total: count() })
-    .from(message)
-    .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
   const topicRows = await tx.execute<{
     id: string
     reason: string
@@ -161,7 +164,6 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     recent,
     notes: memory?.notes ?? [],
     lookups,
-    totalMessages: Number(total?.total ?? 0),
   }
 }
 
@@ -172,7 +174,7 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
 export function formatAgentCaseForPrompt(
   state: AgentCaseState,
   zone: Pick<OrgLocale, "timezone" | "locale">,
-  historyLimit: number,
+  history: AgentCaseHistory = { total: 0, omitted: 0 },
 ): string | null {
   const when = (iso: string) => formatZoned(new Date(iso), zone)
   const sections: string[] = []
@@ -225,9 +227,10 @@ ${state.topics
         .join("\n")}`,
     )
   }
-  if (state.totalMessages > historyLimit) {
+  // Nunca un corte mudo: si la atención no cabe entera, se dice cuánto falta.
+  if (history.omitted > 0) {
     sections.push(
-      `Solo ves los últimos ${historyLimit} mensajes de ${state.totalMessages}: lo anterior no está a la vista. Apóyate en las notas del caso y, si falta un dato, pregúntalo.`,
+      `De esta atención no ves ${history.omitted} de sus ${history.total} mensajes, los del medio: ves cómo empezó y lo último. Apóyate en tus notas y en el estado del caso; si falta un dato, pregúntalo.`,
     )
   }
   return sections.length ? sections.join("\n\n") : null

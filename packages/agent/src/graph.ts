@@ -35,9 +35,9 @@ import {
   LESSON_PERSON_NAME,
   PROBAR_PERSON_NAME,
   listAgentContextCandidates,
+  listAttentionMessages,
   listContactChannelHistory,
   listContactNotes,
-  listMessages,
   listMessagesById,
   listOpportunities,
   formatKnowledgeEntry,
@@ -66,6 +66,7 @@ import { DecisionError, type DecisionResult } from "./decision/port.js"
 import { z } from "zod"
 import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
 import { reportAiUse } from "./ai-usage.js"
+import { fitHistory, HISTORY_MAX_MESSAGES, HISTORY_MIN_TAIL } from "./attention.js"
 import { channelFormatRule } from "./channel-format.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
@@ -166,9 +167,6 @@ function trailingBurst(items: ThreadMessage[]): string | null {
 
 /** Nombre con el que el equipo ve las respuestas que el modelo de decisión eligió para un turno. */
 const KNOWLEDGE_PICKED_SOURCE = "Respuestas oficiales elegidas para este mensaje"
-
-/** Mensajes del hilo que el modelo ve en cada turno; lo anterior queda en las notas del caso. */
-const HISTORY_LIMIT = 20
 
 /** Quién dice que sí a cada acción: la misma para todas las clínicas (ADR 0021). */
 const POLICY_LINE = `Política de autonomía: ${Object.entries(DEFAULT_AUTONOMY_MODES)
@@ -641,20 +639,28 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       .slice(0, 10)
       .map(([k, v]) => `${k}: ${typeof v === "string" ? v.slice(0, 120) : JSON.stringify(v)?.slice(0, 120) ?? ""}`)
       .join("; ")
-    const items: ThreadMessage[] = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
-      const { items: page } = await listMessages(tx, toolCtx.orgId, toolCtx.conversationId, { limit: HISTORY_LIMIT })
+    // La atención en curso entera (ADR 0104): lo que la persona ya dijo no se
+    // le vuelve a pedir. Si no cabe, quedan cómo empezó y lo último, con aviso.
+    const { items, history } = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
+      const read = await listAttentionMessages(tx, toolCtx.orgId, toolCtx.conversationId, {
+        minTail: HISTORY_MIN_TAIL,
+        max: HISTORY_MAX_MESSAGES,
+      })
+      const total = Math.max(read.inAttention, read.items.length)
+      const page = fitHistory(read.items).items
       // Lo citado puede ser más viejo que lo leído: un aviso de cita de hace días.
-      const byId = new Map(page.map((item) => [item.id, item]))
+      const byId = new Map(read.items.map((item) => [item.id, item]))
       const older = page
         .map((item) => item.replyToMessageId)
         .filter((id): id is string => id !== null && !byId.has(id))
       for (const item of await listMessagesById(tx, toolCtx.orgId, toolCtx.conversationId, [...new Set(older)])) {
         byId.set(item.id, item)
       }
-      return page.map((item) => {
+      const shown: ThreadMessage[] = page.map((item) => {
         const quoted = item.replyToMessageId ? byId.get(item.replyToMessageId) : undefined
         return quoted ? { ...item, quote: { body: quoted.body, contentType: quoted.contentType } } : item
       })
+      return { items: shown, history: { total, omitted: total - page.length } }
     })
     // Lo ya propuesto, lo que el propio agente anotó y lo que consultó en
     // turnos anteriores: sin esto cada turno empieza de cero y no puede
@@ -662,7 +668,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const caseBlock = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const state = await getAgentCaseState(tx, toolCtx.orgId, toolCtx.conversationId)
       toolCtx.casePending = state.pending.length > 0
-      return formatAgentCaseForPrompt(state, zone, HISTORY_LIMIT)
+      return formatAgentCaseForPrompt(state, zone, history)
     })
     // Historial acotado de otros canales del mismo contacto verificado, con
     // procedencia, para continuidad omnicanal. La autorización la da el

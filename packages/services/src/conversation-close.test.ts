@@ -127,7 +127,7 @@ describe("cerrar y reabrir", () => {
     expect(memory?.notes).toHaveLength(1)
     expect(memory?.notes[0]).toMatchObject({ kind: "atencion_anterior" })
     // La atención nueva recibe solo cómo terminó la anterior.
-    const prompt = formatAgentCaseForPrompt(await c.run((tx) => getAgentCaseState(tx, c.orgId, conv.id)), { timezone: "America/Lima", locale: "es-PE" }, 20) ?? ""
+    const prompt = formatAgentCaseForPrompt(await c.run((tx) => getAgentCaseState(tx, c.orgId, conv.id)), { timezone: "America/Lima", locale: "es-PE" }) ?? ""
     expect(prompt).toContain("Atención anterior: cerrada el")
     expect(prompt).toContain("se despidió y no quedaba nada pendiente")
     expect(prompt).not.toContain("Prefiere las tardes")
