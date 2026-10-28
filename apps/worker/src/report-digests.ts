@@ -1,5 +1,5 @@
 import { type Db, withOrgContext } from "@odentia/db"
-import { claimReportDigest, completeReportDigest, composeReportDigest, dueReportDigests } from "@odentia/services"
+import { claimReportDigest, completeReportDigest, composeReportDigest, dueReportDigests, noticeMissedReportDigest } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { shouldSkipSaasOrg } from "./saas-billing.js"
 
@@ -21,6 +21,19 @@ export interface ReportDigestTickResult {
   mailed: number
   skipped: number
   uncertain: number
+}
+
+/** Avisar sin romper el ciclo: que no se pueda avisar no cambia lo que ya quedó anotado. */
+async function tell(
+  deps: ReportDigestWorkerDeps,
+  due: { orgId: string; userId: string; week: string },
+  why: "incierto" | "no_se_pudo_armar",
+): Promise<void> {
+  try {
+    await withOrgContext(deps.appDb, due.orgId, (tx) => noticeMissedReportDigest(tx, due.orgId, due.userId, due.week, why))
+  } catch (error) {
+    console.error(`worker: aviso del resumen del lunes sin crear (${due.orgId})`, error)
+  }
 }
 
 /**
@@ -50,6 +63,7 @@ export async function runReportDigestTick(deps: ReportDigestWorkerDeps): Promise
     } catch (error) {
       console.error(`worker: resumen del lunes sin armar (${due.orgId})`, error)
       await finish("omitido", "no_se_pudo_armar")
+      await tell(deps, due, "no_se_pudo_armar")
       result.skipped += 1
       continue
     }
@@ -64,6 +78,7 @@ export async function runReportDigestTick(deps: ReportDigestWorkerDeps): Promise
       result.mailed += 1
     } catch (error) {
       await finish("incierto", error instanceof Error ? error.message : String(error))
+      await tell(deps, due, "incierto")
       result.uncertain += 1
     }
   }
