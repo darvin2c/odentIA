@@ -750,9 +750,11 @@ it("deshabilitar bloquea lo público sin borrar fichas", async () => {
   await publish(app, true)
 })
 
-it("el aviso de privacidad se lee en su página aunque el registro esté apagado, y sin aviso no hay página (ADR 0099)", async () => {
+it("el aviso de privacidad tiene su página mientras el registro está encendido; apagado o sin aviso, no (ADR 0099)", async () => {
   const app = buildApp("aviso")
   await publish(app, false)
+  expect((await app.request(`/api/public/patient-registration/${SLUG_A}/aviso`)).status).toBe(404)
+  await publish(app, true)
   const res = await app.request(`/api/public/patient-registration/${SLUG_A}/aviso`)
   expect(res.status).toBe(200)
   expect(res.headers.get("cache-control")).toContain("no-store")
@@ -761,7 +763,6 @@ it("el aviso de privacidad se lee en su página aunque el registro esté apagado
   expect(Object.keys(body.data).sort()).toEqual(["notice", "organization", "version"])
   expect((await app.request(`/api/public/patient-registration/${SLUG_B}/aviso`)).status).toBe(404)
   expect((await app.request(`/api/public/patient-registration/inexistente/aviso`)).status).toBe(404)
-  await publish(app, true)
 })
 
 it("spoofing: contactos, pacientes y organización ajenos se rechazan", async () => {

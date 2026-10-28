@@ -64,7 +64,13 @@ import { type SendBudgetDeps, sendBudget } from "./budget-send.js"
 import { type BudgetLineWithStatus, type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
 import { OPERATIONS } from "./operation-fields.js"
 import { listPatientsByContact, requirePatient } from "./patients.js"
-import { type ChatRegistrationPerson, registerFromConversation } from "./patient-registration.js"
+import {
+  type ChatPrivacyNotice,
+  type ChatRegistrationPerson,
+  chatDocumentError,
+  chatPrivacyNotice,
+  registerFromConversation,
+} from "./patient-registration.js"
 import { requireDecisionContact, requireLinkedActiveContact } from "./responsibilities.js"
 import { createTask, getTask, updateTask } from "./tasks.js"
 import { createWorkspaceNotification, upsertWorkspaceNotification } from "./workspace.js"
@@ -1854,9 +1860,6 @@ function uuidField(payload: Record<string, unknown>, key: string, label: string,
   if (typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) throw validation(`${label} inválido`)
 }
 
-/** Los tipos de documento que acepta registrar a alguien nuevo por el chat: los del registro. */
-export const NEW_PATIENT_DOC_TYPES = IDENTITY_DOC_TYPES
-
 /** Los datos de quien aún no es paciente en una cita propuesta (ADR 0099); nulo si no vienen bien. */
 export function newPatientOf(payload: Record<string, unknown>): ChatRegistrationPerson | null {
   const raw = payload.newPatient
@@ -1875,8 +1878,17 @@ export function newPatientOf(payload: Record<string, unknown>): ChatRegistration
     docType,
     docNumber: docType ? text(value.docNumber, 20) : null,
     forOther: value.forOther === true,
+    minor: value.forOther === true && value.minor === true,
     writerName: text(value.writerName, 200),
   }
+}
+
+/** El aviso que se le mostró a quien se registra por el chat, congelado al proponer (ADR 0099). */
+function frozenNoticeOf(payload: Record<string, unknown>): ChatPrivacyNotice | null {
+  const raw = payload.privacyNotice
+  if (typeof raw !== "object" || raw === null) return null
+  const { version, text } = raw as Record<string, unknown>
+  return typeof version === "number" && typeof text === "string" && text.trim() ? { version, text } : null
 }
 
 function validatePayload(action: ProposalAction, payload: Record<string, unknown>): void {
@@ -2044,6 +2056,17 @@ export async function createProposal(
   validatePayload(input.action, input.payload)
   const reason = cleanReason(input.reason)
   const proposedBy = input.proposedBy === "user" ? "user" : "agent"
+  // Registrar a alguien nuevo es solo del chat, con su sí (ADR 0099): el aviso que se le
+  // muestra queda congelado en la propuesta y su documento se juzga antes de pedirle el sí.
+  if (input.action === "reservar_cita" && input.payload.newPatient !== undefined) {
+    if (proposedBy === "user") throw validation("Una persona nueva se registra en «Nuevo paciente», no con una propuesta")
+    const fresh = newPatientOf(input.payload)
+    const documentError = fresh ? chatDocumentError(fresh) : null
+    if (documentError) throw validation(documentError)
+    const notice = await chatPrivacyNotice(tx, orgId)
+    if (!notice) throw new ServiceError("NO_PRIVACY_NOTICE", 409, "La clínica no registra pacientes por el chat: no tiene su aviso de privacidad publicado")
+    input.payload = { ...input.payload, privacyNotice: notice }
+  }
   let finalKey = key
   if (!input.conversationId) throw validation("conversationId es obligatorio")
   const [conv] = await tx
@@ -2399,7 +2422,19 @@ export async function chosenBeforeProposalOf(
   const said = before.slice(lastOut + 1).filter((m) => m.direction === "in" && m.body)
   const latest = said.at(-1)
   if (!latest) return null
-  const proposed = current.afterSummary ?? PROPOSAL_ACTION_LABEL[current.action as ProposalAction]
+  // Lo que el modelo de decisión compara: día y hora, con quién, dónde, para quién y qué día es hoy.
+  const item = await getProposal(tx, orgId, id)
+  const zone = await getOrgLocale(tx, orgId)
+  const fresh = newPatientOf(current.payload)
+  const proposed = [
+    item.context.afterSummary,
+    item.context.professionalName ? `con ${item.context.professionalName}` : null,
+    item.context.branchName ? `en ${item.context.branchName}` : null,
+    item.context.patientName ? `para ${item.context.patientName}` : fresh ? `para ${fresh.givenNames} ${fresh.familyName}` : null,
+    `(hoy es ${formatZoned(new Date(), zone)})`,
+  ]
+    .filter(Boolean)
+    .join(" ")
   return { messageId: latest.id, said: said.map((m) => m.body).join("\n"), proposed }
 }
 
@@ -2444,7 +2479,19 @@ export async function confirmProposalByContact(
     )
   }
   const { items } = await listMessages(tx, orgId, current.conversationId, { limit: 10 })
-  const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= current.createdAt.getTime()
+  // Registrar a alguien nuevo pide que antes le haya llegado la pregunta con el
+  // enlace del aviso de privacidad (ADR 0099): su sí cuenta desde ese mensaje.
+  const fresh = newPatientOf(current.payload)
+  const noticeShown = fresh
+    ? items.find(
+        (m) => m.direction === "out" && new Date(m.createdAt).getTime() >= current.createdAt.getTime() && (m.body ?? "").includes("/aviso"),
+      )
+    : undefined
+  if (fresh && !noticeShown) {
+    throw new ServiceError("PROPOSAL_NOTICE_NOT_SENT", 409, "Aún no le llegó la pregunta con el aviso de privacidad")
+  }
+  const since = new Date(noticeShown?.createdAt ?? current.createdAt).getTime()
+  const afterProposal = (m: (typeof items)[number]) => m.direction === "in" && new Date(m.createdAt).getTime() >= since
   const byWords = items.find((m) => afterProposal(m) && isAffirmative(m.body))
   // El sí que entendió el modelo de decisión: el mensaje tiene que estar, ser suyo y posterior.
   const byIntent = opts.understoodMessageId ? items.find((m) => m.id === opts.understoodMessageId && afterProposal(m)) : undefined
@@ -2456,7 +2503,7 @@ export async function confirmProposalByContact(
       : undefined
   // Registrar a alguien nuevo pide su sí a la pregunta que decía «Al confirmar, aceptas
   // nuestro aviso de privacidad» (ADR 0099): lo que eligió antes no lo vio.
-  const confirmation = byWords ?? byIntent ?? (newPatientOf(current.payload) ? undefined : byChoice)
+  const confirmation = byWords ?? byIntent ?? (fresh ? undefined : byChoice)
   if (!confirmation) {
     throw new ServiceError(
       "PROPOSAL_NOT_CONFIRMED",
@@ -2653,6 +2700,10 @@ export async function confirmProposalByPhone(
   if (!(APPOINTMENT_PROPOSAL_ACTIONS as readonly string[]).includes(current.action)) {
     throw new ServiceError("PROPOSAL_NOT_APPOINTMENT", 409, "Solo una cita propuesta se confirma por teléfono")
   }
+  // Una persona nueva acepta el aviso con su sí en el chat (ADR 0099): por teléfono no hay ese sí.
+  if (newPatientOf(current.payload)) {
+    throw new ServiceError("PROPOSAL_NEEDS_CHAT_YES", 409, "Esta cita es de alguien nuevo: se confirma con su sí en el chat, después de leer el aviso de privacidad")
+  }
   if (current.action === "reservar_cita" && !(await proposedSlotFree(tx, orgId, current.payload))) {
     throw new ServiceError("SLOT_TAKEN", 409, SLOT_TAKEN_WORDS)
   }
@@ -2768,7 +2819,10 @@ export async function executeProposal(
       // Alguien nuevo se registra aquí, dentro del mismo punto de restauración:
       // si la cita no se puede reservar, tampoco queda registrado (ADR 0099).
       const fresh = newPatientOf(payload)
-      if (fresh && (!locked.contactId || !locked.conversationId)) throw validation("Registrar a alguien nuevo necesita su conversación")
+      const notice = frozenNoticeOf(payload)
+      if (fresh && (!locked.contactId || !locked.conversationId || !notice || !opts.consentMessageId)) {
+        throw validation("Registrar a alguien nuevo necesita su conversación, el aviso que se le mostró y su sí")
+      }
       const patientId = fresh
         ? (
             await registerFromConversation(tx, orgId, {
@@ -2776,7 +2830,8 @@ export async function executeProposal(
               contactId: locked.contactId as string,
               submissionId: locked.id,
               person: fresh,
-              consentMessageId: opts.consentMessageId ?? null,
+              notice: notice as ChatPrivacyNotice,
+              consentMessageId: opts.consentMessageId as string,
             })
           ).patientId
         : (payload.patientId as string)

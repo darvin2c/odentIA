@@ -533,7 +533,7 @@
   },
   {
     "name": "reservar_paciente_nuevo",
-    "description": "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona (su hijo), van los nombres de esa persona y paraOtraPersona; quien escribe queda como su responsable. Nunca preguntes nada de salud para esto.",
+    "description": "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona, van los datos de esa persona con forOther; si es su hijo o hija menor, también minor. Nunca preguntes nada de salud para esto.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -580,19 +580,19 @@
           "minLength": 0,
           "maxLength": 500
         },
-        "nombres": {
+        "givenNames": {
           "type": "string",
           "minLength": 1,
           "maxLength": 100,
           "description": "Sus nombres, como los escribió."
         },
-        "apellidos": {
+        "familyName": {
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
           "description": "Sus apellidos, como los escribió."
         },
-        "tipoDocumento": {
+        "docType": {
           "description": "Tipo de documento, solo si lo dio.",
           "type": "string",
           "enum": [
@@ -605,26 +605,31 @@
             "OTRO"
           ]
         },
-        "numeroDocumento": {
+        "docNumber": {
           "description": "Número de documento, solo si lo dio.",
           "type": "string",
           "maxLength": 20
         },
-        "paraOtraPersona": {
-          "description": "true si la cita es para otra persona (su hijo, su mamá): los nombres son los de esa persona.",
+        "forOther": {
+          "description": "true si la cita es para otra persona: los nombres son los de esa persona.",
           "type": "boolean"
         },
-        "nombreDeQuienEscribe": {
+        "minor": {
+          "description": "Con forOther: true si es su hijo o hija menor de edad y quien escribe es su madre, padre o tutor.",
+          "type": "boolean"
+        },
+        "writerName": {
           "description": "Cómo se llama quien escribe, cuando la cita es para otra persona.",
           "type": "string",
+          "minLength": 1,
           "maxLength": 200
         }
       },
       "required": [
         "professionalUserId",
         "startsAt",
-        "nombres",
-        "apellidos"
+        "givenNames",
+        "familyName"
       ],
       "additionalProperties": false
     }

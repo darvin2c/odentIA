@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createServer } from "node:http"
 import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@odentia/channels"
-import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
+import { createAppDb, createOwnerDb, type Db, sendAgentRun, withOrgContext } from "@odentia/db"
 import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { automationJob } from "@odentia/db/schema/automation"
@@ -62,7 +62,7 @@ import { closeConversationWith, configurePublicLinks, getPatientRegistrationConf
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
-import { afterAll, beforeAll, expect, it } from "vitest"
+import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { offTopicReply } from "./decision/route.js"
 import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
@@ -1145,7 +1145,15 @@ it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el
       rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
     }))
   const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
-  if (!current.privacyNotice.trim()) {
+  // Las demás pruebas cuentan con el registro como estaba, pase lo que pase con esta.
+  onTestFinished(async () => {
+    const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+    await withOrgContext(appDb, "org_a", (tx) =>
+      savePatientRegistrationConfig(tx, "org_a", actorId, {
+        expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice,
+      }))
+  })
+  if (!current.enabled || !current.privacyNotice.trim()) {
     await withOrgContext(appDb, "org_a", (tx) =>
       savePatientRegistrationConfig(tx, "org_a", actorId, {
         expectedVersion: current.version, enabled: true, fields: current.fields, privacyNotice: "Usamos tus datos solo para atenderte.",
@@ -1177,14 +1185,31 @@ it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el
     durationMin: 30,
   }
   expect(slot.roomId).toBe(createdRoom!.id)
-  const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, nombres: "Valeria", apellidos: "Rojas Salazar" }))
+  // Un documento mal escrito se pide de nuevo antes de pedir el sí: no queda propuesta.
+  const badDocument = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({
+    ...slot, givenNames: "Valeria", familyName: "Rojas Salazar", docType: "DNI", docNumber: "123",
+  }))
+  expect(badDocument).toContain("Pídele que lo revise")
+  const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, givenNames: "Valeria", familyName: "Rojas Salazar" }))
   // La pregunta lleva la frase del aviso y su enlace; todavía no hay nadie registrado.
   expect(asked).toContain("Al confirmar, aceptas nuestro aviso de privacidad: https://")
-  expect(asked).toContain("/aviso")
+  // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
+  ctx.evidence = [...(ctx.evidence ?? []), { kind: "sistema", source: "reservar_paciente_nuevo", text: asked }]
+  const noticeUrl = asked.match(/https:\/\/\S+\/aviso/)?.[0]
+  expect(noticeUrl).toBeDefined()
   const before = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
   expect(before[0]?.n).toBe(0)
   const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-  // Lo que eligió antes de la propuesta no la registra: hace falta su sí después de leer el aviso.
+  // El aviso quedó congelado en la propuesta: es el que se guarda con su sí.
+  expect(pending!.payload.privacyNotice).toMatchObject({ text: expect.any(String) })
+  // Un «sí» antes de que le llegue la pregunta con el aviso no la registra.
+  await ingestText("tg:registro-chat", "evt-registro-chat-temprano", "sí")
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("Todavía no le llegó la pregunta con el aviso")
+  await tools.find((t) => t.name === "send_reply")!.invoke({
+    text: `Te reservo el lunes con el dentista y te registro como paciente. Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?`,
+  })
+  ctx.replySettled = false
+  // Ese «sí» de antes no vale: hace falta uno después de la pregunta.
   expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("no es un sí")
   await ingestText("tg:registro-chat", "evt-registro-chat-si", "sí porfa")
   // La dirección pública la configuran la API y el worker al arrancar.
@@ -1211,12 +1236,6 @@ it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el
   expect(consent?.source_message_id).not.toBeNull()
   // Con la cita, el enlace para llegar con todo completo.
   expect(confirmed).toContain("llegas con todo listo")
-  // Las demás pruebas cuentan con el registro como estaba.
-  const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    savePatientRegistrationConfig(tx, "org_a", actorId, {
-      expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice,
-    }))
 })
 
 it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {
@@ -2943,8 +2962,13 @@ it("si la persona sigue escribiendo mientras el modelo responde, lo redactado no
   const { conversationId, messageId } = await ingestText("tg:sigue-escribiendo", "evt-sigue-1", "tengo un problema")
   const model = new SlowScriptedModel(
     () => toolCall("send_reply", { text: "¿Qué problema tienes?" }, "call-1"),
-    // Mientras escribe, llega el resto: «en el diente».
-    () => ingestText("tg:sigue-escribiendo", "evt-sigue-2", "en el diente"),
+    // Mientras escribe, llega el resto: «en el diente», con su corrida en la cola como en el worker.
+    async () => {
+      const next = await ingestText("tg:sigue-escribiendo", "evt-sigue-2", "en el diente")
+      await withOrgContext(appDb, "org_a", (tx) =>
+        sendAgentRun(tx, { kind: "inbound_message", orgId: "org_a", conversationId, messageId: next.messageId }, { delaySeconds: 600 }))
+      return next
+    },
   )
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   expect(await agentMessages(conversationId)).toEqual([])
@@ -2953,6 +2977,17 @@ it("si la persona sigue escribiendo mientras el modelo responde, lo redactado no
   expect(row).toEqual({ status: "omitida", error: "persona-siguio-escribiendo" })
   // No queda como «sin respuesta» ni pasa a una persona: la siguiente corrida responde todo junto.
   expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.conversationId, conversationId))).toEqual([])
+})
+
+it("lo que llega sin corrida propia (un botón, «BAJA») no hace descartar la respuesta (ADR 0097)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:boton-mientras", "evt-boton-1", "¿atienden el sábado?")
+  const model = new SlowScriptedModel(
+    () => toolCall("send_reply", { text: "Sí, atendemos los sábados." }, "call-1"),
+    // El toque de un botón lo resuelve el sistema: no encola otra corrida.
+    () => ingestText("tg:boton-mientras", "evt-boton-2", "Confirmar"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(await agentMessages(conversationId)).toEqual(["Sí, atendemos los sábados."])
 })
 
 it("quien escribe mucho sigue atendido: no hay tope por persona ni por día (ADR 0085)", async () => {

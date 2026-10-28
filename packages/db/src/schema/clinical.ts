@@ -1816,6 +1816,8 @@ export const patientDataConsent = pgTable(
     /**
      * En el chat (ADR 0099), el mensaje con que dijo que sí: la pregunta que lo
      * pedía decía «Al confirmar, aceptas nuestro aviso de privacidad». Nulo en los demás canales.
+     * Sin clave foránea: una conversación de prueba se borra con su persona; el
+     * servicio comprueba que el mensaje es de esa conversación y organización.
      */
     sourceMessageId: uuid("source_message_id"),
     recordedBy: text("recorded_by").references(() => user.id),

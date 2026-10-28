@@ -62,8 +62,8 @@ export const CHOSE_QUESTION: DecisionQuestion = {
   instructions:
     "La persona escribió esto antes de que la clínica le ofreciera una cita. ¿Ya pidió reservar exactamente esa cita?",
   criteria: {
-    yes: "Pide que le reserven o separen esa cita: el mismo día y la misma hora, y si nombró profesional o sede, los mismos; si dijo «con cualquiera», cualquiera sirve («resérvame mañana a las 2 con la Dra. Ana», «el viernes a las 5 me sirve, me la separan?»). Si además pregunta otra cosa (un precio, una promoción, si tiene costo), igual la pidió.",
-    no: "Solo pregunta qué horarios hay, duda entre varias horas, pide otro día, hora o profesional, la pide solo si se cumple algo («si no cuesta, sepárala»), o no dice día y hora.",
+    yes: "Pide que le reserven o separen esa cita y todo coincide: el día (si dice «hoy», «mañana» o un día de la semana, cuéntalo desde la fecha de hoy que trae la cita), la hora, el profesional y la sede si los nombró («con cualquiera» sirve cualquiera) y la persona («para mí» es quien escribe; si nombró a alguien, esa persona). Si además pregunta otra cosa (un precio, una promoción, si tiene costo), igual la pidió.",
+    no: "Algo no coincide (otro día, otra hora, otro profesional, otra sede u otra persona), solo pregunta qué horarios hay, duda entre varias horas, la pide solo si se cumple algo («si no cuesta, sepárala»), o no dice día y hora. Ante la duda, no.",
   },
 }
 

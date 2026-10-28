@@ -98,10 +98,16 @@ const CHAOS = [
   "da un dato equivocado y luego lo corrige",
   "pregunta dos veces lo mismo",
   "se molesta si siente que no le entienden",
+  "escribe con abreviaturas y faltas («q», «xq», «mñn», «xfa», «aki»)",
+  "manda todo en un solo mensaje largo, sin puntos ni comas",
+  "da su nombre o sus datos en pedazos, en mensajes separados",
+  "mezcla dos temas a la vez (una cita y otra duda que no tiene nada que ver)",
+  "responde solo «sí», «ya» o «dale» sin decir a qué",
 ]
 
 async function invent(channel: Channel, known: string | null): Promise<Persona | null> {
-  const chaotic = Math.random() < 0.25
+  // Qué parte de las conversaciones son caóticas (CAOS, de 0 a 1; por defecto, una de cada cuatro).
+  const chaotic = Math.random() < Number(env.CAOS ?? 0.25)
   const style = [pick(STYLES), Math.random() < 0.4 ? pick(STYLES) : null, chaotic ? `caótico: ${pick(CHAOS)}` : null, chaotic && Math.random() < 0.5 ? pick(CHAOS) : null]
     .filter(Boolean)
     .join("; ")

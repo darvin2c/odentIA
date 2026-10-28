@@ -58,8 +58,9 @@ import {
   getAgentClinicData,
   getAgentConfig,
   listAgentContextCandidates,
-  getPatientRegistrationConfig,
-  NEW_PATIENT_DOC_TYPES,
+  chatPrivacyNotice,
+  chatRegistrationSchema,
+  type ChatRegistrationPerson,
   listContactChannelHistory,
   listContactNotes,
   listOpportunities,
@@ -145,6 +146,7 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
 
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
+  reservar_paciente_nuevo: "Propuso la cita de alguien nuevo, que con su sí queda registrado.",
   ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
   buscar_en_la_clinica: "Buscó en los servicios, promociones y profesionales de la clínica.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
@@ -922,9 +924,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (naming && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, contactId))).some((item) => item.relationship === "self")) {
         return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
       }
+      // Solo sus nombres también se guardan: «Soy Carla» ya es saber con quién habla.
       const names = givenNames?.trim() && familyName?.trim()
         ? { givenNames: givenNames.trim(), familyName: familyName.trim(), displayName: displayName ?? `${givenNames.trim()} ${familyName.trim()}` }
-        : displayName ? { displayName } : {}
+        : givenNames?.trim()
+          ? { givenNames: givenNames.trim(), displayName: displayName ?? givenNames.trim() }
+          : displayName ? { displayName } : {}
+      if (!Object.keys(names).length && !customFields) return "No se guardó nada: no venía un nombre ni un campo."
       await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { ...names, customFields }, { userId: null, origin: "agent" }))
       return "Contacto actualizado."
     },
@@ -1364,7 +1370,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const before = await inOrg((tx) => chosenBeforeProposalOf(tx, ctx.orgId, ctx.contactId, id)).catch(() => null)
         if (before && (await choseThisSlot(ctx.decision, { proposed: before.proposed, said: before.said }))) {
           const done = await confirmById({ proposalId: id }, before.messageId)
-          return `Ya había pedido esta misma hora, así que no se le pregunta de nuevo. ${done} Dile que quedó reservada, con el día, la hora, la sede y con quién.`
+          // Solo se dice reservada si de verdad se reservó; si no, lo que pasó tal cual.
+          return done.startsWith("Confirmado y ejecutado")
+            ? `Ya había pedido esta misma hora, así que no se le pregunta de nuevo. ${done} Dile que quedó reservada, con el día, la hora, la sede y con quién.`
+            : `${proposed} (${done})`
         }
       }
       return proposed
@@ -1379,9 +1388,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
 
   /**
    * Quien aún no es paciente reserva en el chat (ADR 0099): la cita lleva sus
-   * nombres en vez del paciente y, con su sí a una pregunta que dice «Al
-   * confirmar, aceptas nuestro aviso de privacidad», queda registrado y
-   * reservado en un solo paso. Sin aviso escrito, el camino es su enlace.
+   * datos en vez del paciente y, con su sí a la pregunta que dice «Al confirmar,
+   * aceptas nuestro aviso de privacidad», queda registrado y reservado en un
+   * solo paso. Sin aviso publicado (o sin registro encendido), su enlace.
    */
   const bookNewPatient = tool(
     async (input: {
@@ -1392,60 +1401,65 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       serviceId?: string
       durationMin?: number
       reason?: string
-      nombres: string
-      apellidos: string
-      tipoDocumento?: (typeof NEW_PATIENT_DOC_TYPES)[number]
-      numeroDocumento?: string
-      paraOtraPersona?: boolean
-      nombreDeQuienEscribe?: string
+      givenNames: string
+      familyName: string
+      docType?: ChatRegistrationPerson["docType"]
+      docNumber?: string
+      forOther?: boolean
+      minor?: boolean
+      writerName?: string
     }) => {
       if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
-      if (ctx.dryRun) return `[SIMULACIÓN] Se propondría reservar y registrar a ${input.nombres} ${input.apellidos} el ${input.startsAt}.`
-      const forOther = input.paraOtraPersona === true
+      if (ctx.dryRun) return `[SIMULACIÓN] Se propondría reservar y registrar a ${input.givenNames} ${input.familyName} el ${input.startsAt}.`
+      const forOther = input.forOther === true
       if (!forOther && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))).some((item) => item.relationship === "self")) {
         return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente)."
       }
       const { notice, origin } = await inOrg(async (tx) => {
         const clinic = await clinicAddressOf(tx, ctx.orgId)
         return {
-          notice: (await getPatientRegistrationConfig(tx, ctx.orgId)).privacyNotice.trim(),
+          notice: await chatPrivacyNotice(tx, ctx.orgId),
           origin: clinic && ctx.publicUrl ? clinicOrigin(clinic.slug, clinic.product, ctx.publicUrl) : null,
         }
       })
       if (!notice || !origin) {
-        return "La clínica aún no tiene su aviso de privacidad publicado: por aquí no se registra. Envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos."
+        return "La clínica no registra pacientes por el chat. Envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos."
       }
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
-      const { nombres, apellidos, tipoDocumento, numeroDocumento, paraOtraPersona: _forOther, nombreDeQuienEscribe, reason, ...slot } = input
+      const { givenNames, familyName, docType, docNumber, forOther: _forOther, minor, writerName, reason, ...slot } = input
       const newPatient = {
-        givenNames: nombres,
-        familyName: apellidos,
-        ...(tipoDocumento && numeroDocumento ? { docType: tipoDocumento, docNumber: numeroDocumento } : {}),
-        ...(forOther ? { forOther: true, ...(nombreDeQuienEscribe ? { writerName: nombreDeQuienEscribe } : {}) } : {}),
+        givenNames,
+        familyName,
+        ...(docType && docNumber ? { docType, docNumber } : {}),
+        ...(forOther ? { forOther: true, minor: minor === true, ...(writerName ? { writerName } : {}) } : {}),
       }
       let created: ProposalItem | undefined
-      const proposed = await propose("reservar_cita", { ...slot, professionalUserId, newPatient }, "reservar_paciente_nuevo", reason, (p) => {
-        created = p
-      })
+      let proposed: string
+      try {
+        proposed = await propose("reservar_cita", { ...slot, professionalUserId, newPatient }, "reservar_paciente_nuevo", reason, (p) => {
+          created = p
+        })
+      } catch (error) {
+        // Un documento mal escrito se le pide de nuevo antes de pedirle el sí.
+        if (error instanceof ServiceError && error.code === "VALIDATION") return `${error.message}. Pídele que lo revise; si no lo tiene a la mano, sigue sin documento.`
+        throw error
+      }
       if (created?.status !== "propuesta") return proposed
       const noticeUrl = new URL("/aviso", origin).toString()
-      const whom = forOther ? `para ${nombres} ${apellidos}, y que lo registras como paciente contigo como su responsable` : "y que la registras como paciente con su nombre"
+      const whom = !forOther
+        ? "y que la registras como paciente con su nombre"
+        : minor
+          ? `para ${givenNames} ${familyName}, y que lo registras como paciente contigo como su madre, padre o tutor`
+          : `para ${givenNames} ${familyName}, y que la registras como paciente`
       const where = (await webchatNeedsContact()) ? " En el chat web, pídele en ese mismo mensaje su WhatsApp para avisarle de la cita." : ""
-      return `Propuesta ${created.id} creada; todavía no se reservó ni registró nada. En tu mensaje di el día, la hora, la sede y con quién, ${whom}, y termina con estas palabras: «Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?» (escribe el enlace tal cual).${where} Con su sí, usa confirmar_propuesta: eso la registra y reserva. Si no dice que sí, no insistas.`
+      return `Propuesta ${created.id} creada; todavía no se reservó ni registró nada. En tu mensaje di el día, la hora, la sede y con quién, ${whom}, y termina con estas palabras: «Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?» (si te habla de usted: «Al confirmar, acepta nuestro aviso de privacidad: ${noticeUrl}. ¿Se la reservo?»). Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",
       description:
-        "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona (su hijo), van los nombres de esa persona y paraOtraPersona; quien escribe queda como su responsable. Nunca preguntes nada de salud para esto.",
-      schema: operationAgentSchema("cita.reservar", { room }).omit({ patientId: true }).extend({
-        nombres: z.string().min(1).max(100).describe("Sus nombres, como los escribió."),
-        apellidos: z.string().min(1).max(200).describe("Sus apellidos, como los escribió."),
-        tipoDocumento: z.enum(NEW_PATIENT_DOC_TYPES).optional().describe("Tipo de documento, solo si lo dio."),
-        numeroDocumento: z.string().max(20).optional().describe("Número de documento, solo si lo dio."),
-        paraOtraPersona: z.boolean().optional().describe("true si la cita es para otra persona (su hijo, su mamá): los nombres son los de esa persona."),
-        nombreDeQuienEscribe: z.string().max(200).optional().describe("Cómo se llama quien escribe, cuando la cita es para otra persona."),
-      }),
+        "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona, van los datos de esa persona con forOther; si es su hijo o hija menor, también minor. Nunca preguntes nada de salud para esto.",
+      schema: operationAgentSchema("cita.reservar", { room }).omit({ patientId: true }).extend(chatRegistrationSchema.shape),
     },
   )
 
@@ -1800,6 +1814,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         // Lo que el modelo lee se lo repite a la persona: nada de «confirmación explícita» ni de sistemas.
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONFIRMED") {
           return "Su último mensaje no es un sí a esa cita. Pregúntale con naturalidad si se la reservas, sin hablar de confirmaciones, propuestas ni sistemas."
+        }
+        if (e instanceof ServiceError && e.code === "PROPOSAL_NOTICE_NOT_SENT") {
+          return "Todavía no le llegó la pregunta con el aviso de privacidad: envíala con el enlace del aviso tal cual (la frase que te dio reservar_paciente_nuevo) y espera su sí. No la des por reservada."
         }
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_PENDING") {
           return "Esa cita ya no espera su sí: si ya quedó reservada, díselo con el día y la hora; si no, ofrécele horarios de nuevo. No hables de propuestas ni de sistemas."

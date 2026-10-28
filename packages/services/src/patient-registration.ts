@@ -1,8 +1,10 @@
 import {
   clinicalProfileFor,
   DEFAULT_REGISTRATION_CONFIG,
-  type DOC_TYPES,
+  demographicsSchema,
+  DOC_TYPES,
   documentIssuerCountry,
+  identityDocumentError,
   documentText,
   isMinor,
   isRealDate,
@@ -31,6 +33,7 @@ import { contact, conversation, contactIdentity, channelConnection, crmTask, reg
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm"
+import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, orgProduct } from "./locale.js"
@@ -1537,22 +1540,64 @@ export interface ChatRegistrationPerson {
   /** Solo si la clínica lo pide y la persona lo dio: si no, se completa en su enlace. */
   docType?: (typeof DOC_TYPES)[number] | null
   docNumber?: string | null
-  /** La cita es para otra persona (su hijo): quien escribe queda como su responsable. */
+  /** La cita es para otra persona: quien escribe no es la paciente. */
   forOther?: boolean
+  /** Con `forOther`: es su hijo o hija menor de edad, y quien escribe es su madre, padre o tutor. */
+  minor?: boolean
   /** Cómo se llama quien escribe, cuando registra a otra persona. */
   writerName?: string | null
+}
+
+const demographic = demographicsSchema.shape
+
+/**
+ * Lo que el agente llena de la persona nueva (ADR 0099): los mismos campos y
+ * límites del registro con lo mínimo (`demographicsSchema`), más para quién es.
+ */
+export const chatRegistrationSchema = z.object({
+  givenNames: demographic.givenNames.unwrap().unwrap().min(1).describe("Sus nombres, como los escribió."),
+  familyName: demographic.familyName.unwrap().unwrap().min(1).describe("Sus apellidos, como los escribió."),
+  docType: z.enum(DOC_TYPES).optional().describe("Tipo de documento, solo si lo dio."),
+  docNumber: demographic.docNumber.unwrap().unwrap().optional().describe("Número de documento, solo si lo dio."),
+  forOther: z.boolean().optional().describe("true si la cita es para otra persona: los nombres son los de esa persona."),
+  minor: z.boolean().optional().describe("Con forOther: true si es su hijo o hija menor de edad y quien escribe es su madre, padre o tutor."),
+  writerName: demographic.displayName.optional().describe("Cómo se llama quien escribe, cuando la cita es para otra persona."),
+})
+
+/** El aviso que se le mostró al pedirle el sí: queda congelado en la propuesta (ADR 0099). */
+export interface ChatPrivacyNotice {
+  version: number
+  text: string
+}
+
+/**
+ * El aviso vigente para registrar por el chat; nulo si la clínica no tiene el
+ * registro de pacientes encendido o no escribió su aviso: entonces la persona
+ * se registra en su enlace o en recepción (ADR 0099).
+ */
+export async function chatPrivacyNotice(tx: Db, orgId: string): Promise<ChatPrivacyNotice | null> {
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  return config.enabled && config.privacyNotice.trim() ? { version: config.version, text: config.privacyNotice } : null
+}
+
+/** El documento de alguien nuevo en el chat, juzgado como en el registro; nulo si está bien. */
+export function chatDocumentError(person: Pick<ChatRegistrationPerson, "docType" | "docNumber">): string | null {
+  if (!person.docType || !person.docNumber?.trim()) return null
+  return identityDocumentError(person.docType, person.docNumber.trim())
 }
 
 /**
  * Registra en el chat a quien aún no es paciente, con lo mínimo y la misma
  * operación con que recepción registra al reservar (`registerPatient`,
- * `essentials`, sin autor: lo hizo Sofi). Lo pide la cita que la persona
- * confirmó (`reservar_cita` con `newPatient`): su sí, a una pregunta que decía
- * «Al confirmar, aceptas nuestro aviso de privacidad», queda como su
- * consentimiento, con ese mensaje y la versión del aviso. Lo que la clínica
- * exige y no se pidió queda anotado en el caso, y la persona lo completa en su
- * enlace antes de la cita. Un documento que ya es de otra persona no se une
- * solo: se registra sin él y queda dicho en el caso para que recepción decida.
+ * `essentials`, sin autor: lo hizo el agente). Lo pide la cita que la persona
+ * confirmó (`reservar_cita` con `newPatient`): su sí, posterior a la pregunta
+ * que decía «Al confirmar, aceptas nuestro aviso de privacidad», queda como su
+ * consentimiento, con ese mensaje y el aviso que se le mostró. Para su hijo
+ * menor, quien escribe queda como su representante legal y es quien acepta;
+ * para otra persona adulta, su consentimiento queda pendiente: lo da ella. Lo
+ * que la clínica exige y no se pidió queda anotado en el caso. Un documento que
+ * ya está en otra ficha no se une: se registra sin él y queda la tarea
+ * «Posible ficha repetida» para recepción, sin decirlo en el chat.
  */
 export async function registerFromConversation(
   tx: Db,
@@ -1563,30 +1608,30 @@ export async function registerFromConversation(
     /** El id de la propuesta: un reintento no registra dos veces. */
     submissionId: string
     person: ChatRegistrationPerson
-    /** El mensaje con su sí; sin él (la confirmó recepción por teléfono) no hay consentimiento escrito. */
-    consentMessageId: string | null
+    /** El aviso que se le mostró, congelado en la propuesta. */
+    notice: ChatPrivacyNotice
+    /** El mensaje con su sí, posterior a la pregunta con el aviso. */
+    consentMessageId: string
   },
 ): Promise<{ patientId: string; displayName: string }> {
-  const config = await getPatientRegistrationConfig(tx, orgId)
-  if (!config.privacyNotice.trim()) {
-    throw new ServiceError("NO_PRIVACY_NOTICE", 409, "La clínica aún no escribió su aviso de privacidad: la persona se registra en su enlace")
-  }
   const { person } = input
   const givenNames = person.givenNames.trim()
   const familyName = person.familyName.trim()
   if (!givenNames || !familyName) throw validation("Faltan los nombres o los apellidos")
   // Una prueba nunca crea a una persona real (ADR 0094): su persona de prueba ya es paciente.
   const [writer] = await tx
-    .select({ isTest: contact.isTest })
+    .select({ isTest: contact.isTest, displayName: contact.displayName })
     .from(contact)
     .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
     .limit(1)
-  if (writer?.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "En una prueba no se registra a nadie nuevo")
+  if (!writer) throw notFound("Contacto")
+  if (writer.isTest) throw new ServiceError("TEST_CONVERSATION", 409, "En una prueba no se registra a nadie nuevo")
   if (!person.forOther && (await hasOwnRecord(tx, orgId, input.contactId))) {
     throw conflict("ALREADY_PATIENT", "Ya es paciente de la clínica")
   }
   const displayName = `${givenNames} ${familyName}`
   const document = person.docType && person.docNumber?.trim() ? { docType: person.docType, docNumber: person.docNumber.trim() } : null
+  const minor = person.forOther === true && person.minor === true
   const register = (withDocument: boolean) =>
     registerPatient(
       tx,
@@ -1596,16 +1641,22 @@ export async function registerFromConversation(
         submissionId: input.submissionId,
         answers: {
           demographics: { displayName, givenNames, familyName, ...(withDocument && document ? document : {}) },
-          // Quien escribe por otra persona no es ella: lo registra Sofi, como el equipo.
+          // Quien escribe por otra persona no es ella: lo registra el agente, como el equipo.
           respondent: person.forOther ? "staff" : "patient",
           // El consentimiento del chat se guarda abajo, con su mensaje.
           privacyAccepted: false,
         },
-        contacts: [{ contactId: input.contactId, relationship: person.forOther ? "guardian" : "self", isPreferred: true }],
+        contacts: [
+          {
+            contactId: input.contactId,
+            relationship: !person.forOther ? "self" : minor ? "guardian" : "family",
+            isPreferred: true,
+          },
+        ],
       },
     )
   let created: PatientRow
-  let documentTaken = false
+  let documentOwner: { contactId: string; name: string } | null = null
   await tx.execute(sql.raw("SAVEPOINT sp_chat_registration"))
   try {
     created = await register(true)
@@ -1613,30 +1664,69 @@ export async function registerFromConversation(
   } catch (error) {
     if (!(document && error instanceof ServiceError && error.code === "DUPLICATE_DOCUMENT")) throw error
     await tx.execute(sql.raw("ROLLBACK TO SAVEPOINT sp_chat_registration"))
+    const country = clinicalProfileFor(await findOrgCountry(tx, orgId))
+    const ownerId = await findPersonByDocument(tx, orgId, {
+      docType: document.docType,
+      docNumber: document.docNumber,
+      docCountry: documentIssuerCountry(country, document.docType, null),
+    })
+    const [owner] = ownerId
+      ? await tx
+          .select({ displayName: contact.displayName })
+          .from(contact)
+          .where(and(eq(contact.organizationId, orgId), eq(contact.id, ownerId)))
+          .limit(1)
+      : []
+    documentOwner = ownerId ? { contactId: ownerId, name: owner?.displayName ?? "otra persona" } : null
     created = await register(false)
-    documentTaken = true
   }
-  if (input.consentMessageId) {
+  // Su hijo menor: quien escribe es su representante legal (como en el enlace,
+  // con su persona ya vinculada) y decide por él.
+  if (minor) {
+    await linkLegalRepresentative(tx, orgId, null, created.id, input.contactId, {
+      relationshipDetail: null,
+      kinship: null,
+      linked: true,
+      today: await patientOrganizationToday(tx, orgId),
+    })
+  }
+  // Acepta quien decide: la propia persona o el representante de su hijo menor. Una
+  // persona adulta registrada por otra da su consentimiento ella misma, después.
+  const grants = !person.forOther || minor
+  if (grants) {
     await tx.insert(patientDataConsent).values({
       organizationId: orgId,
       patientId: created.id,
-      noticeVersion: config.version,
-      noticeText: config.privacyNotice,
+      noticeVersion: input.notice.version,
+      noticeText: input.notice.text,
       purposes: ["atencion"],
       grantedByContactId: input.contactId,
-      grantedByName: person.forOther ? person.writerName?.trim() || "Su responsable" : created.displayName,
+      grantedByName: person.forOther ? person.writerName?.trim() || writer.displayName : created.displayName,
       channel: "chat",
       sourceMessageId: input.consentMessageId,
       recordedBy: null,
     })
   }
-  // Lo que falta lo anotó el registro; aquí, cómo aceptó y si su documento era de otra persona.
-  const notes = [
-    input.consentMessageId
-      ? `${created.displayName}${person.forOther ? " (a cargo de quien escribe)" : ""} aceptó el aviso de privacidad (versión ${config.version}) con su sí en el chat.`
-      : null,
-    documentTaken ? `El documento ${document?.docNumber} ya es de otra persona: no se guardó. Revisa si es la misma.` : null,
-  ].filter(Boolean)
-  if (notes.length) await addAgentCaseNote(tx, orgId, input.conversationId, notes.join(" "))
+  if (documentOwner) {
+    await createTask(tx, orgId, {
+      title: `Posible ficha repetida: ${created.displayName}`,
+      patientId: created.id,
+      area: "recepcion",
+      createdBy: "sistema",
+      kind: "ficha_repetida",
+      reason: `El documento que dio en el chat ya está en la página de ${documentOwner.name}. No se guardó: revisa si son la misma persona.`,
+      idempotencyKey: `ficha-repetida:${created.id}:${documentOwner.contactId}`,
+    })
+  }
+  // Lo que falta lo anotó el registro; aquí, quién aceptó el aviso. Nada del documento:
+  // esta nota la lee el agente y no debe decirle a quien escribe de quién es.
+  await addAgentCaseNote(
+    tx,
+    orgId,
+    input.conversationId,
+    grants
+      ? `${person.forOther ? `Quien escribe aceptó por ${created.displayName}, su hijo o hija menor,` : `${created.displayName} aceptó`} el aviso de privacidad (versión ${input.notice.version}) con su sí en el chat.`
+      : `${created.displayName} se registró a pedido de quien escribe: su propio consentimiento queda pendiente.`,
+  )
   return { patientId: created.id, displayName: created.displayName }
 }
