@@ -1,7 +1,8 @@
+import { AIMessage } from "@langchain/core/messages"
 import { examSystemsText } from "@odentia/services/medical"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
-import { readDictation } from "../dictation.js"
+import { askDictationModel, parseToolArguments, readDictation } from "../dictation.js"
 import { demoSegment, MEDICAL_DICTATION_PROFILE } from "./dictation.js"
 
 /** Clío médica en modo de demostración y la lectura de su respuesta (issue 229, entrega 10). No mide a ningún modelo. */
@@ -123,5 +124,63 @@ describe("Clío médica: lectura de la respuesta", () => {
       { kind: "descanso", payload: { days: 2 }, sourceText: "Descanso de dos días." },
     ])
     expect(read?.omitted).toBe(0)
+  })
+})
+
+describe("Clío médica: una clave que llega dos veces", () => {
+  // Como respondió gpt-6-luna el 2026-10-28: el examen lleno y, al cerrar, otra vez vacío.
+  const RAW =
+    '{"nota":{"reason":"Control de presión."},"examen":[{"system":"corazon","state":"sin_alteraciones","dicho":"Ruidos cardiacos rítmicos, sin soplos."}],"diagnosticos":[{"diagnosisCode":"I10","diagnosisType":"confirmed"}],"examen":[],"diagnosticos":[],"quitar":[]}'
+  const TRANSCRIPT = "Control de presión. Ruidos cardiacos rítmicos, sin soplos. Hipertensión esencial."
+
+  it("lo vacío no borra lo que ya traía, y se sabe qué clave se repitió", () => {
+    expect(parseToolArguments(RAW)).toEqual({
+      value: {
+        nota: { reason: "Control de presión." },
+        examen: [{ system: "corazon", state: "sin_alteraciones", dicho: "Ruidos cardiacos rítmicos, sin soplos." }],
+        diagnosticos: [{ diagnosisCode: "I10", diagnosisType: "confirmed" }],
+        quitar: [],
+      },
+      repeated: ["examen", "diagnosticos"],
+    })
+  })
+
+  it("dos listas se juntan sin repetir lo igual; dos datos distintos, vale el último; lo que no es JSON no se lee", () => {
+    expect(parseToolArguments('{"a":[1,{"b":2}],"a":[{"b":2},3],"c":"x","c":"y","d":{"e":1},"d":{"e":null,"f":2}}')).toEqual({
+      value: { a: [1, { b: 2 }, 3], c: "y", d: { e: 1, f: 2 } },
+      repeated: ["a", "c", "d"],
+    })
+    expect(parseToolArguments('{"t":"dijo \\"no\\", 38.4","n":-1.5e2,"v":[true,false,null]}')?.value).toEqual({
+      t: 'dijo "no", 38.4',
+      n: -150,
+      v: [true, false, null],
+    })
+    for (const text of ['{"a":1', '{"a":1}x', "No entendí.", ""]) expect(parseToolArguments(text)).toBeNull()
+  })
+
+  it("la atención lee lo que llegó tal cual, no lo que dejó JSON.parse", async () => {
+    const reply = new AIMessage({
+      content: "",
+      tool_calls: [{ name: "registrar_dictado", args: JSON.parse(RAW) as Record<string, unknown>, id: "fc_1" }],
+      response_metadata: { output: [{ type: "function_call", name: "registrar_dictado", arguments: RAW }] },
+    })
+    const { read, repeated } = await askDictationModel(
+      { invoke: async () => reply },
+      { provider: "openai", modelName: "gpt-6-luna" },
+      {
+        provider: "openai",
+        services: [],
+        diagnosisList: "CIE-10 (OMS)",
+        catalog: examSystemsText(),
+        zone: { locale: "es-PE", timezone: "America/Lima" },
+        now: NOW,
+        transcript: TRANSCRIPT,
+        context: "",
+        pending: [],
+      },
+      MEDICAL_DICTATION_PROFILE,
+    )
+    expect(repeated).toEqual(["examen", "diagnosticos"])
+    expect(read?.drafts.map((draft) => draft.kind)).toEqual(["nota", "examen", "diagnostico"])
   })
 })

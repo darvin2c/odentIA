@@ -98,7 +98,7 @@ const now = new Date()
 
 for (const dictation of bank.dictados) {
   const pending = (dictation.pendientes ?? []).map((label) => ({ label }))
-  const { read, reply } = await askDictationModel(model, spec, {
+  const { read, reply, repeated } = await askDictationModel(model, spec, {
     provider: spec.provider,
     services: bank.servicios,
     diagnosisList: "CIE-10 (OMS)",
@@ -225,7 +225,7 @@ for (const dictation of bank.dictados) {
   }
   const unused = read.unused.length ? ` · no usó: ${read.unused.map((phrase) => `«${phrase}»`).join(", ")}` : ""
   const money = cost === null ? "sin costo" : `USD ${(cost / 1_000_000).toFixed(5)}`
-  console.log(`${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`)
+  console.log(`${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}${repeated.length ? `, repitió ${repeated.join(", ")}` : ""})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`)
   // `--detalle`: lo que devolvió el modelo en los que fallan, para ver por qué.
   if (notes.length && process.argv.includes("--detalle")) console.log(JSON.stringify({ drafts: read.drafts, corrections: read.corrections, removals: read.removals }, null, 1))
 }
