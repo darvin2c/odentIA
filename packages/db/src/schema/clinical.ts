@@ -90,6 +90,8 @@ export const diagnosisCatalog = catalogSchema.table(
     code: text("code").notNull(),
     edition: text("edition").notNull(),
     title: text("title").notNull(),
+    /** El título como lo publica su editor, cuando el que se muestra es otro (la CIE-10 del MINSA, ADR 0103). */
+    officialTitle: text("official_title"),
     uri: text("uri"),
     isCategory: boolean("is_category").notNull().default(false),
     searchText: text("search_text").notNull(),

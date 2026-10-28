@@ -383,7 +383,7 @@ describe("dictado en la atención", () => {
     expect(note?.payload).toEqual({ reason: "Dolor al masticar del lado derecho", illnessDuration: "una semana" })
     expect(note?.sourceText).toBe("Viene por dolor al masticar.")
     expect(diagnosis).toMatchObject({ payload: { diagnosisCode: "K02.1", description: "Caries de la dentina", toothNumber: 16 }, summary: "K02.1 · Caries de la dentina\nPieza 16 · Presuntivo" })
-    expect(unknownCode?.note).toContain("no está en la lista CIE-10 (OMS) de la clínica")
+    expect(unknownCode?.note).toContain("no está en la lista CIE-10 MINSA de la clínica")
     // La prestación se reconoce por su nombre y trae la tarifa del tarifario, que no se dicta.
     expect(plan?.payload).toMatchObject({ serviceId: fx.service.id, serviceName: "Resina compuesta", priceCents: 120000, currency: "PEN" })
     expect(plan?.summary).toMatch(/^Resina compuesta · S\/\s1,200\.00\nPieza 16 · cara oclusal$/)

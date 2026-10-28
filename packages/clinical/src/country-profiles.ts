@@ -292,11 +292,15 @@ const PERU: Omit<ClinicalCountryProfile, "country"> = {
   origin: true,
   // «Conviviente» es la palabra del país; al enviarse a otro sistema sale como HL7 T.
   maritalStatuses: ["S", "M", "PE:conviviente", "L", "D", "W"],
-  // El registro HIS del MINSA codifica los diagnósticos con la CIE-10.
+  // El registro HIS codifica los diagnósticos con la CIE-10 del MINSA: es la
+  // lista nacional, aparte de la CIE-10 de la OMS, con unos pocos códigos
+  // propios de planificación familiar.
   diagnosis: {
-    recommended: "ICD-10",
+    recommended: "ICD-10-PE",
     notices: {
-      "ICD-11": "En Perú, el registro oficial (HIS) pide la CIE-10. Con la CIE-11, esa hoja no se podrá llenar.",
+      "ICD-10":
+        "En Perú, el registro oficial (HIS) pide la CIE-10 del MINSA. La de la OMS no trae sus códigos propios.",
+      "ICD-11": "En Perú, el registro oficial (HIS) pide la CIE-10 del MINSA. Con la CIE-11, esa hoja no se podrá llenar.",
     },
     officialRecordTypes: true,
   },

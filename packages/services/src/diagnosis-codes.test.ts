@@ -79,7 +79,7 @@ it("cierra con S02.5 (presuntivo basta) y, con la CIE-11 elegida, con un código
     .from(encounterDiagnosis)
     .where(eq(encounterDiagnosis.encounterId, f.encounter.id))
   expect(first).toMatchObject({
-    diagnosisSystem: "ICD-10",
+    diagnosisSystem: "ICD-10-PE",
     diagnosisCode: "S02.5",
     diagnosisType: "provisional",
   })
@@ -118,7 +118,7 @@ it("cambiar de lista no reescribe lo anterior: la atención abierta conserva su 
   await f.run((tx) => setOrgDiagnosisSystem(tx, "org_a", f.actor, "ICD-11"))
   const detail = await f.run((tx) => getEncounterDetail(tx, "org_a", f.patient.id, f.encounter.id))
   expect(detail.diagnoses.map((dx) => [dx.diagnosisSystem, dx.diagnosisCode])).toEqual([
-    ["ICD-10", "K02.1"],
+    ["ICD-10-PE", "K02.1"],
   ])
   // Se cierra con lo que ya tenía, aunque la clínica ya trabaje con la CIE-11.
   await f.run((tx) =>
@@ -128,7 +128,7 @@ it("cambiar de lista no reescribe lo anterior: la atención abierta conserva su 
     (await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))).encounter.status,
   ).toBe("finalizada")
   // Se puede volver atrás, y cada cambio queda en la actividad.
-  await f.run((tx) => setOrgDiagnosisSystem(tx, "org_a", f.actor, "ICD-10"))
+  await f.run((tx) => setOrgDiagnosisSystem(tx, "org_a", f.actor, "ICD-10-PE"))
   const changes = await ownerDb
     .select({ metadata: auditEvent.metadata })
     .from(auditEvent)
@@ -140,12 +140,12 @@ it("cambiar de lista no reescribe lo anterior: la atención abierta conserva su 
     )
   expect(changes.map((row) => row.metadata)).toEqual(
     expect.arrayContaining([
-      { from: "ICD-10", to: "ICD-11" },
-      { from: "ICD-11", to: "ICD-10" },
+      { from: "ICD-10-PE", to: "ICD-11" },
+      { from: "ICD-11", to: "ICD-10-PE" },
     ]),
   )
   await expect(
-    f.run((tx) => setOrgDiagnosisSystem(tx, "org_a", f.actor, "ICD-10-PE")),
+    f.run((tx) => setOrgDiagnosisSystem(tx, "org_a", f.actor, "ICD-10-ES")),
   ).rejects.toMatchObject({ status: 400 })
 })
 
@@ -163,7 +163,7 @@ it("el buscador ignora tildes y mayúsculas, busca en la lista de la clínica y 
   ).toEqual(["S02.5"])
   // El código sin punto también se encuentra; una categoría se marca.
   expect(await f.run((tx) => searchDiagnosisCodes(tx, "org_a", "k021"))).toEqual([
-    { system: "ICD-10", code: "K02.1", description: "Caries de la dentina", isCategory: false },
+    { system: "ICD-10-PE", code: "K02.1", description: "Caries de la dentina", isCategory: false },
   ])
   expect((await f.run((tx) => searchDiagnosisCodes(tx, "org_a", "K02")))[0]).toMatchObject({
     code: "K02",
@@ -191,7 +191,7 @@ it("el odontograma propone el código del hallazgo y los más usados salen de la
   const before = await f.run((tx) =>
     getDiagnosisSuggestions(tx, "org_a", { patientId: f.patient.id, encounterId: f.encounter.id }),
   )
-  expect(before).toMatchObject({ system: "ICD-10", systemTitle: "CIE-10 (OMS)" })
+  expect(before).toMatchObject({ system: "ICD-10-PE", systemTitle: "CIE-10 MINSA" })
   expect(before.proposed).toEqual([
     expect.objectContaining({
       code: "K02.1",
@@ -226,6 +226,25 @@ it("el odontograma propone el código del hallazgo y los más usados salen de la
   // Lo más usado se arma de nuevo en la lista elegida: la CIE-10 no aparece.
   expect(eleven.mostUsed.every((row) => row.system === "ICD-11")).toBe(true)
   expect(eleven.mostUsed.map((row) => row.code)).not.toContain("K02.1")
+})
+
+it("en la CIE-10 del MINSA, la categoría sin subdivisiones se registra con su X; una con subdivisiones pide el subcódigo", async () => {
+  await seedDiagnosisCodes([
+    { code: "I10", title: "HIPERTENSION ESENCIAL (PRIMARIA)" },
+    { code: "I10.X", title: "HIPERTENSION ESENCIAL (PRIMARIA)" },
+    { code: "K02", title: "CARIES DENTAL" },
+    { code: "K02.1", title: "CARIES DE LA DENTINA" },
+  ])
+  const f = await clinicalFixture()
+  const added = await f.run((tx) =>
+    addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "I10", diagnosisType: "confirmed" }),
+  )
+  expect(added).toMatchObject({ diagnosisSystem: "ICD-10-PE", diagnosisCode: "I10.X" })
+  await expect(
+    f.run((tx) =>
+      addEncounterDiagnosis(tx, ...f.args, f.encounter.id, { diagnosisCode: "K02", diagnosisType: "confirmed" }),
+    ),
+  ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("K02.1") })
 })
 
 it("«ya diagnosticado antes» lo marca el sistema solo dentro de la misma lista", async () => {

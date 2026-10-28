@@ -268,10 +268,10 @@ beforeAll(async () => {
   await ownerDb.execute(
     sql`with "release" as (
       insert into "diagnosis_code_release" ("system_key", "edition", "official", "license", "code_count")
-      values ('ICD-10', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
+      values ('ICD-10-PE', 'prueba', false, 'Solo pruebas', 0) on conflict do nothing
     )
     insert into "diagnosis_code" ("system_key", "code", "edition", "title", "search_text")
-    select 'ICD-10', v.code, 'prueba', v.title, lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
+    select 'ICD-10-PE', v.code, 'prueba', v.title, lower(v.code || ' ' || replace(v.code, '.', '') || ' ' || v.title)
     from (values ('K02.1', 'Caries de la dentina')) as v(code, title)
     on conflict do nothing`,
   )

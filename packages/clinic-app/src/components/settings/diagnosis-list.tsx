@@ -17,7 +17,8 @@ const CARD = "elevated flex flex-col gap-4 rounded-xl border bg-card p-5"
 
 /**
  * «Lista de diagnósticos» (decisión 26 v3): la clínica elige la CIE-10 o la
- * CIE-11. Viene la que recomienda su país; elegir otra muestra el aviso de su
+ * CIE-11 de la OMS o, en Perú, la CIE-10 del MINSA. Viene la que recomienda su
+ * país; elegir otra muestra el aviso de su
  * país y pide confirmar. Desde ese día los diagnósticos nuevos se eligen en la
  * lista nueva; lo anterior no se reescribe y se puede volver atrás. El cambio
  * se guarda solo, como un interruptor, y queda en la actividad de la clínica.
@@ -31,6 +32,11 @@ export function DiagnosisListSettings({ profile }: { profile: OrgProfile }) {
   const recommended = country.diagnosis.recommended
   const countryLabel = country.country ? countryName(country.country, language) : null
   const [pending, setPending] = useState<SelectableDiagnosisSystem | null>(null)
+  // Una lista nacional solo en su país (o si ya la tiene); la recomendada, primero.
+  const options = SELECTABLE_DIAGNOSIS_SYSTEMS.filter((system) => {
+    const listCountry = DIAGNOSIS_SYSTEM_INFO[system].country
+    return listCountry === null || listCountry === profile.countryCode || system === current
+  }).sort((a, b) => Number(b === recommended) - Number(a === recommended))
 
   const mutation = useMutation({
     mutationFn: (system: SelectableDiagnosisSystem) => saveDiagnosisSystem(system),
@@ -72,7 +78,7 @@ export function DiagnosisListSettings({ profile }: { profile: OrgProfile }) {
         aria-labelledby={`${groupId}-title`}
         className="flex flex-wrap gap-1.5"
       >
-        {SELECTABLE_DIAGNOSIS_SYSTEMS.map((system) => (
+        {options.map((system) => (
           <Button
             key={system}
             type="button"
