@@ -17,6 +17,7 @@ import type { Db } from "@odentia/db"
 import {
   DICTATION_KINDS,
   type DictationKind,
+  encounter,
   encounterDictationSuggestion,
   patientAllergy,
   prescription,
@@ -26,10 +27,13 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { medicalLeave } from "@odentia/db/schema/clinical-forms"
-import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, eq, inArray, sql } from "drizzle-orm"
+import { appointment } from "@odentia/db/schema/agenda"
+import { auditEvent, branch } from "@odentia/db/schema/org"
+import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { addPatientAllergy, markAllergiesReviewed, removePatientAllergy } from "./allergies.js"
+import { createAppointment } from "./appointments.js"
+import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
@@ -38,7 +42,7 @@ import { cancelFollowUp, createFollowUp } from "./follow-ups.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { findOrgLocale, formatOrgMoney, type OrgLocale, orgProduct } from "./locale.js"
 import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
-import { addBudgetItems, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
+import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
 import { createPrescription } from "./prescriptions.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
@@ -77,6 +81,8 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   descanso: "Descanso médico",
   alergia: "Alergias",
   procedimiento: "Procedimientos",
+  cita: "Próxima cita",
+  presupuesto: "Presupuesto",
 }
 
 /** Operación de la atención que ejecuta cada clase de sugerencia al confirmarse. */
@@ -92,6 +98,8 @@ export const DICTATION_OPERATION = {
   descanso: "descanso.medico",
   alergia: "alergia.dictada",
   procedimiento: "atencion.procedimiento",
+  cita: "cita.dictada",
+  presupuesto: "presupuesto.armar",
 } as const satisfies Record<DictationKind, keyof typeof OPERATIONS>
 
 export interface DictationDraft {
@@ -228,7 +236,7 @@ async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
 }
 
 /** Las clases de sugerencia de todo producto; cada uno suma las suyas (`ProductDictation.kinds`). */
-const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "control", "receta", "alergia", "procedimiento"]
+const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "control", "receta", "alergia", "procedimiento", "cita", "presupuesto"]
 
 const words = (text: string) => normalizeForSearch(text).split(" ").filter((word) => word.length >= 3)
 
@@ -278,6 +286,17 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
     if (payload["none"] === true) return payload["review"] === "sin_cambios" ? "Sin alergias nuevas" : "No tiene alergias"
     const reaction = [payload["reaction"], payload["severity"] ? `reacción ${payload["severity"]}` : ""].filter(Boolean).join(" · ")
     return [`Alergia a ${allergyName(payload)}`, reaction].filter(Boolean).join("\n")
+  }
+  if (kind === "cita") {
+    const what = String(payload["serviceName"] ?? payload["service"] ?? "")
+    if (typeof payload["startsAt"] !== "string") return [`Cita${what ? ` · ${what}` : ""}`, payload["date"] ? `Desde el ${dayWords(String(payload["date"]), zone)}` : ""].filter(Boolean).join("\n")
+    const minutes = typeof payload["durationMin"] === "number" ? ` · ${payload["durationMin"]} min` : ""
+    return [`Cita · ${slotWords(payload["startsAt"], zone)}${what ? ` · ${what}` : ""}`, `Contigo${minutes}`].join("\n")
+  }
+  if (kind === "presupuesto") {
+    const lines = Array.isArray(payload["lines"]) ? (payload["lines"] as BudgetPreviewLine[]) : []
+    const total = typeof payload["totalCents"] === "number" && typeof payload["currency"] === "string" ? ` · ${formatOrgMoney(payload["totalCents"], payload["currency"], zone)}` : ""
+    return [`Presupuesto · ${lines.length === 1 ? "1 tratamiento" : `${lines.length} tratamientos`}${total}`, "Queda en borrador: todavía no le llega a nadie."].join("\n")
   }
   if (kind === "procedimiento") {
     const price =
@@ -359,6 +378,10 @@ export function dictationModelLabel(item: Pick<DictationSuggestion, "kind" | "pa
             ? payload["none"] === true ? "no tiene alergias" : allergyName(payload)
             : item.kind === "procedimiento"
             ? [String(payload["serviceName"] ?? payload["service"] ?? ""), dictation.siteWords(payload)].filter(Boolean).join(", ")
+            : item.kind === "cita"
+            ? [String(payload["serviceName"] ?? payload["service"] ?? ""), String(payload["date"] ?? ""), payload["time"] ? `a las ${payload["time"]}` : ""].filter(Boolean).join(", ")
+            : item.kind === "presupuesto"
+            ? "armar el presupuesto"
             : dictation.kinds.includes(item.kind)
             ? dictation.modelLabel(item.kind, payload)
             : String(payload["title"] ?? "Control")
@@ -421,6 +444,16 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
   if (draft.kind === "alergia") return prepareAllergy(payload, scope.medications.allergens)
+  if (draft.kind === "cita") {
+    // El día se cuenta desde hoy: uno que no es una fecha no se adivina.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload["date"])) || Number.isNaN(new Date(`${payload["date"]}T12:00:00Z`).getTime())) {
+      return { payload, status: "por_revisar", note: "No entendí para qué día. Dilo otra vez o elige otro horario." }
+    }
+    if (payload["time"] !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(payload["time"]))) delete payload["time"]
+    const what = typeof payload["service"] === "string" ? chooseService(payload as PlanChoice, services) : {}
+    return { payload: { ...payload, ...what }, status: "lista", note: null }
+  }
+  if (draft.kind === "presupuesto") return { payload: { show: payload["show"] === true }, status: "lista", note: null }
   // Lo que se hizo hoy se busca en el tarifario; de dónde sale (el plan, tus servicios o un
   // acto libre) se decide con lo del paciente (`checkAgainstPatient`).
   if (draft.kind === "procedimiento") return { payload: { ...payload, ...chooseService(payload as PlanChoice, services) }, status: "lista", note: null }
@@ -606,6 +639,8 @@ async function revise(
     Object.entries({ ...current, ...patch }).filter(([, value]) => value !== null && value !== ""),
   )
   if (kind === "plan" && Array.isArray(current["options"])) return revisePlanChoice(current, patch, services, dictation)
+  // Tocar otro hueco de los que ofrece la tarjeta: se queda ese, si sigue libre.
+  if (kind === "cita" && typeof patch["startsAt"] === "string") return { payload: { ...current, startsAt: patch["startsAt"] }, status: "lista", note: null }
   if (kind === "procedimiento") {
     if (typeof patch["serviceId"] === "string") {
       const chosen = services.find((service) => service.id === patch["serviceId"])
@@ -730,6 +765,217 @@ const dictatedAllergy = (payload: Record<string, unknown>): AllergyOnFile => ({
   verification: null,
 })
 
+/**
+ * Lo que se revisa con el paciente antes de guardar una sugerencia. La cita lee
+ * además la agenda (el hueco) y el presupuesto, lo indicado en la atención.
+ */
+async function withPatient(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+  kind: DictationKind,
+  prepared: Prepared,
+  checks: PatientChecks,
+  scope: DictationScope,
+): Promise<Prepared> {
+  const ready = checkAgainstPatient(kind, prepared, checks, scope.medications, scope.dictation)
+  if (kind === "cita") return settleAppointment(tx, orgId, patientId, encounterId, ready, checks)
+  if (kind === "presupuesto") return previewBudget(tx, orgId, patientId, encounterId, ready, scope)
+  return ready
+}
+
+/** Cuántos huecos ofrece la tarjeta de la cita, y en cuántos días desde el pedido se buscan. */
+const SLOT_CHOICES = 3
+const SLOT_DAYS = 8
+const DAY_MS = 86_400_000
+
+/** Fecha y hora de un hueco como se lee en la tarjeta: «jueves 12 de noviembre, 10:00». */
+function slotWords(startsAt: string, zone: Zone): string {
+  const at = new Date(startsAt)
+  const day = at.toLocaleDateString(zone.locale, { timeZone: zone.timezone, weekday: "long", day: "numeric", month: "long" })
+  const time = at.toLocaleTimeString(zone.locale, { timeZone: zone.timezone, hour: "2-digit", minute: "2-digit", hour12: false })
+  return `${day}, ${time}`
+}
+
+/** Un día dicho (AAAA-MM-DD) en palabras: «12 de noviembre». */
+function dayWords(date: string, zone: Zone): string {
+  return new Date(`${date}T12:00:00Z`).toLocaleDateString(zone.locale, { timeZone: "UTC", day: "numeric", month: "long" })
+}
+
+/** Dónde y con quién va la próxima cita: la sede de la atención (o la primera de la clínica) y quien la lleva. */
+async function appointmentPlace(tx: Db, orgId: string, encounterId: string) {
+  const [row] = await tx
+    .select({ branchId: encounter.branchId, professionalUserId: encounter.professionalUserId })
+    .from(encounter)
+    .where(and(eq(encounter.organizationId, orgId), eq(encounter.id, encounterId)))
+    .limit(1)
+  const [place] = await tx
+    .select({ id: branch.id, timezone: branch.timezone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true), ...(row?.branchId ? [eq(branch.id, row.branchId)] : [])))
+    .orderBy(asc(branch.createdAt))
+    .limit(1)
+  const locale = await findOrgLocale(tx, orgId)
+  return {
+    branchId: place?.id ?? null,
+    professionalUserId: row?.professionalUserId ?? null,
+    zone: { locale: locale.locale, timezone: place?.timezone || locale.timezone },
+  }
+}
+
+const NO_BRANCH = "La clínica no tiene una sede activa: reserva la cita desde Agenda."
+const NO_SLOTS = "No tienes huecos libres esa semana: elige otro horario."
+
+/**
+ * «Cítalo en quince días para la endodoncia»: el primer hueco libre de quien
+ * lleva la atención desde ese día, en su sede y con la duración del servicio
+ * (`listAvailableSlots`, la misma regla de la agenda), y dos más cerca para
+ * elegir con un toque. Con la hora dicha, esa; si no está libre, la más
+ * cercana, con el aviso. Si ya tiene una cita cerca de ese día, no se reserva
+ * otra. Lo que la cita trae (el tratamiento aceptado de ese servicio) lo une
+ * `createAppointment` al reservar.
+ */
+async function settleAppointment(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  encounterId: string,
+  prepared: Prepared,
+  checks: PatientChecks,
+): Promise<Prepared> {
+  if (prepared.status === "por_revisar") return prepared
+  const { slots: _slots, existing: _existing, durationMin: _duration, branchId: _branch, planItemIds: _items, startsAt: kept, ...base } = prepared.payload
+  const place = await appointmentPlace(tx, orgId, encounterId)
+  if (!place.branchId || !place.professionalUserId) return { payload: base, status: "por_revisar", note: NO_BRANCH }
+  const dayStart = zonedTimeToUtc(String(base["date"]), 0, place.zone.timezone)
+  const [near] = await tx
+    .select({ id: appointment.id, startsAt: appointment.startsAt })
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.patientId, patientId),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        gt(appointment.startsAt, new Date(Math.max(Date.now(), dayStart.getTime() - 7 * DAY_MS))),
+        lt(appointment.startsAt, new Date(dayStart.getTime() + SLOT_DAYS * DAY_MS)),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt))
+    .limit(1)
+  if (near) {
+    const at = near.startsAt.toISOString()
+    return { payload: { ...base, existing: { id: near.id, startsAt: at } }, status: "lista", note: `Ya tiene cita el ${slotWords(at, place.zone)}: no se reserva otra.` }
+  }
+  const serviceId = typeof base["serviceId"] === "string" ? base["serviceId"] : null
+  const [service] = serviceId
+    ? await tx.select({ durationMin: serviceCatalog.durationMin }).from(serviceCatalog).where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, serviceId))).limit(1)
+    : []
+  const search = (withService: boolean) =>
+    listAvailableSlots(tx, orgId, {
+      branchId: place.branchId!,
+      professionalUserId: place.professionalUserId!,
+      ...(withService && serviceId ? { serviceId } : service?.durationMin ? { durationMin: service.durationMin } : {}),
+      from: dayStart.toISOString(),
+      to: new Date(dayStart.getTime() + SLOT_DAYS * DAY_MS).toISOString(),
+      notBefore: new Date().toISOString(),
+    })
+  // Quien atiende la cita es quien la pide: si el servicio no está entre los suyos en la agenda, se busca con su duración.
+  let found = await search(true)
+  if (found.slots.length === 0 && serviceId) found = await search(false)
+  const slots = found.slots.filter((slot, index, all) => all.findIndex((other) => other.startsAt === slot.startsAt) === index)
+  if (slots.length === 0) return { payload: base, status: "por_revisar", note: NO_SLOTS }
+  const time = typeof base["time"] === "string" ? base["time"] : null
+  const wanted = typeof kept === "string" ? Date.parse(kept) : time ? zonedTimeToUtc(String(base["date"]), Number(time.slice(0, 2)) * 60 + Number(time.slice(3)), place.zone.timezone).getTime() : null
+  const nearest = (target: number) => [...slots].sort((a, b) => Math.abs(Date.parse(a.startsAt) - target) - Math.abs(Date.parse(b.startsAt) - target))
+  const chosen = wanted === null ? slots[0]! : nearest(wanted)[0]!
+  const picked = nearest(Date.parse(chosen.startsAt)).slice(0, SLOT_CHOICES).sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))
+  const moved = wanted !== null && Date.parse(chosen.startsAt) !== wanted
+  const note = !moved
+    ? null
+    : typeof kept === "string"
+      ? `${slotWords(kept, place.zone)} se ocupó: te dejo el hueco más cercano.`
+      : `A las ${time} no está libre: te dejo el hueco más cercano.`
+  const planItemIds = serviceId ? checks.planItems.filter((item) => item.accepted && item.serviceId === serviceId).map((item) => item.id) : []
+  return {
+    payload: {
+      ...base,
+      startsAt: chosen.startsAt,
+      durationMin: Math.round((Date.parse(chosen.endsAt) - Date.parse(chosen.startsAt)) / 60_000),
+      slots: picked.map((slot) => slot.startsAt),
+      branchId: place.branchId,
+      ...(planItemIds.length ? { planItemIds } : {}),
+    },
+    status: "lista",
+    note,
+  }
+}
+
+/** Una línea de lo que llevaría el presupuesto pedido. */
+interface BudgetPreviewLine {
+  title: string
+  site: string
+  priceCents: number
+  currency: string
+  /** Dictada hoy y aún sin confirmar: entra al plan al armarlo. */
+  dictated: boolean
+}
+
+const NOTHING_TO_QUOTE = "Aún no hay nada con precio para presupuestar: indica un tratamiento y pídelo otra vez."
+
+/**
+ * Lo que llevaría «Arma el presupuesto»: lo indicado en esta atención que aún
+ * no está en un presupuesto (la regla de firmar, `assembleEncounterBudget`) y
+ * lo dictado que espera confirmación, con los precios de la lista.
+ */
+async function previewBudget(tx: Db, orgId: string, patientId: string, encounterId: string, prepared: Prepared, scope: DictationScope): Promise<Prepared> {
+  const required = (await productHooks(tx, orgId)).budgetRequired
+  const indicated = (await listPlanItems(tx, orgId, patientId)).filter(
+    (item) =>
+      item.sourceEncounterId === encounterId &&
+      item.budgetId === null &&
+      item.status === "pendiente" &&
+      item.decision === (required ? "pendiente" : "aceptado") &&
+      item.priceCents !== null &&
+      item.currency,
+  )
+  const suggestions = await listDictationSuggestions(tx, orgId, patientId, encounterId)
+  const pending = suggestions.filter(
+    (item) => item.kind === "plan" && item.status === "lista" && typeof item.payload["priceCents"] === "number" && typeof item.payload["currency"] === "string",
+  )
+  // Lo dictado que aún no tiene servicio de tu lista no tiene precio: sale sin eso, y se dice.
+  const unpriced = suggestions.filter((item) => item.kind === "plan" && typeof item.payload["serviceId"] !== "string").map((item) => String(item.payload["service"] ?? ""))
+  const lines: BudgetPreviewLine[] = [
+    ...indicated.map((item) => ({ title: item.title, site: scope.dictation.siteWords(item as unknown as Record<string, unknown>), priceCents: item.priceCents!, currency: item.currency!, dictated: false })),
+    ...pending.map((item) => ({
+      title: String(item.payload["serviceName"] ?? item.payload["service"] ?? ""),
+      site: scope.dictation.siteWords(item.payload),
+      priceCents: item.payload["priceCents"] as number,
+      currency: item.payload["currency"] as string,
+      dictated: true,
+    })),
+  ]
+  const currency = lines[0]?.currency ?? null
+  const same = lines.filter((line) => line.currency === currency)
+  const payload = { show: prepared.payload["show"] === true, lines: same, ...(currency ? { totalCents: same.reduce((sum, line) => sum + line.priceCents, 0), currency } : {}) }
+  const missing = unpriced.length
+    ? `${unpriced.map((name) => `«${name}»`).join(" y ")} aún no ${unpriced.length === 1 ? "tiene" : "tienen"} servicio de tu lista: sale sin eso. Elige el servicio en su tarjeta.`
+    : null
+  return same.length ? { payload, status: "lista", note: missing } : { payload, status: "por_revisar", note: missing ?? NOTHING_TO_QUOTE }
+}
+
+/** El presupuesto pedido que aún espera, al día con lo que se indicó o se confirmó después. */
+async function refreshBudgetPreview(tx: Db, orgId: string, patientId: string, encounterId: string, scope: DictationScope): Promise<void> {
+  for (const row of await pendingRowsOf(tx, orgId, patientId, encounterId, "presupuesto")) {
+    const { data, meta } = splitMeta(row.payload)
+    const ready = await previewBudget(tx, orgId, patientId, encounterId, { payload: data, status: "lista", note: null }, scope)
+    await tx
+      .update(encounterDictationSuggestion)
+      .set({ payload: withMeta(ready.payload, meta), status: ready.status, note: ready.note, updatedAt: new Date() })
+      .where(eq(encounterDictationSuggestion.id, row.id))
+  }
+}
+
 const IN_SENT_BUDGET = "Está en un presupuesto que el paciente aún no respondió: se registra como servicio de tu lista. Anota su respuesta en el presupuesto."
 const ACCEPTED_WHEN_DONE = "Estaba en un presupuesto sin aceptar: al confirmar, queda aceptado y hecho, con su precio."
 const NOT_IN_SERVICES = "No está en tus servicios: queda registrado sin cobro. Si se cobra, elige el servicio."
@@ -811,7 +1057,7 @@ function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: Pa
 }
 
 /** Las clases que se revisan con lo del paciente: sus alergias, su plan y su presupuesto. */
-const PATIENT_CHECKED: readonly DictationKind[] = ["plan", "receta", "alergia", "procedimiento"]
+const PATIENT_CHECKED: readonly DictationKind[] = ["plan", "receta", "alergia", "procedimiento", "cita", "presupuesto"]
 
 const MAIN_SERVICE_KEYS = ["service", "serviceId", "serviceName", "priceCents", "currency", "serviceScope", "candidates"] as const
 
@@ -1027,7 +1273,7 @@ export async function saveDictationSegment(
     const revised = await revise(tx, row.kind, data, patch, scope)
     if (!revised) return false
     const ready = PATIENT_CHECKED.includes(row.kind)
-      ? checkAgainstPatient(row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope.medications, dictation)
+      ? await withPatient(tx, orgId, patientId, encounterId, row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope)
       : revised
     const before = describeBefore(row.kind, data, ready.payload, Object.keys(patch), dictation)
     if (!before) return false
@@ -1112,9 +1358,10 @@ export async function saveDictationSegment(
   const doneKey = (payload: Record<string, unknown>) => JSON.stringify([payload["planItemId"] ?? payload["serviceId"] ?? normalizeForSearch(String(payload["service"] ?? "")), placeOf(payload)])
   const pendingDone = new Set(pendingNow.filter((item) => item.kind === "procedimiento").map((item) => doneKey(item.payload)))
   let allergiesTouched = removed.length > 0 || corrected.length > 0
+  let pendingBudget = pendingNow.some((item) => item.kind === "presupuesto")
   const alreadyOnFile: string[] = []
   for (const { draft, prepared } of preparedDrafts) {
-    const ready = checkAgainstPatient(draft.kind, prepared, checks, scope.medications, dictation)
+    const ready = await withPatient(tx, orgId, patientId, encounterId, draft.kind, prepared, checks, scope)
     // Una sola elección por presupuesto (decisión 3): la siguiente de este mismo tramo también espera.
     if (isPlanChoice(draft.kind, ready.payload)) checks.choiceBlocked ??= CHOICE_ALREADY_HERE
     const own = sameKey(draft.kind, ready.payload)
@@ -1143,6 +1390,11 @@ export async function saveDictationSegment(
       const key = doneKey(ready.payload)
       if (pendingDone.has(key)) continue
       pendingDone.add(key)
+    }
+    // Pedir otra vez el presupuesto no es otro presupuesto: el que espera se pone al día al terminar el tramo.
+    if (draft.kind === "presupuesto") {
+      if (pendingBudget) continue
+      pendingBudget = true
     }
     if (draft.kind === "diagnostico") {
       const key = diagnosisKey(ready.payload)
@@ -1183,6 +1435,8 @@ export async function saveDictationSegment(
   const inserted = rows.length ? await tx.insert(encounterDictationSuggestion).values(rows).returning() : []
   // Una alergia nueva, corregida o quitada cambia el aviso de las recetas que ya esperaban.
   if (allergiesTouched) await refreshRecipes(tx, orgId, patientId, encounterId, scope)
+  // Lo indicado en este tramo también va al presupuesto pedido.
+  await refreshBudgetPreview(tx, orgId, patientId, encounterId, scope)
   if (inserted.length + corrected.length + removed.length + undoRequested.length > 0) {
     await tx.insert(auditEvent).values({
       organizationId: orgId,
@@ -1312,7 +1566,7 @@ export async function updateDictationSuggestion(
   const { data, meta } = splitMeta(row.payload)
   const revised = await revise(tx, row.kind, data, patch, scope)
   if (!revised) throw validation("La sugerencia quedó vacía; descártala si no aplica")
-  const ready = checkAgainstPatient(row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope.medications, scope.dictation)
+  const ready = await withPatient(tx, orgId, patientId, encounterId, row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope)
   // Editada a mano, ya no es «corregida por voz»: no queda nada que deshacer.
   const [updated] = await tx
     .update(encounterDictationSuggestion)
@@ -1623,6 +1877,12 @@ export async function confirmDictationSuggestion(
     }
   } else if (row.kind === "procedimiento") {
     entityId = await confirmDone(tx, orgId, actorUserId, patientId, encounterId, payload)
+  } else if (row.kind === "cita") {
+    const booked = await confirmAppointment(tx, orgId, actorUserId, patientId, encounterId, row, payload)
+    if (typeof booked !== "string") return toItem(booked, await findOrgLocale(tx, orgId), dictation)
+    entityId = booked
+  } else if (row.kind === "presupuesto") {
+    entityId = await confirmBudget(tx, orgId, actorUserId, patientId, encounterId, row.id)
   } else if (dictation.kinds.includes(row.kind)) {
     entityId = await dictation.confirm(tx, { orgId, actorUserId, patientId, encounterId }, row.kind, payload)
   } else {
@@ -1642,7 +1902,65 @@ export async function confirmDictationSuggestion(
     .returning()
   if (!updated) throw new Error("No se pudo confirmar la sugerencia")
   if (row.kind === "alergia") await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
+  if (row.kind === "plan") await refreshBudgetPreview(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
   return toItem(updated, await findOrgLocale(tx, orgId), dictation)
+}
+
+/**
+ * Reserva la cita con la operación de «Nueva cita» (`createAppointment`): con
+ * quien lleva la atención, en su sede, y con el aviso a la persona como cuando
+ * reserva recepción. Antes se mira que el hueco siga libre: si se ocupó
+ * mientras atendía, la sugerencia queda con el más cercano y sin reservar, para
+ * confirmarla de nuevo. Si ya tenía una cita cerca, no se reserva otra.
+ */
+async function confirmAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  encounterId: string,
+  suggestion: typeof encounterDictationSuggestion.$inferSelect,
+  payload: Record<string, unknown>,
+): Promise<string | typeof encounterDictationSuggestion.$inferSelect> {
+  const existing = payload["existing"] as { id: string } | undefined
+  if (existing?.id) return existing.id
+  const again = await settleAppointment(tx, orgId, patientId, encounterId, { payload, status: "lista", note: null }, await patientChecks(tx, orgId, patientId, encounterId, suggestion.id))
+  if (again.status !== "lista" || again.payload["startsAt"] !== payload["startsAt"] || again.payload["existing"]) {
+    const [row] = await tx
+      .update(encounterDictationSuggestion)
+      .set({ payload: withMeta(again.payload, splitMeta(suggestion.payload).meta), status: again.status, note: again.note, updatedAt: new Date() })
+      .where(eq(encounterDictationSuggestion.id, suggestion.id))
+      .returning()
+    if (!row) throw new Error("No se pudo actualizar la cita")
+    return row
+  }
+  const created = await createAppointment(tx, orgId, actorUserId, {
+    patientId,
+    professionalUserId: actorUserId,
+    branchId: String(payload["branchId"]),
+    startsAt: String(payload["startsAt"]),
+    ...(typeof payload["durationMin"] === "number" ? { durationMin: payload["durationMin"] } : {}),
+    ...(typeof payload["serviceId"] === "string" ? { serviceId: payload["serviceId"] } : {}),
+    reason: String(payload["serviceName"] ?? payload["service"] ?? "Próxima cita").slice(0, 200),
+    ...(Array.isArray(payload["planItemIds"]) && payload["planItemIds"].length ? { planItemIds: payload["planItemIds"] as string[] } : {}),
+  })
+  return created.id
+}
+
+/**
+ * «Arma el presupuesto» ahora: lo dictado que espera entra al plan como al
+ * confirmarlo, y lo indicado en la atención va al borrador con la misma regla
+ * que al firmar (`assembleEncounterBudget`, también donde es opcional). No
+ * envía nada.
+ */
+async function confirmBudget(tx: Db, orgId: string, actorUserId: string, patientId: string, encounterId: string, suggestionId: string): Promise<string> {
+  for (const item of await listDictationSuggestions(tx, orgId, patientId, encounterId)) {
+    if (item.kind === "plan" && item.status === "lista" && item.id !== suggestionId) await confirmDictationSuggestion(tx, orgId, actorUserId, patientId, encounterId, item.id)
+  }
+  const assembled = await assembleEncounterBudget(tx, orgId, actorUserId, patientId, encounterId, { onRequest: true })
+  const id = assembled?.id ?? (await findDraftBudget(tx, orgId, patientId))?.id
+  if (!id) throw conflict("NOTHING_TO_QUOTE", NOTHING_TO_QUOTE)
+  return id
 }
 
 /**
@@ -1873,6 +2191,7 @@ export async function discardDictationSuggestion(
     .set({ status: "descartada", decidedBy: actorUserId, decidedAt: new Date(), updatedAt: new Date() })
     .where(eq(encounterDictationSuggestion.id, id))
   if (row.kind === "alergia") await refreshRecipes(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
+  if (row.kind === "plan") await refreshBudgetPreview(tx, orgId, patientId, encounterId, await dictationScope(tx, orgId))
 }
 
 /** Descarta todo lo que quede sin decidir: lo que no se confirma no entra a la historia. */

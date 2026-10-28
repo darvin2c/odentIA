@@ -8,6 +8,7 @@ import {
 import { z } from "zod"
 import {
   allergyAndDonePrompt,
+  appointmentAndBudgetPrompt,
   DICTATION_TOOL,
   type DictationExtraction,
   type DictationPending,
@@ -35,6 +36,11 @@ export const extraction = z.object({
   controles: dictationList("control.crear", "Un elemento por cada control que pidió."),
   alergias: dictationList("alergia.dictada", "Un elemento por cada alergia del paciente que se dijo, o uno con `none` si no tiene."),
   procedimientos: dictationList("atencion.procedimiento", "Un elemento por cada cosa que el odontólogo ya hizo hoy en la atención."),
+  citas: dictationList("cita.dictada", "La próxima cita, solo si pidió reservarla (normalmente una sola)."),
+  presupuesto: operationAgentSchema("presupuesto.armar")
+    .extend({ dicho: dictationSaid })
+    .optional()
+    .describe("Solo si pidió armar el presupuesto ahora."),
   ...dictationEdits("toothNumber"),
 })
 
@@ -47,6 +53,8 @@ const DRAFT_PARTS = [
   { key: "controles", kind: "control" },
   { key: "alergias", kind: "alergia" },
   { key: "procedimientos", kind: "procedimiento" },
+  { key: "citas", kind: "cita" },
+  { key: "presupuesto", kind: "presupuesto", single: true },
 ] as const
 
 export function systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string {
@@ -75,6 +83,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
       ? `Servicios de la clínica, para reconocer de qué prestación habla: ${input.services.slice(0, 200).join("; ")}.`
       : "La clínica aún no tiene servicios.",
     ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
+    ...appointmentAndBudgetPrompt("«agéndale para la endodoncia»"),
     "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")
@@ -143,6 +152,19 @@ export function demoExtraction(
     if (/\b(ausente|falta la|no tiene la)\b/.test(text)) {
       const tooth = toothIn(sentence)
       if (tooth) drafts.push({ kind: "odontograma", payload: { toothNumber: tooth, condition: "missing_tooth" }, sourceText: sentence })
+    }
+    // «Cítalo en quince días»: la próxima cita, desde ese día. «Arma el presupuesto»: armarlo ahora.
+    const booking = /\b(citalo|citala|agendale|que vuelva)\b.*?\ben (\d+|una|dos|tres|cuatro|quince|diez) (dias|semanas?)\b/.exec(text)
+    if (booking?.[2] && booking[3]) {
+      const count = /^\d+$/.test(booking[2]) ? Number(booking[2]) : ({ una: 1, dos: 2, tres: 3, cuatro: 4, diez: 10, quince: 15 } as Record<string, number>)[booking[2]] ?? 1
+      const day = new Date(now.getTime() + count * (booking[3].startsWith("semana") ? 7 : 1) * 86_400_000)
+      const what = services.find((name) => text.includes(plain(name).split(" ")[0] ?? "~"))
+      drafts.push({ kind: "cita", payload: { date: day.toISOString().slice(0, 10), ...(what ? { service: what } : {}) }, sourceText: sentence })
+      continue
+    }
+    if (/\barma(r)? el presupuesto\b/.test(text)) {
+      drafts.push({ kind: "presupuesto", payload: { show: /\b(ensen|muestr)/.test(text) }, sourceText: sentence })
+      continue
     }
     // «Es alérgica a la penicilina»; «niega alergias».
     const allergy = /\balergic[oa] a (?:la |el |los |las )?([a-z]+)/.exec(text)

@@ -364,3 +364,73 @@ test("asistente clínico: la alergia dictada y lo hecho hoy se confirman donde v
   await expect(suggested("Alergias")).toHaveCount(0)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
 })
+
+test("asistente clínico: la próxima cita y el presupuesto se piden por voz y se resuelven en la atención", async ({ owner }, info) => {
+  const { page, org } = owner
+  const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: crypto.randomUUID(),
+    answers: { demographics: { displayName: "Rosa Quispe", docType: "DNI", docNumber: "76543211" }, respondent: "staff", privacyAccepted: false },
+    contacts: [],
+  }, 201)
+  const apiPath = `/api/patients/${patient.id}`
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
+  await call(page, "POST", "/api/services", org.slug, {
+    name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
+    officialCode: "D3330",
+  }, 201)
+  // La agenda que lee Clío: una unidad dental y el horario de quien atiende, todos los días de 9 a 18.
+  await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+    branchId: owner.branchId,
+    professionalUserId: owner.user.id,
+    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 18 * 60 })),
+  }, 200)
+  const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Consulta" }, 201)
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {
+    professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345",
+  })
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  const dictationPath = `${apiPath}/encounters/${encounter.id}/dictation`
+  const dictation = () => call<{ suggestions: Array<{ kind: string; status: string }>; confirmed: number }>(page, "GET", dictationPath, org.slug)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  const suggested = (name: string) => page.getByRole("list", { name: `Sugerencias de Clío: ${name}` })
+  await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+  await idle.getByLabel("Escribe lo dictado").fill("En la dieciséis hacemos endodoncia. Cítalo en quince días para la endodoncia. Arma el presupuesto para enseñárselo.")
+  await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+
+  // La cita: tu primer hueco desde ese día, con otros para tocar y el aviso que recibirá.
+  const booking = suggested("Próxima cita").getByRole("listitem").first()
+  await expect(booking).toContainText("Cita · ")
+  await expect(booking).toContainText("Endodoncia multirradicular")
+  // Los huecos se nombran «Jue 12 · 10:00»; el elegido está marcado.
+  const slots = booking.getByRole("group", { name: "Otros horarios libres" }).getByRole("button", { name: / · \d{2}:\d{2}$/ })
+  await expect(slots).toHaveCount(3)
+  await expect(booking.getByRole("group", { name: "Otros horarios libres" }).getByRole("button", { pressed: true })).toHaveCount(1)
+  await expect(booking).toContainText("Rosa recibe el aviso de la cita")
+  // El presupuesto: lo dictado hoy, con su precio, en borrador.
+  const budget = suggested("Presupuesto").getByRole("listitem").first()
+  await expect(budget).toContainText("Presupuesto · 1 tratamiento · S/ 650.00")
+  await expect(budget).toContainText("dictada hoy: entra al plan")
+  await info.attach("cita-y-presupuesto", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // Armar confirma la indicación dictada y deja el borrador para mostrarlo sin salir.
+  await budget.getByRole("button", { name: "Armar", exact: true }).click()
+  await expect(page.getByText("Presupuesto armado.")).toBeVisible()
+  await expect(suggested("Plan de tratamiento")).toHaveCount(0)
+  await page.getByRole("button", { name: "Mostrar a Rosa" }).click()
+  const shown = page.getByRole("dialog", { name: "Presupuesto para Rosa Quispe" })
+  await expect(shown).toContainText("Mostrarlo no le envía nada")
+  await expect(shown.locator("iframe")).toBeVisible({ timeout: 15_000 })
+  await info.attach("mostrar-presupuesto", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await shown.getByRole("button", { name: "Cerrar" }).first().click()
+
+  // Tocar otro hueco y reservar: la cita queda con quien atiende.
+  await booking.getByRole("group", { name: "Otros horarios libres" }).getByRole("button", { name: / · \d{2}:\d{2}$/, pressed: false }).first().click()
+  await booking.getByRole("button", { name: "Reservar", exact: true }).click()
+  await expect(page.getByText("Cita reservada.")).toBeVisible()
+  await expect(suggested("Próxima cita")).toHaveCount(0)
+  expect((await dictation()).suggestions.filter((item) => item.kind === "cita")).toEqual([])
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+})

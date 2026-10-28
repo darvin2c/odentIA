@@ -152,6 +152,16 @@
       "id": "m15-niega-alergias-y-solo-indica",
       "texto": "Niega alergias. Vamos a pedirle una ecografía abdominal para la próxima.",
       "espera": { "alergias": ["ninguna"], "indicaciones": ["ecograf"] }
+    },
+    {
+      "id": "m16-citalo-y-presupuesto",
+      "texto": "Cítalo en una semana para ver los resultados. Y arma el presupuesto de la ecografía para que lo vea.",
+      "espera": {"citas": [{"enDias": 7}], "sinControles": true, "presupuesto": true}
+    },
+    {
+      "id": "m17-control-sin-cita",
+      "texto": "Control en un mes si no mejora.",
+      "espera": {"citas": [], "controles": 1}
     }
   ]
 }

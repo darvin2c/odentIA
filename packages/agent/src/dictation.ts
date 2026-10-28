@@ -106,6 +106,18 @@ export function dictationEdits(example: string) {
 export const DICTATION_TOOL = "registrar_dictado"
 
 /**
+ * La próxima cita y el presupuesto a pedido (issue 109, paso 2), igual en todo
+ * producto. Se distinguen por lo que se pide, no por palabras fijas. `booking`:
+ * un ejemplo de pedir la cita, con las palabras del producto.
+ */
+export function appointmentAndBudgetPrompt(booking: string): string[] {
+  return [
+    `En \`citas\` va la próxima cita solo si pide reservarla («cítalo en quince días», «que vuelva el jueves a las cuatro», ${booking}): el día en \`date\`, contado desde la fecha de hoy, la hora en \`time\` solo si la dijo, y para qué en \`service\`. Decir cuándo hay que volver a verlo sin pedir reservar («control en seis meses») es un control, no una cita. Si dudas, es un control.`,
+    "En `presupuesto` va un pedido de armar el presupuesto ahora («arma el presupuesto», «prepárale el presupuesto para enseñárselo»), con `show` si pidió mostrárselo. Pedir enviarlo no lo envía: es el mismo pedido de armarlo.",
+  ]
+}
+
+/**
  * Lo que todo producto ordena igual (issue 109): las alergias que se dicen y lo
  * que se hizo hoy. `clinician`: cómo se nombra a quien dicta; `done`: un ejemplo
  * de lo que se cuenta como hecho, con las palabras del producto.
