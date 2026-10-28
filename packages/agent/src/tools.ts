@@ -263,6 +263,8 @@ export interface AgentToolCtx {
   routeHint?: string
   /** Volvió a preguntar por un tema abierto y este pasó a urgente: se le puede decir. */
   topicRaised?: boolean
+  /** Volvió sobre un tema que ya tiene el equipo: el aviso de entonces ya le llegó (ADR 0104). */
+  topicAgain?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.

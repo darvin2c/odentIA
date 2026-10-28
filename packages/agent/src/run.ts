@@ -736,6 +736,7 @@ async function attendAgentRun(
           recordTopicAskedAgain(tx, orgId, { handoffId: open.id, messageId: toolCtx.triggerId ?? null }),
         )
         toolCtx.topicRaised = again.raised
+        toolCtx.topicAgain = true
         toolCtx.handedOff = true
         toolCtx.handoffId = open.id
       } else {

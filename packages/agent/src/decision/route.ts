@@ -350,6 +350,8 @@ export interface RouteFacts {
    * falta, no repite lo que ya se hizo. Lo arma `attentionProgress`.
    */
   progress?: RouteProgress
+  /** Vuelve sobre un tema que ya tiene el equipo: ya recibió un aviso y no se le repite (ADR 0104). */
+  again?: boolean
 }
 
 /** Cómo va la cita en esta atención, con el texto con que se nombra cada paso. */
@@ -434,7 +436,12 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
         : facts.urgency === "urgente"
           ? " Es urgente: si figura en lo que sabes de la clínica, el aviso empieza dándole el teléfono para urgencias de la clínica. No le digas que llame al número de emergencias del país salvo que lo que contó ponga en peligro su vida (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar); si podría llegar a eso, puedes decirle que, si pasa, vaya a la emergencia más cercana."
           : ""
-    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora, y le da algo concreto cuando lo hay: si es sobre una cita suya, revísala antes con ver_resumen_paciente y dile lo que ves; si pide hablar con alguien ya, el teléfono de la sede (ver_sedes_y_servicios) si figura; si ya se lo dijiste antes en esta conversación, no repitas la misma frase: reconoce en pocas palabras lo nuevo que dijo (que lo necesita hoy, un dato más) y que se lo hiciste llegar al equipo; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
+    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora, y le da algo concreto cuando lo hay: si es sobre una cita suya, revísala antes con ver_resumen_paciente y dile lo que ves; si pide hablar con alguien ya, el teléfono de la sede (ver_sedes_y_servicios) si figura;${
+      // Solo cuando vuelve sobre un tema que ya tiene el equipo (ADR 0104): ya recibió un aviso.
+      facts.again
+        ? " ya le avisaste antes en esta atención que lo tiene el equipo: no repitas la misma frase; reconoce en pocas palabras lo nuevo que dijo (que lo necesita hoy, un dato más) y que se lo hiciste llegar al equipo;"
+        : ""
+    } no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
   }
   // Con qué se propone la cita: quien aún no es paciente se reserva y registra con su sí (ADR 0101).
   const propose = has("reservar_paciente_nuevo") ? "proponer_cita (o reservar_paciente_nuevo, si aún no es paciente)" : "proponer_cita"
