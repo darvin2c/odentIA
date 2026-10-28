@@ -691,14 +691,18 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .filter(Boolean)
           .join("\n")
       : null
-    // Quien aún no es paciente no se reserva por aquí (proponer_cita es para una
-    // ficha) ni se registra por el chat: el registro pide su aviso de privacidad.
-    // Se le dice desde el primer mensaje, para que no pida datos que no puede usar
-    // (auditoría del 27-oct: pedía nombre, DNI y celular y después no podía).
+    // Quien aún no es paciente se reserva y registra aquí mismo con su sí, si la
+    // clínica tiene su aviso de privacidad publicado (ADR 0099); si no, por su
+    // enlace o por recepción. Se le dice desde el primer mensaje, para que no pida
+    // datos que no puede usar (auditoría del 27-oct).
     async function newPersonLine(): Promise<string> {
-      const online =
-        available.has("enviar_enlace_cita") &&
-        (await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => (await getPatientRegistrationConfig(tx, toolCtx.orgId)).enabled).catch(() => false))
+      const config = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getPatientRegistrationConfig(tx, toolCtx.orgId)).catch(() => null)
+      if (available.has("reservar_paciente_nuevo") && config?.privacyNotice.trim() && toolCtx.publicUrl) {
+        const document =
+          config.fields.docNumber === "required" ? " y, porque la clínica lo pide, su documento (si no lo tiene a la mano, sigue sin él)" : ""
+        return `Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, pídele sus nombres y apellidos${document} y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo. Si la cita es para otra persona (su hijo, su mamá), pide los nombres y apellidos de esa persona y cómo se llama quien escribe. No le pidas nada de salud ni otros datos. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita.`
+      }
+      const online = available.has("enviar_enlace_cita") && config?.enabled === true
       return online
         ? "Este interlocutor aún no es paciente de la clínica. Por aquí no le reservas ni lo registras, y no le pidas documento ni otros datos para eso: si quiere una cita, ofrécele los horarios y, cuando elija uno, envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos ahí; díselo así."
         : "Este interlocutor aún no es paciente de la clínica y la clínica no registra pacientes en línea. Por aquí no le reservas ni lo registras: si quiere una cita, pregúntale solo su nombre y qué día y hora prefiere, y pasa el caso a recepción una sola vez con request_human_handoff para que lo registre y le confirme; no le pidas documento ni le digas que la cita quedó reservada."

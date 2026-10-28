@@ -29,7 +29,7 @@ Una auditoría con 41 conversaciones simuladas por el recorrido real (odentIA y 
 
 ## Alternativas descartadas
 
-- **Registrar a la persona nueva por el chat:** el registro pide aceptar el aviso de privacidad (Ley 29733). Hacerlo en el chat necesita decidir cómo se acepta allí, y eso va al lienzo antes de programarlo.
+- **Registrar a la persona nueva por el chat:** se decidió después en el lienzo y lo sustituye ADR 0099 (un solo sí reserva, registra y acepta el aviso).
 - **«Solo con evaluación» → «precio exacto» como valor por defecto:** contradice la decisión C del 13 de octubre. La pantalla de la biblioteca ya agrega con «precio exacto»; lo que fallaba era la semilla de latidIA y el armado de las demos para presentar (ADR 0096), que ahora agregan como la pantalla y con el registro en línea activo.
 
 ## Consecuencias

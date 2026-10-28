@@ -19,6 +19,8 @@ import { getConversationDetail, type IngestDeps, ingestInbound, listMessages } f
 import { createOpportunity, getOpportunity, listOpportunities, setOpportunityTask } from "./opportunities.js"
 import { ensureDefaultPipeline } from "./pipelines.js"
 import { secretsKeyFromEnv } from "./secrets.js"
+import { getPatientRegistrationConfig, registerFromConversation, savePatientRegistrationConfig } from "./patient-registration.js"
+import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
@@ -523,5 +525,119 @@ describe("obsolescencia y fallo transaccional", () => {
     ).rejects.toMatchObject({ cause: { code: "23514" } })
     const intact = await run((tx) => getProposal(tx, ORG, proposal.id))
     expect(intact.status).toBe("ejecutada")
+  })
+})
+
+describe("registrar por el chat con el mismo sí de la cita (ADR 0099)", () => {
+  async function withNotice(): Promise<void> {
+    const current = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    if (current.privacyNotice.trim()) return
+    await run((tx) =>
+      savePatientRegistrationConfig(tx, ORG, "owner-1", {
+        expectedVersion: current.version,
+        enabled: true,
+        fields: DEFAULT_REGISTRATION_CONFIG.fields,
+        privacyNotice: "Usamos tus datos solo para atenderte.",
+      }),
+    )
+  }
+
+  it("registra a la persona con lo mínimo y guarda su sí como consentimiento, con el mensaje", async () => {
+    await withNotice()
+    const { conversationId, contactId, connectionId: connId } = await openConversation("chat-registro-1", "evt-reg-1")
+    const yes = await inbound("chat-registro-1", connId, "evt-reg-1b", "sí porfa")
+    const [said] = (await run((tx) => listMessages(tx, ORG, yes, { limit: 10 }))).items.filter((m) => m.body === "sí porfa")
+    const done = await run((tx) =>
+      registerFromConversation(tx, ORG, {
+        conversationId,
+        contactId,
+        submissionId: randomUUID(),
+        person: { givenNames: "Valeria", familyName: "Rojas Salazar" },
+        consentMessageId: said!.id,
+      }),
+    )
+    expect(done.displayName).toBe("Valeria Rojas Salazar")
+    const [consent] = await ownerDb.execute<{ channel: string; source_message_id: string; purposes: string[]; granted_by_name: string }>(
+      sql`select channel, source_message_id, purposes, granted_by_name from patient_data_consent where patient_id = ${done.patientId}`,
+    )
+    expect(consent).toMatchObject({ channel: "chat", source_message_id: said!.id, purposes: ["atencion"], granted_by_name: "Valeria Rojas Salazar" })
+    // Su ficha es la de quien escribe: no hay otra persona.
+    const [self] = await ownerDb.execute<{ person_id: string }>(sql`select person_id from patient where id = ${done.patientId}`)
+    expect(self?.person_id).toBe(contactId)
+    // Ya es paciente: no se registra dos veces.
+    await expect(
+      run((tx) =>
+        registerFromConversation(tx, ORG, {
+          conversationId, contactId, submissionId: randomUUID(),
+          person: { givenNames: "Valeria", familyName: "Rojas Salazar" }, consentMessageId: said!.id,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "ALREADY_PATIENT" })
+  })
+
+  it("para su hijo: el hijo es el paciente y quien escribe queda como responsable y como quien aceptó", async () => {
+    await withNotice()
+    const { conversationId, contactId, connectionId: connId } = await openConversation("chat-registro-2", "evt-reg-2")
+    await inbound("chat-registro-2", connId, "evt-reg-2b", "sí, gracias")
+    const [said] = (await run((tx) => listMessages(tx, ORG, conversationId, { limit: 10 }))).items.filter((m) => m.body === "sí, gracias")
+    const done = await run((tx) =>
+      registerFromConversation(tx, ORG, {
+        conversationId, contactId, submissionId: randomUUID(),
+        person: { givenNames: "Mateo", familyName: "Rivas Méndez", forOther: true, writerName: "Carolina Méndez" },
+        consentMessageId: said!.id,
+      }),
+    )
+    const [child] = await ownerDb.execute<{ person_id: string }>(sql`select person_id from patient where id = ${done.patientId}`)
+    expect(child?.person_id).not.toBe(contactId)
+    const [link] = await ownerDb.execute<{ relationship: string }>(
+      sql`select relationship from patient_contact where patient_id = ${done.patientId} and contact_id = ${contactId}`,
+    )
+    expect(link?.relationship).toBe("guardian")
+    const [consent] = await ownerDb.execute<{ granted_by_name: string; granted_by_contact_id: string }>(
+      sql`select granted_by_name, granted_by_contact_id from patient_data_consent where patient_id = ${done.patientId}`,
+    )
+    expect(consent).toMatchObject({ granted_by_name: "Carolina Méndez", granted_by_contact_id: contactId })
+  })
+
+  it("si la cita no se puede reservar, tampoco queda registrada; y lo que eligió antes no vale como su sí", async () => {
+    await withNotice()
+    const { conversationId, contactId, connectionId: connId } = await openConversation("chat-registro-3", "evt-reg-3")
+    await inbound("chat-registro-3", connId, "evt-reg-3b", "Resérvame el lunes a las 10")
+    const { patientId: _none, ...slot } = booking()
+    const proposal = await run((tx) =>
+      createProposal(tx, ORG, {
+        conversationId, action: "reservar_cita",
+        payload: { ...slot, newPatient: { givenNames: "Lucía", familyName: "Paredes Gómez" } },
+        idempotencyKey: "test:chat-registro:3",
+      }),
+    )
+    expect(proposal.context.afterSummary).toContain("Lucía Paredes Gómez")
+    const before = await run((tx) => chosenBeforeProposalOf(tx, ORG, contactId, proposal.id))
+    await expect(
+      run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id, { chosenMessageId: before!.messageId })),
+    ).rejects.toMatchObject({ code: "PROPOSAL_NOT_CONFIRMED" })
+    await inbound("chat-registro-3", connId, "evt-reg-3c", "sí")
+    // La unidad dental de la prueba no existe: la cita falla y el registro se deshace con ella.
+    const done = await run((tx) => confirmProposalByContact(tx, ORG, contactId, proposal.id))
+    expect(done.status).toBe("fallida")
+    const [own] = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
+    expect(own?.n).toBe(0)
+  })
+
+  it("sin aviso de privacidad escrito no registra por el chat", async () => {
+    const { conversationId, contactId } = await openConversation("chat-registro-4", "evt-reg-4")
+    const current = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    await run((tx) =>
+      savePatientRegistrationConfig(tx, ORG, "owner-1", { expectedVersion: current.version, enabled: false, fields: current.fields, privacyNotice: "" }),
+    )
+    await expect(
+      run((tx) =>
+        registerFromConversation(tx, ORG, {
+          conversationId, contactId, submissionId: randomUUID(),
+          person: { givenNames: "Ana", familyName: "Ríos" }, consentMessageId: null,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "NO_PRIVACY_NOTICE" })
+    await withNotice()
   })
 })

@@ -699,11 +699,17 @@ export async function submitPersonalLinkData(
 export async function bookedDataLink(
   tx: Db,
   orgId: string,
-  input: { contactId: string; patientId: string; appointmentId: string | null },
+  input: {
+    contactId: string
+    patientId: string
+    appointmentId: string | null
+    /** Recién registrado por el chat (ADR 0099): el enlace va siempre, para llegar con todo completo. */
+    always?: boolean
+  },
   deps: { secretsKey: Buffer },
 ): Promise<{ missing: string[]; url: string } | null> {
   const missing = await getPatientMissingData(tx, orgId, input.patientId)
-  if (missing.length === 0) return null
+  if (missing.length === 0 && !input.always) return null
   if (!(await contactDecides(tx, orgId, input.patientId, input.contactId))) return null
   if ((await personalLinkUrl(tx, orgId, "0".repeat(64))) === null) return null
   const link = await issuePersonalLink(

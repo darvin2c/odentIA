@@ -1,7 +1,7 @@
 import { registrationAnswersSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { findOrgLocale, getPublicPatientRegistration, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
+import { findOrgLocale, getPatientRegistrationConfig, getPublicPatientRegistration, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { eq } from "drizzle-orm"
 import { type Context, Hono } from "hono"
@@ -99,6 +99,15 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
       }
       throw error
     }
+  })
+  // El aviso de privacidad que se enlaza desde el chat (ADR 0099): el mismo texto del
+  // registro, leído aunque el registro en línea esté apagado. Sin aviso escrito, no hay página.
+  app.get("/:slug/aviso", async c => {
+    const [org] = await deps.db.select({ id: organization.id, name: organization.name, logo: organization.logo }).from(organization).where(eq(organization.slug, c.req.param("slug"))).limit(1)
+    if (!org) return unavailable(c)
+    const config = await withOrgContext(deps.db, org.id, tx => getPatientRegistrationConfig(tx, org.id))
+    if (!config.privacyNotice.trim()) return unavailable(c)
+    return c.json({ data: { organization: { name: org.name, logo: org.logo }, notice: config.privacyNotice, version: config.version } })
   })
   // Terminal: nunca continuar hacia requireSession ni ampliar excepciones a otros /api/*.
   app.all("*", unavailable)

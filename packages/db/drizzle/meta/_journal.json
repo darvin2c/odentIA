@@ -78,6 +78,13 @@
       "when": 1793123765390,
       "tag": "0010_demos_para_presentar",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793206250218,
+      "tag": "0011_sofi_registra_por_el_chat",
+      "breakpoints": true
     }
   ]
 }

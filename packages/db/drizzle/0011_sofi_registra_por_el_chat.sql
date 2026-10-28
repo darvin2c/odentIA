@@ -1,0 +1,4 @@
+ALTER TABLE "patient_data_consent" DROP CONSTRAINT "patient_data_consent_channel_check";--> statement-breakpoint
+ALTER TABLE "patient_data_consent" ADD COLUMN "source_message_id" uuid;--> statement-breakpoint
+ALTER TABLE "patient_data_consent" ADD CONSTRAINT "patient_data_consent_chat_message_check" CHECK (("patient_data_consent"."channel" = 'chat') = ("patient_data_consent"."source_message_id" IS NOT NULL));--> statement-breakpoint
+ALTER TABLE "patient_data_consent" ADD CONSTRAINT "patient_data_consent_channel_check" CHECK ("patient_data_consent"."channel" IN ('presencial','formulario_publico','portal','chat'));

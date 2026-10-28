@@ -58,7 +58,7 @@ import {
   addAgentGuidance,
   removeAgentGuidance,
 } from "@odentia/services"
-import { closeConversationWith, professionalRef } from "@odentia/services"
+import { closeConversationWith, configurePublicLinks, getPatientRegistrationConfig, professionalRef, savePatientRegistrationConfig } from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -1118,6 +1118,105 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.startsAt.toISOString()).toBe(optionStart)
   expect(booked.endsAt.toISOString()).toBe(new Date(Date.parse(optionStart) + durationMin * 60_000).toISOString())
   expect(booked.status).toBe("programada")
+})
+
+it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el aviso a la vista (ADR 0099)", async () => {
+  const [createdBranch] = await ownerDb
+    .insert(branch)
+    .values({ organizationId: "org_a", name: "Sede Registro Chat", timezone: "America/Lima" })
+    .returning({ id: branch.id })
+  const branchId = createdBranch!.id
+  const stamp = Date.now()
+  const actorId = `agent-actor-reg-${stamp}`
+  const professionalId = `agent-professional-reg-${stamp}`
+  await ownerDb.insert(user).values([
+    { id: actorId, name: "Actor Registro", email: `actor-reg-${stamp}@example.test` },
+    { id: professionalId, name: "Dentista Registro", email: `dentista-reg-${stamp}@example.test` },
+  ])
+  await ownerDb.execute(sql`
+    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
+      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
+      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
+  const createdRoom = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: "Unidad dental Registro" }))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setProfessionalSchedule(tx, "org_a", actorId, {
+      branchId,
+      professionalUserId: professionalId,
+      rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+    }))
+  const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+  if (!current.privacyNotice.trim()) {
+    await withOrgContext(appDb, "org_a", (tx) =>
+      savePatientRegistrationConfig(tx, "org_a", actorId, {
+        expectedVersion: current.version, enabled: true, fields: current.fields, privacyNotice: "Usamos tus datos solo para atenderte.",
+      }))
+  }
+  const { conversationId } = await ingestText("tg:registro-chat", "evt-registro-chat", "Hola, quiero una cita")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+    publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" },
+  }
+  const tools = makeAgentTools(ctx)
+  const monday = new Date(Date.now() + 7 * 86_400_000)
+  monday.setUTCDate(monday.getUTCDate() + ((8 - monday.getUTCDay()) % 7))
+  const from = `${monday.toISOString().slice(0, 10)}T05:00:00Z`
+  const out = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId, from, to: new Date(Date.parse(from) + 86_400_000).toISOString(), durationMin: 30,
+  }))
+  const line = out.split("\n")[1] ?? ""
+  const slot = {
+    branchId: line.match(/sede ([0-9a-f-]{36})/i)![1]!,
+    roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
+    professionalUserId: line.match(/profesional ([^\]\s]+)/)![1]!,
+    startsAt: line.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)![1]!,
+    durationMin: 30,
+  }
+  expect(slot.roomId).toBe(createdRoom!.id)
+  const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, nombres: "Valeria", apellidos: "Rojas Salazar" }))
+  // La pregunta lleva la frase del aviso y su enlace; todavía no hay nadie registrado.
+  expect(asked).toContain("Al confirmar, aceptas nuestro aviso de privacidad: https://")
+  expect(asked).toContain("/aviso")
+  const before = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
+  expect(before[0]?.n).toBe(0)
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  // Lo que eligió antes de la propuesta no la registra: hace falta su sí después de leer el aviso.
+  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("no es un sí")
+  await ingestText("tg:registro-chat", "evt-registro-chat-si", "sí porfa")
+  // La dirección pública la configuran la API y el worker al arrancar.
+  configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" })
+  const confirmed = await (async () => {
+    try {
+      return String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))
+    } finally {
+      configurePublicLinks(null)
+    }
+  })()
+  expect(confirmed).toContain("Confirmado y ejecutado")
+  const [patientRow] = await ownerDb.execute<{ id: string; display_name: string }>(
+    sql`select p.id, pp.display_name from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id where p.person_id = ${contactId}`,
+  )
+  expect(patientRow?.display_name).toBe("Valeria Rojas Salazar")
+  const booked = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(appointment).where(eq(appointment.patientId, patientRow!.id)))
+  expect(booked).toHaveLength(1)
+  expect(booked[0]!.startsAt.toISOString()).toBe(slot.startsAt)
+  const [consent] = await ownerDb.execute<{ channel: string; source_message_id: string | null }>(
+    sql`select channel, source_message_id from patient_data_consent where patient_id = ${patientRow!.id}`,
+  )
+  expect(consent?.channel).toBe("chat")
+  expect(consent?.source_message_id).not.toBeNull()
+  // Con la cita, el enlace para llegar con todo completo.
+  expect(confirmed).toContain("llegas con todo listo")
+  // Las demás pruebas cuentan con el registro como estaba.
+  const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+  await withOrgContext(appDb, "org_a", (tx) =>
+    savePatientRegistrationConfig(tx, "org_a", actorId, {
+      expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice,
+    }))
 })
 
 it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {

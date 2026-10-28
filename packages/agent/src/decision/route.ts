@@ -154,9 +154,9 @@ export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // «Ya no me manden recordatorios» como respuesta a uno: elegir_mensajes.
   saludo: [...ALWAYS, "despedirse_y_cerrar", "confirmar_cita", "responder_permiso_mensajes", "elegir_mensajes"],
   // Quien cuenta un problema sin pedir consejo recibe una cita, no un pase (ADR 0097).
-  clinico: [...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "ver_contexto_paciente", "guardar_contacto"],
+  clinico: [...ALWAYS, "ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reservar_paciente_nuevo", "enviar_enlace_cita", "confirmar_propuesta", "ver_contexto_paciente", "guardar_contacto"],
   cita: [
-    ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
+    ...ALWAYS, "ver_sedes_y_servicios", "buscar_en_la_clinica", "consultar_conocimiento", "buscar_huecos", "proponer_cita", "reservar_paciente_nuevo", "enviar_enlace_cita", "confirmar_propuesta", "confirmar_cita",
     "responder_permiso_mensajes", "elegir_mensajes", "ver_contexto_paciente", "ver_resumen_paciente", "anotar_caso", "recordar_dato", "guardar_contacto",
   ],
   cambio_cita: [
