@@ -3992,7 +3992,7 @@ export async function recordTopicAskedAgain(
   tx: Db,
   orgId: string,
   input: { handoffId: string; messageId: string | null },
-): Promise<{ assigneeName: string | null; reason: string }> {
+): Promise<{ assigneeName: string | null; reason: string; raised: boolean }> {
   const [row] = await tx
     .select()
     .from(agentHandoff)
@@ -4009,9 +4009,12 @@ export async function recordTopicAskedAgain(
       .limit(1)
     if (msg) asked.add(msg.id)
   }
+  // Quien insiste por lo mismo sube su tema a urgente, como haría una recepcionista: es
+  // algo nuevo y cierto que el agente le puede decir, en vez de repetir que lo tiene el equipo.
+  const raised = asked.size >= ASKED_AGAIN_TO_URGENT && row.priority !== "alta"
   await tx
     .update(agentHandoff)
-    .set({ askedMessageIds: [...asked].slice(-20), askedAgainAt: new Date() })
+    .set({ askedMessageIds: [...asked].slice(-20), askedAgainAt: new Date(), ...(raised ? { priority: "alta" } : {}) })
     .where(eq(agentHandoff.id, row.id))
   let assigneeName: string | null = null
   if (row.assigneeUserId) {
@@ -4028,8 +4031,11 @@ export async function recordTopicAskedAgain(
       permission: "conversations.read",
     })
   }
-  return { assigneeName, reason: row.reason }
+  return { assigneeName, reason: row.reason, raised }
 }
+
+/** Cuántas veces vuelve a preguntar por lo mismo antes de que su tema pase a urgente. */
+const ASKED_AGAIN_TO_URGENT = 2
 
 /* ---------- Supervisión: libro de corridas reales ---------- */
 

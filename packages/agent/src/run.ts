@@ -732,9 +732,10 @@ async function attendAgentRun(
         latestOpenTopic(tx, orgId, conversationId, { kind: toolCtx.route?.intent === "clinical_question" ? "clinico" : topicKindOf(undefined) }),
       )
       if (open && !(priority === "alta" && open.priority !== "alta")) {
-        await withOrgContext(db, orgId, (tx) =>
+        const again = await withOrgContext(db, orgId, (tx) =>
           recordTopicAskedAgain(tx, orgId, { handoffId: open.id, messageId: toolCtx.triggerId ?? null }),
         )
+        toolCtx.topicRaised = again.raised
         toolCtx.handedOff = true
         toolCtx.handoffId = open.id
       } else {

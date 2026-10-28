@@ -729,7 +729,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       ? `Se llama ${person?.givenNames} ${person?.familyName}.`
       : onlyGivenNames
         ? `Se llama ${person?.givenNames}; aún no sabes sus apellidos (pídelos solo si hacen falta, por ejemplo para registrarla).`
-        : "Aún no sabes cómo se llama: lo que figura es el nombre de su perfil o del chat, no su nombre."
+        : "Su ficha no tiene su nombre (lo que figura es el de su perfil o del chat). Si ya te lo dijo en esta conversación, úsalo y no se lo vuelvas a pedir; si no, aún no sabes cómo se llama."
     // Personas a las que este interlocutor está vinculado: mismo listado
     // autorizado que ver_contexto_paciente (solo nombre y vínculo, sin clínica).
     const linkedPatients = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
@@ -868,6 +868,9 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
             urgency: toolCtx.alarm ? "alarma" : route.urgency !== null && route.urgency >= URGENT_SCORE ? "urgente" : null,
           }),
           toolCtx.routeHint,
+          toolCtx.topicRaised
+            ? "Volvió a preguntar por un tema que ya tiene el equipo y ese tema acaba de quedar como urgente: díselo en una frase, en vez de repetir que lo tiene el equipo."
+            : null,
         ]
           .filter(Boolean)
           .join("\n") || null
