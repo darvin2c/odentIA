@@ -1545,20 +1545,21 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (created?.status !== "propuesta") return proposed
       const noticeUrl = new URL("/aviso", origin).toString()
-      // En futuro: «te registro como paciente» sonaba hecho antes del sí (auditoría del ADR 0104).
-      const whom = !forOther
-        ? "y que quedará registrada como paciente con su nombre"
+      // El registro va en la frase final, con el aviso y bajo «al confirmar»: dicho aparte sonaba
+      // hecho («te registro como paciente») o repetía «Al confirmar» (auditoría del ADR 0104).
+      const registers = !forOther
+        ? "te registro como paciente"
         : minor
-          ? `para ${givenNames} ${familyName}, y que lo registrarás como paciente con quien escribe como su madre, padre o tutor`
-          : `para ${givenNames} ${familyName}, y que la registrarás como paciente`
+          ? `registro a ${givenNames} ${familyName} como paciente, contigo como su madre, padre o tutor,`
+          : `registro a ${givenNames} ${familyName} como paciente`
       const where = (await webchatNeedsContact())
         ? " En el chat web, si aún no te dio su WhatsApp ni se lo pediste, pídeselo en ese mismo mensaje para avisarle de la cita."
         : ""
       // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona. Su sí tiene que
       // llegar después del aviso (ADR 0101); si ya pidió esta hora, lo único que falta es ese
       // sí, y «¿Te la reservo?» le volvía a preguntar lo que ya pidió (auditoría del ADR 0104).
-      const accepts = `aceptas nuestro aviso de privacidad: ${noticeUrl}.`
-      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, di el día, la hora, la sede y con quién, ${whom}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere: termina en cambio con «Solo falta tu sí: al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
+      const accepts = `${registers} y aceptas nuestro aviso de privacidad: ${noticeUrl}.`
+      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, di el día, la hora, la sede y con quién${forOther ? `, para ${givenNames} ${familyName}` : ""}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere: termina en cambio con «Solo falta tu sí: al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. El registro y «al confirmar» van una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",

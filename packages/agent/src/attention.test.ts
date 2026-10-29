@@ -1,3 +1,4 @@
+import { GENERAL_PERMISSION_QUESTION } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { attentionLines, attentionProgress, fitHistory, HISTORY_CHARS, HISTORY_HEAD, nameQuestionsIn } from "./attention"
 
@@ -102,6 +103,13 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
       pending: "Reservar cita — Cita: lunes 2 de noviembre, 9:00",
       done: "Reservar cita — Cita: lunes 2 de noviembre, 9:00",
     })
+    // Lo hecho en una corrida que se cortó no se le dijo: la pregunta automática de novedades no cuenta.
+    const booked = { ...empty, recent: [proposal("ejecutada", 3)] }
+    const out = (body: string, minutes: number) => ({ direction: "out", senderKind: "agent", body, createdAt: at(minutes) })
+    const untold = attentionProgress({ items: [out(GENERAL_PERMISSION_QUESTION, 4)], startedAt, state: booked, promotions: [] })
+    expect(untold.doneTold).toBe(false)
+    expect(attentionLines(untold, "Sofi").join("\n")).toContain("pero todavía no se lo dijiste")
+    expect(attentionProgress({ items: [out("Listo, quedó reservada.", 4)], startedAt, state: booked, promotions: [] }).doneTold).toBe(true)
     // Lo hecho en la atención anterior no es de esta.
     const before = attentionProgress({ items: [], startedAt, state: { ...empty, recent: [proposal("ejecutada", -600)] }, promotions: [] })
     expect(before.done).toBeNull()

@@ -145,6 +145,11 @@ const BURST_COVERED = "burst-covered"
 const TEAM_TOOK_OVER = "team-took-over"
 /** La persona siguió escribiendo mientras se preparaba la respuesta: la de su último mensaje responde todo (ADR 0097). */
 const PERSON_KEPT_WRITING = "persona-siguio-escribiendo"
+/**
+ * Lo reservado hasta este tiempo antes de la corrida cuenta para la pregunta del
+ * permiso general: una corrida cortada pudo reservar sin enviar su respuesta.
+ */
+const BOOKED_BEFORE_MS = 10 * 60_000
 /** Motivo en el libro de quien pasó al equipo porque la clínica llegó a su presupuesto del mes. */
 const BUDGET_REACHED = "PRESUPUESTO"
 /** Ya recibió hoy el mensaje fijo del presupuesto: lo que siga escribiendo lo ve el equipo, sin otro aviso. */
@@ -798,12 +803,14 @@ async function attendAgentRun(
           console.error(`agent: interés no anotado (${error instanceof Error ? error.message : String(error)})`)
         })
       }
-      // Tras reservar en esta corrida, la pregunta del permiso general, una sola
-      // vez por persona y después de la respuesta (ADR 0030). Texto y botones
-      // fijos, sin modelo; si no puede salir, la corrida sigue igual.
-      if (toolCtx.replySettled && !toolCtx.handedOff && !toolCtx.takenOver && !toolCtx.dryRun) {
+      // Tras reservar, la pregunta del permiso general, una sola vez por persona y
+      // después de la respuesta (ADR 0030). Texto y botones fijos, sin modelo; si no
+      // puede salir, la corrida sigue igual. Una corrida que se cortó porque la
+      // persona siguió escribiendo no envió su respuesta: la pregunta va con la de la
+      // corrida siguiente, que mira también lo reservado en las cortadas de antes.
+      if (toolCtx.replySettled && !toolCtx.superseded && !toolCtx.handedOff && !toolCtx.takenOver && !toolCtx.dryRun) {
         await withOrgContext(db, orgId, (tx) =>
-          askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: startedAt }),
+          askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: new Date(startedAt.getTime() - BOOKED_BEFORE_MS) }),
         ).catch(() => false)
       }
     }

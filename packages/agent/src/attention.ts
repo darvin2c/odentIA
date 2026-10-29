@@ -7,7 +7,7 @@
  * Y cómo va esa atención, leído de sus fuentes y no de la memoria del modelo:
  * la indicación de cada turno dice lo que falta, no lo que ya se hizo.
  */
-import { ATTENTION_OPENING_MS, type AgentCaseState, normalizeForSearch } from "@odentia/services"
+import { ATTENTION_OPENING_MS, type AgentCaseState, GENERAL_PERMISSION_QUESTION, normalizeForSearch } from "@odentia/services"
 
 /** Lo que lee siempre, aunque la atención recién empiece: el aviso de cita que la persona responde. */
 export const HISTORY_MIN_TAIL = 20
@@ -73,6 +73,11 @@ export interface AttentionProgress {
   pending: string | null
   /** Lo último que quedó hecho con su cita en esta atención. */
   done: string | null
+  /**
+   * Si después de hacerlo le salió algún mensaje propio: lo hecho en una corrida que
+   * se cortó porque siguió escribiendo nunca se le dijo.
+   */
+  doneTold: boolean
   /** Promociones vigentes que ya nombró en esta atención. */
   promotions: string[]
   /** Cuántas de sus respuestas en esta atención le preguntaron a quien escribe cómo se llama. */
@@ -109,6 +114,10 @@ export function attentionProgress(input: {
     offered: input.state.lookups.some((item) => item.tool === "buscar_huecos" && inAttention(item.at)),
     pending: pending ? describe(pending) : null,
     done: done ? describe(done) : null,
+    // La pregunta automática de novedades no le dice lo hecho.
+    doneTold:
+      !done ||
+      said.some((item) => item.createdAt !== undefined && Date.parse(item.createdAt) > Date.parse(done.at) && item.body !== GENERAL_PERMISSION_QUESTION),
     promotions: input.promotions.filter((name) => {
       const key = normalizeForSearch(name).trim()
       return key.length > 0 && spoken.includes(key)
@@ -134,6 +143,9 @@ export function attentionLines(
       ? `Es tu primera respuesta en esta atención: preséntate como ${persona} en una frase.`
       : "Ya le respondiste en esta atención: no te presentes ni vuelvas a saludar; ve directo a lo que pide.",
   ]
+  if (progress.done && !progress.doneTold) {
+    lines.push(`Ya quedó hecho en esta atención: ${progress.done}, pero todavía no se lo dijiste. Díselo en esta respuesta, en una frase, junto con lo que pide ahora.`)
+  }
   const save = who.saves ? "guárdalo con update_contact en este mismo paso y " : ""
   if (who.name) {
     if (!progress.usedName) lines.push(`Se llama ${who.name}: aún no le hablaste por su nombre en esta atención; hazlo en esta respuesta.`)
