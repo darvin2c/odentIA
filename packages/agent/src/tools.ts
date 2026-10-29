@@ -2137,9 +2137,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   /** Lo que se le pide al modelo que pasó un tema sin escribirle a la persona. */
   const REPLY_AFTER_HANDOFF =
     "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje. Di en una frase quién verá ese tema, sin prometer hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender (horarios, precio, cómo reservar): eso no se pasa al equipo."
-  /** Cuando insiste en un tema que el equipo ya tiene: reconocerlo sin repetir la misma frase. */
+  /**
+   * Cuando insiste en un tema que el equipo ya tiene: lo que escribe le llega con el tema, así
+   * que no se le repite que lo tiene el equipo ni que se anotó (auditoría del ADR 0104).
+   */
   const REPLY_ASKED_AGAIN =
-    "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje y sin repetir lo que ya le dijiste. Si añadió algo (que lo necesita hoy, un dato nuevo), dile que se lo hiciste llegar al equipo; si solo insiste, reconócelo en pocas palabras. No prometas hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender."
+    "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje y sin repetir lo que ya le dijiste: ni que lo tiene el equipo, ni que lo anotaste, ni que se lo hiciste llegar (lo que escribe le llega con el tema). Responde en una línea a lo nuevo que dijo o preguntó; si solo insiste, dale algo concreto que aún no le diste (el teléfono de la sede, el horario de atención) si lo tienes. No prometas hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender."
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
