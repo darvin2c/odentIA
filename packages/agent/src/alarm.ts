@@ -43,7 +43,9 @@ const SIGNALS: readonly RegExp[] = [
   ),
   new RegExp(String.raw`\bpecho\b[^.!?]{0,15}${ALARM_NOT}\b(dolor|duele|aprieta)\b`),
   // No poder respirar; «no me falta el aire» o «no tiene dificultad para respirar», no.
-  /\bno (puedo|puede|podia|podemos) respirar\b/,
+  /\b(no|ni siquiera) (puedo|puede|podia|podemos) respirar\b/,
+  // «No respira»; «no respira bien por la nariz», de un resfrío, no.
+  /\bno respira\b(?! (bien )?por la nariz)/,
   new RegExp(String.raw`${ALARM_NOT}\b(me|le|nos) falta (el )?aire\b`),
   new RegExp(String.raw`${ALARM_NOT}\bfalta de aire\b`),
   new RegExp(String.raw`${ALARM_NOT}\bdificultad para respirar\b`),
@@ -51,12 +53,12 @@ const SIGNALS: readonly RegExp[] = [
   // Desmayo o pérdida de conocimiento. Desmayarse va con «se», que en «no se desmayó»
   // no puede ser «no sé».
   new RegExp(String.raw`${ALARM_NOT}(?<!\b(?:no|ni|tampoco) se (?:ha |han )?)\b(desmay|desvanec)`),
-  new RegExp(String.raw`${ALARM_NOT}\bperdi(o|da de)? (el )?conocimiento\b`),
+  new RegExp(String.raw`${ALARM_NOT}\bperdi(o|do|da de)? (el )?conocimiento\b`),
   new RegExp(String.raw`${ALARM_NOT}\binconsciente\b`),
   // Convulsiones.
   new RegExp(String.raw`${ALARM_NOT}\bconvulsi`),
   // Sangrado que no para.
-  /\bno (para|deja) de sangrar\b/,
+  /\bno (para|paro|deja|dejo|ha parado|ha dejado) de sangrar\b/,
   new RegExp(String.raw`${ALARM_NOT}\bsangrado (abundante|que no para)\b`),
   new RegExp(String.raw`${ALARM_NOT}\bhemorragia\b`),
   // Una reacción que cierra la garganta o hincha la cara.

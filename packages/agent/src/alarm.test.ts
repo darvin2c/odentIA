@@ -23,6 +23,12 @@ describe("señales de alarma (ADR 0084)", () => {
       "a veces pienso en el suicidio",
       "me quiero morir",
       "ME DUELE EL PECHO",
+      // Otras formas de decirlo (revisión del 29-oct).
+      "mi papá ha perdido el conocimiento",
+      "mi bebé no respira",
+      "ni siquiera puedo respirar",
+      "le sacaron la muela y no ha dejado de sangrar",
+      "toda la noche no paró de sangrar",
     ]) {
       expect(hasAlarmSignal(text), text).toBe(true)
     }
@@ -36,6 +42,7 @@ describe("señales de alarma (ADR 0084)", () => {
       "me quiero morir de lo que cuesta",
       "¿cuánto cuesta una resina?",
       "tengo la cara un poco hinchada por la muela",
+      "mi hijo tiene tos y no respira bien por la nariz",
       "",
       null,
       undefined,
@@ -63,6 +70,7 @@ describe("señales de alarma (ADR 0084)", () => {
         "se cayó pero no se desmayó",
         "no se ha desmayado",
         "se golpeó la cabeza, no perdió el conocimiento",
+        "no ha perdido el conocimiento",
         "no quedó inconsciente",
         "tiene fiebre pero no ha convulsionado",
         "sin convulsiones",
