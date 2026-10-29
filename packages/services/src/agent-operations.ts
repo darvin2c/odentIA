@@ -1097,18 +1097,42 @@ export interface FreeGapResult {
   professionalNotAttending: boolean
 }
 
-/** Huecos que ofrece el agente por profesional y día (decisión 16 de la fase 4). */
-export const GAPS_PER_PROFESSIONAL_PER_DAY = 2
+/** Huecos que ofrece el agente por profesional y día, repartidos en su jornada (decisión 16 de la fase 4). */
+export const GAPS_PER_PROFESSIONAL_PER_DAY = 3
 /** Huecos que caben en una respuesta de `buscar_huecos`. */
 export const GAPS_SHOWN = 20
 
 /**
+ * De los huecos de un profesional en un día, los que recibe el agente: el primero, el último y
+ * los de en medio repartidos. Con los primeros nada más, quien tenía la tarde libre solo
+ * aparecía a primera hora y la persona creía que no había más (auditoría del ADR 0104).
+ */
+function spreadOverEachDay<T extends { startsAt: string; professionalUserId: string }>(slots: T[], timeZone: string, perDay: number): T[] {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
+  const byDay = new Map<string, T[]>()
+  for (const slot of slots) {
+    const key = `${slot.professionalUserId}|${day.format(new Date(slot.startsAt))}`
+    byDay.set(key, [...(byDay.get(key) ?? []), slot])
+  }
+  const kept = new Set<T>()
+  for (const group of byDay.values()) {
+    if (group.length <= perDay) {
+      for (const slot of group) kept.add(slot)
+      continue
+    }
+    for (let i = 0; i < perDay; i++) kept.add(group[Math.round((i * (group.length - 1)) / Math.max(1, perDay - 1))]!)
+  }
+  return slots.filter((slot) => kept.has(slot))
+}
+
+/**
  * Huecos libres según Agenda (`listAvailableSlots`): respeta horario semanal
  * del profesional, bloqueos y citas ocupantes, y con servicio ofrece solo a
- * quien lo atiende (la misma regla que recepción y el enlace). Dos huecos por
- * profesional y día, ordenados por hora: una sola persona no se queda con la
- * lista. Sin horario configurado no hay huecos (el agente debe decirlo, no
- * inventarlos). Si `truncated`, acota el rango o pagina por días.
+ * quien lo atiende (la misma regla que recepción y el enlace). Hasta tres por
+ * profesional y día, repartidos en su jornada y ordenados por hora: una sola
+ * persona no se queda con la lista y se ve también la tarde. Sin horario
+ * configurado no hay huecos (el agente debe decirlo, no inventarlos). Si
+ * `truncated`, acota el rango o pagina por días.
  */
 export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): Promise<FreeGapResult> {
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -1146,10 +1170,10 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
-    perProfessionalPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
     ...(input.forTest ? { forTest: true } : {}),
   })
-  const shown = slots.slice(0, GAPS_SHOWN)
+  const spread = spreadOverEachDay(slots, timeZone, GAPS_PER_PROFESSIONAL_PER_DAY)
+  const shown = spread.slice(0, GAPS_SHOWN)
   const ids = [...new Set([...shown.map((s) => s.professionalUserId), ...(attending?.professionalUserIds ?? [])])]
   const names = ids.length
     ? new Map(
@@ -1165,7 +1189,7 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
       professionalName: names.get(s.professionalUserId) ?? null,
       roomId: s.roomId,
     })),
-    truncated: truncated || slots.length > GAPS_SHOWN,
+    truncated: truncated || spread.length > GAPS_SHOWN,
     timeZone,
     attending: attending
       ? {

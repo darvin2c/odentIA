@@ -101,6 +101,8 @@ export interface AttentionProgress {
   usedName: boolean
   /** Respuestas suyas en esta atención que empezaron con «Entiendo…» o dijeron «anoté que…» (`formulasIn`). */
   formulas: { opener: number; noted: number }
+  /** Ya le salió en esta atención su enlace para elegir la cita viendo toda la agenda. */
+  linkSent: boolean
 }
 
 /**
@@ -145,6 +147,7 @@ export function attentionProgress(input: {
       opener: said.filter((item) => formulasIn(item.body ?? "").opener).length,
       noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
     },
+    linkSent: said.some((item) => (item.body ?? "").includes("/reserva?token=")),
   }
 }
 

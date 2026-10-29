@@ -2551,6 +2551,31 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   expect(refused).toContain("no tiene activo el registro de pacientes en línea")
 })
 
+it("con los horarios va su enlace para ver toda la agenda, una vez por atención (lo reportó una clínica)", async () => {
+  const { conversationId } = await ingestText("tg:agenda-entera", "evt-agenda-entera-1", "¿Tienen cita el lunes?")
+  const fx = await bookingFixture(conversationId, "agenda-entera")
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId: fx.contactId,
+    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+    publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" },
+  }
+  const monday = upcomingMonday()
+  const range = { branchId: fx.branchId, from: monday.toISOString(), to: new Date(monday.getTime() + 86_400_000).toISOString() }
+  const search = () => makeAgentTools(ctx).find((item) => item.name === "buscar_huecos")!.invoke(range)
+  const first = String(await search())
+  expect(first).toContain("hasta tres por profesional y día, repartidos en su jornada")
+  expect(first).toMatch(/Su enlace para ver toda la agenda y elegir el día, la hora y con quién: https:\/\/norte\.odentia\.test\/reserva\?token=[0-9a-f]{64}/)
+  // Una segunda búsqueda en la misma corrida no lo vuelve a traer.
+  expect(String(await search())).not.toContain("/reserva?token=")
+  // Si ya le salió en esta atención, solo se le recuerda que ahí los ve todos.
+  ctx.bookingLinkOffered = false
+  ctx.bookingLinkSent = true
+  const later = String(await search())
+  expect(later).not.toContain("/reserva?token=")
+  expect(later).toContain("Ya le enviaste en esta atención su enlace para ver toda la agenda")
+})
+
 it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {
   const { conversationId, messageId } = await ingestText("tg:espera", "evt-espera-1", "Hola")
   const second = await ingestText("tg:espera", "evt-espera-2", "quiero saber si atienden el viernes")

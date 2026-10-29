@@ -305,6 +305,10 @@ export interface AgentToolCtx {
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
   claimNudged?: boolean
+  /** Ya le salió en esta atención su enlace para elegir la cita (`attentionProgress`). */
+  bookingLinkSent?: boolean
+  /** `buscar_huecos` ya trajo su enlace en esta corrida: una segunda búsqueda no lo repite. */
+  bookingLinkOffered?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -1302,6 +1306,47 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     },
   )
 
+  /**
+   * «Su enlace»: la página donde la persona ve todos los horarios libres y elige su cita. Lo
+   * usan `enviar_enlace_cita` y, junto con los horarios, `buscar_huecos`. Sin la dirección de
+   * la clínica devuelve null; lo que impide crearlo llega como `ServiceError`.
+   */
+  const personalLink = async (publicUrl: PublicLinkConfig, input: { patientId?: string; serviceId?: string; branchId?: string }) => {
+    const { link, clinic } = await inOrg(async (tx) => ({
+      link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey }),
+      clinic: await clinicAddressOf(tx, ctx.orgId),
+    }))
+    // En el dominio de su producto (odentIA o latidIA; decisión 9 del issue 229).
+    const origin = clinic ? clinicOrigin(clinic.slug, clinic.product, publicUrl) : null
+    if (!origin) return null
+    const url = new URL("/reserva", origin)
+    url.searchParams.set("token", link.token)
+    return { url: url.toString(), who: link.patientName ?? "la persona", needsRegistration: link.needsRegistration }
+  }
+
+  /**
+   * Lo que acompaña a los horarios, una vez por atención: su enlace para ver toda la agenda. Con
+   * tres horas por profesional y día, la persona creía que no había más y no podía elegir con
+   * quién (lo reportó una clínica). Sin enlace (varios pacientes, sin registro en línea, una
+   * prueba) siguen solo los horarios.
+   */
+  const agendaLine = async (serviceId: string | undefined): Promise<string | null> => {
+    if (ctx.dryRun || !ctx.publicUrl || ctx.bookingLinkOffered) return null
+    if (ctx.bookingLinkSent) {
+      return "Ya le enviaste en esta atención su enlace para ver toda la agenda: si pide más horarios o a otro profesional, recuérdale en una frase que ahí los ve todos."
+    }
+    try {
+      const link = await personalLink(ctx.publicUrl, serviceId ? { serviceId } : {})
+      if (!link) return null
+      ctx.bookingLinkOffered = true
+      const data = link.needsRegistration ? " Como aún no es paciente, ahí también deja sus datos al reservar." : ""
+      return `Su enlace para ver toda la agenda y elegir el día, la hora y con quién: ${link.url}\nOfrécele dos o tres de estos horarios, repartidos, y al final el enlace en una frase (por ejemplo «Si prefieres ver todos los horarios y elegir con quién, aquí puedes: ${link.url}»).${data}`
+    } catch (error) {
+      if (error instanceof ServiceError) return null
+      throw error
+    }
+  }
+
   const availability = tool(
     async (input: {
       branchId: string
@@ -1336,7 +1381,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const day = new Intl.DateTimeFormat(locale, { timeZone, weekday: "long", day: "numeric", month: "long" })
       const clock = new Intl.DateTimeFormat(locale, { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
       const lines = [
-        "Huecos libres, ordenados por hora, hasta dos por profesional y día, en hora local de la sede (dilos así, sin convertir horas). El dato entre corchetes es solo para proponer_cita: no lo escribas a la persona.",
+        "Huecos libres, ordenados por hora, hasta tres por profesional y día, repartidos en su jornada, en hora local de la sede (dilos así, sin convertir horas). El dato entre corchetes es solo para proponer_cita: no lo escribas a la persona.",
         ...(who ? [who] : []),
         ...gaps.map((g) => {
           const start = new Date(g.startsAt)
@@ -1350,12 +1395,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         `Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, ${room} y profesional): nunca inventes IDs ni horas.`,
       ]
       if (truncated) lines.push("Hay más huecos que no van aquí: acota el rango por días o pide los de un profesional.")
+      const agenda = await agendaLine(input.serviceId)
+      if (agenda) lines.push(agenda)
       return lines.join("\n")
     },
     {
       name: "buscar_huecos",
       description:
-        `Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, ${room}, profesional, inicio, fin, zona y duración para proponer_cita.`,
+        `Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta tres huecos por profesional y día, repartidos en su jornada y por hora; cada hueco trae sede, ${room}, profesional, inicio, fin, zona y duración para proponer_cita. Si la clínica tiene su página, trae también el enlace para que la persona vea toda la agenda.`,
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -1378,21 +1425,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const publicUrl = ctx.publicUrl
       if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
       try {
-        const { link, clinic } = await inOrg(async (tx) => ({
-          link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey }),
-          clinic: await clinicAddressOf(tx, ctx.orgId),
-        }))
-        // En el dominio de su producto (odentIA o latidIA; decisión 9 del issue 229).
-        const origin = clinic ? clinicOrigin(clinic.slug, clinic.product, publicUrl) : null
-        if (!origin) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
-        const url = new URL("/reserva", origin)
-        url.searchParams.set("token", link.token)
-        const who = link.patientName ?? "la persona"
+        const link = await personalLink(publicUrl, input)
+        if (!link) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
         // Quien aún no es paciente no puede reservar por aquí: ofrecerle «seguir por aquí» lo contradecía.
         const next = link.needsRegistration
           ? " Como aún no es paciente, ahí deja sus datos y reserva: díselo en una frase y no le ofrezcas reservar por aquí. Si ya eligió una hora contigo, dile que elija esa misma en la página (por ejemplo «ahí eliges el jueves a las 8:00»), sin pedirle que vuelva a decidir."
           : " Ofrece también seguir por aquí si lo prefiere."
-        return `Su enlace, para que ${who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje.${next} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
+        return `Su enlace, para que ${link.who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${link.url}\nEnvíalo tal cual con send_reply, en un solo mensaje.${next} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
       } catch (error) {
         if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
           return "Es una prueba del chat web: no se envía el enlace. Dile que en la prueba no se reserva nada y ofrece seguir por aquí."
