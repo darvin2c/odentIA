@@ -301,6 +301,8 @@ export interface MyOrganization {
   /** El producto de la clínica: su dirección va en su dominio (decisión 9 del issue 229). */
   product: ClinicalProduct
   provisioning: { hasProfile: boolean; hasBranch: boolean }
+  /** La clínica pide verificación en dos pasos a todo su equipo (ADR 0106). */
+  requiresTwoFactor: boolean
 }
 
 export interface RecoveryEvidence {
@@ -1411,7 +1413,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
   const out: MyOrganization[] = []
   for (const row of rows) {
     const [profile] = await tx
-      .select({ id: orgProfile.organizationId, product: orgProfile.product })
+      .select({ id: orgProfile.organizationId, product: orgProfile.product, requireTwoFactor: orgProfile.requireTwoFactor })
       .from(orgProfile)
       .where(eq(orgProfile.organizationId, row.organizationId))
       .limit(1)
@@ -1430,6 +1432,7 @@ export async function listMyOrganizations(tx: Db, userId: string): Promise<MyOrg
       ...withProduct(row.role, profile?.product),
       canLeave: await canLeaveOrganization(tx, userId, row.organizationId, row.role),
       provisioning: { hasProfile: Boolean(profile), hasBranch: sedes.length > 0 },
+      requiresTwoFactor: profile?.requireTwoFactor ?? false,
     })
   }
   return out

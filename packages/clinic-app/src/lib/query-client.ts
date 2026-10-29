@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query"
+import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query"
 import { ApiError } from "./api"
 
 /**
@@ -8,9 +8,14 @@ import { ApiError } from "./api"
  * Un 4xx no mejora reintentando: se muestra enseguida en vez de esperar ~7 s.
  * Una por app en el navegador y una por petición en SSR (nunca compartida
  * entre sesiones): se crea con `useState` en la raíz.
+ * Si la clínica empieza a pedir verificación en dos pasos con la pantalla
+ * abierta (ADR 0106), la primera respuesta que lo dice recarga: el layout
+ * muestra entonces cómo activarla.
  */
 export function createQueryClient(): QueryClient {
   return new QueryClient({
+    queryCache: new QueryCache({ onError: reloadWhenTwoFactorRequired }),
+    mutationCache: new MutationCache({ onError: reloadWhenTwoFactorRequired }),
     defaultOptions: {
       queries: {
         staleTime: 10_000,
@@ -18,4 +23,13 @@ export function createQueryClient(): QueryClient {
       },
     },
   })
+}
+
+let reloading = false
+function reloadWhenTwoFactorRequired(error: unknown): void {
+  if (reloading || typeof window === "undefined") return
+  if (error instanceof ApiError && error.shape.code === "TWO_FACTOR_REQUIRED") {
+    reloading = true
+    window.location.reload()
+  }
 }

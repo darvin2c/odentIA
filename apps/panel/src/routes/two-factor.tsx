@@ -1,11 +1,10 @@
-import { Checkbox, Field, FieldError, FieldGroup, FieldLabel, Input, Separator, toast } from "@odentia/ui"
-import { AuthSplit, fieldErrorMessages, SubmitButton } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { Button, Checkbox, Field, FieldDescription, FieldError, FieldGroup, FieldLabel, Input } from "@odentia/ui"
+import { AuthSplit, SubmitButton, totpDigits } from "@odentia/ui-patterns"
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router"
-import { z } from "zod"
+import { useState } from "react"
 import { authClient } from "../lib/auth-client"
 import { AuthLegal, RecoverAside, WelcomeAside } from "../lib/auth-screens"
-import { KNOWN_DOMAINS } from "../lib/host"
+import { safeNext } from "../lib/safe-next"
 
 export const Route = createFileRoute("/two-factor")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -15,70 +14,65 @@ export const Route = createFileRoute("/two-factor")({
   component: TwoFactorPage,
 })
 
-/** Mismo criterio que el login: dominio base https o loopback en dev. */
-function safeNext(next: string | undefined): string | null {
-  if (!next) return null
-  try {
-    const url = new URL(next)
-    const host = url.hostname
-    if (host === "localhost" || host === "127.0.0.1") {
-      if (url.protocol !== "http:" && url.protocol !== "https:") return null
-      return url.href
-    }
-    if (url.protocol !== "https:") return null
-    if (!KNOWN_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) return null
-    return url.href
-  } catch {
-    return null
-  }
-}
-
-const challenge = z.object({
-  code: z.string().trim().min(4, "Ingresa el código").max(32),
-})
-
 /**
- * Segundo paso del login cuando la cuenta tiene TOTP (incluye el retorno del
- * admin: `?next=` al dominio admin). Sin sesión pendiente vuelve al login.
+ * Segundo paso del login cuando la cuenta tiene la verificación en dos pasos
+ * (ADR 0106; incluye el retorno del admin: `?next=` al dominio admin). El
+ * código de la app, o uno de respaldo, y recordar el navegador 30 días. Sin
+ * sesión pendiente, Better Auth responde error y se vuelve a entrar.
  */
 function TwoFactorPage() {
   const navigate = useNavigate()
   const { next, enlace } = useSearch({ from: "/two-factor" })
-  const form = useForm({
-    defaultValues: { code: "", recovery: false },
-    validators: {
-      onSubmit: z.object({ code: challenge.shape.code, recovery: z.boolean() }),
-    },
-    onSubmit: async ({ value }) => {
-      const target = safeNext(next)
-      try {
-        const result = value.recovery
-          ? await authClient.twoFactor.verifyBackupCode({ code: value.code })
-          : await authClient.twoFactor.verifyTotp({ code: value.code })
-        if (result.error) {
-          toast.error("Código incorrecto o caducado. Revisa tu app de autenticación.")
-          return
-        }
-      } catch {
-        toast.error("No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.")
+  const [recovery, setRecovery] = useState(false)
+  const [code, setCode] = useState("")
+  const [trust, setTrust] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+
+  async function submit(value: string) {
+    if (pending) return
+    if (recovery ? value.trim().length < 4 : value.length < 6) {
+      setError(recovery ? "Escribe uno de tus códigos de respaldo." : "Escribe los 6 dígitos.")
+      return
+    }
+    setPending(true)
+    setError(null)
+    const target = safeNext(next)
+    try {
+      const result = recovery
+        ? await authClient.twoFactor.verifyBackupCode({ code: value.trim(), trustDevice: trust })
+        : await authClient.twoFactor.verifyTotp({ code: value, trustDevice: trust })
+      if (result.error) {
+        setPending(false)
+        setError(
+          recovery
+            ? "Ese código no existe o ya se usó."
+            : "Ese código no coincide. Escribe el que muestra ahora la app (cambia cada 30 segundos). Si sigue fallando, revisa que la hora del teléfono esté en automático.",
+        )
         return
       }
-      if (target) {
-        window.location.assign(target)
-        return
-      }
-      const { data: orgs } = await authClient.organization.list()
-      await navigate({ to: orgs && orgs.length > 0 ? "/" : "/onboarding" })
-    },
-  })
+    } catch {
+      setPending(false)
+      setError("No pudimos conectar. Revisa tu conexión e inténtalo de nuevo.")
+      return
+    }
+    if (target) {
+      window.location.assign(target)
+      return
+    }
+    const { data: orgs } = await authClient.organization.list()
+    await navigate({ to: orgs && orgs.length > 0 ? "/" : "/onboarding" })
+  }
 
   return (
     <AuthSplit
-      title={enlace ? "Un paso más" : "Verifica tu identidad"}
+      title={recovery ? "Escribe un código de respaldo" : enlace ? "Un paso más" : "Escribe el código de tu app"}
       description={
-        enlace
-          ? "El enlace confirmó tu correo. Tu cuenta pide además el código de tu app de autenticación."
-          : "Escribe el código de tu app de autenticación."
+        recovery
+          ? "Uno de los 10 que guardaste al activar la verificación. Cada código sirve una sola vez."
+          : enlace
+            ? "El enlace confirmó tu correo. Tu cuenta pide además el código de tu app de autenticación."
+            : "Tu contraseña es correcta. Abre tu app de autenticación y escribe el código."
       }
       aside={enlace ? <RecoverAside /> : <WelcomeAside />}
       legal={<AuthLegal />}
@@ -91,57 +85,63 @@ function TwoFactorPage() {
       <form
         onSubmit={(event) => {
           event.preventDefault()
-          void form.handleSubmit()
+          void submit(code)
         }}
       >
         <FieldGroup className="gap-4">
-          <form.Field name="code">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="code">Código de 6 dígitos</FieldLabel>
-                <Input
-                  id="code"
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  aria-describedby={field.state.meta.errors.length ? "code-error" : undefined}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={32}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError id="code-error">
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
-              </Field>
+          <Field>
+            <FieldLabel htmlFor="code">{recovery ? "Código de respaldo" : "Código de 6 dígitos"}</FieldLabel>
+            <Input
+              id="code"
+              key={recovery ? "recovery" : "totp"}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "code-error" : "code-help"}
+              inputMode={recovery ? "text" : "numeric"}
+              autoComplete="one-time-code"
+              maxLength={recovery ? 32 : 6}
+              autoFocus
+              value={code}
+              onChange={(event) => {
+                const value = recovery ? event.target.value : totpDigits(event.target.value)
+                setCode(value)
+                if (error) setError(null)
+                if (!recovery && value.length === 6) void submit(value)
+              }}
+              className={recovery ? "font-mono" : "h-12 font-mono text-2xl tracking-[0.4em]"}
+            />
+            {error ? (
+              <FieldError id="code-error">{error}</FieldError>
+            ) : (
+              <FieldDescription id="code-help">{recovery ? "Con guion o sin él." : "Al escribir el sexto número entras solo."}</FieldDescription>
             )}
-          </form.Field>
-          <form.Field name="recovery">
-            {(field) => (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Checkbox
-                  id="recovery"
-                  checked={field.state.value}
-                  onCheckedChange={(checked) => field.handleChange(checked === true)}
-                />
-                <label htmlFor="recovery">Es un código de respaldo (de un solo uso)</label>
-              </div>
-            )}
-          </form.Field>
-          <form.Subscribe selector={(state) => state.isSubmitting}>
-            {(isSubmitting) => (
-              <SubmitButton type="submit" pending={isSubmitting} className="w-full">
-                Entrar
-              </SubmitButton>
-            )}
-          </form.Subscribe>
+          </Field>
+          <div className="flex items-start gap-2.5 text-sm">
+            <Checkbox id="trust" className="mt-0.5" checked={trust} onCheckedChange={(checked) => setTrust(checked === true)} />
+            <label htmlFor="trust" className="flex flex-col gap-0.5">
+              <span className="font-medium">Recordar este dispositivo 30 días</span>
+              <span className="text-muted-foreground">Solo si es tu teléfono o tu computadora. En un equipo compartido de recepción, déjalo sin marcar.</span>
+            </label>
+          </div>
+          <SubmitButton type="submit" pending={pending} className="w-full">
+            Entrar
+          </SubmitButton>
         </FieldGroup>
       </form>
-      <div className="flex items-center gap-3">
-        <Separator className="flex-1" aria-hidden />
+      <div className="flex flex-col gap-2 text-sm">
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto self-start p-0"
+          onClick={() => {
+            setRecovery((value) => !value)
+            setCode("")
+            setError(null)
+          }}
+        >
+          {recovery ? "Usar el código de la app" : "Usar un código de respaldo"}
+        </Button>
+        <p className="text-muted-foreground">¿Perdiste el teléfono y los códigos? Pide al propietario de tu clínica que restablezca tu verificación.</p>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Perdiste tu app y tus códigos: pide a otro admin un reseteo de factor con tu identidad verificada.
-      </p>
     </AuthSplit>
   )
 }

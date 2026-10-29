@@ -1,6 +1,8 @@
 import type { Db } from "@odentia/db"
 import {
   closeMyAccount,
+  forgetTrustedBrowsers,
+  getMyTwoFactor,
   leaveOrganization,
   listMyInvitations,
   listMyOrganizations,
@@ -62,6 +64,21 @@ export function createAccountRoute(deps: AccountDeps) {
         ok: true,
       })),
     )
+  })
+
+  // Verificación en dos pasos (ADR 0106): activar, cambiar de teléfono y los
+  // códigos son de Better Auth; aquí, lo que Mi perfil dice y olvidar los
+  // navegadores recordados.
+  app.get("/two-factor", async (c) => {
+    const who = await accountSession(c)
+    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+    return runService(c, 200, () => getMyTwoFactor(deps.ownerDb, who.userId))
+  })
+
+  app.post("/two-factor/forget-browsers", async (c) => {
+    const who = await accountSession(c)
+    if (!who) return c.json(errorBody(c, "UNAUTHORIZED", "Sesión requerida"), 401)
+    return runService(c, 200, async () => ({ forgotten: await forgetTrustedBrowsers(deps.ownerDb, who.userId) }))
   })
 
   app.post("/close", async (c) => {

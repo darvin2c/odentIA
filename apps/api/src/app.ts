@@ -54,6 +54,7 @@ import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
 import { createPeopleRoute } from "./routes/people.js"
+import { createTeamTwoFactorRoute } from "./routes/team-two-factor.js"
 import { createDataProtectionRoute } from "./routes/data-protection.js"
 import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
 import { createPromotionsRoute } from "./routes/promotions.js"
@@ -766,6 +767,7 @@ export function createApp(deps: AppDeps) {
       webURL: deps.webURL,
     }),
   )
+  guarded.route("/team/two-factor", createTeamTwoFactorRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf }))
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))

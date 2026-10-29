@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { member, organization } from "@odentia/db/schema/auth"
 import { and, eq } from "drizzle-orm"
 import type { Context, Next } from "hono"
+import { orgRequiresTwoFactor } from "@odentia/services"
 import { errorBody } from "./error.js"
 
 export { canAccess, canAccessAny, type OrgRole, type Permission } from "@odentia/auth/permissions"
@@ -29,6 +30,7 @@ export function requireSession({ auth }: Pick<ApiDeps, "auth">) {
     }
     c.set("userId", session.user.id)
     c.set("userImage", session.user.image ?? null)
+    c.set("twoFactorEnabled", (session.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled === true)
     c.set("activeOrganizationId", session.session.activeOrganizationId ?? null)
     await next()
   }
@@ -75,6 +77,12 @@ export function requireOrgContext({ db }: Pick<ApiDeps, "db">) {
       .limit(1)
     if (!membership) {
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
+    }
+
+    // La clínica que pide verificación en dos pasos (ADR 0106) no deja operar
+    // a quien no la tiene: la app lo lleva a activarla en Mi perfil.
+    if (c.get("twoFactorEnabled") !== true && (await orgRequiresTwoFactor(db, orgId))) {
+      return c.json(errorBody(c, "TWO_FACTOR_REQUIRED", "Esta clínica pide verificación en dos pasos: actívala en Mi perfil"), 403)
     }
 
     c.set("orgId", orgId)
