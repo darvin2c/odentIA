@@ -9,9 +9,13 @@
  *
  *   PRODUCTO=odentia N=50 PARALELO=6 AUDIT_OUT=<carpeta> tsx src/auditoria-masiva.ts
  *
+ * Para comparar dos versiones con las mismas personas (pareado): primero
+ * `CASOS=<archivo> CASOS_SOLO=1` inventa y guarda los casos sin conversar, y
+ * cada ronda corre con el mismo `CASOS=<archivo>`.
+ *
  * Es evidencia de estas demos y de pacientes inventados por un modelo, no de una clínica real.
  */
-import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { ChatOpenAI } from "@langchain/openai"
 import { buildWebchatInbound, newWebchatSessionId } from "@odentia/channels"
@@ -188,13 +192,61 @@ let webConnection = ""
 let waConnection = ""
 let knownPatients: Array<{ name: string; phone: string }> = []
 
-async function converse(index: number) {
+/**
+ * Casos fijos para comparar versiones con las mismas personas (`CASOS=<archivo>`):
+ * con `CASOS_SOLO=1` se inventan y se guardan sin conversar; las rondas que
+ * siguen los leen, así la diferencia entre rondas es de Sofi y no de los casos.
+ * Sin `CASOS`, cada corrida inventa los suyos, como siempre.
+ */
+const CASES_FILE = env.CASOS
+interface AuditCase {
+  channel: Channel
+  /** El paciente de la demo que escribe desde su WhatsApp, por su nombre. */
+  known: string | null
+  persona: Persona
+}
+let fixedCases: AuditCase[] | null = null
+
+async function caseFor(index: number): Promise<AuditCase | null> {
+  const fixed = fixedCases?.[index]
+  if (fixed) return fixed
   const roll = Math.random()
   const channel: Channel = roll < 0.45 ? "whatsapp_nuevo" : roll < 0.7 ? "web" : "whatsapp_conocido"
   const known = channel === "whatsapp_conocido" && knownPatients.length ? pick(knownPatients) : null
   const persona = await invent(known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel, known?.name ?? null)
-  if (!persona) return
-  const realChannel: Channel = known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel
+  if (!persona) return null
+  return { channel: known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel, known: known?.name ?? null, persona }
+}
+
+/** El paciente conocido de un caso fijo, con su WhatsApp en esta base (cada ronda tiene la suya). */
+async function knownPatient(name: string): Promise<{ name: string; phone: string } | null> {
+  const listed = knownPatients.find((item) => item.name === name)
+  if (listed) return listed
+  const rows = await ownerDb.execute<{ contact_id: string; name: string; external_user_id: string | null }>(
+    `select c.id as contact_id, c.display_name as name,
+        (select ci.external_user_id from contact_identity ci where ci.contact_id = c.id and ci.channel = 'whatsapp' limit 1) as external_user_id
+       from patient p join contact c on c.id = p.person_id
+      where p.organization_id = '${ORG}' and not c.is_test and c.display_name = '${name.replace(/'/g, "''")}' limit 1` as never,
+  )
+  return rows[0] ? withWhatsApp(rows[0]) : null
+}
+
+/** Ya escribió antes desde su WhatsApp: el vínculo existe, no se adivina por el número. */
+async function withWhatsApp(row: { contact_id: string; name: string; external_user_id: string | null }): Promise<{ name: string; phone: string }> {
+  let phone = row.external_user_id?.replace(/^wa:/, "") ?? null
+  if (!phone) {
+    phone = `519${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`
+    await ownerDb.insert(contactIdentity).values({ organizationId: ORG, contactId: row.contact_id, channel: "whatsapp", externalUserId: `wa:${phone}`, displayName: row.name, isPrimary: true })
+  }
+  return { name: row.name, phone }
+}
+
+async function converse(index: number) {
+  const chosen = await caseFor(index)
+  if (!chosen) return
+  const { persona } = chosen
+  const known = chosen.known ? await knownPatient(chosen.known) : null
+  const realChannel: Channel = chosen.channel === "whatsapp_conocido" && !known ? "whatsapp_nuevo" : chosen.channel
   const session = newWebchatSessionId()
   const phone = known?.phone ?? `519${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`
   const thread = realChannel === "web" ? session : `wa:${phone}`
@@ -269,8 +321,11 @@ async function converse(index: number) {
 /** Lo que de verdad quedó en la base: el juez no puede adivinar si un pase o una cita existen. */
 async function whatWasRecorded(conversationId: string): Promise<string> {
   // Todo lo que Sofi puede decir que hizo: si el juez no lo ve, lo marca como falso sin serlo.
-  const handoffs = await ownerDb.execute<{ reason: string; priority: string; asks: string | null; pending: string | null; again: number }>(
-    `select reason, priority, asks, pending, coalesce(jsonb_array_length(asked_message_ids), 0) as again from agent_handoff where conversation_id = '${conversationId}' and created_at > now() - interval '1 hour'` as never,
+  // Con quién lo tiene: si Sofi dice «lo tiene la Dra. Ana» y el juez no lo ve, lo da por falso sin serlo.
+  const handoffs = await ownerDb.execute<{ reason: string; priority: string; asks: string | null; pending: string | null; again: number; assignee: string | null }>(
+    `select h.reason, h.priority, h.asks, h.pending, coalesce(jsonb_array_length(h.asked_message_ids), 0) as again, u.name as assignee
+       from agent_handoff h left join "user" u on u.id = h.assignee_user_id
+      where h.conversation_id = '${conversationId}' and h.created_at > now() - interval '1 hour'` as never,
   )
   const [memory] = await ownerDb.execute<{ notes: Array<{ text: string }> | null }>(
     `select notes from agent_case_memory where conversation_id = '${conversationId}'` as never,
@@ -293,7 +348,8 @@ async function whatWasRecorded(conversationId: string): Promise<string> {
   )
   return JSON.stringify({
     pases_al_equipo: handoffs.map(
-      (row) => `${row.reason} (${row.priority})${row.asks ? `; pide: ${row.asks}` : ""}${row.pending ? `; falta: ${row.pending}` : ""}${row.again ? `; volvió a preguntar ${row.again} veces y quedó anotado en el tema` : ""}`,
+      (row) =>
+        `${row.reason} (${row.priority}; ${row.assignee ? `lo tiene ${row.assignee}` : "nadie lo tomó todavía"})${row.asks ? `; pide: ${row.asks}` : ""}${row.pending ? `; falta: ${row.pending}` : ""}${row.again ? `; volvió a preguntar ${row.again} veces y quedó anotado en el tema` : ""}`,
     ),
     notas_del_caso_anotadas: (memory?.notes ?? []).map((note) => note.text),
     datos_guardados_de_quien_escribe: person,
@@ -366,22 +422,27 @@ async function setup() {
        from patient p join contact c on c.id = p.person_id
       where p.organization_id = '${ORG}' and not c.is_test order by random() limit 40` as never,
   )
-  for (const row of rows) {
-    let phone = row.external_user_id?.replace(/^wa:/, "") ?? null
-    if (!phone) {
-      phone = `519${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`
-      await ownerDb.insert(contactIdentity).values({ organizationId: ORG, contactId: row.contact_id, channel: "whatsapp", externalUserId: `wa:${phone}`, displayName: row.name, isPrimary: true })
-    }
-    knownPatients.push({ name: row.name, phone })
-  }
+  for (const row of rows) knownPatients.push(await withWhatsApp(row))
 }
 
 mkdirSync(OUT, { recursive: true })
 await setup()
+if (CASES_FILE && env.CASOS_SOLO === "1") {
+  const made: AuditCase[] = []
+  for (let index = 0; index < TOTAL; index++) {
+    const chosen = await caseFor(index)
+    if (chosen) made.push(chosen)
+  }
+  writeFileSync(CASES_FILE, JSON.stringify(made, null, 2))
+  console.log(`casos guardados: ${made.length} en ${CASES_FILE}`)
+  process.exit(0)
+}
+if (CASES_FILE) fixedCases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as AuditCase[]
+const LAST = fixedCases ? Math.min(TOTAL, fixedCases.length) : TOTAL
 let next = 0
 await Promise.all(
   Array.from({ length: PARALLEL }, async () => {
-    while (next < TOTAL) {
+    while (next < LAST) {
       const index = next++
       // Que no empiecen todas a la vez.
       await sleep(Math.random() * 15_000)
