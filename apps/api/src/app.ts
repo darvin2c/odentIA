@@ -21,6 +21,7 @@ import { createAdminCoreRoute, createAccountAdminAccessRoute, createAdminFactorB
 import { createAccountRoute } from "./routes/account.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAdminDemosRoute } from "./routes/admin-demos.js"
+import { createAdminImportsRoute } from "./routes/admin-imports.js"
 import { createAccountBillingRoute, createSaasBillingRoute, createSaasPreAuthGuard, requireSaasAccess } from "./routes/saas-billing.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
 import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
@@ -323,6 +324,7 @@ export function createApp(deps: AppDeps) {
   }))
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/demos", createAdminDemosRoute(deps))
+  app.route("/api/admin/imports", createAdminImportsRoute(deps))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf, replyTo: deps.foundersEmail }))

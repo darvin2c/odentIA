@@ -1,0 +1,28 @@
+{
+  "countryCode": "PE",
+  "files": [
+    {
+      "path": "pacientes.csv",
+      "key": "N° HC",
+      "columns": {
+        "givenNames": "Nombres",
+        "familyName": "Apellidos",
+        "docType": "Tipo Doc",
+        "docNumber": "DNI",
+        "birthDate": "F. Nac",
+        "sex": "Sexo",
+        "phone": "Celular",
+        "email": "Correo",
+        "guardianName": "Apoderado",
+        "guardianDocNumber": "DNI Apoderado",
+        "guardianKinship": "Parentesco",
+        "guardianPhone": "Tel. apoderado"
+      },
+      "defaults": { "docType": "DNI", "guardianDocType": "DNI" },
+      "dateFormat": "DD/MM/YYYY"
+    }
+  ],
+  "overrides": {
+    "106": { "set": { "birthDate": "1985-12-12", "phone": null } }
+  }
+}
