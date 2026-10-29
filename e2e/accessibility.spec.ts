@@ -56,10 +56,17 @@ async function audit(page: Page, info: TestInfo, surface: string) {
   await expect(page.locator("main")).toHaveCount(1)
 }
 
+// El tema cambia sin transiciones: un control con `transition-[color]` quedaría
+// a medio camino entre el claro y el oscuro cuando mide Axe.
 async function theme(page: Page, dark: boolean) {
   await page.evaluate((dark) => {
+    const still = document.createElement("style")
+    still.textContent = "*,*::before,*::after{transition:none!important}"
+    document.head.append(still)
     document.documentElement.classList.toggle("dark", dark)
     document.documentElement.style.colorScheme = dark ? "dark" : "light"
+    getComputedStyle(document.body).color
+    still.remove()
   }, dark)
   await settleAnimations(page)
 }

@@ -235,6 +235,7 @@ emergente y avisa a la página que la abrió: una cabecera
 - DB/services usan Testcontainers con `dentalagent-postgres:18.6`; construir con `podman build -t dentalagent-postgres:18.6 infra/dev/postgres`.
 - Instalar Chromium: `pnpm --filter @odentia/e2e exec playwright install chromium`. Linux requiere dependencias de sistema del navegador.
 - `pnpm e2e --workers=2` crea entorno efímero sin `.env`, compose dev ni semilla manual. Reglas en `e2e/AGENTS.md`.
+- El CI corre la suite completa en cada PR y en main, repartida en tres partes (`--shard`); el deploy espera a que pase. Si falla, las evidencias quedan como artefacto `e2e-<parte>` durante 7 días.
 - Windows/Podman (PowerShell): `$env:DOCKER_HOST='npipe:////./pipe/podman-machine-default'` y `$env:TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE='/run/podman/podman.sock'`. Confirmar nombre con `podman machine inspect` si cambia la máquina.
 - Si el pipe no existe, reenviar el socket root de la conexión por defecto (`podman system connection list`) con `ssh -N -L 127.0.0.1:<puerto>:/run/podman/podman.sock` y usar `DOCKER_HOST=tcp://127.0.0.1:<puerto>`. En Git Bash, exportar `MSYS2_ENV_CONV_EXCL=TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` para que la ruta del override no se convierta a una ruta de Windows.
 - Linux/WSL: `DOCKER_HOST=unix:///ruta/al/socket pnpm e2e`; socket accesible desde Node Linux. En Podman remoto, el override del socket apunta al host de contenedores. Docker estándar puede autodetectarse.

@@ -209,15 +209,21 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await shot("admin-plan")
   await page.keyboard.press("Escape")
 
-  // La ficha: costo y margen de la clínica, por agente y tipo (tablero O2).
-  await gotoHydrated(page, hostUrl("admin", `/organizations?org=${org.id}`))
-  await expect(page.getByText("Cobro y consumo")).toBeVisible()
-  const costMargin = page.getByRole("region", { name: /Costo y margen/ })
-  await expect(costMargin).toBeVisible()
-  await expect(costMargin.getByRole("columnheader", { name: "Nos costó" })).toBeVisible()
-  await expect(costMargin.getByRole("row").filter({ hasText: "Sofi · Gestiona" })).toContainText("52")
-  await expect(costMargin.getByText("Jev · decide cada mensaje")).toBeVisible()
+  // La ficha: el mes con lo cobrado, lo que costó y el margen, y lo que hizo cada agente.
+  await gotoHydrated(page, hostUrl("admin", `/organizations/${org.id}`))
+  const month = page.getByRole("region", { name: "El mes, en curso" })
+  await expect(month).toBeVisible()
+  await expect(month.getByText("Nos costó", { exact: true })).toBeVisible()
+  await expect(month.getByText("Margen", { exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Lo que hicieron los agentes" })).toContainText("82 conversaciones")
   await shot("admin-ficha")
+  // Gastos: costo y margen por agente y tipo, también lo que no se cobra (tablero O2).
+  await page.getByRole("tab", { name: "Gastos" }).click()
+  const byType = page.getByRole("region", { name: "Por agente y tipo" })
+  await expect(byType.getByRole("columnheader", { name: "Nos costó" })).toBeVisible()
+  await expect(byType.getByRole("row").filter({ hasText: "Sofi · Gestiona" })).toContainText("52")
+  await expect(byType.getByText("Jev · decide cada mensaje")).toBeVisible()
+  await shot("admin-ficha-gastos")
 
   // Hoy: las pruebas por vencer y el costo y margen de todas las clínicas (tablero O3).
   await gotoHydrated(page, hostUrl("admin", "/"))
