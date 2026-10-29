@@ -553,7 +553,9 @@ function checkBody(raw: string, data: MessageDef["data"]): TextCheck[] {
     }
   }
   if (names.length > 0) {
-    const edges = /^\{\{[^{}]*\}\}/.test(body) || /\{\{[^{}]*\}\}$/.test(body)
+    // Meta cuenta un dato seguido solo de un punto (o precedido de un «¡») como al principio o
+    // al final, y rechaza la plantilla: «…en [Nombre de la clínica].» no pasa.
+    const edges = /^[\s\p{P}]*\{\{[^{}]*\}\}/u.test(body) || /\{\{[^{}]*\}\}[\s\p{P}]*$/u.test(body)
     checks.push(
       edges
         ? {
