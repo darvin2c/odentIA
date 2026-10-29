@@ -253,7 +253,7 @@ export function invitationTemplate({
 }
 
 /**
- * La clínica pide verificación en dos pasos a todo su equipo (ADR 0106): a
+ * La clínica pide verificación en dos pasos a todo su equipo (ADR 0107): a
  * quien aún no la tiene, con la app que necesita, antes de que se la pidan en
  * plena atención.
  */

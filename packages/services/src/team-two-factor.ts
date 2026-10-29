@@ -1,5 +1,5 @@
 /**
- * Verificación en dos pasos del equipo de la clínica (ADR 0106).
+ * Verificación en dos pasos del equipo de la clínica (ADR 0107).
  *
  * La verificación es de la persona (Better Auth: `user.two_factor_enabled` y
  * su fila en `two_factor`); la clínica solo decide si la pide a todo su equipo

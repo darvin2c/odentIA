@@ -1,5 +1,5 @@
 /**
- * Verificación en dos pasos del equipo (ADR 0106), en pantalla: activarla en Mi
+ * Verificación en dos pasos del equipo (ADR 0107), en pantalla: activarla en Mi
  * perfil con la clave escrita, pedirla a todo el equipo desde Equipo, que quien
  * no la tiene llegue a la pantalla de la clínica y vuelva tras activarla, que
  * no pueda desactivarla mientras la pidan, entrar con el código recordando el

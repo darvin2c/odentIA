@@ -496,6 +496,38 @@
       ],
       "additionalProperties": false
     },
+    "materiales": {
+      "default": [],
+      "description": "Un elemento por cada material que dijo que usó en la atención.",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 200,
+            "description": "El material que usó, con sus palabras y en singular (mascarilla, guante, carpule de anestesia). El sistema lo busca en Inventario."
+          },
+          "quantity": {
+            "description": "Cuántos dijo que usó, solo si lo dijo («dos pares de guantes» = 2). Vacío si no lo dijo.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9999
+          },
+          "dicho": {
+            "description": "El fragmento del dictado, tal cual, del que sale este registro.",
+            "type": "string",
+            "maxLength": 600
+          }
+        },
+        "required": [
+          "product"
+        ],
+        "additionalProperties": false
+      }
+    },
     "correcciones": {
       "default": [],
       "description": "Correcciones que dijo sobre sugerencias pendientes ya numeradas. Vacío si no corrigió ninguna.",
@@ -567,6 +599,7 @@
     "alergias",
     "procedimientos",
     "citas",
+    "materiales",
     "correcciones",
     "quitar"
   ],

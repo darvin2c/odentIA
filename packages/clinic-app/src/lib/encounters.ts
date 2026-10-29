@@ -65,6 +65,8 @@ export interface EncounterMaterials {
   items: MaterialQuantity[]
   /** Quien atendió, el dueño o la administración, con la atención firmada y con sede. */
   canCorrect: boolean
+  /** Puede corregir y la clínica tiene productos que se usan en las atenciones: «Agregar otro producto». */
+  canAddProducts: boolean
 }
 
 export function fetchEncounterMaterials(patientId: string, encounterId: string) {

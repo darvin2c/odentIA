@@ -8,7 +8,7 @@ import { panelUrl } from "../../lib/host"
 import { appRoleLabel } from "../../lib/product-words"
 
 /**
- * Configuración › Equipo › verificación en dos pasos (ADR 0106): si la clínica
+ * Configuración › Equipo › verificación en dos pasos (ADR 0107): si la clínica
  * la pide a todo su equipo, quién la tiene y restablecer la de alguien. Lo que
  * se ve sale de `/api/team/two-factor`; el servidor decide quién puede cambiarlo.
  */

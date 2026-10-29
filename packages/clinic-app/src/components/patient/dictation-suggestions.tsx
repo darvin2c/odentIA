@@ -247,6 +247,7 @@ const UNDO_WORDS: Partial<Record<DictationKind, string>> = {
   control: "Quitar el control",
   alergia: "Quitar de sus alergias",
   procedimiento: "Anular el procedimiento",
+  material: "Quitar el material",
 }
 
 /** Lo que hace confirmar, dicho como lo que es: reservar la cita, armar el presupuesto. */
@@ -717,6 +718,11 @@ const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, Editabl
   alergia: [
     { key: "substance", label: "Sustancia" },
     { key: "reaction", label: "Qué le pasó", long: true },
+  ],
+  // El material se busca otra vez en Inventario por su nombre; la cantidad es el total, no se suma.
+  material: [
+    { key: "product", label: "Material" },
+    { key: "quantity", label: "Cuántos en total", number: true },
   ],
 }
 

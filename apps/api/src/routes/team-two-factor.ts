@@ -29,7 +29,7 @@ const resetInput = z.object({ reason: z.string().trim().min(3, "Escribe el motiv
 export const TWO_FACTOR_PROFILE_PATH = "/profile?edit=two-factor"
 
 /**
- * Configuración › Equipo (ADR 0106): quién tiene la verificación en dos pasos,
+ * Configuración › Equipo (ADR 0107): quién tiene la verificación en dos pasos,
  * pedirla a todo el equipo y restablecer la de alguien. Leer, `settings.read`;
  * cambiar, `settings.write` (propietario y administración).
  */

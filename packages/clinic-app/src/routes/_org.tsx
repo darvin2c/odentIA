@@ -95,7 +95,7 @@ interface OrgRegion {
   country: string | undefined
   /** El producto de la clínica: si no es el de esta app, se abre en su dominio. */
   product?: string | undefined
-  /** La clínica pide verificación en dos pasos y esta persona no la tiene (ADR 0106). */
+  /** La clínica pide verificación en dos pasos y esta persona no la tiene (ADR 0107). */
   twoFactorRequired?: boolean
 }
 let orgRegionLoaded: OrgRegion | null = null

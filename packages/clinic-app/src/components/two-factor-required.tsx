@@ -8,7 +8,7 @@ import { productUi } from "../product/product-ui"
 
 /**
  * La clínica pide verificación en dos pasos a su equipo y esta persona aún no
- * la tiene (ADR 0106): en vez de la aplicación, la API responde
+ * la tiene (ADR 0107): en vez de la aplicación, la API responde
  * `TWO_FACTOR_REQUIRED` y esta pantalla lleva a activarla en Mi perfil, con la
  * vuelta a esta misma dirección. Sus otras clínicas no cambian.
  */

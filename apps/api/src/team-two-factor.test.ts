@@ -12,7 +12,7 @@ import { afterAll, beforeAll, expect, it } from "vitest"
 import { createApp } from "./app.js"
 
 /**
- * Verificación en dos pasos del equipo (ADR 0106) contra la app real: quien no
+ * Verificación en dos pasos del equipo (ADR 0107) contra la app real: quien no
  * la tiene no opera en la clínica que la pide, la otra clínica no cambia y solo
  * quien configura el equipo la enciende. Solo se simula la sesión.
  */

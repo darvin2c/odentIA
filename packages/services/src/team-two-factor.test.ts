@@ -13,7 +13,7 @@ import {
 } from "./team-two-factor.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
-/** Verificación en dos pasos del equipo (ADR 0106). */
+/** Verificación en dos pasos del equipo (ADR 0107). */
 setupTestDb()
 
 async function person(orgId: string, role: string, enabled: boolean, name = role): Promise<string> {

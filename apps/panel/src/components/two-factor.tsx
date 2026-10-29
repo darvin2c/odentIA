@@ -33,7 +33,7 @@ import { panelWords } from "../lib/brand"
 import { totpQrDataUrl } from "../lib/totp"
 
 /**
- * Verificación en dos pasos de la persona (ADR 0106): solo app autenticadora.
+ * Verificación en dos pasos de la persona (ADR 0107): solo app autenticadora.
  * Activar, cambiar de teléfono, códigos nuevos y desactivar son de Better Auth;
  * lo que se dice de ella (quién la pide, navegadores recordados) sale de
  * `/api/account/two-factor`.

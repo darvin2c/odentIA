@@ -68,7 +68,7 @@ export const orgProfile = pgTable("org_profile", {
   servicesTaxBps: integer("services_tax_bps"),
   productsTaxCategory: text("products_tax_category"),
   productsTaxBps: integer("products_tax_bps"),
-  // Verificación en dos pasos a todo el equipo (ADR 0106): encendida, la API
+  // Verificación en dos pasos a todo el equipo (ADR 0107): encendida, la API
   // no deja operar en esta clínica a quien no la tiene activa.
   requireTwoFactor: boolean("require_two_factor").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

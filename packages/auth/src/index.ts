@@ -182,7 +182,7 @@ export function createAuth({
     plugins: [
       // Segundo factor TOTP (estándar Better Auth: sin cripto propia; secreto +
       // códigos de respaldo cifrados en `two_factor`). Lo activa cada persona en
-      // Mi perfil y la clínica puede pedirlo a su equipo (ADR 0106); el personal
+      // Mi perfil y la clínica puede pedirlo a su equipo (ADR 0107); el personal
       // lo enrola en /api/admin/access. Solo TOTP; sin OTP por correo/SMS (sin
       // otpOptions el método `otp` queda inútil). allowPasswordless: las cuentas
       // solo-OAuth (Google) enrolan con sesión fresca verificada en

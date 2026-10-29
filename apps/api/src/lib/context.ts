@@ -79,7 +79,7 @@ export function requireOrgContext({ db }: Pick<ApiDeps, "db">) {
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
     }
 
-    // La clínica que pide verificación en dos pasos (ADR 0106) no deja operar
+    // La clínica que pide verificación en dos pasos (ADR 0107) no deja operar
     // a quien no la tiene: la app lo lleva a activarla en Mi perfil.
     if (c.get("twoFactorEnabled") !== true && (await orgRequiresTwoFactor(db, orgId))) {
       return c.json(errorBody(c, "TWO_FACTOR_REQUIRED", "Esta clínica pide verificación en dos pasos: actívala en Mi perfil"), 403)

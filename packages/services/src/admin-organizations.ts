@@ -301,7 +301,7 @@ export interface MyOrganization {
   /** El producto de la clínica: su dirección va en su dominio (decisión 9 del issue 229). */
   product: ClinicalProduct
   provisioning: { hasProfile: boolean; hasBranch: boolean }
-  /** La clínica pide verificación en dos pasos a todo su equipo (ADR 0106). */
+  /** La clínica pide verificación en dos pasos a todo su equipo (ADR 0107). */
   requiresTwoFactor: boolean
 }
 

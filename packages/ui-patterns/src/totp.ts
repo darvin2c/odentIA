@@ -2,7 +2,7 @@
  * Lo que una pantalla de verificación en dos pasos muestra del enlace
  * `otpauth://` que entrega Better Auth al activarla (RFC 6238, el formato «Key
  * Uri» que leen todas las apps de autenticación): la administración y Mi perfil
- * del panel (ADR 0106). El enlace nunca se muestra como texto.
+ * del panel (ADR 0107). El enlace nunca se muestra como texto.
  */
 
 /** Extrae el secreto para escribirlo a mano. */

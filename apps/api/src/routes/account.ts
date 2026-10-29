@@ -66,7 +66,7 @@ export function createAccountRoute(deps: AccountDeps) {
     )
   })
 
-  // Verificación en dos pasos (ADR 0106): activar, cambiar de teléfono y los
+  // Verificación en dos pasos (ADR 0107): activar, cambiar de teléfono y los
   // códigos son de Better Auth; aquí, lo que Mi perfil dice y olvidar los
   // navegadores recordados.
   app.get("/two-factor", async (c) => {

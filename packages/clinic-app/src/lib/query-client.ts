@@ -9,7 +9,7 @@ import { ApiError } from "./api"
  * Una por app en el navegador y una por petición en SSR (nunca compartida
  * entre sesiones): se crea con `useState` en la raíz.
  * Si la clínica empieza a pedir verificación en dos pasos con la pantalla
- * abierta (ADR 0106), la primera respuesta que lo dice recarga: el layout
+ * abierta (ADR 0107), la primera respuesta que lo dice recarga: el layout
  * muestra entonces cómo activarla.
  */
 export function createQueryClient(): QueryClient {

@@ -16,7 +16,7 @@ export const Route = createFileRoute("/two-factor")({
 
 /**
  * Segundo paso del login cuando la cuenta tiene la verificación en dos pasos
- * (ADR 0106; incluye el retorno del admin: `?next=` al dominio admin). El
+ * (ADR 0107; incluye el retorno del admin: `?next=` al dominio admin). El
  * código de la app, o uno de respaldo, y recordar el navegador 30 días. Sin
  * sesión pendiente, Better Auth responde error y se vuelve a entrar.
  */

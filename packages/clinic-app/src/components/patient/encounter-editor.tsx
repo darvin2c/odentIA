@@ -69,6 +69,7 @@ import { EncounterClosingDialog, SignatureRegistrationFields } from "./encounter
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
+import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterBudgetSend, EncounterPlanPanel } from "./encounter-plan-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -126,7 +127,8 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
   // Lo dictado en un bloque del producto lo declara el bloque (odentIA: lo de una pieza, issue 109).
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
   // Lo que se dijo hecho hoy (issue 109): sale del plan, de los servicios o como acto libre.
-  procedimientos: { kinds: ["procedimiento"], onlySuggested: "Sin procedimientos registrados" },
+  // Con lo hecho, el material que se dijo usar (ADR 0106): sale de la sede al firmar.
+  procedimientos: { kinds: ["procedimiento", "material"], onlySuggested: "Sin procedimientos registrados" },
   // Los signos vitales y el examen por sistemas que dicta latidIA (issue 229).
   examen: { kinds: ["signos", "examen"], onlySuggested: "Sin examen registrado" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.
@@ -340,8 +342,11 @@ export function EncounterEditor({
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
   // El presupuesto que quedó armado al firmar (decisión 12): el cierre pregunta si enviarlo ya.
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
-  // Lo que descontó el cierre (ADR 0067): solo se dice si no se pudo descontar.
+  // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
+  // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
+  const [correctingMaterials, setCorrectingMaterials] = useState(false)
+  const [materialsCorrected, setMaterialsCorrected] = useState(false)
   const [budgetSent, setBudgetSent] = useState(false)
   // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
@@ -781,6 +786,8 @@ export function EncounterEditor({
     setFinalizedBilling(null)
     setFinalizedBudget(null)
     setFinalizedMaterials(null)
+    setCorrectingMaterials(false)
+    setMaterialsCorrected(false)
     setBudgetSent(false)
     void onFinalized(hadCharges)
   }
@@ -2065,13 +2072,24 @@ export function EncounterEditor({
               ))}
             </ul>
           ) : null}
-          {/* La atención se firmó igual: lo usado se registra después desde ella. */}
-          {finalizedMaterials?.failed ? (
-            <p role="alert" className="rounded-lg border border-warning/50 p-3 text-sm">
-              No se pudieron descontar los materiales de {finalizedMaterials.branch.name}. Regístralos con
-              «Corregir» en «Materiales usados» de esta atención, en Historia.
-            </p>
+          {/* Lo que salió de la sede y lo que no había; se corrige aquí mismo. Nunca frena «Listo». */}
+          {finalizedMaterials ? (
+            <FinalizedMaterialsNote
+              patientId={patientId}
+              encounterId={encounterId}
+              materials={finalizedMaterials}
+              corrected={materialsCorrected}
+              onCorrect={() => setCorrectingMaterials(true)}
+            />
           ) : null}
+          {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Corregir». */}
+          <EncounterMaterialsCorrection
+            open={correctingMaterials}
+            patientId={patientId}
+            encounterId={encounterId}
+            onClose={() => setCorrectingMaterials(false)}
+            onSaved={() => setMaterialsCorrected(true)}
+          />
           {/* Mismo paso de cierre: casi siempre la persona sigue ahí y conviene que se lo lleve. */}
           {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget ? (
             <section

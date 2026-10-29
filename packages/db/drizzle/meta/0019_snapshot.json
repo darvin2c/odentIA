@@ -1,5 +1,5 @@
 {
-  "id": "e97dbbf6-a024-4c1c-8385-b5f72910b11e",
+  "id": "7c33b38c-b066-4c48-9982-8bf4cca5350e",
   "prevId": "291f8736-b7a2-4e5e-9a5d-5f7da4300457",
   "version": "7",
   "dialect": "postgresql",
@@ -13243,7 +13243,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -29751,13 +29751,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
-        },
-        "require_two_factor": {
-          "name": "require_two_factor",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",

@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm"
 
 /**
  * No se desactiva la verificación en dos pasos mientras una clínica de la
- * persona la pida a su equipo (ADR 0106): se puede cambiar de teléfono, no
+ * persona la pida a su equipo (ADR 0107): se puede cambiar de teléfono, no
  * quedarse sin ella. Y el personal de odentIA no la enciende por esta vía: su
  * factor es el de la administración y su cuenta la deja apagada
  * (`keepStaffSignInWithoutFactor`). Ni se vuelve a activar estando activa.

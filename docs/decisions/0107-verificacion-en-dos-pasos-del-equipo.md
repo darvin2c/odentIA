@@ -1,4 +1,4 @@
-# 0106 · Verificación en dos pasos del equipo de la clínica
+# 0107 · Verificación en dos pasos del equipo de la clínica
 
 Fecha: 2026-10-29 · Estado: aceptada · Lienzo «Verificación en dos pasos del equipo», aprobado el 2026-10-29.
 

@@ -183,7 +183,7 @@ function TeamPage() {
     enabled: canView,
   })
   const org = orgQuery.data
-  // Quién tiene la verificación en dos pasos (ADR 0106).
+  // Quién tiene la verificación en dos pasos (ADR 0107).
   const twoFactorQuery = useTeamTwoFactor(canView)
   const twoFactorByUser = useMemo(
     () => new Map((twoFactorQuery.data?.members ?? []).map((member) => [member.userId, member.enabled])),

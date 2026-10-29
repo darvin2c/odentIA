@@ -12,6 +12,7 @@ import {
   isDiagnosisVerification,
   type MedicationCatalog,
   normalizeDrugText,
+  quantityWords,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -27,6 +28,7 @@ import {
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
 import { medicalLeave } from "@odentia/db/schema/clinical-forms"
+import { product } from "@odentia/db/schema/inventory"
 import { appointment } from "@odentia/db/schema/agenda"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm"
@@ -45,6 +47,7 @@ import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
 import { createPrescription } from "./prescriptions.js"
+import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
 
@@ -83,6 +86,7 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   procedimiento: "Procedimientos",
   cita: "Próxima cita",
   presupuesto: "Presupuesto",
+  material: "Materiales",
 }
 
 /** Operación de la atención que ejecuta cada clase de sugerencia al confirmarse. */
@@ -100,6 +104,7 @@ export const DICTATION_OPERATION = {
   procedimiento: "atencion.procedimiento",
   cita: "cita.dictada",
   presupuesto: "presupuesto.armar",
+  material: "atencion.material",
 } as const satisfies Record<DictationKind, keyof typeof OPERATIONS>
 
 export interface DictationDraft {
@@ -182,6 +187,23 @@ async function activeServices(tx: Db, orgId: string): Promise<ServiceOption[]> {
     .limit(500)
 }
 
+/** Un producto de Inventario que se usa en las atenciones: donde se busca un material dicho (ADR 0106). */
+interface CareProduct {
+  id: string
+  name: string
+  /** Unidad de uso, en singular. */
+  unit: string
+}
+
+async function careProducts(tx: Db, orgId: string): Promise<CareProduct[]> {
+  return tx
+    .select({ id: product.id, name: product.name, unit: product.unit })
+    .from(product)
+    .where(and(eq(product.organizationId, orgId), eq(product.isActive, true), eq(product.usedInCare, true)))
+    .orderBy(asc(product.name))
+    .limit(500)
+}
+
 /**
  * Lo que el asistente necesita saber de la clínica para entender un dictado:
  * su producto (con qué prompt y formato dicta), sus prestaciones, su lista de
@@ -209,6 +231,8 @@ export async function getDictationCatalog(
 /** Lo de la clínica con que se revisa una sugerencia: sus servicios, su lista de diagnósticos, su receta y lo del producto. */
 interface DictationScope {
   services: ServiceOption[]
+  /** Los productos que se usan en las atenciones: ahí se busca un material dicho. */
+  products: CareProduct[]
   diagnosisSystem: DiagnosisSystemKey
   medications: MedicationCatalog
   dictation: ProductDictation
@@ -227,6 +251,7 @@ async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
   const hooks = await productHooks(tx, orgId)
   return {
     services: await activeServices(tx, orgId),
+    products: await careProducts(tx, orgId),
     diagnosisSystem: await orgDiagnosisSystem(tx, orgId),
     medications: hooks.prescribing.catalog,
     dictation,
@@ -236,12 +261,15 @@ async function dictationScope(tx: Db, orgId: string): Promise<DictationScope> {
 }
 
 /** Las clases de sugerencia de todo producto; cada uno suma las suyas (`ProductDictation.kinds`). */
-const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "control", "receta", "alergia", "procedimiento", "cita", "presupuesto"]
+const COMMON_KINDS: readonly DictationKind[] = ["nota", "diagnostico", "plan", "control", "receta", "alergia", "procedimiento", "cita", "presupuesto", "material"]
 
 const words = (text: string) => normalizeForSearch(text).split(" ").filter((word) => word.length >= 3)
 
-/** La prestación del tarifario que nombró el odontólogo, o las más parecidas si no hay una sola. */
-function matchService(spoken: string, services: ServiceOption[]): { match: ServiceOption | null; candidates: ServiceOption[] } {
+/**
+ * La prestación del tarifario (o el producto de Inventario) que nombró el
+ * odontólogo, o las más parecidas si no hay una sola.
+ */
+function matchService<T extends { name: string }>(spoken: string, services: T[]): { match: T | null; candidates: T[] } {
   const wanted = normalizeForSearch(spoken)
   const exact = services.filter((service) => normalizeForSearch(service.name) === wanted)
   if (exact.length === 1) return { match: exact[0] ?? null, candidates: [] }
@@ -297,6 +325,26 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
     const lines = Array.isArray(payload["lines"]) ? (payload["lines"] as BudgetPreviewLine[]) : []
     const total = typeof payload["totalCents"] === "number" && typeof payload["currency"] === "string" ? ` · ${formatOrgMoney(payload["totalCents"], payload["currency"], zone)}` : ""
     return [`Presupuesto · ${lines.length === 1 ? "1 tratamiento" : `${lines.length} tratamientos`}${total}`, "Queda en borrador: todavía no le llega a nadie."].join("\n")
+  }
+  if (kind === "material") {
+    // El total de ese producto en la atención: lo que ya traían sus servicios no se suma.
+    const name = String(payload["productName"] ?? payload["product"] ?? "")
+    const total = typeof payload["unit"] === "string" ? `${quantityWords(quantityOf(payload), payload["unit"], zone.locale)} en total` : ""
+    const brought = payload["inServices"] as MaterialInServices | undefined
+    const unit = typeof payload["unit"] === "string" ? payload["unit"] : ""
+    const said = typeof payload["alreadySaid"] === "number" ? payload["alreadySaid"] : null
+    return [
+      [name, total].filter(Boolean).join(" · "),
+      said !== null
+        ? `Ya anotaste ${quantityWords(said, unit, zone.locale)}: vale el total, no se suma`
+        : brought
+        ? `${brought.services.join(" y ")} ya trae ${quantityWords(brought.quantity, unit, zone.locale)}: vale el total, no se suma`
+        : typeof payload["productId"] === "string"
+          ? "Sale de la sede al firmar"
+          : "",
+    ]
+      .filter(Boolean)
+      .join("\n")
   }
   if (kind === "procedimiento") {
     const price =
@@ -382,6 +430,8 @@ export function dictationModelLabel(item: Pick<DictationSuggestion, "kind" | "pa
             ? [String(payload["serviceName"] ?? payload["service"] ?? ""), String(payload["date"] ?? ""), payload["time"] ? `a las ${payload["time"]}` : ""].filter(Boolean).join(", ")
             : item.kind === "presupuesto"
             ? "armar el presupuesto"
+            : item.kind === "material"
+            ? [String(payload["productName"] ?? payload["product"] ?? ""), typeof payload["quantity"] === "number" ? `${payload["quantity"]} en total` : ""].filter(Boolean).join(", ")
             : dictation.kinds.includes(item.kind)
             ? dictation.modelLabel(item.kind, payload)
             : String(payload["title"] ?? "Control")
@@ -399,6 +449,44 @@ const quantityOf = (payload: Record<string, unknown>) => (typeof payload["quanti
 
 /** De dónde sale lo que se hizo hoy, sin que el odontólogo lo elija. */
 const DONE_SOURCE: Record<string, string> = { plan: "del plan", servicio: "de tus servicios", libre: "sin servicio: no se cobra" }
+
+/** Cuánto de un material traen ya los servicios de la atención, y cuáles. */
+type MaterialInServices = { quantity: number; services: string[] }
+
+/**
+ * Un material dicho se busca en Inventario, entre lo que se usa en las
+ * atenciones. Lo que no está no se puede descontar: queda por revisar, con las
+ * más parecidas si las hay; descartarlo no frena nada.
+ */
+function prepareMaterial(payload: Record<string, unknown>, products: CareProduct[]): Prepared {
+  const spoken = String(payload["product"] ?? "").trim()
+  const quantity = typeof payload["quantity"] === "number" ? { quantity: payload["quantity"] } : {}
+  const { match, candidates } = matchService(spoken, products)
+  if (match) return { payload: { product: spoken, productId: match.id, productName: match.name, unit: match.unit, ...quantity }, status: "lista", note: null }
+  const names = candidates.map((item) => item.name)
+  return {
+    payload: { product: spoken, ...quantity },
+    status: "por_revisar",
+    note: names.length
+      ? `¿Cuál de Inventario? ${names.join(" o ")}. Escríbelo al editar, o descártalo.`
+      : `«${spoken}» no está entre los productos que se usan en las atenciones: agrégalo en Inventario o descártalo.`,
+  }
+}
+
+/**
+ * Lo dicho de un material es el total de ese producto en la atención (ADR
+ * 0105): si sus servicios ya lo traen, se dice cuánto y no se suma. Sin
+ * cantidad dicha queda lo que traen, o uno.
+ */
+async function settleMaterial(tx: Db, orgId: string, encounterId: string, prepared: Prepared): Promise<Prepared> {
+  const { inServices: _old, alreadySaid: _said, ...payload } = prepared.payload
+  if (typeof payload["productId"] !== "string") return { ...prepared, payload }
+  // Lo ya anotado de ese producto manda sobre lo de sus servicios: es lo que saldría hoy.
+  const said = (await dictatedMaterials(tx, orgId, encounterId)).get(payload["productId"])
+  const brought = said ? undefined : (await materialsFromServices(tx, orgId, encounterId)).get(payload["productId"])
+  const quantity = typeof payload["quantity"] === "number" ? payload["quantity"] : (said ?? brought?.quantity ?? 1)
+  return { ...prepared, payload: { ...payload, quantity, ...(said ? { alreadySaid: said } : brought ? { inServices: brought } : {}) } }
+}
 
 /**
  * Deja una sugerencia lista o por revisar. Se valida con el mismo esquema que
@@ -444,6 +532,7 @@ async function prepare(tx: Db, draft: DictationDraft, scope: DictationScope): Pr
   }
   if (draft.kind === "receta") return prepareMedication(payload, scope.medications)
   if (draft.kind === "alergia") return prepareAllergy(payload, scope.medications.allergens)
+  if (draft.kind === "material") return prepareMaterial(payload, scope.products)
   if (draft.kind === "cita") {
     // El día se cuenta desde hoy: uno que no es una fecha no se adivina.
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(payload["date"])) || Number.isNaN(new Date(`${payload["date"]}T12:00:00Z`).getTime())) {
@@ -782,6 +871,7 @@ async function withPatient(
   const ready = checkAgainstPatient(kind, prepared, checks, scope.medications, scope.dictation)
   if (kind === "cita") return settleAppointment(tx, orgId, patientId, encounterId, ready, checks)
   if (kind === "presupuesto") return previewBudget(tx, orgId, patientId, encounterId, ready, scope)
+  if (kind === "material") return settleMaterial(tx, orgId, encounterId, ready)
   return ready
 }
 
@@ -1056,8 +1146,8 @@ function checkAgainstPatient(kind: DictationKind, prepared: Prepared, checks: Pa
   return prepared
 }
 
-/** Las clases que se revisan con lo del paciente: sus alergias, su plan y su presupuesto. */
-const PATIENT_CHECKED: readonly DictationKind[] = ["plan", "receta", "alergia", "procedimiento", "cita", "presupuesto"]
+/** Las clases que se revisan con lo del paciente: sus alergias, su plan, su presupuesto y lo que ya traen sus servicios. */
+const PATIENT_CHECKED: readonly DictationKind[] = ["plan", "receta", "alergia", "procedimiento", "cita", "presupuesto", "material"]
 
 const MAIN_SERVICE_KEYS = ["service", "serviceId", "serviceName", "priceCents", "currency", "serviceScope", "candidates"] as const
 
@@ -1357,6 +1447,13 @@ export async function saveDictationSegment(
   const pendingAllergies = new Set(pendingNow.filter((item) => item.kind === "alergia").map((item) => allergyKey(item.payload)))
   const doneKey = (payload: Record<string, unknown>) => JSON.stringify([payload["planItemId"] ?? payload["serviceId"] ?? normalizeForSearch(String(payload["service"] ?? "")), placeOf(payload)])
   const pendingDone = new Set(pendingNow.filter((item) => item.kind === "procedimiento").map((item) => doneKey(item.payload)))
+  // Un material pendiente se corrige («no, fueron cuatro»), no se vuelve a proponer.
+  // Por el producto y por cómo se dijo: el que no se encontró y se vuelve a decir ya encontrado es el mismo.
+  const materialKeys = (payload: Record<string, unknown>) => [
+    ...(typeof payload["productId"] === "string" ? [payload["productId"]] : []),
+    `dicho:${normalizeForSearch(String(payload["product"] ?? ""))}`,
+  ]
+  const pendingMaterials = new Set(pendingNow.filter((item) => item.kind === "material").flatMap((item) => materialKeys(item.payload)))
   let allergiesTouched = removed.length > 0 || corrected.length > 0
   let pendingBudget = pendingNow.some((item) => item.kind === "presupuesto")
   const alreadyOnFile: string[] = []
@@ -1390,6 +1487,11 @@ export async function saveDictationSegment(
       const key = doneKey(ready.payload)
       if (pendingDone.has(key)) continue
       pendingDone.add(key)
+    }
+    if (draft.kind === "material") {
+      const keys = materialKeys(ready.payload)
+      if (keys.some((key) => pendingMaterials.has(key))) continue
+      for (const key of keys) pendingMaterials.add(key)
     }
     // Pedir otra vez el presupuesto no es otro presupuesto: el que espera se pone al día al terminar el tramo.
     if (draft.kind === "presupuesto") {
@@ -1638,12 +1740,12 @@ export async function undoDictationVoiceCorrection(
 
 /**
  * Lo confirmado hoy que el asistente puede proponer quitar: una indicación sin
- * caminos, un diagnóstico, un control, una alergia o lo que se hizo hoy. Una
- * elección de caminos ya armó el presupuesto con sus opciones, y un hallazgo o
- * la receta se corrigen donde quedaron: esos no se proponen. «No tiene
- * alergias» no dejó nada que quitar.
+ * caminos, un diagnóstico, un control, una alergia, lo que se hizo hoy o un
+ * material. Una elección de caminos ya armó el presupuesto con sus opciones, y
+ * un hallazgo o la receta se corrigen donde quedaron: esos no se proponen. «No
+ * tiene alergias» no dejó nada que quitar.
  */
-const UNDOABLE_KINDS: DictationKind[] = ["plan", "diagnostico", "control", "alergia", "procedimiento"]
+const UNDOABLE_KINDS: DictationKind[] = ["plan", "diagnostico", "control", "alergia", "procedimiento", "material"]
 
 /** Ya confirmadas en esta atención que se pueden proponer quitar, en el orden en que se dictaron. */
 export async function listConfirmedDictation(tx: Db, orgId: string, patientId: string, encounterId: string): Promise<DictationSuggestion[]> {
@@ -1753,6 +1855,8 @@ export async function undoConfirmedDictation(
     await removePatientAllergy(tx, orgId, actorUserId, patientId, entityId, "error")
   } else if (row.kind === "procedimiento") {
     await voidEncounterProcedure(tx, orgId, actorUserId, patientId, encounterId, entityId, { reason })
+  } else if (row.kind === "material") {
+    // Todavía no salió de la sede (sale al firmar): quitarlo es dejar de contarlo.
   } else {
     throw conflict("NOT_UNDOABLE", "Esto se corrige donde quedó, no desde el dictado")
   }
@@ -1877,6 +1981,10 @@ export async function confirmDictationSuggestion(
     }
   } else if (row.kind === "procedimiento") {
     entityId = await confirmDone(tx, orgId, actorUserId, patientId, encounterId, payload)
+  } else if (row.kind === "material") {
+    // Confirmado queda como el total de ese producto en la atención: sale de la sede al
+    // firmar, en lugar de lo que traían sus servicios (`encounterMaterialPlan`).
+    entityId = String(payload["productId"])
   } else if (row.kind === "cita") {
     const booked = await confirmAppointment(tx, orgId, actorUserId, patientId, encounterId, row, payload)
     if (typeof booked !== "string") return toItem(booked, await findOrgLocale(tx, orgId), dictation)
