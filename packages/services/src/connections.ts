@@ -31,6 +31,7 @@ import {
 import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { checkOwnAppKeys, freshOwnApp, type OwnAppKeysChecked, settleOwnApp } from "./whatsapp-own-app.js"
+import { settleWorkspaceNotifications } from "./workspace.js"
 
 type ConnectionRow = typeof channelConnection.$inferSelect
 
@@ -1063,6 +1064,10 @@ export async function changeConnectionCredentials(
     .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
     .returning()
   if (!updated) throw notFound("Conexión")
+  // El aviso de la campana de que Meta la había cortado se retira ya, no al abrir la campana.
+  if (origin && row.signup?.metaRemoved) {
+    await settleWorkspaceNotifications(tx, orgId, { subject: `meta-desconecto:${id}` })
+  }
   if (origin) return { ...toPublic(updated), account, templates: null }
   await registerTelegramWebhook(updated, config, deps)
   const withOwnApp = await settleOwnApp(tx, updated, config, secretsKey, deps)

@@ -43,6 +43,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { reportAutomaticCase } from "./model-outage.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
+import { notifyAdmins } from "./whatsapp-own-app.js"
 import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -569,7 +570,7 @@ export async function noteHistoryDeclined(tx: Db, orgId: string, connectionId: s
 /* ---------- Meta corta la conexión de la cuenta ---------- */
 
 /** Asunto del aviso de la campana: se retira solo cuando la conexión vuelve a estar hecha. */
-const removalSubject = (connectionId: string) => `meta-desconecto:${connectionId}`
+export const metaRemovedSubject = (connectionId: string) => `meta-desconecto:${connectionId}`
 
 /**
  * Meta avisa a la cuenta (`account_update`) que cortó su conexión con la app de
@@ -607,36 +608,27 @@ export async function applyAccountEvents(
     if (event.kind === "removed") removed = { at, reason: event.reason, initiatedBy: event.initiatedBy }
     else if (removed && Date.parse(at) >= Date.parse(removed.at)) removed = null
   }
-  if (JSON.stringify(removed) === JSON.stringify(before)) return
+  // Un reintento de Meta trae lo mismo: no se reescribe ni se vuelve a avisar.
+  const same =
+    removed === before ||
+    (removed !== null &&
+      before !== null &&
+      removed.at === before.at &&
+      removed.reason === before.reason &&
+      removed.initiatedBy === before.initiatedBy)
+  if (same) return
   await tx
     .update(channelConnection)
     .set({ signup: { ...row.signup, metaRemoved: removed }, updatedAt: new Date() })
     .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
-  if (removed) await notifyMetaRemoved(tx, orgId, connectionId, removed)
-}
-
-/**
- * Avisa en la campana a quien administra las integraciones (dueño y
- * administradores: `settings.write`) que Meta cortó la conexión, con el motivo.
- * Un aviso por conexión, que se retira solo al volver a conectar.
- */
-async function notifyMetaRemoved(tx: Db, orgId: string, connectionId: string, removal: ConnectionMetaRemoval): Promise<void> {
-  const admins = await tx
-    .select({ userId: member.userId })
-    .from(member)
-    .where(and(eq(member.organizationId, orgId), inArray(member.role, ["owner", "admin"])))
-    .limit(20)
-  for (const { userId } of admins) {
-    await upsertWorkspaceNotification(tx, orgId, {
-      userId,
-      dedupeKey: `${removalSubject(connectionId)}:${userId}`,
-      title: "WhatsApp se desconectó de Meta",
-      body: `${metaRemovalWhy(removal)} Mientras tanto no llegan ni salen mensajes de WhatsApp. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.`,
-      href: WHATSAPP_SETTINGS_HREF,
-      permission: "settings.write",
-      subject: removalSubject(connectionId),
-    })
+  if (!removed) {
+    await settleWorkspaceNotifications(tx, orgId, { subject: metaRemovedSubject(connectionId) })
+    return
   }
+  await notifyAdmins(tx, orgId, metaRemovedSubject(connectionId), {
+    title: "WhatsApp se desconectó de Meta",
+    body: `${metaRemovalWhy(removed)} Mientras tanto no llegan ni salen mensajes de WhatsApp. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.`,
+  })
 }
 
 /* ---------- La clave de Meta se renueva sola (darvin2c/odentIA#121) ---------- */

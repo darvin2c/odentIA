@@ -785,8 +785,9 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect(await shown()).not.toBeNull()
     expect((await deliver(body(accountUpdate(seconds(120), { event: "ACCOUNT_RECONNECTED" })))).status).toBe(200)
     expect(await shown()).toBeNull()
-    await settle()
+    // El aviso se retira en ese momento, sin esperar a que alguien abra la campana.
     expect((await notices())[0]!.resolved_at).not.toBeNull()
+    await settle()
 
     // Se cortó otra vez (salió del celular) y se vuelve a conectar con el botón: la misma conexión, sin el corte.
     expect((await deliver(body(accountUpdate(seconds(180), { event: "ACCOUNT_OFFBOARDED" })))).status).toBe(200)
@@ -800,6 +801,7 @@ describe("la dirección de avisos de la app de odentIA", () => {
     })
     expect(again.status).toBe(200)
     expect(await shown()).toBeNull()
+    expect((await notices())[0]!.resolved_at).not.toBeNull()
     // Meta reintenta un corte de antes de volver a entrar con Facebook: ya no vale.
     expect((await deliver(body(removed(seconds(-3600))))).status).toBe(200)
     expect(await shown()).toBeNull()
