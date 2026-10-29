@@ -9,6 +9,7 @@ import {
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
 import {
+  applyAccountEvents,
   applyAppContacts,
   applyStatus,
   applyTemplateCategories,
@@ -111,6 +112,12 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       await withOrgContext(deps.db, orgId, (tx) => noteHistoryDeclined(tx, orgId, connection.id))
     }
 
+    // Meta cortó (o rehízo) la conexión de la cuenta: sin esto la pantalla seguiría diciendo «Conectado».
+    if (parsed.accountEvents?.length) {
+      const events = parsed.accountEvents
+      await withOrgContext(deps.db, orgId, (tx) => applyAccountEvents(tx, orgId, connection.id, events))
+    }
+
     for (const event of parsed.messages) {
       const inserted = await deps.ownerDb
         .insert(inboundEvent)
@@ -167,8 +174,8 @@ export function createWebhooksRoute(deps: WebhookDeps) {
    * Avisos de todas las cuentas suscritas a la app de odentIA: una sola
    * dirección, firmada con la clave secreta de la app, que puede traer cambios
    * de varias clínicas en el mismo envío. Cada cambio se reparte a su conexión:
-   * los mensajes y estados por el número que los recibió y los cambios de
-   * plantilla por su cuenta. No se usan direcciones alternas por cuenta o por
+   * los mensajes y estados por el número que los recibió, y los cambios de
+   * plantilla y los cortes de la conexión (`account_update`) por su cuenta. No se usan direcciones alternas por cuenta o por
    * número: con ellas una cuenta con dos números se repartiría mal, y los
    * cambios de plantilla llegan aquí de todos modos.
    * https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks
@@ -250,7 +257,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       )
       if (subscribed.length === 0) {
         console.warn(
-          `[webhooks] cambio de plantilla descartado: la cuenta ${delivery.accountId} no es de una conexión activa y suscrita`,
+          `[webhooks] aviso de cuenta descartado: la cuenta ${delivery.accountId} no es de una conexión activa y suscrita`,
         )
         continue
       }
@@ -260,6 +267,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
           statuses: [],
           templateStatuses: delivery.templateStatuses,
           templateCategories: delivery.templateCategories,
+          accountEvents: delivery.accountEvents,
         })
       }
     }

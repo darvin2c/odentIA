@@ -1,4 +1,5 @@
 import {
+  type AccountRemovalReason,
   type ChannelAdapter,
   type ChannelProvider,
   channelAdapters,
@@ -9,6 +10,7 @@ import type { Db } from "@odentia/db"
 import {
   channelConnection,
   type ConnectionHealth,
+  type ConnectionMetaRemoval,
   type ConnectionOwnApp,
   type ConnectionSignup,
   conversation,
@@ -52,6 +54,23 @@ const SIGNUP_STEP_TITLE: Record<SignupStep, string> = {
     "Falta traer del celular los nombres de tu agenda y las conversaciones anteriores. Meta da 24 horas desde que se entró con Facebook; pasado ese plazo hay que volver a conectar para traerlas.",
 }
 
+/** Por qué Meta cortó la conexión de la cuenta, en palabras de la clínica. */
+const META_REMOVAL_WHY: Record<AccountRemovalReason, string> = {
+  access_removed: "Se le quitó el acceso a la cuenta de WhatsApp desde la configuración del negocio en Meta.",
+  disconnected_in_app: "Se desconectó desde la app WhatsApp Business del celular.",
+  primary_inactivity:
+    "La app WhatsApp Business no se abrió en el celular principal durante unos 14 días. Para que no vuelva a pasar, ábrela al menos una vez por semana.",
+  companion_inactivity: "Uno de los dispositivos vinculados a este número no se usó durante unos 30 días.",
+  business_downgrade: "La cuenta del celular dejó de ser de WhatsApp Business.",
+  number_changed: "Se cambió el número en la app WhatsApp Business del celular.",
+  re_registered: "El número se volvió a registrar o pasó a otro celular.",
+}
+
+/** El motivo que dio Meta al cortar la conexión, o que no lo dijo. */
+export function metaRemovalWhy(removal: Pick<ConnectionMetaRemoval, "reason">): string {
+  return (removal.reason && META_REMOVAL_WHY[removal.reason as AccountRemovalReason]) || "Meta no dijo el motivo."
+}
+
 /**
  * Cuándo quedó hecho cada paso; nulo: falta. «sincronizar» solo es de un
  * número de la app del celular: en los demás no hay nada que traer.
@@ -88,6 +107,11 @@ export interface ConnectionSignupView {
   businessApp: boolean
   /** La clínica no quiso compartir el historial del celular al conectar. */
   historyDeclined: boolean
+  /**
+   * Meta cortó la conexión de la cuenta y por qué, en palabras: no llegan ni
+   * salen mensajes hasta volver a conectar con el botón. Nulo: no se cortó.
+   */
+  metaRemoved: { at: string; why: string } | null
 }
 
 /**
@@ -153,6 +177,7 @@ function signupView(signup: ConnectionSignup | null): ConnectionSignupView | nul
     })),
     businessApp: signup.businessApp === true,
     historyDeclined: Boolean(signup.sync?.historyDeclinedAt),
+    metaRemoved: signup.metaRemoved ? { at: signup.metaRemoved.at, why: metaRemovalWhy(signup.metaRemoved) } : null,
   }
 }
 
@@ -1029,6 +1054,8 @@ export async function changeConnectionCredentials(
               tokenExpiresAt: origin.tokenExpiresAt?.toISOString() ?? null,
               tokenNeverExpires: false,
               tokenProblem: null,
+              // Volver a entrar con Facebook rehace la conexión que Meta había cortado.
+              metaRemoved: null,
             },
           }
         : {}),

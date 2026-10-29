@@ -196,8 +196,8 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    como dirección `https://<API>/api/webhooks/meta/whatsapp` y como clave de
    verificación el valor de `META_WEBHOOK_VERIFY_TOKEN`; suscribir los campos
    `messages`, `message_template_status_update` y `template_category_update`, que son los que odentIA usa, y
-   `account_update`, que la guía de Meta exige (odentIA lo recibe y no hace nada
-   con él). Para los números que siguen en la app WhatsApp Business del celular
+   `account_update`, que la guía de Meta exige (por él odentIA sabe que Meta
+   cortó o rehízo la conexión de la cuenta). Para los números que siguen en la app WhatsApp Business del celular
    (coexistencia), además `smb_message_echoes` (lo que el equipo escribe desde
    el celular), `history` (las conversaciones anteriores, al conectar) y
    `smb_app_state_sync` (la agenda de contactos). Es una sola dirección para

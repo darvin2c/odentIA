@@ -109,6 +109,8 @@ export interface WorkspaceNoticeInput {
  *   firmado o se cambió la clave secreta.
  * - `vence-clave-meta:<conexión>`: la clave de la app propia ya no vence en
  *   los próximos 7 días (se pegó otra) o la conexión ya no está activa.
+ * - `meta-desconecto:<conexión>`: Meta ya no tiene cortada la conexión (se
+ *   volvió a conectar o Meta avisó que se reconectó) o la conexión ya no está activa.
  */
 export const NOTICE_SUBJECTS = [
   "producto",
@@ -118,6 +120,7 @@ export const NOTICE_SUBJECTS = [
   "clave-meta",
   "firma-meta",
   "vence-clave-meta",
+  "meta-desconecto",
 ] as const
 
 /**
@@ -226,6 +229,9 @@ export async function settleWorkspaceNotifications(tx: Db, orgId: string, scope:
         or (n.subject like 'vence-clave-meta:%' and not exists (select 1 from channel_connection c
           where c.organization_id = n.organization_id and c.id::text = ${subjectId("vence-clave-meta")}
             and c.status = 'active' and (c.own_app->>'tokenExpiresAt')::timestamptz <= now() + interval '7 days'))
+        or (n.subject like 'meta-desconecto:%' and not exists (select 1 from channel_connection c
+          where c.organization_id = n.organization_id and c.id::text = ${subjectId("meta-desconecto")}
+            and c.status = 'active' and jsonb_typeof(c.signup->'metaRemoved') = 'object'))
       )`)
 }
 
