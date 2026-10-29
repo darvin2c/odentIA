@@ -54,7 +54,9 @@ En una ronda de latidIA con casos nuevos al azar (issue #328), una persona escri
 - **Medido el 2026-10-29**, con pacientes inventados por un modelo, no con una clínica real:
   - En las 12 275 líneas de persona de las rondas anteriores de la auditoría (10 644 de odentIA y 1 631 de latidIA), las frases nuevas solo marcan las del caso del murciélago.
   - Con `GUIONES=urgencias` y el modelo real, en odentIA, la mordida de perro en la boca y el murciélago al despertar pasan con prioridad alta y su aviso empieza por el 106. «Mi perro me mordió la placa» no dispara la alarma, y las urgencias de la boca siguen sin el 106.
-  - En la ronda de latidIA con los mismos 20 casos, ninguna otra conversación disparó las frases nuevas, y cumplieron todo 7 (antes, 4 y 8). En el caso del murciélago, la primera respuesta dijo a dónde ir en 8 de 9 corridas, frente a 0 de 2 antes; la otra lo condicionó a «si crees que tu vida puede estar en peligro». No cumplió todo en ninguna, como antes, por fluidez: ante una persona que insiste, repite el teléfono de la clínica y la misma advertencia en cada respuesta.
+  - En la ronda de latidIA con los mismos 20 casos, ninguna otra conversación disparó las frases nuevas, y cumplieron todo 7 (antes, 4 y 8).
+  - En el caso del murciélago, la primera respuesta dijo a dónde ir en 11 de 13 corridas con el cambio, frente a 0 de 6 sin él. Medido a la vez y en bases nuevas, `main` dio 0 de 4 (empezó siempre por el teléfono del consultorio) y el cambio, 3 de 4. Las dos que fallaron con el cambio lo condicionaron a «si crees que tu vida puede estar en peligro».
+  - No cumplió todo en ninguna, con el cambio o sin él, por fluidez: ante una persona que insiste, repite el teléfono de la clínica y la misma advertencia en cada respuesta.
 
 ### Alternativas descartadas
 
