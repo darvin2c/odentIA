@@ -154,6 +154,9 @@ for (const viewport of [
 
       const page = owner.page
       await page.setViewportSize(viewport)
+      // Su contexto no nace con el esquema de esta prueba: sin esto, la app aplica
+      // el tema del sistema (claro) cuando monta y pisa el que pone `theme`.
+      await page.emulateMedia({ colorScheme: dark ? "dark" : "light" })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       // El siguiente paso navega: es un enlace con aspecto de botón y se localiza por su rol real.
       await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()
