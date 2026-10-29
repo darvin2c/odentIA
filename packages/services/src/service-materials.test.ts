@@ -488,7 +488,7 @@ it("«Fueron 4, no 2»: corregir hacia arriba y hacia abajo queda unido a la ate
   expect(readByOther.canAddProducts).toBe(false)
 })
 
-it("Clío: el material dicho se busca en Inventario y es el total de la atención, no se suma a lo de sus servicios (ADR 0105)", async () => {
+it("Clío: el material dicho se busca en Inventario y es el total de la atención, no se suma a lo de sus servicios (ADR 0106)", async () => {
   const { f, store, gloves, paste } = await careScenario()
   await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { clinicalAssistantEnabled: true }))
   // Nombres propios: otras pruebas dejan productos con el mismo nombre.

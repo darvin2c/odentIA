@@ -65,7 +65,7 @@ interface PracticeDictation {
     sinControles?: boolean
     /** Pidió armar el presupuesto ahora (true) o no (false). */
     presupuesto?: boolean
-    /** Materiales que dijo usar (ADR 0105), por una palabra y cuántos si lo dijo. Exactos: ni uno de más. */
+    /** Materiales que dijo usar (ADR 0106), por una palabra y cuántos si lo dijo. Exactos: ni uno de más. */
     materiales?: Array<{ producto: string; cantidad?: number }>
   }
 }

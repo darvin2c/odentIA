@@ -130,7 +130,7 @@ export function allergyAndDonePrompt(clinician: string, done: string): string[] 
 }
 
 /**
- * El material que se dice usado en la atención (ADR 0105), igual en todo
+ * El material que se dice usado en la atención (ADR 0106), igual en todo
  * producto. El modelo lo deja con sus palabras; el servicio lo busca en
  * Inventario y lo cuenta como el total de ese producto. `used` y `done`:
  * ejemplos de lo usado y de lo hecho, con las palabras del producto.

@@ -949,7 +949,7 @@ test("latidIA: Clío anota el material dicho, al firmar se ve lo que salió del 
   expect((await request(page, api, "PUT", "/api/agent/config", slug, { clinicalAssistantEnabled: true })).status).toBe(200)
 
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
-  // Clío anota el material dicho: el total, no se suma a lo que trae la consulta (ADR 0105).
+  // Clío anota el material dicho: el total, no se suma a lo que trae la consulta (ADR 0106).
   const idle = page.getByRole("region", { name: "Dictado de la atención" })
   await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
   await idle.getByLabel("Escribe lo dictado").fill("Usé dos pares de guantes.")

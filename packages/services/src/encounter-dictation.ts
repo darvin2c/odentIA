@@ -187,7 +187,7 @@ async function activeServices(tx: Db, orgId: string): Promise<ServiceOption[]> {
     .limit(500)
 }
 
-/** Un producto de Inventario que se usa en las atenciones: donde se busca un material dicho (ADR 0105). */
+/** Un producto de Inventario que se usa en las atenciones: donde se busca un material dicho (ADR 0106). */
 interface CareProduct {
   id: string
   name: string

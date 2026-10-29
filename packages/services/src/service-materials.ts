@@ -9,7 +9,7 @@
  *   desde `finalizeEncounter`) del almacén principal de la sede de la
  *   atención, del lote que vence primero; si no alcanza queda como faltante.
  *   La atención nunca se bloquea por esto. Sin sede no se descuenta nada.
- * - Lo que se dice usado a Clío («usé una mascarilla», ADR 0105) y se confirma
+ * - Lo que se dice usado a Clío («usé una mascarilla», ADR 0106) y se confirma
  *   es el total de ese producto en la atención: reemplaza lo de sus servicios,
  *   nunca se suma, y sale al firmar con lo demás.
  * - Lo usado se corrige desde la atención firmada («Fueron 4, no 2») con un
@@ -476,7 +476,7 @@ const DICTATED = "lo que se dictó"
 /**
  * Lo que descuenta una atención: sus procedimientos no anulados con servicio
  * × su cantidad × los materiales de ese servicio, por producto. Un material
- * dicho y confirmado (ADR 0105) es el total de ese producto: reemplaza lo de
+ * dicho y confirmado (ADR 0106) es el total de ese producto: reemplaza lo de
  * sus servicios, nunca se suma. Un producto desactivado o que ya no se usa en
  * las atenciones no se descuenta.
  */

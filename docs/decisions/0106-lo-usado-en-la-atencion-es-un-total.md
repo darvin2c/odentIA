@@ -1,4 +1,4 @@
-# 0105 · Lo usado en la atención es un total: se ve al firmar, se corrige ahí y se le dice a Clío
+# 0106 · Lo usado en la atención es un total: se ve al firmar, se corrige ahí y se le dice a Clío
 
 Fecha: 2026-10-29 · Estado: aceptada · Precisa la 0067
 
@@ -22,7 +22,7 @@ Los materiales de cada servicio se descontaban al firmar (ADR 0067), pero casi n
 
 ## Consecuencias
 
-- Una clase más de sugerencia, común a odentIA y latidIA (migración 0018).
+- Una clase más de sugerencia, común a odentIA y latidIA (migración 0019).
 - Lo dictado se mide con `eval:dictado` (caóticos) y `eval:dictado-medico`, con dictados de materiales y de lo que no lo es (una resina hecha, un medicamento recetado).
 - Si las clínicas piden anotar materiales durante la atención sin Clío, se revisa la lista editable descartada.
 

@@ -127,7 +127,7 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
   // Lo dictado en un bloque del producto lo declara el bloque (odentIA: lo de una pieza, issue 109).
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
   // Lo que se dijo hecho hoy (issue 109): sale del plan, de los servicios o como acto libre.
-  // Con lo hecho, el material que se dijo usar (ADR 0105): sale de la sede al firmar.
+  // Con lo hecho, el material que se dijo usar (ADR 0106): sale de la sede al firmar.
   procedimientos: { kinds: ["procedimiento", "material"], onlySuggested: "Sin procedimientos registrados" },
   // Los signos vitales y el examen por sistemas que dicta latidIA (issue 229).
   examen: { kinds: ["signos", "examen"], onlySuggested: "Sin examen registrado" },
@@ -344,7 +344,7 @@ export function EncounterEditor({
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
   // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
-  // «Corregir» desde «Atención finalizada»: el aviso se oculta mientras el formulario está abierto y vuelve al cerrarlo.
+  // «Corregir» desde «Atención finalizada»: el formulario se abre encima del aviso, que queda abierto debajo.
   const [correctingMaterials, setCorrectingMaterials] = useState(false)
   const [materialsCorrected, setMaterialsCorrected] = useState(false)
   const [budgetSent, setBudgetSent] = useState(false)
@@ -2022,17 +2022,9 @@ export function EncounterEditor({
         {signFields}
       </DictationSignDialog>
 
-      <EncounterMaterialsCorrection
-        open={correctingMaterials}
-        patientId={patientId}
-        encounterId={encounterId}
-        onClose={() => setCorrectingMaterials(false)}
-        onSaved={() => setMaterialsCorrected(true)}
-      />
-
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
       <Dialog
-        open={finalizedBilling !== null && !correctingMaterials}
+        open={finalizedBilling !== null}
         onOpenChange={(next) => {
           if (!next) closeFinalized()
         }}
@@ -2090,6 +2082,14 @@ export function EncounterEditor({
               onCorrect={() => setCorrectingMaterials(true)}
             />
           ) : null}
+          {/* Encima del aviso, dentro de él: al cerrarlo el foco vuelve a «Corregir». */}
+          <EncounterMaterialsCorrection
+            open={correctingMaterials}
+            patientId={patientId}
+            encounterId={encounterId}
+            onClose={() => setCorrectingMaterials(false)}
+            onSaved={() => setMaterialsCorrected(true)}
+          />
           {/* Mismo paso de cierre: casi siempre la persona sigue ahí y conviene que se lo lleve. */}
           {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget ? (
             <section

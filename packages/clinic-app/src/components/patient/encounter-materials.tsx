@@ -224,7 +224,8 @@ export function FinalizedMaterialsNote({
 
 /**
  * «Corregir» abierto desde fuera del bloque (el cierre): espera la lectura de
- * lo registrado y abre el mismo formulario.
+ * lo registrado y abre el mismo formulario, siempre como cajón encima de la
+ * ventana que lo abre (en la columna lateral quedaría fuera de ella).
  */
 export function EncounterMaterialsCorrection({
   open,
@@ -253,6 +254,7 @@ export function EncounterMaterialsCorrection({
       current={data}
       canAddProducts={data.canAddProducts}
       locale={locale}
+      dock={false}
     />
   )
 }
@@ -283,11 +285,14 @@ function EncounterMaterialsDrawer({
   current,
   canAddProducts,
   locale,
+  dock = true,
 }: {
   open: boolean
   onClose: () => void
   /** Se guardó al menos un cambio. */
   onSaved?: () => void
+  /** `false`: siempre cajón (`FormDrawer`), como lo que se abre desde otra ventana. */
+  dock?: boolean
   patientId: string
   encounterId: string
   current: EncounterMaterials
@@ -424,6 +429,7 @@ function EncounterMaterialsDrawer({
   return (
     <FormDrawer
       open={open}
+      dock={dock}
       title="Corregir materiales"
       description={
         current.branch

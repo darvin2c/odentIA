@@ -138,17 +138,16 @@ test("al firmar se ve lo que salió y lo que no había, y quien atendió agrega 
   await page.evaluate(() => document.documentElement.classList.remove("dark"))
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  // Con el teclado: «Corregir» abre el formulario y Esc vuelve al aviso con el foco dentro.
+  // Con el teclado: «Corregir» abre el formulario encima y Esc lo cierra; el foco vuelve a «Corregir».
   await materials.getByRole("button", { name: "Corregir" }).focus()
   await page.keyboard.press("Enter")
   await expect(surface(page, { name: "Corregir materiales" })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(done).toBeVisible()
-  await expect.poll(() => done.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true)
+  await expect(materials.getByRole("button", { name: "Corregir" })).toBeFocused()
 
-  // «Y una mascarilla»: se corrige ahí mismo y el aviso vuelve con lo registrado.
+  // «Y una mascarilla»: se corrige ahí mismo y el aviso queda con lo registrado.
   await materials.getByRole("button", { name: "Corregir" }).click()
-  await expect(done).toBeHidden()
   const drawer = surface(page, { name: "Corregir materiales" })
   await drawer.getByRole("button", { name: "Agregar otro producto" }).click()
   await drawer.getByRole("combobox", { name: "Producto" }).click()

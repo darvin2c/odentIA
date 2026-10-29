@@ -1946,7 +1946,7 @@ export const clinicalFollowUp = pgTable(
 /**
  * Las clases de sugerencia de Clío: las de todo producto (con la alergia que
  * se dice, lo que se hizo hoy, la próxima cita, el presupuesto a pedido,
- * issue 109, y el material que se usó, ADR 0105), el odontograma de odentIA y
+ * issue 109, y el material que se usó, ADR 0106), el odontograma de odentIA y
  * los signos vitales, el examen por sistemas y el descanso médico de latidIA
  * (issue 229, entrega 10).
  */

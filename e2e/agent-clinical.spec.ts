@@ -435,7 +435,7 @@ test("asistente clínico: la próxima cita y el presupuesto se piden por voz y s
   expect(await overflow(page)).toBeLessThanOrEqual(0)
 })
 
-test("asistente clínico: el material dicho es el total de la atención y sale de la sede al firmar (ADR 0105)", async ({ owner }, info) => {
+test("asistente clínico: el material dicho es el total de la atención y sale de la sede al firmar (ADR 0106)", async ({ owner }, info) => {
   const { page, org } = owner
   const product = async (name: string, unit: string, counted: number) => {
     const created = await call<{ id: string }>(page, "POST", "/api/inventory/products", org.slug, { name, usedInCare: true, unit }, 201)

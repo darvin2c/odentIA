@@ -41,7 +41,7 @@ interface PracticeDictation {
     hechos?: string[]
     /** Alergias dichas, por una palabra de la sustancia; «ninguna»: dijo que no tiene. Exactas: ni una de más. */
     alergias?: string[]
-    /** Materiales que dijo usar (ADR 0105), por una palabra y cuántos si lo dijo. Exactos: ni uno de más. */
+    /** Materiales que dijo usar (ADR 0106), por una palabra y cuántos si lo dijo. Exactos: ni uno de más. */
     materiales?: Array<{ producto: string; cantidad?: number }>
     /** La próxima cita pedida: en cuántos días desde hoy (con su margen, 1 por defecto) y la hora si la dijo. Exactas. */
     citas?: Array<{ enDias?: number; margen?: number; hora?: string }>

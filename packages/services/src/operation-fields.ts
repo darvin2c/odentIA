@@ -410,7 +410,7 @@ export const OPERATIONS = {
       quantity: { kind: "int", min: 1, max: 99, label: "Cantidad", description: "Cuántas unidades, solo si lo dijo («dos carillas» = 2).", body: "optional", nullable: true, agent: "fills" },
     },
   },
-  // Un material que se dice usado en la atención (ADR 0105): se busca en Inventario y, confirmado,
+  // Un material que se dice usado en la atención (ADR 0106): se busca en Inventario y, confirmado,
   // es el total de ese producto en la atención; sale de la sede al firmar, con los de sus servicios.
   "atencion.material": {
     label: "Material usado",
