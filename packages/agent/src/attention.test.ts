@@ -1,12 +1,37 @@
 import { GENERAL_PERMISSION_QUESTION } from "@odentia/services"
 import { describe, expect, it } from "vitest"
-import { attentionLines, attentionProgress, fitHistory, HISTORY_CHARS, HISTORY_HEAD, nameQuestionsIn } from "./attention"
+import { attentionLines, attentionProgress, fitHistory, formulasIn, HISTORY_CHARS, HISTORY_HEAD, nameQuestionsIn } from "./attention"
 
 describe("pedir el nombre dos veces en un mensaje (auditoría del ADR 0104)", () => {
   it("cuenta las preguntas que piden su nombre, no las menciones", () => {
     expect(nameQuestionsIn("¿Cuál horario te conviene? Y para registrarte, ¿me dices tus nombres y apellidos? ¿Con quién tengo el gusto?")).toBe(2)
     expect(nameQuestionsIn("Para registrarte, ¿me dices tus nombres y apellidos?")).toBe(1)
     expect(nameQuestionsIn("Te registro con tu nombre. ¿Te la reservo?")).toBe(0)
+  })
+})
+
+describe("las fórmulas que no dicen nada nuevo (auditoría del ADR 0104)", () => {
+  it("reconoce «Entiendo…» al empezar y «anoté que…» en cualquier parte, en los dos idiomas", () => {
+    expect(formulasIn("Entiendo, Martín; tomé nota de que lo necesitas hoy.")).toEqual({ opener: true, noted: true })
+    expect(formulasIn("I understand. I've noted that you need it today.")).toEqual({ opener: true, noted: true })
+    expect(formulasIn("Ya quedó anotado que prefieres la tarde.")).toEqual({ opener: false, noted: true })
+    expect(formulasIn("Te entiendo: el jueves no hay, pero el viernes tengo las 10:00.")).toEqual({ opener: false, noted: false })
+  })
+
+  it("cuenta las de esta atención y el turno lo dice", () => {
+    const startedAt = "2026-10-28T15:00:00.000Z"
+    const at = (minutes: number) => new Date(Date.parse(startedAt) + minutes * 60_000).toISOString()
+    const progress = attentionProgress({
+      items: [
+        { direction: "out", senderKind: "agent", body: "Entiendo que lo necesitas pronto.", createdAt: at(1) },
+        { direction: "out", senderKind: "agent", body: "Entiendo, ya lo tiene recepción.", createdAt: at(-600) },
+      ],
+      startedAt,
+      state: { pending: [], recent: [], lookups: [] },
+      promotions: [],
+    })
+    expect(progress.formulas).toEqual({ opener: 1, noted: 0 })
+    expect(attentionLines(progress, "Sofi").join("\n")).toContain("no vuelvas a empezar así")
   })
 })
 

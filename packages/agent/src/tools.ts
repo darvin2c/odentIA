@@ -99,7 +99,7 @@ import { formatForChannel } from "./channel-format.js"
 import { claimsOf } from "./claims.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
-import { nameQuestionsIn } from "./attention.js"
+import { formulasIn, nameQuestionsIn } from "./attention.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
@@ -295,6 +295,10 @@ export interface AgentToolCtx {
   treatmentNudged?: boolean
   /** Ya se le pidió una vez en esta corrida que no pregunte su nombre dos veces en un mensaje. */
   nameNudged?: boolean
+  /** Cuántas respuestas de esta atención ya usaron «Entiendo…» o «anoté que…» (`formulasIn`). */
+  formulas?: { opener: number; noted: number }
+  /** Ya se le pidió una vez en esta corrida que no repita esas fórmulas. */
+  formulaNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
@@ -829,6 +833,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te trata de usted y tu mensaje la tutea. Escríbelo de usted, también las frases que te dieron las herramientas (por ejemplo «Al confirmar, acepta nuestro aviso…» o «complete sus datos»), y vuelve a llamar a la misma herramienta sola en su paso.`
   }
 
+  /** Vuelve a la fórmula de antes, «Entiendo…» o «anoté que…» (auditoría del ADR 0104). Una vez por corrida. */
+  const formulaAgain = (text: string): string | null => {
+    if (ctx.formulaNudged || !ctx.formulas) return null
+    const now = formulasIn(text)
+    if (!(now.opener && ctx.formulas.opener > 0) && !(now.noted && ctx.formulas.noted > 0)) return null
+    ctx.formulaNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: en esta atención ya le respondiste con «Entiendo…» o «anoté que…». Respóndele directo a lo que dijo o preguntó, sin repetírselo; si no hay nada nuevo, una frase corta basta. Vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
   /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
   const nameTwice = (text: string): string | null => {
     if (ctx.nameNudged || nameQuestionsIn(text) < 2) return null
@@ -909,7 +922,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text)
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text) ?? formulaAgain(text)
       if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
@@ -2206,7 +2219,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Antes de registrar nada: el aviso en otro idioma o en otro trato se vuelve a pedir.
-      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice)) : null
+      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? formulaAgain(notice)) : null
       if (mismatch) return mismatch
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).

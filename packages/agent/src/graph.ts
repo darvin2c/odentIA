@@ -938,6 +938,8 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // Cómo va la atención (ADR 0104): la indicación del turno dice lo que
     // falta y lo que ya se hizo no se vuelve a ordenar.
     const progress = attentionProgress({ items, startedAt, state, promotions: clinicData.promotions.map((promo) => promo.name), name: givenName })
+    // `send_reply` pide de nuevo la respuesta que vuelve a «Entiendo…» o «anoté que…».
+    toolCtx.formulas = progress.formulas
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
       .filter(Boolean)
       .join("\n\n")

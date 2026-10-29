@@ -63,6 +63,21 @@ export function nameQuestionsIn(body: string): number {
   return questionsOf(body).filter((question) => ASKS_NAME.test(normalizeForSearch(question))).length
 }
 
+/** Empezar repitiendo lo que dijo: «Entiendo que…», «I understand…». */
+const ACK_OPENER = /^(entiendo|comprendo|i understand|i see|understood)\b/
+/** Responder con que se tomó nota: «anoté que…», «tomo nota de…», «I've noted…». */
+const ACK_NOTED = /\b(anote|anotado|anotada|tomo nota|tome nota|tomo en cuenta|i ve noted|i have noted|noted that)\b/
+
+/**
+ * Las fórmulas con que responde sin decir nada nuevo. En las rondas de la auditoría del ADR
+ * 0104, ninguna de las 64 conversaciones con dos o más respuestas que empezaban por
+ * «Entiendo» fue fluida, ni las 11 con dos o más «anoté que…».
+ */
+export function formulasIn(body: string): { opener: boolean; noted: boolean } {
+  const said = normalizeForSearch(body)
+  return { opener: ACK_OPENER.test(said), noted: ACK_NOTED.test(said) }
+}
+
 /** Cómo va la atención en curso, contado por el código (ADR 0104). */
 export interface AttentionProgress {
   /** Mensajes que ya le salieron a su nombre en esta atención (también lo automático). */
@@ -84,6 +99,8 @@ export interface AttentionProgress {
   namesAsked: number
   /** Ya le habló por su nombre en esta atención (si se sabe cuál es). */
   usedName: boolean
+  /** Respuestas suyas en esta atención que empezaron con «Entiendo…» o dijeron «anoté que…» (`formulasIn`). */
+  formulas: { opener: number; noted: number }
 }
 
 /**
@@ -124,6 +141,10 @@ export function attentionProgress(input: {
     }),
     namesAsked: said.filter((item) => nameQuestionsIn(item.body ?? "") > 0).length,
     usedName: firstName.length > 0 && ` ${spoken.replace(/\n/g, " ")} `.includes(` ${firstName} `),
+    formulas: {
+      opener: said.filter((item) => formulasIn(item.body ?? "").opener).length,
+      noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
+    },
   }
 }
 
@@ -143,6 +164,11 @@ export function attentionLines(
       ? `Es tu primera respuesta en esta atención: preséntate como ${persona} en una frase.`
       : "Ya le respondiste en esta atención: no te presentes ni vuelvas a saludar; ve directo a lo que pide.",
   ]
+  if (progress.formulas.opener > 0 || progress.formulas.noted > 0) {
+    lines.push(
+      "En esta atención ya le respondiste con «Entiendo…» o «anoté que…»: no vuelvas a empezar así ni le repitas lo que acaba de decir. Responde directo a lo que pide o pregunta; si no hay nada nuevo que decirle, una frase corta basta.",
+    )
+  }
   if (progress.done && !progress.doneTold) {
     lines.push(`Ya quedó hecho en esta atención: ${progress.done}, pero todavía no se lo dijiste. Díselo en esta respuesta, en una frase, junto con lo que pide ahora.`)
   }
