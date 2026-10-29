@@ -308,6 +308,9 @@ describe("resumen del caso para quien lo toma", () => {
     expect(limited.known.map((item) => item.origin)).toEqual(["caso"])
     // Otra organización no llega a esta conversación.
     await expect(run((tx) => getCaseBrief(tx, OTHER, ana.conversationId), OTHER)).rejects.toMatchObject({ status: 404 })
+    // Cuando da lo que faltaba, queda dicho que ya no falta nada.
+    await run((tx) => annotateHandoff(tx, ORG, created[0]!.id, { clearPending: true }))
+    expect((await run((tx) => getCaseBrief(tx, ORG, ana.conversationId))).handoff).toMatchObject({ asks: "Que la atiendan hoy", pending: null })
   })
 
   it("lee los mensajes citados en una derivación y nada más", () => {

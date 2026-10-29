@@ -33,6 +33,7 @@ import {
   setKnowledgeStatus,
   updateTask,
   getAgentCaseState,
+  formatAgentCaseForPrompt,
   getAgentConfig,
   listAnswerTraces,
   listKnowledgeGaps,
@@ -2518,6 +2519,38 @@ it("un dato de la persona dicho hoy llega a su siguiente conversación; lo clín
   // El equipo lo quita: el agente deja de usarlo.
   await inOrg((tx) => removePersonFact(tx, "org_a", adminId, conv!.contactId, facts[0]!.id))
   expect(await promptOf("evt-memoria-3")).not.toContain("Prefiere citas por la tarde")
+})
+
+it("lo que da después de pasar el tema lo deja al día para quien lo tiene (ADR 0104)", async () => {
+  const first = await ingestText("tg:tema-al-dia", "evt-tema-1", "Necesito una constancia de mi atención")
+  const topic = await withOrgContext(appDb, "org_a", (tx) =>
+    createHandoff(tx, "org_a", null, {
+      conversationId: first.conversationId,
+      reason: "Constancia de atención",
+      summary: "Pide una constancia de su atención.",
+      priority: "media",
+      createdBy: "agent",
+      asks: "Una constancia de su atención",
+      pending: "Su nombre completo y su DNI",
+    }))
+  // Sofi ve qué falta en el tema, no solo que lo tiene el equipo.
+  const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", first.conversationId))
+  expect(formatAgentCaseForPrompt(state, { timezone: "America/Lima", locale: "es-PE" })).toContain("Falta: «Su nombre completo y su DNI».")
+  const second = await ingestText("tg:tema-al-dia", "evt-tema-2", "Soy Rosa Campos, DNI 41234567")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, second.conversationId)))
+  const remember = makeAgentTools({
+    db: appDb, orgId: "org_a", conversationId: second.conversationId, contactId: conv!.contactId,
+    triggerId: second.messageId, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }).find((item) => item.name === "recordar_tema")!
+  const read = async () => (await ownerDb.select({ asks: agentHandoff.asks, pending: agentHandoff.pending }).from(agentHandoff).where(eq(agentHandoff.id, topic.id)))[0]
+  // Dio lo que faltaba: ya no figura como pendiente, y lo que pide sigue igual.
+  await remember.invoke({ tema_id: topic.id, falta: "nada" })
+  expect(await read()).toEqual({ asks: "Una constancia de su atención", pending: null })
+  // Lo que precisa queda en lo que pide.
+  await remember.invoke({ tema_id: topic.id, pide: "Una constancia de su atención del 12 de octubre en Miraflores" })
+  expect(await read()).toEqual({ asks: "Una constancia de su atención del 12 de octubre en Miraflores", pending: null })
 })
 
 it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente, y solo si hay dirección pública", async () => {

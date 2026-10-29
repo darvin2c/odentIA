@@ -3740,19 +3740,21 @@ const HANDOFF_NOTICE_CHARS = 4000
 /**
  * Completa una derivación ya registrada con lo que se sabe después de crearla:
  * qué pide la persona, qué falta y el aviso que recibió. Solo escribe lo que
- * llega con texto; no cambia motivo, prioridad ni responsable.
+ * llega con texto, salvo `clearPending`, que deja dicho que ya no falta nada
+ * (la persona dio lo que faltaba); no cambia motivo, prioridad ni responsable.
  */
 export async function annotateHandoff(
   tx: Db,
   orgId: string,
   handoffId: string,
-  input: { asks?: string | null; pending?: string | null; notice?: string | null },
+  input: { asks?: string | null; pending?: string | null; notice?: string | null; clearPending?: boolean },
 ): Promise<void> {
-  const patch: { asks?: string; pending?: string; notice?: string } = {}
+  const patch: { asks?: string; pending?: string | null; notice?: string } = {}
   const asks = cleanReason(input.asks ?? "", HANDOFF_BRIEF_CHARS)
   if (asks) patch.asks = asks
   const pending = cleanReason(input.pending ?? "", HANDOFF_BRIEF_CHARS)
-  if (pending) patch.pending = pending
+  if (input.clearPending) patch.pending = null
+  else if (pending) patch.pending = pending
   const notice = (input.notice ?? "").trim().slice(0, HANDOFF_NOTICE_CHARS)
   if (notice) patch.notice = notice
   if (Object.keys(patch).length === 0) return
@@ -3992,7 +3994,7 @@ export async function recordTopicAskedAgain(
   tx: Db,
   orgId: string,
   input: { handoffId: string; messageId: string | null },
-): Promise<{ assigneeName: string | null; reason: string; raised: boolean }> {
+): Promise<{ assigneeName: string | null; reason: string; raised: boolean; conversationId: string | null }> {
   const [row] = await tx
     .select()
     .from(agentHandoff)
@@ -4031,7 +4033,7 @@ export async function recordTopicAskedAgain(
       permission: "conversations.read",
     })
   }
-  return { assigneeName, reason: row.reason, raised }
+  return { assigneeName, reason: row.reason, raised, conversationId: row.conversationId }
 }
 
 /** Cuántas veces vuelve a preguntar por lo mismo antes de que su tema pase a urgente. */
