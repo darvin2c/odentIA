@@ -96,6 +96,7 @@ import type { DecisionModel } from "./decision/port.js"
 import { choseThisSlot, understoodYes } from "./confirm-intent.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
+import { claimsOf } from "./claims.js"
 import { languageOf } from "./language.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
@@ -201,6 +202,9 @@ const ASK_YES: Record<string, string> = {
     "la cita sigue en pie. Pregúntale con naturalidad si se la cancelas, con el día y la hora de esa cita; no digas que ya la cancelaste",
 }
 
+/** Lo que guarda lo que dijo la persona: con una de ellas en la corrida, «lo anoté» es cierto. */
+const CLAIM_NOTES = ["anotar_caso", "recordar_dato", "update_contact", "guardar_contacto", "elegir_mensajes"]
+
 /** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
 const SLOT_NOT_OFFERED =
   "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista, vuelve a consultar con buscar_huecos (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
@@ -283,6 +287,10 @@ export interface AgentToolCtx {
   personLanguage?: "es" | "en" | null
   /** Ya se le pidió una vez en esta corrida que responda en el idioma de la persona. */
   languageNudged?: boolean
+  /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
+  caseOnFile?: { topics: number; notes: number }
+  /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
+  claimNudged?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -803,6 +811,30 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te escribe en inglés y tu mensaje está en español. Escríbelo en inglés, traduciendo también lo que te dieron las herramientas, y vuelve a llamar a la misma herramienta sola en su paso.`
   }
 
+  /**
+   * Dice que el equipo lo verá o que lo anotó, y no consta (auditoría del ADR 0104):
+   * «recepción lo revisará» sin ningún pase, «ya lo anoté» sin ninguna nota. Una vez
+   * por corrida, como el idioma: lo que hizo en este mismo paso cuenta (`toolsUsed`).
+   */
+  const unbackedClaim = (text: string): string | null => {
+    if (ctx.claimNudged) return null
+    const claims = claimsOf(text)
+    if (!claims.team && !claims.note) return null
+    const used = new Set(ctx.toolsUsed)
+    const passed = ctx.handedOff || used.has("request_human_handoff") || used.has("recordar_tema") || (ctx.caseOnFile?.topics ?? 0) > 0
+    const noted = passed || (ctx.caseOnFile?.notes ?? 0) > 0 || CLAIM_NOTES.some((name) => used.has(name))
+    const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
+    if (claims.team && !passed) {
+      ctx.claimNudged = true
+      return `${prefix}No enviado: dices que el equipo lo verá o que se lo pasaste, y en esta conversación no hay ningún pase. Si hace falta que lo vea alguien del equipo, pásalo con request_human_handoff y pon el aviso en message; si no, no lo digas y respóndele tú. Después vuelve a enviar la respuesta sola en su paso.`
+    }
+    if (claims.note && !noted) {
+      ctx.claimNudged = true
+      return `${prefix}No enviado: dices que lo anotaste y no anotaste nada. Si lo que te dijo hará falta después, anótalo con anotar_caso en el mismo paso que tu respuesta; si no, no digas que lo anotaste.`
+    }
+    return null
+  }
+
   const checkReply = async (text: string): Promise<{ verdict: ReplyVerdict | null; blocked: string | null }> => {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
     const verdict = verifyReply(text, ctx.evidence ?? [], await orgZone())
@@ -852,7 +884,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text)
+      const mismatch = wrongLanguage(text) ?? unbackedClaim(text)
       if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked

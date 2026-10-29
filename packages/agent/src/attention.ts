@@ -70,8 +70,8 @@ export interface AttentionProgress {
   done: string | null
   /** Promociones vigentes que ya nombró en esta atención. */
   promotions: string[]
-  /** Ya le preguntó a quien escribe cómo se llama en esta atención. */
-  askedName: boolean
+  /** Cuántas de sus respuestas en esta atención le preguntaron a quien escribe cómo se llama. */
+  namesAsked: number
   /** Ya le habló por su nombre en esta atención (si se sabe cuál es). */
   usedName: boolean
 }
@@ -108,7 +108,7 @@ export function attentionProgress(input: {
       const key = normalizeForSearch(name).trim()
       return key.length > 0 && spoken.includes(key)
     }),
-    askedName: said.some((item) => questionsOf(item.body ?? "").some((question) => ASKS_NAME.test(normalizeForSearch(question)))),
+    namesAsked: said.filter((item) => questionsOf(item.body ?? "").some((question) => ASKS_NAME.test(normalizeForSearch(question)))).length,
     usedName: firstName.length > 0 && ` ${spoken.replace(/\n/g, " ")} `.includes(` ${firstName} `),
   }
 }
@@ -132,8 +132,13 @@ export function attentionLines(
   const save = who.saves ? "guárdalo con update_contact en este mismo paso y " : ""
   if (who.name) {
     if (!progress.usedName) lines.push(`Se llama ${who.name}: aún no le hablaste por su nombre en esta atención; hazlo en esta respuesta.`)
-  } else if (progress.askedName) {
-    lines.push(`Ya le preguntaste cómo se llama en esta atención: no se lo vuelvas a preguntar. Si ya te lo dijo, ${save}háblale por su nombre.`)
+  } else if (progress.namesAsked > 1) {
+    lines.push(`Ya le preguntaste cómo se llama ${progress.namesAsked} veces en esta atención: no se lo vuelvas a preguntar. Si ya te lo dijo, ${save}háblale por su nombre.`)
+  } else if (progress.namesAsked === 1) {
+    // Quien no contestó queda sin nombre: el juez lo pide, pero no en cada mensaje (auditoría del ADR 0104).
+    lines.push(
+      `Ya le preguntaste cómo se llama en esta atención. Si te lo dijo, ${save}háblale por su nombre; si no te lo dijo, no se lo preguntes en cada mensaje: pídeselo una vez más, con naturalidad, solo cuando haga falta (para reservarle o para pasar su caso).`,
+    )
   } else {
     lines.push(
       `Aún no sabes cómo se llama quien escribe ni se lo preguntaste en esta atención: si ya te lo dijo en la conversación, ${save}háblale por su nombre; si no, pregúntaselo al final de esta respuesta, sin frenar lo que pidió.`,

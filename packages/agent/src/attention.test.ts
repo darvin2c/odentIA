@@ -100,20 +100,22 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     expect(before.offered).toBe(false)
   })
 
-  it("si ya le preguntó su nombre no se lo vuelve a preguntar; «te registro con tu nombre» no es preguntar", () => {
+  it("cuenta cuántas veces le preguntó su nombre: una vez más solo si hace falta, y después no; «te registro con tu nombre» no es preguntar", () => {
     const out = (body: string, minutes = 1) => ({ direction: "out", senderKind: "agent", body, createdAt: at(minutes) })
     const unknown = attentionProgress({ items: [out("Hola, soy Sofi. Te registro con tu nombre. ¿Te la reservo?")], startedAt, state: empty, promotions: [] })
-    expect(unknown.askedName).toBe(false)
+    expect(unknown.namesAsked).toBe(0)
     expect(attentionLines(unknown, "Sofi", { saves: true })[1]).toBe(
       "Aún no sabes cómo se llama quien escribe ni se lo preguntaste en esta atención: si ya te lo dijo en la conversación, guárdalo con update_contact en este mismo paso y háblale por su nombre; si no, pregúntaselo al final de esta respuesta, sin frenar lo que pidió.",
     )
     for (const asked of ["¿Con quién tengo el gusto?", "Para registrarte, ¿me indicas tus nombres y apellidos?", "May I have your full name?"]) {
       const progress = attentionProgress({ items: [out(`Tengo el jueves a las 10:00. ${asked}`)], startedAt, state: empty, promotions: [] })
-      expect(progress.askedName).toBe(true)
-      expect(attentionLines(progress, "Sofi")[1]).toBe("Ya le preguntaste cómo se llama en esta atención: no se lo vuelvas a preguntar. Si ya te lo dijo, háblale por su nombre.")
+      expect(progress.namesAsked).toBe(1)
+      expect(attentionLines(progress, "Sofi")[1]).toContain("pídeselo una vez más, con naturalidad, solo cuando haga falta")
     }
+    const twice = attentionProgress({ items: [out("¿Con quién tengo el gusto?"), out("¿Me dices tu nombre?", 2)], startedAt, state: empty, promotions: [] })
+    expect(attentionLines(twice, "Sofi")[1]).toBe("Ya le preguntaste cómo se llama 2 veces en esta atención: no se lo vuelvas a preguntar. Si ya te lo dijo, háblale por su nombre.")
     // Lo que preguntó en la atención anterior no cuenta.
-    expect(attentionProgress({ items: [out("¿Con quién tengo el gusto?", -600)], startedAt, state: empty, promotions: [] }).askedName).toBe(false)
+    expect(attentionProgress({ items: [out("¿Con quién tengo el gusto?", -600)], startedAt, state: empty, promotions: [] }).namesAsked).toBe(0)
   })
 
   it("con su nombre en la ficha, se le pide usarlo hasta que lo usa, sin tildes ni el segundo nombre", () => {

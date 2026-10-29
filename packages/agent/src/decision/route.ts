@@ -421,8 +421,8 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
           ? " La clínica no tiene servicios cargados: no des precios de tratamientos."
           : ""
     const knowledge = has("consultar_conocimiento")
-      ? " Si un tema está solo en el índice o su respuesta aparece recortada, pide su texto con consultar_conocimiento antes de citarla. Si un dato no está arriba ni en lo que buscaste, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona."
-      : " Si un dato no está arriba, dilo y ofrece pasar el caso a una persona."
+      ? " Si un tema está solo en el índice o su respuesta aparece recortada, pide su texto con consultar_conocimiento antes de citarla. Si un dato no está arriba ni en lo que buscaste, usa consultar_conocimiento una vez; si tampoco está, pásalo al equipo con request_human_handoff y dile en message que se lo confirman por aquí."
+      : " Si un dato no está arriba, pásalo al equipo con request_human_handoff y dile en message que se lo confirman por aquí."
     return `${head} pide información. Arriba ya tienes ${listed}.${search} Si con eso basta, responde ahora con send_reply, en este mismo paso.${knowledge}${budgets}`
   }
   if (path === "saludo") {
@@ -447,7 +447,7 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
       facts.again
         ? " ya le avisaste en esta atención que lo tiene el equipo, y lo que vuelve a escribir le llega con el tema: no le repitas que lo tiene el equipo, que lo anotaste ni que se lo hiciste llegar; responde en una línea a lo nuevo que dijo o preguntó y, si no hay nada nuevo, dale algo concreto que aún no le diste (el teléfono de la sede, el horario de atención);"
         : ""
-    } si además pregunta algo que está en lo que sabes de la clínica (un precio, cuánto dura, una sede), respóndelo en el mismo aviso; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
+    } si además pregunta algo que está en lo que sabes de la clínica (un precio, cuánto dura, una sede), respóndelo en el mismo aviso; si para resolverlo el equipo necesitará un dato que puede darte ahora (su nombre completo, la fecha de su atención) y aún no lo tienes, pídeselo en el mismo aviso; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
   }
   // Con qué se propone la cita: quien aún no es paciente se reserva y registra con su sí (ADR 0101).
   const propose = has("reservar_paciente_nuevo") ? "proponer_cita (o reservar_paciente_nuevo, si aún no es paciente)" : "proponer_cita"
