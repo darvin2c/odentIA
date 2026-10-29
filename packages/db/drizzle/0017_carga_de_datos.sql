@@ -13,6 +13,4 @@ CREATE TABLE "admin"."clinic_import_row" (
 );
 --> statement-breakpoint
 ALTER TABLE "admin"."clinic_import_row" ADD CONSTRAINT "clinic_import_row_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."clinic_import_row" ADD CONSTRAINT "clinic_import_row_contact_fkey" FOREIGN KEY ("organization_id","contact_id") REFERENCES "public"."contact"("organization_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "admin"."clinic_import_row" ADD CONSTRAINT "clinic_import_row_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "clinic_import_row_contact_idx" ON "admin"."clinic_import_row" USING btree ("organization_id","contact_id");
+ALTER TABLE "admin"."clinic_import_row" ADD CONSTRAINT "clinic_import_row_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;

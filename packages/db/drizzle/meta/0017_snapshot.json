@@ -1,5 +1,5 @@
 {
-  "id": "27ac0e7e-fd56-4a45-b4a9-61509f5bad88",
+  "id": "823a697c-b992-4fcc-b6df-ea6336482e65",
   "prevId": "e7c8e362-0233-4c97-b884-1f3e483f1382",
   "version": "7",
   "dialect": "postgresql",
@@ -1032,29 +1032,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "clinic_import_row_contact_idx": {
-          "name": "clinic_import_row_contact_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "contact_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "clinic_import_row_organization_id_fkey": {
           "name": "clinic_import_row_organization_id_fkey",
@@ -1064,21 +1042,6 @@
             "organization_id"
           ],
           "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "clinic_import_row_contact_fkey": {
-          "name": "clinic_import_row_contact_fkey",
-          "tableFrom": "clinic_import_row",
-          "tableTo": "contact",
-          "columnsFrom": [
-            "organization_id",
-            "contact_id"
-          ],
-          "columnsTo": [
-            "organization_id",
             "id"
           ],
           "onDelete": "cascade",

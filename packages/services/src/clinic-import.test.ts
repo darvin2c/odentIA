@@ -5,13 +5,13 @@ import { automationJob } from "@odentia/db/schema/automation"
 import { patient, patientContact } from "@odentia/db/schema/clinical"
 import { contact } from "@odentia/db/schema/crm"
 import { orgProfile } from "@odentia/db/schema/org"
-import { and, eq } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
 import { beforeAll, describe, expect, it } from "vitest"
 import type { AdminActor } from "./admin-core.js"
 import { applyClinicImportBatch, CLINIC_IMPORT_BATCH, previewClinicImport } from "./clinic-import.js"
 import type { ClinicImportPerson, ClinicImportPlan } from "./clinic-import-plan.js"
 import { createPatient } from "./patients.js"
-import { ownerDb, setupTestDb } from "./test-setup.js"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -82,6 +82,17 @@ describe("cargar los datos de una clínica", () => {
     const carmen = await ownerDb.select({ id: patient.id }).from(patient).innerJoin(contact, eq(contact.id, patient.personId)).where(eq(contact.displayName, "Carmen Soto"))
     expect(carmen).toHaveLength(0)
     expect(await ownerDb.select().from(automationJob).where(eq(automationJob.organizationId, ORG))).toHaveLength(0)
+
+    // Lo que dejó la carga es de odentIA: con el rol de la aplicación, la ficha de Mateo
+    // sigue pudiendo pasar a su contacto real cuando escriba.
+    const [placeholder] = await withOrgContext(appDb, ORG, async (tx) => {
+      const [row] = await tx
+        .select({ personId: patient.personId })
+        .from(patient)
+        .where(and(eq(patient.organizationId, ORG), eq(patient.id, mateo!.patientId)))
+      return tx.execute<{ placeholder: boolean }>(sql`select is_placeholder_person(${ORG}, ${row!.personId}::uuid, ${mateo!.patientId}::uuid) as placeholder`)
+    })
+    expect(placeholder?.placeholder).toBe(true)
 
     const again = await inOrg((tx) => applyClinicImportBatch(tx, ORG, admin, plan, 0))
     expect(again.done).toMatchObject({ creadas: 0, existentes: 0, yaCargadas: 5, errores: 1 })

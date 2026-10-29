@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm"
-import { check, foreignKey, index, integer, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core"
+import { check, foreignKey, integer, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core"
 import { organization, user } from "./auth.js"
-import { contact } from "./crm.js"
 import { adminSchema } from "./schemas.js"
 
 /**
@@ -14,7 +13,11 @@ import { adminSchema } from "./schemas.js"
  *   huella que le dio la preparación).
  * - `outcome`: `creada` (la carga creó a la persona) o `existente` (ya estaba
  *   en la clínica con ese documento y no se tocó).
- * - Si la persona se borra (pedido sobre sus datos), su fila se va con ella.
+ * - `contactId` no es una clave foránea a propósito. La fila es de odentIA,
+ *   no actividad de la persona: no debe impedir que su ficha pase a su
+ *   contacto real (`is_placeholder_person` mira toda clave foránea a
+ *   `contact`). Y si la persona se reemplaza o se borra, la fila queda, así
+ *   que volver a cargar el plan no la trae de vuelta.
  */
 export const CLINIC_IMPORT_OUTCOMES = ["creada", "existente"] as const
 export type ClinicImportOutcome = (typeof CLINIC_IMPORT_OUTCOMES)[number]
@@ -42,16 +45,10 @@ export const clinicImportRow = adminSchema.table(
       foreignColumns: [organization.id],
     }).onDelete("cascade"),
     foreignKey({
-      name: "clinic_import_row_contact_fkey",
-      columns: [table.organizationId, table.contactId],
-      foreignColumns: [contact.organizationId, contact.id],
-    }).onDelete("cascade"),
-    foreignKey({
       name: "clinic_import_row_created_by_fkey",
       columns: [table.createdBy],
       foreignColumns: [user.id],
     }),
-    index("clinic_import_row_contact_idx").on(table.organizationId, table.contactId),
     check("clinic_import_row_outcome_check", sql`${table.outcome} IN ('creada','existente')`),
   ],
 )

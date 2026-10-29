@@ -75,6 +75,11 @@ interface Snapshot {
   byKey: Map<string, ClinicImportPerson>
   /** Lo que ya entró: clave → persona. */
   loaded: Map<string, string>
+  /**
+   * De esas personas, las que siguen en la clínica: la que pasó a su contacto
+   * real o se borró ya no está, aunque su fila de la carga quede.
+   */
+  alive: Set<string>
   /** Quien ya está en la clínica con el documento de la fila: clave → nombre y si es paciente. */
   existing: Map<string, { contactId: string; name: string; isPatient: boolean }>
   /** Avisos que dependen de la clínica (teléfono o nombre de alguien que ya está). */
@@ -101,6 +106,16 @@ async function snapshot(tx: Db, orgId: string, plan: ClinicImportPlan): Promise<
     .from(clinicImportRow)
     .where(eq(clinicImportRow.organizationId, orgId))
   const loaded = new Map(loadedRows.filter((row) => byKey.has(row.key)).map((row) => [row.key, row.contactId]))
+  const alive = new Set(
+    loaded.size
+      ? (
+          await tx
+            .select({ id: contact.id })
+            .from(contact)
+            .where(and(eq(contact.organizationId, orgId), inArray(contact.id, [...loaded.values()])))
+        ).map((row) => row.id)
+      : [],
+  )
 
   // El documento identifica a la persona (ADR 0001): la que ya está no se vuelve a crear.
   const profile = clinicalProfileFor(plan.countryCode)
@@ -167,7 +182,7 @@ async function snapshot(tx: Db, orgId: string, plan: ClinicImportPlan): Promise<
     }
   }
 
-  return { sha: clinicImportPlanSha256(plan), check, byKey, loaded, existing, clinicNotes }
+  return { sha: clinicImportPlanSha256(plan), check, byKey, loaded, alive, existing, clinicNotes }
 }
 
 function statusOf(snap: Snapshot, key: string): ClinicImportRowStatus {
@@ -280,6 +295,7 @@ export async function applyClinicImportBatch(
     if (owner) {
       await tx.insert(clinicImportRow).values({ ...row, contactId: owner.contactId, outcome: "existente" })
       snap.loaded.set(key, owner.contactId)
+      snap.alive.add(owner.contactId)
       done.existentes++
       continue
     }
@@ -287,6 +303,10 @@ export async function applyClinicImportBatch(
     const guardianId = guardianKey ? snap.loaded.get(guardianKey) : undefined
     if (guardianKey && !guardianId) {
       fail("Quien habla por ella todavía no está cargada")
+      continue
+    }
+    if (guardianId && !snap.alive.has(guardianId)) {
+      fail("Quien habla por ella ya no está en la clínica (pasó a su contacto real o se borró): vincúlala desde su página")
       continue
     }
     try {
@@ -322,6 +342,7 @@ export async function applyClinicImportBatch(
         return id
       })
       snap.loaded.set(key, contactId)
+      snap.alive.add(contactId)
       done.creadas++
     } catch (error) {
       if (!(error instanceof ServiceError)) throw error
