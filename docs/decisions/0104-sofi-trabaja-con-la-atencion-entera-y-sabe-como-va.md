@@ -36,7 +36,7 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 - **Más reglas de texto:** es lo que se venía haciendo; no movió la fluidez y encarece cada llamada.
 - **Un resumen del hilo escrito por un modelo** (ya descartado en ADR 0006): suma una llamada por turno y el texto puede inventar. La atención entera cabe casi siempre, y el estado lo cuenta el código.
 - **Guardar el estado del grafo entre turnos** (ADR 0051): crece sin control y arrastra datos caducados.
-- **Que el modelo de decisión lea lo que dijo la clínica:** llevaría datos de la cita al proveedor, y basta con saber si preguntaba algo.
+- **Que el modelo de decisión lea lo que dijo la clínica:** llevaría datos de la cita al proveedor, y basta con saber si preguntaba algo (`guardAnswer`). Se midió en la auditoría: cumplió todo el 38 % frente al 30 % del main, pero 10 conversaciones mejoraron y 7 empeoraron, dentro del ruido, y costó un 15 % más.
 
 ## Consecuencias
 
