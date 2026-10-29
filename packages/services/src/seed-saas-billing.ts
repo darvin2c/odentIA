@@ -73,7 +73,7 @@ function tierPlan(factor: number) {
     conversationMicros: price(0.5),
     conversationAgendaMicros: price(1),
     consultationSimpleMicros: price(0.1),
-    consultationStandardMicros: price(0.2),
+    consultationStandardMicros: price(0.3),
     consultationMicros: price(0.5),
     recoveryMicros: price(2),
     argosIncludedQuestions: 100,
@@ -95,7 +95,7 @@ const PRE_TIER_PRICES: Record<string, { conversationMicros: number; consultation
 /**
  * El plan de las ADR 0031, 0085 y 0105 para probar el cobro por acción: USD 29 que
  * vuelven en crédito, el precio de cada tipo (Sofi 0,20 / 0,50 / 1,00, Clío
- * 0,10 / 0,20 / 0,50, cita recuperada 2), 100 preguntas a Argos y paquetes de
+ * 0,10 / 0,30 / 0,50, cita recuperada 2), 100 preguntas a Argos y paquetes de
  * 100 por 3, 20 GB y 0,20 por GB extra, y prueba de USD 100 y 30 días. Es el
  * plan por defecto de la semilla; en producción lo configura administración.
  */
@@ -198,6 +198,13 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
       .update(saasPlan)
       .set({ argosIncludedQuestions: plan.argosIncludedQuestions, updatedAt: new Date() })
       .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.argosIncludedQuestions, 300)))
+  }
+  // Estándar a USD 0,30 (Fundadores 0,15): sube solo si seguía en el 0,20 (0,10) anterior de la semilla.
+  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+    await db
+      .update(saasPlan)
+      .set({ consultationStandardMicros: plan.consultationStandardMicros, updatedAt: new Date() })
+      .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.consultationStandardMicros, (plan.consultationStandardMicros * 2) / 3)))
   }
   await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))
   // Las condiciones comerciales con los valores de hoy (ADR 0074): la migración

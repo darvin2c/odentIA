@@ -19,7 +19,7 @@ Tres principios del dueño del producto: **todo lo que hace un agente es una acc
   - Se lee de las propuestas ejecutadas de esa persona (`agent_proposal`) y de las reservas desde el enlace de esa ventana. Mientras la conversación no se cobró, sube de tipo sola: al ejecutarse la propuesta, al reservar desde el enlace o en la corrida siguiente.
 - **Clío, según lo que dejó hecho y el odontólogo confirmó**, una vez por atención:
   - `completa` (USD 0,50): armó un presupuesto (una indicación del plan, con una o varias opciones);
-  - `estandar` (USD 0,20): un diagnóstico, el odontograma o dos bloques o más;
+  - `estandar` (USD 0,20; USD 0,30 desde el 2026-10-29): un diagnóstico, el odontograma o dos bloques o más;
   - `simple` (USD 0,10): un solo bloque (receta, nota o control).
   - No hay tope por odontólogo ni regla de pausas: cada consulta es un paciente atendido que le dejó dinero a la clínica.
 - **La cita recuperada, USD 2**, cuando la persona **no tenía cita ni tratamiento en curso** al escribirle Argos, reservó en los días de las condiciones y vino. Lo que decide es si ya tenía cita, no el nombre del mensaje:
