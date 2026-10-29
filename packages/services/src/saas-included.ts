@@ -236,7 +236,7 @@ export interface ArgosPanelAllowance {
   budgetReached: boolean
 }
 
-/** Lo que dice el panel de Argos arriba («150 de 300 preguntas de noviembre») y en su tarjeta (tablero C3). */
+/** Lo que dice el panel de Argos arriba («60 de 100 preguntas de noviembre») y en su tarjeta (tablero C3). */
 export async function getArgosPanelAllowance(tx: Db, orgId: string, now = new Date()): Promise<ArgosPanelAllowance> {
   const allowance = await getArgosAllowance(tx, orgId, now)
   const words = await periodWords(tx, orgId, allowance.periodEnd)

@@ -165,7 +165,7 @@ export function PlanDrawer({
     () => Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(seed?.[item.field] ?? null)])) as Record<PriceKey, string>,
   )
   const [fixed, setFixed] = useState<ReadonlySet<string>>(() => new Set(seed?.fixedPriceTiers ?? ["informa", "simple", "estandar", "preguntas", "almacenamiento"]))
-  const [included, setIncluded] = useState(String(seed?.argosIncludedQuestions ?? 300))
+  const [included, setIncluded] = useState(String(seed?.argosIncludedQuestions ?? 100))
   const [packQuestions, setPackQuestions] = useState(String(seed?.argosPackQuestions ?? 100))
   const [includedGb, setIncludedGb] = useState(String(seed?.storageIncludedGb ?? 20))
   const [informMessages, setInformMessages] = useState(seed?.informMessageLimit ? String(seed.informMessageLimit) : "")
