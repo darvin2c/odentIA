@@ -20,7 +20,7 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 - **La atención entera.** Cada turno lee la atención en curso desde que empezó (`listAttentionMessages`), y al menos los últimos 20 mensajes, para no perder el aviso que la abrió. Tiene un tope por tamaño (`fitHistory`, unas 6 000 palabras): si no cabe, quedan cómo empezó y lo último, y el contexto dice cuántos mensajes no ve. Entre turnos no se guarda nada (ADR 0051).
 - **El código cuenta cómo va la atención.** `attentionProgress` lee de sus fuentes si Sofi ya respondió, si ya ofreció horarios, qué cita espera el sí, qué quedó hecho y si ya se le dijo, qué promoción ya nombró, cuántas veces le preguntó su nombre y si ya le habló por él. El manual dice cada regla una sola vez; el turno dice si ya se cumplió. La indicación del camino dice lo que falta (`appointmentStep`).
 - **Lo que la persona sigue escribiendo entra mientras Sofi redacta.** Las corridas van en su propio ciclo del worker. En un solo ciclo, una corrida frenaba la ingesta: lo que la persona escribía mientras tanto quedaba en la cola sin guardarse y Sofi respondía a pedazos. Si llega algo nuevo antes de un paso, la corrida solo guarda lo que la persona dijo y termina: no actúa con lo de antes.
-- **Lo que va a salir se compara con lo que consta**, sin modelo y una vez por corrida cada cosa, como `verifyReply`: el idioma, el trato de usted, el pase o la nota que dice haber hecho, el nombre preguntado dos veces y empezar repitiendo lo que la persona dijo. Lo que espera su sí se pregunta y nunca se afirma antes; a quien aún no es paciente, el registro va en la frase del aviso (ADR 0101).
+- **Lo que va a salir se compara con lo que consta**, sin modelo y una vez por corrida cada cosa, como `verifyReply`: el idioma, el trato de usted, el pase o la nota que dice haber hecho, el nombre preguntado dos veces y volver a empezar con «Entiendo…» o a decir «anoté que…». Lo que espera su sí se pregunta y nunca se afirma antes; a quien aún no es paciente, el registro va en la frase del aviso (ADR 0101).
 - **Lo que no puede hacer ni responder lo pasa al equipo**, en vez de decirle que llame.
 - **Recepción razona poco antes de responder** (`receptionReasoning` de `AGENT_MODEL`), con el mismo modelo: sin cambiar de modelo, gasta menos tokens por conversación y repite y afirma de más con menos frecuencia.
 - **Responder no es saludar** (`guardAnswer`). Si lo último que envió la clínica preguntaba algo, el camino «saludo» pasa a ser el abierto. Es una regla del código, como `guardBurst`.
@@ -47,7 +47,7 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 - Con las corridas en su propio ciclo, la que se corta porque la persona siguió escribiendo se paga hasta el paso en que se corta.
 - Las comprobaciones por forma no cubren todas las maneras de decir lo mismo: el modelo encuentra otras.
 - Razonar alarga un poco la respuesta (alrededor de un segundo en la mediana).
-- Se descartaron, medidas: exigir que la respuesta use el nombre (llenaba de «Gracias, Mariela…») y un revisor con el modelo antes de enviar (sus reescrituras bajaban la fluidez).
+- Se descartaron, medidas: exigir que la respuesta use el nombre (llenaba de «Gracias, Mariela…»), un revisor con el modelo antes de enviar (sus reescrituras bajaban la fluidez) y pedir de nuevo «Entiendo…» y «anoté que…» desde la primera vez (las fórmulas bajaron de 22 a 6 en 40 conversaciones, pero cumplió todo el 30 % en vez del 43 % y costó un 23 % más).
 
 ## Referencias
 
