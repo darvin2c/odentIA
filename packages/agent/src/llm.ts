@@ -48,7 +48,14 @@ export const AGENT_MODEL = {
   modelName: "gpt-6-luna",
   // gpt-6-luna en chat/completions rechaza herramientas si el razonamiento no va en `none`.
   reasoningEffort: "none",
-} as const satisfies { provider: LlmProvider; modelName: string; reasoningEffort: string }
+  /**
+   * Recepción piensa antes de responder: sin razonar, el modelo volvía a pedir
+   * lo que la persona acababa de decir o cambiaba el trato (auditoría del
+   * ADR 0104). Con razonamiento, gpt-6-luna va por /v1/responses
+   * (`createConfiguredChatModel`); la simulación usa el mismo.
+   */
+  receptionReasoning: "low",
+} as const satisfies { provider: LlmProvider; modelName: string; reasoningEffort: string; receptionReasoning: "low" | "medium" | "high" }
 
 /** Modelo efectivo de una corrida: una sola fuente para proveedor, modelo y cuenta. */
 export interface LlmSpec {

@@ -64,6 +64,7 @@ import { hasAlarmSignal } from "./alarm.js"
 import { compileAgentGraph } from "./graph.js"
 import { noteAskedInterest } from "./interest.js"
 import {
+  AGENT_MODEL,
   createConfiguredChatModel,
   describeProviderProblem,
   isProviderConfigError,
@@ -715,7 +716,9 @@ async function attendAgentRun(
       }
     }
     const invokeGraph = async () => {
-      const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)
+      const model = runtime.createModel
+        ? await runtime.createModel(spec)
+        : await createConfiguredChatModel(spec, { reasoning: AGENT_MODEL.receptionReasoning })
       // El grafo no guarda su estado (ADR 0051): cada corrida arma el contexto
       // desde la base y lo que debe quedar ya tiene su tabla.
       const graph = compileAgentGraph(model, toolCtx)
@@ -1101,7 +1104,7 @@ export async function simulateAgentTurn(
   toolCtx.modelName = modelName
   toolCtx.modelProvider = spec.provider
   toolCtx.draftText = text.slice(0, 4000)
-  const model = await createConfiguredChatModel(spec)
+  const model = await createConfiguredChatModel(spec, { reasoning: AGENT_MODEL.receptionReasoning })
   const graph = compileAgentGraph(model, toolCtx)
   const state = (await graph.invoke({ messages: [], turnCount: 0 })) as { messages: BaseMessage[] }
   const replies = state.messages.filter((m) => m instanceof AIMessage)
