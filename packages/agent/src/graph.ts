@@ -41,6 +41,7 @@ import {
   listContactNotes,
   listMessagesById,
   listOpportunities,
+  newerInboundThan,
   formatKnowledgeEntry,
   type KnowledgeEntryItem,
   knowledgeFitsPrompt,
@@ -1030,9 +1031,29 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     return { messages: [reply] }
   }
 
+  /**
+   * La persona siguió escribiendo mientras el modelo pensaba: lo que iba a hacer sale de lo
+   * que ya no es lo último (la hora que corrigió, la pregunta que sumó). La corrida termina
+   * sin hacer nada y la de su último mensaje responde todo (ADR 0097): no reserva con lo de
+   * antes ni paga los pasos que quedaban (auditoría del ADR 0104). Con una señal de alarma o
+   * el caso ya en el equipo, el aviso no espera.
+   */
+  async function personKeptWriting(): Promise<boolean> {
+    const trigger = toolCtx.triggerId
+    if (toolCtx.dryRun || !trigger || toolCtx.alarm || toolCtx.handedOff) return false
+    const newer = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) =>
+      newerInboundThan(tx, toolCtx.orgId, toolCtx.conversationId, trigger),
+    ).catch(() => false)
+    if (newer) {
+      toolCtx.superseded = true
+      toolCtx.replySettled = true
+    }
+    return newer
+  }
+
   async function routeAfterLlm(state: typeof AgentState.State): Promise<string> {
     const last = state.messages[state.messages.length - 1]
-    if (last instanceof AIMessage && last.tool_calls && last.tool_calls.length > 0) return "tools"
+    if (last instanceof AIMessage && last.tool_calls && last.tool_calls.length > 0) return (await personKeptWriting()) ? END : "tools"
     // Texto sin enviar: el aviso, una vez por corrida (los mensajes del
     // estado son solo los de esta corrida). Con el caso ya derivado o la
     // respuesta ya enviada no hay nada que reclamar; sin texto, tampoco.

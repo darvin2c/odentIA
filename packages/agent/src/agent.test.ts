@@ -3066,6 +3066,26 @@ it("si la persona sigue escribiendo mientras el modelo responde, lo redactado no
   expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.conversationId, conversationId))).toEqual([])
 })
 
+it("con lo que llegó mientras el modelo pensaba, no hace lo que decidió con lo de antes (auditoría del ADR 0104)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:sigue-antes-de-actuar", "evt-actuar-1", "mañana a las 10")
+  const model = new SlowScriptedModel(
+    () => toolCall("anotar_caso", { preferencia: "mañana a las 10" }, "call-1"),
+    // Mientras piensa, la persona corrige la hora: lo que iba a anotar ya no vale.
+    async () => {
+      const next = await ingestText("tg:sigue-antes-de-actuar", "evt-actuar-2", "no, mejor a las 11")
+      await withOrgContext(appDb, "org_a", (tx) =>
+        sendAgentRun(tx, { kind: "inbound_message", orgId: "org_a", conversationId, messageId: next.messageId }, { delaySeconds: 600 }))
+      return next
+    },
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
+  expect(state.notes).toEqual([])
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
+  expect(row).toEqual({ status: "omitida", error: "persona-siguio-escribiendo" })
+})
+
 it("lo que llega sin corrida propia (un botón, «BAJA») no hace descartar la respuesta (ADR 0097)", async () => {
   const { conversationId, messageId } = await ingestText("tg:boton-mientras", "evt-boton-1", "¿atienden el sábado?")
   const model = new SlowScriptedModel(
