@@ -309,13 +309,9 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       usedInCare: !item.onlySale,
       forSale: item.sale !== undefined,
       salePriceCents: item.sale !== undefined ? demoPriceCents(item.sale, country) : null,
-      minimums:
-        min > 0
-          ? [
-              { branchId: main, minQuantity: min },
-              ...(second ? [{ branchId: second, minQuantity: Math.ceil(min / 2) }] : []),
-            ]
-          : [],
+      // Las compras llegan a la sede principal: la otra solo recibe guantes y no lleva mínimos
+      // (con ellos, todo saldría como que hace falta).
+      minimums: min > 0 ? [{ branchId: main, minQuantity: min }] : [],
     })
     ids.set(item.sku, row.id)
     if (item.retired) await setProductActive(tx, orgId, ownerUserId, row.id, false)
@@ -325,11 +321,13 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
   const expiring = recipe.expiring.filter((sku) =>
     care.some((item) => item.sku === sku && !item.onlySale),
   )
-  const [expiredSku, soonSku] = expiring
+  // El lote vencido va en uno que no hace falta: si no, lo vencido cuenta en lo que hay y lo tapa.
+  const expiredSku = expiring.find((sku) => !recipe.low.includes(sku))
+  const soonSku = expiring.find((sku) => sku !== expiredSku)
   const lotOf = (sku: string, days: number) => ({
     lotCode: `L${reportDayOf(ctx.timezone, new Date(ctx.now.getTime() - days * DAY_MS))
       .replaceAll("-", "")
-      .slice(2)}-${sku.split("-")[1] ?? "A"}`,
+      .slice(2)}-${sku.split("-").slice(1).join("-")}`,
     expiresAt: sku === soonSku ? addDays(ctx.today, 20) : addDays(ctx.today, random.int(380, 720)),
   })
   const backdate = async (orderId: string, createdDaysAgo: number, receivedDaysAgo?: number) => {
@@ -524,7 +522,9 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       )
   }
   let discounted = 0
-  for (const visit of [...visits].reverse()) {
+  // Una atención con varios servicios llega una vez por servicio: se descuenta una sola vez.
+  const attended = [...new Map(visits.map((visit) => [visit.id, visit])).values()]
+  for (const visit of [...attended].reverse()) {
     const done = await discountEncounterMaterials(tx, orgId, ownerUserId, visit)
     if (!done) continue
     discounted += 1
@@ -558,7 +558,7 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
       note: "Muestras que dejó el proveedor",
       idempotencyKey: `demo-muestra-${orgId}`,
     })
-  const [lastVisit] = visits
+  const [lastVisit] = attended
   const gloves = big.find((line) => line.item.sku === "INS-GUANTE-NITRILO")
   if (gloves && lastVisit)
     await registerUse(tx, orgId, ownerUserId, {
@@ -579,7 +579,7 @@ async function seedInventoryOf(ctx: Context, recipe: DemoKindRecipe["inventory"]
     })
 
   // Lo vendido en Caja: dos pacientes de esta semana se llevaron lo que se vende.
-  const buyers = [...new Set(visits.map((visit) => visit.patientId))].slice(0, forSale.length)
+  const buyers = [...new Set(attended.map((visit) => visit.patientId))].slice(0, forSale.length)
   const cash = (await listPaymentMethods(tx, orgId)).find((method) => method.typeCode === "10")
   for (const [index, patientId] of buyers.entries()) {
     const line = forSale[index]
