@@ -369,6 +369,23 @@ export function phoneFormatError(countryCode?: string | null): string {
     : "Ingresa el teléfono con su código de país, empezando por «+»"
 }
 
+/**
+ * Por qué un número del país de la clínica no puede ser su WhatsApp, o null si
+ * puede. El E.164 admite cualquier largo de 8 a 15 dígitos, así que un celular
+ * con un dígito de menos (`+5199215437`) pasa como número y Meta lo rechaza en
+ * cada envío. Solo se comprueba con el perfil del país de la clínica; un número
+ * de otro país, o de un país sin perfil, pasa como viene.
+ */
+export function whatsappNumberProblem(e164: string, countryCode?: string | null): string | null {
+  const profile = nationalPhone(countryCode)
+  if (!profile) return null
+  const digits = e164.replace(/\D/g, "")
+  if (!digits.startsWith(profile.callingCode)) return null
+  return profile.national.test(digits.slice(profile.callingCode.length))
+    ? null
+    : `Ese número no puede ser su WhatsApp: revisa que sea ${profile.hint}.`
+}
+
 /** Edad legible: en meses antes de los dos años, en años después. */
 export function ageLabel(birthDate: string | null | undefined, today = new Date()): string {
   if (!birthDate || !/^\d{4}-\d{2}-\d{2}$/.test(birthDate)) return ""

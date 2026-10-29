@@ -30,6 +30,7 @@ import {
   getMessagePermissions,
   getPublicLinkInfo,
   handleAutomationReply,
+  preferredContact,
   listBudgetHeldJobs,
   reconcileDeliveries,
   requestNeededTemplates,
@@ -572,6 +573,41 @@ describe("como mucho un mensaje al día por persona", () => {
     const sent = await messageOf(jobs[0]!.sentMessageId)
     expect(sent.body).toMatch(/^Hola, Jorge\. Te recordamos la cita en Clínica Sonríe, sede Centro: Mateo: mañana, .*, con Dra\. Ana Torres; Sofía: mañana, .*, con Dra\. Ana Torres\./)
     expect(await ownerDb.select().from(message).where(eq(message.conversationId, parent.conversationId!))).toHaveLength(1)
+  })
+
+  it("lo de un menor le llega a su representante legal, aunque el registro dejó su propio vínculo como preferido", async () => {
+    const c = await clinic()
+    await ruleOn(c, "recordatorio_cita", new Date(NOW.getTime() - HOUR), { hoursBefore: [24] })
+    const mother = await person(c, "Carla Ramos", { consent: ["recordatorio"], openWindow: true })
+    const kid = await person(c, "Tomás Ramos", { whatsapp: false })
+    await ownerDb.update(contact).set({ birthDate: "2018-05-01" }).where(eq(contact.id, kid.contactId))
+    // Como lo deja el registro que hace su madre: el vínculo propio, preferido; el de ella, no.
+    await ownerDb.update(patientContact).set({ isPreferred: true }).where(eq(patientContact.patientId, kid.patientId))
+    await ownerDb.insert(patientContact).values({
+      organizationId: c.orgId, patientId: kid.patientId, contactId: mother.contactId, relationship: "guardian", isPreferred: false,
+    })
+    await ownerDb.insert(patientResponsibility).values({
+      organizationId: c.orgId, patientId: kid.patientId, contactId: mother.contactId, kind: "representante_legal", startsAt: "2018-05-01",
+    })
+    expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(mother.contactId)
+    await appointmentFor(c, kid.patientId, new Date(NOW.getTime() + 24 * HOUR))
+    await run(c, (tx) => syncAppointmentReminders(tx, c.orgId, NOW))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [job] = await jobsOf(c)
+    expect((await messageOf(job!.sentMessageId)).conversationId).toBe(mother.conversationId)
+
+    // Si el equipo elige a otra persona (la abuela que lo trae), le llega a ella.
+    const grandma = await person(c, "Rosa Ramos", { consent: ["recordatorio"] })
+    await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.patientId, kid.patientId))
+    await ownerDb.insert(patientContact).values({
+      organizationId: c.orgId, patientId: kid.patientId, contactId: grandma.contactId, relationship: "family", isPreferred: true,
+    })
+    expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(grandma.contactId)
+
+    // Al cumplir 18 la representación termina: sin otra persona elegida, le llega a él.
+    await ownerDb.update(patientContact).set({ isPreferred: false }).where(eq(patientContact.contactId, grandma.contactId))
+    await ownerDb.update(contact).set({ birthDate: "2000-05-01" }).where(eq(contact.id, kid.contactId))
+    expect(await run(c, (tx) => preferredContact(tx, c.orgId, kid.patientId))).toBe(kid.contactId)
   })
 
   it("un seguimiento espera a mañana si la persona ya recibió algo hoy; el recordatorio de cita no espera", async () => {

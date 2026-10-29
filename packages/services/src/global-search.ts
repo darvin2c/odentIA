@@ -248,7 +248,7 @@ export async function searchEverything(
       left join patient p on p.organization_id = c.organization_id and p.person_id = c.id
       where c.organization_id = ${orgId} and c.is_active and c.screen is null and not ${testOnlyPersonSql(sql.raw("c"))}
         ${seesNonPatients ? sql`` : sql`and p.id is not null`}
-        and (${personSearchCondition(q, { displayName: sql`c.display_name`, phone: sql`c.phone`, email: sql`c.email`, docNumber: sql`c.doc_number` })}
+        and (${personSearchCondition(q, { displayName: sql`c.display_name`, phone: sql`c.phone`, email: sql`c.email`, docNumber: sql`c.doc_number`, contactId: sql`c.id` })}
           ${record == null ? sql`` : sql`or p.patient_number = ${record}`})
       order by ${record == null ? sql`` : sql`(p.patient_number = ${record}) desc nulls last,`}
         ${foldedStartsWith(sql`c.display_name`, q)} desc, c.display_name, c.id

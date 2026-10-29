@@ -13,15 +13,22 @@ import { digitsContain, foldedContains, foldedWordsMatch } from "./search-text.j
 /**
  * Nombre por palabras y sin tildes («lucia quispe» encuentra «Lucía Quispe
  * Huamán»), documento y correo por su texto, y el teléfono por sus dígitos.
+ * Con `contactId`, el número también se busca en su WhatsApp: quien escribió
+ * primero por WhatsApp no tiene «Teléfono» en su ficha, y sin esto «Nueva
+ * conversación» ofrecería crear a otra persona con su número.
  */
 export function personSearchCondition(
   q: string,
-  columns: { displayName: SQLWrapper; phone: SQLWrapper; email: SQLWrapper; docNumber?: SQLWrapper },
+  columns: { displayName: SQLWrapper; phone: SQLWrapper; email: SQLWrapper; docNumber?: SQLWrapper; contactId?: SQLWrapper },
 ): SQL {
   const text = q.trim()
   if (!text) return sql`true`
   const digits = /^[\d\s\-()+.]+$/.test(text) ? text.replace(/\D/g, "") : ""
   const phone = digits.length >= 4 ? sql` or ${digitsContain(columns.phone, digits)}` : sql``
+  const whatsapp =
+    digits.length >= 4 && columns.contactId
+      ? sql` or exists (select 1 from contact_identity ci where ci.contact_id = ${columns.contactId} and ci.channel = 'whatsapp' and ${digitsContain(sql`ci.external_user_id`, digits)})`
+      : sql``
   const doc = columns.docNumber ? sql` or ${foldedContains(columns.docNumber, text)}` : sql``
-  return sql`(${foldedWordsMatch([columns.displayName], text)}${doc} or ${foldedContains(columns.email, text)} or ${foldedContains(columns.phone, text)}${phone})`
+  return sql`(${foldedWordsMatch([columns.displayName], text)}${doc} or ${foldedContains(columns.email, text)} or ${foldedContains(columns.phone, text)}${phone}${whatsapp})`
 }

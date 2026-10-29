@@ -682,6 +682,7 @@ export async function listPatients(
         docNumber: contact.docNumber,
         email: contact.email,
         phone: contact.phone,
+        contactId: contact.id,
       }),
     )
   if (input.isActive !== undefined) conditions.push(eq(contact.isActive, input.isActive))
