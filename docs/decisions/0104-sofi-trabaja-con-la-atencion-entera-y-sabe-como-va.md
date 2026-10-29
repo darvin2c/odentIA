@@ -54,3 +54,30 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 ## Referencias
 
 `packages/agent/src/attention.ts`; `graph.ts` (`readThread`, `loadContext`, `runTools`); `claims.ts`, `treatment.ts` y `language.ts` (lo que se compara antes de enviar); `tools.ts` (`ASK_YES`); `decision/route.ts` (`appointmentStep`, `guardAnswer`); `decision/shadow.ts`; `apps/worker/src/index.ts` (el ciclo de las corridas); `packages/services/src/conversations.ts` (`listAttentionMessages`, `ingestInbound`); `conversation-close.ts` (`closeConversationWith`); `product-agent.ts` (`urgentFirst`); `agent-case.ts` (`CASE_SLOTS`); `agent-case-brief.ts`. Issue #328.
+
+## Actualización del 2026-10-29: lo que cambia en cada corrida va después del historial
+
+En las rondas de la auditoría, cada llamada de Recepción llevaba unos 14 500 tokens de entrada. Algo más de la mitad salía de la caché de OpenAI, y todo el resto se escribía en ella a 1,25× de la entrada. gpt-6-luna, por /v1/responses, deja su corte automático al final del último mensaje del usuario. Solo lee un corte que ya escribió y con el mismo principio exacto: las herramientas, en su orden, y lo que sigue. Lo de cada corrida iba en el mismo mensaje de sistema que lo de la clínica, con la hora al final, así que ninguna corrida leía de la caché lo que dejó la anterior, ni siquiera lo de la clínica.
+
+- **Antes del historial, solo lo que no cambia en la atención.**
+  - El primer mensaje de sistema lleva lo igual para toda la clínica, con un corte explícito: `prompt_cache_breakpoint` en un bloque `input_text`, porque a un bloque `text` LangChain le quita la marca. Así lo lee cualquier conversación de la clínica, también en su primera corrida.
+  - Le sigue lo del hilo que no cambia: el formato del canal y los otros canales.
+  - Después va el historial y, al final, en otro mensaje de sistema, lo de la corrida: con quién habla, cómo va la atención, el camino, el idioma, el trato y la hora. Un mensaje de sistema después del historial no mueve el corte automático: la corrida siguiente lee de la caché todo lo anterior hasta el último mensaje de la persona.
+- **Medido** como el resto de este ADR, con los mismos 40 casos de odentIA y 20 de latidIA y dos rondas por versión (120 conversaciones cada una):
+  - El costo de Sofi por conversación bajó de USD 0,0083 a 0,0031 (−62 %): en odentIA, de 0,0093 a 0,0035 con Jev; en latidIA, de 0,0070 a 0,0033.
+  - De la entrada de cada llamada, lo leído de la caché pasó del 56 % al 90 % y lo escrito, del 44 % al 7 %. Las llamadas por conversación no cambiaron (8,8).
+  - Cumplió todo el 43 % frente al 30 %, más a menudo en las cuatro rondas: 22 conversaciones mejoraron, 10 empeoraron y 28 quedaron igual.
+
+### Alternativas descartadas
+
+- **Lo de la corrida como mensaje del usuario.** El corte automático cae después de él, y la corrida siguiente vuelve a escribir el historial (probado directo con la API).
+- **Solo cortes explícitos** (`prompt_cache_options` en modo `explicit`). Sin el corte automático, un paso de la corrida ya no lee el anterior. Con lo de la corrida al final, el automático escribe justo lo que se vuelve a leer.
+- **Una sola lista de herramientas, acotada con `allowed_tools`.** Las herramientas van antes que todo, y una lista por camino parte la caché. Con todas a la vista y el camino acotando lo que puede llamar se leyó más de la caché (93 % frente a 89 %), pero cada llamada llevó unos 3 300 tokens más y hubo más llamadas. En los mismos 36 casos costó un 10 % más y cumplió todo en 7 frente a 15. Queda en la rama `claude/sofi-lista-unica`.
+
+### Consecuencias
+
+- La caché vence a los 30 minutos sin uso. Una clínica con poca conversación vuelve a escribir lo suyo en la primera corrida que llega después. En las rondas hay cuatro conversaciones a la vez y lo de la clínica casi siempre está en la caché, así que una clínica tranquila ahorra menos.
+- Lo que cambia el principio del historial deja esa corrida sin leerlo de la caché. Pasa cuando el camino cambia la lista de herramientas. También en el hilo largo de quien vuelve, mientras la atención tiene menos de 20 mensajes, porque la ventana de `listAttentionMessages` se corre; la demo casi no tiene hilos así.
+- `usage.test.ts` fija el orden: lo de la clínica, igual para dos personas; lo de la corrida, al final; y la corrida siguiente, igual a la anterior hasta su último mensaje.
+
+Referencias: `graph.ts` (`loadContext`, `systemContent`); `llm.ts` (`createConfiguredChatModel`); `usage.test.ts`; la guía de la caché de OpenAI (developers.openai.com/api/docs/guides/prompt-caching).

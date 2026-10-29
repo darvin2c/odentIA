@@ -166,7 +166,10 @@ const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, r
  *
  * Con `reasoning` el modelo piensa antes de responder: gpt-6-luna no acepta
  * herramientas con razonamiento en chat/completions, así que va por
- * /v1/responses, sin temperatura y con la caché automática del proveedor.
+ * /v1/responses, sin temperatura y con la caché automática del proveedor:
+ * `explicitCache` no se envía, y un corte propio va en un bloque `input_text`
+ * con `prompt_cache_breakpoint`, porque a uno `text` LangChain le quita la
+ * marca (así lo hace Recepción, ADR 0104).
  */
 export async function createConfiguredChatModel(
   spec: LlmSpec,
