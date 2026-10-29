@@ -129,6 +129,22 @@ test("al firmar se ve lo que salió y lo que no había, y quien atendió agrega 
   await expect(materials).toContainText("Salieron de Sede Central: 1 unidad de eyector de prueba y 2 pares de guantes de prueba.")
   await expect(materials).toContainText("No había 1 unidad de eyector de prueba: queda como faltante en Inventario.")
   await info.attach("atencion-finalizada-materiales", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  // En el teléfono y en oscuro se lee entero y «Corregir» queda a la vista.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(materials.getByRole("button", { name: "Corregir" })).toBeInViewport()
+  await info.attach("atencion-finalizada-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await info.attach("atencion-finalizada-oscuro", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Con el teclado: «Corregir» abre el formulario y Esc vuelve al aviso con el foco dentro.
+  await materials.getByRole("button", { name: "Corregir" }).focus()
+  await page.keyboard.press("Enter")
+  await expect(surface(page, { name: "Corregir materiales" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(done).toBeVisible()
+  await expect.poll(() => done.evaluate((dialog) => dialog.contains(document.activeElement))).toBe(true)
 
   // «Y una mascarilla»: se corrige ahí mismo y el aviso vuelve con lo registrado.
   await materials.getByRole("button", { name: "Corregir" }).click()
