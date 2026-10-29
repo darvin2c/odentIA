@@ -28,6 +28,7 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
   - «Con quién hablas» junta quién es, por quién escribe, dónde avisarle en el chat web y lo que se recuerda de la persona.
   - Lo interno de la ficha va aparte, solo si hay algo y sin vencimientos.
   - `anotar_caso` anota con nombre propio para quién es, qué pide y qué prefiere. De cada cosa vale lo último, y quien toma el caso lo ve con ese nombre.
+  - Cada tema que tiene el equipo se ve con lo que pide y lo que falta, y `recordar_tema` lo deja al día cuando la persona da lo que faltaba: quien lo toma no lee que falta algo que ya está.
   - Lo que solo guarda lo que dijo la persona (`anotar_caso`, `recordar_dato`, `update_contact`) puede ir en el mismo paso que `send_reply`. Así anotar no cuesta otra llamada.
 - **El manual dice el objetivo** del issue #328 y cómo trabajar: leer todo antes de responder y tomar como un solo pedido lo que la persona escribió seguido. Se quitan las reglas que tapaban la pérdida de contexto.
 
@@ -47,8 +48,10 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 - Con las corridas en su propio ciclo, la que se corta porque la persona siguió escribiendo se paga hasta el paso en que se corta.
 - Las comprobaciones por forma no cubren todas las maneras de decir lo mismo: el modelo encuentra otras.
 - Razonar alarga un poco la respuesta (alrededor de un segundo en la mediana).
-- Se descartaron, medidas: exigir que la respuesta use el nombre (llenaba de «Gracias, Mariela…»), un revisor con el modelo antes de enviar (sus reescrituras bajaban la fluidez) y pedir de nuevo «Entiendo…» y «anoté que…» desde la primera vez (las fórmulas bajaron de 22 a 6 en 40 conversaciones, pero cumplió todo el 30 % en vez del 43 % y costó un 23 % más).
+- El tema al día se midió en una ronda incompleta: en los 17 casos de odentIA que alcanzaron a correr cumplió todo en 11 (las dos corridas de la línea base, 8 y 5 en esos casos), y en 11 de latidIA, en 6 (la línea base, 4). Falta la ronda completa.
+- Entre dos corridas del mismo código cambian de resultado unas 9 a 14 de 40 conversaciones: una ronda sola no distingue diferencias de dos o tres.
+- Se descartaron, medidas: exigir que la respuesta use el nombre (llenaba de «Gracias, Mariela…»), un revisor con el modelo antes de enviar (sus reescrituras bajaban la fluidez), pedir de nuevo «Entiendo…» y «anoté que…» desde la primera vez (las fórmulas bajaron de 22 a 6 en 40 conversaciones, pero cumplió todo el 30 % en vez del 43 % y costó un 23 % más) y tratar de usted a quien saluda con formalidad sin verbos de usted (el juez dejó de citar el trato, pero cumplió todo en 3 de 17 casos).
 
 ## Referencias
 
-`packages/agent/src/attention.ts`; `graph.ts` (`readThread`, `loadContext`, `runTools`); `claims.ts`, `treatment.ts` y `language.ts` (lo que se compara antes de enviar); `tools.ts` (`ASK_YES`); `decision/route.ts` (`appointmentStep`, `guardAnswer`); `decision/shadow.ts`; `apps/worker/src/index.ts` (el ciclo de las corridas); `packages/services/src/conversations.ts` (`listAttentionMessages`); `agent-case.ts` (`CASE_SLOTS`); `agent-case-brief.ts`. Issue #328.
+`packages/agent/src/attention.ts`; `graph.ts` (`readThread`, `loadContext`, `runTools`); `claims.ts`, `treatment.ts` y `language.ts` (lo que se compara antes de enviar); `tools.ts` (`ASK_YES`, `recordar_tema`); `decision/route.ts` (`appointmentStep`, `guardAnswer`); `decision/shadow.ts`; `apps/worker/src/index.ts` (el ciclo de las corridas); `packages/services/src/conversations.ts` (`listAttentionMessages`); `agent-case.ts` (`CASE_SLOTS`); `agent-case-brief.ts`. Issue #328.
