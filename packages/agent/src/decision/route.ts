@@ -138,7 +138,8 @@ const ALWAYS = ["send_reply", "request_human_handoff", "recordar_tema", "update_
 export const ROUTE_TOOLS: Partial<Record<RoutePath, readonly string[]>> = {
   // El caso ya está derivado: solo queda el aviso, y nada más puede hacerse en este turno.
   // Con el caso ya en el equipo, lo que deja decir algo concreto: su cita y cómo comunicarse con la sede.
-  derivar: ["request_human_handoff", "ver_contexto_paciente", "ver_resumen_paciente", "ver_sedes_y_servicios"],
+  // Y lo que sí puede hacer ella misma: «no me escriban más» llega con la queja (auditoría del ADR 0104).
+  derivar: ["request_human_handoff", "ver_contexto_paciente", "ver_resumen_paciente", "ver_sedes_y_servicios", "elegir_mensajes"],
   // «¿Me mandas mi presupuesto?» o «prefiero la de la corona» se leen como una
   // pregunta de precios: el presupuesto de la persona va en este camino.
   informacion: [
@@ -241,6 +242,24 @@ export function guardBurst(route: AgentRoute, messages: number): AgentRoute {
 }
 
 /**
+ * Responder a lo que se le preguntó no es saludar (ADR 0104). El modelo de
+ * decisión solo lee lo que escribió la persona, nunca lo que dijo la clínica:
+ * un «dale», «ok» o «sí» a «Tengo el martes a las 10 o a las 11, ¿cuál
+ * prefieres?» le parece un agradecimiento, y en el camino «saludo» el que
+ * escribe no tiene con qué reservar y recibe «responde breve, sin consultar
+ * nada». Si lo último que salió de la clínica preguntaba algo, el turno va
+ * por el camino abierto. Es una regla del código, como `guardBurst`.
+ */
+export function guardAnswer(route: AgentRoute, answersQuestion: boolean): AgentRoute {
+  return route.path === "saludo" && answersQuestion ? { ...route, path: "abierto" } : route
+}
+
+/** ¿Lo que salió de la clínica le preguntaba algo? */
+export function asksSomething(text: string | null | undefined): boolean {
+  return Boolean(text?.includes("?"))
+}
+
+/**
  * Respuesta fija a lo que no es de la clínica: no se llama al modelo que
  * escribe (no se usa el agente como chat gratis) y siempre dice lo mismo.
  */
@@ -327,6 +346,43 @@ export interface RouteFacts {
    * urgencias de la clínica.
    */
   urgency?: "alarma" | "urgente" | null
+  /** Lo urgente empieza por el teléfono para urgencias de la clínica y no por la hora (`ProductAgentTexts.urgentFirst`). */
+  urgentFirst?: "telefono"
+  /**
+   * Cómo va la cita en esta atención (ADR 0104): la indicación dice lo que
+   * falta, no repite lo que ya se hizo. Lo arma `attentionProgress`.
+   */
+  progress?: RouteProgress
+  /** Vuelve sobre un tema que ya tiene el equipo: ya recibió un aviso y no se le repite (ADR 0104). */
+  again?: boolean
+}
+
+/** Cómo va la cita en esta atención, con el texto con que se nombra cada paso. */
+export interface RouteProgress {
+  /** Ya buscó y ofreció horarios en esta atención. */
+  offered?: boolean
+  /** Lo que espera su sí. */
+  pending?: string | null
+  /** Lo que ya quedó hecho con su cita en esta atención. */
+  done?: string | null
+}
+
+/**
+ * El paso que falta para la cita, según cómo va (ADR 0104): nunca «ofrécele
+ * horarios» cuando ya se los ofreció, ni «reserva» cuando ya quedó reservada.
+ * `propose` nombra la herramienta con que se propone.
+ */
+function appointmentStep(progress: RouteProgress | undefined, propose: string): string {
+  if (progress?.done) {
+    return `En esta atención ya quedó hecho: ${progress.done}. No se la vuelvas a ofrecer ni a confirmar; si pide otra cita, es una nueva.`
+  }
+  if (progress?.pending) {
+    return `Ya hay una cita propuesta que espera su sí (${progress.pending}): si su último mensaje es un sí, confírmala con confirmar_propuesta; si pidió otro día, hora, sede o profesional, busca y propón eso.`
+  }
+  if (progress?.offered) {
+    return `Ya le ofreciste horarios en esta atención (están en las consultas de mensajes anteriores): si eligió uno, propónselo con ${propose} usando ese hueco exacto; si pide otro día, sede o profesional, busca de nuevo. No le repitas los mismos horarios.`
+  }
+  return `Si aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; ${propose} va solo cuando ya eligió uno.`
 }
 
 /**
@@ -367,8 +423,8 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
           ? " La clínica no tiene servicios cargados: no des precios de tratamientos."
           : ""
     const knowledge = has("consultar_conocimiento")
-      ? " Si un tema está solo en el índice o su respuesta aparece recortada, pide su texto con consultar_conocimiento antes de citarla. Si un dato no está arriba ni en lo que buscaste, usa consultar_conocimiento una vez; si tampoco está, dilo y ofrece pasar el caso a una persona."
-      : " Si un dato no está arriba, dilo y ofrece pasar el caso a una persona."
+      ? " Si un tema está solo en el índice o su respuesta aparece recortada, pide su texto con consultar_conocimiento antes de citarla. Si un dato no está arriba ni en lo que buscaste, usa consultar_conocimiento una vez; si tampoco está, pásalo al equipo con request_human_handoff y dile en message que se lo confirman por aquí."
+      : " Si un dato no está arriba, pásalo al equipo con request_human_handoff y dile en message que se lo confirman por aquí."
     return `${head} pide información. Arriba ya tienes ${listed}.${search} Si con eso basta, responde ahora con send_reply, en este mismo paso.${knowledge}${budgets}`
   }
   if (path === "saludo") {
@@ -383,12 +439,31 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
         : facts.urgency === "urgente"
           ? " Es urgente: si figura en lo que sabes de la clínica, el aviso empieza dándole el teléfono para urgencias de la clínica. No le digas que llame al número de emergencias del país salvo que lo que contó ponga en peligro su vida (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar); si podría llegar a eso, puedes decirle que, si pasa, vaya a la emergencia más cercana."
           : ""
-    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora, y le da algo concreto cuando lo hay: si es sobre una cita suya, revísala antes con ver_resumen_paciente y dile lo que ves; si pide hablar con alguien ya, el teléfono de la sede (ver_sedes_y_servicios) si figura; si ya se lo dijiste antes en esta conversación, no repitas la misma frase: reconoce en pocas palabras lo nuevo que dijo (que lo necesita hoy, un dato más) y que se lo hiciste llegar al equipo; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
+    return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora, y le da algo concreto cuando lo hay: si es sobre una cita suya, revísala antes con ver_resumen_paciente y dile lo que ves; si pide hablar con alguien ya, el teléfono de la sede (ver_sedes_y_servicios) si figura;${
+      has("elegir_mensajes") ? " si pide que no le escriban más o dejar de recibir un tipo de mensaje, anótalo antes con elegir_mensajes y díselo en el aviso;" : ""
+    }${
+      // Solo cuando vuelve sobre un tema que ya tiene el equipo (ADR 0104): ya recibió un aviso.
+      // «Y que se lo hiciste llegar al equipo» salía en cada insistencia: «ya anoté…», «ya hice
+      // llegar al equipo…» una y otra vez (auditoría del ADR 0104). Lo que vuelve a escribir ya
+      // le llega al equipo con el tema.
+      facts.again
+        ? " ya le avisaste en esta atención que lo tiene el equipo, y lo que vuelve a escribir le llega con el tema: no le repitas que lo tiene el equipo, que lo anotaste ni que se lo hiciste llegar; responde en una línea a lo nuevo que dijo o preguntó y, si no hay nada nuevo, dale algo concreto que aún no le diste (el teléfono de la sede, el horario de atención);"
+        : ""
+    } si además pregunta algo que está en lo que sabes de la clínica (un precio, cuánto dura, una sede), respóndelo en el mismo aviso; si para resolverlo el equipo necesitará un dato que puede darte ahora (su nombre completo, la fecha de su atención) y aún no lo tienes, pídeselo en el mismo aviso; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
   }
+  // Con qué se propone la cita: quien aún no es paciente se reserva y registra con su sí (ADR 0101).
+  const propose = has("reservar_paciente_nuevo") ? "proponer_cita (o reservar_paciente_nuevo, si aún no es paciente)" : "proponer_cita"
+  const progress = facts.progress
   if (path === "clinico") {
     // Jev marca «clínico» también a quien solo cuenta un problema («tengo un problema en el
     // diente»): pasarlo sin preguntar lo dejaba sin atención (ADR 0097). Solo el consejo va al equipo.
-    return `${head} puede ser una consulta clínica. No des consejo clínico ni diagnóstico. Si pide un consejo (qué tomar, si es grave, qué hacer), pasa el caso a una persona con request_human_handoff y avísale en message${has("buscar_huecos") ? "; si además quiere cita, búscale horarios antes y ofréceselos en ese aviso" : ""}. Si solo cuenta un problema o un síntoma sin pedir consejo, no lo pases: pregúntale qué le pasa en una línea y ofrécele una cita${has("buscar_huecos") ? " con los horarios más próximos (buscar_huecos)" : ""}.`
+    // Si ya se le ofreció la cita, volver a contarlo no es empezar de cero (ADR 0104).
+    const started = Boolean(progress?.offered || progress?.pending || progress?.done)
+    const problem = started && has("buscar_huecos")
+      ? ` Si solo vuelve sobre lo que le pasa, sin pedir consejo, ya le ofreciste la cita en esta atención: no le preguntes otra vez qué le pasa y sigue con la cita. ${appointmentStep(progress, propose)}`
+      : // «Pregúntale qué le pasa» se lo preguntaba también a quien ya lo había contado (auditoría del ADR 0104).
+        ` Si solo cuenta un problema o un síntoma sin pedir consejo, no lo pases: ofrécele una cita${has("buscar_huecos") ? " con los horarios más próximos (buscar_huecos)" : ""} y, solo si aún no dijo qué le pasa, pregúntaselo en una línea.`
+    return `${head} puede ser una consulta clínica. No des consejo clínico ni diagnóstico. Si pide un consejo (qué tomar, si es grave, qué hacer), pasa el caso a una persona con request_human_handoff y avísale en message${has("buscar_huecos") ? "; si además quiere cita, búscale horarios antes y ofréceselos en ese aviso" : ""}.${problem}`
   }
   if (path === "cita" && !has("buscar_huecos")) {
     // Con «Agendar» apagado no hay huecos ni propuestas: la cita la elige la persona en su enlace.
@@ -399,17 +474,22 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
   if (path === "cambio_cita" && !has("reprogramar_cita") && !has("cancelar_cita")) {
     return `${head} cambiar o cancelar una cita. Por aquí no mueves ni cancelas citas: pasa el caso a una persona con request_human_handoff y avísale en message.`
   }
-  if (path === "cita" && prefetched) {
+  if (path === "cita") {
     const ids =
       services === "lista"
         ? "Las sedes y los servicios, con sus ids, están arriba: no llames a ver_sedes_y_servicios para eso."
         : services === "indice" && has("buscar_en_la_clinica")
           ? "Las sedes, con su id, están arriba; de los servicios va solo el índice: si ya sabe qué servicio quiere, búscalo con buscar_en_la_clinica para tener su id y pásalo a buscar_huecos, así el hueco dura lo que dura ese servicio."
           : "Las sedes, con su id, están arriba. Sin el id del servicio, buscar_huecos usa la duración de una cita regular."
-    return `${head} reservar una cita. Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n${ids} Si el interlocutor aún no eligió un día y una hora concretos, busca con buscar_huecos y ofrécele dos o tres horarios en tu respuesta, sin reservar nada; proponer_cita va solo cuando ya eligió uno.${
+    const consulted = prefetched
+      ? ` Esto se consultó ahora mismo y no hace falta volver a pedirlo (ni con ver_contexto_paciente ni con ver_resumen_paciente):\n${prefetched}\n`
+      : " "
+    return `${head} reservar una cita.${consulted}${ids} ${appointmentStep(progress, propose)}${
       // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
-      facts.urgency === "urgente"
-        ? " Lo que cuenta no puede esperar: ofrécele primero el horario más próximo, hoy si hay, y dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; no pases el caso al equipo por eso."
+      facts.urgency === "urgente" && !progress?.done
+        ? facts.urgentFirst === "telefono"
+          ? " Lo que cuenta no puede esperar: dale primero el teléfono para urgencias de la clínica, si figura en lo que sabes de la clínica, para que la evalúen hoy, y después el horario más próximo, hoy si hay; no pases el caso al equipo por eso."
+          : " Lo que cuenta no puede esperar: ofrécele primero el horario más próximo, hoy si hay, y dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; no pases el caso al equipo por eso."
         : ""
     }`
   }

@@ -66,6 +66,7 @@ import { hasAlarmSignal } from "./alarm.js"
 import { compileAgentGraph } from "./graph.js"
 import { noteAskedInterest } from "./interest.js"
 import {
+  AGENT_MODEL,
   createConfiguredChatModel,
   describeProviderProblem,
   isProviderConfigError,
@@ -145,6 +146,11 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
 const TEAM_TOOK_OVER = "team-took-over"
 /** La persona siguió escribiendo mientras se preparaba la respuesta: la de su último mensaje responde todo (ADR 0097). */
 const PERSON_KEPT_WRITING = "persona-siguio-escribiendo"
+/**
+ * Lo reservado hasta este tiempo antes de la corrida cuenta para la pregunta del
+ * permiso general: una corrida cortada pudo reservar sin enviar su respuesta.
+ */
+const BOOKED_BEFORE_MS = 10 * 60_000
 /** Motivo en el libro de quien pasó al equipo porque la clínica llegó a su presupuesto del mes. */
 const BUDGET_REACHED = "PRESUPUESTO"
 /** Ya recibió hoy el mensaje fijo del presupuesto: lo que siga escribiendo lo ve el equipo, sin otro aviso. */
@@ -707,7 +713,9 @@ async function attendAgentRun(
       }
     }
     const invokeGraph = async () => {
-      const model = runtime.createModel ? await runtime.createModel(spec) : await createConfiguredChatModel(spec)
+      const model = runtime.createModel
+        ? await runtime.createModel(spec)
+        : await createConfiguredChatModel(spec, { reasoning: AGENT_MODEL.receptionReasoning })
       // El grafo no guarda su estado (ADR 0051): cada corrida arma el contexto
       // desde la base y lo que debe quedar ya tiene su tabla.
       const graph = compileAgentGraph(model, toolCtx)
@@ -733,6 +741,7 @@ async function attendAgentRun(
           recordTopicAskedAgain(tx, orgId, { handoffId: open.id, messageId: toolCtx.triggerId ?? null }),
         )
         toolCtx.topicRaised = again.raised
+        toolCtx.topicAgain = true
         toolCtx.handedOff = true
         toolCtx.handoffId = open.id
       } else {
@@ -794,12 +803,14 @@ async function attendAgentRun(
           console.error(`agent: interés no anotado (${error instanceof Error ? error.message : String(error)})`)
         })
       }
-      // Tras reservar en esta corrida, la pregunta del permiso general, una sola
-      // vez por persona y después de la respuesta (ADR 0030). Texto y botones
-      // fijos, sin modelo; si no puede salir, la corrida sigue igual.
-      if (toolCtx.replySettled && !toolCtx.handedOff && !toolCtx.takenOver && !toolCtx.dryRun) {
+      // Tras reservar, la pregunta del permiso general, una sola vez por persona y
+      // después de la respuesta (ADR 0030). Texto y botones fijos, sin modelo; si no
+      // puede salir, la corrida sigue igual. Una corrida que se cortó porque la
+      // persona siguió escribiendo no envió su respuesta: la pregunta va con la de la
+      // corrida siguiente, que mira también lo reservado en las cortadas de antes.
+      if (toolCtx.replySettled && !toolCtx.superseded && !toolCtx.handedOff && !toolCtx.takenOver && !toolCtx.dryRun) {
         await withOrgContext(db, orgId, (tx) =>
-          askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: startedAt }),
+          askGeneralPermissionAfterBooking(tx, orgId, { conversationId, since: new Date(startedAt.getTime() - BOOKED_BEFORE_MS) }),
         ).catch(() => false)
       }
     }
@@ -1090,7 +1101,7 @@ export async function simulateAgentTurn(
   toolCtx.modelName = modelName
   toolCtx.modelProvider = spec.provider
   toolCtx.draftText = text.slice(0, 4000)
-  const model = await createConfiguredChatModel(spec)
+  const model = await createConfiguredChatModel(spec, { reasoning: AGENT_MODEL.receptionReasoning })
   const graph = compileAgentGraph(model, toolCtx)
   const state = (await graph.invoke({ messages: [], turnCount: 0 })) as { messages: BaseMessage[] }
   const replies = state.messages.filter((m) => m instanceof AIMessage)

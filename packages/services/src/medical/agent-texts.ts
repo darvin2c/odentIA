@@ -116,6 +116,8 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
     /\b(bebe|bebito|bebita|recien nacid[oa])\b(?:[^.!?]|(?<=\d)\.(?=\d)){0,80}\bno (quiere |puede )?(lactar|lacta|tomar? (el )?(pecho|teta|leche))\b/,
     /\bno (quiere |puede )?(lactar|lacta)\b(?:[^.!?]|(?<=\d)\.(?=\d)){0,80}\b(bebe|bebito|bebita|recien nacid[oa])\b/,
   ],
+  // En un consultorio, lo urgente se orienta primero por teléfono: que la evalúen hoy, y la hora después.
+  urgentFirst: "telefono",
   clinic: { es: "consultorio médico", en: "medical practice" },
   room: "sala",
   site: "",

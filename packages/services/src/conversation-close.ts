@@ -202,13 +202,15 @@ const HANDOFF_CLOSE_NOTE: Partial<Record<ConversationCloseReason, string>> = {
  * se completan solo si cierra el equipo (`equipo`, `manual`), con nota en la
  * ficha; y las notas del caso de esta atención pasan al historial: la
  * siguiente recibe una sola línea con cómo terminó. No envía nada: la
- * despedida, si corresponde, sale antes. Devuelve false si ya estaba cerrada.
+ * despedida, si corresponde, sale antes. Devuelve false si ya estaba cerrada
+ * o si, con `unlessInboundAfter`, la persona escribió algo después de ese
+ * mensaje: la despedida le respondía a él y lo nuevo tiene su propia corrida.
  */
 export async function closeConversationWith(
   tx: Db,
   orgId: string,
   id: string,
-  input: { reason: ConversationCloseReason; byUserId: string | null; now?: Date },
+  input: { reason: ConversationCloseReason; byUserId: string | null; now?: Date; unlessInboundAfter?: string },
 ): Promise<boolean> {
   if (!(CONVERSATION_CLOSE_REASONS as readonly string[]).includes(input.reason)) {
     throw validation(`Motivo de cierre inválido (${CONVERSATION_CLOSE_REASONS.join("|")})`)
@@ -222,6 +224,9 @@ export async function closeConversationWith(
     .limit(1)
   if (!row) throw notFound("Conversación")
   if (row.status === "closed") return false
+  // Con la fila bloqueada, la ingesta (que también la bloquea) ya dejó lo nuevo a la vista
+  // o espera a que termine este cierre y reabre: ningún entrante queda en una cerrada (ADR 0024).
+  if (input.unlessInboundAfter && (await newerInboundThan(tx, orgId, id, input.unlessInboundAfter))) return false
   // Primero el cierre: lo que se resuelve después (la tarea de una derivación)
   // ve la conversación ya cerrada y no vuelve a cerrarla.
   await tx

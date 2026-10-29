@@ -19,7 +19,7 @@ import {
 import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
@@ -313,6 +313,9 @@ export async function ingestInbound(
 
   let conversationId: string
   let threadContactId: string
+  // Bloqueada: un cierre en curso (la despedida de Sofi) termina antes y aquí se ve cerrada
+  // y se reabre, o espera a este entrante y ya no cierra (ADR 0024). Las corridas van en su
+  // propio ciclo del worker, a la vez que la ingesta (ADR 0104).
   const [existing] = await tx
     .select()
     .from(conversation)
@@ -323,6 +326,7 @@ export async function ingestInbound(
         eq(conversation.externalThreadId, event.externalThreadId),
       ),
     )
+    .for("update")
     .limit(1)
   if (existing) {
     conversationId = existing.id
@@ -1400,6 +1404,61 @@ export async function listMessagesById(
       and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId), inArray(message.id, ids)),
     )
   return rows.map((row) => toMessageItem(row))
+}
+
+/**
+ * El mensaje que abre una atención se guarda en la misma transacción que la
+ * reabre, y su hora es la del comienzo de esa transacción: un instante antes
+ * de `attention_started_at` (más, si la ingesta transcribe un audio).
+ */
+export const ATTENTION_OPENING_MS = 5 * 60_000
+
+/** Lo que lee el agente de su conversación en cada turno (ADR 0104). */
+export interface AttentionMessages {
+  /** Del más antiguo al más reciente. */
+  items: MessageItem[]
+  /** Cuándo empezó la atención en curso (ADR 0024). */
+  startedAt: string
+  /** Mensajes de la atención en curso: pueden ser más que los leídos si pasan de `max`. */
+  inAttention: number
+}
+
+/**
+ * La atención en curso entera, desde que empezó, y como mínimo los últimos
+ * `minTail` mensajes aunque sean de antes (el aviso de cita que la persona
+ * responde). Hasta `max`, los más recientes. Aquí no se recorta ninguno por
+ * tamaño: eso lo decide el agente, que dice cuántos dejó fuera.
+ */
+export async function listAttentionMessages(
+  tx: Db,
+  orgId: string,
+  conversationId: string,
+  input: { minTail: number; max: number },
+): Promise<AttentionMessages> {
+  const [thread] = await tx
+    .select({ startedAt: conversation.attentionStartedAt })
+    .from(conversation)
+    .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
+    .limit(1)
+  if (!thread) throw notFound("Conversación")
+  const [counted] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(message)
+    .where(
+      and(
+        eq(message.organizationId, orgId),
+        eq(message.conversationId, conversationId),
+        gte(message.createdAt, new Date(thread.startedAt.getTime() - ATTENTION_OPENING_MS)),
+      ),
+    )
+  const inAttention = Number(counted?.n ?? 0)
+  const rows = await tx
+    .select()
+    .from(message)
+    .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
+    .orderBy(desc(message.createdAt), desc(message.id))
+    .limit(Math.min(Math.max(inAttention, input.minTail, 1), input.max))
+  return { items: rows.reverse().map((row) => toMessageItem(row)), startedAt: thread.startedAt.toISOString(), inAttention }
 }
 
 export interface CrossThreadMessage {

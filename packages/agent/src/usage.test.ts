@@ -79,8 +79,13 @@ class RecordingModel extends BaseChatModel {
     })
     return { generations: [{ text: "", message: reply }] }
   }
+  /** El sistema que va antes del historial: lo de la clínica y lo del hilo. */
   systemPrompt(call: number): string {
     return String(this.calls[call]?.[0]?.content ?? "")
+  }
+  /** Lo que cambia en cada corrida: el último mensaje de sistema, después del historial. */
+  turnPrompt(call: number): string {
+    return String([...(this.calls[call] ?? [])].reverse().find((m) => m.getType() === "system")?.content ?? "")
   }
   toolsJson(): string {
     return JSON.stringify(this.tools.map((tool) => convertToOpenAITool(tool as Parameters<typeof convertToOpenAITool>[0])))
@@ -271,11 +276,16 @@ it("el prompt pone primero lo que comparte toda la clínica y acota el conocimie
   // prefijo que el proveedor puede servir desde su caché.
   expect(one.toolsJson()).toBe(two.toolsJson())
   const shared = sharedPrefix(promptA, promptB)
-  expect(shared).toBeGreaterThanOrEqual(promptA.indexOf("Interlocutor:"))
   expect(promptA.slice(0, shared)).toContain("Política de autonomía")
   expect(promptA.slice(0, shared)).toContain("Pregunta frecuente 10")
-  // Lo que cambia en cada corrida va al final.
-  expect(promptA.trimEnd().split("\n\n").at(-1)).toMatch(/^Fecha y hora actual/)
+  // Lo que cambia en cada corrida va después del historial, en su propio mensaje, y la hora al final.
+  const turnA = one.turnPrompt(0)
+  expect(one.calls[0]?.at(-1)?.getType()).toBe("system")
+  expect(one.calls[0]?.at(-2)?.content).toContain("¿cuánto cuesta una consulta?")
+  expect(promptA).not.toContain("Con quién hablas:")
+  expect(promptA).not.toContain("Fecha y hora actual")
+  expect(turnA).toMatch(/^Con quién hablas:/)
+  expect(turnA.trimEnd().split("\n\n").at(-1)).toMatch(/^Fecha y hora actual/)
   // Una respuesta oficial extensa se recorta con aviso; la breve va entera.
   expect(promptA).toContain("(recortada)")
   expect(promptA).toContain("Respuesta oficial breve número 1 sobre horarios, pagos o preparación antes de la cita.")
@@ -285,7 +295,25 @@ it("el prompt pone primero lo que comparte toda la clínica y acota el conocimie
   expect(hits[0]?.title).toBe("Pregunta frecuente 1")
   const full = await withOrgContext(appDb, ORG, (tx) => searchPublishedKnowledge(tx, ORG, "Pregunta frecuente 9", 5))
   expect(full[0]?.body.length).toBeGreaterThan(2000)
-  console.log(`USO ${JSON.stringify({ promptCaracteres: promptA.length, prefijoComun: shared, herramientas: one.tools.length, herramientasCaracteres: one.toolsJson().length })}`)
+  console.log(`USO ${JSON.stringify({ promptCaracteres: promptA.length, turnoCaracteres: turnA.length, prefijoComun: shared, herramientas: one.tools.length, herramientasCaracteres: one.toolsJson().length })}`)
+})
+
+it("la corrida siguiente del hilo empieza igual que la anterior hasta su último mensaje: el historial se lee de la caché", async () => {
+  const model = new RecordingModel()
+  const first = await ingest("tg:uso-hilo", "uso-hilo-1", "Hola, quisiera una limpieza")
+  expect(await run(model, first.conversationId, first.messageId)).toBe("done")
+  const second = await ingest("tg:uso-hilo", "uso-hilo-2", "El jueves en la tarde, por favor")
+  expect(await run(model, second.conversationId, second.messageId)).toBe("done")
+  expect(model.calls).toHaveLength(2)
+  const seen = (call: number) => (model.calls[call] ?? []).map((m) => JSON.stringify([m.getType(), m.content]))
+  const [before, after] = [seen(0), seen(1)]
+  // Todo lo de la primera corrida hasta el mensaje de la persona se repite igual en la segunda:
+  // OpenAI deja ahí su corte y la siguiente lo lee de la caché. Lo del turno va después.
+  const untilPerson = before.slice(0, -1)
+  expect(after.slice(0, untilPerson.length)).toEqual(untilPerson)
+  expect(after.slice(untilPerson.length).map((item) => JSON.parse(item)[0])).toEqual(["ai", "human", "system"])
+  // Lo del turno cambia (la hora, cómo va la atención) y no toca lo de antes.
+  expect(model.turnPrompt(1)).toContain("Fecha y hora actual")
 })
 
 it("el agente nunca recibe una herramienta de plantillas, haya o no WhatsApp (ADR 0040)", async () => {
@@ -364,10 +392,13 @@ it("la corrida guarda su costo por proveedor, con lo leído y lo escrito en la c
     { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: ORG, conversationId: inbound.conversationId, messageId: inbound.messageId } },
   )
   expect(result).toBe("done")
-  // OpenAI guarda solo el prefijo en su caché: el sistema va en un solo texto, con la hora al final.
-  const system = model.calls[0]?.[0]?.content
-  expect(typeof system).toBe("string")
-  expect(String(system).indexOf("Fecha y hora actual")).toBeGreaterThan(String(system).length / 2)
+  // Lo igual para toda la clínica lleva el corte de caché de OpenAI, en el bloque que /v1/responses
+  // envía tal cual; la hora y lo del turno van en el último mensaje, después del historial.
+  const system = model.calls[0]?.[0]?.content as Array<{ type: string; text: string; prompt_cache_breakpoint?: unknown }>
+  expect(system[0]).toMatchObject({ type: "input_text", prompt_cache_breakpoint: { mode: "explicit" } })
+  expect(system[0]?.text).toContain("Política de autonomía")
+  expect(system.map((block) => block.text).join("")).not.toContain("Fecha y hora actual")
+  expect(model.turnPrompt(0)).toContain("Fecha y hora actual")
   const [ledgerRow] = await withOrgContext(appDb, ORG, (tx) =>
     tx.select().from(agentRunLedger).where(eq(agentRunLedger.conversationId, inbound.conversationId)))
   // 600 nuevos a 0,10 + 2.000 leídos a 0,01 + 400 escritos a 0,125 + 50 de salida a 0,50 (USD por millón).

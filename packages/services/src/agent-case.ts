@@ -12,7 +12,7 @@ import {
   type AnswerTraceOutcome,
 } from "@odentia/db/schema/agent"
 import { conversation, message } from "@odentia/db/schema/crm"
-import { and, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm"
 import { handoffOpenSql } from "./handoff-state.js"
 import { listProposals, PROPOSAL_ACTION_LABEL } from "./agent-operations.js"
 import { CONFIRM_TTL_HOURS } from "./proposal-state.js"
@@ -23,6 +23,18 @@ import { formatZoned, type OrgLocale } from "./locale.js"
 
 export const CASE_NOTE_LIMIT = 12
 export const CASE_NOTE_CHARS = 300
+/**
+ * Lo que el agente anota con nombre propio (ADR 0104): de cada cosa vale la
+ * última, así «mejor el jueves» reemplaza a «prefiere el martes» en vez de
+ * quedar las dos. Con su nombre la lee el agente y quien toma el caso.
+ */
+export const CASE_SLOTS = { para_quien: "Para quién", servicio: "Qué pide", preferencia: "Prefiere" } as const
+export type CaseSlot = keyof typeof CASE_SLOTS
+
+/** El nombre con que se lee una nota anotada con nombre propio; nulo si es libre o del sistema. */
+export function caseSlotLabel(kind: AgentCaseNote["kind"]): string | null {
+  return kind !== undefined && kind in CASE_SLOTS ? CASE_SLOTS[kind as CaseSlot] : null
+}
 /** Cabe lo que se consultó en un turno: los huecos de dos sedes (unos 2 300 caracteres) no se recortan. */
 export const CASE_LOOKUP_CHARS = 4000
 /** Una consulta más antigua ya no se muestra: la agenda y los saldos cambian. */
@@ -55,6 +67,10 @@ export interface AgentCaseTopic {
   dueAt: string | null
   /** Lo que escribió la persona al originarlo. */
   asked: string | null
+  /** Ya recibió el aviso de que lo tiene el equipo: no se le repite. */
+  notified?: boolean
+  /** Cuántas veces volvió a preguntar por él. */
+  askedAgain?: number
 }
 
 export interface AgentCaseState {
@@ -64,7 +80,14 @@ export interface AgentCaseState {
   recent: AgentCaseProposal[]
   notes: AgentCaseNote[]
   lookups: Array<{ tool: string; text: string; at: string }>
-  totalMessages: number
+}
+
+/** Cuánto de la atención en curso lee el agente en este turno (ADR 0104). */
+export interface AgentCaseHistory {
+  /** Mensajes de la atención, o los leídos si son más (el aviso que la abrió). */
+  total: number
+  /** Los del medio que no caben en lo que lee. */
+  omitted: number
 }
 
 async function requireConversation(tx: Db, orgId: string, conversationId: string): Promise<void> {
@@ -130,18 +153,17 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     .filter(([, value]) => now - Date.parse(value.at) <= CASE_LOOKUP_TTL_MS)
     .map(([tool, value]) => ({ tool, text: value.text, at: value.at }))
     .sort((a, b) => a.at.localeCompare(b.at))
-  const [total] = await tx
-    .select({ total: count() })
-    .from(message)
-    .where(and(eq(message.organizationId, orgId), eq(message.conversationId, conversationId)))
   const topicRows = await tx.execute<{
     id: string
     reason: string
     assignee_name: string | null
     due_at: Date | string | null
     asked: string | null
+    notified: boolean
+    asked_again: number
   }>(sql`
-    select h.id, h.reason, u.name as assignee_name, t.due_at, ms.body as asked
+    select h.id, h.reason, u.name as assignee_name, t.due_at, ms.body as asked,
+      h.notice is not null as notified, coalesce(jsonb_array_length(h.asked_message_ids), 0)::int as asked_again
     from agent_handoff h
     left join "user" u on u.id = h.assignee_user_id
     left join task t on t.id = h.task_id and t.organization_id = h.organization_id
@@ -154,6 +176,8 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     assigneeName: row.assignee_name,
     dueAt: row.due_at ? new Date(row.due_at).toISOString() : null,
     asked: row.asked ? row.asked.slice(0, 300) : null,
+    notified: row.notified === true,
+    askedAgain: Number(row.asked_again ?? 0),
   }))
   return {
     topics,
@@ -161,7 +185,6 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     recent,
     notes: memory?.notes ?? [],
     lookups,
-    totalMessages: Number(total?.total ?? 0),
   }
 }
 
@@ -172,18 +195,19 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
 export function formatAgentCaseForPrompt(
   state: AgentCaseState,
   zone: Pick<OrgLocale, "timezone" | "locale">,
-  historyLimit: number,
+  history: AgentCaseHistory = { total: 0, omitted: 0 },
 ): string | null {
   const when = (iso: string) => formatZoned(new Date(iso), zone)
   const sections: string[] = []
   const facts: string[] = []
   if (state.topics?.length) {
     sections.push(
-      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene, sin prometer una hora. Si habla de otra cosa, no los menciones: responde con normalidad lo que pide:
+      // Repetir «lo tiene el equipo» cada vez que insiste era la falla de fluidez más común (auditoría del ADR 0104).
+      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve sobre uno, usa recordar_tema con su id; si ya le avisaste que lo tiene el equipo, no se lo repites: en una línea reconoce lo nuevo que dijo y dale algo concreto si lo hay (si quiere hablar ya con alguien, el teléfono de la sede si figura en lo que sabes de la clínica), o haz tú lo que pide si tienes con qué. Nunca prometas una hora. Si habla de otra cosa, no los menciones: responde con normalidad lo que pide:
 ${state.topics
         .map(
           (t) =>
-            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}.`,
+            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}.${t.notified ? " Ya le avisaste." : ""}${t.askedAgain ? ` Volvió a preguntar ${t.askedAgain} ${t.askedAgain === 1 ? "vez" : "veces"}.` : ""}`,
         )
         .join("\n")}`,
     )
@@ -209,13 +233,16 @@ ${state.topics
   }
   // Cómo terminó la atención anterior del hilo (la deja el sistema al cerrar): las notas de entonces no siguen.
   const previous = state.notes.filter((n) => n.kind === "atencion_anterior")
-  const own = state.notes.filter((n) => n.kind !== "atencion_anterior")
+  const own = state.notes.filter((n) => !n.kind)
   for (const note of previous) {
     sections.push(`${note.text} Esta es una atención nueva: no des por pendiente lo de entonces salvo que la persona lo retome.`)
   }
-  if (own.length) {
+  const named = (Object.keys(CASE_SLOTS) as CaseSlot[]).flatMap((slot) =>
+    state.notes.filter((n) => n.kind === slot).map((n) => `- ${CASE_SLOTS[slot]}: ${n.text}`),
+  )
+  if (named.length || own.length) {
     sections.push(
-      `Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso):\n${own.map((n) => `- ${n.text}`).join("\n")}`,
+      `Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso; de cada cosa vale lo último que anotaste):\n${[...named, ...own.map((n) => `- ${n.text}`)].join("\n")}`,
     )
   }
   if (state.lookups.length) {
@@ -225,9 +252,10 @@ ${state.topics
         .join("\n")}`,
     )
   }
-  if (state.totalMessages > historyLimit) {
+  // Nunca un corte mudo: si la atención no cabe entera, se dice cuánto falta.
+  if (history.omitted > 0) {
     sections.push(
-      `Solo ves los últimos ${historyLimit} mensajes de ${state.totalMessages}: lo anterior no está a la vista. Apóyate en las notas del caso y, si falta un dato, pregúntalo.`,
+      `De esta atención no ves ${history.omitted} de sus ${history.total} mensajes, los del medio: ves cómo empezó y lo último. Apóyate en tus notas y en el estado del caso; si falta un dato, pregúntalo.`,
     )
   }
   return sections.length ? sections.join("\n\n") : null
@@ -259,20 +287,31 @@ async function upsertCaseMemory(
 }
 
 /**
- * Añade una nota del agente sobre el caso. Acotada: al pasar del límite se
- * descarta la más antigua; una nota repetida no se duplica.
+ * Añade una nota del agente sobre el caso. Con `slot`, reemplaza lo que había
+ * anotado de esa cosa (ADR 0104). Las libres son acotadas: al pasar del
+ * límite se descarta la más antigua; una nota repetida no se duplica.
  */
 export async function addAgentCaseNote(
   tx: Db,
   orgId: string,
   conversationId: string,
   text: string,
+  slot?: CaseSlot,
 ): Promise<AgentCaseNote[]> {
   const clean = text.replace(/\s+/g, " ").trim().slice(0, CASE_NOTE_CHARS)
   if (!clean) throw validation("La nota del caso no puede estar vacía")
   const current = (await caseMemoryRow(tx, orgId, conversationId))?.notes ?? []
-  if (current.some((note) => note.text === clean)) return current
-  const next = [...current, { text: clean, at: new Date().toISOString() }].slice(-CASE_NOTE_LIMIT)
+  const at = new Date().toISOString()
+  if (slot) {
+    if (current.some((note) => note.kind === slot && note.text === clean)) return current
+    const next = [...current.filter((note) => note.kind !== slot), { text: clean, at, kind: slot }]
+    await upsertCaseMemory(tx, orgId, conversationId, { notes: next })
+    return next
+  }
+  if (current.some((note) => !note.kind && note.text === clean)) return current
+  // Lo del sistema y lo anotado con nombre no cuentan para el límite de las libres.
+  const free = [...current.filter((note) => !note.kind), { text: clean, at }].slice(-CASE_NOTE_LIMIT)
+  const next = [...current.filter((note) => note.kind), ...free]
   await upsertCaseMemory(tx, orgId, conversationId, { notes: next })
   return next
 }

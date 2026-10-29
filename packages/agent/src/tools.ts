@@ -8,6 +8,8 @@ import {
   addAgentCaseNote,
   addPersonFact,
   type AgentPatientBudgets,
+  CASE_SLOTS,
+  type CaseSlot,
   budgetAnswerQuestion,
   budgetLineWords,
   budgetNumberText,
@@ -94,6 +96,10 @@ import type { DecisionModel } from "./decision/port.js"
 import { choseThisSlot, understoodYes } from "./confirm-intent.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
+import { claimsOf } from "./claims.js"
+import { languageOf } from "./language.js"
+import { tutea } from "./treatment.js"
+import { formulasIn, nameQuestionsIn } from "./attention.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
@@ -185,6 +191,22 @@ const MAX_UNSUPPORTED_REPLIES = 2
 const UNKNOWN_PROFESSIONAL =
   "Ese profesional no es de un hueco de buscar_huecos: usa el dato «profesional» exacto (pro-…) del hueco elegido. Nunca inventes identificadores."
 
+/**
+ * Cómo se pide el sí de lo que espera al interlocutor, según el acto: lo que lee
+ * el modelo lo repite, así que nada suena hecho antes del sí (auditoría del ADR 0104).
+ */
+const ASK_YES: Record<string, string> = {
+  reservar_cita:
+    "la cita aún no está reservada. En una sola pregunta, con el día, la hora, la sede y con quién, pregúntale con naturalidad si se la reservas (por ejemplo «¿Te reservo el jueves a las 10:00 en … con …?»); no digas que ya la reservaste, que la tienes ni que quedó lista",
+  reprogramar_cita:
+    "la cita sigue como estaba. En una sola pregunta, con el día y la hora nuevos, pregúntale con naturalidad si se la cambias (por ejemplo «¿Te la paso al viernes a las 10:00?»); no digas que ya la cambiaste",
+  cancelar_cita:
+    "la cita sigue en pie. Pregúntale con naturalidad si se la cancelas, con el día y la hora de esa cita; no digas que ya la cancelaste",
+}
+
+/** Lo que guarda lo que dijo la persona: con una de ellas en la corrida, «lo anoté» es cierto. */
+const CLAIM_NOTES = ["anotar_caso", "recordar_dato", "update_contact", "guardar_contacto", "elegir_mensajes"]
+
 /** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
 const SLOT_NOT_OFFERED =
   "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista, vuelve a consultar con buscar_huecos (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
@@ -261,6 +283,28 @@ export interface AgentToolCtx {
   routeHint?: string
   /** Volvió a preguntar por un tema abierto y este pasó a urgente: se le puede decir. */
   topicRaised?: boolean
+  /** Volvió sobre un tema que ya tiene el equipo: el aviso de entonces ya le llegó (ADR 0104). */
+  topicAgain?: boolean
+  /** El idioma en que escribe la persona, si se distingue (`languageOf`). */
+  personLanguage?: "es" | "en" | null
+  /** Ya se le pidió una vez en esta corrida que responda en el idioma de la persona. */
+  languageNudged?: boolean
+  /** Quien escribe trata de usted, si se distingue (`treatmentOf`). */
+  personTreatment?: "usted" | null
+  /** Ya se le pidió una vez en esta corrida que trate de usted a quien escribe así. */
+  treatmentNudged?: boolean
+  /** Ya se le pidió una vez en esta corrida que no pregunte su nombre dos veces en un mensaje. */
+  nameNudged?: boolean
+  /** Cuántas respuestas de esta atención ya usaron «Entiendo…» o «anoté que…» (`formulasIn`). */
+  formulas?: { opener: number; noted: number }
+  /** Ya le habló por su nombre en esta atención (`attentionProgress`). */
+  usedName?: boolean
+  /** Ya se le pidió una vez en esta corrida que no repita esas fórmulas. */
+  formulaNudged?: boolean
+  /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
+  caseOnFile?: { topics: number; notes: number }
+  /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
+  claimNudged?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -643,7 +687,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (proposal.status === "expirada") {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
-    return `Cita lista para su sí (id ${proposal.id}). En tu mensaje di el día, la hora, la sede y con quién, y pregúntale con naturalidad si se la reservas (por ejemplo «¿Te la reservo?»), sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
+    // «Cita lista para su sí» salía como «dejo lista la cita… ¿Te la reservo?», y mover o
+    // cancelar también se preguntaba con «¿Te la reservo?» (auditoría del ADR 0104).
+    return `Falta su sí (id ${proposal.id}): ${ASK_YES[action] ?? "todavía no se hizo nada. Pregúntale con naturalidad si lo hace"}, sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
   }
 
   /**
@@ -768,6 +814,67 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * y puede consultarlo o quitarlo; a la segunda vez el caso pasa a una persona. Pasado el tope de
    * precios por conversación tampoco sale (`priceCap`).
    */
+  /**
+   * La persona escribe en inglés y lo que iba a salir está en español: una vez
+   * por corrida se le pide traducirlo (auditoría del ADR 0104). Vale para la
+   * respuesta, la despedida y el aviso de un pase.
+   */
+  const wrongLanguage = (text: string): string | null => {
+    if (ctx.personLanguage !== "en" || ctx.languageNudged || languageOf(text) !== "es") return null
+    ctx.languageNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te escribe en inglés y tu mensaje está en español. Escríbelo en inglés, traduciendo también lo que te dieron las herramientas, y vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
+  /**
+   * Quien escribe trata de usted y lo que iba a salir la tutea, casi siempre en una
+   * frase copiada de una herramienta (auditoría del ADR 0104). Una vez por corrida.
+   */
+  const wrongTreatment = (text: string): string | null => {
+    if (ctx.personTreatment !== "usted" || ctx.personLanguage === "en" || ctx.treatmentNudged || !tutea(text)) return null
+    ctx.treatmentNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te trata de usted y tu mensaje la tutea. Escríbelo de usted, también las frases que te dieron las herramientas (por ejemplo «Al confirmar, acepta nuestro aviso…» o «complete sus datos»), y vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
+  /** Vuelve a la fórmula de antes, «Entiendo…» o «anoté que…» (auditoría del ADR 0104). Una vez por corrida. */
+  const formulaAgain = (text: string): string | null => {
+    if (ctx.formulaNudged || !ctx.formulas) return null
+    const now = formulasIn(text)
+    if (!(now.opener && ctx.formulas.opener > 0) && !(now.noted && ctx.formulas.noted > 0)) return null
+    ctx.formulaNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: en esta atención ya le respondiste con «Entiendo…» o «anoté que…». Respóndele directo a lo que dijo o preguntó, sin repetírselo; si no hay nada nuevo, una frase corta basta. Vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
+  /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
+  const nameTwice = (text: string): string | null => {
+    if (ctx.nameNudged || nameQuestionsIn(text) < 2) return null
+    ctx.nameNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: le preguntas su nombre dos veces en el mismo mensaje. Deja una sola pregunta (si le pides sus nombres y apellidos para registrarla, esa es la pregunta) y vuelve a enviar la respuesta sola en su paso.`
+  }
+
+  /**
+   * Dice que el equipo lo verá o que lo anotó, y no consta (auditoría del ADR 0104):
+   * «recepción lo revisará» sin ningún pase, «ya lo anoté» sin ninguna nota. Una vez
+   * por corrida, como el idioma: lo que hizo en este mismo paso cuenta (`toolsUsed`).
+   */
+  const unbackedClaim = (text: string): string | null => {
+    if (ctx.claimNudged) return null
+    const claims = claimsOf(text)
+    if (!claims.team && !claims.note) return null
+    const used = new Set(ctx.toolsUsed)
+    const passed = ctx.handedOff || used.has("request_human_handoff") || used.has("recordar_tema") || (ctx.caseOnFile?.topics ?? 0) > 0
+    const noted = passed || (ctx.caseOnFile?.notes ?? 0) > 0 || CLAIM_NOTES.some((name) => used.has(name))
+    const prefix = ctx.dryRun ? "[SIMULACIÓN] " : ""
+    if (claims.team && !passed) {
+      ctx.claimNudged = true
+      return `${prefix}No enviado: dices que el equipo lo verá o que se lo pasaste, y en esta conversación no hay ningún pase. Si hace falta que lo vea alguien del equipo, pásalo con request_human_handoff y pon el aviso en message; si no, no lo digas y respóndele tú. Después vuelve a enviar la respuesta sola en su paso.`
+    }
+    if (claims.note && !noted) {
+      ctx.claimNudged = true
+      return `${prefix}No enviado: dices que lo anotaste y no anotaste nada. Si lo que te dijo hará falta después, anótalo con anotar_caso en el mismo paso que tu respuesta; si no, no digas que lo anotaste.`
+    }
+    return null
+  }
+
   const checkReply = async (text: string): Promise<{ verdict: ReplyVerdict | null; blocked: string | null }> => {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
     const verdict = verifyReply(text, ctx.evidence ?? [], await orgZone())
@@ -817,6 +924,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text) ?? formulaAgain(text)
+      if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -843,7 +952,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "send_reply",
       description:
-        "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
+        "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción; en su mismo paso solo pueden ir anotar_caso, recordar_dato y update_contact. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
       schema: z.object({ text: z.string().min(1).max(4000) }),
     },
   )
@@ -858,6 +967,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
       if (pending) return `No cerrado. ${pending}`
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text)
+      if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -876,7 +987,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       })
       for (const proposal of sent) await traceAnswer(text, traceOutcome(proposal), verdict?.checks ?? [], proposal)
       if (!sent.some((proposal) => proposal.status === "ejecutada")) return outcome
-      await inOrg((tx) => closeConversationWith(tx, ctx.orgId, ctx.conversationId, { reason: "resuelta", byUserId: null }))
+      // Si escribió algo mientras salía la despedida, no se cierra: su corrida le responde.
+      const closed = await inOrg((tx) =>
+        closeConversationWith(tx, ctx.orgId, ctx.conversationId, { reason: "resuelta", byUserId: null, unlessInboundAfter: ctx.triggerId ?? undefined }),
+      )
+      if (!closed) return "Despedida enviada; la conversación sigue abierta porque la persona escribió algo nuevo y eso se responde aparte. No envíes más mensajes."
       ctx.closed = true
       return "Despedida enviada y conversación cerrada. No envíes más mensajes: si la persona vuelve a escribir, se reabre sola."
     },
@@ -1449,16 +1564,25 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (created?.status !== "propuesta") return proposed
       const noticeUrl = new URL("/aviso", origin).toString()
-      const whom = !forOther
-        ? "y que la registras como paciente con su nombre"
+      // El registro va en la frase final, con el aviso y bajo «al confirmar»: dicho aparte sonaba
+      // hecho («te registro como paciente») o repetía «Al confirmar» (auditoría del ADR 0104).
+      const registers = !forOther
+        ? "te registro como paciente"
         : minor
-          ? `para ${givenNames} ${familyName}, y que lo registras como paciente contigo como su madre, padre o tutor`
-          : `para ${givenNames} ${familyName}, y que la registras como paciente`
+          ? `registro a ${givenNames} ${familyName} como paciente, contigo como su madre, padre o tutor,`
+          : `registro a ${givenNames} ${familyName} como paciente`
       const where = (await webchatNeedsContact())
         ? " En el chat web, si aún no te dio su WhatsApp ni se lo pediste, pídeselo en ese mismo mensaje para avisarle de la cita."
         : ""
-      // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona.
-      return `Cita lista para su sí (id ${created.id}); todavía no se reservó ni registró nada. En tu mensaje, en su idioma, di el día, la hora, la sede y con quién, ${whom}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?». Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
+      // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona. Su sí tiene que
+      // llegar después del aviso (ADR 0101); si ya pidió esta hora, lo único que falta es ese
+      // sí, y «¿Te la reservo?» le volvía a preguntar lo que ya pidió (auditoría del ADR 0104).
+      const accepts = `${registers} y aceptas nuestro aviso de privacidad: ${noticeUrl}.`
+      // Quien acaba de dar su nombre para registrarse no lo oía en esta pregunta, la primera
+      // después de darlo: el juez lo contaba como no saber con quién habla (auditoría del ADR 0104).
+      const writer = (forOther ? writerName : givenNames)?.trim().split(/\s+/)[0]
+      const byName = writer && ctx.usedName !== true ? `empieza por su nombre («${writer}, …»), ` : ""
+      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, ${byName}di el día, la hora, la sede y con quién${forOther ? `, para ${givenNames} ${familyName}` : ""}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere ni le expliques por qué le pides el sí: termina en cambio con «Al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. El registro y «al confirmar» van una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",
@@ -1871,17 +1995,31 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       schema: z.object({ proposalId: z.string().uuid() }),
     },
   )
+  // De cada cosa vale lo último que anota (ADR 0104): «mejor el jueves» reemplaza a «el martes».
   const noteCase = tool(
-    async ({ nota }: { nota: string }) => {
-      if (ctx.dryRun) return `[SIMULACIÓN] Se anotaría en el caso: ${nota}`
-      await inOrg((tx) => addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, nota))
+    async (input: Partial<Record<CaseSlot | "nota", string>>) => {
+      const named = (Object.keys(CASE_SLOTS) as CaseSlot[]).filter((slot) => input[slot]?.trim())
+      const free = input.nota?.trim()
+      if (!named.length && !free) return "No se anotó nada: no venía ningún dato."
+      if (ctx.dryRun) {
+        return `[SIMULACIÓN] Se anotaría en el caso: ${[...named.map((slot) => `${CASE_SLOTS[slot]}: ${input[slot]}`), free].filter(Boolean).join(" · ")}`
+      }
+      await inOrg(async (tx) => {
+        for (const slot of named) await addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, input[slot] ?? "", slot)
+        if (free) await addAgentCaseNote(tx, ctx.orgId, ctx.conversationId, free)
+      })
       return "Anotado en el caso."
     },
     {
       name: "anotar_caso",
       description:
-        "Guarda una nota breve del caso para los próximos mensajes: para quién es la cita, servicio y sede elegidos, preferencia de horario o lo que quedó pendiente. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
-      schema: z.object({ nota: z.string().min(3).max(300) }),
+        "Anota lo que hará falta en los próximos mensajes de esta atención: para quién es, qué pide y qué prefiere. De cada cosa vale lo último que anotes: si cambia de opinión, vuelve a anotarla. Puede ir en el mismo paso que send_reply. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
+      schema: z.object({
+        para_quien: z.string().min(2).max(160).optional().describe("Para quién es la cita o la consulta, con su nombre y vínculo si lo dijo («su hija Ana, de 8 años»)."),
+        servicio: z.string().min(2).max(160).optional().describe("Qué pide, sin datos de salud («una consulta», «un control», «el precio de un servicio»)."),
+        preferencia: z.string().min(2).max(160).optional().describe("Día, hora, sede o profesional que prefiere («mañanas, en Miraflores»)."),
+        nota: z.string().min(3).max(300).optional().describe("Otra cosa que hará falta más adelante."),
+      }),
     },
   )
 
@@ -2080,13 +2218,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   /** Lo que se le pide al modelo que pasó un tema sin escribirle a la persona. */
   const REPLY_AFTER_HANDOFF =
     "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje. Di en una frase quién verá ese tema, sin prometer hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender (horarios, precio, cómo reservar): eso no se pasa al equipo."
-  /** Cuando insiste en un tema que el equipo ya tiene: reconocerlo sin repetir la misma frase. */
+  /**
+   * Cuando insiste en un tema que el equipo ya tiene: lo que escribe le llega con el tema, así
+   * que no se le repite que lo tiene el equipo ni que se anotó (auditoría del ADR 0104).
+   */
   const REPLY_ASKED_AGAIN =
-    "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje y sin repetir lo que ya le dijiste. Si añadió algo (que lo necesita hoy, un dato nuevo), dile que se lo hiciste llegar al equipo; si solo insiste, reconócelo en pocas palabras. No prometas hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender."
+    "Falta tu respuesta: envíala ahora con send_reply, un solo mensaje y sin repetir lo que ya le dijiste: ni que lo tiene el equipo, ni que lo anotaste, ni que se lo hiciste llegar (lo que escribe le llega con el tema). Responde en una línea a lo nuevo que dijo o preguntó; si solo insiste, dale algo concreto que aún no le diste (el teléfono de la sede, el horario de atención) si lo tienes. No prometas hora ni plazo, y responde ahí lo demás que preguntó y sí puedes atender."
   const requestHandoff = tool(
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
+      // Antes de registrar nada: el aviso en otro idioma o en otro trato se vuelve a pedir.
+      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? formulaAgain(notice)) : null
+      if (mismatch) return mismatch
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {
@@ -2124,6 +2268,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const raised = again.raised ? " Como ya preguntó varias veces, ese tema quedó como urgente para el equipo: díselo." : ""
         if (!notice) {
           ctx.handoffNeedsReply = true
+          // Lo que trae sobre qué pide o qué falta se guarda aunque el aviso salga después.
+          await annotate(false)
           return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él.${raised} ${REPLY_ASKED_AGAIN}`
         }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
@@ -2199,14 +2345,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       ).catch(() => null)
       if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
       if (result.raised) return "Anotado: como ya preguntó varias veces, su tema quedó como urgente para el equipo. Díselo en una frase, sin prometer una hora; no respondas el tema tú."
+      // Lo que ya sabe no se le repite (auditoría del ADR 0104): era la falla de fluidez más común.
       return result.assigneeName
-        ? `Anotado y avisado a ${result.assigneeName}. Dile a la persona que ${result.assigneeName} tiene su consulta, sin prometer una hora; no respondas el tema tú.`
-        : "Anotado: el equipo lo verá. Dile a la persona que su consulta la tiene el equipo, sin prometer una hora; no respondas el tema tú."
+        ? `Anotado y avisado a ${result.assigneeName}. Si aún no le dijiste quién tiene su consulta, díselo; si ya se lo dijiste, no se lo repitas: reconoce en una línea lo nuevo que dijo. Sin prometer una hora; no respondas el tema tú.`
+        : "Anotado: el equipo lo verá. Si ya le dijiste que lo tiene el equipo, no se lo repitas: reconoce en una línea lo nuevo que dijo y, si quiere hablar ya con alguien, dale el teléfono de la sede si figura. Sin prometer una hora; no respondas el tema tú."
     },
     {
       name: "recordar_tema",
       description:
-        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
+        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
       schema: z.object({ tema_id: z.string().uuid().describe("El id del tema, de «Temas con el equipo».") }),
     },
   )

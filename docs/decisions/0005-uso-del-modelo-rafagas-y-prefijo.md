@@ -1,6 +1,6 @@
 # 0005 · Uso del modelo: ráfagas agrupadas y prompt de prefijo estable
 
-Fecha: 2026-10-09 · Estado: aceptada
+Fecha: 2026-10-09 · Estado: aceptada · Precisada por [0104](0104-sofi-trabaja-con-la-atencion-entera-y-sabe-como-va.md) el 2026-10-29: lo de la corrida va después del historial y lo de la organización lleva su corte de caché
 
 ## Problema
 

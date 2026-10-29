@@ -1,7 +1,7 @@
 [
   {
     "name": "send_reply",
-    "description": "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
+    "description": "Envía la respuesta completa al interlocutor y termina con este mensaje: úsala al final, después de cualquier otra acción; en su mismo paso solo pueden ir anotar_caso, recordar_dato y update_contact. Si pasaron 24 horas desde su último mensaje, el sistema retoma la conversación por ti y te lo dice.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -918,20 +918,36 @@
   },
   {
     "name": "anotar_caso",
-    "description": "Guarda una nota breve del caso para los próximos mensajes: para quién es la cita, servicio y sede elegidos, preferencia de horario o lo que quedó pendiente. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
+    "description": "Anota lo que hará falta en los próximos mensajes de esta atención: para quién es, qué pide y qué prefiere. De cada cosa vale lo último que anotes: si cambia de opinión, vuelve a anotarla. Puede ir en el mismo paso que send_reply. No anotes datos clínicos ni lo que ya figura en el estado del caso.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "para_quien": {
+          "description": "Para quién es la cita o la consulta, con su nombre y vínculo si lo dijo («su hija Ana, de 8 años»).",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "servicio": {
+          "description": "Qué pide, sin datos de salud («una consulta», «un control», «el precio de un servicio»).",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
+        "preferencia": {
+          "description": "Día, hora, sede o profesional que prefiere («mañanas, en Miraflores»).",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 160
+        },
         "nota": {
+          "description": "Otra cosa que hará falta más adelante.",
           "type": "string",
           "minLength": 3,
           "maxLength": 300
         }
       },
-      "required": [
-        "nota"
-      ],
       "additionalProperties": false
     }
   },
@@ -1032,7 +1048,7 @@
   },
   {
     "name": "recordar_tema",
-    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
+    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { agentAnswerTrace, agentCaseMemory, agentProposal } from "@odentia/db/schema/agent"
+import { agentAnswerTrace, agentCaseMemory, agentHandoff, agentProposal } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
@@ -15,6 +15,7 @@ import {
   recordAgentCaseLookup,
   recordAnswerTrace,
 } from "./agent-case.js"
+import { getCaseBrief } from "./agent-case-brief.js"
 import { createProposal, getAgentRunStats, recordAgentRun } from "./agent-operations.js"
 import { createConnection } from "./connections.js"
 import { getConversationDetail, type IngestDeps, ingestInbound } from "./conversations.js"
@@ -80,8 +81,8 @@ async function openConversation(sender: string): Promise<string> {
 it("un hilo nuevo no tiene estado que contar y no gasta prompt en una sección vacía", async () => {
   const conversationId = await openConversation("vacio")
   const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(state).toEqual({ topics: [], pending: [], recent: [], notes: [], lookups: [], totalMessages: 1 })
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toBeNull()
+  expect(state).toEqual({ topics: [], pending: [], recent: [], notes: [], lookups: [] })
+  expect(formatAgentCaseForPrompt(state, ZONE)).toBeNull()
 })
 
 it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo con su motivo", async () => {
@@ -93,7 +94,7 @@ it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo co
   }))
   const pending = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(pending.pending.map((item) => item.action)).toEqual(["reservar_cita"])
-  const prompt = formatAgentCaseForPrompt(pending, ZONE, 20) ?? ""
+  const prompt = formatAgentCaseForPrompt(pending, ZONE) ?? ""
   expect(prompt).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita — ")
   expect(prompt).toContain(`(id ${booking.id}`)
 
@@ -102,7 +103,7 @@ it("el estado dice lo que espera al interlocutor y recuerda lo que no se hizo co
   const after = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(after.pending).toEqual([])
   expect(after.recent).toMatchObject([{ action: "reservar_cita", status: "fallida", detail: "El horario ya no está libre" }])
-  const afterPrompt = formatAgentCaseForPrompt(after, ZONE, 20) ?? ""
+  const afterPrompt = formatAgentCaseForPrompt(after, ZONE) ?? ""
   expect(afterPrompt).toContain("No se hizo: Reservar cita — ")
   expect(afterPrompt).toContain("(fallida: El horario ya no está libre;")
 })
@@ -121,7 +122,52 @@ it("las notas del caso son acotadas y no se repiten", async () => {
   state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
   expect(state.notes).toHaveLength(CASE_NOTE_LIMIT)
   expect(state.notes[0]?.text).toBe("Nota 3")
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Notas del caso")
+  expect(formatAgentCaseForPrompt(state, ZONE)).toContain("Notas del caso")
+})
+
+it("lo anotado con nombre propio se reemplaza: de cada cosa vale lo último, y quien toma el caso lo ve con su nombre (ADR 0104)", async () => {
+  const conversationId = await openConversation("ranuras")
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "el martes por la mañana", "preferencia"))
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "su hija Ana", "para_quien"))
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "Pregunta también por el blanqueamiento."))
+  // Cambia de opinión: queda solo lo último, no las dos.
+  await run((tx) => addAgentCaseNote(tx, ORG, conversationId, "mejor el jueves por la tarde", "preferencia"))
+  // Muchas notas libres no se llevan lo anotado con nombre.
+  for (let i = 1; i <= CASE_NOTE_LIMIT + 1; i++) await run((tx) => addAgentCaseNote(tx, ORG, conversationId, `Nota ${i}`))
+  const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
+  expect(state.notes.filter((note) => note.kind).map((note) => [note.kind, note.text])).toEqual([
+    ["para_quien", "su hija Ana"],
+    ["preferencia", "mejor el jueves por la tarde"],
+  ])
+  expect(state.notes.filter((note) => !note.kind)).toHaveLength(CASE_NOTE_LIMIT)
+  const prompt = formatAgentCaseForPrompt(state, ZONE) ?? ""
+  expect(prompt).toContain(
+    "Notas del caso (las dejaste tú en mensajes anteriores con anotar_caso; de cada cosa vale lo último que anotaste):\n- Para quién: su hija Ana\n- Prefiere: mejor el jueves por la tarde\n- Nota 2",
+  )
+  expect(prompt).not.toContain("martes")
+  const brief = await run((tx) => getCaseBrief(tx, ORG, conversationId, { includePerson: false }))
+  expect(brief.known.filter((item) => item.label)).toEqual([
+    expect.objectContaining({ label: "Para quién", text: "su hija Ana", origin: "caso" }),
+    expect.objectContaining({ label: "Prefiere", text: "mejor el jueves por la tarde", origin: "caso" }),
+  ])
+})
+
+it("un tema con el equipo dice si ya se le avisó y cuántas veces insistió, para no repetirle el aviso (auditoría del ADR 0104)", async () => {
+  const conversationId = await openConversation("tema-avisado")
+  await ownerDb.insert(agentHandoff).values([
+    { organizationId: ORG, conversationId, reason: "Pide un descuento", summary: "Pide un descuento", notice: "El equipo verá tu pedido.", askedMessageIds: [randomUUID(), randomUUID()] },
+    { organizationId: ORG, conversationId, reason: "Reclamo por el cobro", summary: "Reclamo" },
+  ])
+  const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
+  expect(state.topics?.map((topic) => [topic.reason, topic.notified, topic.askedAgain])).toEqual([
+    ["Pide un descuento", true, 2],
+    ["Reclamo por el cobro", false, 0],
+  ])
+  const prompt = formatAgentCaseForPrompt(state, ZONE) ?? ""
+  expect(prompt).toContain("si ya le avisaste que lo tiene el equipo, no se lo repites")
+  expect(prompt).toContain("«Pide un descuento»")
+  expect(prompt).toMatch(/Pide un descuento[^\n]*Ya le avisaste\. Volvió a preguntar 2 veces\./)
+  expect(prompt).not.toMatch(/Reclamo por el cobro[^\n]*Ya le avisaste/)
 })
 
 it("solo se conserva la última consulta de las herramientas previstas, recortada y con caducidad", async () => {
@@ -133,7 +179,7 @@ it("solo se conserva la última consulta de las herramientas previstas, recortad
   expect(state.lookups).toHaveLength(1)
   expect(state.lookups[0]?.tool).toBe("buscar_huecos")
   expect(state.lookups[0]?.text.endsWith("(recortado: vuelve a consultar)")).toBe(true)
-  expect(formatAgentCaseForPrompt(state, ZONE, 20)).toContain("Consultas de mensajes anteriores")
+  expect(formatAgentCaseForPrompt(state, ZONE)).toContain("Consultas de mensajes anteriores")
 
   // Pasadas unas horas la consulta ya no se muestra: la agenda pudo cambiar.
   const old = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
@@ -145,11 +191,12 @@ it("solo se conserva la última consulta de las herramientas previstas, recortad
   expect(state.lookups).toEqual([])
 })
 
-it("el contexto avisa cuando el hilo tiene más mensajes de los que el modelo ve", async () => {
+it("el contexto avisa cuando la atención no cabe entera en lo que lee el modelo, y calla cuando la ve toda (ADR 0104)", async () => {
   const conversationId = await openConversation("largo")
   const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
-  expect(formatAgentCaseForPrompt({ ...state, totalMessages: 45 }, ZONE, 20)).toBe(
-    "Solo ves los últimos 20 mensajes de 45: lo anterior no está a la vista. Apóyate en las notas del caso y, si falta un dato, pregúntalo.",
+  expect(formatAgentCaseForPrompt(state, ZONE, { total: 45, omitted: 0 })).toBeNull()
+  expect(formatAgentCaseForPrompt(state, ZONE, { total: 260, omitted: 70 })).toBe(
+    "De esta atención no ves 70 de sus 260 mensajes, los del medio: ves cómo empezó y lo último. Apóyate en tus notas y en el estado del caso; si falta un dato, pregúntalo.",
   )
 })
 

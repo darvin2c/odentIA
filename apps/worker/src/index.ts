@@ -346,30 +346,41 @@ if (env.NODE_ENV === "production") {
   })
 }
 
-console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
-while (!stopping) {
-  try {
-    let worked = false
-    for (const queue of queues) {
-      if (stopping) break
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        worked = (await queue.poll()) || worked
-      } catch (error) {
-        // Sin ack: el mensaje vuelve a ser visible tras el vt.
-        console.error(`worker: error en cola ${queue.name}`, error)
+/** Un ciclo recorre sus colas y toma una tarea de cada una por vuelta. */
+async function consume(own: QueueDef[]): Promise<void> {
+  while (!stopping) {
+    try {
+      let worked = false
+      for (const queue of own) {
+        if (stopping) break
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          worked = (await queue.poll()) || worked
+        } catch (error) {
+          // Sin ack: el mensaje vuelve a ser visible tras el vt.
+          console.error(`worker: error en cola ${queue.name}`, error)
+        }
       }
+      if (!worked) {
+        const idle = Promise.withResolvers<void>()
+        setTimeout(idle.resolve, 1_000)
+        await idle.promise
+      }
+    } catch (error) {
+      console.error("worker: error en loop", error)
+      const backoff = Promise.withResolvers<void>()
+      setTimeout(backoff.resolve, 2_000)
+      await backoff.promise
     }
-    if (!worked) {
-      const idle = Promise.withResolvers<void>()
-      setTimeout(idle.resolve, 1_000)
-      await idle.promise
-    }
-  } catch (error) {
-    console.error("worker: error en loop", error)
-    const backoff = Promise.withResolvers<void>()
-    setTimeout(backoff.resolve, 2_000)
-    await backoff.promise
   }
 }
+
+// Las corridas del agente van en su propio ciclo: duran lo que tarda el modelo y,
+// en el mismo ciclo, lo que la persona seguía escribiendo esperaba en la cola sin
+// guardarse; la corrida no veía que siguió escribiendo (`personKeptWriting`) y
+// respondía a pedazos. En la auditoría del ADR 0104, un tercio de los entrantes
+// esperó 5 s o más. Cada cola sigue con un solo lector: una corrida a la vez.
+const isAgentRun = (queue: QueueDef) => queue.name === "agent_runs"
+console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
+await Promise.all([consume(queues.filter((queue) => !isAgentRun(queue))), consume(queues.filter(isAgentRun))])
 process.exit(0)
