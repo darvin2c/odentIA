@@ -4018,7 +4018,7 @@ await db.transaction(async (tx) => {
   const sofiMicros = { informa: 200_000, gestiona: 500_000 }
   const clio = [
     { tier: "simple", micros: 100_000, hours: 20 },
-    { tier: "estandar", micros: 200_000, hours: 44 },
+    { tier: "estandar", micros: 300_000, hours: 44 },
     { tier: "completa", micros: 500_000, hours: 70 },
   ] as const
   await db.insert(saasAction).values([
