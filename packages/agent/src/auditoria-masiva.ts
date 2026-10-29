@@ -14,6 +14,10 @@
  * cada ronda corre con el mismo `CASOS=<archivo>`. Una ronda que se cortó se
  * termina con `INDICES=<los que faltan>` en la misma carpeta.
  *
+ * Con `VUELVE=1` al inventarlos, todos los casos son de quien vuelve: un paciente
+ * que escribe por el WhatsApp donde ya conversó otras veces, con un hilo largo de
+ * antes (avisos y atenciones cerradas) que queda en el archivo con el caso.
+ *
  * Es evidencia de estas demos y de pacientes inventados por un modelo, no de una clínica real.
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
@@ -21,7 +25,7 @@ import { join } from "node:path"
 import { ChatOpenAI } from "@langchain/openai"
 import { buildWebchatInbound, newWebchatSessionId } from "@odentia/channels"
 import { createAppDb, createOwnerDb, sendInboundMessage, withOrgContext } from "@odentia/db"
-import { contactIdentity, inboundEvent, message } from "@odentia/db/schema/crm"
+import { contactIdentity, conversation, inboundEvent, message } from "@odentia/db/schema/crm"
 import { createConnection, ensureClinicWebchatConnection, secretsKeyFromEnv, upsertAgentConfig } from "@odentia/services"
 import { and, asc, eq, gt } from "drizzle-orm"
 
@@ -110,25 +114,49 @@ const CHAOS = [
   "responde solo «sí», «ya» o «dale» sin decir a qué",
 ]
 
-async function invent(channel: Channel, known: string | null): Promise<Persona | null> {
+/** Un mensaje del hilo de antes de quien vuelve: de quién, qué dijo y cuándo. */
+interface PreviousMessage {
+  de: "persona" | "clinica" | "equipo"
+  texto: string
+  hace_dias: number
+  /** Hora de Lima, «10:15». */
+  hora: string
+}
+const RETURNING = env.VUELVE === "1"
+/** Lo menos que trae el hilo de antes: con menos, la ventana del historial no llega a correrse. */
+const PREVIOUS_MIN = 25
+
+async function invent(channel: Channel, known: string | null, returning = false): Promise<{ persona: Persona; previous: PreviousMessage[] } | null> {
   // Qué parte de las conversaciones son caóticas (CAOS, de 0 a 1; por defecto, una de cada cuatro).
   const chaotic = Math.random() < Number(env.CAOS ?? 0.25)
   const style = [pick(STYLES), Math.random() < 0.4 ? pick(STYLES) : null, chaotic ? `caótico: ${pick(CHAOS)}` : null, chaotic && Math.random() < 0.5 ? pick(CHAOS) : null]
     .filter(Boolean)
     .join("; ")
-  const persona = await askJson<Persona>(
+  const reply = await askJson<Persona & { historia_previa?: PreviousMessage[] }>(
     inventor,
     `Inventa UNA persona real y distinta que le escribe a ${CLINIC} por ${channel === "web" ? "el chat de su página web" : "WhatsApp"}. ${
-      known ? `Es ${known}, que ya es paciente de la clínica.` : "Es alguien que la clínica no conoce."
+      known ? `Es ${known}, que ya es paciente de la clínica${returning ? " y otras veces ya le escribió por este mismo WhatsApp" : ""}.` : "Es alguien que la clínica no conoce."
     }
 ${
       Math.random() < 0.7
         ? "Escribe por uno de los motivos más frecuentes por los que la gente le escribe a una clínica así; tú eliges cuál y sus detalles."
         : "Escribe por un motivo poco frecuente pero real (un trámite, un reclamo, algo que no es de la clínica, una situación rara)."
-    } Puede ser para sí o para otra persona. Cómo escribe: ${style}.
-Devuelve solo un JSON con: nombre_perfil (el nombre que se ve en su WhatsApp o «» si es web), quien_es, por_que_escribe, detalles (lo que sabe y lo que no), datos_si_los_piden (nombre completo, documento, celular o correo inventados, y los de la otra persona si aplica), como_escribe, que_quiere_lograr.`,
+    } Puede ser para sí o para otra persona. Cómo escribe: ${style}.${
+      returning
+        ? `
+Inventa también lo que ya hablaron por este WhatsApp antes de hoy, como queda en un WhatsApp de verdad: de 2 a 4 conversaciones anteriores, de hace 2 a 150 días, con ${PREVIOUS_MIN + 5} a 45 mensajes en total. Entre ellos, los avisos automáticos de sus citas («Hola…, te recordamos tu cita…») y lo que respondió, preguntas por precios u horarios, alguna cita que reservó, cambió o canceló, y un gracias. Lo de la clínica lo escribió Sofi, su recepcionista virtual, o a veces alguien del equipo. Lo de hoy puede tener que ver con eso o no.`
+        : ""
+    }
+Devuelve solo un JSON con: nombre_perfil (el nombre que se ve en su WhatsApp o «» si es web), quien_es, por_que_escribe, detalles (lo que sabe y lo que no), datos_si_los_piden (nombre completo, documento, celular o correo inventados, y los de la otra persona si aplica), como_escribe, que_quiere_lograr${
+      returning ? `, historia_previa (la lista en orden, del más antiguo al más reciente: {"de": "persona" | "clinica" | "equipo", "texto": "...", "hace_dias": 40, "hora": "10:15"})` : ""
+    }.`,
   )
-  return persona ? { ...persona, estilo_pedido: style, caotico: chaotic } : null
+  if (!reply) return null
+  const { historia_previa, ...persona } = reply
+  const previous = (historia_previa ?? []).filter((item) => item.texto?.trim() && ["persona", "clinica", "equipo"].includes(item.de))
+  // Sin un hilo largo de antes no es el caso que se quiere medir.
+  if (returning && previous.length < PREVIOUS_MIN) return null
+  return { persona: { ...persona, estilo_pedido: style, caotico: chaotic }, previous }
 }
 
 interface Fragment {
@@ -205,18 +233,30 @@ interface AuditCase {
   /** El paciente de la demo que escribe desde su WhatsApp, por su nombre. */
   known: string | null
   persona: Persona
+  /** Lo que ya hablaron por ese WhatsApp antes de hoy (`VUELVE=1`). */
+  previous?: PreviousMessage[]
 }
 let fixedCases: AuditCase[] | null = null
 
 async function caseFor(index: number): Promise<AuditCase | null> {
   const fixed = fixedCases?.[index]
   if (fixed) return fixed
+  if (RETURNING) {
+    // Una persona distinta de la demo por caso, mientras alcancen.
+    const known = knownPatients[index % Math.max(knownPatients.length, 1)]
+    if (!known) return null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const made = await invent("whatsapp_conocido", known.name, true)
+      if (made) return { channel: "whatsapp_conocido", known: known.name, persona: made.persona, previous: made.previous }
+    }
+    return null
+  }
   const roll = Math.random()
   const channel: Channel = roll < 0.45 ? "whatsapp_nuevo" : roll < 0.7 ? "web" : "whatsapp_conocido"
   const known = channel === "whatsapp_conocido" && knownPatients.length ? pick(knownPatients) : null
-  const persona = await invent(known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel, known?.name ?? null)
-  if (!persona) return null
-  return { channel: known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel, known: known?.name ?? null, persona }
+  const made = await invent(known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel, known?.name ?? null)
+  if (!made) return null
+  return { channel: known ? "whatsapp_conocido" : channel === "whatsapp_conocido" ? "whatsapp_nuevo" : channel, known: known?.name ?? null, persona: made.persona }
 }
 
 /** El paciente conocido de un caso fijo, con su WhatsApp en esta base (cada ronda tiene la suya). */
@@ -242,11 +282,70 @@ async function withWhatsApp(row: { contact_id: string; name: string; external_us
   return { name: row.name, phone }
 }
 
+const DAY = 86_400_000
+/** Cuándo se dijo cada mensaje del hilo de antes, en orden y nunca hoy. */
+function previousTimes(previous: PreviousMessage[]): number[] {
+  let last = 0
+  const times = previous.map((item) => {
+    const [hour, minute] = (/^(\d{1,2}):(\d{2})/.exec(item.hora ?? "")?.slice(1) ?? ["10", "0"]).map(Number)
+    const day = new Date(Date.now() - Math.max(1, Math.round(Number(item.hace_dias) || 1)) * DAY)
+    // Lima va cinco horas detrás de UTC todo el año.
+    const at = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), (hour ?? 10) + 5, minute ?? 0)
+    last = Math.max(at, last + 20_000)
+    return last
+  })
+  const shift = Math.max(0, (times.at(-1) ?? 0) - (Date.now() - DAY / 2))
+  return times.map((at) => at - shift)
+}
+
+/**
+ * El WhatsApp de quien vuelve, como queda en la clínica: los mensajes de antes con su
+ * fecha y la conversación cerrada, así lo de hoy abre una atención nueva. Cada caso
+ * escribe desde un número propio de esa persona: dos casos suyos en la misma base no
+ * comparten hilo.
+ */
+async function returningThread(name: string, previous: PreviousMessage[]): Promise<{ name: string; phone: string } | null> {
+  const [person] = await ownerDb.execute<{ contact_id: string }>(
+    `select c.id as contact_id from patient p join contact c on c.id = p.person_id
+      where p.organization_id = '${ORG}' and not c.is_test and c.display_name = '${name.replace(/'/g, "''")}' limit 1` as never,
+  )
+  if (!person) return null
+  const phone = `519${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`
+  const [identity] = await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: ORG, contactId: person.contact_id, channel: "whatsapp", externalUserId: `wa:${phone}`, displayName: name })
+    .returning({ id: contactIdentity.id })
+  const times = previousTimes(previous)
+  const latest = (who: (item: PreviousMessage) => boolean) => {
+    const at = Math.max(...times.filter((_, index) => who(previous[index]!)), 0)
+    return at > 0 ? new Date(at) : null
+  }
+  const closed = new Date(times.at(-1)!)
+  const [thread] = await ownerDb
+    .insert(conversation)
+    .values({
+      organizationId: ORG, contactId: person.contact_id, contactIdentityId: identity!.id, channelConnectionId: waConnection, externalThreadId: `wa:${phone}`,
+      status: "closed", closedAt: closed, closeReason: "resuelta", attentionStartedAt: closed, lastMessageAt: closed,
+      lastInboundAt: latest((item) => item.de === "persona"), lastOutboundAt: latest((item) => item.de !== "persona"), createdAt: new Date(times[0]!),
+    })
+    .returning({ id: conversation.id })
+  await ownerDb.insert(message).values(
+    previous.map((item, index) => {
+      const at = new Date(times[index]!)
+      return item.de === "persona"
+        ? { organizationId: ORG, conversationId: thread!.id, direction: "in", senderKind: "contact", body: item.texto, status: "received", createdAt: at }
+        : { organizationId: ORG, conversationId: thread!.id, direction: "out", senderKind: item.de === "equipo" ? "user" : "agent", body: item.texto, status: "read", sentAt: at, createdAt: at }
+    }),
+  )
+  return { name, phone }
+}
+
 async function converse(index: number) {
   const chosen = await caseFor(index)
   if (!chosen) return
   const { persona } = chosen
-  const known = chosen.known ? await knownPatient(chosen.known) : null
+  const previous = chosen.previous ?? []
+  const known = chosen.known ? await (previous.length ? returningThread(chosen.known, previous) : knownPatient(chosen.known)) : null
   const realChannel: Channel = chosen.channel === "whatsapp_conocido" && !known ? "whatsapp_nuevo" : chosen.channel
   const session = newWebchatSessionId()
   const phone = known?.phone ?? `519${String(Math.floor(10_000_000 + Math.random() * 89_999_999))}`
@@ -304,7 +403,7 @@ async function converse(index: number) {
     if (!lastNew) transcript.push({ from: "sofi", text: "(sin respuesta en 150 s)", at: Date.now() - started })
   }
   const recorded = conversationId ? await whatWasRecorded(conversationId) : "nada"
-  const verdict = await grade(persona, realChannel, known !== null, transcript, recorded)
+  const verdict = await grade(persona, realChannel, known !== null, transcript, recorded, known ? previous : [])
   // Lo que costó: cada arreglo se mide también en tokens, no solo en calidad.
   const [cost] = conversationId
     ? await ownerDb.execute<{ corridas: number; llamadas: number; entrada: number; cache: number; salida: number; usd: number }>(
@@ -314,7 +413,7 @@ async function converse(index: number) {
            from agent_run_ledger where conversation_id = '${conversationId}'` as never,
       )
     : []
-  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, conversationId, transcript, verdict, cost: cost ?? null }
+  const result = { product: PRODUCT, index, channel: realChannel, known: known?.name ?? null, persona, previous: previous.length, conversationId, transcript, verdict, cost: cost ?? null }
   writeFileSync(join(OUT, `${String(index).padStart(3, "0")}.json`), JSON.stringify(result, null, 2))
   console.log(`[${index}] ${realChannel} · ${persona.por_que_escribe.slice(0, 60)} → ${verdict?.cumple ? "cumple" : "NO cumple"}`)
 }
@@ -375,8 +474,14 @@ interface Verdict {
   resumen: string
 }
 
-async function grade(persona: Persona, channel: Channel, known: boolean, transcript: Line[], recorded: string): Promise<Verdict | null> {
+async function grade(persona: Persona, channel: Channel, known: boolean, transcript: Line[], recorded: string, previous: PreviousMessage[]): Promise<Verdict | null> {
   const lines = transcript.map((line) => `[${Math.round(line.at / 1000)} s] ${line.from === "persona" ? "PERSONA" : "SOFI"}: ${line.text}`).join("\n")
+  // Lo de antes también lo lee Sofi: sin verlo, el juez tomaría por inventado lo que recuerda de ahí.
+  const before = previous.length
+    ? `\n\nAntes de hoy ya habían conversado por este mismo WhatsApp (Sofi lee lo más reciente de esto en su historial):\n${previous
+        .map((item) => `[hace ${item.hace_dias} días, ${item.hora}] ${item.de === "persona" ? "PERSONA" : item.de === "equipo" ? "EQUIPO" : "CLÍNICA"}: ${item.texto}`)
+        .join("\n")}`
+    : ""
   return askJson<Verdict>(
     judge,
     `Eres un auditor exigente de la atención de Sofi, la recepcionista virtual de ${CLINIC}. Califica esta conversación con el objetivo de Sofi, sin indulgencia: si dudas, no cumple.
@@ -394,7 +499,7 @@ No juzgues como falsos los horarios, precios, profesionales, sedes, teléfonos o
 
 Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez. Las personas a veces se van sin contestar: si la conversación termina después de una pregunta de Sofi que era la correcta para avanzar (por ejemplo «¿Te la reservo?»), juzga lo que Sofi hizo hasta ahí; que la cita no quedara reservada por eso no es una falla de Sofi.
 
-Canal: ${channel}. ¿Paciente ya conocido?: ${known ? "sí" : "no"}. Quién era la persona (Sofi no lo sabía): ${JSON.stringify(persona)}
+Canal: ${channel}. ¿Paciente ya conocido?: ${known ? "sí" : "no"}. Quién era la persona (Sofi no lo sabía): ${JSON.stringify(persona)}${before}
 
 Conversación (segundos desde el primer mensaje):
 ${lines}
@@ -429,13 +534,20 @@ async function setup() {
 mkdirSync(OUT, { recursive: true })
 await setup()
 if (CASES_FILE && env.CASOS_SOLO === "1") {
-  const made: AuditCase[] = []
-  for (let index = 0; index < TOTAL; index++) {
-    const chosen = await caseFor(index)
-    if (chosen) made.push(chosen)
-  }
-  writeFileSync(CASES_FILE, JSON.stringify(made, null, 2))
-  console.log(`casos guardados: ${made.length} en ${CASES_FILE}`)
+  // De a `PARALELO` a la vez: los de quien vuelve traen su hilo de antes y tardan.
+  const made: Array<AuditCase | null> = Array.from({ length: TOTAL }, () => null)
+  let pending = 0
+  await Promise.all(
+    Array.from({ length: PARALLEL }, async () => {
+      while (pending < TOTAL) {
+        const index = pending++
+        made[index] = await caseFor(index)
+      }
+    }),
+  )
+  const kept = made.filter((item): item is AuditCase => item !== null)
+  writeFileSync(CASES_FILE, JSON.stringify(kept, null, 2))
+  console.log(`casos guardados: ${kept.length} en ${CASES_FILE}`)
   process.exit(0)
 }
 if (CASES_FILE) fixedCases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as AuditCase[]
