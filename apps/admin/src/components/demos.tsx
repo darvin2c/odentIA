@@ -136,6 +136,12 @@ const STEPS: Array<{ key: string; title: string; detail: (demo: DemoItem) => str
     title: "Hoy y las próximas dos semanas",
     detail: () => "La agenda de hoy, lo que espera en la Bandeja y los controles que vencen",
   },
+  {
+    key: "operacion",
+    title: "Lo que el equipo ya usa",
+    detail: () =>
+      "Inventario con sus compras, promociones, comisiones, oportunidades y lo que Sofi ya sabe responder",
+  },
 ]
 
 /** Las demos, al día mientras alguna se arma. */

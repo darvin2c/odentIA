@@ -18,9 +18,10 @@ import { and, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { RESERVED_ORG_SLUGS } from "./admin-organizations.js"
 import {
+  DEMO_BUILD_STEPS,
+  type DemoPurgeResult,
   demoCountryOf,
   demoKindOf,
-  type DemoPurgeResult,
   purgeDemoOrganization,
 } from "./demo-build.js"
 import { DEMO_COUNTRIES, DEMO_SIZE_RECIPES } from "./demo-recipes.js"
@@ -161,7 +162,7 @@ export async function requestDemo(tx: Db, actor: AdminActor, input: DemoRequestI
       createdBy: actor.userId,
       seed: randomInt(1, 2_147_483_647),
       status: "pendiente",
-      progress: { step: "pendiente", done: 0, total: 5 },
+      progress: { step: "pendiente", done: 0, total: DEMO_BUILD_STEPS },
     })
     .returning({ id: saasDemo.id, slug: saasDemo.slug })
   await writeAdminAudit(tx, actor, {
@@ -391,7 +392,7 @@ export async function resetDemo(tx: Db, actor: AdminActor, id: string) {
       status: "pendiente",
       // Volver a empezar cuenta como uso: no se borra sola mientras se vuelve a armar.
       openedAt: new Date(),
-      progress: { step: "pendiente", done: 0, total: 5 },
+      progress: { step: "pendiente", done: 0, total: DEMO_BUILD_STEPS },
       error: null,
       updatedAt: new Date(),
     })

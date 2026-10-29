@@ -1,10 +1,14 @@
 import { seedCatalog } from "@odentia/db/products"
 import { adminStaff } from "@odentia/db/schema/admin-core"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
+import { agentKnowledgeEntry } from "@odentia/db/schema/agent"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { encounter, encounterDiagnosis, patient, patientContact, serviceCatalog } from "@odentia/db/schema/clinical"
 import { conversation } from "@odentia/db/schema/crm"
+import { commissionSettlement } from "@odentia/db/schema/finance"
+import { purchaseOrder, stockMovement } from "@odentia/db/schema/inventory"
+import { opportunity } from "@odentia/db/schema/opportunities"
 import { orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, eq, inArray, like, sql } from "drizzle-orm"
@@ -12,6 +16,8 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { listOrganizations } from "./admin-organizations.js"
 import { seedDiagnosisCodes } from "./clinical-test-fixture.js"
 import { advanceDemo, buildDemo, demoUserPrefix, purgeDemoOrganization } from "./demo-build.js"
+import { listProducts } from "./inventory.js"
+import { getPromotionMetrics, listPromotions } from "./promotions.js"
 import { createSaasPlan } from "./saas-billing.js"
 import { getClinicCostMargin } from "./saas-cost.js"
 import {
@@ -301,6 +307,64 @@ describe("una demo de Pediatría en Colombia", () => {
     })
     expect(detail?.showcase?.controlsLabel).toBe("Control de niño sano")
     expect(detail?.showcase?.openTopics ?? 0).toBeGreaterThan(0)
+  })
+
+  it("trae lo que el equipo ya usa: inventario, promociones usadas, comisiones, oportunidades y respuestas de Sofi", async () => {
+    const orgId = demo.organizationId
+    // Inventario: lo que gastan los servicios que ofrece en su país, lo que vende, algo que hace
+    // falta reponer, un lote vencido y otro por vencer. Un consultorio de niños no guarda DIU.
+    const stock = await listProducts(ownerDb, orgId)
+    expect(stock.items.map((item) => item.name)).toEqual(
+      expect.arrayContaining(["Mascarilla para nebulizar", "Termómetro digital"]),
+    )
+    expect(stock.items.some((item) => item.name.includes("DIU"))).toBe(false)
+    expect(stock.counts.hacen_falta).toBeGreaterThan(0)
+    expect(stock.items.some((item) => item.expired !== null)).toBe(true)
+    expect(stock.counts.por_vencer).toBeGreaterThan(0)
+    const orders = await ownerDb
+      .selectDistinct({ status: purchaseOrder.status })
+      .from(purchaseOrder)
+      .where(eq(purchaseOrder.organizationId, orgId))
+    expect(orders.map((row) => row.status).sort()).toEqual(
+      ["borrador", "cancelada", "cerrada", "confirmada", "parcialmente_recibida", "recibida"].sort(),
+    )
+    // Las atenciones de estos días descontaron sus materiales.
+    const [used] = await ownerDb
+      .select({ n: sql<number>`count(*)::int` })
+      .from(stockMovement)
+      .where(and(eq(stockMovement.organizationId, orgId), like(stockMovement.reason, "Atención del %")))
+    expect(used?.n ?? 0).toBeGreaterThan(0)
+
+    // Las dos promociones son de servicios de su tarifario y se usaron en cobros de la historia.
+    const promotions = await listPromotions(ownerDb, orgId)
+    expect(promotions.map((item) => item.name).sort()).toEqual(
+      ["Control del niño sano", "Nebulización a precio especial"].sort(),
+    )
+    for (const item of promotions) {
+      expect(item.items[0]?.priceCents ?? 0).toBeLessThan(item.items[0]?.tariffCents ?? 0)
+      expect((await getPromotionMetrics(ownerDb, orgId, item.id)).uses).toBeGreaterThan(0)
+    }
+
+    // Comisiones: el mes pasado pagado, con su gasto de Personal.
+    const [paid] = await ownerDb
+      .select({ n: sql<number>`count(*)::int` })
+      .from(commissionSettlement)
+      .where(eq(commissionSettlement.organizationId, orgId))
+    expect(paid?.n ?? 0).toBeGreaterThan(0)
+
+    // Oportunidades de quienes escribieron: abiertas, una ganada y una perdida.
+    const opportunities = await ownerDb
+      .select({ status: opportunity.status })
+      .from(opportunity)
+      .where(eq(opportunity.organizationId, orgId))
+    expect(opportunities.map((row) => row.status).sort()).toEqual(["lost", "open", "open", "open", "won"])
+
+    // Sofi ya tiene publicadas las respuestas básicas, también la de su tipo.
+    const answers = await ownerDb
+      .select({ basicKey: agentKnowledgeEntry.basicKey })
+      .from(agentKnowledgeEntry)
+      .where(and(eq(agentKnowledgeEntry.organizationId, orgId), eq(agentKnowledgeEntry.status, "publicada")))
+    expect(answers.map((row) => row.basicKey)).toEqual(expect.arrayContaining(["horario", "ninos"]))
   })
 
   it("ponerla al día cierra lo que pasó, no toca lo hecho a mano y es igual si se repite el mismo día", async () => {

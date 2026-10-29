@@ -24,6 +24,276 @@ const GENERAL_EXPENSES: DemoKindRecipe["expenses"] = [
   { category: "Servicios", concept: "Luz, agua e internet", cents: 520_00, day: 18 },
 ]
 
+/**
+ * Lo que guarda un consultorio en Inventario. Entra lo que gasta algún
+ * servicio de su tipo y lo que se vende: un consultorio de pediatría no
+ * guarda DIU.
+ */
+const MEDICAL_INVENTORY: DemoKindRecipe["inventory"] = {
+  suppliers: ["Distribuidora Médica Central", "Insumos Hospitalarios del Sur"],
+  products: [
+    {
+      sku: "INS-GUANTE-NITRILO",
+      name: "Guantes de nitrilo",
+      unit: "guante",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 38,
+      min: 200,
+    },
+    {
+      sku: "INS-TORUNDA-ALCOHOL",
+      name: "Torundas con alcohol",
+      unit: "torunda",
+      purchase: { unit: "bolsa", factor: 200 },
+      cost: 15,
+      min: 150,
+    },
+    {
+      sku: "INS-JERINGA-5ML",
+      name: "Jeringa de 5 ml con aguja 21G",
+      unit: "jeringa",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 45,
+      min: 50,
+    },
+    {
+      sku: "INS-JERINGA-1ML",
+      name: "Jeringa de 1 ml con aguja 25G",
+      unit: "jeringa",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 42,
+      min: 40,
+    },
+    {
+      sku: "INS-MASCARILLA-NEB",
+      name: "Mascarilla para nebulizar",
+      unit: "mascarilla",
+      purchase: { unit: "caja", factor: 50 },
+      cost: 95,
+      min: 20,
+    },
+    {
+      sku: "MED-SUERO-FISIO",
+      name: "Cloruro de sodio 0,9 % ampolla de 5 ml",
+      unit: "ampolla",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 65,
+      min: 40,
+    },
+    {
+      sku: "INS-TIRA-GLUCOSA",
+      name: "Tiras reactivas de glucosa",
+      unit: "tira",
+      purchase: { unit: "frasco", factor: 50 },
+      cost: 55,
+      min: 50,
+    },
+    {
+      sku: "INS-LANCETA",
+      name: "Lancetas estériles",
+      unit: "lanceta",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 18,
+      min: 50,
+    },
+    {
+      sku: "INS-ELECTRODO-ECG",
+      name: "Electrodos para electrocardiograma",
+      unit: "electrodo",
+      purchase: { unit: "bolsa", factor: 50 },
+      cost: 30,
+      min: 50,
+    },
+    {
+      sku: "INS-GEL-ECO",
+      name: "Gel para ecografía en sachet",
+      unit: "sachet",
+      purchase: { unit: "caja", factor: 50 },
+      cost: 40,
+      min: 25,
+    },
+    {
+      sku: "INS-SUTURA-NYLON",
+      name: "Sutura de nylon 3-0",
+      unit: "sobre",
+      purchase: { unit: "caja", factor: 12 },
+      cost: 48,
+      min: 6,
+    },
+    {
+      sku: "INS-GASA-ESTERIL",
+      name: "Gasas estériles 10 × 10 cm",
+      unit: "gasa",
+      purchase: { unit: "paquete", factor: 100 },
+      cost: 30,
+      min: 100,
+    },
+    {
+      sku: "INS-CEPILLO-CITO",
+      name: "Cepillo citológico",
+      unit: "cepillo",
+      purchase: { unit: "bolsa", factor: 100 },
+      cost: 35,
+      min: 20,
+    },
+    {
+      sku: "INS-LAMINA-PORTA",
+      name: "Láminas portaobjetos",
+      unit: "lámina",
+      purchase: { unit: "caja", factor: 50 },
+      cost: 10,
+      min: 20,
+    },
+    {
+      sku: "INS-TUBO-VACIO",
+      name: "Tubos de extracción al vacío",
+      unit: "tubo",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 55,
+      min: 50,
+    },
+    {
+      sku: "INS-AGUJA-VACIO",
+      name: "Agujas para extracción al vacío 21G",
+      unit: "aguja",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 40,
+      min: 40,
+    },
+    { sku: "PRO-DIU-COBRE", name: "DIU de cobre T380A", unit: "dispositivo", cost: 25, min: 3 },
+    {
+      sku: "VEN-TERMOMETRO-DIG",
+      name: "Termómetro digital",
+      unit: "termómetro",
+      purchase: { unit: "caja", factor: 10 },
+      cost: 120,
+      min: 3,
+      sale: 25,
+      onlySale: true,
+    },
+    {
+      sku: "VEN-ALCOHOL-GEL",
+      name: "Alcohol en gel 250 ml",
+      unit: "frasco",
+      purchase: { unit: "caja", factor: 12 },
+      cost: 96,
+      min: 4,
+      sale: 12,
+    },
+    {
+      sku: "INS-TERMOMETRO-HG",
+      name: "Termómetro de mercurio",
+      unit: "termómetro",
+      cost: 8,
+      min: 0,
+      retired: true,
+    },
+  ],
+  materials: {
+    nebulizacion: [
+      { sku: "INS-MASCARILLA-NEB", quantity: 1 },
+      { sku: "MED-SUERO-FISIO", quantity: 1 },
+    ],
+    "inyectable-intramuscular": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-JERINGA-5ML", quantity: 1 },
+      { sku: "INS-TORUNDA-ALCOHOL", quantity: 1 },
+    ],
+    "sutura-simple": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-SUTURA-NYLON", quantity: 1 },
+      { sku: "INS-GASA-ESTERIL", quantity: 2 },
+      { sku: "INS-TORUNDA-ALCOHOL", quantity: 2 },
+    ],
+    "retiro-de-puntos": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-GASA-ESTERIL", quantity: 1 },
+      { sku: "INS-TORUNDA-ALCOHOL", quantity: 1 },
+    ],
+    electrocardiograma: [{ sku: "INS-ELECTRODO-ECG", quantity: 10 }],
+    "glucosa-capilar": [
+      { sku: "INS-TIRA-GLUCOSA", quantity: 1 },
+      { sku: "INS-LANCETA", quantity: 1 },
+      { sku: "INS-TORUNDA-ALCOHOL", quantity: 1 },
+    ],
+    "aplicacion-de-vacuna": [
+      { sku: "INS-JERINGA-1ML", quantity: 1 },
+      { sku: "INS-TORUNDA-ALCOHOL", quantity: 1 },
+    ],
+    papanicolaou: [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-CEPILLO-CITO", quantity: 1 },
+      { sku: "INS-LAMINA-PORTA", quantity: 1 },
+    ],
+    "ecografia-obstetrica": [{ sku: "INS-GEL-ECO", quantity: 1 }],
+    "ecografia-abdominal": [{ sku: "INS-GEL-ECO", quantity: 1 }],
+    "ecografia-transvaginal": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-GEL-ECO", quantity: 1 },
+    ],
+    "toma-de-muestra-de-sangre": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-TUBO-VACIO", quantity: 2 },
+      { sku: "INS-AGUJA-VACIO", quantity: 1 },
+      { sku: "INS-TORUNDA-ALCOHOL", quantity: 1 },
+    ],
+    "colocacion-de-diu": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "PRO-DIU-COBRE", quantity: 1 },
+      { sku: "INS-GASA-ESTERIL", quantity: 2 },
+    ],
+  },
+  low: [
+    "INS-MASCARILLA-NEB",
+    "INS-TIRA-GLUCOSA",
+    "INS-ELECTRODO-ECG",
+    "INS-JERINGA-1ML",
+    "INS-CEPILLO-CITO",
+    "INS-TUBO-VACIO",
+  ],
+  expiring: [
+    "MED-SUERO-FISIO",
+    "INS-TIRA-GLUCOSA",
+    "INS-JERINGA-1ML",
+    "INS-GEL-ECO",
+    "INS-TORUNDA-ALCOHOL",
+    "INS-TUBO-VACIO",
+    "INS-MASCARILLA-NEB",
+    "INS-GUANTE-NITRILO",
+  ],
+}
+
+/** Lo que Sofi ya tiene respondido en un consultorio, con el horario del equipo de la demo. */
+const MEDICAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
+  {
+    title: "Horario de atención",
+    body: "Atendemos de lunes a viernes de 9:00 a. m. a 1:00 p. m. y de 2:00 p. m. a 6:00 p. m., y los sábados de 9:00 a. m. a 1:00 p. m. Domingos y feriados no atendemos.",
+    basicKey: "horario",
+    askForms: ["¿A qué hora abren?", "¿Atienden los sábados?"],
+  },
+  {
+    title: "¿Atienden sin cita?",
+    body: "Atendemos con cita. Si no puede esperar a mañana, escríbenos y te damos el primer espacio libre del día.",
+    basicKey: "sin_cita",
+    askForms: ["¿Puedo ir sin reservar?"],
+  },
+  {
+    title: "¿Atienden urgencias?",
+    body: "No somos un servicio de emergencias. Ante dolor de pecho, falta de aire, un desmayo o un accidente, acude a la emergencia más cercana.",
+    basicKey: "urgencias",
+  },
+  {
+    title: "¿Cómo cambio o cancelo mi cita?",
+    body: "Escríbenos por este chat y la cambiamos al día que te acomode. Si no puedes venir, avísanos con unas horas de anticipación para darle el espacio a otro paciente.",
+    basicKey: "cambiar_cita",
+  },
+  {
+    title: "¿Qué necesito llevar a mi primera cita?",
+    body: "Tu documento de identidad, tus análisis o informes anteriores y la lista de medicamentos que tomas.",
+    basicKey: "primera_cita",
+  },
+]
+
 function adult(random: Random, minAge = 18, maxAge = 75, female = 0.58): ReportsSeedPerson {
   return {
     birthDate: birthDateForAge(random.int(minAge, maxAge), random),
@@ -233,6 +503,24 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: false,
     occupancy: 0.72,
     expenses: GENERAL_EXPENSES,
+    inventory: MEDICAL_INVENTORY,
+    promotions: [
+      {
+        template: "glucosa-capilar",
+        name: "Chequeo de glucosa",
+        conditions: "Medición en ayunas, con el resultado en el momento.",
+        price: 10,
+        when: "vigente",
+      },
+      {
+        template: "electrocardiograma",
+        name: "Electrocardiograma a precio especial",
+        conditions: "Con la consulta del mismo día.",
+        price: 50,
+        when: "terminada",
+      },
+    ],
+    knowledge: MEDICAL_KNOWLEDGE,
   },
   {
     key: "pediatria",
@@ -316,6 +604,31 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: false,
     occupancy: 0.78,
     expenses: GENERAL_EXPENSES,
+    inventory: MEDICAL_INVENTORY,
+    promotions: [
+      {
+        template: "nebulizacion",
+        name: "Nebulización a precio especial",
+        conditions: "Para niños con indicación médica de nebulizar.",
+        price: 25,
+        when: "vigente",
+      },
+      {
+        template: "control-nino-sano-1-a-4",
+        name: "Control del niño sano",
+        conditions: "De 1 a 4 años, con peso, talla y desarrollo.",
+        price: 70,
+        when: "terminada",
+      },
+    ],
+    knowledge: [
+      ...MEDICAL_KNOWLEDGE,
+      {
+        title: "¿Atienden a niños? ¿Desde qué edad?",
+        body: "Sí, atendemos desde recién nacidos hasta los 17 años, siempre con un adulto responsable.",
+        basicKey: "ninos",
+      },
+    ],
   },
   {
     key: "ginecologia_obstetricia",
@@ -403,6 +716,31 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: false,
     occupancy: 0.74,
     expenses: GENERAL_EXPENSES,
+    inventory: MEDICAL_INVENTORY,
+    promotions: [
+      {
+        template: "papanicolaou",
+        name: "Papanicolaou preventivo",
+        conditions: "Una toma por persona; el resultado llega en unos 10 días.",
+        price: 45,
+        when: "vigente",
+      },
+      {
+        template: "ecografia-obstetrica",
+        name: "Ecografía obstétrica a precio especial",
+        conditions: "Para gestantes en control con nosotros.",
+        price: 95,
+        when: "terminada",
+      },
+    ],
+    knowledge: [
+      ...MEDICAL_KNOWLEDGE,
+      {
+        title: "¿Atienden a embarazadas?",
+        body: "Sí, hacemos el control prenatal completo, con sus ecografías, desde el primer mes.",
+        basicKey: "embarazo",
+      },
+    ],
   },
   {
     key: "medicina_interna",
@@ -487,6 +825,24 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: false,
     occupancy: 0.7,
     expenses: GENERAL_EXPENSES,
+    inventory: MEDICAL_INVENTORY,
+    promotions: [
+      {
+        template: "glucosa-capilar",
+        name: "Control de glucosa",
+        conditions: "Para pacientes en control de diabetes, con el resultado en el momento.",
+        price: 10,
+        when: "vigente",
+      },
+      {
+        template: "electrocardiograma",
+        name: "Electrocardiograma de control",
+        conditions: "Con la consulta de control del mismo día.",
+        price: 55,
+        when: "terminada",
+      },
+    ],
+    knowledge: MEDICAL_KNOWLEDGE,
   },
   {
     key: "medicina_familiar",
@@ -560,6 +916,24 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: false,
     occupancy: 0.7,
     expenses: GENERAL_EXPENSES,
+    inventory: MEDICAL_INVENTORY,
+    promotions: [
+      {
+        template: "chequeo-preventivo-adulto-mayor",
+        name: "Chequeo del adulto mayor",
+        conditions: "Para mayores de 60 años, una vez al año.",
+        price: 130,
+        when: "vigente",
+      },
+      {
+        template: "chequeo-preventivo-adulto",
+        name: "Chequeo preventivo",
+        conditions: "Para mayores de 18 años, una vez al año.",
+        price: 120,
+        when: "terminada",
+      },
+    ],
+    knowledge: MEDICAL_KNOWLEDGE,
   },
   {
     key: "policlinico",
@@ -641,5 +1015,23 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: false,
     occupancy: 0.75,
     expenses: GENERAL_EXPENSES,
+    inventory: MEDICAL_INVENTORY,
+    promotions: [
+      {
+        template: "electrocardiograma",
+        name: "Electrocardiograma de control",
+        conditions: "Con la consulta del mismo día.",
+        price: 55,
+        when: "vigente",
+      },
+      {
+        template: "ecografia-abdominal",
+        name: "Ecografía abdominal a precio especial",
+        conditions: "Con orden de uno de nuestros médicos.",
+        price: 95,
+        when: "terminada",
+      },
+    ],
+    knowledge: MEDICAL_KNOWLEDGE,
   },
 ]

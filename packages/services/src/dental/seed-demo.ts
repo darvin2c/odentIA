@@ -206,7 +206,7 @@ import { createService, quickAddServices, updateService } from "../service-catal
 import { librarySpecialtyIds } from "../specialties.js"
 import type { DentalFinalizeParts } from "./hooks.js"
 import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
-import { buildDemo, purgeDemoOrganization } from "../demo-build.js"
+import { buildDemo, DEMO_BUILD_STEPS, purgeDemoOrganization } from "../demo-build.js"
 import { createStorage } from "../storage.js"
 import {
   countWhereIn,
@@ -4174,7 +4174,7 @@ await db.transaction(async (tx) => {
   const built = await buildDemo(tx, { ...demo, product: "medical", size: "pequeno" }, { secretsKey, fetch })
   await tx
     .update(saasDemo)
-    .set({ organizationId: built.organizationId, slug: built.slug, status: "lista", historyThrough: built.historyThrough, readyAt: new Date(), progress: { step: "listo", done: 5, total: 5 } })
+    .set({ organizationId: built.organizationId, slug: built.slug, status: "lista", historyThrough: built.historyThrough, readyAt: new Date(), progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS } })
     .where(eq(saasDemo.id, demo.id))
 })
 
