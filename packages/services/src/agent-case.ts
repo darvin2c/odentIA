@@ -67,6 +67,10 @@ export interface AgentCaseTopic {
   dueAt: string | null
   /** Lo que escribió la persona al originarlo. */
   asked: string | null
+  /** Ya recibió el aviso de que lo tiene el equipo: no se le repite. */
+  notified?: boolean
+  /** Cuántas veces volvió a preguntar por él. */
+  askedAgain?: number
 }
 
 export interface AgentCaseState {
@@ -155,8 +159,11 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     assignee_name: string | null
     due_at: Date | string | null
     asked: string | null
+    notified: boolean
+    asked_again: number
   }>(sql`
-    select h.id, h.reason, u.name as assignee_name, t.due_at, ms.body as asked
+    select h.id, h.reason, u.name as assignee_name, t.due_at, ms.body as asked,
+      h.notice is not null as notified, coalesce(jsonb_array_length(h.asked_message_ids), 0)::int as asked_again
     from agent_handoff h
     left join "user" u on u.id = h.assignee_user_id
     left join task t on t.id = h.task_id and t.organization_id = h.organization_id
@@ -169,6 +176,8 @@ export async function getAgentCaseState(tx: Db, orgId: string, conversationId: s
     assigneeName: row.assignee_name,
     dueAt: row.due_at ? new Date(row.due_at).toISOString() : null,
     asked: row.asked ? row.asked.slice(0, 300) : null,
+    notified: row.notified === true,
+    askedAgain: Number(row.asked_again ?? 0),
   }))
   return {
     topics,
@@ -193,11 +202,12 @@ export function formatAgentCaseForPrompt(
   const facts: string[] = []
   if (state.topics?.length) {
     sections.push(
-      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve a preguntar por uno, usa recordar_tema con su id y dile quién lo tiene, sin prometer una hora. Si habla de otra cosa, no los menciones: responde con normalidad lo que pide:
+      // Repetir «lo tiene el equipo» cada vez que insiste era la falla de fluidez más común (auditoría del ADR 0104).
+      `Temas con el equipo (ADR 0050; los registra el sistema). Nunca los respondas tú, aunque creas saber la respuesta. Si la persona vuelve sobre uno, usa recordar_tema con su id; si ya le avisaste que lo tiene el equipo, no se lo repites: en una línea reconoce lo nuevo que dijo y dale algo concreto si lo hay (si quiere hablar ya con alguien, el teléfono de la sede si figura en lo que sabes de la clínica), o haz tú lo que pide si tienes con qué. Nunca prometas una hora. Si habla de otra cosa, no los menciones: responde con normalidad lo que pide:
 ${state.topics
         .map(
           (t) =>
-            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}.`,
+            `- «${t.reason}» (id ${t.id})${t.asked ? `: escribió «${t.asked}»` : ""}. ${t.assigneeName ? `Lo tiene ${t.assigneeName}` : "Nadie lo tomó todavía: lo verá el equipo"}.${t.notified ? " Ya le avisaste." : ""}${t.askedAgain ? ` Volvió a preguntar ${t.askedAgain} ${t.askedAgain === 1 ? "vez" : "veces"}.` : ""}`,
         )
         .join("\n")}`,
     )

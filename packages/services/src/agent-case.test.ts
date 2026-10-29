@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
-import { agentAnswerTrace, agentCaseMemory, agentProposal } from "@odentia/db/schema/agent"
+import { agentAnswerTrace, agentCaseMemory, agentHandoff, agentProposal } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { eq, sql } from "drizzle-orm"
 import { beforeAll, expect, it } from "vitest"
@@ -150,6 +150,24 @@ it("lo anotado con nombre propio se reemplaza: de cada cosa vale lo último, y q
     expect.objectContaining({ label: "Para quién", text: "su hija Ana", origin: "caso" }),
     expect.objectContaining({ label: "Prefiere", text: "mejor el jueves por la tarde", origin: "caso" }),
   ])
+})
+
+it("un tema con el equipo dice si ya se le avisó y cuántas veces insistió, para no repetirle el aviso (auditoría del ADR 0104)", async () => {
+  const conversationId = await openConversation("tema-avisado")
+  await ownerDb.insert(agentHandoff).values([
+    { organizationId: ORG, conversationId, reason: "Pide un descuento", summary: "Pide un descuento", notice: "El equipo verá tu pedido.", askedMessageIds: [randomUUID(), randomUUID()] },
+    { organizationId: ORG, conversationId, reason: "Reclamo por el cobro", summary: "Reclamo" },
+  ])
+  const state = await run((tx) => getAgentCaseState(tx, ORG, conversationId))
+  expect(state.topics?.map((topic) => [topic.reason, topic.notified, topic.askedAgain])).toEqual([
+    ["Pide un descuento", true, 2],
+    ["Reclamo por el cobro", false, 0],
+  ])
+  const prompt = formatAgentCaseForPrompt(state, ZONE) ?? ""
+  expect(prompt).toContain("si ya le avisaste que lo tiene el equipo, no se lo repites")
+  expect(prompt).toContain("«Pide un descuento»")
+  expect(prompt).toMatch(/Pide un descuento[^\n]*Ya le avisaste\. Volvió a preguntar 2 veces\./)
+  expect(prompt).not.toMatch(/Reclamo por el cobro[^\n]*Ya le avisaste/)
 })
 
 it("solo se conserva la última consulta de las herramientas previstas, recortada y con caducidad", async () => {

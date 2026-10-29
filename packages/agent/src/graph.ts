@@ -69,6 +69,7 @@ import { BURST_HORIZON_MS, BURST_MESSAGES } from "./decision/points.js"
 import { reportAiUse } from "./ai-usage.js"
 import { attentionLines, attentionProgress, fitHistory, HISTORY_MAX_MESSAGES, HISTORY_MIN_TAIL } from "./attention.js"
 import { channelFormatRule } from "./channel-format.js"
+import { languageOf } from "./language.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
@@ -188,6 +189,23 @@ const SEND_TOOLS = new Set(["send_reply", "despedirse_y_cerrar"])
  * despedida: esa cierra la atención y su memoria.
  */
 const MEMORY_TOOLS = new Set(["anotar_caso", "recordar_dato", "update_contact"])
+
+/**
+ * Lo que la persona pide y Sofi sí puede hacer aunque el caso ya esté con el
+ * equipo: «no me escriban más» llega con la queja (auditoría del ADR 0104). El
+ * turno sigue después para que el aviso lo diga.
+ */
+const BEFORE_NOTICE = new Set(["elegir_mensajes"])
+
+/**
+ * Lo que propone algo nuevo: junto a confirmar_propuesta, en paralelo,
+ * reemplazaba lo que la persona acababa de aceptar y el sí ya no tenía qué
+ * confirmar (auditoría del ADR 0104). Se confirma primero; lo otro, después.
+ */
+const PROPOSING_TOOLS = new Set(["proponer_cita", "reservar_paciente_nuevo", "reprogramar_cita", "cancelar_cita", "anotar_respuesta_presupuesto"])
+
+const NOT_PROPOSED =
+  "No hecho: en este mismo paso confirmaste lo que esperaba su sí. Mira primero el resultado de confirmar_propuesta y vuelve a proponer solo si aún hace falta."
 
 const NOT_SENT =
   "No enviado: la respuesta al interlocutor debe ir sola en su paso (solo puede acompañarla lo que guarda lo que te dijo: anotar_caso, recordar_dato o update_contact). Revisa los resultados de las otras herramientas y vuelve a llamar a la herramienta de envío una sola vez."
@@ -930,8 +948,14 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const formatLine = channelFormatRule(await conversationChannel(toolCtx))
     const stable = [receptionPrompt(zone, cfg, { tools: available, services }, agentTexts(toolCtx)), rulesBlock, POLICY_LINE, knowledgeBlock].filter(Boolean).join("\n\n")
     // Todo lo que lee está en español; lo más cercano a la respuesta le recuerda el idioma de la persona.
+    // El idioma lo distingue el código (auditoría del ADR 0104): «responde en su idioma» no bastaba.
+    toolCtx.personLanguage = languageOf(
+      [...items.filter((item) => item.direction === "in").slice(-3).map((item) => item.body ?? ""), draft ?? ""].join("\n"),
+    )
     const languageLine =
-      "Responde en el idioma del último mensaje de la persona, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español: si te escribe en otro idioma, tradúcelas."
+      toolCtx.personLanguage === "en"
+        ? "La persona te escribe en inglés: respóndele en inglés, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español; tradúcelas."
+        : "Responde en el idioma del último mensaje de la persona, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español: si te escribe en otro idioma, tradúcelas."
     const perTurn = [contactBlock, formatLine, crossBlock, attentionBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, nowLine]
       .filter(Boolean)
       .join("\n\n")
@@ -1025,7 +1049,9 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const sends = calls.filter((call) => SEND_TOOLS.has(call.name))
     const remembers =
       sends.length === 1 && sends[0]?.name === "send_reply" && calls.every((call) => SEND_TOOLS.has(call.name) || MEMORY_TOOLS.has(call.name))
-    const held = calls.length > 1 && !remembers ? sends : []
+    // Lo que acepta la persona se confirma antes de proponer otra cosa (`PROPOSING_TOOLS`).
+    const unproposed = calls.some((call) => call.name === "confirmar_propuesta") ? calls.filter((call) => PROPOSING_TOOLS.has(call.name)) : []
+    const held = [...(calls.length > 1 && !remembers ? sends : []), ...unproposed]
     const executed = calls.filter((call) => !held.includes(call))
     for (const call of executed) {
       if (call.name && !toolCtx.toolsUsed.includes(call.name)) toolCtx.toolsUsed.push(call.name)
@@ -1036,7 +1062,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       return { messages: out.messages ?? [], turnCount: state.turnCount + 1 }
     }
     const notSent: BaseMessage[] = held.map(
-      (call) => new ToolMessage({ tool_call_id: call.id ?? "", name: call.name, content: NOT_SENT }),
+      (call) => new ToolMessage({ tool_call_id: call.id ?? "", name: call.name, content: unproposed.includes(call) ? NOT_PROPOSED : NOT_SENT }),
     )
     if (executed.length === 0) return { messages: notSent, turnCount: state.turnCount + 1 }
     const trimmed = new AIMessage({ content: last.content, tool_calls: executed })
@@ -1095,8 +1121,9 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       }
       // Con el caso ya en el equipo, consultar algo (su cita, el teléfono de la sede)
       // es para decirle algo concreto en el aviso: el turno sigue hasta que lo envíe.
+      // También después de hacer lo que pidió y sí puede hacer (`BEFORE_NOTICE`).
       const lastCall = [...state.messages].reverse().find((item): item is AIMessage => item instanceof AIMessage && (item.tool_calls?.length ?? 0) > 0)
-      const onlyRead = !!lastCall?.tool_calls?.every((call) => READ_TOOLS.includes(call.name))
+      const onlyRead = !!lastCall?.tool_calls?.every((call) => READ_TOOLS.includes(call.name) || BEFORE_NOTICE.has(call.name))
       if (!onlyRead) return END
     }
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {

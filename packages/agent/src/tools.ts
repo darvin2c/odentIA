@@ -96,6 +96,7 @@ import type { DecisionModel } from "./decision/port.js"
 import { choseThisSlot, understoodYes } from "./confirm-intent.js"
 import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { formatForChannel } from "./channel-format.js"
+import { languageOf } from "./language.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
@@ -265,6 +266,10 @@ export interface AgentToolCtx {
   topicRaised?: boolean
   /** Volvió sobre un tema que ya tiene el equipo: el aviso de entonces ya le llegó (ADR 0104). */
   topicAgain?: boolean
+  /** El idioma en que escribe la persona, si se distingue (`languageOf`). */
+  personLanguage?: "es" | "en" | null
+  /** Ya se le pidió una vez en esta corrida que responda en el idioma de la persona. */
+  languageNudged?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -772,6 +777,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * y puede consultarlo o quitarlo; a la segunda vez el caso pasa a una persona. Pasado el tope de
    * precios por conversación tampoco sale (`priceCap`).
    */
+  /**
+   * La persona escribe en inglés y lo que iba a salir está en español: una vez
+   * por corrida se le pide traducirlo (auditoría del ADR 0104). Vale para la
+   * respuesta, la despedida y el aviso de un pase.
+   */
+  const wrongLanguage = (text: string): string | null => {
+    if (ctx.personLanguage !== "en" || ctx.languageNudged || languageOf(text) !== "es") return null
+    ctx.languageNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te escribe en inglés y tu mensaje está en español. Escríbelo en inglés, traduciendo también lo que te dieron las herramientas, y vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
   const checkReply = async (text: string): Promise<{ verdict: ReplyVerdict | null; blocked: string | null }> => {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
     const verdict = verifyReply(text, ctx.evidence ?? [], await orgZone())
@@ -821,6 +837,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
+      const mismatch = wrongLanguage(text)
+      if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -862,6 +880,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
       if (pending) return `No cerrado. ${pending}`
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
+      const mismatch = wrongLanguage(text)
+      if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -2105,6 +2125,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
+      // Antes de registrar nada: el aviso en otro idioma se vuelve a pedir traducido.
+      const mismatch = notice ? wrongLanguage(notice) : null
+      if (mismatch) return mismatch
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {
@@ -2217,14 +2240,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       ).catch(() => null)
       if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
       if (result.raised) return "Anotado: como ya preguntó varias veces, su tema quedó como urgente para el equipo. Díselo en una frase, sin prometer una hora; no respondas el tema tú."
+      // Lo que ya sabe no se le repite (auditoría del ADR 0104): era la falla de fluidez más común.
       return result.assigneeName
-        ? `Anotado y avisado a ${result.assigneeName}. Dile a la persona que ${result.assigneeName} tiene su consulta, sin prometer una hora; no respondas el tema tú.`
-        : "Anotado: el equipo lo verá. Dile a la persona que su consulta la tiene el equipo, sin prometer una hora; no respondas el tema tú."
+        ? `Anotado y avisado a ${result.assigneeName}. Si aún no le dijiste quién tiene su consulta, díselo; si ya se lo dijiste, no se lo repitas: reconoce en una línea lo nuevo que dijo. Sin prometer una hora; no respondas el tema tú.`
+        : "Anotado: el equipo lo verá. Si ya le dijiste que lo tiene el equipo, no se lo repitas: reconoce en una línea lo nuevo que dijo y, si quiere hablar ya con alguien, dale el teléfono de la sede si figura. Sin prometer una hora; no respondas el tema tú."
     },
     {
       name: "recordar_tema",
       description:
-        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
+        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
       schema: z.object({ tema_id: z.string().uuid().describe("El id del tema, de «Temas con el equipo».") }),
     },
   )

@@ -1048,7 +1048,7 @@
   },
   {
     "name": "recordar_tema",
-    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply quién lo tiene, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
+    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

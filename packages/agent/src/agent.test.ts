@@ -72,7 +72,7 @@ import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { extractDictation } from "./extract-dictation.js"
 import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
 import { BaseChatModel } from "@langchain/core/language_models/chat_models"
-import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages"
+import { AIMessage, SystemMessage, type BaseMessage, type ToolMessage } from "@langchain/core/messages"
 import type { ChatResult } from "@langchain/core/outputs"
 import { user } from "@odentia/db/schema/auth"
 import { branch, auditEvent } from "@odentia/db/schema/org"
@@ -515,6 +515,40 @@ it("lo que solo guarda lo que dijo va en el mismo paso que la respuesta: sale en
     ["preferencia", "en Miraflores"],
   ])
   expect(await ledgerRows(conversationId)).toEqual([{ status: "ok", llmCalls: 1, toolsUsed: ["anotar_caso", "send_reply"] }])
+})
+
+it("lo que acepta la persona se confirma antes de proponer otra cosa en el mismo paso (auditoría del ADR 0104)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-confirma-propone", "evt-ag-confirma-propone", "Sí, acepto, resérvala")
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? new AIMessage({
+          content: "",
+          tool_calls: [
+            { name: "confirmar_propuesta", args: { proposalId: randomUUID() }, id: "call-1a", type: "tool_call" },
+            { name: "proponer_cita", args: {}, id: "call-1b", type: "tool_call" },
+          ],
+        })
+      : toolCall("send_reply", { text: "Te ayudo con eso." }, `call-${call}`),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  const results = (model.seen[1] ?? []).filter((m) => m.getType() === "tool").map((m) => ({ name: (m as ToolMessage).name, text: String(m.content) }))
+  // La propuesta nueva no corre junto al sí: así no reemplaza lo que acababa de aceptar.
+  expect(results.find((item) => item.name === "proponer_cita")?.text).toContain("No hecho: en este mismo paso confirmaste")
+  expect(results.find((item) => item.name === "confirmar_propuesta")?.text).not.toContain("No hecho")
+})
+
+it("a quien escribe en inglés no le sale una respuesta en español: se le pide traducirla una vez (auditoría del ADR 0104)", async () => {
+  const { conversationId, messageId } = await ingestText("tg:ag-ingles", "evt-ag-ingles", "Hi! Do you have an appointment available this week? How much is the evaluation?")
+  const model = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall("send_reply", { text: "Hola, con gusto te ayudo con la evaluación de esta semana." }, "call-1")
+      : toolCall("send_reply", { text: "Hi! I'd be glad to help you with the evaluation this week." }, "call-2"),
+  )
+  expect(await runScripted(model, conversationId, messageId)).toBe("done")
+  expect(systemTextOf(model.seen[0] ?? [])).toContain("La persona te escribe en inglés: respóndele en inglés")
+  const first = (model.seen[1] ?? []).filter((m) => m.getType() === "tool").map((m) => String(m.content))
+  expect(first.at(-1)).toContain("No enviado: la persona te escribe en inglés y tu mensaje está en español")
+  expect(await agentMessages(conversationId)).toEqual(["Hi! I'd be glad to help you with the evaluation this week."])
 })
 
 it("derivar con aviso envía el mensaje y registra la derivación en una sola llamada al modelo", async () => {
@@ -2607,8 +2641,9 @@ it("decidir antes de escribir: el camino se elige primero, derivar no llama al q
     }, "aviso"))
     const asks = notifier()
     const handoff = await derive("tg:camino-derivar", "evt-camino-derivar", "Tengo una queja y quiero hablar con una persona", asks)
-    // Con el caso ya en el equipo puede leer su cita y las sedes para decirle algo concreto.
-    expect(asks.offered).toEqual([["ver_sedes_y_servicios", "ver_contexto_paciente", "ver_resumen_paciente", "request_human_handoff"]])
+    // Con el caso ya en el equipo puede leer su cita y las sedes para decirle algo concreto,
+    // y hacer lo que sí puede aunque venga con la queja: que no le escriban más (ADR 0104).
+    expect(asks.offered).toEqual([["ver_sedes_y_servicios", "ver_contexto_paciente", "ver_resumen_paciente", "elegir_mensajes", "request_human_handoff"]])
     expect(systemTextOf(asks.seen[0] ?? [])).toContain("el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso")
     expect(handoff.ledger).toEqual([{ status: "handoff", llmCalls: 1, toolsUsed: ["request_human_handoff"] }])
     expect(await agentStatusOf(handoff.conversationId)).toBe("on")
