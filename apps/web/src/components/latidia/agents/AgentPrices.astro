@@ -21,7 +21,7 @@ const plan = shownPlan(pricing)
 const list = pricing.list
 const founder = plan !== null && plan === pricing.founders
 const currencyCode = plan?.currency ?? ""
-// «0,05», «1,00»: sin la moneda (va en la nota) y siempre con dos decimales, como en Precios.
+// «0,10», «1,00»: sin la moneda (va en la nota) y siempre con dos decimales, como en Precios.
 const cut = (value: number) => {
   const shown = money(value, currencyCode).replace(`${currencyCode} `, "")
   return shown.includes(",") ? shown : `${shown},00`

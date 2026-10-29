@@ -127,6 +127,13 @@
       "when": 1793285385202,
       "tag": "0017_carga_de_datos",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793288324485,
+      "tag": "0018_informa_por_bloques",
+      "breakpoints": true
     }
   ]
 }

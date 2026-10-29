@@ -46,6 +46,8 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
       storageIncludedGb: 20,
       storageGbMicros: 200_000,
       fixedPriceTiers: ["informa", "simple", "estandar", "preguntas"],
+      // Cada Informa cubre 25 mensajes de la persona, por ahora en sombra (ADR 0105).
+      informMessageLimit: 25,
       maxDiscountBps: 4000,
       trialCreditCents: 5000,
       trialMaxCreditCents: 13000,
@@ -205,7 +207,9 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await expect(checks.getByRole("row").filter({ hasText: "Gestiona" })).toContainText("5")
   // Simple no se negocia y vale menos del doble en el caso extremo: «Atento», y se guarda igual.
   await expect(checks.getByRole("row").filter({ hasText: "Simple" })).toContainText("Atento")
-  await expect(page.getByLabel("Informa")).toHaveValue("0.1")
+  // Exacto: «Mensajes por Informa» también lo nombra (ADR 0105).
+  await expect(page.getByLabel("Informa", { exact: true })).toHaveValue("0.1")
+  await expect(page.getByLabel("Mensajes por Informa")).toHaveValue("25")
   await shot("admin-plan")
   await page.keyboard.press("Escape")
 
@@ -223,6 +227,8 @@ test("cobro por acción: la clínica ve sus acciones y su aviso; la administraci
   await expect(byType.getByRole("columnheader", { name: "Nos costó" })).toBeVisible()
   await expect(byType.getByRole("row").filter({ hasText: "Sofi · Gestiona" })).toContainText("52")
   await expect(byType.getByText("Jev · decide cada mensaje")).toBeVisible()
+  // El bloque de Informa se mide sin cobrarlo: estas 30 personas no escribieron con Sofi.
+  await expect(byType).toContainText("Informa por bloques de 25 mensajes, en sombra: ninguna de las 30 conversaciones Informa pasó el tope. No se cobra")
   await shot("admin-ficha-gastos")
 
   // Hoy: las pruebas por vencer y el costo y margen de todas las clínicas (tablero O3).

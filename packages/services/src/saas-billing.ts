@@ -326,6 +326,8 @@ export interface SaasPlanInput {
   conversationAgendaMicros?: number | null
   consultationSimpleMicros?: number | null
   consultationStandardMicros?: number | null
+  /** Mensajes de la persona que cubre cada Informa (ADR 0105); null = sin tope. En sombra. */
+  informMessageLimit?: number | null
   argosIncludedQuestions?: number
   argosPackQuestions?: number
   argosPackMicros?: number | null
@@ -367,6 +369,7 @@ export interface SaasPlanRow {
   conversationAgendaMicros: number | null
   consultationSimpleMicros: number | null
   consultationStandardMicros: number | null
+  informMessageLimit: number | null
   argosIncludedQuestions: number
   argosPackQuestions: number
   argosPackMicros: number | null
@@ -407,6 +410,7 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
     conversationAgendaMicros: row.conversationAgendaMicros,
     consultationSimpleMicros: row.consultationSimpleMicros,
     consultationStandardMicros: row.consultationStandardMicros,
+    informMessageLimit: row.informMessageLimit,
     argosIncludedQuestions: row.argosIncludedQuestions,
     argosPackQuestions: row.argosPackQuestions,
     argosPackMicros: row.argosPackMicros,
@@ -455,6 +459,10 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
   if (value.argosIncludedQuestions !== undefined) terms.argosIncludedQuestions = count(value.argosIncludedQuestions, "Las preguntas incluidas", 0, 100_000)
   if (value.argosPackQuestions !== undefined) terms.argosPackQuestions = count(value.argosPackQuestions, "Las preguntas de un paquete", 1, 10_000)
   if (value.storageIncludedGb !== undefined) terms.storageIncludedGb = count(value.storageIncludedGb, "Los GB incluidos", 0, 100_000)
+  if (value.informMessageLimit !== undefined) {
+    terms.informMessageLimit =
+      value.informMessageLimit === null ? null : count(value.informMessageLimit, "Los mensajes que cubre cada Informa", 1, 1000)
+  }
   if (value.fixedPriceTiers !== undefined) {
     const unknown = value.fixedPriceTiers.filter((tier) => !FIXED_PRICE_KEYS.includes(tier))
     if (unknown.length) throw validation(`No se puede fijar el precio de «${unknown[0]}»`)

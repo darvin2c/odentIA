@@ -4015,7 +4015,7 @@ await db.transaction(async (tx) => {
   const people = [...contactIdByName.values()].slice(0, 6)
   const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
   const sofi = ["informa", "gestiona", "gestiona", "informa", "gestiona", "informa"] as const
-  const sofiMicros = { informa: 100_000, gestiona: 500_000 }
+  const sofiMicros = { informa: 200_000, gestiona: 500_000 }
   const clio = [
     { tier: "simple", micros: 100_000, hours: 20 },
     { tier: "estandar", micros: 200_000, hours: 44 },
