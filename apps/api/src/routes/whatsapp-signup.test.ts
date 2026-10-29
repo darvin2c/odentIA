@@ -227,7 +227,7 @@ describe("la configuración de plataforma es opcional", () => {
       },
     } as unknown as Auth
     const app = new Hono()
-    app.use("*", requireSession({ auth }), requireOrgContext({ db: appDb }))
+    app.use("*", requireSession({ auth }), requireOrgContext({ db: appDb, ownerDb }))
     app.route(
       "/channels/whatsapp/signup",
       createWhatsAppSignupRoute({ db: appDb, secretsKey: KEY, storage: storageStub, validateExternal: true, webhookBaseUrl: "https://api.example.com", meta: META }),

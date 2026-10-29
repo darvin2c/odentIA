@@ -20,6 +20,7 @@ import {
   type MailTemplate,
   passwordChangedTemplate,
   staffInvitationTemplate,
+  teamTwoFactorRequiredTemplate,
   supportInboxNoticeTemplate,
   supportReplyNoticeTemplate,
   verifyEmailTemplate,
@@ -94,6 +95,7 @@ const MAILS: Record<string, MailTemplate> = {
   "07-crea-o-acepta-tu-clinica": accountReminderTemplate({ kind: "sin_clinica", url }),
   "08-te-invitaron-a-la-clinica": invitationTemplate({ organizationName: clinic, inviterName: "María Pérez", url }),
   "09-te-invitaron-al-equipo-de-odentia": staffInvitationTemplate({ url }),
+  "09b-la-clinica-pide-verificacion-en-dos-pasos": teamTwoFactorRequiredTemplate({ firstName: "Lucía", organizationName: clinic, url }),
   "10-actualizamos-los-terminos": legalUpdateTemplate({
     firstName: "Lucía",
     effectiveText: "1 de marzo de 2027",

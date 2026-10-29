@@ -15,6 +15,7 @@ import {
   resetMailLinks,
   senderFor,
   staffInvitationTemplate,
+  teamTwoFactorRequiredTemplate,
   supportInboxNoticeTemplate,
   supportReplyNoticeTemplate,
   verifyEmailTemplate,
@@ -40,6 +41,8 @@ const TEMPLATES: Record<string, () => MailTemplate> = {
     }),
   invitacion: () => invitationTemplate({ organizationName: "Clínica Sonrisa", inviterName: "María Pérez", url: URL }),
   invitacionAlPersonal: () => staffInvitationTemplate({ url: URL }),
+  verificacionEnDosPasos: () =>
+    teamTwoFactorRequiredTemplate({ firstName: "Lucía", organizationName: "Clínica Sonrisa", url: URL }),
   cuentaSinVerificar: () => accountReminderTemplate({ kind: "sin_verificar", url: URL, days: 7 }),
   cuentaSinClinica: () => accountReminderTemplate({ kind: "sin_clinica", url: URL }),
   soporteCasoNuevo: () =>
