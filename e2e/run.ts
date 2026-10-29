@@ -508,12 +508,33 @@ async function stopProxy(state: RunState): Promise<void> {
   const result = await waitForExitTimeout(owned.proc, STOP_GRACE_MS)
   if (result === "timeout") await stopOwned(owned)
   if (result === "timeout" || result.code !== 0) throw new Error(`No se pudo detener el proxy propio (PID ${state.proxyPid}): ${tailLog(owned.logPath)}`)
-  if (state.proxyPid) {
-    try { process.kill(state.proxyPid, 0) } catch (error) {
-      if (error instanceof Error && "code" in error && error.code === "ESRCH") return
-      throw error
-    }
-    throw new Error(`El proxy sigue vivo (PID ${state.proxyPid})`)
+  // En Linux `proxy stop` vuelve en cuanto envía la señal: se espera a que el
+  // daemon salga de verdad antes de darlo por vivo.
+  const pid = state.proxyPid
+  if (!pid) return
+  const deadline = performance.now() + STOP_GRACE_MS
+  while (proxyAlive(pid)) {
+    if (performance.now() > deadline) throw new Error(`El proxy sigue vivo (PID ${pid})`)
+    await sleep(100)
+  }
+}
+
+/**
+ * El daemon queda huérfano al salir `proxy start`; en Linux, si su nuevo padre
+ * aún no lo recogió, sigue como zombi: ya terminó y no retiene puertos.
+ */
+function proxyAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return false
+    throw error
+  }
+  if (process.platform !== "linux") return true
+  try {
+    return readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] !== "Z"
+  } catch {
+    return false
   }
 }
 
