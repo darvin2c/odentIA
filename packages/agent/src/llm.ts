@@ -207,10 +207,10 @@ export function viaResponses(model: unknown): boolean {
  * bloque `text`; por /v1/responses (`viaResponses`), en uno `input_text`, que
  * LangChain 1.5.13 envía tal cual: a uno `text` le quita el corte. Sin caché
  * (el modelo de demostración), el texto solo. Medido el 2026-10-29 (ADR 0012 y
- * 0075): sin el corte, OpenAI ya leía la parte fija de Argos y del dictado de
- * latidIA de lo que guardó la llamada anterior hasta el final del mensaje de
- * sistema, y el corte no bajó su costo. Lo que ahorra es que lo que cambia en
- * cada llamada vaya después.
+ * 0075): en Argos y en el dictado de latidIA, donde la parte fija es todo el
+ * mensaje de sistema, OpenAI ya la leía sin el corte de lo que guardó la
+ * llamada anterior, y el corte no bajó su costo. No se midió el corte que
+ * separa lo fijo de lo que cambia dentro del mismo mensaje.
  */
 export function cachedPrompt(provider: LlmSpec["provider"], text: string, responses: boolean): string | ContentBlock[] {
   if (provider !== "openai") return text
