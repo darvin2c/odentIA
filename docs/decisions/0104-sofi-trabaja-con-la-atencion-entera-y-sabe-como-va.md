@@ -1,6 +1,6 @@
 # 0104 · Sofi trabaja con la atención entera y sabe cómo va
 
-Fecha: 2026-10-28 · Estado: propuesta (se acepta cuando la auditoría de Sofi del issue #328 muestre que mejora; ver Consecuencias) · Precisa [0006](0006-memoria-del-caso-y-comprobacion-de-respuestas.md) y [0010](0010-memoria-de-la-persona-sin-datos-clinicos.md)
+Fecha: 2026-10-28 · Estado: aceptada el 2026-10-29 (en la auditoría del issue #328, cumplir todo pasó del 14 % a entre el 30 % y el 43 % en rondas completas de 40; ver Consecuencias) · Precisa [0006](0006-memoria-del-caso-y-comprobacion-de-respuestas.md) y [0010](0010-memoria-de-la-persona-sin-datos-clinicos.md)
 
 ## Problema
 
