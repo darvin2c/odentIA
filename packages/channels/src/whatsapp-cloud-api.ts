@@ -412,6 +412,12 @@ function graphError(status: number, json: unknown): string {
   return `HTTP ${status}`
 }
 
+/** La explicación de Meta pensada para la persona, si la manda. */
+function graphUserMessage(json: unknown): string | null {
+  const err = graphErrorOf(json) as { error_user_msg?: unknown } | undefined
+  return typeof err?.error_user_msg === "string" && err.error_user_msg.trim() ? err.error_user_msg.trim() : null
+}
+
 function sentMessageId(json: unknown): string | null {
   if (!json || typeof json !== "object" || !("messages" in json) || !Array.isArray(json.messages))
     return null
@@ -992,7 +998,13 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       deps,
     )
     if (status >= 400 || !json || typeof json !== "object") {
-      throw new Error(`WhatsApp no aceptó la solicitud de plantilla: ${graphError(status, json)}`)
+      // Meta explica el rechazo para la persona en `error_user_msg` («Las variables no pueden
+      // estar al principio ni al final…»); `message` solo dice «Invalid parameter».
+      const error = new Error(
+        `WhatsApp no aceptó la solicitud de plantilla: ${graphUserMessage(json) ?? graphError(status, json)}`,
+      ) as Error & { providerStatus?: number }
+      error.providerStatus = status
+      throw error
     }
     return {
       externalId: "id" in json ? text(json.id) : null,
