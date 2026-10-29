@@ -3,7 +3,9 @@
  * salió de la sede con el cierre, neto de lo corregido después. «Corregir»
  * («Fueron 4 guantes, no 2») lo hacen quien atendió, el dueño y la
  * administración —lo dice el servidor con `canCorrect`— y deja un ajuste unido
- * a la atención: lo firmado no cambia.
+ * a la atención: lo firmado no cambia. Lo que se escribe es el total usado de
+ * cada producto, nunca algo que se suma: así un material no se descuenta dos
+ * veces. «Atención finalizada» dice lo descontado con la misma corrección a mano.
  */
 import { quantityWords, unitFor } from "@odentia/clinical"
 import {
@@ -29,15 +31,31 @@ import {
   correctEncounterMaterialApi,
   type EncounterMaterials,
   fetchEncounterMaterials,
+  type FinalizedMaterials,
 } from "../../lib/encounters"
 import { financeErrorMessage } from "../../lib/finance"
 import { activeOrgLocale } from "../../lib/locale"
-import { formatWholeQuantity, materialPhrase, parseWholeQuantity } from "../../lib/materials"
+import {
+  discountedMaterialsWords,
+  formatWholeQuantity,
+  materialPhrase,
+  parseWholeQuantity,
+  shortageWords,
+} from "../../lib/materials"
 import { MATERIAL_QUANTITY_MAX } from "../../lib/services"
 import { MaterialProductPicker } from "../service-materials"
 
 function materialsKey(patientId: string, encounterId: string) {
   return ["encounter-materials", patientId, encounterId] as const
+}
+
+/** Una sola lectura para el bloque, el cierre y «Corregir». */
+function useEncounterMaterials(patientId: string, encounterId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: materialsKey(patientId, encounterId),
+    queryFn: () => fetchEncounterMaterials(patientId, encounterId),
+    enabled,
+  })
 }
 
 /**
@@ -52,15 +70,9 @@ export function EncounterMaterialsBlock({
   encounterId: string
 }) {
   const canRead = usePermission("clinical.read")
-  // Agregar un producto que no estaba pide buscarlo entre los de Inventario: es de quien lo lleva.
-  const canAddProducts = usePermission("inventory.write")
   const locale = activeOrgLocale() ?? "es"
   const [open, setOpen] = useState(false)
-  const query = useQuery({
-    queryKey: materialsKey(patientId, encounterId),
-    queryFn: () => fetchEncounterMaterials(patientId, encounterId),
-    enabled: canRead,
-  })
+  const query = useEncounterMaterials(patientId, encounterId, canRead)
   if (!canRead) return null
   if (query.isPending) {
     return (
@@ -88,7 +100,7 @@ export function EncounterMaterialsBlock({
     )
   }
   const data = query.data.data
-  const correctable = data.canCorrect && (data.items.length > 0 || canAddProducts)
+  const correctable = data.canCorrect && (data.items.length > 0 || data.canAddProducts)
   if (data.items.length === 0 && !correctable) return null
   return (
     <section aria-label="Materiales usados" className="flex flex-col gap-2 rounded-lg border p-4">
@@ -126,11 +138,122 @@ export function EncounterMaterialsBlock({
           patientId={patientId}
           encounterId={encounterId}
           current={data}
-          canAddProducts={canAddProducts}
+          canAddProducts={data.canAddProducts}
           locale={locale}
         />
       ) : null}
     </section>
+  )
+}
+
+/**
+ * En «Atención finalizada»: de qué sede salió lo usado, lo que no había (queda
+ * como faltante) y «Corregir» ahí mismo («y una mascarilla»). Si no se pudo
+ * descontar, lo dice y ofrece registrarlo. Solo informa: «Listo» nunca espera.
+ */
+export function FinalizedMaterialsNote({
+  patientId,
+  encounterId,
+  materials,
+  corrected,
+  onCorrect,
+}: {
+  patientId: string
+  encounterId: string
+  /** Lo que devolvió el cierre. */
+  materials: FinalizedMaterials
+  /** Ya se corrigió desde aquí: se muestra lo registrado ahora, sin el faltante del cierre. */
+  corrected: boolean
+  onCorrect: () => void
+}) {
+  const locale = activeOrgLocale() ?? "es"
+  const query = useEncounterMaterials(patientId, encounterId, true)
+  const data = query.data?.data ?? null
+  if (materials.failed && !(corrected && data)) {
+    return (
+      <div
+        role="alert"
+        className="flex flex-col gap-2 rounded-lg border border-warning/50 p-3 text-sm"
+      >
+        <p>
+          No se pudieron descontar los materiales de {materials.branch.name}; la atención quedó
+          firmada igual.
+          {data?.canAddProducts
+            ? ""
+            : " Regístralos en «Materiales usados» de esta atención, en Historia."}
+        </p>
+        {data?.canAddProducts ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
+            onClick={onCorrect}
+          >
+            Registrar lo usado
+          </Button>
+        ) : null}
+      </div>
+    )
+  }
+  const shown =
+    corrected && data
+      ? { branch: data.branch ?? materials.branch, items: data.items }
+      : { branch: materials.branch, items: materials.items }
+  const shortage = corrected ? null : shortageWords(materials.items, locale)
+  return (
+    <section aria-label="Materiales" className="flex flex-col gap-1 rounded-lg border p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="min-w-0">
+          <span className="font-medium">Materiales</span>
+          {" · "}
+          {shown.items.length > 0
+            ? discountedMaterialsWords(shown, locale)
+            : "No se registró ningún material."}
+        </p>
+        {data?.canCorrect ? (
+          <Button type="button" variant="outline" size="sm" onClick={onCorrect}>
+            Corregir
+          </Button>
+        ) : null}
+      </div>
+      {shortage ? <p className="text-muted-foreground">{shortage}</p> : null}
+    </section>
+  )
+}
+
+/**
+ * «Corregir» abierto desde fuera del bloque (el cierre): espera la lectura de
+ * lo registrado y abre el mismo formulario.
+ */
+export function EncounterMaterialsCorrection({
+  open,
+  patientId,
+  encounterId,
+  onClose,
+  onSaved,
+}: {
+  open: boolean
+  patientId: string
+  encounterId: string
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const locale = activeOrgLocale() ?? "es"
+  const query = useEncounterMaterials(patientId, encounterId, open)
+  const data = query.data?.data
+  if (!data) return null
+  return (
+    <EncounterMaterialsDrawer
+      open={open}
+      onClose={onClose}
+      onSaved={onSaved}
+      patientId={patientId}
+      encounterId={encounterId}
+      current={data}
+      canAddProducts={data.canAddProducts}
+      locale={locale}
+    />
   )
 }
 
@@ -154,6 +277,7 @@ interface CorrectionRow {
 function EncounterMaterialsDrawer({
   open,
   onClose,
+  onSaved,
   patientId,
   encounterId,
   current,
@@ -162,6 +286,8 @@ function EncounterMaterialsDrawer({
 }: {
   open: boolean
   onClose: () => void
+  /** Se guardó al menos un cambio. */
+  onSaved?: () => void
   patientId: string
   encounterId: string
   current: EncounterMaterials
@@ -251,6 +377,7 @@ function EncounterMaterialsDrawer({
           branch: result.data.branch,
           items: result.data.items,
           canCorrect: result.data.canCorrect,
+          canAddProducts: result.data.canAddProducts,
         }
         done += 1
         // Lo guardado pasa a ser el punto de partida: si otro falla, este no se reenvía.
@@ -279,9 +406,13 @@ function EncounterMaterialsDrawer({
               ? `Listo: ${only.quantity === 1 ? "se usó" : "se usaron"} ${materialPhrase({ ...only.row, quantity: only.quantity }, locale)}.`
               : "Listo.",
       )
+      onSaved?.()
       onClose()
     } catch (err) {
-      if (last) queryClient.setQueryData(materialsKey(patientId, encounterId), { data: last })
+      if (last) {
+        queryClient.setQueryData(materialsKey(patientId, encounterId), { data: last })
+        onSaved?.()
+      }
       void queryClient.invalidateQueries({ queryKey: materialsKey(patientId, encounterId) })
       const message = financeErrorMessage(err)
       setError(done > 0 ? `Se guardaron ${done} de ${changes.length}. ${message}` : message)

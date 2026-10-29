@@ -69,6 +69,7 @@ import { EncounterClosingDialog, SignatureRegistrationFields } from "./encounter
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
+import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterBudgetSend, EncounterPlanPanel } from "./encounter-plan-panel"
 import { BudgetSendButton } from "./plan/budget-send"
 import { EncounterProcedures } from "./encounter-procedures"
@@ -340,8 +341,11 @@ export function EncounterEditor({
   const [finalizedBilling, setFinalizedBilling] = useState<FinalizeBilling | null>(null)
   // El presupuesto que quedó armado al firmar (decisión 12): el cierre pregunta si enviarlo ya.
   const [finalizedBudget, setFinalizedBudget] = useState<FinalizedBudget | null>(null)
-  // Lo que descontó el cierre (ADR 0067): solo se dice si no se pudo descontar.
+  // Lo que descontó el cierre (ADR 0067): «Atención finalizada» lo dice, con lo que no había.
   const [finalizedMaterials, setFinalizedMaterials] = useState<FinalizedMaterials | null>(null)
+  // «Corregir» desde «Atención finalizada»: el aviso se oculta mientras el formulario está abierto y vuelve al cerrarlo.
+  const [correctingMaterials, setCorrectingMaterials] = useState(false)
+  const [materialsCorrected, setMaterialsCorrected] = useState(false)
   const [budgetSent, setBudgetSent] = useState(false)
   // El aviso de firma se elige al abrirlo: firmar descarta las sugerencias y no debe cambiar de diálogo a mitad.
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
@@ -781,6 +785,8 @@ export function EncounterEditor({
     setFinalizedBilling(null)
     setFinalizedBudget(null)
     setFinalizedMaterials(null)
+    setCorrectingMaterials(false)
+    setMaterialsCorrected(false)
     setBudgetSent(false)
     void onFinalized(hadCharges)
   }
@@ -2015,9 +2021,17 @@ export function EncounterEditor({
         {signFields}
       </DictationSignDialog>
 
+      <EncounterMaterialsCorrection
+        open={correctingMaterials}
+        patientId={patientId}
+        encounterId={encounterId}
+        onClose={() => setCorrectingMaterials(false)}
+        onSaved={() => setMaterialsCorrected(true)}
+      />
+
       {/* Cierre de la atención: qué quedó por cobrar y qué no, con su porqué. */}
       <Dialog
-        open={finalizedBilling !== null}
+        open={finalizedBilling !== null && !correctingMaterials}
         onOpenChange={(next) => {
           if (!next) closeFinalized()
         }}
@@ -2065,12 +2079,15 @@ export function EncounterEditor({
               ))}
             </ul>
           ) : null}
-          {/* La atención se firmó igual: lo usado se registra después desde ella. */}
-          {finalizedMaterials?.failed ? (
-            <p role="alert" className="rounded-lg border border-warning/50 p-3 text-sm">
-              No se pudieron descontar los materiales de {finalizedMaterials.branch.name}. Regístralos con
-              «Corregir» en «Materiales usados» de esta atención, en Historia.
-            </p>
+          {/* Lo que salió de la sede y lo que no había; se corrige aquí mismo. Nunca frena «Listo». */}
+          {finalizedMaterials ? (
+            <FinalizedMaterialsNote
+              patientId={patientId}
+              encounterId={encounterId}
+              materials={finalizedMaterials}
+              corrected={materialsCorrected}
+              onCorrect={() => setCorrectingMaterials(true)}
+            />
           ) : null}
           {/* Mismo paso de cierre: casi siempre la persona sigue ahí y conviene que se lo lleve. */}
           {finalizedBudget && finalizedBudget.itemCount > 0 && canSendBudget ? (

@@ -623,6 +623,12 @@ export interface EncounterMaterials {
   items: MaterialQuantity[]
   /** Quien atendió, o quien lleva el inventario, con la atención firmada y con sede. */
   canCorrect: boolean
+  /**
+   * Puede corregir y la clínica tiene algún producto activo que se usa en las
+   * atenciones: «Agregar otro producto» (la mascarilla que no estaba). Sin
+   * productos así no hay nada que agregar y la pantalla no lo ofrece.
+   */
+  canAddProducts: boolean
 }
 
 async function encounterRowOf(tx: Db, orgId: string, patientId: string, encounterId: string, lock = false) {
@@ -668,6 +674,16 @@ function mayCorrect(
   return row.status === "finalizada" && row.branchId !== null && (row.professionalUserId === actorUserId || can("inventory.write"))
 }
 
+/** ¿La clínica tiene algún producto activo que se usa en las atenciones? */
+async function hasCareProducts(tx: Db, orgId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: product.id })
+    .from(product)
+    .where(and(eq(product.organizationId, orgId), eq(product.isActive, true), eq(product.usedInCare, true)))
+    .limit(1)
+  return row !== undefined
+}
+
 /** «Materiales usados» de una atención (quien lee la atención). */
 export async function getEncounterMaterials(
   tx: Db,
@@ -681,6 +697,7 @@ export async function getEncounterMaterials(
   const site = row.branchId ? await branchOf(tx, orgId, row.branchId) : null
   const { locale } = await findOrgLocale(tx, orgId)
   const used = await usedByProduct(tx, orgId, encounterId)
+  const canCorrect = mayCorrect(row, actorUserId, can)
   return {
     branch: site ? { id: site.id, name: site.name } : null,
     items: used
@@ -692,7 +709,8 @@ export async function getEncounterMaterials(
         quantity: line.used,
         quantityText: quantityWords(line.used, line.unit, locale),
       })),
-    canCorrect: mayCorrect(row, actorUserId, can),
+    canCorrect,
+    canAddProducts: canCorrect && (await hasCareProducts(tx, orgId)),
   }
 }
 

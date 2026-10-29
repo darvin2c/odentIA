@@ -8,7 +8,8 @@
  *   de la atención; lo que no alcanza queda como faltante; un reintento no
  *   descuenta dos veces; sin sede no se descuenta ni se anuncia.
  * - «Fueron 4, no 2»: corregir hacia arriba y hacia abajo, enlazado a la
- *   atención, por quien atendió o quien lleva el inventario.
+ *   atención, por quien atendió o quien lleva el inventario; quien atendió
+ *   también agrega lo que no estaba («y una mascarilla»).
  */
 import { randomUUID } from "node:crypto"
 import { withOrgContext } from "@odentia/db"
@@ -396,7 +397,7 @@ it("sin sede en la atención no se descuenta nada y el cierre no lo anuncia", as
   const moves = await ownerDb.select().from(stockMovement).where(eq(stockMovement.encounterId, f.encounter.id))
   expect(moves).toHaveLength(0)
   const used = await f.run((tx) => getEncounterMaterials(tx, ...f.args, f.encounter.id, all))
-  expect(used).toEqual({ branch: null, items: [], canCorrect: false })
+  expect(used).toEqual({ branch: null, items: [], canCorrect: false, canAddProducts: false })
 })
 
 it("«Fueron 4, no 2»: corregir hacia arriba y hacia abajo queda unido a la atención y lo hace quien atendió o inventario", async () => {
@@ -445,6 +446,16 @@ it("«Fueron 4, no 2»: corregir hacia arriba y hacia abajo queda unido a la ate
   expect(moves.every((move) => move.patientId === f.patient.id)).toBe(true)
   expect(moves.some((move) => move.reason.includes("fueron 1 guante, no 6 guantes"))).toBe(true)
 
+  // «Y una mascarilla»: quien atendió, sin inventario, agrega lo que no estaba;
+  // no había en la sede y queda como faltante, sin frenar nada.
+  const mask = await newProduct({ name: "Mascarilla quirúrgica", unit: "unidad" })
+  const added = await f.run((tx) =>
+    correctEncounterMaterial(tx, ...f.args, f.encounter.id, { productId: mask.id, quantity: 1, idempotencyKey: "k-mask" }, none),
+  )
+  expect(added).toMatchObject({ changed: 1, canCorrect: true, canAddProducts: true })
+  expect(added.items.find((item) => item.productId === mask.id)?.quantity).toBe(1)
+  expect(await f.run((tx) => shortageOf(tx, "org_a", mask.id, store.id))).toBe(1)
+
   // Otro profesional sin inventario no corrige; quien lleva el inventario sí.
   const other = randomUUID()
   await ownerDb.insert(user).values({ id: other, name: "Otro", email: `${other}@example.test` })
@@ -467,4 +478,5 @@ it("«Fueron 4, no 2»: corregir hacia arriba y hacia abajo queda unido a la ate
   expect(byOwner.items.find((item) => item.productId === gloves.id)?.quantity).toBe(2)
   const readByOther = await f.run((tx) => getEncounterMaterials(tx, "org_a", other, f.patient.id, f.encounter.id, none))
   expect(readByOther.canCorrect).toBe(false)
+  expect(readByOther.canAddProducts).toBe(false)
 })

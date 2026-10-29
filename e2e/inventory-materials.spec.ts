@@ -9,9 +9,10 @@ import { surface } from "./surface"
 
 /**
  * Inventario por sede (ADR 0067): lo que sale de la sede sin que nadie lo
- * anote. Los materiales de un servicio se descuentan al firmar la atención y se
- * corrigen después; lo que se vende en «Cobrar» sale al agregarlo. Los datos se
- * preparan por la API; lo que se ve y se corrige, por la pantalla.
+ * anote. Los materiales de un servicio se descuentan al firmar la atención, el
+ * cierre lo dice y se corrigen después, también ahí mismo; lo que se vende en
+ * «Cobrar» sale al agregarlo. Los datos se preparan por la API; lo que se ve y
+ * se corrige, por la pantalla.
  */
 
 type Product = { id: string }
@@ -81,6 +82,76 @@ test("los materiales del servicio salen de la sede al firmar la atención y se c
   await expect(page.getByText("Listo: se usó 1 par de guantes de prueba.")).toBeVisible()
   await expect(used).toContainText("1 par")
   expect(await onHand(owner, gloves.id)).toBe(9)
+})
+
+test("al firmar se ve lo que salió y lo que no había, y quien atendió agrega lo que faltó sin salir", async ({ owner, fixtureDb }, info) => {
+  const { page, org } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const ids = await buildClinicalBase(owner)
+  const gloves = await productWithStock(owner, { name: "Guantes de prueba", usedInCare: true, unit: "par" }, 10)
+  // El eyector nunca se contó: lo que se use queda como faltante.
+  const ejector = await call<Product>(page, "POST", "/api/inventory/products", org.slug, {
+    name: "Eyector de prueba",
+    usedInCare: true,
+    unit: "unidad",
+  }, 201)
+  const mask = await productWithStock(owner, { name: "Mascarilla de prueba", usedInCare: true, unit: "unidad" }, 5)
+  await call(page, "PUT", `/api/services/${ids.serviceId}/materials`, org.slug, {
+    items: [{ productId: gloves.id, quantity: 2 }, { productId: ejector.id, quantity: 1 }],
+  })
+  const apiPath = patientApiPath(ids.patientId)
+  const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, {
+    reason: "Endodoncia pieza 36",
+    branchId: owner.branchId,
+  }, 201)
+  await call(page, "POST", `${apiPath}/encounters/${encounter.id}/procedures`, org.slug, { serviceId: ids.serviceId, toothNumber: 36 }, 201)
+  await call(page, "PATCH", `${apiPath}/encounters/${encounter.id}`, org.slug, { evolution: "Se realiza la endodoncia de la pieza 36." })
+  await call(page, "POST", `${apiPath}/encounters/${encounter.id}/diagnoses`, org.slug, {
+    diagnosisCode: "K02.1",
+    diagnosisType: "confirmed",
+    toothNumber: 36,
+    surfaces: ["occlusal"],
+  }, 201)
+
+  // Atiende como odontóloga, sin inventario.
+  const asRole = (role: string) =>
+    fixtureDb.update(member).set({ role }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
+  await asRole("clinician")
+  await gotoHydrated(page, tenant(org.slug, `/patients/${ids.patientId}/encounters/${encounter.id}`))
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  const signing = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await expect(signing).toContainText("se descuentan de Sede Central: 1 unidad de eyector de prueba y 2 pares de guantes de prueba.")
+  await signing.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+
+  // Firmada: dice lo que salió y, aparte, lo que no había.
+  const done = page.getByRole("dialog", { name: "Atención finalizada" })
+  const materials = done.getByRole("region", { name: "Materiales" })
+  await expect(materials).toContainText("Salieron de Sede Central: 1 unidad de eyector de prueba y 2 pares de guantes de prueba.")
+  await expect(materials).toContainText("No había 1 unidad de eyector de prueba: queda como faltante en Inventario.")
+  await info.attach("atencion-finalizada-materiales", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+
+  // «Y una mascarilla»: se corrige ahí mismo y el aviso vuelve con lo registrado.
+  await materials.getByRole("button", { name: "Corregir" }).click()
+  await expect(done).toBeHidden()
+  const drawer = surface(page, { name: "Corregir materiales" })
+  await drawer.getByRole("button", { name: "Agregar otro producto" }).click()
+  await drawer.getByRole("combobox", { name: "Producto" }).click()
+  await page.getByRole("option", { name: /^Mascarilla de prueba/ }).click()
+  await expect(drawer.getByLabel(/^Mascarilla de prueba/)).toHaveValue("1")
+  await info.attach("corregir-agregar-mascarilla", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await drawer.getByRole("button", { name: "Guardar" }).click()
+  await expect(page.getByText("Listo: se usó 1 unidad de mascarilla de prueba.")).toBeVisible()
+  await expect(materials).toContainText(
+    "Salieron de Sede Central: 1 unidad de eyector de prueba, 2 pares de guantes de prueba y 1 unidad de mascarilla de prueba.",
+  )
+  await expect(materials).not.toContainText("No había")
+  await info.attach("atencion-finalizada-corregida", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await done.getByRole("button", { name: "Listo" }).click()
+  await expect(page.getByRole("region", { name: "Materiales usados" })).toContainText("Mascarilla de prueba")
+
+  await asRole("owner")
+  expect(await onHand(owner, gloves.id)).toBe(8)
+  expect(await onHand(owner, mask.id)).toBe(4)
 })
 
 test("vender desde «Cobrar»: el producto sale de la sede al agregarlo y va en el ticket", async ({ owner }, info) => {

@@ -852,3 +852,121 @@ test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP,
   })
   await context.close()
 })
+
+test("latidIA: al firmar se ve lo que salió del consultorio y se agrega lo que faltó sin salir", async ({
+  browser,
+  fixtureDb,
+  passwordHash,
+}, testInfo) => {
+  const vela = await createVela(fixtureDb, passwordHash)
+  const context = await browser.newContext({ ignoreHTTPSErrors: true })
+  const page = await context.newPage()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, latidiaUrl("app", "/login"))
+  const { api, slug, orgId } = await openConsultorio(page, vela)
+  const [site] = await fixtureDb.select({ id: branch.id }).from(branch).where(eq(branch.organizationId, orgId))
+  const product = async (name: string, unit: string, counted: number | null) => {
+    const created = await request<{ data: { id: string } }>(page, api, "POST", "/api/inventory/products", slug, {
+      name,
+      usedInCare: true,
+      unit,
+    })
+    expect(created.status).toBe(201)
+    if (counted !== null) {
+      const count = await request(page, api, "POST", "/api/inventory/count", slug, {
+        branchId: site!.id,
+        idempotencyKey: randomUUID(),
+        items: [{ productId: created.body.data.id, counted }],
+      })
+      expect(count.status).toBe(200)
+    }
+    return created.body.data.id
+  }
+  const gloves = await product("Guantes de examen", "par", 10)
+  const depressor = await product("Bajalengua de madera", "unidad", null)
+  await product("Mascarilla quirúrgica", "unidad", 5)
+  const specialties = await request<{ data: Array<{ id: string; key: string }> }>(
+    page,
+    api,
+    "GET",
+    "/api/clinical-forms/specialties",
+    slug,
+  )
+  const service = await request<{ data: { id: string } }>(page, api, "POST", "/api/services", slug, {
+    name: "Consulta de prueba",
+    specialtyId: specialties.body.data[0]!.id,
+    scope: "general",
+    priceCents: 8000,
+    currency: "PEN",
+    officialCode: "99201",
+  })
+  expect(service.status).toBe(201)
+  const serviceId = service.body.data.id
+  expect(
+    (
+      await request(page, api, "PUT", `/api/services/${serviceId}/materials`, slug, {
+        items: [
+          { productId: gloves, quantity: 1 },
+          { productId: depressor, quantity: 1 },
+        ],
+      })
+    ).status,
+  ).toBe(200)
+  expect(
+    (
+      await request(page, api, "PUT", "/api/clinical-forms/professionals/me/profile", slug, {
+        professionalTitle: "Médico cirujano",
+        registrationBody: "CMP",
+        registrationNumber: "045678",
+      })
+    ).status,
+  ).toBe(200)
+  const patient = await request<{ data: { id: string } }>(page, api, "POST", "/api/patients", slug, {
+    submissionId: randomUUID(),
+    answers: {
+      demographics: { displayName: "Luis Gómez", docType: "DNI", docNumber: "40998877", birthDate: "1979-03-10" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
+  })
+  expect(patient.status).toBe(201)
+  const patientId = patient.body.data.id
+  const opened = await request<{ data: { id: string } }>(page, api, "POST", `/api/patients/${patientId}/encounters`, slug, {
+    reason: "Fiebre y dolor de garganta",
+    branchId: site!.id,
+  })
+  expect(opened.status).toBe(201)
+  const path = `/api/patients/${patientId}/encounters/${opened.body.data.id}`
+  expect((await request(page, api, "POST", `${path}/procedures`, slug, { serviceId })).status).toBe(201)
+  expect(
+    (await request(page, api, "POST", `${path}/diagnoses`, slug, { diagnosisCode: "J03.9", diagnosisType: "provisional" }))
+      .status,
+  ).toBe(201)
+  expect((await request(page, api, "PATCH", path, slug, { evolution: "Amigdalitis; reposo e hidratación." })).status).toBe(
+    200,
+  )
+
+  await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  const signing = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await signing.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  const done = page.getByRole("dialog", { name: "Atención finalizada" })
+  const materials = done.getByRole("region", { name: "Materiales" })
+  await expect(materials).toContainText("Salieron de Sede Central: 1 unidad de bajalengua de madera y 1 par de guantes de examen.")
+  await expect(materials).toContainText("No había 1 unidad de bajalengua de madera: queda como faltante en Inventario.")
+  await page.screenshot({ path: testInfo.outputPath("latidia-atencion-finalizada-materiales.png"), fullPage: true })
+
+  await materials.getByRole("button", { name: "Corregir" }).click()
+  const drawer = surface(page, { name: "Corregir materiales" })
+  await drawer.getByRole("button", { name: "Agregar otro producto" }).click()
+  await drawer.getByRole("combobox", { name: "Producto" }).click()
+  await page.getByRole("option", { name: /^Mascarilla quirúrgica/ }).click()
+  await drawer.getByRole("button", { name: "Guardar" }).click()
+  await expect(materials).toContainText(
+    "Salieron de Sede Central: 1 unidad de bajalengua de madera, 1 par de guantes de examen y 1 unidad de mascarilla quirúrgica.",
+  )
+  await page.screenshot({ path: testInfo.outputPath("latidia-atencion-finalizada-corregida.png"), fullPage: true })
+  await done.getByRole("button", { name: "Listo" }).click()
+  await expect(page.getByRole("region", { name: "Materiales usados" })).toContainText("Mascarilla quirúrgica")
+  await context.close()
+})
