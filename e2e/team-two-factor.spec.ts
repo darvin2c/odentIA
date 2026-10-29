@@ -132,20 +132,22 @@ test("verificación en dos pasos: activarla, pedirla al equipo, entrar con el c�
   await page.getByText("Recordar este dispositivo 30 días").click()
   await page.getByLabel("Código de 6 dígitos").fill(totpNow(ownerSecret))
   await expect(page).not.toHaveURL(/two-factor/)
-  // Tras el código el panel sigue a la clínica: se espera en una página quieta.
-  await page.waitForLoadState("networkidle")
-  await gotoHydrated(page, `${PANEL}/profile`)
-  await page.context().clearCookies({ name: /session_token/ })
-  const again = await api<{ twoFactorRedirect?: boolean }>(page, "POST", "/api/auth/sign-in/email", undefined, { email: user.email, password: user.password })
+  // Tras el código el panel sigue redirigiendo a la clínica: lo que sigue va en
+  // otra pestaña del mismo navegador (las mismas cookies), sin chocar con eso.
+  const later = await page.context().newPage()
+  await later.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(later, `${PANEL}/profile`)
+  await later.context().clearCookies({ name: /session_token/ })
+  const again = await api<{ twoFactorRedirect?: boolean }>(later, "POST", "/api/auth/sign-in/email", undefined, { email: user.email, password: user.password })
   expect(again.status).toBe(200)
   expect(again.body.twoFactorRedirect).toBeUndefined()
 
   // Restablecer a la recepcionista: pide el motivo, cierra sus sesiones y queda en la actividad.
-  await gotoHydrated(page, tenant(org.slug, "/settings/team"))
+  await gotoHydrated(later, tenant(org.slug, "/settings/team"))
   // Todas las cuentas de prueba se llaman igual: la fila se busca por su correo.
-  await page.getByRole("row").filter({ hasText: reception.user.email }).getByRole("button", { name: /^Acciones de / }).click()
-  await page.getByRole("menuitem", { name: "Restablecer verificación en dos pasos" }).click()
-  const confirm = page.getByRole("alertdialog")
+  await later.getByRole("row").filter({ hasText: reception.user.email }).getByRole("button", { name: /^Acciones de / }).click()
+  await later.getByRole("menuitem", { name: "Restablecer verificación en dos pasos" }).click()
+  const confirm = later.getByRole("alertdialog")
   await confirm.getByRole("button", { name: "Restablecer" }).click()
   await expect(confirm.getByText("Escribe el motivo")).toBeVisible()
   await confirm.getByLabel("Motivo").fill("Le robaron el teléfono; lo confirmó por llamada")
@@ -156,8 +158,8 @@ test("verificación en dos pasos: activarla, pedirla al equipo, entrar con el c�
   await fixtureDb.delete(member).where(and(eq(member.organizationId, reception.org.id), eq(member.userId, reception.user.id)))
   await confirm.getByRole("button", { name: "Restablecer" }).click()
   await expect(confirm).toBeHidden()
-  await expect(page.getByRole("row").filter({ hasText: reception.user.email })).toContainText("Sin activar")
-  await shot(page, "equipo-restablecida")
+  await expect(later.getByRole("row").filter({ hasText: reception.user.email })).toContainText("Sin activar")
+  await shot(later, "equipo-restablecida")
   expect(await fixtureDb.select().from(session).where(eq(session.userId, reception.user.id))).toEqual([])
   const [event] = await fixtureDb
     .select({ metadata: auditEvent.metadata })
