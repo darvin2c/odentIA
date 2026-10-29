@@ -44,6 +44,72 @@ describe("señales de alarma (ADR 0084)", () => {
     }
   })
 
+  it("una frase negada justo antes no es una alarma, en los dos productos; un «no» en otra parte, sí", () => {
+    for (const product of ["dental", "medical"] as const) {
+      const signals = agentTextsFor(product).alarmSignals
+      for (const text of [
+        // Las rondas de latidIA (auditoría del 29-oct): pedían una cita por tos y recibían el 106.
+        "Llevo cuatro días con tos y congestión, pero no me falta el aire.",
+        "No le falta el aire y está tomando líquidos. ¿Atienden con cita?",
+        "está con tos y la nariz tapada. No tiene dificultad para respirar y sí está tomando líquidos",
+        "no me duele el pecho",
+        "el pecho no me duele, es la espalda",
+        "tengo tos pero sin dolor en el pecho",
+        "no tengo ningún dolor en el pecho ni falta de aire",
+        "no siento opresión en el pecho",
+        "ya no me falta el aire",
+        "no le noto dificultad para respirar",
+        "no me estoy ahogando, solo es tos",
+        "se cayó pero no se desmayó",
+        "no se ha desmayado",
+        "se golpeó la cabeza, no perdió el conocimiento",
+        "no quedó inconsciente",
+        "tiene fiebre pero no ha convulsionado",
+        "sin convulsiones",
+        "me sacaron la muela y no hay hemorragia",
+        "no se me cierra la garganta, solo me pica",
+        "le salieron ronchas pero no se le hinchó la cara",
+        "tampoco me mordió el perro, solo me asustó",
+      ]) {
+        expect(hasAlarmSignal(text, signals), `${product}: ${text}`).toBe(false)
+      }
+      for (const text of [
+        "no sé, me falta el aire",
+        "No, me duele el pecho",
+        "no aguanto el dolor de pecho",
+        "no tengo fiebre pero me falta el aire",
+        "no me duele el pecho, pero me falta el aire",
+        "no sé qué hacer, tiene dificultad para respirar",
+        // «No se» sin tildes también es «no sé»: «no sé, tiene dificultad», «no sé, se desmayó mi mamá».
+        "no se tiene dificultad para respirar",
+        "no se se desmayo mi mama",
+        // «Nunca» y el pasado de antes suelen contar lo que cambió.
+        "nunca se había desmayado y hoy le pasó",
+        "ayer no tenía dolor de pecho, hoy sí",
+        // Hacerse daño no se niega: quien lo dice ya lo nombró.
+        "no pienso en suicidarme",
+      ]) {
+        expect(hasAlarmSignal(text, signals), `${product}: ${text}`).toBe(true)
+      }
+    }
+    const medical = agentTextsFor("medical").alarmSignals
+    for (const text of [
+      "estoy embarazada de 12 semanas y no tengo sangrado, quiero mi control",
+      "estoy embarazada, no estoy sangrando pero tengo náuseas",
+      "no estoy sangrando y estoy embarazada",
+      "embarazada y sin sangrado",
+      "vomitó pero sin sangre",
+      "no ha vomitado sangre",
+      "tiene tos pero no tiene los labios morados",
+      "no se puso morado",
+      "mi hijo no se tomó todas las pastillas del antibiótico",
+      "no se me rompió la fuente, solo tengo contracciones",
+    ]) {
+      expect(hasAlarmSignal(text, medical), text).toBe(false)
+    }
+    expect(hasAlarmSignal("estoy embarazada y no sé si estoy sangrando", medical)).toBe(true)
+  })
+
   it("una posible rabia es una alarma en los dos productos: la mordedura de un animal o un murciélago que pudo tocarla", () => {
     for (const product of ["dental", "medical"] as const) {
       const signals = agentTextsFor(product).alarmSignals
