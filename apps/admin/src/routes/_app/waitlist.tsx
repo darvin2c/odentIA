@@ -53,7 +53,8 @@ export const Route = createFileRoute("/_app/waitlist")({
     ...(typeof search.estado === "string" && STATUSES.includes(search.estado as StatusFilter) && search.estado !== "por_revisar"
       ? { estado: search.estado as StatusFilter }
       : {}),
-    ...(typeof search.q === "string" && search.q ? { q: search.q } : {}),
+    // Un enlace con «?q=987654321» llega como número: también es una búsqueda.
+    ...((typeof search.q === "string" && search.q) || typeof search.q === "number" ? { q: String(search.q) } : {}),
     ...(typeof search.solicitud === "string" ? { solicitud: search.solicitud } : {}),
   }),
   component: WaitlistPage,
@@ -188,7 +189,13 @@ function WaitlistPage() {
   })
   const [product, setProduct] = React.useState<ProductChoice>("todos")
   const allRows = list.data?.rows ?? []
-  const rows = allRows.filter((r) => matchesProduct(product, r.product))
+  // La tabla y los selectores de Base UI necesitan referencias estables: con
+  // `data` o `state` nuevos en cada render, la página se redibuja sin fin
+  // (se congela al poner el foco en el panel de la solicitud).
+  const rows = React.useMemo(
+    () => (list.data?.rows ?? []).filter((r) => matchesProduct(product, r.product)),
+    [list.data?.rows, product],
+  )
   const productCounts = countByProduct(allRows, (r) => r.product)
   const now = new Date()
   const open = (id: string | undefined) => void navigate({ search: (prev) => ({ ...prev, solicitud: id }), replace: true })
@@ -222,9 +229,20 @@ function WaitlistPage() {
     ],
     [],
   )
-  const columnVisibility: VisibilityState = compact ? { product: false, where: false, professionals: false, tool: false, asked: false, who: false } : {}
+  const columnVisibility = React.useMemo<VisibilityState>(
+    (): VisibilityState =>
+      compact ? { product: false, where: false, professionals: false, tool: false, asked: false, who: false } : {},
+    [compact],
+  )
   const table = useReactTable({ data: rows, columns, state: { columnVisibility }, getCoreRowModel: getCoreRowModel() })
   const counts = list.data?.counts ?? {}
+  const statusItems = React.useMemo(
+    () =>
+      Object.fromEntries(
+        STATUSES.map((s) => [s, s === "todas" ? STATUS_LABEL[s] : `${STATUS_LABEL[s]} ${list.data?.counts[s] ?? 0}`]),
+      ),
+    [list.data?.counts],
+  )
   // Los productos que se miran: los dos en «Todos».
   const shown: readonly ClinicalProduct[] = product === "todos" ? CLINICAL_PRODUCTS : [product]
   const seatsOf = list.data?.seats
@@ -293,7 +311,7 @@ function WaitlistPage() {
           <FieldLabel htmlFor="espera-estado">Estado</FieldLabel>
           <Select
             value={status}
-            items={Object.fromEntries(STATUSES.map((s) => [s, s === "todas" ? STATUS_LABEL[s] : `${STATUS_LABEL[s]} ${counts[s] ?? 0}`]))}
+            items={statusItems}
             onValueChange={(value) =>
               void navigate({
                 search: (prev) => ({ ...prev, estado: value === "por_revisar" || !value ? undefined : (value as StatusFilter) }),

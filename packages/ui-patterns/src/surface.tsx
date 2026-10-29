@@ -40,7 +40,8 @@ export interface SurfaceShellProps {
   /**
    * Con `onSubmit` el root es un `<form>` y el pie lleva acciones de envío; sin
    * él es un `<div>` y el pie solo contiene botones `type="button"`. La forma
-   * del root es una consecuencia de la superficie, no una prop aparte.
+   * del root es una consecuencia de la superficie, no una prop aparte. El envío
+   * nativo se cancela siempre aquí: quien la usa no tiene que acordarse.
    */
   onSubmit?: (event: React.FormEvent) => void
   /**
@@ -145,7 +146,15 @@ export function SurfaceShell({
 
   if (onSubmit) {
     return (
-      <form onSubmit={onSubmit} className={SURFACE_ROOT_CLASS}>
+      <form
+        onSubmit={(event) => {
+          // Sin esto el navegador envía el formulario y recarga la página: el
+          // guardado queda a medias y su error no llega a verse.
+          event.preventDefault()
+          onSubmit(event)
+        }}
+        className={SURFACE_ROOT_CLASS}
+      >
         {blocks}
       </form>
     )

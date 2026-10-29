@@ -21,6 +21,63 @@ export interface DemoServiceRecipe {
   firstVisit?: boolean
 }
 
+/** Un producto de Inventario de la demo, con lo que cuesta y cuánto debe haber. */
+export interface DemoProductRecipe {
+  sku: string
+  name: string
+  /** Unidad de uso («guante»). */
+  unit: string
+  /** Unidad de compra y cuántas de uso trae; sin ella, se compra igual que se usa. */
+  purchase?: { unit: string; factor: number }
+  /** Costo de una unidad de compra (o de uso, sin ella), en soles. */
+  cost: number
+  /** Mínimo de la sede, en unidades de uso. */
+  min: number
+  /** Precio de venta de una unidad de uso, en soles: aparece en «Cobrar». */
+  sale?: number
+  /** Solo se vende, no se gasta en las atenciones. */
+  onlySale?: boolean
+  /** Ya no se usa: queda desactivado, con su compra de antes. */
+  retired?: boolean
+}
+
+/** Lo que una demo tiene en Inventario y lo que gasta cada servicio. */
+export interface DemoInventoryRecipe {
+  /** Los proveedores, sin la forma de sociedad del país: «Dental Andina». */
+  suppliers: readonly [string, string]
+  products: readonly DemoProductRecipe[]
+  /** Lo que gasta cada servicio de la biblioteca (`treatment_template.key`), por su `sku`. */
+  materials: Readonly<Record<string, ReadonlyArray<{ sku: string; quantity: number }>>>
+  /** Quedan por debajo de su mínimo: la pantalla dice «Hace falta». */
+  low: readonly string[]
+  /** De los que entran, al primero le queda un lote vencido y al segundo uno que vence en días. */
+  expiring: readonly string[]
+}
+
+/**
+ * Una promoción de la demo sobre un servicio de su receta. «vigente» empezó
+ * hace tres semanas y sigue sin fin; «terminada» duró el mes pasado. Las dos
+ * se usaron en cobros de la historia.
+ */
+export interface DemoPromotionRecipe {
+  template: string
+  name: string
+  /** Lo lee Sofi tal cual a los pacientes: una condición de verdad. */
+  conditions: string
+  /** Precio de la promoción en soles; con «from», el mínimo. */
+  price: number
+  mode?: "fixed" | "from"
+  when: "vigente" | "terminada"
+}
+
+/** Una respuesta oficial de Conocimiento (`KNOWLEDGE_BASICS` si tiene clave). */
+export interface DemoKnowledgeRecipe {
+  title: string
+  body: string
+  basicKey?: string
+  askForms?: readonly string[]
+}
+
 export interface DemoKindRecipe {
   key: string
   product: ClinicalProduct
@@ -62,6 +119,10 @@ export interface DemoKindRecipe {
     revenueShare?: number
     day: number
   }>
+  inventory: DemoInventoryRecipe
+  promotions: readonly DemoPromotionRecipe[]
+  /** Las respuestas que Sofi ya tiene publicadas. */
+  knowledge: readonly DemoKnowledgeRecipe[]
 }
 
 /** Los tamaños (decisión 4): profesionales, sedes, consultorios por sede y pacientes que ya existen. */
@@ -93,7 +154,13 @@ export interface DemoCountry {
   places: readonly string[]
   /** Prefijo y largo de un celular del país. */
   mobile: { prefix: string; digits: number }
+  /** La forma de sociedad de un proveedor y un número tributario con su forma («20…» en Perú). */
+  company: { suffix: string; taxNumber: (random: Random) => string }
 }
+
+const LETTERS = "ABCDEFGHJKLMNPRSTUVWXYZ"
+const digits = (random: Random, count: number): string =>
+  Array.from({ length: count }, () => String(random.int(0, 9))).join("")
 
 const GIVEN_F = [
   "María",
@@ -212,6 +279,8 @@ export const DEMO_COUNTRIES: Record<DemoCountry["code"], DemoCountry> = {
       "Lince",
     ],
     mobile: { prefix: "+519", digits: 8 },
+    // RUC de una persona jurídica: 11 dígitos que empiezan con 20.
+    company: { suffix: "S.A.C.", taxNumber: (random) => `20${digits(random, 9)}` },
   },
   CO: {
     code: "CO",
@@ -318,6 +387,11 @@ export const DEMO_COUNTRIES: Record<DemoCountry["code"], DemoCountry> = {
       "Belén",
     ],
     mobile: { prefix: "+573", digits: 9 },
+    // NIT de una sociedad: nueve dígitos y su dígito de verificación.
+    company: {
+      suffix: "S.A.S.",
+      taxNumber: (random) => `9${digits(random, 8)}-${digits(random, 1)}`,
+    },
   },
   MX: {
     code: "MX",
@@ -407,6 +481,12 @@ export const DEMO_COUNTRIES: Record<DemoCountry["code"], DemoCountry> = {
       "Lindavista",
     ],
     mobile: { prefix: "+521", digits: 10 },
+    // RFC de una persona moral: tres letras, la fecha de constitución y la homoclave.
+    company: {
+      suffix: "S.A. de C.V.",
+      taxNumber: (random) =>
+        `${Array.from({ length: 3 }, () => random.pick([...LETTERS])).join("")}${String(random.int(5, 19)).padStart(2, "0")}${String(random.int(1, 12)).padStart(2, "0")}${String(random.int(1, 28)).padStart(2, "0")}${random.pick([...LETTERS])}${digits(random, 1)}${random.pick([...LETTERS])}`,
+    },
   },
 }
 

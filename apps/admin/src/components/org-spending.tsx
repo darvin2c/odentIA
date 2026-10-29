@@ -414,7 +414,7 @@ function ActionDetail({
           ? "La voz se convierte en texto en el navegador del profesional: no hay audio ni costo de transcripción. Lo que cuesta es que Clío entienda cada pausa. No se muestra lo dictado ni el diagnóstico: son datos clínicos."
           : item.agent === "sofi" || item.type === "Cita recuperada"
             ? "La conversación no se abre desde aquí: se lee solo con el permiso de la clínica, en una revisión de cobro. Cada fila sale del registro de lo que hizo Sofi, sin el texto de los mensajes."
-            : "Lo que escribió la persona no se guarda: puede llevar nombres de pacientes (ADR 0070). Esto es lo que Argos entendió."}
+            : "Lo que escribió la persona no se guarda: puede llevar nombres de pacientes. Esto es lo que Argos entendió."}
       </p>
     </div>
   )
@@ -759,7 +759,36 @@ function ByTypeTable({
           ? ` ${plural(margin.unpricedCalls, "llamada no tiene", "llamadas no tienen")} precio conocido y no están en el total.`
           : ""}
       </p>
+      {margin.informBlocks?.windows ? <InformBlocksNote margin={margin} blocks={margin.informBlocks} /> : null}
     </section>
+  )
+}
+
+/**
+ * Informa por bloques de mensajes de la persona (ADR 0105), en sombra: lo que
+ * se contaría con el tope del plan. Sirve para decidir el tope; nadie lo paga.
+ */
+function InformBlocksNote({
+  margin,
+  blocks,
+}: {
+  margin: ClinicCostMargin
+  blocks: NonNullable<ClinicCostMargin["informBlocks"]>
+}) {
+  const over = blocks.over
+    ? `${blocks.over} de ${plural(blocks.windows, "conversación", "conversaciones")} Informa ${blocks.over === 1 ? "pasaría" : "pasarían"} el tope; se ${blocks.extraInforma === 1 ? "contaría" : "contarían"} ${blocks.extraInforma} Informa más, ${money(blocks.extraCents, margin.currency)}.`
+    : blocks.windows === 1
+      ? "la única conversación Informa no pasó el tope."
+      : `ninguna de las ${blocks.windows} conversaciones Informa pasó el tope.`
+  const longest = blocks.maxMessages ? ` La más larga tuvo ${plural(blocks.maxMessages, "mensaje", "mensajes")} de la persona.` : ""
+  return (
+    <p className="px-1 text-xs text-muted-foreground">
+      <b className="font-medium text-foreground">
+        Informa por bloques de {plural(blocks.messageLimit, "mensaje", "mensajes")}, en sombra:
+      </b>{" "}
+      {over}
+      {longest} No se cobra: solo se mide para decidir el tope.
+    </p>
   )
 }
 

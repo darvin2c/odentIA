@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto"
-import { inflateRawSync } from "node:zlib"
 import {
   type DiagnosisSystemKey,
   diagnosisSearchText,
   isDiagnosisCodeFormat,
   normalizeDiagnosisCode,
 } from "@odentia/clinical"
+import { decodeXml, readXlsxRows, readZipEntries } from "./xlsx.js"
+
+export { readXlsxRows, readZipEntries } from "./xlsx.js"
 
 /**
  * Lectura de los archivos de una lista de diagnósticos (ADR 0041), sin base de
@@ -172,17 +174,6 @@ function parseDiagnosisTable(table: readonly string[][]): DiagnosisSourceRow[] {
   return rows
 }
 
-function decodeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCodePoint(Number.parseInt(n, 16)))
-    .replace(/&amp;/g, "&")
-}
-
 /**
  * Las categorías de un archivo ClaML: cada `<Class kind="category">` con su
  * código y su rúbrica `preferred` (en `language` si el archivo trae varias).
@@ -221,50 +212,6 @@ export function parseClaml(text: string, language = "es"): DiagnosisSourceRow[] 
 }
 
 /**
- * Las entradas de un .zip (APPNOTE de PKWARE), sin dependencias: Node no trae
- * un lector y la OMS publica sus tabulaciones así. Basta lo que esos archivos
- * usan: sin cifrar, guardado (0) o deflate (8) y menos de 4 GB (sin Zip64).
- */
-export function readZipEntries(bytes: Uint8Array): Map<string, Buffer> {
-  const data = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const minEnd = Math.max(0, data.length - 22 - 0xffff)
-  let end = -1
-  for (let at = data.length - 22; at >= minEnd; at--)
-    if (data.readUInt32LE(at) === 0x06054b50) {
-      end = at
-      break
-    }
-  if (end < 0) throw new Error("No es un .zip: falta el directorio central")
-  const count = data.readUInt16LE(end + 10)
-  let at = data.readUInt32LE(end + 16)
-  const entries = new Map<string, Buffer>()
-  for (let i = 0; i < count; i++) {
-    if (data.readUInt32LE(at) !== 0x02014b50) throw new Error("El .zip está dañado")
-    const flags = data.readUInt16LE(at + 8)
-    const method = data.readUInt16LE(at + 10)
-    const compressedSize = data.readUInt32LE(at + 20)
-    const size = data.readUInt32LE(at + 24)
-    const nameLength = data.readUInt16LE(at + 28)
-    const extraLength = data.readUInt16LE(at + 30)
-    const commentLength = data.readUInt16LE(at + 32)
-    const localAt = data.readUInt32LE(at + 42)
-    const name = data.toString("utf8", at + 46, at + 46 + nameLength)
-    at += 46 + nameLength + extraLength + commentLength
-    if (name.endsWith("/")) continue
-    if (flags & 1) throw new Error(`${name} está cifrado`)
-    if (data.readUInt32LE(localAt) !== 0x04034b50) throw new Error("El .zip está dañado")
-    const start = localAt + 30 + data.readUInt16LE(localAt + 26) + data.readUInt16LE(localAt + 28)
-    const raw = data.subarray(start, start + compressedSize)
-    const content =
-      method === 0 ? Buffer.from(raw) : method === 8 ? inflateRawSync(raw) : null
-    if (!content) throw new Error(`${name} usa una compresión que no se lee (${method})`)
-    if (content.length !== size) throw new Error(`${name} no tiene el tamaño que declara el .zip`)
-    entries.set(name, content)
-  }
-  return entries
-}
-
-/**
  * El texto de la lista: el archivo tal cual o, si es un .zip, su único archivo
  * de datos (.txt, .tsv, .csv o .xml; la OMS suma un readme y una hoja de
  * cálculo, que no se leen). El SHA-256 se verifica antes, sobre el archivo
@@ -287,62 +234,6 @@ export function diagnosisFileText(bytes: Uint8Array): string {
 export function parseDiagnosisFile(text: string): DiagnosisSourceRow[] {
   const head = text.replace(/^﻿/, "").trimStart().slice(0, 200)
   return head.startsWith("<") ? parseClaml(text) : parseDiagnosisDelimited(text)
-}
-
-/** Índice de la columna de una celda («A1» → 0, «AB7» → 27). */
-function columnIndex(ref: string): number {
-  const letters = /^[A-Z]+/.exec(ref)?.[0] ?? "A"
-  let index = 0
-  for (const letter of letters) index = index * 26 + (letter.charCodeAt(0) - 64)
-  return index - 1
-}
-
-/** El texto de un `<si>` o un `<is>`: sus `<t>`, también los de cada tramo con formato. */
-function xmlRunsText(xml: string): string {
-  return decodeXml([...xml.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((m) => m[1] ?? "").join(""))
-}
-
-/**
- * Las filas de la primera hoja de un .xlsx (ECMA-376, SpreadsheetML), con las
- * entradas de su .zip: textos compartidos, textos en la celda y números, cada
- * uno en su columna. Basta lo que usan las listas oficiales que se publican
- * así (la CIE-10 del MINSA): sin fórmulas que haya que calcular.
- */
-export function readXlsxRows(entries: ReadonlyMap<string, Buffer>): string[][] {
-  const workbook = entries.get("xl/workbook.xml")?.toString("utf8")
-  if (!workbook) throw new Error("El .xlsx no trae xl/workbook.xml")
-  const firstSheetId = /<sheet\b[^>]*\br:id="([^"]+)"/.exec(workbook)?.[1]
-  const rels = entries.get("xl/_rels/workbook.xml.rels")?.toString("utf8") ?? ""
-  const target = firstSheetId
-    ? new RegExp(`<Relationship\\b[^>]*\\bId="${firstSheetId}"[^>]*\\bTarget="([^"]+)"`).exec(rels)?.[1] ??
-      new RegExp(`<Relationship\\b[^>]*\\bTarget="([^"]+)"[^>]*\\bId="${firstSheetId}"`).exec(rels)?.[1]
-    : undefined
-  const sheetPath = target ? `xl/${target.replace(/^\/?xl\//, "")}` : "xl/worksheets/sheet1.xml"
-  const sheet = entries.get(sheetPath)?.toString("utf8")
-  if (!sheet) throw new Error(`El .xlsx no trae su primera hoja (${sheetPath})`)
-  const shared = [
-    ...(entries.get("xl/sharedStrings.xml")?.toString("utf8") ?? "").matchAll(/<si>([\s\S]*?)<\/si>/g),
-  ].map((m) => xmlRunsText(m[1] ?? ""))
-  const rows: string[][] = []
-  for (const row of sheet.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
-    const cells: string[] = []
-    for (const cell of (row[1] ?? "").matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
-      const attrs = cell[1] ?? ""
-      const body = cell[2] ?? ""
-      const type = /\bt="([^"]+)"/.exec(attrs)?.[1]
-      const value = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1]
-      const text =
-        type === "s"
-          ? (shared[Number(value)] ?? "")
-          : type === "inlineStr"
-            ? xmlRunsText(body)
-            : decodeXml(value ?? "")
-      cells[columnIndex(/\br="([A-Z]+)\d+"/.exec(attrs)?.[1] ?? String.fromCharCode(65 + cells.length))] =
-        text
-    }
-    rows.push(Array.from(cells, (cell) => cell ?? ""))
-  }
-  return rows
 }
 
 /**

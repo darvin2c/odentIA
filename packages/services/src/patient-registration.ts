@@ -930,13 +930,15 @@ export async function registerPatient(
       // número pasa a ser su WhatsApp (ADR 0027), con la misma operación que
       // «Escribirle» y a nombre de quien la registra, para que le lleguen el aviso y
       // los recordatorios. Si ya es de otra persona no se mueve: la cita sigue y se dice.
+      // Un fijo no es un WhatsApp: la cita sigue y no se marca nada.
       if (newPerson && created.phone && (await hasActiveWhatsApp(tx, orgId))) {
         try {
           await claimWhatsAppNumber(tx, orgId, actorUserId, personId, created.phone)
           whatsapp = "creado"
         } catch (error) {
-          if (!(error instanceof ServiceError) || error.code !== "IDENTITY_IN_USE") throw error
-          whatsapp = "en_uso"
+          if (error instanceof ServiceError && error.code === "NOT_WHATSAPP_NUMBER") whatsapp = undefined
+          else if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") whatsapp = "en_uso"
+          else throw error
         }
       }
     }

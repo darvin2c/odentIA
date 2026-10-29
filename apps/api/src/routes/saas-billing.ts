@@ -89,6 +89,7 @@ import {
   upsertSaasSeller,
   voidSaasSettlement,
   writeAdminAudit,
+  clinicTwoFactorGate,
 } from "@odentia/services"
 import { and, eq } from "drizzle-orm"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
@@ -109,6 +110,8 @@ export interface SaasBillingAccountDeps {
   auth: Auth
   db: Db
   storage: Storage
+  /** Para la verificación en dos pasos que pide la clínica (ADR 0107). */
+  ownerDb: Db
 }
 
 /**
@@ -165,6 +168,8 @@ const planInput = z
     recoveryMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
     // Por tipo, preguntas a Argos y almacenamiento (ADR 0085).
     ...tierPrices,
+    // Mensajes de la persona que cubre cada Informa, en sombra (ADR 0105); null = sin tope.
+    informMessageLimit: z.number().int().min(1).max(1000).nullish(),
     argosIncludedQuestions: z.number().int().min(0).max(100_000).optional(),
     argosPackQuestions: z.number().int().min(1).max(10_000).optional(),
     storageIncludedGb: z.number().int().min(0).max(100_000).optional(),
@@ -973,13 +978,17 @@ async function accountMember(deps: SaasBillingAccountDeps, c: Context, orgId: st
     .where(and(eq(member.userId, session.user.id), eq(member.organizationId, orgId)))
     .limit(1)
   if (!membership) return null
-  return { userId: session.user.id, role: membership.role }
+  return { userId: session.user.id, sessionId: session.session.id, role: membership.role }
 }
-/** Miembro que ve Facturación (`seesBilling`: owner/admin), o null (sin sesión, sin membresía u otro rol). */
+/**
+ * Miembro que ve Facturación (`seesBilling`: owner/admin), o null (sin sesión,
+ * sin membresía u otro rol, o sin el código que pide la clínica: ADR 0107).
+ */
 async function accountOwnerOrAdmin(deps: SaasBillingAccountDeps, c: Context, orgId: string) {
   const membership = await accountMember(deps, c, orgId)
   if (!membership) return null
   if (!seesBilling(membership.role)) return null
+  if (await clinicTwoFactorGate(deps.ownerDb, { orgId, userId: membership.userId, sessionId: membership.sessionId })) return null
   return membership
 }
 

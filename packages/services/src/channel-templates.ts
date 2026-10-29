@@ -459,9 +459,14 @@ export async function requestConnectionTemplate(
         { fetch: deps.fetch },
       )
     } catch (error) {
+      // Si el proveedor rechaza el pedido (un 4xx de Meta: el texto, un permiso), es un 400
+      // con su motivo, que la pantalla muestra. Un 502 queda para cuando no respondió:
+      // Cloudflare cambia los 502 del servidor por su propia página y el motivo se pierde.
+      const providerStatus = (error as { providerStatus?: unknown } | null)?.providerStatus
+      const rejected = typeof providerStatus === "number" && providerStatus >= 400 && providerStatus < 500 && providerStatus !== 429
       throw new ServiceError(
         "TEMPLATE_REQUEST_FAILED",
-        502,
+        rejected ? 400 : 502,
         error instanceof Error ? error.message : "El proveedor no aceptó la solicitud",
       )
     }

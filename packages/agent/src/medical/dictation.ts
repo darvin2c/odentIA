@@ -13,10 +13,12 @@ import {
   type DictationExtraction,
   type DictationPending,
   type DictationProfile,
+  demoMaterial,
   dictationEdits,
   dictationItems,
   dictationList,
   dictationSaid,
+  materialsPrompt,
 } from "../dictation.js"
 
 /**
@@ -87,6 +89,7 @@ export const extraction = z.object({
     .extend({ dicho: dictationSaid })
     .optional()
     .describe("El descanso médico, solo si lo indicó."),
+  materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
   ...dictationEdits("temperatura"),
 })
 
@@ -103,6 +106,7 @@ const DRAFT_PARTS = [
   { key: "citas", kind: "cita" },
   { key: "presupuesto", kind: "presupuesto", single: true },
   { key: "descanso", kind: "descanso", single: true },
+  { key: "materiales", kind: "material" },
 ] as const
 
 export function systemPrompt(input: {
@@ -131,6 +135,7 @@ export function systemPrompt(input: {
       : "La clínica aún no tiene servicios.",
     ...allergyAndDonePrompt("médico", "«le hice la nebulización», «ya le puse el inyectable»"),
     ...appointmentAndBudgetPrompt("«agéndale la ecografía para la próxima semana»"),
+    materialsPrompt("médico", "«se fueron dos ampollas de suero»", "una nebulización, una curación"),
     "La fecha de hoy llega con lo dictado. Un control «en una semana» o un descanso «desde mañana» se cuentan desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")
@@ -258,6 +263,9 @@ export function demoExtraction(
         })
       }
     }
+    // «Usé una mascarilla»: un material de la atención, no una prestación.
+    const material = demoMaterial(text)
+    if (material) drafts.push({ kind: "material", payload: material, sourceText: sentence })
     for (const name of services) {
       const key = plain(name)
         .split(" ")

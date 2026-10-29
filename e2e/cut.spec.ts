@@ -82,7 +82,11 @@ test("auth: la dirección sigue al nombre, avisa si está en uso y el teléfono 
 
     // Issue 106: la dirección sigue cada tecla del nombre, sin lo genérico.
     const address = page.getByLabel("Dirección de tu clínica en odentIA")
-    await page.getByLabel("Nombre de tu clínica").pressSequentially("Clínica Dental Sonrisa")
+    // El paso de la clínica aparece cuando llega la sesión; `pressSequentially` no
+    // espera a que se vea, y antes lo tecleado iría al paso anterior.
+    const name = page.getByLabel("Nombre de tu clínica")
+    await expect(name).toBeVisible()
+    await name.pressSequentially("Clínica Dental Sonrisa")
     await expect(address).toHaveValue("sonrisa")
     await expect(page.getByText(/^✓ sonrisa\..+ está libre\.$/)).toBeVisible()
 

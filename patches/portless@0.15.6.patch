@@ -1,8 +1,8 @@
 diff --git a/dist/cli.js b/dist/cli.js
-index 648ea06770ed30d1f527478f0889bb047e2a588c..8f4cd320848774eb758bf1b69380c424902fb8f4 100644
+index 648ea06770ed30d1f527478f0889bb047e2a588c..305ce377d4b9ffab3b77e932883d25619a464819 100644
 --- a/dist/cli.js
 +++ b/dist/cli.js
-@@ -264,6 +264,7 @@ function openssl(args, options) {
+@@ -266,6 +266,7 @@ function openssl(args, options) {
        timeout: OPENSSL_TIMEOUT_MS,
        input: options?.input,
        stdio: ["pipe", "pipe", "pipe"],
@@ -59,7 +59,36 @@ index 648ea06770ed30d1f527478f0889bb047e2a588c..8f4cd320848774eb758bf1b69380c424
    ]);
    fs2.chmodSync(keyPath, 384);
    fs2.chmodSync(certPath, 420);
-@@ -4706,7 +4727,8 @@ function startProxyServer(store, proxyPort, tld, tlds, tlsOptions, lanIp, strict
+@@ -555,13 +576,10 @@ async function generateHostCertAsync(stateDir, hostname) {
+       `subjectAltName=${sans.join(",")}`
+     ].join("\n") + "\n"
+   );
+-  const srlPath = path.join(stateDir, "ca.srl");
+-  if (!fs2.existsSync(srlPath)) {
+-    await fs2.promises.writeFile(
+-      srlPath,
+-      crypto2.randomUUID().replace(/-/g, "").slice(0, 16).toUpperCase() + "\n"
+-    );
+-  }
++  // odentIA: un serial al azar por certificado. Con `-CAserial ca.srl`, dos
++  // direcciones nuevas a la vez reescriben el mismo archivo (ca.srl.new y rename),
++  // una de las dos falla y el proxy corta la conexión sin decir nada.
++  const serial = "0x" + crypto2.randomBytes(16).toString("hex").replace(/^[89a-f]/, "7");
+   await opensslAsync([
+     "x509",
+     "-req",
+@@ -572,8 +590,8 @@ async function generateHostCertAsync(stateDir, hostname) {
+     caCertPath,
+     "-CAkey",
+     caKeyPath,
+-    "-CAserial",
+-    srlPath,
++    "-set_serial",
++    serial,
+     "-out",
+     certPath,
+     "-days",
+@@ -4706,7 +4724,8 @@ function startProxyServer(store, proxyPort, tld, tlds, tlsOptions, lanIp, strict
        );
      });
    }

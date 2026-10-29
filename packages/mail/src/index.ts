@@ -252,6 +252,38 @@ export function invitationTemplate({
   })
 }
 
+/**
+ * La clínica pide verificación en dos pasos a todo su equipo (ADR 0107): a
+ * quien aún no la tiene, con la app que necesita, antes de que se la pidan en
+ * plena atención.
+ */
+export function teamTwoFactorRequiredTemplate({
+  firstName,
+  organizationName,
+  url,
+  brand,
+}: {
+  firstName?: string | undefined
+  organizationName: string
+  url: string
+} & Branded): MailTemplate {
+  const name = mailBrandName(brand)
+  return renderEmail({
+    brand,
+    subject: `${organizationName} pide verificación en dos pasos`,
+    preview: "Actívala una vez desde tu teléfono; tarda un par de minutos.",
+    title: "Activa tu verificación en dos pasos",
+    paragraphs: [
+      `${hello(firstName)}${organizationName} pide a todo su equipo entrar con su contraseña y un código de 6 dígitos de una app de su teléfono. Si alguien consigue tu contraseña, sin tu teléfono no entra.`,
+      "Instala una de estas apps (gratis, en Android y iPhone, y guardan copia en tu cuenta por si cambias de teléfono):",
+    ],
+    list: ["Google Authenticator", "Microsoft Authenticator"],
+    action: { label: "Activarla ahora", url },
+    note: `Si ya usas otra app de códigos, también sirve. Hasta que la actives, ${organizationName} te la pedirá al entrar.`,
+    reason: `Te escribimos porque eres parte del equipo de ${organizationName} en ${name}.`,
+  })
+}
+
 /** Invitación al personal de odentIA (Administración y Soporte). */
 export function staffInvitationTemplate({ url }: { url: string }): MailTemplate {
   return renderEmail({

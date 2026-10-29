@@ -1,0 +1,7 @@
+N° HC;Apellidos;Nombres;Tipo Doc;DNI;F. Nac;Sexo;Celular;Correo;Apoderado;DNI Apoderado;Parentesco;Tel. apoderado
+101;EJEMPLO GARCIA;JUAN CARLOS;DNI;4567890;03/04/1985;M;987654321;juan.ejemplo@example.com;;;;
+102;Prueba Mamani;Rosa;DNI;45678901;15/11/1990;F;987 654 322 / 01 4567890;;;;;
+103;Prueba Mamani;Lucía;;;10/02/2016;F;;;Rosa Prueba Mamani;45678901;Madre;987654322
+104;Prueba Mamani;Mateo;;;20/08/2018;Masc;;;Rosa Prueba Mamani;45678901;Madre;987654322
+105;Ficticia Soto;Ana;;;01/01/2015;F;;;Carmen Ficticia;;Tía;987000999
+106;Inventado;Luis;DNI;87654321;12/12/85;M;014567890;;;;;

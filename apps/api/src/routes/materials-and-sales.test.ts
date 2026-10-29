@@ -244,7 +244,8 @@ it("materiales usados en la atención: los lee quien lee la historia y los corri
 
   const empty = await call(professional, "GET", path)
   expect(empty.status).toBe(200)
-  expect(empty.body.data).toEqual({ branch: { id: BRANCH, name: "Sede Miraflores" }, items: [], canCorrect: true })
+  // Quien atendió puede agregar lo que no estaba: la clínica tiene productos que se usan en las atenciones.
+  expect(empty.body.data).toEqual({ branch: { id: BRANCH, name: "Sede Miraflores" }, items: [], canCorrect: true, canAddProducts: true })
   expect((await call(buildApp("cashier", "u-cashier"), "GET", path)).status).toBe(403)
 
   const fixed = await call(professional, "POST", path, { productId: GLOVES, quantity: 4, idempotencyKey: "form-1" })
@@ -254,7 +255,10 @@ it("materiales usados en la atención: los lee quien lee la historia y los corri
   const denied = await call(other, "POST", path, { productId: GLOVES, quantity: 2, idempotencyKey: "form-2" })
   expect(denied.status).toBe(403)
   expect(denied.body.error.message).toBe("Corrigen los materiales quien atendió, el dueño y la administración")
-  expect((await call(other, "GET", path)).body.data.canCorrect).toBe(false)
+  expect((await call(other, "GET", path)).body.data).toMatchObject({ canCorrect: false, canAddProducts: false })
+  // El buscador de productos también le responde a quien atiende.
+  const picked = await call(professional, "GET", "/services/material-products?q=guantes")
+  expect(picked.body.data).toEqual([{ productId: GLOVES, name: "Guantes de nitrilo", unit: "guante" }])
 
   const byOwner = await call(owner, "POST", path, { productId: GLOVES, quantity: 2, idempotencyKey: "form-3" })
   expect(byOwner.status).toBe(200)

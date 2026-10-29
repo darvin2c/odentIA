@@ -175,6 +175,13 @@ export {
 } from "./locale.js"
 export { normalizeSearchText } from "./text.js"
 export {
+  AUTHENTICATOR_STORES,
+  groupedSecret,
+  RECOMMENDED_AUTHENTICATORS,
+  totpDigits,
+  totpSecret,
+} from "./totp.js"
+export {
   applyTheme,
   readStoredTheme,
   resolveTheme,

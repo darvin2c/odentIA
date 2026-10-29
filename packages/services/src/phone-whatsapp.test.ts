@@ -9,9 +9,9 @@ import { channelConnection, channelTemplate, contact, contactIdentity, conversat
 import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { confirmPhoneMatch, phoneMatchOf, phoneWhatsAppState, usePhoneAsWhatsApp } from "./contacts.js"
-import { applyStatus } from "./conversations.js"
+import { applyStatus, writeToPerson } from "./conversations.js"
 import { previewRoute } from "./message-gate.js"
-import { createPerson } from "./people.js"
+import { createPerson, listPeople } from "./people.js"
 import { appDb, insertOrg, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
@@ -151,4 +151,50 @@ it("caso 3: un teléfono que figura en dos fichas no sugiere a nadie", async () 
     })
     .returning({ id: conversation.id })
   expect(await c.run((tx) => phoneMatchOf(tx, c.orgId, thread!.id))).toBeNull()
+})
+
+it("un celular con un dígito de menos no se guarda como su WhatsApp: Meta lo rechazaría en cada envío", async () => {
+  const c = await clinic()
+  const luis = await c.run((tx) =>
+    createPerson(tx, c.orgId, { userId: null }, { givenNames: "Luis", familyName: "Incompleto", phone: "+5198765090" }),
+  )
+  await expect(c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, luis.id))).rejects.toMatchObject({ code: "NOT_WHATSAPP_NUMBER" })
+  await expect(c.run((tx) => writeToPerson(tx, c.orgId, null, luis.id, { phone: "+5198765090" }))).rejects.toMatchObject({
+    code: "NOT_WHATSAPP_NUMBER",
+  })
+  expect(await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, luis.id))).toEqual([])
+  // Con el número completo, sí: la conversación va a ese número.
+  const opened = await c.run((tx) => writeToPerson(tx, c.orgId, null, luis.id, { phone: "+51987650909" }))
+  const [thread] = await ownerDb.select({ to: conversation.externalThreadId }).from(conversation).where(eq(conversation.id, opened.conversationId))
+  expect(thread?.to).toBe("wa:51987650909")
+})
+
+it("cambió de número: el WhatsApp que el equipo elige pasa a ser el principal y se le escribe ahí, no al de antes", async () => {
+  const c = await clinic()
+  const rosa = await c.run((tx) => createPerson(tx, c.orgId, { userId: null }, { givenNames: "Rosa", familyName: "Número Nuevo" }))
+  // Escribió desde su número de antes: esa identidad quedó como la principal.
+  await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: c.orgId, contactId: rosa.id, channel: "whatsapp", externalUserId: "wa:51987651010", isPrimary: true })
+  await ownerDb.update(contact).set({ phone: "+51987651111" }).where(eq(contact.id, rosa.id))
+  await c.run((tx) => usePhoneAsWhatsApp(tx, c.orgId, null, rosa.id))
+  const rows = await ownerDb
+    .select({ number: contactIdentity.externalUserId, primary: contactIdentity.isPrimary })
+    .from(contactIdentity)
+    .where(eq(contactIdentity.contactId, rosa.id))
+  expect(rows.filter((row) => row.primary).map((row) => row.number)).toEqual(["wa:51987651111"])
+  // «Escribirle» y los recordatorios eligen el principal.
+  const opened = await c.run((tx) => writeToPerson(tx, c.orgId, null, rosa.id))
+  const [thread] = await ownerDb.select({ to: conversation.externalThreadId }).from(conversation).where(eq(conversation.id, opened.conversationId))
+  expect(thread?.to).toBe("wa:51987651111")
+})
+
+it("buscar su número encuentra a quien escribió primero por WhatsApp, aunque su ficha no tenga teléfono", async () => {
+  const c = await clinic()
+  const [wrote] = await ownerDb.insert(contact).values({ organizationId: c.orgId, displayName: "Willy" }).returning({ id: contact.id })
+  await ownerDb
+    .insert(contactIdentity)
+    .values({ organizationId: c.orgId, contactId: wrote!.id, channel: "whatsapp", externalUserId: "wa:51987651212", isPrimary: true })
+  const found = await c.run((tx) => listPeople(tx, c.orgId, { view: "todos", q: "987 651 212", limit: 8 }, () => true))
+  expect(found.items.map((person) => person.id)).toEqual([wrote!.id])
 })

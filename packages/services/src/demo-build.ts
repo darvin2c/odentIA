@@ -49,10 +49,18 @@ import { addDays, dayStart, reportDayOf } from "./report-periods.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 import { seedChannelTemplates } from "./seed-automation.js"
 import { seedConversationIn, seedMessageIn } from "./seed-common.js"
-import { chunks, generator, knownDiagnosisCodes, type Random, seedReports } from "./seed-reports.js"
+import {
+  chunks,
+  generator,
+  knownDiagnosisCodes,
+  promotionFor,
+  type Random,
+  seedReports,
+} from "./seed-reports.js"
 import { seedReportsAgent } from "./seed-reports-agent.js"
 import { seedReportsArgos } from "./seed-reports-argos.js"
 import { seedReportsPatients } from "./seed-reports-patients.js"
+import { demoPromotionsOf, seedOperation, seedPromotions } from "./seed-operation.js"
 import { seedSaasCostDemo } from "./seed-saas-cost.js"
 import { savePatientRegistrationConfig } from "./patient-registration.js"
 import { fromTemplates } from "./service-catalog.js"
@@ -68,6 +76,9 @@ import { librarySpecialtyIds } from "./specialties.js"
  * transacción: una demo nunca queda a medias. Nada sale a una persona: el
  * canal tiene claves falsas y los correos son de example.com.
  */
+
+/** Los pasos del armado que dice el avance: equipo, tarifario, historia, agentes, hoy y operación. */
+export const DEMO_BUILD_STEPS = 6
 
 /** Días de agenda hacia adelante. */
 const HORIZON_DAYS = 14
@@ -161,9 +172,8 @@ export async function buildDemo(
   const country = demoCountryOf(demo.countryCode)
   const size = DEMO_SIZE_RECIPES[demo.size]
   const random = generator(demo.seed)
-  const TOTAL = 5
   const step = async (done: number, name: string) =>
-    deps.onProgress?.({ step: name, done, total: TOTAL })
+    deps.onProgress?.({ step: name, done, total: DEMO_BUILD_STEPS })
   const now = new Date()
   await step(0, "equipo")
 
@@ -457,6 +467,15 @@ export async function buildDemo(
       409,
       "Falta la biblioteca del producto: ejecuta seed:procedures",
     )
+  // Las promociones existen antes de la historia: sus cobros nacen con su precio.
+  const operation = {
+    orgId,
+    ownerUserId: demo.presenterUserId,
+    recipe: kind,
+    country,
+    seed: demo.seed,
+  }
+  await seedPromotions(tx, operation)
 
   // --- La historia de los meses que se pidieron -----------------------------------------------
   await step(2, "historia")
@@ -495,6 +514,7 @@ export async function buildDemo(
       inbound: kind.inbound,
       reply: kind.reply,
       budgets: kind.budgets,
+      promotions: await demoPromotionsOf(tx, orgId),
       paymentMethods: country.paymentMethods,
       expenses: kind.expenses.map((item) => ({
         ...item,
@@ -573,7 +593,12 @@ export async function buildDemo(
   await closeVisits(tx, context, now)
   await seedTodayInbox(tx, context, connection.id, today, size.professionals)
   await topUpFollowUps(tx, context, today)
-  await step(5, "listo")
+
+  // --- Lo que el equipo ya usa: inventario, promociones, comisiones, oportunidades y Sofi ----
+  // Después de hoy: los materiales se descuentan de las atenciones recién cerradas.
+  await step(5, "operacion")
+  await seedOperation(tx, operation)
+  await step(DEMO_BUILD_STEPS, "listo")
   return { organizationId: orgId, historyThrough: through, slug }
 }
 
@@ -775,6 +800,7 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
     ).map((row) => row.patientId),
   )
   const tax = chargeTaxOf(await orgTaxes(tx, ctx.orgId), false)
+  const promotions = await demoPromotionsOf(tx, ctx.orgId)
   const missed: string[] = []
   const attended: typeof due = []
   for (const visit of due) {
@@ -835,6 +861,7 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         encounterId: randomUUID(),
         procedureId: randomUUID(),
         chargeId: randomUUID(),
+        promoted: service ? promotionFor(promotions, service.id, endedAt, ctx.random) : null,
       }
     })
     await tx
@@ -927,9 +954,10 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         encounterProcedureId: row.procedureId,
         branchId: row.visit.branchId,
         description: row.service?.name ?? "",
-        amountCents: row.service?.priceCents ?? 0,
+        amountCents: row.promoted?.cents ?? row.service?.priceCents ?? 0,
         currency: ctx.currency,
         ...(tax ?? {}),
+        ...(row.promoted?.charge ?? {}),
         createdBy: row.visit.professionalUserId,
         createdAt: row.endedAt,
       })),
@@ -939,7 +967,7 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
     const methods = ctx.paymentMethods
     const payments = paid.map((row) => {
       const method = ctx.random.weighted(methods)
-      const cents = row.service?.priceCents ?? 0
+      const cents = row.promoted?.cents ?? row.service?.priceCents ?? 0
       return {
         row,
         payment: {

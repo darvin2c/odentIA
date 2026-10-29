@@ -113,6 +113,41 @@
       "when": 1793222318711,
       "tag": "0015_cie10_minsa",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793248808690,
+      "tag": "0016_backups_verificados",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793285385202,
+      "tag": "0017_carga_de_datos",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793288324485,
+      "tag": "0018_informa_por_bloques",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793291222189,
+      "tag": "0019_clio_materiales",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793294235530,
+      "tag": "0020_verificacion_en_dos_pasos",
+      "breakpoints": true
     }
   ]
 }

@@ -6,7 +6,10 @@
  * Smile y entra una vez en cada dominio; una sede con dos salas y horario, la
  * agenda de hoy y mañana, los controles de presión de Luis con su examen y el
  * próximo, que se repite cada 3 meses, los antecedentes médicos de los tres,
- * y sus cinco especialidades y un tarifario de su biblioteca (entrega 8).
+ * y sus cinco especialidades y un tarifario de su biblioteca (entrega 8). Lo
+ * que el equipo ya usa (inventario, promociones, comisiones, oportunidades y
+ * las respuestas de Sofi) sale de la receta de Medicina general, como en
+ * «Crear demo» (`seed-operation.ts`).
  *
  * Solo manual, como toda la semilla: nunca en CI ni importado por pruebas.
  */
@@ -28,12 +31,15 @@ import { savePatientHealth } from "../clinical.js"
 import { setProfessionalSpecialties } from "../clinical-forms.js"
 import { createFollowUp } from "../follow-ups.js"
 import { createContact } from "../contacts.js"
+import { DEMO_COUNTRIES } from "../demo-recipes.js"
 import { createPatient } from "../patients.js"
 import { savePatientRegistrationConfig } from "../patient-registration.js"
 import { ensureDefaultPaymentMethods } from "../payment-methods.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
+import { seedOperation, seedPromotions } from "../seed-operation.js"
 import { fromTemplates } from "../service-catalog.js"
 import { ensureClinicSpecialties } from "../specialties.js"
+import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
 
 export const MEDICAL_DEMO_ORG = "seed-org-consultorio-san-martin"
 export const VELA_ID = "seed-user-vela"
@@ -409,4 +415,12 @@ export async function seedMedicalDemo(
       repeatEveryMonths: 3,
     }),
   )
+
+  const recipe = MEDICAL_DEMO_KINDS.find((kind) => kind.key === "medicina_general")
+  if (!recipe) throw new Error("Falta la receta de Medicina general")
+  const operation = { orgId: ORG, ownerUserId: VELA_ID, recipe, country: DEMO_COUNTRIES.PE, seed: 20_261_029 }
+  await db.transaction(async (tx) => {
+    await seedPromotions(tx, operation)
+    await seedOperation(tx, operation)
+  })
 }

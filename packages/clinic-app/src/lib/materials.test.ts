@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   closingMaterialsWords,
   copiedMaterialsWords,
+  discountedMaterialsWords,
   draftLineOf,
   materialPhrase,
   materialsChanged,
@@ -10,6 +11,7 @@ import {
   parseWholeQuantity,
   saleDeductionWords,
   saleStockNote,
+  shortageWords,
   withoutMaterialsIntro,
   withoutMaterialsTitle,
 } from "./materials"
@@ -76,6 +78,23 @@ describe("un material dicho en una frase", () => {
         "es-PE",
       ),
     ).toBe("se descuenta de Sede Centro: 1 jeringa de resina A2.")
+  })
+
+  it("después de firmar dice lo descontado y, aparte, solo lo que no había", () => {
+    const items = [
+      { name: "Guantes de nitrilo", unit: "guante", quantity: 4, shortage: 0 },
+      { name: "Pasta profiláctica", unit: "sobre", quantity: 2, shortage: 2 },
+    ]
+    expect(discountedMaterialsWords({ branch: { name: "Sede Centro" }, items }, "es-PE")).toBe(
+      "Salieron de Sede Centro: 4 guantes de nitrilo y 2 sobres de pasta profiláctica.",
+    )
+    expect(shortageWords(items, "es-PE")).toBe(
+      "No había 2 sobres de pasta profiláctica: quedan como faltante en Inventario.",
+    )
+    expect(
+      shortageWords([{ name: "Guantes de nitrilo", unit: "guante", shortage: 1 }], "es-PE"),
+    ).toBe("No había 1 guante de nitrilo: queda como faltante en Inventario.")
+    expect(shortageWords([items[0]!], "es-PE")).toBeNull()
   })
 })
 

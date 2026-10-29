@@ -318,7 +318,8 @@ export function EncounterDetailView({
                 <p className="text-xs text-muted-foreground">
                   {(proc.quantity ?? 1) > 1 ? `× ${proc.quantity} · ` : ""}
                   {proc.toothNumber != null ? `Pieza ${proc.toothNumber} · ` : ""}
-                  {proc.surfaces.length > 0
+                  {/* Las caras van con la pieza; un producto sin «dónde» no manda ninguna. */}
+                  {proc.toothNumber != null && proc.surfaces.length > 0
                     ? `${partNames(proc.surfaces)} · `
                     : ""}
                   {proc.planItemId

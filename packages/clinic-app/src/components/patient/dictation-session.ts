@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
 
-export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto"
+export type DictationKind = "nota" | "diagnostico" | "plan" | "control" | "odontograma" | "receta" | "signos" | "examen" | "descanso" | "alergia" | "procedimiento" | "cita" | "presupuesto" | "material"
 
 export interface DictationSuggestion {
   id: string
@@ -36,6 +36,7 @@ export const DICTATION_KIND_LABEL: Record<DictationKind, string> = {
   procedimiento: "Procedimientos",
   cita: "Próxima cita",
   presupuesto: "Presupuesto",
+  material: "Materiales",
 }
 
 /** Silencio tras el que se ordena lo dicho hasta ahí: una llamada al modelo por pausa, no por palabra. */
@@ -429,6 +430,8 @@ export function useDictationSession({
       if (input.item.kind === "procedimiento" && input.item.payload["acceptOnDo"] === true) {
         toast.success("Quedó hecho y el tratamiento, aceptado. Se cobra al cerrar la atención.")
       }
+      // El material no deja nada a la vista hasta firmar: se dice cuándo sale.
+      if (input.item.kind === "material") toast.success("Anotado. Sale de la sede al firmar; lo ves en el cierre.")
     },
     onSettled: () => void refresh(),
   })

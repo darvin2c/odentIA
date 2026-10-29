@@ -64,13 +64,14 @@ import { GlobalSearchButton, GlobalSearchProvider, type GlobalSearchScreen } fro
 import { ArgosPanel } from "../components/argos/argos-panel"
 import { ScheduleHost } from "../components/agenda/schedule-host"
 import { HelpButton } from "../components/help-panel"
+import { TwoFactorRequiredPage } from "../components/two-factor-required"
 import { HeaderHelpMenuItem } from "../components/header-more-menu"
 import { NoticesPanel, WorkspaceNotifications } from "../components/workspace-notifications"
 import { ClinicNoticeStrip, RaiseCapProvider, useClinicNotices } from "../components/clinic-notices"
 import { invalidateAppointmentQueries } from "../lib/agenda"
 import { authClient, authFetch } from "../lib/auth-client"
 import { requireTermsAccepted, requireVerifiedSession, type SessionInfo, ssrFetchOptions } from "../lib/guards"
-import { apiFetch } from "../lib/api"
+import { ApiError, apiFetch } from "../lib/api"
 import { adminRedirectFor, legalLinks, orgSlugFromHostname, panelUrl, requestHostname, tenantUrl } from "../lib/host"
 import { notifyOrgLocale, setOrgLocale } from "../lib/locale"
 import { fetchOrgProfile, useOrgProfile } from "../lib/org"
@@ -94,6 +95,8 @@ interface OrgRegion {
   country: string | undefined
   /** El producto de la clínica: si no es el de esta app, se abre en su dominio. */
   product?: string | undefined
+  /** La clínica pide verificación en dos pasos (ADR 0107): activarla, o el código de esta sesión. */
+  twoFactorRequired?: "activar" | "codigo"
 }
 let orgRegionLoaded: OrgRegion | null = null
 async function loadOrgRegion(): Promise<OrgRegion> {
@@ -111,7 +114,12 @@ async function loadOrgRegion(): Promise<OrgRegion> {
       setOrgLocale(region.locale, region.timeZone, region.country)
     }
     return region
-  } catch {
+  } catch (error) {
+    // La API no deja operar en esta clínica sin verificación en dos pasos: se dice, no se cachea.
+    if (error instanceof ApiError && (error.shape.code === "TWO_FACTOR_REQUIRED" || error.shape.code === "TWO_FACTOR_CODE_REQUIRED")) {
+      const twoFactorRequired = error.shape.code === "TWO_FACTOR_REQUIRED" ? "activar" : "codigo"
+      return { locale: undefined, timeZone: undefined, country: undefined, twoFactorRequired }
+    }
     return { locale: undefined, timeZone: undefined, country: undefined }
   }
 }
@@ -184,8 +192,15 @@ export const Route = createFileRoute("/_org")({
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
     return { session, org: data, region }
   },
-  component: OrgLayout,
+  component: OrgGate,
 })
+
+/** Sin la verificación que pide la clínica, su pantalla en vez de la aplicación. */
+function OrgGate() {
+  const { org, region } = orgRouteApi.useRouteContext()
+  if (region.twoFactorRequired) return <TwoFactorRequiredPage org={org} need={region.twoFactorRequired} />
+  return <OrgLayout />
+}
 
 /** El contrato de encargo de la clínica: lo pide la ventana a quien la administra. */
 const clinicAgreement = {

@@ -84,6 +84,24 @@ export interface ConnectionSignup {
   tokenNeverExpires?: boolean
   /** Por qué no se pudo renovar o revisar la clave, en palabras. Se borra al lograrlo o al volver a conectar. */
   tokenProblem?: string | null
+  /**
+   * Meta cortó la conexión de la cuenta con la app de odentIA: le quitaron el
+   * acceso o, en coexistencia, el número se desconectó (14 días sin abrir la app
+   * del celular, cambio de número o de celular…). Mientras tanto no llegan ni
+   * salen mensajes. Se borra al volver a conectar o cuando Meta avisa que se
+   * reconectó. Ausente o nulo: no se cortó.
+   */
+  metaRemoved?: ConnectionMetaRemoval | null
+}
+
+/** Cómo avisó Meta que se cortó la conexión de la cuenta. */
+export interface ConnectionMetaRemoval {
+  /** Cuándo lo avisó Meta (o cuándo llegó el aviso, si no lo dice). */
+  at: string
+  /** El motivo normalizado por el adaptador (`AccountRemovalReason`); nulo si Meta no dijo uno que se conozca. */
+  reason: string | null
+  /** Lo hizo la clínica o Meta; nulo si no lo dice. */
+  initiatedBy: "user" | "system" | null
 }
 
 /**

@@ -63,18 +63,20 @@ const FICTIONAL_METHODS = [
   },
 ] as const
 
-/** Los precios por tipo de la ADR 0085, por un factor (Fundadores: la mitad). */
+/** Los precios por tipo de las ADR 0085 y 0105, por un factor (Fundadores: la mitad). */
 function tierPlan(factor: number) {
   const price = (usd: number) => Math.round(usd * factor * 1_000_000)
   return {
-    conversationInformMicros: price(0.1),
+    conversationInformMicros: price(0.2),
+    // Cada Informa cubre hasta 25 mensajes de la persona; por ahora solo se mide (ADR 0105).
+    informMessageLimit: 25,
     conversationMicros: price(0.5),
     conversationAgendaMicros: price(1),
     consultationSimpleMicros: price(0.1),
     consultationStandardMicros: price(0.2),
     consultationMicros: price(0.5),
     recoveryMicros: price(2),
-    argosIncludedQuestions: 300,
+    argosIncludedQuestions: 100,
     argosPackQuestions: 100,
     argosPackMicros: price(3),
     storageIncludedGb: 20,
@@ -91,9 +93,9 @@ const PRE_TIER_PRICES: Record<string, { conversationMicros: number; consultation
 }
 
 /**
- * El plan de las ADR 0031 y 0085 para probar el cobro por acción: USD 29 que
- * vuelven en crédito, el precio de cada tipo (Sofi 0,10 / 0,50 / 1,00, Clío
- * 0,10 / 0,20 / 0,50, cita recuperada 2), 300 preguntas a Argos y paquetes de
+ * El plan de las ADR 0031, 0085 y 0105 para probar el cobro por acción: USD 29 que
+ * vuelven en crédito, el precio de cada tipo (Sofi 0,20 / 0,50 / 1,00, Clío
+ * 0,10 / 0,20 / 0,50, cita recuperada 2), 100 preguntas a Argos y paquetes de
  * 100 por 3, 20 GB y 0,20 por GB extra, y prueba de USD 100 y 30 días. Es el
  * plan por defecto de la semilla; en producción lo configura administración.
  */
@@ -181,6 +183,21 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
           eq(saasPlan.recoveryMicros, before.recoveryMicros),
         ),
       )
+  }
+  // Informa a USD 0,20 (Fundadores 0,10) y su tope en sombra (ADR 0105): una base sembrada antes
+  // los pone solo si el plan sigue con el precio anterior de la semilla, la mitad del de hoy.
+  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+    await db
+      .update(saasPlan)
+      .set({ conversationInformMicros: plan.conversationInformMicros, informMessageLimit: plan.informMessageLimit, updatedAt: new Date() })
+      .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.conversationInformMicros, plan.conversationInformMicros / 2)))
+  }
+  // 100 preguntas a Argos al mes (ADR 0085): una base sembrada antes baja de 300 solo si nadie las cambió.
+  for (const plan of [ACTION_PLAN, FOUNDERS_PLAN, MEDICAL_ACTION_PLAN, MEDICAL_FOUNDERS_PLAN]) {
+    await db
+      .update(saasPlan)
+      .set({ argosIncludedQuestions: plan.argosIncludedQuestions, updatedAt: new Date() })
+      .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.argosIncludedQuestions, 300)))
   }
   await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))
   // Las condiciones comerciales con los valores de hoy (ADR 0074): la migración

@@ -36,6 +36,7 @@ import { type FormEvent, useMemo, useState } from "react"
 import { z } from "zod"
 import { ProfessionalProfileDrawer } from "../../components/professional-profile-drawer"
 import { SettingsNoAccess } from "../../components/settings/no-access"
+import { ResetTwoFactorDialog, TeamTwoFactorCard, TwoFactorBadge, useTeamTwoFactor } from "../../components/settings/team-two-factor"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { authClient } from "../../lib/auth-client"
 import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
@@ -150,6 +151,7 @@ function TeamPage() {
   const [stoppingCalendar, setStoppingCalendar] = useState<Membership | null>(null)
   const [cancelling, setCancelling] = useState<Invitation | null>(null)
   const [editingProfile, setEditingProfile] = useState<ProfessionalProfile | null>(null)
+  const [resettingFactor, setResettingFactor] = useState<Membership | null>(null)
 
   const { org: routeOrg, session } = orgRouteApi.useRouteContext()
   const myRole = useMyRole()
@@ -181,6 +183,12 @@ function TeamPage() {
     enabled: canView,
   })
   const org = orgQuery.data
+  // Quién tiene la verificación en dos pasos (ADR 0107).
+  const twoFactorQuery = useTeamTwoFactor(canView)
+  const twoFactorByUser = useMemo(
+    () => new Map((twoFactorQuery.data?.members ?? []).map((member) => [member.userId, member.enabled])),
+    [twoFactorQuery.data],
+  )
   const refreshTeam = () => queryClient.invalidateQueries({ queryKey: ["full-org"] })
 
   const inviteMutation = useMutation({
@@ -361,6 +369,11 @@ function TeamPage() {
         },
       },
       {
+        id: "two-factor",
+        header: "Verificación en dos pasos",
+        cell: ({ row }) => <TwoFactorBadge enabled={twoFactorByUser.get(row.original.userId)} />,
+      },
+      {
         id: "actions",
         header: "",
         cell: ({ row }) => {
@@ -386,12 +399,19 @@ function TeamPage() {
             canManage && !isSelf && feedByUser.has(membership.userId)
               ? [{ key: "calendar", label: "Dejar de compartir su agenda", onSelect: () => setStoppingCalendar(membership) }]
               : []
+          // Restablecer la verificación de otro es de quien configura el equipo;
+          // a un propietario solo otro propietario (lo exige el servidor).
+          const factorItem =
+            canManage && !isSelf && twoFactorByUser.get(membership.userId) === true && (membership.role !== "owner" || myRole === "owner")
+              ? [{ key: "two-factor", label: "Restablecer verificación en dos pasos", onSelect: () => setResettingFactor(membership) }]
+              : []
           const items =
             !canManage || isSelf || isLastOwner || outOfReach
-              ? [...profileItem, ...calendarItem]
+              ? [...profileItem, ...calendarItem, ...factorItem]
               : [
                   ...profileItem,
                   ...calendarItem,
+                  ...factorItem,
                   {
                     key: "role",
                     label: "Cambiar rol",
@@ -413,7 +433,7 @@ function TeamPage() {
         },
       },
     ],
-    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, feedByUser],
+    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, feedByUser, twoFactorByUser, myRole],
   )
   const filteredMembers = useMemo(() => {
     const needle = search.toLowerCase()
@@ -474,6 +494,7 @@ function TeamPage() {
           canManage ? { label: "Invitar al equipo", icon: <Plus aria-hidden />, onClick: openInvite } : undefined
         }
       />
+      <TeamTwoFactorCard canManage={canManage} myUserId={session.userId} />
       <FilterBar
         filters={[
           {
@@ -498,7 +519,7 @@ function TeamPage() {
             onRetry={() => void orgQuery.refetch()}
           />
         ) : (
-          <DataTableSkeleton columnCount={5} rowCount={4} label="Cargando el equipo…" />
+          <DataTableSkeleton columnCount={6} rowCount={4} label="Cargando el equipo…" />
         )
       ) : (
         <>
@@ -682,6 +703,11 @@ function TeamPage() {
         confirmLabel="Dejar de compartir"
         variant="destructive"
         pending={stopCalendarMutation.isPending}
+      />
+
+      <ResetTwoFactorDialog
+        member={resettingFactor ? { userId: resettingFactor.userId, name: resettingFactor.user.name } : null}
+        onClose={() => setResettingFactor(null)}
       />
 
       <ConfirmDialog

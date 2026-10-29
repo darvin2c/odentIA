@@ -480,6 +480,7 @@ function searchCondition(q: string) {
     docNumber: sql`c.doc_number`,
     email: sql`c.email`,
     phone: sql`c.phone`,
+    contactId: sql`c.id`,
   })
 }
 

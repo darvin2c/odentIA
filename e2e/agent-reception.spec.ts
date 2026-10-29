@@ -21,15 +21,12 @@ interface Config {
   handoffKeywords: string[]
 }
 
-/** El control cabe entero en la ventana: no queda tapado ni fuera de la pantalla. */
-async function insideViewport(page: Page, locator: Locator): Promise<void> {
-  const box = await locator.boundingBox()
-  const size = page.viewportSize()
-  expect(box).not.toBeNull()
-  expect(box!.x).toBeGreaterThanOrEqual(0)
-  expect(box!.y).toBeGreaterThanOrEqual(0)
-  expect(box!.x + box!.width).toBeLessThanOrEqual(size!.width)
-  expect(box!.y + box!.height).toBeLessThanOrEqual(size!.height)
+/**
+ * El control cabe entero en la ventana: no queda tapado ni fuera de la pantalla.
+ * Reintenta: el cajón del teléfono entra con una animación.
+ */
+async function insideViewport(_page: Page, locator: Locator): Promise<void> {
+  await expect(locator).toBeInViewport({ ratio: 1 })
 }
 
 const overflow = (page: Page) =>
@@ -130,9 +127,10 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(booking).toContainText("«Ofrece primero las mañanas.»")
   await expect(booking.getByRole("button", { name: "Editar la indicación de «Agendar, mover y cancelar citas»" })).toBeVisible()
 
-  // Sin niveles (ADR 0021): cada función dice quién confirma; la cita, siempre el paciente.
+  // Sin niveles (ADR 0021): cada función dice quién confirma; la cita, el paciente
+  // (su pedido de esa misma hora ya es su sí).
   await expect(reach.getByRole("button", { name: "Supervisado", exact: true })).toHaveCount(0)
-  await expect(booking).toContainText("siempre le pide el «sí» al paciente")
+  await expect(booking).toContainText("le pide el «sí» al paciente")
   await expect(reach).toContainText("Siempre responde al momento.")
 
   // Cuándo pasa a una persona: lo fijo y lo que añade la clínica, con su entrada.

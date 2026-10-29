@@ -3,6 +3,7 @@ import type { Db } from "@odentia/db"
 import { member, organization } from "@odentia/db/schema/auth"
 import { and, eq } from "drizzle-orm"
 import type { Context, Next } from "hono"
+import { clinicTwoFactorGate } from "@odentia/services"
 import { errorBody } from "./error.js"
 
 export { canAccess, canAccessAny, type OrgRole, type Permission } from "@odentia/auth/permissions"
@@ -29,6 +30,7 @@ export function requireSession({ auth }: Pick<ApiDeps, "auth">) {
     }
     c.set("userId", session.user.id)
     c.set("userImage", session.user.image ?? null)
+    c.set("sessionId", session.session.id)
     c.set("activeOrganizationId", session.session.activeOrganizationId ?? null)
     await next()
   }
@@ -45,7 +47,7 @@ export function requireSession({ auth }: Pick<ApiDeps, "auth">) {
  * en `member` siempre se verifica; fija orgId/userId/memberRole.
  * Invariante: el contexto NUNCA sale de un id crudo del cliente sin verificar.
  */
-export function requireOrgContext({ db }: Pick<ApiDeps, "db">) {
+export function requireOrgContext({ db, ownerDb }: Pick<ApiDeps, "db"> & { ownerDb: Db }) {
   return async (c: Context, next: Next) => {
     const userId = c.get("userId") as string
     let orgId: string | null = null
@@ -75,6 +77,16 @@ export function requireOrgContext({ db }: Pick<ApiDeps, "db">) {
       .limit(1)
     if (!membership) {
       return c.json(errorBody(c, "FORBIDDEN", "No eres miembro de esta organización"), 403)
+    }
+
+    // La clínica que pide verificación en dos pasos (ADR 0107) exige que esta
+    // sesión haya pasado el código; la app lleva a activarla o a escribirlo.
+    const gate = await clinicTwoFactorGate(ownerDb, { orgId, userId, sessionId: c.get("sessionId") as string })
+    if (gate === "activar") {
+      return c.json(errorBody(c, "TWO_FACTOR_REQUIRED", "Esta clínica pide verificación en dos pasos: actívala en Mi perfil"), 403)
+    }
+    if (gate === "codigo") {
+      return c.json(errorBody(c, "TWO_FACTOR_CODE_REQUIRED", "Esta clínica pide el código de tu app de autenticación"), 403)
     }
 
     c.set("orgId", orgId)

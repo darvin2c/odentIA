@@ -94,6 +94,42 @@ export interface ReportsSeedRecipe {
   /** Los gastos de cada mes y sede: el alquiler de la sede, un monto (más uno por profesional) o una parte de lo cobrado. */
   expenses?: ReadonlyArray<{ category: string; concept: string; rent?: boolean; cents?: number; perStaffCents?: number; revenueShare?: number; day: number }>
   names?: { given: readonly string[]; surnames: readonly string[]; bySex?: { F: readonly string[]; M: readonly string[] } }
+  /** Promociones que ya existen: una parte de los cobros de su servicio en sus fechas lleva su precio. */
+  promotions?: readonly ReportsSeedPromotion[]
+}
+
+/** Una promoción de la clínica sobre un servicio, como la aplica Caja al cobrar. */
+export interface ReportsSeedPromotion {
+  id: string
+  name: string
+  serviceId: string
+  startsAt: Date
+  endsAt: Date | null
+  /** Qué parte de los cobros de su servicio la llevan. */
+  share: number
+  /** Lo acordado: el precio fijo o, con «desde», uno entre el mínimo y la tarifa. */
+  priceCents: (random: Random) => number
+}
+
+/**
+ * La promoción que lleva el cobro de un servicio terminado a esa hora, si le
+ * toca: el concepto queda con su precio, su nombre y el motivo, como lo deja
+ * «Aplicar promoción» en Caja. Sin promociones no usa el generador.
+ */
+export function promotionFor(
+  promotions: readonly ReportsSeedPromotion[] | undefined,
+  serviceId: string,
+  at: Date,
+  random: Random,
+): { cents: number; charge: { promotionId: string; promotionName: string; editReason: string } } | null {
+  const live = promotions?.find(
+    (item) => item.serviceId === serviceId && item.startsAt <= at && (!item.endsAt || at < item.endsAt),
+  )
+  if (!live || !random.chance(live.share)) return null
+  return {
+    cents: live.priceCents(random),
+    charge: { promotionId: live.id, promotionName: live.name, editReason: `Promoción «${live.name}»` },
+  }
 }
 
 export interface ReportsSeedInput {
@@ -646,7 +682,8 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
   }
   for (const item of done) {
     const { visit } = item
-    const cents = visit.service.priceCents * visit.quantity
+    const promoted = promotionFor(recipe.promotions, visit.service.id, item.endedAt, random)
+    const cents = (promoted?.cents ?? visit.service.priceCents) * visit.quantity
     const chargeId = randomUUID()
     charges.push({
       id: chargeId,
@@ -658,6 +695,7 @@ export async function seedReports(tx: Db, input: ReportsSeedInput): Promise<{ pa
       amountCents: cents,
       currency,
       ...(tax ?? {}),
+      ...(promoted?.charge ?? {}),
       createdBy: visit.professional.userId,
       createdAt: item.endedAt,
     })

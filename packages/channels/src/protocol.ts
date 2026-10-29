@@ -208,6 +208,39 @@ export interface NormalizedAppContact {
   removed: boolean
 }
 
+/**
+ * Por qué el proveedor cortó la conexión de una cuenta:
+ * - `access_removed`: la clínica le quitó el acceso a la app de odentIA.
+ * - `disconnected_in_app`: se desconectó desde la app WhatsApp Business del celular.
+ * - `primary_inactivity`: el celular principal no abrió la app en unos 14 días.
+ * - `companion_inactivity`: un dispositivo vinculado no se usó en unos 30 días.
+ * - `business_downgrade`: la cuenta del celular dejó de ser de empresa.
+ * - `number_changed`: se cambió el número en la app del celular.
+ * - `re_registered`: el número se volvió a registrar o pasó a otro celular.
+ */
+export type AccountRemovalReason =
+  | "access_removed"
+  | "disconnected_in_app"
+  | "primary_inactivity"
+  | "companion_inactivity"
+  | "business_downgrade"
+  | "number_changed"
+  | "re_registered"
+
+/**
+ * Aviso del proveedor sobre la cuenta entera (en WhatsApp, `account_update`):
+ * se cortó su conexión con la app de odentIA o se volvió a hacer.
+ */
+export interface NormalizedAccountEvent {
+  kind: "removed" | "reconnected"
+  /** Por qué se cortó; nulo si no se cortó o el proveedor no dice un motivo que se conozca. */
+  reason: AccountRemovalReason | null
+  /** Lo hizo la clínica o el proveedor; nulo si no lo dice. */
+  initiatedBy: "user" | "system" | null
+  /** Cuándo lo avisó el proveedor; nulo si no lo dice. */
+  at: string | null
+}
+
 export interface WebhookParseResult {
   messages: NormalizedInbound[]
   statuses: NormalizedStatus[]
@@ -217,6 +250,8 @@ export interface WebhookParseResult {
   historyDeclined?: boolean
   templateStatuses?: NormalizedTemplateStatus[]
   templateCategories?: NormalizedTemplateCategory[]
+  /** La conexión de la cuenta con la app de odentIA se cortó o se volvió a hacer. */
+  accountEvents?: NormalizedAccountEvent[]
 }
 
 export interface OutboundMessage {

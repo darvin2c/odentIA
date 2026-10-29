@@ -22,7 +22,8 @@ function mutationMessage(err: unknown, fallback: string): string {
 
 /** «36 · Oclusal, Mesial» o «Sin pieza»; nada si el producto no registra el «dónde» (latidIA). */
 export function diagnosisSiteLabel(dx: Pick<EncounterDiagnosis, "toothNumber" | "surfaces">): string | null {
-  if (dx.toothNumber === null) return productUi().site ? "Sin pieza" : null
+  // Un producto sin «dónde» no manda la pieza ni las caras: ni null.
+  if (dx.toothNumber == null) return productUi().site ? "Sin pieza" : null
   const surfaces = partNames(dx.surfaces)
   return surfaces ? `${dx.toothNumber} · ${surfaces}` : String(dx.toothNumber)
 }

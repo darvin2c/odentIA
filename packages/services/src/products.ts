@@ -33,6 +33,11 @@ export async function productDictation(tx: Db, orgId: string): Promise<ProductDi
   return (await productHooks(tx, orgId)).dictation
 }
 
+/** Lo que Clío dicta en un producto, sin clínica (las mediciones); null si no dicta. */
+export function dictationFor(product: ClinicalProduct): ProductDictation | null {
+  return HOOKS[product].dictation
+}
+
 /**
  * Clío dicta con el prompt, el formato y el extractor de su producto (ADR
  * 0079). En una clínica de un producto sin dictado no dicta.
