@@ -1252,6 +1252,8 @@ it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el
   const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, givenNames: "Valeria", familyName: "Rojas Salazar" }))
   // La pregunta lleva la frase del aviso y su enlace, con el registro en la misma frase; todavía no hay nadie registrado.
   expect(asked).toContain("Al confirmar, te registro como paciente y aceptas nuestro aviso de privacidad: https://")
+  // Acaba de dar su nombre y aún no se le habló por él: la pregunta empieza por su nombre.
+  expect(asked).toContain("empieza por su nombre («Valeria, …»)")
   // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
   ctx.evidence = [...(ctx.evidence ?? []), { kind: "sistema", source: "reservar_paciente_nuevo", text: asked }]
   const noticeUrl = asked.match(/https:\/\/\S+\/aviso/)?.[0]

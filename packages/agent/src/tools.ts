@@ -297,6 +297,8 @@ export interface AgentToolCtx {
   nameNudged?: boolean
   /** Cuántas respuestas de esta atención ya usaron «Entiendo…» o «anoté que…» (`formulasIn`). */
   formulas?: { opener: number; noted: number }
+  /** Ya le habló por su nombre en esta atención (`attentionProgress`). */
+  usedName?: boolean
   /** Ya se le pidió una vez en esta corrida que no repita esas fórmulas. */
   formulaNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
@@ -1576,7 +1578,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // llegar después del aviso (ADR 0101); si ya pidió esta hora, lo único que falta es ese
       // sí, y «¿Te la reservo?» le volvía a preguntar lo que ya pidió (auditoría del ADR 0104).
       const accepts = `${registers} y aceptas nuestro aviso de privacidad: ${noticeUrl}.`
-      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, di el día, la hora, la sede y con quién${forOther ? `, para ${givenNames} ${familyName}` : ""}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere ni le expliques por qué le pides el sí: termina en cambio con «Al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. El registro y «al confirmar» van una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
+      // Quien acaba de dar su nombre para registrarse no lo oía en esta pregunta, la primera
+      // después de darlo: el juez lo contaba como no saber con quién habla (auditoría del ADR 0104).
+      const writer = (forOther ? writerName : givenNames)?.trim().split(/\s+/)[0]
+      const byName = writer && ctx.usedName !== true ? `empieza por su nombre («${writer}, …»), ` : ""
+      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, ${byName}di el día, la hora, la sede y con quién${forOther ? `, para ${givenNames} ${familyName}` : ""}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere ni le expliques por qué le pides el sí: termina en cambio con «Al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. El registro y «al confirmar» van una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",
