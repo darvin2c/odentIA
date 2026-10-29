@@ -4,11 +4,32 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/a
 import { sql } from "drizzle-orm"
 
 /**
+ * La sesión que pasó el segundo factor (ADR 0107): la clínica que pide la
+ * verificación exige esta marca, no solo que la persona la tenga activa. Así
+ * no cuentan la vuelta de Google (Better Auth no pide el código ahí), las
+ * sesiones abiertas solo con contraseña antes de activarla ni el enlace sin
+ * código. Vive en `verification`, con el id de la sesión.
+ */
+export const SESSION_TWO_FACTOR_PREFIX = "2fa-session-"
+const SESSION_MARK_TTL_MS = 400 * 86_400_000
+
+/** Operaciones de Better Auth sobre el equipo de una clínica: piden la marca si la clínica pide la verificación. */
+const TEAM_PATHS = new Set([
+  "/organization/invite-member",
+  "/organization/update-member-role",
+  "/organization/remove-member",
+  "/organization/cancel-invitation",
+  "/organization/update",
+  "/organization/delete",
+])
+
+/**
  * No se desactiva la verificación en dos pasos mientras una clínica de la
  * persona la pida a su equipo (ADR 0107): se puede cambiar de teléfono, no
  * quedarse sin ella. Y el personal de odentIA no la enciende por esta vía: su
  * factor es el de la administración y su cuenta la deja apagada
  * (`keepStaffSignInWithoutFactor`). Ni se vuelve a activar estando activa.
+ * Marca la sesión que pasó el código y protege las operaciones del equipo.
  * Sin sesión, Better Auth responde lo suyo.
  */
 export const keepTwoFactorWhileRequired = (ownerDb: Db) =>
@@ -55,9 +76,61 @@ export const keepTwoFactorWhileRequired = (ownerDb: Db) =>
             if ([...rows].length > 0) {
               throw APIError.from("FORBIDDEN", {
                 code: "STAFF_FACTOR",
-                message: "Tu verificación es la de la administración de odentIA",
+                message: "Tu verificación es la de la administración: se maneja allí",
               })
             }
+          }),
+        },
+        {
+          matcher: (ctx) => ctx.path !== undefined && TEAM_PATHS.has(ctx.path),
+          handler: createAuthMiddleware(async (ctx) => {
+            const current = await getSessionFromCtx(ctx)
+            if (!current) return
+            const body = (ctx.body ?? {}) as { organizationId?: unknown }
+            const orgId =
+              typeof body.organizationId === "string"
+                ? body.organizationId
+                : ((current.session as { activeOrganizationId?: string | null }).activeOrganizationId ?? null)
+            if (!orgId) return
+            const rows = await ownerDb.execute(sql`
+              select 1 from org_profile p
+              where p.organization_id = ${orgId} and p.require_two_factor
+                and not exists (
+                  select 1 from verification v
+                  where v.identifier = ${SESSION_TWO_FACTOR_PREFIX + current.session.id} and v.expires_at > now())
+              limit 1`)
+            if ([...rows].length > 0) {
+              throw APIError.from("FORBIDDEN", {
+                code: "TWO_FACTOR_REQUIRED",
+                message: "Esta clínica pide verificación en dos pasos: escribe tu código o actívala en Mi perfil",
+              })
+            }
+          }),
+        },
+      ],
+      after: [
+        {
+          // El código de la app o uno de respaldo, al entrar, al activarla o en la
+          // administración; y la entrada con contraseña que el navegador recordado
+          // deja pasar (Better Auth borra la sesión si en cambio pide el código).
+          matcher: (ctx) =>
+            ctx.path === "/two-factor/verify-totp" || ctx.path === "/two-factor/verify-backup-code" || ctx.path === "/sign-in/email",
+          handler: createAuthMiddleware(async (ctx) => {
+            if (ctx.context.returned instanceof APIError) return
+            let marked = ctx.context.newSession
+            if (ctx.path === "/sign-in/email") {
+              if (!marked || !(marked.user as { twoFactorEnabled?: boolean | null }).twoFactorEnabled) return
+              const alive = await ctx.context.internalAdapter.findSession(marked.session.token)
+              if (!alive) return
+            } else {
+              marked ??= await getSessionFromCtx(ctx)
+            }
+            if (!marked) return
+            await ctx.context.internalAdapter.createVerificationValue({
+              identifier: `${SESSION_TWO_FACTOR_PREFIX}${marked.session.id}`,
+              value: marked.user.id,
+              expiresAt: new Date(Date.now() + SESSION_MARK_TTL_MS),
+            })
           }),
         },
       ],

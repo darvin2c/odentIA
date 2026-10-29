@@ -4,14 +4,17 @@
  * La verificación es de la persona (Better Auth: `user.two_factor_enabled` y
  * su fila en `two_factor`); la clínica solo decide si la pide a todo su equipo
  * (`org_profile.require_two_factor`) y puede restablecer la de alguien que
- * perdió el teléfono y sus códigos. Lee y escribe tablas de identidad, así que
- * recibe la conexión owner; quien llama ya comprobó el permiso en la clínica.
+ * perdió el teléfono y sus códigos. Lo que exige no es que la persona la tenga,
+ * sino que esta sesión haya pasado el código (la marca la escribe Better Auth,
+ * `keepTwoFactorWhileRequired` de @odentia/auth). Lee y escribe tablas de
+ * identidad, así que recibe la conexión owner; quien llama ya comprobó el
+ * permiso en la clínica.
  */
-import { type Db, withOrgContext } from "@odentia/db"
+import type { Db } from "@odentia/db"
 import { adminStaff, twoFactor } from "@odentia/db/schema/admin-core"
 import { account, member, organization, session, user, verification } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, eq, like } from "drizzle-orm"
+import { and, asc, eq, like, ne, sql } from "drizzle-orm"
 import { ServiceError } from "./errors.js"
 
 export interface TeamTwoFactorMember {
@@ -27,12 +30,33 @@ export interface TeamTwoFactor {
   members: TeamTwoFactorMember[]
 }
 
-/** Si la clínica la pide: lo consulta la API en cada pedido de la clínica. */
-export async function orgRequiresTwoFactor(db: Db, orgId: string): Promise<boolean> {
-  const [row] = await withOrgContext(db, orgId, (tx) =>
-    tx.select({ required: orgProfile.requireTwoFactor }).from(orgProfile).where(eq(orgProfile.organizationId, orgId)).limit(1),
-  )
-  return row?.required ?? false
+/** La marca de la sesión que pasó el código (`SESSION_TWO_FACTOR_PREFIX` de @odentia/auth). */
+const SESSION_MARK_PREFIX = "2fa-session-"
+
+/** La persona tiene una app vinculada y confirmada (también el personal, cuyo factor es el de la administración). */
+const hasFactor = (userId: unknown) =>
+  sql<boolean>`exists (select 1 from ${twoFactor} where ${twoFactor.userId} = ${userId} and ${twoFactor.verified})`
+
+/**
+ * Lo que la clínica exige a esta sesión, si algo: `activar` si la persona aún
+ * no tiene la verificación, `codigo` si la tiene pero esta sesión no pasó el
+ * código (entró con Google, o la abrió antes de activarla). `null`: puede seguir.
+ */
+export async function clinicTwoFactorGate(
+  ownerDb: Db,
+  input: { orgId: string; userId: string; sessionId: string },
+): Promise<"activar" | "codigo" | null> {
+  const [row] = await ownerDb
+    .select({
+      required: orgProfile.requireTwoFactor,
+      passed: sql<boolean>`exists (select 1 from ${verification} where ${verification.identifier} = ${SESSION_MARK_PREFIX + input.sessionId} and ${verification.expiresAt} > now())`,
+      factor: hasFactor(input.userId),
+    })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, input.orgId))
+    .limit(1)
+  if (!row?.required || row.passed) return null
+  return row.factor ? "codigo" : "activar"
 }
 
 /** Si la pide la clínica y quién del equipo la tiene activa. */
@@ -43,7 +67,7 @@ export async function getTeamTwoFactor(ownerDb: Db, orgId: string): Promise<Team
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
   const members = await ownerDb
-    .select({ userId: user.id, name: user.name, email: user.email, role: member.role, enabled: user.twoFactorEnabled })
+    .select({ userId: user.id, name: user.name, email: user.email, role: member.role, enabled: hasFactor(user.id) })
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
     .where(eq(member.organizationId, orgId))
@@ -90,8 +114,10 @@ export async function setTeamTwoFactorRequired(
  * Restablece la verificación de alguien del equipo que perdió el teléfono y
  * sus códigos: borra su factor, sus navegadores recordados y sus sesiones.
  * Un administrador no restablece a un propietario, nadie se restablece a sí
- * mismo (eso es Mi perfil) y el personal de odentIA queda fuera: su factor es
- * también el de la administración.
+ * mismo (eso es Mi perfil) y el personal de la administración queda fuera: su
+ * factor es también el de la administración. Tampoco quien es parte de otra
+ * clínica: su verificación es una sola y la usa también allí, donde esta
+ * clínica no manda.
  */
 export async function resetMemberTwoFactor(
   ownerDb: Db,
@@ -104,7 +130,7 @@ export async function resetMemberTwoFactor(
   }
   await ownerDb.transaction(async (tx) => {
     const [target] = await tx
-      .select({ role: member.role, enabled: user.twoFactorEnabled })
+      .select({ role: member.role, enabled: hasFactor(user.id) })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
       .where(and(eq(member.organizationId, input.orgId), eq(member.userId, input.targetUserId)))
@@ -114,13 +140,26 @@ export async function resetMemberTwoFactor(
       throw new ServiceError("FORBIDDEN", 403, "Solo un propietario restablece a otro propietario")
     }
     const [staff] = await tx.select({ userId: adminStaff.userId }).from(adminStaff).where(eq(adminStaff.userId, input.targetUserId)).limit(1)
-    if (staff) throw new ServiceError("STAFF_FACTOR", 409, "Es del personal de odentIA: su verificación la restablece la administración")
+    if (staff) throw new ServiceError("STAFF_FACTOR", 409, "Es del personal de la administración: su verificación se restablece allí")
+    const [elsewhere] = await tx
+      .select({ id: member.id })
+      .from(member)
+      .where(and(eq(member.userId, input.targetUserId), ne(member.organizationId, input.orgId)))
+      .limit(1)
+    if (elsewhere) {
+      throw new ServiceError(
+        "TWO_FACTOR_OTHER_CLINIC",
+        409,
+        "También es parte de otra clínica: entra con uno de sus códigos de respaldo o lo restablece soporte",
+      )
+    }
     if (!target.enabled) throw new ServiceError("TWO_FACTOR_NOT_ENABLED", 409, "Esa persona no tiene la verificación activa")
 
     await tx.delete(twoFactor).where(eq(twoFactor.userId, input.targetUserId))
     await tx.update(user).set({ twoFactorEnabled: false }).where(eq(user.id, input.targetUserId))
     // Los navegadores recordados de Better Auth: `trust-device-*` con el id de la persona.
     await tx.delete(verification).where(and(like(verification.identifier, "trust-device-%"), eq(verification.value, input.targetUserId)))
+    await tx.delete(verification).where(and(like(verification.identifier, `${SESSION_MARK_PREFIX}%`), eq(verification.value, input.targetUserId)))
     await tx.delete(session).where(eq(session.userId, input.targetUserId))
     await tx.insert(auditEvent).values({
       organizationId: input.orgId,
@@ -150,7 +189,7 @@ export async function clinicsRequiringTwoFactor(ownerDb: Db, userId: string): Pr
 
 export interface MyTwoFactor {
   enabled: boolean
-  /** Personal de odentIA: su factor es el de la administración y se maneja allí. */
+  /** Personal de la administración: su factor es el de allí y se maneja allí. */
   staff: boolean
   /** Sus clínicas que la piden: mientras haya alguna, no puede desactivarla. */
   requiredBy: string[]

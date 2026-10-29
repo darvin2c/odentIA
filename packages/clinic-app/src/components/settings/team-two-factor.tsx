@@ -145,7 +145,7 @@ function RequireTwoFactorDrawer({ missing, meEnabled, onClose }: { missing: Team
                 ))}
               </ul>
               <p className="text-muted-foreground">
-                En su próxima acción en la clínica les pediremos activarla antes de seguir. No pierden lo que tengan a medias ni su sesión en otras clínicas.
+                En su próxima acción en la clínica les pediremos activarla antes de seguir. Sus otras clínicas no cambian.
               </p>
             </div>
           ) : (

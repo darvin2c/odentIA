@@ -6,12 +6,12 @@ import { and, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import {
   clinicsRequiringTwoFactor,
+  clinicTwoFactorGate,
   getTeamTwoFactor,
-  orgRequiresTwoFactor,
   resetMemberTwoFactor,
   setTeamTwoFactorRequired,
 } from "./team-two-factor.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
+import { ownerDb, setupTestDb } from "./test-setup.js"
 
 /** Verificación en dos pasos del equipo (ADR 0107). */
 setupTestDb()
@@ -25,20 +25,26 @@ async function person(orgId: string, role: string, enabled: boolean, name = role
 }
 
 describe("verificación en dos pasos del equipo", () => {
-  it("encenderla exige tenerla uno mismo, dice a quién le falta y queda en la actividad", async () => {
+  it("encenderla exige tenerla uno mismo, dice a quién le falta, pide el código a cada sesión y queda en la actividad", async () => {
     const owner = await person("org_a", "owner", false, "Ana")
     const reception = await person("org_a", "reception", false, "María")
+    const gate = (userId: string, sessionId: string, orgId = "org_a") => clinicTwoFactorGate(ownerDb, { orgId, userId, sessionId })
     await expect(setTeamTwoFactorRequired(ownerDb, { orgId: "org_a", actorUserId: owner, required: true })).rejects.toMatchObject({
       code: "TWO_FACTOR_SELF_REQUIRED",
     })
-    expect(await orgRequiresTwoFactor(appDb, "org_a")).toBe(false)
+    expect(await gate(reception, "s-recepcion")).toBeNull()
 
-    await ownerDb.update(user).set({ twoFactorEnabled: true }).where(eq(user.id, owner))
+    await ownerDb.insert(twoFactor).values({ id: randomUUID(), userId: owner, secret: "s", backupCodes: "[]", verified: true })
     const result = await setTeamTwoFactorRequired(ownerDb, { orgId: "org_a", actorUserId: owner, required: true })
     expect(result.missing.map((item) => item.userId)).toEqual([reception])
-    expect(await orgRequiresTwoFactor(appDb, "org_a")).toBe(true)
+    // Sin la verificación: activarla. Con ella pero sin el código en esta sesión
+    // (Google, o abierta antes): el código. La sesión que lo pasó, sigue.
+    expect(await gate(reception, "s-recepcion")).toBe("activar")
+    expect(await gate(owner, "s-google")).toBe("codigo")
+    await ownerDb.insert(verification).values({ id: randomUUID(), identifier: "2fa-session-s-codigo", value: owner, expiresAt: new Date(Date.now() + 3600_000) })
+    expect(await gate(owner, "s-codigo")).toBeNull()
     // La otra clínica no cambia.
-    expect(await orgRequiresTwoFactor(appDb, "org_b")).toBe(false)
+    expect(await gate(reception, "s-recepcion", "org_b")).toBeNull()
 
     const team = await getTeamTwoFactor(ownerDb, "org_a")
     expect(team.required).toBe(true)
@@ -48,7 +54,7 @@ describe("verificación en dos pasos del equipo", () => {
     expect(await clinicsRequiringTwoFactor(ownerDb, reception)).toEqual(["Clínica norte"])
 
     await setTeamTwoFactorRequired(ownerDb, { orgId: "org_a", actorUserId: owner, required: false })
-    expect(await orgRequiresTwoFactor(appDb, "org_a")).toBe(false)
+    expect(await gate(reception, "s-recepcion")).toBeNull()
     expect(await clinicsRequiringTwoFactor(ownerDb, reception)).toEqual([])
   })
 
@@ -98,7 +104,17 @@ describe("verificación en dos pasos del equipo", () => {
     ).rejects.toMatchObject({ code: "NOT_FOUND" })
   })
 
-  it("el personal de odentIA lo restablece la administración, no la clínica", async () => {
+  it("a quien también es parte de otra clínica no lo restablece esta: su verificación vale allí", async () => {
+    const owner = await person("org_a", "owner", true)
+    const shared = await person("org_a", "reception", true)
+    await ownerDb.insert(member).values({ id: randomUUID(), organizationId: "org_b", userId: shared, role: "owner", createdAt: new Date() })
+    await expect(
+      resetMemberTwoFactor(ownerDb, { orgId: "org_a", actorUserId: owner, actorRole: "owner", targetUserId: shared, reason: "perdió el teléfono" }),
+    ).rejects.toMatchObject({ code: "TWO_FACTOR_OTHER_CLINIC" })
+    expect(await ownerDb.select().from(twoFactor).where(eq(twoFactor.userId, shared))).toHaveLength(1)
+  })
+
+  it("el personal de la administración lo restablece la administración, no la clínica", async () => {
     const owner = await person("org_b", "owner", true)
     const staffer = await person("org_b", "admin", true)
     await ownerDb.insert(adminStaff).values({ userId: staffer, role: "admin" })

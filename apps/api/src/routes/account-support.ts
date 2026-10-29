@@ -3,6 +3,7 @@ import { withOrgContext } from "@odentia/db"
 import type { Storage } from "@odentia/services"
 import {
   accountSupportAttachmentUrl,
+  clinicTwoFactorGate,
   attachToAccountSupportCase,
   createAccessSupportCase,
   getAccountSupportCase,
@@ -50,7 +51,7 @@ const revokeInput = z.object({ grantId: z.uuid() })
  * (owner/admin), nunca contra lo que dice el cliente.
  */
 export function createAccountSupportRoute(deps: AccountSupportDeps) {
-  const app = new Hono<{ Variables: { userId: string } }>()
+  const app = new Hono<{ Variables: { userId: string; sessionId: string } }>()
   app.use(requireSession({ auth: deps.auth }))
 
   app.get("/cases", async (c) => {
@@ -203,6 +204,10 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
       if (!orgId || orgId !== input.organizationId)
         throw new ServiceError("NOT_FOUND", 404, "Caso no encontrado")
       const canGrant = await isOrgOwnerOrAdmin(deps.ownerDb, userId, orgId)
+      // Dar acceso a la clínica pide el código si la clínica pide la verificación (ADR 0107).
+      if (await clinicTwoFactorGate(deps.ownerDb, { orgId, userId, sessionId: c.get("sessionId") })) {
+        throw new ServiceError("TWO_FACTOR_REQUIRED", 403, "Esta clínica pide verificación en dos pasos")
+      }
       return withOrgContext(deps.ownerDb, orgId, (tx) =>
         grantSupportAccess(tx, orgId, userId, canGrant, kase.id, input.minutes ?? 30),
       )

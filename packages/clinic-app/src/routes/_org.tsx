@@ -95,8 +95,8 @@ interface OrgRegion {
   country: string | undefined
   /** El producto de la clínica: si no es el de esta app, se abre en su dominio. */
   product?: string | undefined
-  /** La clínica pide verificación en dos pasos y esta persona no la tiene (ADR 0107). */
-  twoFactorRequired?: boolean
+  /** La clínica pide verificación en dos pasos (ADR 0107): activarla, o el código de esta sesión. */
+  twoFactorRequired?: "activar" | "codigo"
 }
 let orgRegionLoaded: OrgRegion | null = null
 async function loadOrgRegion(): Promise<OrgRegion> {
@@ -116,8 +116,9 @@ async function loadOrgRegion(): Promise<OrgRegion> {
     return region
   } catch (error) {
     // La API no deja operar en esta clínica sin verificación en dos pasos: se dice, no se cachea.
-    if (error instanceof ApiError && error.shape.code === "TWO_FACTOR_REQUIRED") {
-      return { locale: undefined, timeZone: undefined, country: undefined, twoFactorRequired: true }
+    if (error instanceof ApiError && (error.shape.code === "TWO_FACTOR_REQUIRED" || error.shape.code === "TWO_FACTOR_CODE_REQUIRED")) {
+      const twoFactorRequired = error.shape.code === "TWO_FACTOR_REQUIRED" ? "activar" : "codigo"
+      return { locale: undefined, timeZone: undefined, country: undefined, twoFactorRequired }
     }
     return { locale: undefined, timeZone: undefined, country: undefined }
   }
@@ -197,7 +198,7 @@ export const Route = createFileRoute("/_org")({
 /** Sin la verificación que pide la clínica, su pantalla en vez de la aplicación. */
 function OrgGate() {
   const { org, region } = orgRouteApi.useRouteContext()
-  if (region.twoFactorRequired) return <TwoFactorRequiredPage org={org} />
+  if (region.twoFactorRequired) return <TwoFactorRequiredPage org={org} need={region.twoFactorRequired} />
   return <OrgLayout />
 }
 

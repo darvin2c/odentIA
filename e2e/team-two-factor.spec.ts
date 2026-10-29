@@ -43,7 +43,7 @@ async function activate(page: Page, password: string): Promise<string> {
   return secret
 }
 
-test("verificación en dos pasos: activarla, pedirla al equipo, entrar con el código y restablecer a alguien", async ({ owner, createOwner, fixtureDb }, info) => {
+test("verificación en dos pasos: activarla, pedirla al equipo, entrar con el código y restablecer a alguien", async ({ owner, createOwner, fixtureDb, browser }, info) => {
   test.setTimeout(180_000)
   const { page, org, user } = owner
   const shot = async (target: Page, name: string) => info.attach(name, { body: await target.screenshot(), contentType: "image/png" })
@@ -93,11 +93,27 @@ test("verificación en dos pasos: activarla, pedirla al equipo, entrar con el c�
   // Su otra clínica no cambia.
   expect((await api(rp, "GET", "/api/org-profile", reception.org.slug)).status).toBe(200)
 
+  // Otra sesión suya, abierta solo con contraseña antes de activarla (la del equipo compartido).
+  const shared = await browser.newContext({ baseURL: PANEL, ignoreHTTPSErrors: true })
+  const sp = await shared.newPage()
+  await gotoHydrated(sp, `${PANEL}/login`)
+  expect((await api(sp, "POST", "/api/auth/sign-in/email", undefined, { email: reception.user.email, password: reception.user.password })).status).toBe(200)
+
   // «Activarla ahora» lleva a Mi perfil y, activada, de vuelta a la clínica.
   await rp.getByRole("link", { name: "Activarla ahora" }).click()
-  await activate(rp, reception.user.password)
+  const receptionSecret = await activate(rp, reception.user.password)
   await expect(rp).toHaveURL(new RegExp(`${org.slug}\\.`))
   await expect(rp.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+
+  // Esa otra sesión nunca escribió el código: activarla no la vuelve válida; se le pide aquí.
+  await sp.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(sp, tenant(org.slug, "/home"))
+  await expect(sp.getByRole("heading", { level: 1 })).toContainText("Escribe el código de tu app")
+  expect(await (await api<{ error?: { code?: string } }>(sp, "GET", "/api/org-profile", org.slug)).body.error?.code).toBe("TWO_FACTOR_CODE_REQUIRED")
+  await shot(sp, "clinica-pide-el-codigo")
+  await sp.getByLabel("Código de 6 dígitos").fill(totpNow(receptionSecret))
+  await expect(sp.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
+  await shared.close()
 
   // Mientras su clínica la pida, no puede desactivarla (tampoco por la API).
   await gotoHydrated(rp, `${PANEL}/profile`)
@@ -133,6 +149,11 @@ test("verificación en dos pasos: activarla, pedirla al equipo, entrar con el c�
   await confirm.getByRole("button", { name: "Restablecer" }).click()
   await expect(confirm.getByText("Escribe el motivo")).toBeVisible()
   await confirm.getByLabel("Motivo").fill("Le robaron el teléfono; lo confirmó por llamada")
+  // También es dueña de su propia clínica: su verificación vale allí y esta clínica no la restablece.
+  await confirm.getByRole("button", { name: "Restablecer" }).click()
+  await expect(confirm.getByRole("alert")).toContainText("También es parte de otra clínica")
+  // Solo de esta clínica, sí.
+  await fixtureDb.delete(member).where(and(eq(member.organizationId, reception.org.id), eq(member.userId, reception.user.id)))
   await confirm.getByRole("button", { name: "Restablecer" }).click()
   await expect(confirm).toBeHidden()
   await expect(page.getByRole("row").filter({ hasText: reception.user.email })).toContainText("Sin activar")

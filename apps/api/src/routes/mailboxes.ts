@@ -63,7 +63,7 @@ export function createMailboxesRoute(deps: MailboxesDeps) {
   // exige sesión + membresía verificada con los mismos guards centrales.
   const authed = new Hono()
   authed.use("*", requireSession({ auth: deps.auth }))
-  authed.use("*", requireOrgContext({ db: deps.db }))
+  authed.use("*", requireOrgContext({ db: deps.db, ownerDb: deps.ownerDb }))
 
   // Conexiones y metadatos de proveedores (configurado o no, sin secretos): recepción lee.
   authed.get("/connections", async (c) => {

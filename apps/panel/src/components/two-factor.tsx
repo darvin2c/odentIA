@@ -95,7 +95,7 @@ export function TwoFactorRow() {
     return (
       <div className="flex flex-col gap-1">
         <p className="flex items-center gap-2 text-sm font-medium">Verificación en dos pasos</p>
-        <p className="text-sm text-muted-foreground">Es la de la administración de odentIA: se maneja allí.</p>
+        <p className="text-sm text-muted-foreground">Es la de la administración: se maneja allí.</p>
       </div>
     )
   }
@@ -381,6 +381,29 @@ export function TwoFactorSetupDrawer({
     setStep("codes")
   }
 
+  // Llegó con el enlace de una clínica pero ya la tiene (o es del personal): no
+  // se vuelve a activar; si ya la tiene, «Listo» lo devuelve a la clínica.
+  if (step === "password" && status && (status.enabled || status.staff)) {
+    return (
+      <FormDrawer
+        open={open}
+        onClose={() => onClose(false)}
+        title="Verificación en dos pasos"
+        description={status.staff ? "Es la de la administración: se maneja allí." : "Ya la tienes activa."}
+        onSubmit={(event) => {
+          event.preventDefault()
+          onClose(status.enabled)
+        }}
+        submitLabel="Listo"
+      >
+        <p className="text-sm text-muted-foreground">
+          {status.staff
+            ? "Tu verificación es la misma que usas en la administración."
+            : "Si una clínica te la pide, al volver escribe el código de tu app."}
+        </p>
+      </FormDrawer>
+    )
+  }
   const title = step === "codes" ? "Guarda tus códigos de respaldo" : "Activar la verificación en dos pasos"
   const description =
     step === "password"
@@ -401,7 +424,7 @@ export function TwoFactorSetupDrawer({
         else if (step === "scan") void confirm(code)
         else close()
       }}
-      isDirty={step === "scan" || (step === "password" && password.length > 0)}
+      isDirty={step === "scan" || (step === "password" && password.length > 0) || (step === "codes" && !saved)}
       isSubmitting={busy}
       submitDisabled={step === "password" ? Boolean(status?.hasPassword) && password.length === 0 : step === "scan" ? code.length < 6 : !saved}
       submitLabel={step === "password" ? "Continuar" : step === "scan" ? "Activar" : "Terminar"}

@@ -28,12 +28,15 @@ let ownerDb: Db
 let app: Hono
 const sent: Array<{ to: string; subject: string }> = []
 
-type Who = "owner" | "reception" | "receptionOther"
-const SESSIONS: Record<Who, { userId: string; email: string; twoFactorEnabled: boolean }> = {
-  owner: { userId: "u-2fa-owner", email: "u-2fa-owner@example.test", twoFactorEnabled: true },
-  reception: { userId: "u-2fa-reception", email: "u-2fa-reception@example.test", twoFactorEnabled: false },
+type Who = "owner" | "ownerGoogle" | "reception" | "receptionOther"
+const SESSIONS: Record<Who, { sessionId: string; userId: string; email: string; twoFactorEnabled: boolean }> = {
+  // Entró con su código: la sesión lleva la marca.
+  owner: { sessionId: "s-2fa-owner", userId: "u-2fa-owner", email: "u-2fa-owner@example.test", twoFactorEnabled: true },
+  // La misma persona con otra sesión que no pasó el código (Google, o abierta antes de activarla).
+  ownerGoogle: { sessionId: "s-2fa-owner-google", userId: "u-2fa-owner", email: "u-2fa-owner@example.test", twoFactorEnabled: true },
+  reception: { sessionId: "s-2fa-reception", userId: "u-2fa-reception", email: "u-2fa-reception@example.test", twoFactorEnabled: false },
   // La misma recepcionista, en su otra clínica.
-  receptionOther: { userId: "u-2fa-reception", email: "u-2fa-reception@example.test", twoFactorEnabled: false },
+  receptionOther: { sessionId: "s-2fa-reception", userId: "u-2fa-reception", email: "u-2fa-reception@example.test", twoFactorEnabled: false },
 }
 
 const authStub = {
@@ -43,7 +46,7 @@ const authStub = {
       if (!found) return null
       return {
         user: { id: found.userId, email: found.email, image: null, twoFactorEnabled: found.twoFactorEnabled },
-        session: { activeOrganizationId: null },
+        session: { id: found.sessionId, activeOrganizationId: null },
       }
     },
   },
@@ -98,6 +101,11 @@ beforeAll(async () => {
       ('m-2fa-owner', ${ORG}, 'u-2fa-owner', 'owner', now()),
       ('m-2fa-reception', ${ORG}, 'u-2fa-reception', 'reception', now()),
       ('m-2fa-reception-b', ${OTHER_ORG}, 'u-2fa-reception', 'reception', now())`)
+  await ownerDb.execute(sql`
+    insert into "two_factor" ("id", "user_id", "secret", "backup_codes", "verified") values ('tf-2fa-owner', 'u-2fa-owner', 's', '[]', true)`)
+  await ownerDb.execute(sql`
+    insert into "verification" ("id", "identifier", "value", "expires_at") values
+      ('v-2fa-owner', '2fa-session-s-2fa-owner', 'u-2fa-owner', now() + interval '1 day')`)
   app = createApp({
     auth: authStub,
     db: appDb,
@@ -142,6 +150,13 @@ it("la clínica que la pide no deja operar a quien no la tiene; la otra clínica
   expect(await code(blocked)).toBe("TWO_FACTOR_REQUIRED")
   expect((await request("owner", "GET", "/org-profile")).status).toBe(200)
   expect((await request("receptionOther", "GET", "/org-profile")).status).toBe(200)
+  // La tiene, pero esta sesión no pasó el código: se le pide el código, no activarla.
+  const google = await request("ownerGoogle", "GET", "/org-profile")
+  expect(google.status).toBe(403)
+  expect(await code(google)).toBe("TWO_FACTOR_CODE_REQUIRED")
+  // Las operaciones de cobro de quien administra también lo piden.
+  const cap = await request("ownerGoogle", "POST", "/account/billing/spend-cap", { orgId: ORG, capCents: 100 })
+  expect(cap.status).toBe(403)
 
   // Mi perfil dice qué clínica la pide.
   const mine = await request("reception", "GET", "/account/two-factor")
