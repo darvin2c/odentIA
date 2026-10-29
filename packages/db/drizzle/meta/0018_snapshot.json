@@ -1,5 +1,5 @@
 {
-  "id": "64a6a9de-62dd-4433-ba52-f34a0f60e3ab",
+  "id": "291f8736-b7a2-4e5e-9a5d-5f7da4300457",
   "prevId": "823a697c-b992-4fcc-b6df-ea6336482e65",
   "version": "7",
   "dialect": "postgresql",
@@ -13243,7 +13243,7 @@
       "checkConstraints": {
         "encounter_dictation_suggestion_kind_check": {
           "name": "encounter_dictation_suggestion_kind_check",
-          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material')"
+          "value": "\"encounter_dictation_suggestion\".\"kind\" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto')"
         },
         "encounter_dictation_suggestion_status_check": {
           "name": "encounter_dictation_suggestion_status_check",
@@ -38298,6 +38298,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "inform_message_limit": {
+          "name": "inform_message_limit",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
         "argos_included_questions": {
           "name": "argos_included_questions",
           "type": "integer",
@@ -38495,6 +38501,10 @@
         "saas_plan_tier_check": {
           "name": "saas_plan_tier_check",
           "value": "coalesce(\"admin\".\"saas_plan\".\"conversation_inform_micros\", 0) >= 0 AND coalesce(\"admin\".\"saas_plan\".\"conversation_agenda_micros\", 0) >= 0 AND coalesce(\"admin\".\"saas_plan\".\"consultation_simple_micros\", 0) >= 0 AND coalesce(\"admin\".\"saas_plan\".\"consultation_standard_micros\", 0) >= 0 AND coalesce(\"admin\".\"saas_plan\".\"argos_pack_micros\", 0) >= 0 AND coalesce(\"admin\".\"saas_plan\".\"storage_gb_micros\", 0) >= 0 AND \"admin\".\"saas_plan\".\"argos_included_questions\" >= 0 AND \"admin\".\"saas_plan\".\"argos_pack_questions\" BETWEEN 1 AND 10000 AND \"admin\".\"saas_plan\".\"storage_included_gb\" >= 0"
+        },
+        "saas_plan_inform_messages_check": {
+          "name": "saas_plan_inform_messages_check",
+          "value": "\"admin\".\"saas_plan\".\"inform_message_limit\" IS NULL OR \"admin\".\"saas_plan\".\"inform_message_limit\" BETWEEN 1 AND 1000"
         },
         "saas_plan_fixed_tiers_check": {
           "name": "saas_plan_fixed_tiers_check",

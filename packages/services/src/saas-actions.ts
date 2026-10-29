@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { agentProposal } from "@odentia/db/schema/agent"
+import { agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
 import { appointment } from "@odentia/db/schema/agenda"
 import { user } from "@odentia/db/schema/auth"
 import { encounter, encounterDictationSuggestion, patientContact } from "@odentia/db/schema/clinical"
@@ -12,7 +12,7 @@ import {
   saasPlan,
   saasSubscription,
 } from "@odentia/db/schema/saas-billing"
-import { and, asc, eq, gt, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm"
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
 import { adminLineOf } from "./admin-lines.js"
 import { APPOINTMENT_NOTICE_KEYS } from "./automation-messages.js"
 import { ServiceError } from "./errors.js"
@@ -113,6 +113,8 @@ export interface ActionPricing {
   fixed: ReadonlySet<SaasPriceKey>
   argos: { included: number; packQuestions: number }
   storageIncludedGb: number
+  /** Mensajes de la persona que cubre cada Informa (ADR 0105); null = sin tope. Por ahora solo se mide. */
+  informMessageLimit: number | null
 }
 
 /**
@@ -171,6 +173,7 @@ export async function getActionPricing(tx: Db, orgId: string, now = new Date()):
     fixed: new Set((plan?.fixedPriceTiers ?? []) as SaasPriceKey[]),
     argos: { included: plan?.argosIncludedQuestions ?? 0, packQuestions: plan?.argosPackQuestions ?? 100 },
     storageIncludedGb: plan?.storageIncludedGb ?? 0,
+    informMessageLimit: plan?.informMessageLimit ?? null,
   }
 }
 
@@ -417,6 +420,77 @@ export async function countConversationAction(tx: Db, orgId: string, input: { co
     detail: `${SOFI_DETAIL[tier]} por ${CHANNEL_NAME[conv.channel] ?? conv.channel}`,
     dedupeKey: `conversacion:${conv.contactId}:${input.at.toISOString()}`,
   })
+}
+
+/** Motivo en el libro de un mensaje que otra corrida leyó y atendió en su ráfaga. */
+export const BURST_COVERED = "burst-covered"
+
+/**
+ * La corrida atendió su mensaje: lo respondió o derivó, o lo leyó en la ráfaga
+ * de otro. Una sola regla para que Sofi no responda dos veces (`run.ts`) y para
+ * contar los mensajes de cada Informa (ADR 0105).
+ */
+export function attendedRun() {
+  return or(
+    inArray(agentRunLedger.status, ["ok", "handoff"]),
+    and(eq(agentRunLedger.status, "omitida"), eq(agentRunLedger.error, BURST_COVERED)),
+  )
+}
+
+/**
+ * Los mensajes de la persona que atendió Sofi en la ventana de cada
+ * conversación (ADR 0105), uno por mensaje: los que respondió o derivó y los
+ * que leyó en la ráfaga de otro. No cuentan sus respuestas, lo que escribe el
+ * equipo, lo que no llega al agente (botones, «BAJA», correos automáticos,
+ * spam, bloqueados) ni las conversaciones de prueba. Devuelve cuántos tuvo
+ * cada acción, por su id.
+ */
+export async function attendedMessagesByWindow(
+  tx: Db,
+  orgId: string,
+  windows: ReadonlyArray<{ id: string; contactId: string | null; occurredAt: Date }>,
+  windowMs: number,
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+  const withPerson = windows.filter((row): row is typeof row & { contactId: string } => row.contactId !== null)
+  if (!withPerson.length) return counts
+  const starts = withPerson.map((row) => row.occurredAt.getTime())
+  const from = starts.reduce((min, at) => Math.min(min, at))
+  const to = starts.reduce((max, at) => Math.max(max, at)) + windowMs
+  const rows = await tx
+    .select({ messageId: agentRunLedger.triggerMessageId, contactId: conversation.contactId, startedAt: agentRunLedger.startedAt })
+    .from(agentRunLedger)
+    .innerJoin(
+      conversation,
+      and(eq(conversation.organizationId, agentRunLedger.organizationId), eq(conversation.id, agentRunLedger.conversationId)),
+    )
+    .where(
+      and(
+        eq(agentRunLedger.organizationId, orgId),
+        inArray(conversation.contactId, [...new Set(withPerson.map((row) => row.contactId))]),
+        eq(conversation.isTest, false),
+        isNotNull(agentRunLedger.triggerMessageId),
+        gte(agentRunLedger.startedAt, new Date(from)),
+        lt(agentRunLedger.startedAt, new Date(to)),
+        attendedRun(),
+      ),
+    )
+  // Cada mensaje una vez, cuando lo atendió la primera corrida; por persona.
+  const first = new Map<string, { contactId: string; at: number }>()
+  for (const row of rows) {
+    if (!row.messageId) continue
+    const at = row.startedAt.getTime()
+    const seen = first.get(row.messageId)
+    if (!seen || at < seen.at) first.set(row.messageId, { contactId: row.contactId, at })
+  }
+  const byPerson = new Map<string, number[]>()
+  for (const message of first.values()) byPerson.set(message.contactId, [...(byPerson.get(message.contactId) ?? []), message.at])
+  for (const window of withPerson) {
+    const start = window.occurredAt.getTime()
+    const times = byPerson.get(window.contactId) ?? []
+    counts.set(window.id, times.filter((at) => at >= start && at < start + windowMs).length)
+  }
+  return counts
 }
 
 /**
@@ -1252,11 +1326,12 @@ async function budgetOf(
  * del 2026-10-23, ADR 0085): una conversación muy larga de Sofi (unas 20
  * respuestas), una atención de 60 pausas de Clío, la cita recuperada con su
  * conversación, 100 preguntas a Argos en su versión más larga y un GB guardado
- * un mes en el proveedor. Se actualiza con `eval:month` y el costo real de
- * `ai_usage`.
+ * un mes en el proveedor. Informa es la conversación más cara de la auditoría
+ * de Sofi del 2026-10-29: 28 mensajes de la persona (ADR 0105). Se actualiza
+ * con `eval:month` y el costo real de `ai_usage`.
  */
 export const SAAS_WORST_COST_MICROS: Record<SaasPriceKey, number> = {
-  informa: 15_000,
+  informa: 41_000,
   gestiona: 60_000,
   agenda: 60_000,
   simple: 52_000,

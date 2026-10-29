@@ -53,6 +53,15 @@ export interface ClinicCostMargin {
   sellerName: string | null
   unpricedCalls: number
   lines: CostLine[]
+  /** Informa por bloques de mensajes de la persona (ADR 0105), en sombra; null si el plan no tiene tope. */
+  informBlocks?: {
+    messageLimit: number
+    windows: number
+    over: number
+    extraInforma: number
+    extraCents: number
+    maxMessages: number
+  } | null
 }
 
 interface Overview {

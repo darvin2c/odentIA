@@ -165,6 +165,8 @@ const planInput = z
     recoveryMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
     // Por tipo, preguntas a Argos y almacenamiento (ADR 0085).
     ...tierPrices,
+    // Mensajes de la persona que cubre cada Informa, en sombra (ADR 0105); null = sin tope.
+    informMessageLimit: z.number().int().min(1).max(1000).nullish(),
     argosIncludedQuestions: z.number().int().min(0).max(100_000).optional(),
     argosPackQuestions: z.number().int().min(1).max(10_000).optional(),
     storageIncludedGb: z.number().int().min(0).max(100_000).optional(),

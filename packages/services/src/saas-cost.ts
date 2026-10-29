@@ -14,7 +14,9 @@ import { and, asc, desc, eq, gte, inArray, lt, notInArray, sql } from "drizzle-o
 import { AGENT_TEST_ORIGINS } from "./ai-usage.js"
 import { previousSaasPeriod } from "./saas-action-review.js"
 import {
+  attendedMessagesByWindow,
   currentSaasPeriod,
+  getActionPricing,
   listPeriodActions,
   microsToCents,
   netMicros,
@@ -104,6 +106,27 @@ export interface ClinicCostMargin {
   /** Llamadas sin costo conocido (modelo sin precio o uso no reportado): no están en el total. */
   unpricedCalls: number
   lines: CostLine[]
+  /**
+   * Informa por bloques de mensajes de la persona (ADR 0105), en sombra: lo
+   * que se contaría con el tope del plan, sin cobrarlo. Null si el plan no
+   * tiene tope.
+   */
+  informBlocks: InformBlocksShadow | null
+}
+
+export interface InformBlocksShadow {
+  /** Mensajes de la persona que cubre cada Informa, del plan. */
+  messageLimit: number
+  /** Conversaciones Informa del tramo. */
+  windows: number
+  /** Cuántas pasaron el tope. */
+  over: number
+  /** Informa de más que se contarían. */
+  extraInforma: number
+  /** Lo que se cobraría por ellas, sin impuesto. */
+  extraCents: number
+  /** La conversación con más mensajes de la persona. */
+  maxMessages: number
 }
 
 const pct = (charged: number, cost: number): number | null =>
@@ -298,7 +321,7 @@ export async function getClinicCostMargin(
   orgId: string,
   input: { which?: "actual" | "anterior"; now?: Date } = {},
 ): Promise<ClinicCostMargin> {
-  const { now, period, sub, plan, actions, usage, actionCost, bucket } = await loadClinicCostContext(tx, orgId, input)
+  const { now, period, sub, plan, actions, usage, windowMs, actionCost, bucket } = await loadClinicCostContext(tx, orgId, input)
   const subtotalMicros = actions.reduce((sum, row) => sum + netMicros(row), 0)
   // Lo cobrado: la cuota y lo que pasó del crédito, sin impuesto. La prueba es de
   // regalo, y una demo nunca se factura (ADR 0096).
@@ -505,7 +528,44 @@ export async function getClinicCostMargin(
       .filter((row) => row.costMicros === null)
       .reduce((sum, row) => sum + row.calls, 0),
     lines,
+    // El tope sale del mismo plan que el precio: el de la clínica o, si aún no eligió, el de su producto.
+    informBlocks: await informBlocksShadow(
+      tx,
+      orgId,
+      of("conversacion", "informa"),
+      windowMs,
+      plan ? plan.informMessageLimit : (await getActionPricing(tx, orgId, now)).informMessageLimit,
+    ),
   }
+}
+
+/**
+ * Lo que se contaría si cada Informa cubriera hasta el tope de mensajes de la
+ * persona de su plan (ADR 0105): pasado el tope, otro Informa a su mismo
+ * precio. Es una sombra: nadie lo paga.
+ */
+async function informBlocksShadow(
+  tx: Db,
+  orgId: string,
+  rows: SaasActionRow[],
+  windowMs: number,
+  limit: number | null,
+): Promise<InformBlocksShadow | null> {
+  if (!limit) return null
+  const messages = await attendedMessagesByWindow(tx, orgId, rows, windowMs)
+  const shadow: InformBlocksShadow = { messageLimit: limit, windows: rows.length, over: 0, extraInforma: 0, extraCents: 0, maxMessages: 0 }
+  let extraMicros = 0
+  for (const row of rows) {
+    const count = messages.get(row.id) ?? 0
+    shadow.maxMessages = Math.max(shadow.maxMessages, count)
+    const extra = Math.max(0, Math.ceil(count / limit) - 1)
+    if (!extra) continue
+    shadow.over += 1
+    shadow.extraInforma += extra
+    extraMicros += extra * (row.priceMicros ?? 0)
+  }
+  shadow.extraCents = microsToCents(extraMicros)
+  return shadow
 }
 
 /** Activa hace más de `SAAS_FOUNDER_IDLE_DAYS` días y sin ningún gasto de IA en ese tiempo. */

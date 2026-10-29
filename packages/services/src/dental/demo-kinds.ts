@@ -24,6 +24,270 @@ const DENTAL_EXPENSES: DemoKindRecipe["expenses"] = [
   { category: "Servicios", concept: "Luz, agua e internet", cents: 650_00, day: 18 },
 ]
 
+/**
+ * Lo que guarda una clínica dental en Inventario. Entra lo que no gasta ningún
+ * servicio (stock general) y lo que gasta algún servicio de su tipo: una
+ * clínica de niños no guarda implantes.
+ */
+const DENTAL_INVENTORY: DemoKindRecipe["inventory"] = {
+  suppliers: ["Dental Andina", "Distribuidora Médica Central"],
+  products: [
+    {
+      sku: "INS-GUANTE-NITRILO",
+      name: "Guantes de nitrilo",
+      unit: "guante",
+      purchase: { unit: "caja", factor: 100 },
+      cost: 38,
+      min: 300,
+    },
+    {
+      sku: "INS-ANESTESIA-LIDO",
+      name: "Lidocaína 2 % con epinefrina",
+      unit: "cartucho",
+      purchase: { unit: "caja", factor: 50 },
+      cost: 210,
+      min: 50,
+    },
+    {
+      sku: "INS-ALGODON-ROLLO",
+      name: "Rollos de algodón",
+      unit: "rollo",
+      purchase: { unit: "bolsa", factor: 500 },
+      cost: 12,
+      min: 200,
+    },
+    {
+      sku: "INS-GASA-ESTERIL",
+      name: "Gasas estériles 5 × 5 cm",
+      unit: "gasa",
+      purchase: { unit: "paquete", factor: 100 },
+      cost: 25,
+      min: 100,
+    },
+    {
+      sku: "INS-SUTURA-SEDA",
+      name: "Sutura de seda 3-0",
+      unit: "sobre",
+      purchase: { unit: "caja", factor: 12 },
+      cost: 60,
+      min: 12,
+    },
+    {
+      sku: "PRO-RESINA-A2",
+      name: "Resina compuesta A2 en cápsulas",
+      unit: "cápsula",
+      purchase: { unit: "caja", factor: 20 },
+      cost: 140,
+      min: 20,
+    },
+    {
+      sku: "INS-PASTA-PROFI",
+      name: "Pasta profiláctica",
+      unit: "dosis",
+      purchase: { unit: "caja", factor: 200 },
+      cost: 85,
+      min: 40,
+    },
+    {
+      sku: "INS-COPA-PROFI",
+      name: "Copas de profilaxis",
+      unit: "copa",
+      purchase: { unit: "bolsa", factor: 100 },
+      cost: 45,
+      min: 30,
+    },
+    {
+      sku: "INS-PELICULA-RX",
+      name: "Película radiográfica periapical",
+      unit: "película",
+      purchase: { unit: "caja", factor: 150 },
+      cost: 260,
+      min: 30,
+    },
+    {
+      sku: "INS-BARNIZ-FLUOR",
+      name: "Barniz de flúor 5 %",
+      unit: "dosis",
+      purchase: { unit: "caja", factor: 50 },
+      cost: 180,
+      min: 20,
+    },
+    { sku: "INS-SELLANTE", name: "Sellante de fosas y fisuras", unit: "jeringa", cost: 75, min: 3 },
+    {
+      sku: "PRO-CORONA-ACERO",
+      name: "Coronas de acero para dientes de leche",
+      unit: "corona",
+      purchase: { unit: "caja", factor: 48 },
+      cost: 380,
+      min: 10,
+    },
+    {
+      sku: "INS-LIGADURA-ELAST",
+      name: "Ligaduras elásticas",
+      unit: "ligadura",
+      purchase: { unit: "bolsa", factor: 1000 },
+      cost: 30,
+      min: 200,
+    },
+    {
+      sku: "PRO-BRACKETS-MET",
+      name: "Juego de brackets metálicos",
+      unit: "juego",
+      cost: 120,
+      min: 3,
+    },
+    {
+      sku: "PRO-IMPLANTE-41",
+      name: "Implante de titanio 4,1 × 10 mm",
+      unit: "implante",
+      cost: 650,
+      min: 3,
+    },
+    {
+      sku: "VEN-CEPILLO-SUAVE",
+      name: "Cepillo dental suave",
+      unit: "cepillo",
+      purchase: { unit: "caja", factor: 12 },
+      cost: 96,
+      min: 6,
+      sale: 15,
+      onlySale: true,
+    },
+    {
+      sku: "VEN-ENJUAGUE-250",
+      name: "Enjuague bucal 250 ml",
+      unit: "frasco",
+      purchase: { unit: "caja", factor: 12 },
+      cost: 198,
+      min: 4,
+      sale: 28,
+    },
+    {
+      sku: "INS-AMALGAMA-CAP",
+      name: "Amalgama en cápsulas",
+      unit: "cápsula",
+      purchase: { unit: "frasco", factor: 50 },
+      cost: 150,
+      min: 0,
+      retired: true,
+    },
+  ],
+  materials: {
+    profilaxis: [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-PASTA-PROFI", quantity: 1 },
+      { sku: "INS-COPA-PROFI", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 2 },
+    ],
+    "resina-fotocurable-1-superficie-posterior": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "PRO-RESINA-A2", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "resina-fotocurable-2-superficies-posterior": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "PRO-RESINA-A2", quantity: 2 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "exodoncia-simple": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 2 },
+      { sku: "INS-GASA-ESTERIL", quantity: 4 },
+      { sku: "INS-SUTURA-SEDA", quantity: 1 },
+    ],
+    "endodoncia-anterior-vital": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 2 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "radiografia-periapical": [{ sku: "INS-PELICULA-RX", quantity: 1 }],
+    "fluor-barniz": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-BARNIZ-FLUOR", quantity: 1 },
+    ],
+    pulpotomia: [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "INS-ALGODON-ROLLO", quantity: 4 },
+    ],
+    "corona-de-acero-prefabricada-deciduo": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 1 },
+      { sku: "PRO-CORONA-ACERO", quantity: 1 },
+    ],
+    "control-de-ortodoncia": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-LIGADURA-ELAST", quantity: 20 },
+    ],
+    "aparatologia-fija-de-ortodoncia": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "PRO-BRACKETS-MET", quantity: 1 },
+      { sku: "INS-LIGADURA-ELAST", quantity: 20 },
+    ],
+    "colocacion-de-implante-endooseo": [
+      { sku: "INS-GUANTE-NITRILO", quantity: 2 },
+      { sku: "INS-ANESTESIA-LIDO", quantity: 3 },
+      { sku: "PRO-IMPLANTE-41", quantity: 1 },
+      { sku: "INS-GASA-ESTERIL", quantity: 4 },
+      { sku: "INS-SUTURA-SEDA", quantity: 1 },
+    ],
+  },
+  low: [
+    "INS-ANESTESIA-LIDO",
+    "PRO-RESINA-A2",
+    "INS-LIGADURA-ELAST",
+    "PRO-IMPLANTE-41",
+    "INS-BARNIZ-FLUOR",
+  ],
+  expiring: [
+    "INS-ANESTESIA-LIDO",
+    "INS-GASA-ESTERIL",
+    "INS-BARNIZ-FLUOR",
+    "INS-PASTA-PROFI",
+    "INS-GUANTE-NITRILO",
+    "INS-COPA-PROFI",
+  ],
+}
+
+/** Lo que Sofi ya tiene respondido en una clínica dental, con el horario del equipo de la demo. */
+const DENTAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
+  {
+    title: "Horario de atención",
+    body: "Atendemos de lunes a viernes de 9:00 a. m. a 1:00 p. m. y de 2:00 p. m. a 6:00 p. m., y los sábados de 9:00 a. m. a 1:00 p. m. Domingos y feriados no atendemos.",
+    basicKey: "horario",
+    askForms: ["¿A qué hora abren?", "¿Atienden los sábados?"],
+  },
+  {
+    title: "¿Atienden sin cita?",
+    body: "Atendemos con cita. Si tienes dolor o se te rompió un diente, escríbenos y te damos el primer espacio libre del día.",
+    basicKey: "sin_cita",
+    askForms: ["¿Puedo ir sin reservar?"],
+  },
+  {
+    title: "¿Cómo cambio o cancelo mi cita?",
+    body: "Escríbenos por este chat y la cambiamos al día que te acomode. Si no puedes venir, avísanos con unas horas de anticipación para darle el espacio a otro paciente.",
+    basicKey: "cambiar_cita",
+  },
+  {
+    title: "¿Qué necesito llevar a mi primera cita?",
+    body: "Tu documento de identidad y, si tienes, radiografías o informes de tratamientos anteriores. Llega 10 minutos antes para registrarte.",
+    basicKey: "primera_cita",
+  },
+  {
+    title: "¿Se puede pagar en cuotas?",
+    body: "En los tratamientos de varias sesiones pagas por partes, según el avance. Lo dejamos acordado en tu presupuesto antes de empezar.",
+    basicKey: "cuotas",
+    askForms: ["¿Puedo pagar en partes?"],
+  },
+  {
+    title: "¿El tratamiento duele?",
+    body: "Usamos anestesia local en los tratamientos que lo necesitan. Si sientes molestia, avísale al odontólogo y se detiene.",
+    basicKey: "dolor",
+  },
+]
+
 function adult(random: Random, minAge: number, maxAge: number): ReportsSeedPerson {
   return {
     birthDate: birthDateForAge(random.int(minAge, maxAge), random),
@@ -159,6 +423,24 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: true,
     occupancy: 0.72,
     expenses: DENTAL_EXPENSES,
+    inventory: DENTAL_INVENTORY,
+    promotions: [
+      {
+        template: "profilaxis",
+        name: "Limpieza de temporada",
+        conditions: "Profilaxis con pulido, una por persona.",
+        price: 95,
+        when: "vigente",
+      },
+      {
+        template: "blanqueamiento-externo-por-arcada",
+        name: "Blanqueamiento de verano",
+        conditions: "Precio por arcada; incluye la evaluación previa.",
+        price: 480,
+        when: "terminada",
+      },
+    ],
+    knowledge: DENTAL_KNOWLEDGE,
   },
   {
     key: "ortodoncia",
@@ -214,6 +496,25 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: true,
     occupancy: 0.78,
     expenses: DENTAL_EXPENSES,
+    inventory: DENTAL_INVENTORY,
+    promotions: [
+      {
+        template: "aparatologia-fija-de-ortodoncia",
+        name: "Brackets metálicos desde",
+        conditions: "El precio final depende del caso y se confirma en la evaluación.",
+        price: 2_900,
+        mode: "from",
+        when: "vigente",
+      },
+      {
+        template: "radiografia-panoramica",
+        name: "Panorámica a mitad de precio",
+        conditions: "Con la consulta de ortodoncia del mismo día.",
+        price: 40,
+        when: "terminada",
+      },
+    ],
+    knowledge: DENTAL_KNOWLEDGE,
   },
   {
     key: "implantes",
@@ -274,6 +575,25 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: true,
     occupancy: 0.66,
     expenses: DENTAL_EXPENSES,
+    inventory: DENTAL_INVENTORY,
+    promotions: [
+      {
+        template: "colocacion-de-implante-endooseo",
+        name: "Implante desde",
+        conditions: "El precio final se define con la tomografía y la evaluación.",
+        price: 2_100,
+        mode: "from",
+        when: "vigente",
+      },
+      {
+        template: "profilaxis",
+        name: "Limpieza a precio especial",
+        conditions: "Para pacientes con implantes o prótesis, una por persona.",
+        price: 90,
+        when: "terminada",
+      },
+    ],
+    knowledge: DENTAL_KNOWLEDGE,
   },
   {
     key: "odontopediatria",
@@ -335,5 +655,31 @@ export const DENTAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
     budgets: true,
     occupancy: 0.74,
     expenses: DENTAL_EXPENSES,
+    inventory: DENTAL_INVENTORY,
+    promotions: [
+      {
+        template: "sellante",
+        name: "Sellantes de regreso a clases",
+        conditions: "Precio por pieza, para niños de 6 a 12 años.",
+        price: 55,
+        when: "vigente",
+      },
+      {
+        template: "fluor-barniz",
+        name: "Flúor a mitad de precio",
+        conditions: "Con la limpieza del mismo día.",
+        price: 30,
+        when: "terminada",
+      },
+    ],
+    knowledge: [
+      ...DENTAL_KNOWLEDGE,
+      {
+        title: "¿Atienden a niños? ¿Desde qué edad?",
+        body: "Sí, atendemos niños desde que les sale el primer diente. Un adulto responsable los acompaña durante toda la consulta.",
+        basicKey: "ninos",
+        askForms: ["¿Puedo entrar con mi hijo?"],
+      },
+    ],
   },
 ]

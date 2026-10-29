@@ -34,6 +34,8 @@ export interface AdminPlan {
   conversationAgendaMicros: number | null
   consultationSimpleMicros: number | null
   consultationStandardMicros: number | null
+  /** Mensajes de la persona que cubre cada Informa (ADR 0105); null = sin tope. Por ahora solo se mide. */
+  informMessageLimit: number | null
   argosIncludedQuestions: number
   argosPackQuestions: number
   argosPackMicros: number | null
@@ -166,6 +168,7 @@ export function PlanDrawer({
   const [included, setIncluded] = useState(String(seed?.argosIncludedQuestions ?? 300))
   const [packQuestions, setPackQuestions] = useState(String(seed?.argosPackQuestions ?? 100))
   const [includedGb, setIncludedGb] = useState(String(seed?.storageIncludedGb ?? 20))
+  const [informMessages, setInformMessages] = useState(seed?.informMessageLimit ? String(seed.informMessageLimit) : "")
   const [maxDiscount, setMaxDiscount] = useState(String((seed?.maxDiscountBps ?? 6000) / 100))
   const [sellerDiscount, setSellerDiscount] = useState(String((seed?.sellerDiscountBps ?? 1000) / 100))
   const [trialCredit, setTrialCredit] = useState(seed ? centsToMajor(seed.trialCreditCents, seed.currency) : "")
@@ -192,6 +195,7 @@ export function PlanDrawer({
     setIncluded(String(from.argosIncludedQuestions))
     setPackQuestions(String(from.argosPackQuestions))
     setIncludedGb(String(from.storageIncludedGb))
+    setInformMessages(from.informMessageLimit ? String(from.informMessageLimit) : "")
     setMaxDiscount(String(from.maxDiscountBps / 100))
     setSellerDiscount(String(from.sellerDiscountBps / 100))
     setTrialCredit(centsToMajor(from.trialCreditCents, from.currency))
@@ -252,6 +256,7 @@ export function PlanDrawer({
         argosIncludedQuestions: Number(included),
         argosPackQuestions: Number(packQuestions),
         storageIncludedGb: Number(includedGb),
+        informMessageLimit: optionalInt(informMessages),
         maxDiscountBps: terms.maxDiscountBps,
         sellerDiscountBps: toBps(sellerDiscount) ?? 0,
         trialCreditCents: majorToCents(trialCredit || "0", currency) ?? 0,
@@ -264,6 +269,9 @@ export function PlanDrawer({
         guaranteeMonths: optionalInt(guaranteeMonths),
       }
       if (Number.isNaN(body.seatLimit) || Number.isNaN(body.guaranteeMonths)) throw new Error("Lugares y meses van como números enteros, o vacíos")
+      if (body.informMessageLimit !== null && !(body.informMessageLimit >= 1 && body.informMessageLimit <= 1000)) {
+        throw new Error("Los mensajes por Informa van de 1 a 1000, o vacío para no poner tope")
+      }
       if (![body.argosIncludedQuestions, body.argosPackQuestions, body.storageIncludedGb].every((value) => Number.isInteger(value) && value >= 0)) {
         throw new Error("Las preguntas y los GB van como números enteros")
       }
@@ -412,6 +420,16 @@ export function PlanDrawer({
                 </div>
               )
             })}
+            {group.keys.includes("informa")
+              ? field(
+                  "plan-inform-messages",
+                  "Mensajes por Informa",
+                  informMessages,
+                  setInformMessages,
+                  "Mensajes de la persona que cubre cada Informa en su ventana. Por ahora solo se mide en Costo y margen: nadie lo paga. Vacío: sin tope.",
+                  "numeric",
+                )
+              : null}
             {group.keys.includes("preguntas") ? (
               <>
                 {field("plan-included", "Preguntas incluidas al mes", included, setIncluded, undefined, "numeric")}
