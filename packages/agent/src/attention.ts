@@ -101,6 +101,8 @@ export interface AttentionProgress {
   usedName: boolean
   /** Respuestas suyas en esta atención que empezaron con «Entiendo…» o dijeron «anoté que…» (`formulasIn`). */
   formulas: { opener: number; noted: number }
+  /** Respuestas suyas en esta atención que ya le dijeron a dónde llamar (`calls`): el teléfono para urgencias de la clínica o el de emergencias. */
+  calledOut: number
 }
 
 /**
@@ -116,6 +118,8 @@ export function attentionProgress(input: {
   promotions: string[]
   /** Los nombres de quien escribe, si su ficha los tiene. */
   name?: string | null
+  /** A dónde llamar ante una urgencia: el teléfono para urgencias de la clínica y el número de emergencias del país. */
+  calls?: Array<string | null | undefined>
 }): AttentionProgress {
   const opened = Date.parse(input.startedAt) - ATTENTION_OPENING_MS
   const inAttention = (at: string | undefined) => !at || Date.parse(at) >= opened
@@ -145,7 +149,17 @@ export function attentionProgress(input: {
       opener: said.filter((item) => formulasIn(item.body ?? "").opener).length,
       noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
     },
+    calledOut: said.filter((item) => saysNumber(item.body ?? "", input.calls ?? [])).length,
   }
+}
+
+/** El mensaje dice alguno de los números, con espacios o guiones o sin ellos: «+51 1 555 0188», «106». */
+function saysNumber(text: string, numbers: Array<string | null | undefined>): boolean {
+  const joined = text.replace(/(?<=\d)[\s().-]+(?=\d)/g, "")
+  return numbers.some((number) => {
+    const digits = number?.replace(/\D/g, "") ?? ""
+    return digits.length >= 3 && new RegExp(`(?<!\\d)${digits}(?!\\d)`).test(joined)
+  })
 }
 
 /**
@@ -192,6 +206,12 @@ export function attentionLines(
     const one = progress.promotions.length === 1
     lines.push(
       `Ya le ofreciste en esta atención ${one ? "la promoción" : "las promociones"} ${named}: no ${one ? "la" : "las"} repitas salvo que vuelva a preguntar por el precio.`,
+    )
+  }
+  // Ante quien insiste, «Para urgencias de la clínica, llama al…» salía en cada respuesta (auditoría del ADR 0104, caso del murciélago).
+  if (progress.calledOut > 0) {
+    lines.push(
+      "Ya le dijiste en esta atención a dónde llamar o ir: no se lo repitas en cada respuesta ni repitas la advertencia que lo acompañaba. Responde directo a lo nuevo que pregunta.",
     )
   }
   return lines
