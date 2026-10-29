@@ -115,7 +115,9 @@ export function PersonMemoryDrawer({
   useEffect(() => {
     if (editing === null && refocusAdd.current) {
       refocusAdd.current = false
-      addButton.current?.focus()
+      // Tras el repintado: el cajón modal, al ver desaparecer el botón que tenía
+      // el foco, se lo lleva a sí mismo en el cuadro siguiente; esto va después.
+      requestAnimationFrame(() => addButton.current?.focus())
     }
   }, [editing])
 
