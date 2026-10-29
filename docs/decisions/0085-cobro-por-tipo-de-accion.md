@@ -13,7 +13,7 @@ También faltaban tres cosas. Argos respondía gratis sin límite de dinero (sol
 Tres principios del dueño del producto: **todo lo que hace un agente es una acción y se cobra**; **nunca se cobra doble**; **ningún agente se calla por un tope: el único límite es el presupuesto de la clínica**.
 
 - **Sofi, según lo que pasó en la agenda**, una vez por persona en la ventana de las condiciones comerciales (24 horas):
-  - `informa` (USD 0,10): no cambió nada en la agenda; respondió, confirmó una cita, dio la dirección o un precio;
+  - `informa` (USD 0,10; USD 0,20 desde la [0105](0105-informa-a-020-y-su-bloque-de-mensajes-en-sombra.md), que además le pone un bloque de mensajes, por ahora en sombra): no cambió nada en la agenda; respondió, confirmó una cita, dio la dirección o un precio;
   - `gestiona` (USD 0,50): movió o canceló una cita, o reservó una nueva, en esa ventana;
   - `agenda` (USD 1,00): la cita que reservó Sofi se dio. Se cobra como una fila aparte con la diferencia (USD 0,50) cuando el paciente asiste; si no viene, queda en «Gestiona».
   - Se lee de las propuestas ejecutadas de esa persona (`agent_proposal`) y de las reservas desde el enlace de esa ventana. Mientras la conversación no se cobró, sube de tipo sola: al ejecutarse la propuesta, al reservar desde el enlace o en la corrida siguiente.
