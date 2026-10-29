@@ -24,7 +24,7 @@ import {
   saasSubscription,
   saasWaitlistRequest,
 } from "@odentia/db/schema/saas-billing"
-import { and, eq, inArray, isNull } from "drizzle-orm"
+import { and, eq, inArray, isNull, or } from "drizzle-orm"
 import {
   confirmSaasPayment,
   createSaasCharge,
@@ -92,12 +92,15 @@ const PRE_TIER_PRICES: Record<string, { conversationMicros: number; consultation
   "fundadores-ficticio": { conversationMicros: 300_000, consultationMicros: 240_000, recoveryMicros: 2_400_000 },
 }
 
+/** La prueba de todos los planes: USD 100 por 30 días, que la administración amplía hasta 150 y 60 días. */
+const TRIAL = { trialCreditCents: 10000, trialDays: 30, trialMaxCreditCents: 15000, trialMaxDays: 60 } as const
+
 /**
  * El plan de las ADR 0031, 0085 y 0105 para probar el cobro por acción: USD 29 que
  * vuelven en crédito, el precio de cada tipo (Sofi 0,20 / 0,50 / 1,00, Clío
  * 0,10 / 0,30 / 0,50, cita recuperada 2), 100 preguntas a Argos y paquetes de
- * 100 por 3, 20 GB y 0,20 por GB extra, y prueba de USD 100 y 30 días. Es el
- * plan por defecto de la semilla; en producción lo configura administración.
+ * 100 por 3, 20 GB y 0,20 por GB extra, y la prueba. Es el plan por defecto de
+ * la semilla; en producción lo configura administración.
  */
 const ACTION_PLAN = {
   code: "odentia-ficticio",
@@ -111,17 +114,14 @@ const ACTION_PLAN = {
   ...tierPlan(1),
   maxDiscountBps: 6000,
   sellerDiscountBps: 1000,
-  trialCreditCents: 10000,
-  trialDays: 30,
-  trialMaxCreditCents: 13000,
-  trialMaxDays: 60,
+  ...TRIAL,
   isDefault: true,
   showOnWeb: true,
 } as const
 
 /**
- * El plan por invitación de Fundadores (issue 165, ADR 0085): sin cuota, USD
- * 100 de regalo hasta 90 días, todo con 50 % menos, 20 lugares y 12 meses
+ * El plan por invitación de Fundadores (issue 165, ADR 0085): sin cuota, la
+ * misma prueba de regalo, todo con 50 % menos, 20 lugares y 12 meses
  * garantizados; sin negociación encima. Se publica en la web.
  */
 const FOUNDERS_PLAN = {
@@ -136,10 +136,7 @@ const FOUNDERS_PLAN = {
   ...tierPlan(0.5),
   maxDiscountBps: 0,
   sellerDiscountBps: 0,
-  trialCreditCents: 10000,
-  trialDays: 90,
-  trialMaxCreditCents: 10000,
-  trialMaxDays: 90,
+  ...TRIAL,
   seatLimit: 20,
   guaranteeMonths: 12,
   showOnWeb: true,
@@ -206,6 +203,17 @@ export async function seedSaasBilling(db: Db): Promise<{ plans: number; methods:
       .set({ consultationStandardMicros: plan.consultationStandardMicros, updatedAt: new Date() })
       .where(and(eq(saasPlan.code, plan.code), eq(saasPlan.consultationStandardMicros, (plan.consultationStandardMicros * 2) / 3)))
   }
+  // La prueba igual en los cuatro: cambia solo si seguía con la anterior de la semilla
+  // (la lista ampliable hasta 130; Fundadores por 90 días, sin ampliar).
+  await db
+    .update(saasPlan)
+    .set({ ...TRIAL, updatedAt: new Date() })
+    .where(
+      or(
+        and(inArray(saasPlan.code, [ACTION_PLAN.code, MEDICAL_ACTION_PLAN.code]), eq(saasPlan.trialMaxCreditCents, 13000)),
+        and(inArray(saasPlan.code, [FOUNDERS_PLAN.code, MEDICAL_FOUNDERS_PLAN.code]), eq(saasPlan.trialDays, 90), eq(saasPlan.trialMaxDays, 90)),
+      ),
+    )
   await db.update(saasPlan).set({ isActive: false }).where(inArray(saasPlan.code, RETIRED_PLAN_CODES))
   // Las condiciones comerciales con los valores de hoy (ADR 0074): la migración
   // 0051 ya deja la primera versión; esto solo la repone en una base sin ella.
