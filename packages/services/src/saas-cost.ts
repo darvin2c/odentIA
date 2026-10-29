@@ -528,24 +528,29 @@ export async function getClinicCostMargin(
       .filter((row) => row.costMicros === null)
       .reduce((sum, row) => sum + row.calls, 0),
     lines,
-    informBlocks: await informBlocksShadow(tx, orgId, of("conversacion", "informa"), windowMs, now),
+    // El tope sale del mismo plan que el precio: el de la clínica o, si aún no eligió, el de su producto.
+    informBlocks: await informBlocksShadow(
+      tx,
+      orgId,
+      of("conversacion", "informa"),
+      windowMs,
+      plan ? plan.informMessageLimit : (await getActionPricing(tx, orgId, now)).informMessageLimit,
+    ),
   }
 }
 
 /**
  * Lo que se contaría si cada Informa cubriera hasta el tope de mensajes de la
  * persona de su plan (ADR 0105): pasado el tope, otro Informa a su mismo
- * precio. Es una sombra: nadie lo paga. El tope sale del mismo plan que el
- * precio (el de la clínica o, si aún no eligió, el de su producto).
+ * precio. Es una sombra: nadie lo paga.
  */
 async function informBlocksShadow(
   tx: Db,
   orgId: string,
   rows: SaasActionRow[],
   windowMs: number,
-  now: Date,
+  limit: number | null,
 ): Promise<InformBlocksShadow | null> {
-  const limit = (await getActionPricing(tx, orgId, now)).informMessageLimit
   if (!limit) return null
   const messages = await attendedMessagesByWindow(tx, orgId, rows, windowMs)
   const shadow: InformBlocksShadow = { messageLimit: limit, windows: rows.length, over: 0, extraInforma: 0, extraCents: 0, maxMessages: 0 }

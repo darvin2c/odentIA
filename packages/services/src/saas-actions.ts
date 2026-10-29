@@ -422,11 +422,20 @@ export async function countConversationAction(tx: Db, orgId: string, input: { co
   })
 }
 
+/** Motivo en el libro de un mensaje que otra corrida leyó y atendió en su ráfaga. */
+export const BURST_COVERED = "burst-covered"
+
 /**
- * Un mensaje que leyó otra corrida en su ráfaga: la constancia que usa la
- * corrida para no responder dos veces (`run.ts`).
+ * La corrida atendió su mensaje: lo respondió o derivó, o lo leyó en la ráfaga
+ * de otro. Una sola regla para que Sofi no responda dos veces (`run.ts`) y para
+ * contar los mensajes de cada Informa (ADR 0105).
  */
-const BURST_COVERED = "burst-covered"
+export function attendedRun() {
+  return or(
+    inArray(agentRunLedger.status, ["ok", "handoff"]),
+    and(eq(agentRunLedger.status, "omitida"), eq(agentRunLedger.error, BURST_COVERED)),
+  )
+}
 
 /**
  * Los mensajes de la persona que atendió Sofi en la ventana de cada
@@ -446,6 +455,8 @@ export async function attendedMessagesByWindow(
   const withPerson = windows.filter((row): row is typeof row & { contactId: string } => row.contactId !== null)
   if (!withPerson.length) return counts
   const starts = withPerson.map((row) => row.occurredAt.getTime())
+  const from = starts.reduce((min, at) => Math.min(min, at))
+  const to = starts.reduce((max, at) => Math.max(max, at)) + windowMs
   const rows = await tx
     .select({ messageId: agentRunLedger.triggerMessageId, contactId: conversation.contactId, startedAt: agentRunLedger.startedAt })
     .from(agentRunLedger)
@@ -459,12 +470,9 @@ export async function attendedMessagesByWindow(
         inArray(conversation.contactId, [...new Set(withPerson.map((row) => row.contactId))]),
         eq(conversation.isTest, false),
         isNotNull(agentRunLedger.triggerMessageId),
-        gte(agentRunLedger.startedAt, new Date(Math.min(...starts))),
-        lt(agentRunLedger.startedAt, new Date(Math.max(...starts) + windowMs)),
-        or(
-          inArray(agentRunLedger.status, ["ok", "handoff"]),
-          and(eq(agentRunLedger.status, "omitida"), eq(agentRunLedger.error, BURST_COVERED)),
-        ),
+        gte(agentRunLedger.startedAt, new Date(from)),
+        lt(agentRunLedger.startedAt, new Date(to)),
+        attendedRun(),
       ),
     )
   // Cada mensaje una vez, cuando lo atendió la primera corrida; por persona.

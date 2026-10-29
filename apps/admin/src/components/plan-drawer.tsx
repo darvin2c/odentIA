@@ -269,7 +269,9 @@ export function PlanDrawer({
         guaranteeMonths: optionalInt(guaranteeMonths),
       }
       if (Number.isNaN(body.seatLimit) || Number.isNaN(body.guaranteeMonths)) throw new Error("Lugares y meses van como números enteros, o vacíos")
-      if (Number.isNaN(body.informMessageLimit)) throw new Error("Los mensajes por Informa van como un número entero, o vacío")
+      if (body.informMessageLimit !== null && !(body.informMessageLimit >= 1 && body.informMessageLimit <= 1000)) {
+        throw new Error("Los mensajes por Informa van de 1 a 1000, o vacío para no poner tope")
+      }
       if (![body.argosIncludedQuestions, body.argosPackQuestions, body.storageIncludedGb].every((value) => Number.isInteger(value) && value >= 0)) {
         throw new Error("Las preguntas y los GB van como números enteros")
       }
