@@ -630,6 +630,11 @@ export interface ConnectionItem {
     businessApp?: boolean
     /** La clínica no compartió el historial del celular al conectar. */
     historyDeclined?: boolean
+    /**
+     * Meta cortó la conexión de la cuenta, con el motivo en las palabras del
+     * servidor: no llegan ni salen mensajes hasta volver a conectar. Ausente en respuestas antiguas.
+     */
+    metaRemoved?: { at: string; why: string } | null
   } | null
   /** Solo en WhatsApp con la app propia de la clínica: lo que odentIA hizo en Meta y sabe de sus claves. */
   ownApp?: OwnAppState | null

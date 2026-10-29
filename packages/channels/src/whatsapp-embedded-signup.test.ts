@@ -317,7 +317,48 @@ describe("repartir un aviso que llega a la dirección de la app", () => {
       kind: "account",
       accountId: "WABA-A",
       templateStatuses: [{ externalId: "77", name: "odentia_recordatorio_cita_v1", language: "es", status: "aprobada", reason: null }], templateCategories: [],
+      accountEvents: [],
     })
+  })
+
+  it("cuando Meta corta o rehace la conexión de una cuenta, el aviso va a la cuenta con el motivo en palabras de odentIA", () => {
+    const removal = (value: Record<string, unknown>) => ({ field: "account_update", value })
+    const deliveries = splitWhatsAppWebhook(
+      JSON.stringify({
+        object: "whatsapp_business_account",
+        entry: [
+          {
+            id: "WABA-C",
+            time: 1739321024,
+            changes: [
+              removal({
+                event: "PARTNER_REMOVED",
+                waba_info: { waba_id: "WABA-C", owner_business_id: "B1" },
+                disconnection_info: { reason: "PRIMARY_INACTIVITY", initiated_by: "SYSTEM" },
+              }),
+            ],
+          },
+          { id: "WABA-D", time: 1739321025, changes: [removal({ event: "PARTNER_REMOVED", waba_info: { waba_id: "WABA-D" } })] },
+          { id: "WABA-E", time: 1739321026, changes: [removal({ event: "ACCOUNT_OFFBOARDED" })] },
+          { id: "WABA-F", time: 1739321027, changes: [removal({ event: "ACCOUNT_RECONNECTED" })] },
+          // Un motivo que no se conoce corta igual, sin motivo; otro evento de la cuenta no cambia la conexión.
+          {
+            id: "WABA-G",
+            changes: [
+              removal({ event: "PARTNER_REMOVED", disconnection_info: { reason: "SOMETHING_NEW", initiated_by: "USER" } }),
+              removal({ event: "ACCOUNT_VIOLATION", violation_info: { violation_type: "SPAM" } }),
+            ],
+          },
+        ],
+      }),
+    )
+    expect(deliveries.map((d) => (d.kind === "account" ? [d.accountId, d.accountEvents] : d.kind))).toEqual([
+      ["WABA-C", [{ kind: "removed", reason: "primary_inactivity", initiatedBy: "system", at: "2025-02-12T00:43:44.000Z" }]],
+      ["WABA-D", [{ kind: "removed", reason: "access_removed", initiatedBy: null, at: "2025-02-12T00:43:45.000Z" }]],
+      ["WABA-E", [{ kind: "removed", reason: "re_registered", initiatedBy: null, at: "2025-02-12T00:43:46.000Z" }]],
+      ["WABA-F", [{ kind: "reconnected", reason: null, initiatedBy: null, at: "2025-02-12T00:43:47.000Z" }]],
+      ["WABA-G", [{ kind: "removed", reason: null, initiatedBy: "user", at: null }]],
+    ])
   })
 
   it("la dirección de una conexión sigue leyendo el mismo aviso entero, como antes", () => {

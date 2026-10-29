@@ -363,10 +363,13 @@ function messageReviews(messages: ConnectionItem["messages"]): IntegrationReview
 
 /**
  * Lo que le falta a un WhatsApp activo para estar terminado, con la misma regla
- * que su página: los pasos que dejó pendientes el botón de Facebook o, a mano,
- * la dirección de avisos y el primer mensaje.
+ * que su página: que Meta cortó la conexión, los pasos que dejó pendientes el
+ * botón de Facebook o, a mano, la dirección de avisos y el primer mensaje.
  */
 function whatsappPending(connection: ConnectionItem): string | null {
+  if (connection.signup?.metaRemoved) {
+    return "Meta lo desconectó: no recibe ni envía mensajes hasta volver a conectarlo con Facebook."
+  }
   if (connection.signup) {
     return connection.signup.pending.length > 0 ? "Falta un paso para terminar de conectarlo." : null
   }

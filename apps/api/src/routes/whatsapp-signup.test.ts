@@ -4,7 +4,7 @@ import { createHmac } from "node:crypto"
 import type { Auth } from "@odentia/auth"
 import { createAppDb, createOwnerDb, type Db, withOrgContext } from "@odentia/db"
 import { channelConnection, channelTemplate, contact, contactIdentity } from "@odentia/db/schema/crm"
-import { createConnection, decryptConfig, secretsKeyFromEnv, type Storage } from "@odentia/services"
+import { createConnection, decryptConfig, secretsKeyFromEnv, settleWorkspaceNotifications, type Storage } from "@odentia/services"
 import { and, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import type { Context } from "hono"
@@ -657,7 +657,7 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
       "[webhooks] aviso de WhatsApp descartado: el número 9999 no es de una conexión activa de la app de odentIA",
       "[webhooks] aviso de WhatsApp descartado: el número 9005 no es de una conexión activa de la app de odentIA",
-      "[webhooks] cambio de plantilla descartado: la cuenta 7999 no es de una conexión activa y suscrita",
+      "[webhooks] aviso de cuenta descartado: la cuenta 7999 no es de una conexión activa y suscrita",
     ])
     warn.mockRestore()
   })
@@ -738,6 +738,73 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect(names.find((row) => row.id === registered)?.name).toBe("Ana")
     expect(names).toHaveLength(2)
     expect((await rowOf(g!.id)).signup?.sync?.historyDeclinedAt).toBeTruthy()
+  })
+
+  it("coexistencia: si Meta corta la conexión se dice con su motivo, avisa a quien administra y se rehace al volver a conectar", async () => {
+    const [g] = await rowsOf("org_g")
+    await ownerDb.execute(sql`insert into "user" ("id", "name", "email", "email_verified", "created_at", "updated_at")
+      values ('u-org_g', 'Dueña', 'org_g@example.com', true, now(), now())`)
+    await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
+      values ('m-org_g', 'org_g', 'u-org_g', 'owner', now())`)
+    const seconds = (offset: number) => Math.floor(Date.now() / 1000) + offset
+    const accountUpdate = (time: number, value: Record<string, unknown>) => ({ id: "7007", time, changes: [{ field: "account_update", value }] })
+    const removed = (time: number) =>
+      accountUpdate(time, {
+        event: "PARTNER_REMOVED",
+        waba_info: { waba_id: "7007", owner_business_id: "B7" },
+        disconnection_info: { reason: "PRIMARY_INACTIVITY", initiated_by: "SYSTEM" },
+      })
+    const shown = async () => {
+      const list = (await (await buildApp("org_g").request("/channels/connections")).json()) as {
+        data: { id: string; signup: { metaRemoved: { at: string; why: string } | null } | null }[]
+      }
+      return list.data.find((item) => item.id === g!.id)?.signup?.metaRemoved ?? null
+    }
+    const notices = async () =>
+      (await ownerDb.execute(sql`select title, body, resolved_at from workspace_notification
+        where organization_id = 'org_g' and subject = ${`meta-desconecto:${g!.id}`}`)) as unknown as {
+        title: string
+        body: string
+        resolved_at: string | null
+      }[]
+    const settle = () => withOrgContext(appDb, "org_g", (tx) => settleWorkspaceNotifications(tx, "org_g"))
+
+    expect((await deliver(body(removed(seconds(60))))).status).toBe(200)
+    expect(await shown()).toEqual({
+      at: new Date(seconds(60) * 1000).toISOString(),
+      why: expect.stringContaining("no se abrió en el celular principal durante unos 14 días"),
+    })
+    // Sigue activa (es la misma conexión que se rehace), pero ya no dice «Conectado» sin más.
+    expect((await rowOf(g!.id)).status).toBe("active")
+    const [notice] = await notices()
+    expect(notice).toMatchObject({ title: "WhatsApp se desconectó de Meta", resolved_at: null })
+    expect(notice!.body).toContain("no llegan ni salen mensajes")
+
+    // Un «se reconectó» anterior al corte (un reintento de Meta) no lo borra; uno posterior sí.
+    expect((await deliver(body(accountUpdate(seconds(30), { event: "ACCOUNT_RECONNECTED" })))).status).toBe(200)
+    expect(await shown()).not.toBeNull()
+    expect((await deliver(body(accountUpdate(seconds(120), { event: "ACCOUNT_RECONNECTED" })))).status).toBe(200)
+    expect(await shown()).toBeNull()
+    // El aviso se retira en ese momento, sin esperar a que alguien abra la campana.
+    expect((await notices())[0]!.resolved_at).not.toBeNull()
+    await settle()
+
+    // Se cortó otra vez (salió del celular) y se vuelve a conectar con el botón: la misma conexión, sin el corte.
+    expect((await deliver(body(accountUpdate(seconds(180), { event: "ACCOUNT_OFFBOARDED" })))).status).toBe(200)
+    expect((await shown())?.why).toContain("se volvió a registrar o pasó a otro celular")
+    const again = await connect("org_g", fakeMeta(), {
+      code: "codigo-g-otra-vez",
+      wabaId: "7007",
+      phoneNumberId: "9007",
+      businessApp: true,
+      reconnectConnectionId: g!.id,
+    })
+    expect(again.status).toBe(200)
+    expect(await shown()).toBeNull()
+    expect((await notices())[0]!.resolved_at).not.toBeNull()
+    // Meta reintenta un corte de antes de volver a entrar con Facebook: ya no vale.
+    expect((await deliver(body(removed(seconds(-3600))))).status).toBe(200)
+    expect(await shown()).toBeNull()
   })
 
   it("la dirección propia de una conexión hecha con el botón no acepta avisos; la de una hecha a mano sigue igual", async () => {

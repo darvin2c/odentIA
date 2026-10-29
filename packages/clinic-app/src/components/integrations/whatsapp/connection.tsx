@@ -28,6 +28,7 @@ import { ConnectedNotice } from "./connected-notice"
 import { WhatsAppConnectSteps } from "./connect-steps"
 import { WhatsAppMessagePanel } from "./message-panel"
 import { WhatsAppMessages } from "./messages"
+import { Note } from "./note"
 import { OwnAppStatus } from "./own-app-status"
 import { appWords } from "../../../lib/product-words"
 
@@ -312,6 +313,16 @@ export function WhatsAppConnection({
   const expiresSoon = ownAppExpiryWords(connection.ownApp, Date.now(), (iso) =>
     new Date(iso).toLocaleDateString(locale, { timeZone: activeOrgTimeZone(), day: "numeric", month: "long" }),
   )
+  const metaRemoved = pending === "meta-removed" ? (connection.signup?.metaRemoved ?? null) : null
+  const metaRemovedAt = metaRemoved
+    ? new Date(metaRemoved.at).toLocaleString(locale, {
+        timeZone: activeOrgTimeZone(),
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null
   const openKey = () => {
     setNotice(null)
     setSurface({ kind: "key" })
@@ -417,6 +428,22 @@ export function WhatsAppConnection({
             {statusError}
           </p>
         ) : null}
+        {/* Meta cortó la conexión: el motivo con las palabras del servidor y, para quien administra, volver a conectar. */}
+        {active && metaRemoved ? (
+          <Note tone="danger" icon title={`Meta desconectó este número el ${metaRemovedAt}`}>
+            <span>{metaRemoved.why}</span>
+            <span>
+              Mientras tanto no llegan ni salen mensajes de WhatsApp.{" "}
+              {canWrite ? "Vuelve a conectar con Facebook, con el mismo número." : "Quien administra la configuración puede volver a conectarlo."}
+            </span>
+            {canWrite ? (
+              <div className="mt-2">
+                {/* No se dibuja si la instalación no tiene habilitado el botón. */}
+                <FacebookSignupButton reconnectConnectionId={connection.id} />
+              </div>
+            ) : null}
+          </Note>
+        ) : null}
         {/* Hecha con el botón: lo que haya quedado pendiente, con «Reintentar», y volver a conectar con él. */}
         {canWrite && byButton && active ? (
           <FacebookSignupPending
@@ -449,7 +476,7 @@ export function WhatsAppConnection({
           </p>
         ) : null}
         {/* Coexistencia: el número sigue en el celular y lo que se escribe ahí llega a la Bandeja. */}
-        {active && connection.signup?.businessApp ? (
+        {active && connection.signup?.businessApp && !metaRemoved ? (
           <p className="text-sm text-muted-foreground">
             Este número sigue en la app WhatsApp Business del celular: lo que respondas desde ahí también aparece en la
             Bandeja, y el agente espera mientras conversas.
@@ -466,7 +493,8 @@ export function WhatsAppConnection({
             ))}
           </ul>
         ) : null}
-        {canWrite && byButton && !otherActive ? (
+        {/* Con el corte de Meta a la vista, el botón ya está en su aviso. */}
+        {canWrite && byButton && !otherActive && !metaRemoved ? (
           <div className="flex flex-col gap-1.5 border-t pt-3">
             <p className="text-sm text-muted-foreground">
               Esta conexión se hizo con Facebook: no tiene una clave que cambiar. Si el permiso se pierde, se vuelve a conectar
