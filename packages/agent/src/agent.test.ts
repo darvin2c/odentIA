@@ -3066,11 +3066,18 @@ it("si la persona sigue escribiendo mientras el modelo responde, lo redactado no
   expect(await ownerDb.select().from(agentHandoff).where(eq(agentHandoff.conversationId, conversationId))).toEqual([])
 })
 
-it("con lo que llegó mientras el modelo pensaba, no hace lo que decidió con lo de antes (auditoría del ADR 0104)", async () => {
+it("con lo que llegó mientras el modelo pensaba, no hace lo que decidió con lo de antes, pero guarda lo que dijo (auditoría del ADR 0104)", async () => {
   const { conversationId, messageId } = await ingestText("tg:sigue-antes-de-actuar", "evt-actuar-1", "mañana a las 10")
   const model = new SlowScriptedModel(
-    () => toolCall("anotar_caso", { preferencia: "mañana a las 10" }, "call-1"),
-    // Mientras piensa, la persona corrige la hora: lo que iba a anotar ya no vale.
+    () =>
+      new AIMessage({
+        content: "",
+        tool_calls: [
+          { name: "anotar_caso", args: { preferencia: "mañana a las 10" }, id: "call-nota", type: "tool_call" },
+          { name: "buscar_huecos", args: { branchId: "x", from: "2026-11-02" }, id: "call-huecos", type: "tool_call" },
+        ],
+      }),
+    // Mientras piensa, la persona corrige la hora: buscar con lo de antes ya no vale.
     async () => {
       const next = await ingestText("tg:sigue-antes-de-actuar", "evt-actuar-2", "no, mejor a las 11")
       await withOrgContext(appDb, "org_a", (tx) =>
@@ -3080,7 +3087,9 @@ it("con lo que llegó mientras el modelo pensaba, no hace lo que decidió con lo
   )
   expect(await runScripted(model, conversationId, messageId)).toBe("done")
   const state = await withOrgContext(appDb, "org_a", (tx) => getAgentCaseState(tx, "org_a", conversationId))
-  expect(state.notes).toEqual([])
+  // Lo que dijo queda (la siguiente corrida anota encima lo último); la búsqueda no se hizo.
+  expect(state.notes.map((note) => note.text)).toEqual(["mañana a las 10"])
+  expect(state.lookups).toEqual([])
   const [row] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ status: agentRunLedger.status, error: agentRunLedger.error }).from(agentRunLedger).where(eq(agentRunLedger.conversationId, conversationId)))
   expect(row).toEqual({ status: "omitida", error: "persona-siguio-escribiendo" })

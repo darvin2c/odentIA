@@ -1035,10 +1035,11 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
 
   /**
    * La persona siguió escribiendo mientras el modelo pensaba: lo que iba a hacer sale de lo
-   * que ya no es lo último (la hora que corrigió, la pregunta que sumó). La corrida termina
-   * sin hacer nada y la de su último mensaje responde todo (ADR 0097): no reserva con lo de
-   * antes ni paga los pasos que quedaban (auditoría del ADR 0104). Con una señal de alarma o
-   * el caso ya en el equipo, el aviso no espera.
+   * que ya no es lo último (la hora que corrigió, la pregunta que sumó). La corrida solo
+   * guarda lo que la persona dijo (`MEMORY_TOOLS`: su nombre, una nota) y termina; la de su
+   * último mensaje responde todo (ADR 0097). No reserva con lo de antes ni paga los pasos que
+   * quedaban (auditoría del ADR 0104); sin guardar su nombre, la siguiente no lo sabía. Con
+   * una señal de alarma o el caso ya en el equipo, el aviso no espera.
    */
   async function personKeptWriting(): Promise<boolean> {
     const trigger = toolCtx.triggerId
@@ -1055,7 +1056,10 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
 
   async function routeAfterLlm(state: typeof AgentState.State): Promise<string> {
     const last = state.messages[state.messages.length - 1]
-    if (last instanceof AIMessage && last.tool_calls && last.tool_calls.length > 0) return (await personKeptWriting()) ? END : "tools"
+    if (last instanceof AIMessage && last.tool_calls && last.tool_calls.length > 0) {
+      if (!(await personKeptWriting())) return "tools"
+      return last.tool_calls.some((call) => MEMORY_TOOLS.has(call.name)) ? "tools" : END
+    }
     // Texto sin enviar: el aviso, una vez por corrida (los mensajes del
     // estado son solo los de esta corrida). Con el caso ya derivado o la
     // respuesta ya enviada no hay nada que reclamar; sin texto, tampoco.
@@ -1094,6 +1098,15 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
   async function runTools(state: typeof AgentState.State) {
     const last = state.messages[state.messages.length - 1]
     const calls = last instanceof AIMessage ? (last.tool_calls ?? []) : []
+    // Siguió escribiendo (`personKeptWriting`): de este paso solo sale lo que guarda lo que dijo.
+    if (toolCtx.superseded && last instanceof AIMessage) {
+      const kept = calls.filter((call) => MEMORY_TOOLS.has(call.name))
+      for (const call of kept) {
+        if (!toolCtx.toolsUsed.includes(call.name)) toolCtx.toolsUsed.push(call.name)
+      }
+      const out = await toolNode.invoke({ messages: [...state.messages.slice(0, -1), new AIMessage({ content: last.content, tool_calls: kept })] })
+      return { messages: out.messages ?? [], turnCount: state.turnCount + 1 }
+    }
     const sends = calls.filter((call) => SEND_TOOLS.has(call.name))
     const remembers =
       sends.length === 1 && sends[0]?.name === "send_reply" && calls.every((call) => SEND_TOOLS.has(call.name) || MEMORY_TOOLS.has(call.name))
