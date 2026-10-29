@@ -44,6 +44,52 @@ describe("señales de alarma (ADR 0084)", () => {
     }
   })
 
+  it("una posible rabia es una alarma en los dos productos: la mordedura de un animal o un murciélago que pudo tocarla", () => {
+    for (const product of ["dental", "medical"] as const) {
+      const signals = agentTextsFor(product).alarmSignals
+      for (const text of [
+        // La ronda de latidIA con casos nuevos al azar (auditoría del 29-oct).
+        "me desperte y habia un murcielago en mi dormitorio, estaba en el piso y ya no esta, creo q salio por la ventana 😰",
+        "Hola, encontré un murciélago en mi cuarto cuando desperté 😰",
+        "necesito saber si voy alla o a emergencias por lo del murcielago",
+        "un murciélago me arañó",
+        "creo que me mordió algún animal mientras dormía",
+        "me mordió un perro en la pierna",
+        "Me mordió ayer un perro de la calle",
+        "a mi hijo lo mordió un perro en la boca y se le movió un diente",
+        "a mi hija le mordió el gato del vecino",
+        "un perro mordió a mi hijo",
+        "el gato de mi vecina me mordió la mano",
+        "fui mordida por un perro callejero",
+        "¿atienden mordeduras de perro?",
+      ]) {
+        expect(hasAlarmSignal(text, signals), `${product}: ${text}`).toBe(true)
+      }
+      for (const text of [
+        // Lo que una clínica dental oye de mascotas y mordidas.
+        "mi gato mordió y rompió el protector bucal de mi hermano 😭",
+        "a mi gato se le ocurrio morder el protector bucal de mi hermano",
+        "mi perro me mordió la placa",
+        "el retenedor lo mordió mi perro",
+        "me duele más al morder",
+        "tengo la mordida cruzada",
+        "me mordí la lengua",
+        "mi hijo me mordió jugando",
+        // Sin mordida ni contacto.
+        "el perro casi me mordió",
+        "el perro no me mordió, solo me ladró",
+        "me arañó mi gato",
+        "me picó un zancudo",
+        "vi un murciélago en el patio",
+        "me voy a la selva y hay murciélagos, ¿ponen la vacuna antirrábica?",
+        "¿pueden sellar un formulario de salud para mi gato?",
+        "me da rabia esperar tanto",
+      ]) {
+        expect(hasAlarmSignal(text, signals), `${product}: ${text}`).toBe(false)
+      }
+    }
+  })
+
   it("latidIA suma las de un consultorio; odentIA, ninguna", () => {
     const medical = agentTextsFor("medical").alarmSignals
     const urgent = [
