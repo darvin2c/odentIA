@@ -414,7 +414,7 @@ function ActionDetail({
           ? "La voz se convierte en texto en el navegador del profesional: no hay audio ni costo de transcripción. Lo que cuesta es que Clío entienda cada pausa. No se muestra lo dictado ni el diagnóstico: son datos clínicos."
           : item.agent === "sofi" || item.type === "Cita recuperada"
             ? "La conversación no se abre desde aquí: se lee solo con el permiso de la clínica, en una revisión de cobro. Cada fila sale del registro de lo que hizo Sofi, sin el texto de los mensajes."
-            : "Lo que escribió la persona no se guarda: puede llevar nombres de pacientes (ADR 0070). Esto es lo que Argos entendió."}
+            : "Lo que escribió la persona no se guarda: puede llevar nombres de pacientes. Esto es lo que Argos entendió."}
       </p>
     </div>
   )
