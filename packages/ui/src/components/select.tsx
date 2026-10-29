@@ -3,7 +3,52 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "cn"
 import { RiArrowDownSLine, RiCheckLine, RiArrowUpSLine } from "@remixicon/react"
 
-const Select = SelectPrimitive.Root
+type SelectItems = SelectPrimitive.Root.Props<unknown>["items"]
+
+/** Misma lista, mismo contenido: mismas claves y mismas etiquetas o valores (comparación superficial). */
+export function sameItems(a: SelectItems, b: SelectItems): boolean {
+  if (a === b) return true
+  if (!a || !b || Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return (
+      a.length === b.length &&
+      a.every((item, index) => {
+        const other = b[index]
+        if (item === other) return true
+        if (!item || !other || typeof item !== "object" || typeof other !== "object") return false
+        const keys = Object.keys(item)
+        return (
+          keys.length === Object.keys(other).length &&
+          keys.every((key) => Object.is((item as Record<string, unknown>)[key], (other as Record<string, unknown>)[key]))
+        )
+      })
+    )
+  }
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.is(left[key], right[key]))
+}
+
+/**
+ * Desviación del registry: Base UI copia `items` en su store en cada render, y
+ * un objeto nuevo con el mismo contenido (`items={Object.fromEntries(...)}` en
+ * línea) lo vuelve a escribir y redibuja la página sin fin (la lista de espera
+ * se congelaba al poner el foco en su panel). Mientras el contenido sea igual,
+ * se conserva la misma referencia.
+ */
+function useStableItems(items: SelectItems): SelectItems {
+  const ref = React.useRef(items)
+  if (!sameItems(ref.current, items)) ref.current = items
+  return ref.current
+}
+
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectPrimitive.Root.Props<Value, Multiple>
+) {
+  const items = useStableItems(props.items)
+  return <SelectPrimitive.Root {...props} items={items} />
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

@@ -1,0 +1,2 @@
+ALTER TABLE "admin"."saas_plan" ADD COLUMN "inform_message_limit" integer;--> statement-breakpoint
+ALTER TABLE "admin"."saas_plan" ADD CONSTRAINT "saas_plan_inform_messages_check" CHECK ("admin"."saas_plan"."inform_message_limit" IS NULL OR "admin"."saas_plan"."inform_message_limit" BETWEEN 1 AND 1000);

@@ -101,6 +101,14 @@ export function AgentTestChat({
       setDraft(text)
     },
   })
+  // «Lo probaste» cuenta las respuestas del modelo, que llegan después del envío:
+  // con cada respuesta nueva se vuelve a pedir el resumen del agente.
+  const answered = state?.turns.length ?? 0
+  const seenAnswers = useRef(answered)
+  useEffect(() => {
+    if (answered > seenAnswers.current) void queryClient.invalidateQueries({ queryKey: ["agent-overview"] })
+    seenAnswers.current = answered
+  }, [answered, queryClient])
   // Lo enviado deja de verse aparte cuando ya es parte de la conversación.
   const lastFromPatient = state?.messages.filter((item) => item.from === "paciente").at(-1)?.text
   useEffect(() => {

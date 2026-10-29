@@ -97,6 +97,12 @@ export const saasPlan = adminSchema.table(
     consultationSimpleMicros: bigint("consultation_simple_micros", { mode: "number" }),
     consultationStandardMicros: bigint("consultation_standard_micros", { mode: "number" }),
     recoveryMicros: bigint("recovery_micros", { mode: "number" }),
+    /**
+     * Mensajes de la persona que cubre cada Informa en su ventana (ADR 0105):
+     * pasado ese número contaría otro Informa. Null = sin tope. Por ahora se
+     * mide en sombra: la administración ve lo que se cobraría, nadie lo paga.
+     */
+    informMessageLimit: integer("inform_message_limit"),
     /** Preguntas a Argos incluidas cada mes y el paquete que se suma al acabarlas (ADR 0085). */
     argosIncludedQuestions: integer("argos_included_questions").notNull().default(0),
     argosPackQuestions: integer("argos_pack_questions").notNull().default(100),
@@ -144,6 +150,10 @@ export const saasPlan = adminSchema.table(
     check(
       "saas_plan_tier_check",
       sql`coalesce(${table.conversationInformMicros}, 0) >= 0 AND coalesce(${table.conversationAgendaMicros}, 0) >= 0 AND coalesce(${table.consultationSimpleMicros}, 0) >= 0 AND coalesce(${table.consultationStandardMicros}, 0) >= 0 AND coalesce(${table.argosPackMicros}, 0) >= 0 AND coalesce(${table.storageGbMicros}, 0) >= 0 AND ${table.argosIncludedQuestions} >= 0 AND ${table.argosPackQuestions} BETWEEN 1 AND 10000 AND ${table.storageIncludedGb} >= 0`,
+    ),
+    check(
+      "saas_plan_inform_messages_check",
+      sql`${table.informMessageLimit} IS NULL OR ${table.informMessageLimit} BETWEEN 1 AND 1000`,
     ),
     check(
       "saas_plan_fixed_tiers_check",

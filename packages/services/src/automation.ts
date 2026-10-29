@@ -78,6 +78,7 @@ import { lapsedToInvite, recordInvitation } from "./return-invites.js"
 import { updateOpportunity } from "./opportunities.js"
 import { getPatientMissingData } from "./patient-registration.js"
 import { personalLinkRef } from "./personal-link-token.js"
+import { listDecisionRecipients, patientAge } from "./responsibilities.js"
 import { clinicOriginOf, personalLinkMessageUrl, personalLinkUrl, publicLinksConfigured } from "./public-links.js"
 import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
@@ -860,8 +861,17 @@ export async function enqueueJob(
 }
 
 /**
- * A quién se le escribe lo de un paciente: su persona preferida y, si no tiene,
- * él mismo. Siempre la misma para el mismo paciente.
+ * A quién se le escribe lo de un paciente (recordatorios, avisos de la cita y
+ * recontactos), siempre la misma para el mismo paciente:
+ * 1. otra persona que el equipo marcó como preferida (la abuela que lo trae);
+ * 2. siendo menor de edad, su representante legal vigente, el mismo de sus
+ *    presupuestos y recetas (`listDecisionRecipients`): un niño no confirma ni
+ *    lleva a nadie a la cita, y sus datos de salud los gestiona su
+ *    representante (Ley 29733). Su propio vínculo «preferido» no le gana: lo
+ *    pone el registro solo. Al cumplir 18 la representación termina y le
+ *    escribe a él;
+ * 3. el propio paciente;
+ * 4. si no, el primero vinculado.
  */
 export async function preferredContact(tx: Db, orgId: string, patientId: string): Promise<string | null> {
   const rows = await tx
@@ -885,6 +895,12 @@ export async function preferredContact(tx: Db, orgId: string, patientId: string)
     .orderBy(asc(patientContact.createdAt), asc(patientContact.id))
     .limit(20)
   if (rows.length === 0) return null
+  const chosen = rows.find((r) => r.isPreferred && r.relationship !== "self")
+  if (chosen) return chosen.contactId
+  if ((await patientAge(tx, orgId, patientId)).isMinor) {
+    const [representative] = await listDecisionRecipients(tx, orgId, patientId)
+    if (representative) return representative.contactId
+  }
   return (rows.find((r) => r.isPreferred) ?? rows.find((r) => r.relationship === "self") ?? rows[0])!.contactId
 }
 

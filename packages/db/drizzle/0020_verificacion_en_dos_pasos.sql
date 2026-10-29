@@ -1,0 +1,1 @@
+ALTER TABLE "org_profile" ADD COLUMN "require_two_factor" boolean DEFAULT false NOT NULL;

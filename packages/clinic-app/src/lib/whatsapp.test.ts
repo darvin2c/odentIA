@@ -358,6 +358,30 @@ describe("la conexión, en palabras", () => {
     expect(connectionWords(waiting, since, "signup")).toMatchObject({ tone: "pending", status: "Falta un paso." })
   })
 
+  it("si Meta cortó la conexión no dice «Conectado»: lo dice antes que cualquier paso y sin calidad ni límite", () => {
+    const signup = { grantedAt: minutesAgo(60), subscribedAt: minutesAgo(60), registeredAt: minutesAgo(60), pending: [] }
+    const removed = connection({
+      lastInboundAt: minutesAgo(30),
+      health: { quality: "alta", dailyLimit: 1000 },
+      signup: { ...signup, businessApp: true, metaRemoved: { at: minutesAgo(5), why: "La app WhatsApp Business no se abrió…" } },
+    })
+    expect(connectionPending(removed)).toBe("meta-removed")
+    expect(connectionWords(removed, since, "meta-removed")).toMatchObject({
+      tone: "pending",
+      status: "Se desconectó de Meta.",
+      detail: "No recibe ni envía mensajes hasta volver a conectar con Facebook. Las conversaciones que ya tienes se conservan.",
+      facts: [],
+    })
+    // Con pasos pendientes también: lo cortado va primero.
+    const both = connection({
+      signup: { ...signup, pending: [{ step: "suscribir", title: "Falta…", problem: null }], metaRemoved: { at: minutesAgo(5), why: "x" } },
+    })
+    expect(connectionPending(both)).toBe("meta-removed")
+    // Vuelta a conectar (o una respuesta de antes, sin el dato): como siempre.
+    expect(connectionPending(connection({ signup: { ...signup, metaRemoved: null } }))).toBeNull()
+    expect(connectionPending(connection({ signup }))).toBeNull()
+  })
+
   it("la cuenta que encontró WhatsApp se dice con lo que entregue", () => {
     expect(accountWords({ number: "+51 999 111 222", name: "Clínica Dental Smile" })).toBe("+51 999 111 222 · Clínica Dental Smile")
     expect(accountWords({ number: null, name: "Clínica Dental Smile" })).toBe("Clínica Dental Smile")

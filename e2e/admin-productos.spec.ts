@@ -51,9 +51,10 @@ test("la administración distingue el producto de cada clínica y filtra por él
   await shot("hoy-claro")
 
   await page.goto(`${ADMIN}/organizations`)
-  const list = page.getByRole("list").filter({ has: page.getByRole("button", { name: new RegExp(medical.org.name) }) })
-  const medicalRow = list.getByRole("button", { name: new RegExp(medical.org.name) })
-  const dentalRow = list.getByRole("button", { name: new RegExp(owner.org.name) })
+  // Cada clínica es una tarjeta que lleva a su ficha.
+  const list = page.getByRole("list").filter({ has: page.getByRole("link", { name: new RegExp(medical.org.name) }) })
+  const medicalRow = list.getByRole("link", { name: new RegExp(medical.org.name) })
+  const dentalRow = list.getByRole("link", { name: new RegExp(owner.org.name) })
   await expect(medicalRow).toContainText("latidIA")
   await expect(dentalRow).toContainText("odentIA")
 

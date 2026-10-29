@@ -15,7 +15,9 @@
     "test": "vitest run",
     "seed:dev": "tsx --env-file-if-exists=../../infra/dev/.env src/dental/seed-demo.ts",
     "mail:preview": "tsx --env-file-if-exists=../../infra/dev/.env src/mail-preview.ts",
-    "bench:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/bench-reports.ts"
+    "bench:reports": "tsx --env-file-if-exists=../../infra/dev/.env src/bench-reports.ts",
+    "import:peek": "tsx src/clinic-import-cli.ts peek",
+    "import:prepare": "tsx src/clinic-import-cli.ts prepare"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1131.0",

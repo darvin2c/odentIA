@@ -13,9 +13,11 @@ import {
   type DictationExtraction,
   type DictationPending,
   type DictationProfile,
+  demoMaterial,
   dictationEdits,
   dictationList,
   dictationSaid,
+  materialsPrompt,
 } from "../dictation.js"
 
 /**
@@ -41,6 +43,7 @@ export const extraction = z.object({
     .extend({ dicho: dictationSaid })
     .optional()
     .describe("Solo si pidió armar el presupuesto ahora."),
+  materiales: dictationList("atencion.material", "Un elemento por cada material que dijo que usó en la atención."),
   ...dictationEdits("toothNumber"),
 })
 
@@ -55,6 +58,7 @@ const DRAFT_PARTS = [
   { key: "procedimientos", kind: "procedimiento" },
   { key: "citas", kind: "cita" },
   { key: "presupuesto", kind: "presupuesto", single: true },
+  { key: "materiales", kind: "material" },
 ] as const
 
 export function systemPrompt(input: { services: string[]; diagnosisList: string; catalog: string }): string {
@@ -84,6 +88,7 @@ export function systemPrompt(input: { services: string[]; diagnosisList: string;
       : "La clínica aún no tiene servicios.",
     ...allergyAndDonePrompt("odontólogo", "«le hice la profilaxis», «terminamos la resina de la 36»"),
     ...appointmentAndBudgetPrompt("«agéndale para la endodoncia»"),
+    materialsPrompt("odontólogo", "«se fueron cuatro carpules»", "una resina, una profilaxis"),
     "La fecha de hoy llega con lo dictado. Un control «en seis meses» se cuenta desde esa fecha.",
     `Responde únicamente llamando a ${DICTATION_TOOL}, una sola vez, con todo lo dictado.`,
   ].join("\n")
@@ -170,6 +175,9 @@ export function demoExtraction(
     const allergy = /\balergic[oa] a (?:la |el |los |las )?([a-z]+)/.exec(text)
     if (allergy?.[1]) drafts.push({ kind: "alergia", payload: { substance: allergy[1] }, sourceText: sentence })
     else if (/\b(niega alergias|no tiene alergias|sin alergias)\b/.test(text)) drafts.push({ kind: "alergia", payload: { none: true }, sourceText: sentence })
+    // «Usé una mascarilla»: un material de la atención.
+    const material = demoMaterial(text)
+    if (material) drafts.push({ kind: "material", payload: material, sourceText: sentence })
     // Lo contado como hecho («le hice…», «terminé…») es un procedimiento de hoy, no una indicación.
     const done = /\b(le hice|hice|termine|terminamos|le puse)\b/.test(text)
     for (const name of services) {

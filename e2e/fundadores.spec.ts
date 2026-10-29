@@ -60,7 +60,7 @@ test("fundadores: la administración invita y la clínica entra con su invitaci�
   test.setTimeout(240_000)
   const { page, user } = owner
   const shot = (p: typeof page, name: string) => p.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
-  const tag = randomUUID().slice(0, 6)
+  const tag = `t${randomUUID().slice(0, 5)}`
   await makeStaff(fixtureDb, user.id)
   const planId = await foundersPlan(fixtureDb, tag)
   const email = `fundadora-${tag}@test.dev`
@@ -152,7 +152,7 @@ test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", asyn
   test.setTimeout(180_000)
   const { page, user, org } = owner
   const shot = (name: string) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
-  const tag = randomUUID().slice(0, 6)
+  const tag = `t${randomUUID().slice(0, 5)}`
   await makeStaff(fixtureDb, user.id)
   const planId = await foundersPlan(fixtureDb, tag)
   // Un plan con descuento negociable para su ficha; el descuento vence en 6 días.
@@ -162,12 +162,15 @@ test("precio negociado: vence, se marca en Clínicas y se avisa en Inicio", asyn
     .set({ planId, discountBps: 1000, discountEndsAt: new Date(Date.now() + 6 * DAY - 60_000) })
     .where(eq(saasSubscription.organizationId, org.id))
 
-  await gotoHydrated(page, hostUrl("admin", `/organizations?org=${org.id}`))
+  // En Clínicas el precio negociado se marca con su vencimiento; su ficha dice quién paga.
+  await gotoHydrated(page, hostUrl("admin", "/organizations"))
   await page.getByRole("textbox", { name: "Buscar clínicas" }).fill(org.slug)
   await page.getByRole("button", { name: "Buscar" }).click()
   await expect(page.getByText("10 % · vence en 6 días")).toBeVisible()
-  await expect(page.getByRole("columnheader", { name: "Paga esta clínica" })).toBeVisible()
   await shot("clinicas-precio-negociado")
+  await gotoHydrated(page, hostUrl("admin", `/organizations?org=${org.id}`))
+  await page.getByRole("tab", { name: "Precio y prueba" }).click()
+  await expect(page.getByRole("columnheader", { name: "Paga esta clínica" })).toBeVisible()
 
   await gotoHydrated(page, hostUrl("admin", "/"))
   const soon = page.getByRole("region", { name: "Precios especiales que vencen pronto" }).or(page.locator("section").filter({ hasText: "Precios especiales que vencen pronto" }))

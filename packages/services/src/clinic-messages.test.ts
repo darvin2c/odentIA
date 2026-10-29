@@ -311,7 +311,7 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
     )
     const failures = async (body: string, extra?: Parameters<typeof check>[1]) =>
       (await check(body, extra)).checks.filter((item) => !item.ok).map((item) => item.text)
-    expect(await failures("Hola, {{persona}}. Tu cita en {{lugar}}.")).toEqual([
+    expect(await failures("Hola, {{persona}}. Tu cita en {{lugar}}. Te esperamos.")).toEqual([
       "Falta el dato «Fecha, hora y profesional de la cita».",
     ])
     expect(await failures("Hola, {{persona}} {{persona}}. En {{lugar}}: {{citas}}. Te esperamos.")).toEqual([
@@ -321,6 +321,13 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
       "«saldo» no es un dato de este mensaje: quítalo.",
     ])
     expect(await failures("{{persona}}, te recordamos la cita en {{lugar}}: {{citas}}")).toEqual([
+      "No puede empezar ni terminar con un dato: WhatsApp pide texto antes y después.",
+    ])
+    // Un punto después del último dato (o un «¡» antes del primero) no cuenta como texto: Meta lo rechaza igual.
+    expect(await failures("Hola, {{persona}}. Te recordamos la cita: {{citas}}, en {{lugar}}.")).toEqual([
+      "No puede empezar ni terminar con un dato: WhatsApp pide texto antes y después.",
+    ])
+    expect(await failures("¡{{persona}}! Te recordamos la cita: {{citas}}, en {{lugar}}. Te esperamos.")).toEqual([
       "No puede empezar ni terminar con un dato: WhatsApp pide texto antes y después.",
     ])
     expect(await failures(`Hola, {{persona}}. En {{lugar}}: {{citas}}. ${"a".repeat(1100)}`)).toEqual([
@@ -491,6 +498,24 @@ describe("cambiar el texto nunca deja a la clínica sin mensaje", () => {
     expect((await messageOf(c, "recordatorio_cita")).current.isDefault).toBe(true)
   })
 
+  it("un rechazo de WhatsApp llega como 400 con la explicación de Meta, no como 502 que el proxy oculta", async () => {
+    const c = await clinic()
+    const userMsg = "Las variables no pueden estar al principio ni al final de la plantilla."
+    const rejecting = fakeMeta((call) =>
+      call.method === "POST"
+        ? { status: 400, json: { error: { message: "Invalid parameter", code: 100, error_user_msg: userMsg } } }
+        : undefined,
+    )
+    await expect(
+      run(c, (tx) => saveMessageText(tx, c.orgId, c.whatsappId, c.ownerId, "recordatorio_cita", FORMAL, { fetch: rejecting.fetch, secretsKey: KEY })),
+    ).rejects.toMatchObject({ code: "TEMPLATE_REQUEST_FAILED", status: 400, message: `WhatsApp no aceptó la solicitud de plantilla: ${userMsg}` })
+    // Si Meta no responde (un 5xx), sigue siendo un 502.
+    const down = fakeMeta((call) => (call.method === "POST" ? { status: 500, json: { error: { message: "Service unavailable" } } } : undefined))
+    await expect(
+      run(c, (tx) => saveMessageText(tx, c.orgId, c.whatsappId, c.ownerId, "recordatorio_cita", FORMAL, { fetch: down.fetch, secretsKey: KEY })),
+    ).rejects.toMatchObject({ code: "TEMPLATE_REQUEST_FAILED", status: 502 })
+  })
+
   it("sin WhatsApp activo vale el último texto guardado, y el ciclo lo deja vigente", async () => {
     const c = await clinic()
     await whatsappSays(c, "odentia_recordatorio_cita_v2", "aprobada")
@@ -556,8 +581,8 @@ describe("mensajes creados por la clínica", () => {
 
   it("eliminarlo lo quita de la cuenta de WhatsApp y lo archiva; uno de odentIA no se elimina", async () => {
     const c = await clinic()
-    const created = await create(c, { title: "Resultados listos", body: "Hola, {{persona}}. Ya tenemos tus resultados en {{clinica}}." })
-    await save(c, created.id, "Hola, {{persona}}. Tus resultados ya están en {{clinica}}.")
+    const created = await create(c, { title: "Resultados listos", body: "Hola, {{persona}}. Ya tenemos tus resultados en {{clinica}}. Te esperamos." })
+    await save(c, created.id, "Hola, {{persona}}. Tus resultados ya están en {{clinica}}. Te esperamos.")
     const names = (await versionsOf(c)).map((version) => version.templateName)
     expect(names).toHaveLength(2)
     // En la cuenta solo sigue la primera: la segunda ya no está y no se pide borrar.
@@ -661,7 +686,7 @@ describe("Bandeja, pasadas las 24 horas", () => {
     const c = await clinic()
     const id = await thread(c, "Lucía Paredes", 48)
     const own = await run(c, (tx) =>
-      createClinicMessage(tx, c.orgId, c.whatsappId, c.ownerId, { title: "Tu trabajo ya está listo", body: "Hola, {{persona}}. Tu trabajo ya llegó a {{clinica}}.", buttonTitle: "Quiero mi cita" }, OFFLINE),
+      createClinicMessage(tx, c.orgId, c.whatsappId, c.ownerId, { title: "Tu trabajo ya está listo", body: "Hola, {{persona}}. Tu trabajo ya llegó a {{clinica}}. Escríbenos y coordinamos.", buttonTitle: "Quiero mi cita" }, OFFLINE),
     )
     const [version] = await versionsOf(c)
     await ownerDb.insert(channelTemplate).values([

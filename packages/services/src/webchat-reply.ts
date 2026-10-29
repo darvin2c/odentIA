@@ -1,6 +1,8 @@
+import { whatsappNumberProblem } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
 import { whatsappOf } from "./held-replies.js"
+import { findOrgCountry } from "./locale.js"
 
 /**
  * Por dónde le llega al visitante del chat web la respuesta del equipo (R4,
@@ -11,7 +13,8 @@ import { whatsappOf } from "./held-replies.js"
  * - WhatsApp: con WhatsApp conectado, su WhatsApp marcado o el número que
  *   dejó. Ese número se usa solo si no es de nadie más: ni la identidad de
  *   otra persona, ni el teléfono anotado de otra ficha, ni uno que WhatsApp ya
- *   rechazó. Nunca se une a otra ficha por el número.
+ *   rechazó, ni uno que no puede ser un WhatsApp (un fijo o un celular
+ *   incompleto del país de la clínica). Nunca se une a otra ficha por el número.
  * - Correo: con un buzón de la clínica conectado.
  */
 export interface WebchatReplyRoutes {
@@ -31,7 +34,11 @@ export async function webchatReplyRoutes(
   let whatsapp: WebchatReplyRoutes["whatsapp"] = null
   if (await whatsappOf(tx, orgId, contactId)) {
     whatsapp = { claim: false, phone: person.phone ?? "" }
-  } else if (person.phone && (await whatsappConnected(tx, orgId))) {
+  } else if (
+    person.phone &&
+    !whatsappNumberProblem(person.phone, await findOrgCountry(tx, orgId)) &&
+    (await whatsappConnected(tx, orgId))
+  ) {
     const digits = person.phone.replace(/\D/g, "")
     const [taken] = await tx.execute<{ taken: boolean }>(sql`
       select exists (select 1 from contact_identity ci

@@ -51,6 +51,7 @@ Leer el `AGENTS.md` del área antes de modificarla; sus reglas complementan este
 - `e2e/AGENTS.md`: aislamiento y verificación de recorridos.
 - `.agents/skills/odentia-ux/SKILL.md`: usar al diseñar o cambiar interfaces y recorridos.
 - `.agents/skills/odentia-arch/SKILL.md`: usar para stack, topología, tenancy, adaptadores y storage.
+- `.agents/skills/odentia-carga/SKILL.md`: usar al traer los pacientes de una clínica nueva desde sus archivos.
 - `docs/development.md`: instalación, operación local y herramientas.
 - `docs/decisions/README.md`: cuándo registrar una decisión y formato MADR breve.
 

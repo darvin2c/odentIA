@@ -1015,7 +1015,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   expect(((await reverted.json()) as { data: Record<string, unknown> }).data).toMatchObject({ current: { isDefault: true }, canRevert: false })
   expect((await send(app, "PUT", `${base}/no_existe/text`, { body: formal })).status).toBe(404)
 
-  const created = await send(app, "POST", base, { title: "Tu trabajo ya está listo", body: "Hola, {{persona}}. Tu trabajo ya llegó a {{clinica}}.", buttonTitle: "Quiero mi cita" })
+  const created = await send(app, "POST", base, { title: "Tu trabajo ya está listo", body: "Hola, {{persona}}. Tu trabajo ya llegó a {{clinica}}. Escríbenos y coordinamos tu cita.", buttonTitle: "Quiero mi cita" })
   expect(created.status).toBe(201)
   const own = ((await created.json()) as { data: { id: string; origin: string; deletable: boolean } }).data
   expect(own).toMatchObject({ origin: "clinica", deletable: true })

@@ -410,6 +410,15 @@ export const OPERATIONS = {
       quantity: { kind: "int", min: 1, max: 99, label: "Cantidad", description: "Cuántas unidades, solo si lo dijo («dos carillas» = 2).", body: "optional", nullable: true, agent: "fills" },
     },
   },
+  // Un material que se dice usado en la atención (ADR 0106): se busca en Inventario y, confirmado,
+  // es el total de ese producto en la atención; sale de la sede al firmar, con los de sus servicios.
+  "atencion.material": {
+    label: "Material usado",
+    fields: {
+      product: { kind: "text", min: 2, max: 200, label: "Material", description: "El material que usó, con sus palabras y en singular (mascarilla, guante, carpule de anestesia). El sistema lo busca en Inventario.", body: "none", agent: "requires" },
+      quantity: { kind: "int", min: 1, max: 9999, label: "Cuántos en total", description: "Cuántos dijo que usó, solo si lo dijo («dos pares de guantes» = 2). Vacío si no lo dijo.", body: "optional", nullable: true, agent: "fills" },
+    },
+  },
   // La próxima cita que se pide reservar en la atención (issue 109, paso 2): el servicio busca el
   // hueco del profesional y la reserva `createAppointment`, como «Nueva cita».
   "cita.dictada": {

@@ -19,6 +19,7 @@ import { forgetAdminDeviceOnSignOut } from "./admin-device.js"
 import { passwordBreachCheck } from "./password-breach.js"
 import { AGREEMENT_VERSION } from "./legal.js"
 import { legalAcceptance } from "./terms.js"
+import { keepTwoFactorWhileRequired } from "./team-two-factor.js"
 
 export interface CreateAuthOptions {
   db: Db
@@ -179,14 +180,15 @@ export function createAuth({
       },
     },
     plugins: [
-      // Segundo factor TOTP del personal admin (estándar Better Auth: sin
-      // cripto propia; secreto + códigos de respaldo cifrados en `two_factor`).
-      // Aditivo: el panel no cambia salvo que alguien lo active. Solo TOTP;
-      // sin OTP por correo/SMS (sin otpOptions el método `otp` queda inútil).
-      // allowPasswordless: las cuentas solo-OAuth (Google) enrolan con sesión
-      // fresca verificada en /api/admin/access (regla propia); con credencial
-      // siempre exige contraseña. Solo lo enrolan staff (única UI).
+      // Segundo factor TOTP (estándar Better Auth: sin cripto propia; secreto +
+      // códigos de respaldo cifrados en `two_factor`). Lo activa cada persona en
+      // Mi perfil y la clínica puede pedirlo a su equipo (ADR 0107); el personal
+      // lo enrola en /api/admin/access. Solo TOTP; sin OTP por correo/SMS (sin
+      // otpOptions el método `otp` queda inútil). allowPasswordless: las cuentas
+      // solo-OAuth (Google) enrolan con sesión fresca verificada en
+      // /api/admin/access (regla propia); con credencial siempre exige contraseña.
       twoFactor({ allowPasswordless: true }),
+      keepTwoFactorWhileRequired(ownerDb),
       accessLink({ mailer, webURL, brand }),
       passwordBreachCheck({ enabled: breachCheck }),
       legalAcceptance(),
@@ -272,3 +274,4 @@ export { AGREEMENT_VERSION, LEGAL, LEGAL_VERSION } from "./legal.js"
 export { termsState } from "./terms.js"
 export * from "./permissions.js"
 export { ADMIN_DEVICE_COOKIE } from "./admin-device.js"
+export { SESSION_TWO_FACTOR_PREFIX } from "./team-two-factor.js"

@@ -51,8 +51,10 @@ import {
   type ProductAgentTexts,
   productAgentTexts,
   type PublicLinkConfig,
+  attendedRun,
+  BURST_COVERED,
 } from "@odentia/services"
-import { and, desc, eq, inArray, or, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { organization } from "@odentia/db/schema/auth"
 import { createDecisionModel, type DecisionModel, type DecisionProvider, type PlatformDecisions } from "./decision/index.js"
 import { BURST_HORIZON_MS } from "./decision/points.js"
@@ -140,8 +142,6 @@ function matchesHandoff(text: string | null, keywords: string[]): boolean {
   return keywords.some((k) => k.trim() !== "" && lower.includes(k.trim().toLowerCase()))
 }
 
-/** Motivo en el libro de un mensaje que otra corrida leyó y atendió. */
-const BURST_COVERED = "burst-covered"
 /** El equipo tomó o cerró la conversación mientras el modelo redactaba: nada salió. */
 const TEAM_TOOK_OVER = "team-took-over"
 /** La persona siguió escribiendo mientras se preparaba la respuesta: la de su último mensaje responde todo (ADR 0097). */
@@ -427,10 +427,7 @@ async function attendAgentRun(
             eq(agentRunLedger.organizationId, orgId),
             eq(agentRunLedger.conversationId, conversationId),
             eq(agentRunLedger.triggerMessageId, trigger.id),
-            or(
-              inArray(agentRunLedger.status, ["ok", "handoff"]),
-              and(eq(agentRunLedger.status, "omitida"), eq(agentRunLedger.error, BURST_COVERED)),
-            ),
+            attendedRun(),
           ),
         )
         .limit(1)

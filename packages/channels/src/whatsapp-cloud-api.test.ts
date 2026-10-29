@@ -510,7 +510,7 @@ it("el aviso de cambio de categoría llega aparte de los estados, y la direcció
   ])
   const deliveries = splitWhatsAppWebhook(JSON.stringify({ entry: [{ id: "WABA9", changes: [{ field: "template_category_update", value }] }] }))
   expect(deliveries).toEqual([
-    { kind: "account", accountId: "WABA9", templateStatuses: [], templateCategories: [expect.objectContaining({ category: "marketing" })] },
+    { kind: "account", accountId: "WABA9", templateStatuses: [], templateCategories: [expect.objectContaining({ category: "marketing" })], accountEvents: [] },
   ])
 })
 

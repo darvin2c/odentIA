@@ -1,7 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type {
+  AccountRemovalReason,
   ChannelAdapter,
   ChannelAdapterDeps,
+  NormalizedAccountEvent,
   NormalizedAppContact,
   NormalizedInbound,
   NormalizedStatus,
@@ -412,6 +414,12 @@ function graphError(status: number, json: unknown): string {
   return `HTTP ${status}`
 }
 
+/** La explicación de Meta pensada para la persona, si la manda. */
+function graphUserMessage(json: unknown): string | null {
+  const err = graphErrorOf(json) as { error_user_msg?: unknown } | undefined
+  return typeof err?.error_user_msg === "string" && err.error_user_msg.trim() ? err.error_user_msg.trim() : null
+}
+
 function sentMessageId(json: unknown): string | null {
   if (!json || typeof json !== "object" || !("messages" in json) || !Array.isArray(json.messages))
     return null
@@ -694,6 +702,41 @@ function toTemplateStatus(value: unknown): NormalizedTemplateStatus | null {
   }
 }
 
+/** Motivos de `disconnection_info.reason`; uno que no está aquí queda sin motivo. */
+const META_REMOVAL_REASONS: Record<string, AccountRemovalReason> = {
+  ACCOUNT_DISCONNECTED: "disconnected_in_app",
+  PRIMARY_INACTIVITY: "primary_inactivity",
+  COMPANION_INACTIVITY: "companion_inactivity",
+  BUSINESS_DOWNGRADE: "business_downgrade",
+  CHANGE_NUMBER: "number_changed",
+  USER_RE_REGISTERED: "re_registered",
+}
+
+/**
+ * Aviso de la cuenta (`account_update`) que corta o rehace su conexión con la
+ * app: `PARTNER_REMOVED` (quitaron el acceso o, en coexistencia, se desconectó
+ * por el motivo de `disconnection_info`), `ACCOUNT_OFFBOARDED` (el número salió
+ * de la coexistencia al cambiar de celular o volver a registrarse) y
+ * `ACCOUNT_RECONNECTED`. Los demás eventos de la cuenta no cambian la conexión.
+ * `at` es `entry[].time`, en segundos.
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/account_update
+ */
+function toAccountEvent(value: unknown, time: unknown): NormalizedAccountEvent | null {
+  if (!value || typeof value !== "object" || !("event" in value) || typeof value.event !== "string") return null
+  const event = value.event.toUpperCase()
+  const at = typeof time === "number" && Number.isFinite(time) ? new Date(time * 1000).toISOString() : null
+  if (event === "ACCOUNT_RECONNECTED") return { kind: "reconnected", reason: null, initiatedBy: null, at }
+  if (event === "ACCOUNT_OFFBOARDED") return { kind: "removed", reason: "re_registered", initiatedBy: null, at }
+  if (event !== "PARTNER_REMOVED") return null
+  const info = "disconnection_info" in value && value.disconnection_info && typeof value.disconnection_info === "object"
+    ? value.disconnection_info
+    : null
+  if (!info) return { kind: "removed", reason: "access_removed", initiatedBy: null, at }
+  const reason = "reason" in info && typeof info.reason === "string" ? (META_REMOVAL_REASONS[info.reason.toUpperCase()] ?? null) : null
+  const by = "initiated_by" in info && typeof info.initiated_by === "string" ? info.initiated_by.toUpperCase() : ""
+  return { kind: "removed", reason, initiatedBy: by === "USER" ? "user" : by === "SYSTEM" ? "system" : null, at }
+}
+
 const EXT_BY_MIME: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -712,6 +755,8 @@ interface WaChange {
   statuses: NormalizedStatus[]
   templateStatus: NormalizedTemplateStatus | null
   templateCategory: NormalizedTemplateCategory | null
+  /** La conexión de la cuenta con la app se cortó o se volvió a hacer (`account_update`). */
+  accountEvent?: NormalizedAccountEvent
   /** Coexistencia: la agenda del celular y si la clínica no compartió el historial. */
   appContacts?: NormalizedAppContact[]
   historyDeclined?: boolean
@@ -744,6 +789,13 @@ function readChanges(rawBody: string): WaChange[] {
         const update = toTemplateCategory(change.value)
         if (update) {
           found.push({ accountId, phoneNumberId: null, messages: [], statuses: [], templateStatus: null, templateCategory: update })
+        }
+        continue
+      }
+      if ("field" in change && change.field === "account_update") {
+        const accountEvent = toAccountEvent(change.value, "time" in entry ? entry.time : null)
+        if (accountEvent) {
+          found.push({ accountId, phoneNumberId: null, messages: [], statuses: [], templateStatus: null, templateCategory: null, accountEvent })
         }
         continue
       }
@@ -789,12 +841,16 @@ export interface WhatsAppNumberDelivery {
   historyDeclined: boolean
 }
 
-/** Lo que un aviso trae para una cuenta: los cambios de estado y de categoría de sus plantillas. */
+/**
+ * Lo que un aviso trae para una cuenta: los cambios de estado y de categoría de
+ * sus plantillas, y si su conexión con la app se cortó o se volvió a hacer.
+ */
 export interface WhatsAppAccountDelivery {
   kind: "account"
   accountId: string
   templateStatuses: NormalizedTemplateStatus[]
   templateCategories: NormalizedTemplateCategory[]
+  accountEvents: NormalizedAccountEvent[]
 }
 
 export type WhatsAppDelivery = WhatsAppNumberDelivery | WhatsAppAccountDelivery
@@ -803,8 +859,9 @@ export type WhatsAppDelivery = WhatsAppNumberDelivery | WhatsAppAccountDelivery
  * Reparte un aviso que llega a la dirección de una app (una sola para todas las
  * cuentas suscritas, y puede traer cambios de varias en el mismo envío): los
  * mensajes y estados van al número que los recibió
- * (`value.metadata.phone_number_id`) y los cambios de plantilla, que no traen
- * número, a su cuenta (`entry[].id`). Lo que no dice de quién es se omite.
+ * (`value.metadata.phone_number_id`); los cambios de plantilla y los de la
+ * conexión de la cuenta, que no traen número, a su cuenta (`entry[].id`). Lo
+ * que no dice de quién es se omite.
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/messages
  * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/reference/message_template_status_update
@@ -813,16 +870,18 @@ export function splitWhatsAppWebhook(rawBody: string): WhatsAppDelivery[] {
   const numbers = new Map<string, WhatsAppNumberDelivery>()
   const accounts = new Map<string, WhatsAppAccountDelivery>()
   for (const change of readChanges(rawBody)) {
-    if (change.templateStatus || change.templateCategory) {
+    if (change.templateStatus || change.templateCategory || change.accountEvent) {
       if (!change.accountId) continue
       const account = accounts.get(change.accountId) ?? {
         kind: "account",
         accountId: change.accountId,
         templateStatuses: [],
         templateCategories: [],
+        accountEvents: [],
       }
       if (change.templateStatus) account.templateStatuses.push(change.templateStatus)
       if (change.templateCategory) account.templateCategories.push(change.templateCategory)
+      if (change.accountEvent) account.accountEvents.push(change.accountEvent)
       accounts.set(change.accountId, account)
       continue
     }
@@ -992,7 +1051,13 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       deps,
     )
     if (status >= 400 || !json || typeof json !== "object") {
-      throw new Error(`WhatsApp no aceptó la solicitud de plantilla: ${graphError(status, json)}`)
+      // Meta explica el rechazo para la persona en `error_user_msg` («Las variables no pueden
+      // estar al principio ni al final…»); `message` solo dice «Invalid parameter».
+      const error = new Error(
+        `WhatsApp no aceptó la solicitud de plantilla: ${graphUserMessage(json) ?? graphError(status, json)}`,
+      ) as Error & { providerStatus?: number }
+      error.providerStatus = status
+      throw error
     }
     return {
       externalId: "id" in json ? text(json.id) : null,

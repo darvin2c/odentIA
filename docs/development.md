@@ -196,8 +196,8 @@ Trámite ante Meta, en este orden (lo hace quien administra odentIA, no una clí
    como dirección `https://<API>/api/webhooks/meta/whatsapp` y como clave de
    verificación el valor de `META_WEBHOOK_VERIFY_TOKEN`; suscribir los campos
    `messages`, `message_template_status_update` y `template_category_update`, que son los que odentIA usa, y
-   `account_update`, que la guía de Meta exige (odentIA lo recibe y no hace nada
-   con él). Para los números que siguen en la app WhatsApp Business del celular
+   `account_update`, que la guía de Meta exige (por él odentIA sabe que Meta
+   cortó o rehízo la conexión de la cuenta). Para los números que siguen en la app WhatsApp Business del celular
    (coexistencia), además `smb_message_echoes` (lo que el equipo escribe desde
    el celular), `history` (las conversaciones anteriores, al conectar) y
    `smb_app_state_sync` (la agenda de contactos). Es una sola dirección para
@@ -235,6 +235,7 @@ emergente y avisa a la página que la abrió: una cabecera
 - DB/services usan Testcontainers con `dentalagent-postgres:18.6`; construir con `podman build -t dentalagent-postgres:18.6 infra/dev/postgres`.
 - Instalar Chromium: `pnpm --filter @odentia/e2e exec playwright install chromium`. Linux requiere dependencias de sistema del navegador.
 - `pnpm e2e --workers=2` crea entorno efímero sin `.env`, compose dev ni semilla manual. Reglas en `e2e/AGENTS.md`.
+- El CI corre la suite completa en cada PR y en main, repartida en tres partes (`--shard`); el deploy espera a que pase. Si falla, las evidencias quedan como artefacto `e2e-<parte>` durante 7 días.
 - Windows/Podman (PowerShell): `$env:DOCKER_HOST='npipe:////./pipe/podman-machine-default'` y `$env:TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE='/run/podman/podman.sock'`. Confirmar nombre con `podman machine inspect` si cambia la máquina.
 - Si el pipe no existe, reenviar el socket root de la conexión por defecto (`podman system connection list`) con `ssh -N -L 127.0.0.1:<puerto>:/run/podman/podman.sock` y usar `DOCKER_HOST=tcp://127.0.0.1:<puerto>`. En Git Bash, exportar `MSYS2_ENV_CONV_EXCL=TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` para que la ruta del override no se convierta a una ruta de Windows.
 - Linux/WSL: `DOCKER_HOST=unix:///ruta/al/socket pnpm e2e`; socket accesible desde Node Linux. En Podman remoto, el override del socket apunta al host de contenedores. Docker estándar puede autodetectarse.

@@ -4,6 +4,7 @@ import {
   listAccountNumbers,
   type MetaPlatformApp,
   MetaSignupError,
+  type NormalizedAccountEvent,
   type NormalizedAppContact,
   newRegistrationPin,
   type ProviderAccount,
@@ -14,7 +15,13 @@ import {
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
 import { member } from "@odentia/db/schema/auth"
-import { channelConnection, type ConnectionSignup, contact, contactIdentity } from "@odentia/db/schema/crm"
+import {
+  channelConnection,
+  type ConnectionMetaRemoval,
+  type ConnectionSignup,
+  contact,
+  contactIdentity,
+} from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import {
@@ -24,6 +31,7 @@ import {
   type ConnectionDeps,
   createConnection,
   getConnectionSecrets,
+  metaRemovalWhy,
   type ProviderCheck,
   BUSINESS_APP_SYNC_HOURS,
   SIGNUP_STEPS,
@@ -35,6 +43,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { reportAutomaticCase } from "./model-outage.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
+import { notifyAdmins } from "./whatsapp-own-app.js"
 import { settleWorkspaceNotifications, upsertWorkspaceNotification } from "./workspace.js"
 
 /**
@@ -556,6 +565,70 @@ export async function noteHistoryDeclined(tx: Db, orgId: string, connectionId: s
       updatedAt: new Date(),
     })
     .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+}
+
+/* ---------- Meta corta la conexión de la cuenta ---------- */
+
+/** Asunto del aviso de la campana: se retira solo cuando la conexión vuelve a estar hecha. */
+export const metaRemovedSubject = (connectionId: string) => `meta-desconecto:${connectionId}`
+
+/**
+ * Meta avisa a la cuenta (`account_update`) que cortó su conexión con la app de
+ * odentIA, o que se rehízo. Se anota en la conexión para decirlo en pantalla, y
+ * la campana avisa a quien administra las integraciones: mientras tanto no
+ * llegan ni salen mensajes, y nada en odentIA lo notaría solo. Se vuelve a
+ * conectar con el botón, que borra lo anotado.
+ *
+ * Meta reintenta durante días lo que no recibe a tiempo: un aviso anterior a
+ * la última vez que se entró con Facebook ya no vale, y un «se reconectó» solo
+ * borra un corte anterior a él.
+ */
+export async function applyAccountEvents(
+  tx: Db,
+  orgId: string,
+  connectionId: string,
+  events: NormalizedAccountEvent[],
+  now = new Date(),
+): Promise<void> {
+  const [row] = await tx
+    .select({ signup: channelConnection.signup })
+    .from(channelConnection)
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+    .for("update")
+    .limit(1)
+  if (!row?.signup) return
+  const grantedAt = Date.parse(row.signup.grantedAt)
+  const before = row.signup.metaRemoved ?? null
+  let removed: ConnectionMetaRemoval | null = before
+  const ordered = events
+    .map((event) => ({ event, at: event.at ?? now.toISOString() }))
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+  for (const { event, at } of ordered) {
+    if (Date.parse(at) < grantedAt) continue
+    if (event.kind === "removed") removed = { at, reason: event.reason, initiatedBy: event.initiatedBy }
+    else if (removed && Date.parse(at) >= Date.parse(removed.at)) removed = null
+  }
+  // Un reintento de Meta trae lo mismo: no se reescribe ni se vuelve a avisar.
+  const same =
+    removed === before ||
+    (removed !== null &&
+      before !== null &&
+      removed.at === before.at &&
+      removed.reason === before.reason &&
+      removed.initiatedBy === before.initiatedBy)
+  if (same) return
+  await tx
+    .update(channelConnection)
+    .set({ signup: { ...row.signup, metaRemoved: removed }, updatedAt: new Date() })
+    .where(and(eq(channelConnection.id, connectionId), eq(channelConnection.organizationId, orgId)))
+  if (!removed) {
+    await settleWorkspaceNotifications(tx, orgId, { subject: metaRemovedSubject(connectionId) })
+    return
+  }
+  await notifyAdmins(tx, orgId, metaRemovedSubject(connectionId), {
+    title: "WhatsApp se desconectó de Meta",
+    body: `${metaRemovalWhy(removed)} Mientras tanto no llegan ni salen mensajes de WhatsApp. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.`,
+  })
 }
 
 /* ---------- La clave de Meta se renueva sola (darvin2c/odentIA#121) ---------- */

@@ -56,10 +56,17 @@ async function audit(page: Page, info: TestInfo, surface: string) {
   await expect(page.locator("main")).toHaveCount(1)
 }
 
+// El tema cambia sin transiciones: un control con `transition-[color]` quedaría
+// a medio camino entre el claro y el oscuro cuando mide Axe.
 async function theme(page: Page, dark: boolean) {
   await page.evaluate((dark) => {
+    const still = document.createElement("style")
+    still.textContent = "*,*::before,*::after{transition:none!important}"
+    document.head.append(still)
     document.documentElement.classList.toggle("dark", dark)
     document.documentElement.style.colorScheme = dark ? "dark" : "light"
+    getComputedStyle(document.body).color
+    still.remove()
   }, dark)
   await settleAnimations(page)
 }
@@ -147,6 +154,9 @@ for (const viewport of [
 
       const page = owner.page
       await page.setViewportSize(viewport)
+      // Su contexto no nace con el esquema de esta prueba: sin esto, la app aplica
+      // el tema del sistema (claro) cuando monta y pisa el que pone `theme`.
+      await page.emulateMedia({ colorScheme: dark ? "dark" : "light" })
       await gotoHydrated(page, tenant(owner.org.slug, "/home"))
       // El siguiente paso navega: es un enlace con aspecto de botón y se localiza por su rol real.
       await expect(page.getByRole("region", { name: "Siguiente paso" }).getByRole("link").first()).toBeVisible()

@@ -21,6 +21,7 @@ import { createAdminCoreRoute, createAccountAdminAccessRoute, createAdminFactorB
 import { createAccountRoute } from "./routes/account.js"
 import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
 import { createAdminDemosRoute } from "./routes/admin-demos.js"
+import { createAdminImportsRoute } from "./routes/admin-imports.js"
 import { createAccountBillingRoute, createSaasBillingRoute, createSaasPreAuthGuard, requireSaasAccess } from "./routes/saas-billing.js"
 import { createAdminSupportRoute } from "./routes/admin-support.js"
 import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
@@ -53,6 +54,7 @@ import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
 import { createPeopleRoute } from "./routes/people.js"
+import { createTeamTwoFactorRoute } from "./routes/team-two-factor.js"
 import { createDataProtectionRoute } from "./routes/data-protection.js"
 import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
 import { createPromotionsRoute } from "./routes/promotions.js"
@@ -122,6 +124,8 @@ export interface AppDeps {
   addressProviders?: AddressProviders
   /** Búsquedas de Geoapify al día para todo odentIA: la administración lo ve en su Inicio. */
   geoapifyDailyLimit?: number
+  /** Producción: sin un backup verificado en 26 horas, el Inicio de la administración avisa. */
+  expectBackups?: boolean
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
@@ -323,6 +327,7 @@ export function createApp(deps: AppDeps) {
   }))
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/demos", createAdminDemosRoute(deps))
+  app.route("/api/admin/imports", createAdminImportsRoute(deps))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
   app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf, replyTo: deps.foundersEmail }))
@@ -330,6 +335,7 @@ export function createApp(deps: AppDeps) {
     deps.ownerDb.transaction((tx) =>
       getBackofficeOverview(tx, adminContextOf(c), {
         ...(deps.addressProviders?.paciente && deps.geoapifyDailyLimit ? { geoapifyDailyLimit: deps.geoapifyDailyLimit } : {}),
+        expectBackups: deps.expectBackups === true,
       }),
     ),
   ))
@@ -761,6 +767,7 @@ export function createApp(deps: AppDeps) {
       webURL: deps.webURL,
     }),
   )
+  guarded.route("/team/two-factor", createTeamTwoFactorRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf }))
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))

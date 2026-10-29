@@ -127,7 +127,7 @@ function money(cents: number, currency: string): string {
 }
 
 /** Precio por acción en millonésimas, hasta tres decimales. */
-/** «Por tipo · Sofi 0,10 / 0,50 / 1,00 · Clío 0,10 / 0,20 / 0,50 · cita 2,00 · Argos 300 + 3,00 · 20 GB + 0,20» (ADR 0085). */
+/** «Por tipo · Sofi 0,20 / 0,50 / 1,00 · Clío 0,10 / 0,30 / 0,50 · cita 2,00 · Argos 100 + 3,00 · 20 GB + 0,20» (ADR 0085 y 0105). */
 function tierSummary(plan: AdminPlan): string {
   const n = (micros: number | null | undefined, fallback: number | null) => {
     const value = micros ?? fallback

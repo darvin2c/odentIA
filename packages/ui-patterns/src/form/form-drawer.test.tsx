@@ -200,6 +200,17 @@ describe("FormDrawer", () => {
     expect(event).toBeDefined()
   })
 
+  it("cancela el envío nativo aunque onSubmit no lo haga: si no, el navegador recarga la página", async () => {
+    const onSubmit = vi.fn()
+    renderDrawer({ onSubmit })
+    await screen.findByText("Editar mesa")
+    const form = screen.getByRole("button", { name: common.actions.save }).closest("form")
+    expect(form).not.toBeNull()
+    // `fireEvent` devuelve false cuando alguien cancela el evento.
+    expect(fireEvent.submit(form as HTMLFormElement)).toBe(false)
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+  })
+
   it("secondaryAction: va entre Cancelar y Guardar, su clic llama a onClick y no envía el formulario", async () => {
     const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault())
     const onDraft = vi.fn()

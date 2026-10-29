@@ -4,6 +4,7 @@ import { getOrganizationPendingCounts } from "./admin-organizations.js"
 import { getAdminSupportAttention } from "./admin-support.js"
 import { consumerComplaintSummary } from "./consumer-complaints.js"
 import { addressSearchesToday } from "./address-suggestions.js"
+import { backupHealth, backupProblemWords } from "./platform-backups.js"
 import { getSaasAdminAttention } from "./saas-billing.js"
 import { businessDaysWords, currentSaasTerms } from "./saas-commercial-terms.js"
 import { countWaitlistToReview, type ExpiringTermRow, listExpiringTerms } from "./saas-founders.js"
@@ -24,12 +25,13 @@ export interface AdminOverview {
 /**
  * Inicio interno: soporte no recibe ningún importe ni pendiente de cobros.
  * `geoapifyDailyLimit`: las búsquedas de direcciones de pacientes que da el plan
- * de Geoapify al día (decisión 7 del lienzo del issue 36).
+ * de Geoapify al día (decisión 7 del lienzo del issue 36). `expectBackups`:
+ * producción, donde sin backups verificados en 26 horas se avisa.
  */
 export async function getBackofficeOverview(
   tx: Db,
   actor: AdminActor,
-  options: { geoapifyDailyLimit?: number } = {},
+  options: { geoapifyDailyLimit?: number; expectBackups?: boolean } = {},
 ): Promise<AdminOverview> {
   const support = await getAdminSupportAttention(tx)
   const organizations = await getOrganizationPendingCounts(tx, actor)
@@ -83,6 +85,7 @@ export async function getBackofficeOverview(
     // Pasado el plan del día, los pacientes escriben su dirección a mano hasta mañana.
     const addressSearches = options.geoapifyDailyLimit ? await addressSearchesToday(tx, "paciente") : 0
     const addressesSpent = options.geoapifyDailyLimit !== undefined && addressSearches >= options.geoapifyDailyLimit
+    const backup = backupProblemWords(await backupHealth(tx, options.expectBackups ? { expectedSince: new Date(0) } : {}))
     items.push(
       {
         key: "payments",
@@ -118,6 +121,13 @@ export async function getBackofficeOverview(
         count: addressesSpent ? addressSearches : 0,
         description: `Se usaron las ${options.geoapifyDailyLimit ?? 0} búsquedas de Geoapify del día: hasta mañana, los pacientes escriben su dirección a mano`,
         path: "/billing",
+      },
+      {
+        key: "backup",
+        label: "Backup sin verificar",
+        count: backup ? 1 : 0,
+        description: backup ?? "El backup de cada día se restaura y comprueba antes de guardarse",
+        path: "/support",
       },
       {
         key: "recovery",

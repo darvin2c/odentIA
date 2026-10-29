@@ -9,8 +9,11 @@
  *   desde `finalizeEncounter`) del almacén principal de la sede de la
  *   atención, del lote que vence primero; si no alcanza queda como faltante.
  *   La atención nunca se bloquea por esto. Sin sede no se descuenta nada.
+ * - Lo que se dice usado a Clío («usé una mascarilla», ADR 0106) y se confirma
+ *   es el total de ese producto en la atención: reemplaza lo de sus servicios,
+ *   nunca se suma, y sale al firmar con lo demás.
  * - Lo usado se corrige desde la atención firmada («Fueron 4, no 2») con un
- *   movimiento enlazado a ella; lo firmado no cambia.
+ *   movimiento enlazado a ella; lo firmado no cambia. Lo escrito es el total.
  * - El costo por vez sale de los últimos precios de compra y solo lo recibe
  *   quien ve precios (`inventory.read`).
  *
@@ -18,7 +21,7 @@
  */
 import { quantityWords } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
-import { encounter, serviceCatalog } from "@odentia/db/schema/clinical"
+import { encounter, encounterDictationSuggestion, serviceCatalog } from "@odentia/db/schema/clinical"
 import { product, serviceMaterial, stockMovement } from "@odentia/db/schema/inventory"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
@@ -445,12 +448,68 @@ interface MaterialPlanLine {
   services: string[]
 }
 
+/** Lo que dice el dictado de los materiales de la atención: el último total confirmado de cada producto. */
+export async function dictatedMaterials(tx: Db, orgId: string, encounterId: string): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({ payload: encounterDictationSuggestion.payload })
+    .from(encounterDictationSuggestion)
+    .where(
+      and(
+        eq(encounterDictationSuggestion.organizationId, orgId),
+        eq(encounterDictationSuggestion.encounterId, encounterId),
+        eq(encounterDictationSuggestion.kind, "material"),
+        eq(encounterDictationSuggestion.status, "confirmada"),
+      ),
+    )
+    .orderBy(asc(encounterDictationSuggestion.decidedAt), asc(encounterDictationSuggestion.createdAt))
+  const out = new Map<string, number>()
+  for (const { payload } of rows) {
+    const quantity = Number(payload["quantity"])
+    if (typeof payload["productId"] === "string" && Number.isSafeInteger(quantity) && quantity > 0) out.set(payload["productId"], quantity)
+  }
+  return out
+}
+
+/** Lo dicho reemplaza lo que traían sus servicios: así lo dice el motivo del movimiento. */
+const DICTATED = "lo que se dictó"
+
 /**
  * Lo que descuenta una atención: sus procedimientos no anulados con servicio
- * × su cantidad × los materiales de ese servicio, por producto. Un producto
- * desactivado o que ya no se usa en las atenciones no se descuenta.
+ * × su cantidad × los materiales de ese servicio, por producto. Un material
+ * dicho y confirmado (ADR 0106) es el total de ese producto: reemplaza lo de
+ * sus servicios, nunca se suma. Un producto desactivado o que ya no se usa en
+ * las atenciones no se descuenta.
  */
 async function encounterMaterialPlan(tx: Db, orgId: string, encounterId: string): Promise<MaterialPlanLine[]> {
+  const fromServices = await serviceMaterialPlan(tx, orgId, encounterId)
+  const dictated = await dictatedMaterials(tx, orgId, encounterId)
+  if (dictated.size === 0) return fromServices
+  const lines = new Map(fromServices.map((line) => [line.productId, line]))
+  const missing = [...dictated.keys()].filter((id) => !lines.has(id))
+  const extra = missing.length
+    ? await tx
+        .select({ productId: product.id, name: product.name, unit: product.unit })
+        .from(product)
+        .where(and(eq(product.organizationId, orgId), inArray(product.id, missing), eq(product.isActive, true), eq(product.usedInCare, true)))
+    : []
+  for (const row of extra) lines.set(row.productId, { ...row, quantity: 0, services: [] })
+  for (const [productId, quantity] of dictated) {
+    const line = lines.get(productId)
+    if (line) lines.set(productId, { ...line, quantity, services: [...line.services, DICTATED] })
+  }
+  return [...lines.values()].sort((a, b) => a.name.localeCompare(b.name) || a.productId.localeCompare(b.productId))
+}
+
+/**
+ * Cuánto de cada producto traen los servicios de la atención, y cuáles: con
+ * esto Clío dice que un material dicho ya venía y no se suma.
+ */
+export async function materialsFromServices(tx: Db, orgId: string, encounterId: string): Promise<Map<string, { quantity: number; services: string[] }>> {
+  const plan = await serviceMaterialPlan(tx, orgId, encounterId)
+  return new Map(plan.map((line) => [line.productId, { quantity: line.quantity, services: line.services }]))
+}
+
+async function serviceMaterialPlan(tx: Db, orgId: string, encounterId: string): Promise<MaterialPlanLine[]> {
   const rows = await tx.execute<{ productId: string; name: string; unit: string; quantity: number; services: string[] }>(sql`
     select sm.product_id as "productId", p.name, p.unit,
       sum(ep.quantity * sm.quantity)::int as quantity,
@@ -623,6 +682,12 @@ export interface EncounterMaterials {
   items: MaterialQuantity[]
   /** Quien atendió, o quien lleva el inventario, con la atención firmada y con sede. */
   canCorrect: boolean
+  /**
+   * Puede corregir y la clínica tiene algún producto activo que se usa en las
+   * atenciones: «Agregar otro producto» (la mascarilla que no estaba). Sin
+   * productos así no hay nada que agregar y la pantalla no lo ofrece.
+   */
+  canAddProducts: boolean
 }
 
 async function encounterRowOf(tx: Db, orgId: string, patientId: string, encounterId: string, lock = false) {
@@ -668,6 +733,16 @@ function mayCorrect(
   return row.status === "finalizada" && row.branchId !== null && (row.professionalUserId === actorUserId || can("inventory.write"))
 }
 
+/** ¿La clínica tiene algún producto activo que se usa en las atenciones? */
+async function hasCareProducts(tx: Db, orgId: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: product.id })
+    .from(product)
+    .where(and(eq(product.organizationId, orgId), eq(product.isActive, true), eq(product.usedInCare, true)))
+    .limit(1)
+  return row !== undefined
+}
+
 /** «Materiales usados» de una atención (quien lee la atención). */
 export async function getEncounterMaterials(
   tx: Db,
@@ -681,6 +756,7 @@ export async function getEncounterMaterials(
   const site = row.branchId ? await branchOf(tx, orgId, row.branchId) : null
   const { locale } = await findOrgLocale(tx, orgId)
   const used = await usedByProduct(tx, orgId, encounterId)
+  const canCorrect = mayCorrect(row, actorUserId, can)
   return {
     branch: site ? { id: site.id, name: site.name } : null,
     items: used
@@ -692,7 +768,8 @@ export async function getEncounterMaterials(
         quantity: line.used,
         quantityText: quantityWords(line.used, line.unit, locale),
       })),
-    canCorrect: mayCorrect(row, actorUserId, can),
+    canCorrect,
+    canAddProducts: canCorrect && (await hasCareProducts(tx, orgId)),
   }
 }
 

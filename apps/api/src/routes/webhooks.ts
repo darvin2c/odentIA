@@ -9,6 +9,7 @@ import {
 import { type Db, sendInboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, inboundEvent } from "@odentia/db/schema/crm"
 import {
+  applyAccountEvents,
   applyAppContacts,
   applyStatus,
   applyTemplateCategories,
@@ -19,7 +20,7 @@ import {
   noteHistoryDeclined,
   noteOwnAppSignatureRejected,
 } from "@odentia/services"
-import { and, eq, isNotNull } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
@@ -111,6 +112,12 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       await withOrgContext(deps.db, orgId, (tx) => noteHistoryDeclined(tx, orgId, connection.id))
     }
 
+    // Meta cortó (o rehízo) la conexión de la cuenta: sin esto la pantalla seguiría diciendo «Conectado».
+    if (parsed.accountEvents?.length) {
+      const events = parsed.accountEvents
+      await withOrgContext(deps.db, orgId, (tx) => applyAccountEvents(tx, orgId, connection.id, events))
+    }
+
     for (const event of parsed.messages) {
       const inserted = await deps.ownerDb
         .insert(inboundEvent)
@@ -119,6 +126,25 @@ export function createWebhooksRoute(deps: WebhookDeps) {
         .returning({ id: inboundEvent.id })
       if (inserted.length === 0) continue
       await sendInboundMessage(deps.ownerDb, { orgId, connectionId: connection.id, event })
+    }
+  }
+
+  /**
+   * Una conexión hecha a mano es de la app de odentIA si el aviso, ya firmado
+   * con la clave de la plataforma, también verifica con la clave secreta que
+   * guardó la clínica. Con la de otra app no: esa conexión recibe en la suya.
+   */
+  function signedWithOwnKey(
+    connection: { ownApp: unknown; configEncrypted: string },
+    headers: Record<string, string>,
+    rawBody: string,
+  ): boolean {
+    if (connection.ownApp === null) return false
+    try {
+      const appSecret = decryptConfig(deps.secretsKey, connection.configEncrypted)["appSecret"]
+      return typeof appSecret === "string" && verifyMetaSignature(headers, rawBody, appSecret)
+    } catch {
+      return false
     }
   }
 
@@ -148,17 +174,21 @@ export function createWebhooksRoute(deps: WebhookDeps) {
    * Avisos de todas las cuentas suscritas a la app de odentIA: una sola
    * dirección, firmada con la clave secreta de la app, que puede traer cambios
    * de varias clínicas en el mismo envío. Cada cambio se reparte a su conexión:
-   * los mensajes y estados por el número que los recibió y los cambios de
-   * plantilla por su cuenta. No se usan direcciones alternas por cuenta o por
+   * los mensajes y estados por el número que los recibió, y los cambios de
+   * plantilla y los cortes de la conexión (`account_update`) por su cuenta. No se usan direcciones alternas por cuenta o por
    * número: con ellas una cuenta con dos números se repartiría mal, y los
    * cambios de plantilla llegan aquí de todos modos.
    * https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks
    * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/override
    *
-   * Solo reciben por aquí las conexiones hechas con el botón; una hecha a mano
-   * sigue con su propia dirección y la clave de su propia app. Lo que no es de
-   * ninguna conexión se descarta dejando registro y se responde 200: Meta
-   * reintenta durante 7 días lo que no recibe un 200.
+   * Reciben por aquí las conexiones hechas con el botón. Una hecha a mano sigue
+   * con su propia dirección y la clave de su propia app, salvo que esa app sea
+   * la de odentIA: Meta deja una sola dirección por app y es esta, así que sus
+   * mensajes y estados entran por aquí si el aviso también lleva la firma de la
+   * clave secreta guardada en la conexión. Sus cambios de plantilla no: la cuenta
+   * no queda anotada sin el botón, y los pone al día la revisión diaria. Lo que
+   * no es de ninguna conexión se descarta dejando registro y se responde 200:
+   * Meta reintenta durante 7 días lo que no recibe un 200.
    *
    * Sin probar contra Meta: la app de odentIA todavía no existe.
    */
@@ -176,19 +206,24 @@ export function createWebhooksRoute(deps: WebhookDeps) {
             id: channelConnection.id,
             organizationId: channelConnection.organizationId,
             status: channelConnection.status,
+            signup: channelConnection.signup,
+            ownApp: channelConnection.ownApp,
+            configEncrypted: channelConnection.configEncrypted,
           })
           .from(channelConnection)
           .where(
             and(
               eq(channelConnection.provider, provider),
               eq(channelConnection.externalId, delivery.phoneNumberId),
-              isNotNull(channelConnection.signup),
             ),
           )
           .limit(1)
-        if (connection?.status !== "active") {
+        if (
+          connection?.status !== "active" ||
+          !(connection.signup || signedWithOwnKey(connection, c.req.header(), rawBody))
+        ) {
           console.warn(
-            `[webhooks] aviso de WhatsApp descartado: el número ${delivery.phoneNumberId} no es de una conexión activa hecha con el botón`,
+            `[webhooks] aviso de WhatsApp descartado: el número ${delivery.phoneNumberId} no es de una conexión activa de la app de odentIA`,
           )
           continue
         }
@@ -222,7 +257,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
       )
       if (subscribed.length === 0) {
         console.warn(
-          `[webhooks] cambio de plantilla descartado: la cuenta ${delivery.accountId} no es de una conexión activa y suscrita`,
+          `[webhooks] aviso de cuenta descartado: la cuenta ${delivery.accountId} no es de una conexión activa y suscrita`,
         )
         continue
       }
@@ -232,6 +267,7 @@ export function createWebhooksRoute(deps: WebhookDeps) {
           statuses: [],
           templateStatuses: delivery.templateStatuses,
           templateCategories: delivery.templateCategories,
+          accountEvents: delivery.accountEvents,
         })
       }
     }

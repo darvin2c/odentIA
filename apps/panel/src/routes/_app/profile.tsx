@@ -34,12 +34,30 @@ import { API_URL, authClient } from "../../lib/auth-client"
 import { tenantUrl } from "../../lib/host"
 import { panelWords } from "../../lib/brand"
  import { parseUserAgent, relativeTime } from "../../lib/user-agent"
+import { safeNext } from "../../lib/safe-next"
+import {
+  TWO_FACTOR_EDITS,
+  type TwoFactorEdit,
+  TwoFactorCodesDrawer,
+  TwoFactorOffDrawer,
+  TwoFactorPhoneDrawer,
+  TwoFactorRow,
+  TwoFactorSetupDrawer,
+  useTwoFactorStatus,
+} from "../../components/two-factor"
+
+type ProfileEdit = "profile" | "password" | "email" | TwoFactorEdit
 
 export const Route = createFileRoute("/_app/profile")({
-  validateSearch: (search: Record<string, unknown>): { edit?: "profile" | "password" | "email" } =>
-    search.edit === "profile" || search.edit === "password" || search.edit === "email"
-      ? { edit: search.edit }
-      : {},
+  // `next`: la clínica que pidió la verificación en dos pasos, para volver al activarla.
+  validateSearch: (search: Record<string, unknown>): { edit?: ProfileEdit; next?: string } => {
+    const edit = search.edit
+    const known = edit === "profile" || edit === "password" || edit === "email" || TWO_FACTOR_EDITS.includes(edit as TwoFactorEdit)
+    return {
+      ...(known ? { edit: edit as ProfileEdit } : {}),
+      ...(typeof search.next === "string" ? { next: search.next } : {}),
+    }
+  },
   component: ProfilePage,
 })
 
@@ -136,7 +154,8 @@ function ProfilePhotoDrawer({ open, name, onClose }: { open: boolean; name: stri
 
 function ProfilePage() {
   const { session } = appRouteApi.useRouteContext()
-  const { edit } = useSearch({ from: "/_app/profile" })
+  const { edit, next } = useSearch({ from: "/_app/profile" })
+  const twoFactor = useTwoFactorStatus()
   const navigate = useNavigate()
   const live = authClient.useSession().data?.user
   // La foto sale de la cuenta (`image`), la misma que ve la barra lateral.
@@ -255,7 +274,7 @@ function ProfilePage() {
       <div className="flex flex-col gap-6 elevated rounded-xl border bg-card p-6">
         <div className="flex flex-col gap-1.5">
           <div className="font-heading text-base font-medium">Seguridad</div>
-          <p className="text-sm text-muted-foreground">Actualiza tu contraseña de acceso.</p>
+          <p className="text-sm text-muted-foreground">Tu contraseña y la verificación en dos pasos.</p>
         </div>
         <div>
           <Link to="/profile" search={{ edit: "password" }}>
@@ -264,6 +283,8 @@ function ProfilePage() {
             </Button>
           </Link>
         </div>
+        <Separator />
+        <TwoFactorRow />
       </div>
       <SessionsCard />
       <MyClinicsCard />
@@ -284,6 +305,20 @@ function ProfilePage() {
         onError={setPasswordError}
         onClose={closeDrawer}
       />
+      <TwoFactorSetupDrawer
+        open={edit === "two-factor"}
+        email={user.email}
+        status={twoFactor.data}
+        onClose={(activated) => {
+          // Activada desde la clínica que la pide: de vuelta a ella.
+          const back = activated ? safeNext(next) : null
+          if (back) window.location.assign(back)
+          else closeDrawer()
+        }}
+      />
+      <TwoFactorPhoneDrawer open={edit === "two-factor-phone"} status={twoFactor.data} onClose={closeDrawer} />
+      <TwoFactorCodesDrawer open={edit === "two-factor-codes"} email={user.email} status={twoFactor.data} onClose={closeDrawer} />
+      <TwoFactorOffDrawer open={edit === "two-factor-off"} status={twoFactor.data} onClose={closeDrawer} />
       <ChangeEmailDrawer
         key={user.email}
         open={edit === "email"}

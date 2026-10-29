@@ -1,5 +1,6 @@
 import { fakeModelStartProblem } from "@odentia/agent"
 import { z } from "zod"
+import { senderModeStartProblem } from "./sender-mode.js"
 
 const envSchema = z.object({
   APP_DATABASE_URL: z.string().min(1),
@@ -52,7 +53,8 @@ const envSchema = z.object({
   MICROSOFT_MAIL_REDIRECT_URI: z.string().default(""),
   MICROSOFT_MAIL_TENANT: z.string().default("common"),
   MAILBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
-  CHANNEL_SENDER_MODE: z.enum(["mock", "live"]).default("mock"),
+  /** `live` envía de verdad; `mock` simula. Vacía: `mock`, salvo en producción, donde es obligatoria. */
+  CHANNEL_SENDER_MODE: z.preprocess((value) => (value === "" ? undefined : value), z.enum(["mock", "live"]).optional()),
   /**
    * Cuenta de odentIA para el modelo del agente, uno solo (ADR 0052). Sin la
    * clave, el agente deriva y lo avisa.
@@ -113,6 +115,8 @@ const envSchema = z.object({
   // Producción no arranca con el modelo de demostración (ver `fakeModelStartProblem`).
   const problem = fakeModelStartProblem(data, data.CHANNEL_SENDER_MODE === "live")
   if (problem) ctx.addIssue({ code: "custom", path: ["LLM_MODEL"], message: problem })
+  const sender = senderModeStartProblem(data)
+  if (sender) ctx.addIssue({ code: "custom", path: ["CHANNEL_SENDER_MODE"], message: sender })
 })
 
 function loadEnv() {
@@ -121,7 +125,7 @@ function loadEnv() {
     console.error("Variables de entorno inválidas:", parsed.error.flatten().fieldErrors)
     process.exit(1)
   }
-  return parsed.data
+  return { ...parsed.data, CHANNEL_SENDER_MODE: parsed.data.CHANNEL_SENDER_MODE ?? "mock" }
 }
 
 export const env = loadEnv()

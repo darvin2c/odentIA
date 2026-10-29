@@ -228,6 +228,8 @@ variable. `LLM_OPENAI_BASE_URL` solo hace falta con una pasarela propia. `LLM_MO
 `NODE_ENV=production` y canales reales (`CHANNEL_SENDER_MODE=live` en el worker,
 `CHANNEL_VALIDATE_EXTERNAL` distinto de `false` en la API) ni la API ni el worker
 arrancan con él.
+Con `NODE_ENV=production` el worker tampoco arranca sin `CHANNEL_SENDER_MODE`:
+sin ella simularía cada envío y el hilo lo mostraría como enviado.
 
 ### Sugerencias de direcciones
 
@@ -355,8 +357,16 @@ de administración de buckets.
   el intervalo entre ejecuciones.
 - Un bucket vacío desactiva el servicio, solo admisible fuera de producción. En
   producción deben configurarse bucket y credenciales.
-- Supervisar los logs: un contenedor en ejecución no demuestra que el backup se
-  haya subido. Verificar descarga y restauración periódicamente.
+- Cada volcado se restaura antes en un PostgreSQL temporal del mismo contenedor
+  (las extensiones de `infra/dev/postgres`, nunca la base activa) y solo se sube
+  si se restauró con todas sus migraciones. Cada vuelta queda en
+  `admin.platform_backup` (verificado, o fallido con el paso y el error).
+- Si la última vuelta falló o pasan 26 horas sin un backup verificado, el worker
+  abre el caso automático «Backup sin verificar» en Soporte (con su correo al
+  buzón de soporte) y el Inicio de la administración lo muestra. Si la base no
+  responde, la vuelta no se puede anotar: el aviso llega por el plazo.
+- La prueba del contenedor no reemplaza descargar un dump de R2 y restaurarlo a
+  mano de vez en cuando: así se comprueba también el acceso al bucket.
 
 Restaurar el dump descargado primero en una instancia aislada con la misma major
  y extensiones, nunca directamente sobre la base activa:

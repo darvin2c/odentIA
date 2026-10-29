@@ -55,9 +55,12 @@ test("formularios: columna lateral en ventana ancha, cajón en estrecha y aviso 
   await expect(column.getByRole("button", { name: "Cancelar" })).toBeInViewport({ ratio: 1 })
   // Al bajar la página la columna se queda quieta: el panel no tiene franja de
   // avisos que defina su alto, y sin él no puede soltarse.
+  // El alto (100svh) se recalcula después del cambio de ventana: se espera a
+  // que se asiente en vez de medir el primer cuadro.
   await page.setViewportSize({ width: 1440, height: 600 })
+  await expect.poll(() => column.boundingBox().then((box) => box?.height)).toBe(600)
   expect(await page.evaluate(() => (window.scrollTo(0, document.documentElement.scrollHeight), window.scrollY))).toBeGreaterThan(0)
-  expect(await column.boundingBox()).toMatchObject({ y: 0, height: 600 })
+  await expect.poll(() => column.boundingBox()).toMatchObject({ y: 0, height: 600 })
   await expect(column.getByRole("button", { name: "Cancelar" })).toBeInViewport({ ratio: 1 })
   await page.setViewportSize({ width: 1440, height: 900 })
 

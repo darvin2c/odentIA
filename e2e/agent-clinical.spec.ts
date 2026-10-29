@@ -434,3 +434,69 @@ test("asistente clínico: la próxima cita y el presupuesto se piden por voz y s
   expect((await dictation()).suggestions.filter((item) => item.kind === "cita")).toEqual([])
   expect(await overflow(page)).toBeLessThanOrEqual(0)
 })
+
+test("asistente clínico: el material dicho es el total de la atención y sale de la sede al firmar (ADR 0106)", async ({ owner }, info) => {
+  const { page, org } = owner
+  const product = async (name: string, unit: string, counted: number) => {
+    const created = await call<{ id: string }>(page, "POST", "/api/inventory/products", org.slug, { name, usedInCare: true, unit }, 201)
+    await call(page, "POST", "/api/inventory/count", org.slug, { branchId: owner.branchId, idempotencyKey: crypto.randomUUID(), items: [{ productId: created.id, counted }] })
+    return created.id
+  }
+  const onHand = async (productId: string) =>
+    (await call<{ items: Array<{ id: string; onHand: number }> }>(page, "GET", `/api/inventory/products?branchId=${owner.branchId}`, org.slug)).items.find((item) => item.id === productId)?.onHand
+  const gloves = await product("Guantes de prueba", "par", 10)
+  const mask = await product("Mascarilla de prueba", "unidad", 5)
+  const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: crypto.randomUUID(),
+    answers: { demographics: { displayName: "Rosa Quispe", docType: "DNI", docNumber: "76543211" }, respondent: "staff", privacyAccepted: false },
+    contacts: [],
+  }, 201)
+  const apiPath = `/api/patients/${patient.id}`
+  const specialties = await call<Array<{ id: string; key: string }>>(page, "GET", "/api/clinical-forms/specialties", org.slug)
+  const service = await call<{ id: string }>(page, "POST", "/api/services", org.slug, {
+    name: "Endodoncia multirradicular", specialtyId: specialties.find((item) => item.key === "endodoncia")!.id, scope: "tooth", priceCents: 65000, currency: "PEN",
+    officialCode: "D3330",
+  }, 201)
+  // Cada endodoncia trae 2 pares de guantes.
+  await call(page, "PUT", `/api/services/${service.id}/materials`, org.slug, { items: [{ productId: gloves, quantity: 2 }] })
+  const encounter = await call<{ id: string }>(page, "POST", `${apiPath}/encounters`, org.slug, { reason: "Endodoncia de la 16", branchId: owner.branchId }, 201)
+  await call(page, "POST", `${apiPath}/encounters/${encounter.id}/procedures`, org.slug, { serviceId: service.id, toothNumber: 16 }, 201)
+  await call(page, "PATCH", `${apiPath}/encounters/${encounter.id}`, org.slug, { evolution: "Se realiza la endodoncia de la 16." })
+  await call(page, "POST", `${apiPath}/encounters/${encounter.id}/diagnoses`, org.slug, { diagnosisCode: "K02.1", diagnosisType: "confirmed", toothNumber: 16 }, 201)
+  await call(page, "PUT", "/api/clinical-forms/professionals/me/profile", org.slug, {
+    professionalTitle: "Cirujano dentista", registrationBody: "COP", registrationNumber: "12345",
+  })
+  await call(page, "PUT", "/api/agent/config", org.slug, { clinicalAssistantEnabled: true })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}/encounters/${encounter.id}`))
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+  await idle.getByLabel("Escribe lo dictado").fill("Usé una mascarilla. Usé cuatro pares de guantes.")
+  await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+
+  // Van con lo hecho hoy; los guantes dicen que la endodoncia ya los trae y que no se suman.
+  const materials = page.getByRole("list", { name: "Sugerencias de Clío: Materiales" })
+  const maskRow = materials.getByRole("listitem").filter({ hasText: "Mascarilla de prueba" })
+  const glovesRow = materials.getByRole("listitem").filter({ hasText: "Guantes de prueba" })
+  await expect(maskRow).toContainText("1 unidad en total")
+  await expect(maskRow).toContainText("Sale de la sede al firmar")
+  await expect(glovesRow).toContainText("4 pares en total")
+  await expect(glovesRow).toContainText("Endodoncia multirradicular ya trae 2 pares: vale el total, no se suma")
+  await info.attach("clio-materiales", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await maskRow.getByRole("button", { name: "Confirmar", exact: true }).click()
+  await expect(page.getByText("Anotado. Sale de la sede al firmar; lo ves en el cierre.").first()).toBeVisible()
+  await glovesRow.getByRole("button", { name: "Confirmar", exact: true }).click()
+  await expect(materials).toHaveCount(0)
+
+  // El cierre lo anuncia: 4 pares (no 6) y la mascarilla.
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  const signing = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await expect(signing).toContainText("se descuentan de Sede Central: 4 pares de guantes de prueba y 1 unidad de mascarilla de prueba.")
+  await signing.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Atención finalizada" }).getByRole("region", { name: "Materiales" })).toContainText(
+    "Salieron de Sede Central: 4 pares de guantes de prueba y 1 unidad de mascarilla de prueba.",
+  )
+  expect(await onHand(gloves)).toBe(6)
+  expect(await onHand(mask)).toBe(4)
+  expect(await overflow(page)).toBeLessThanOrEqual(0)
+})

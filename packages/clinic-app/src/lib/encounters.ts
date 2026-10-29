@@ -65,6 +65,8 @@ export interface EncounterMaterials {
   items: MaterialQuantity[]
   /** Quien atendió, el dueño o la administración, con la atención firmada y con sede. */
   canCorrect: boolean
+  /** Puede corregir y la clínica tiene productos que se usan en las atenciones: «Agregar otro producto». */
+  canAddProducts: boolean
 }
 
 export function fetchEncounterMaterials(patientId: string, encounterId: string) {
@@ -258,6 +260,22 @@ export function saveProfessionalProfileApi(userId: string | "me", body: Professi
     `/api/clinical-forms/professionals/${userId}/profile`,
     { method: "PUT", body: JSON.stringify(body) },
   )
+}
+
+export interface SignatureRegistration {
+  professionalTitle: string
+  registrationBody: string
+  registrationNumber: string
+}
+
+/** Lo que pide el servidor para firmar (`requireProfessionalSignature`): título, colegio y número. */
+export function signatureRegistrationError(values: SignatureRegistration): string | null {
+  if (!values.professionalTitle.trim()) return "Escribe tu título profesional"
+  if (!values.registrationBody.trim()) return "Escribe tu colegio profesional"
+  if (!values.registrationNumber.trim()) return "Escribe tu número de colegiatura"
+  if (!/^[A-Za-z0-9-]{1,20}$/.test(values.registrationNumber.trim()))
+    return "La colegiatura lleva solo letras, números y guiones (hasta 20)"
+  return null
 }
 
 /** Colegio y número («<colegio> <número>») o null si falta la colegiatura. */

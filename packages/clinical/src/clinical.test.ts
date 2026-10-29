@@ -5,6 +5,7 @@ import {
   identityDocumentError,
   normalizePhone,
   phoneFormatError,
+  whatsappNumberProblem,
   allergyConflicts,
   allergyWarnings,
   codeAllergySubstance,
@@ -140,6 +141,18 @@ describe("alergias al prescribir", () => {
 })
 
 describe("identidad estándar", () => {
+  it("un WhatsApp del país de la clínica es un celular completo; uno de otro país pasa como viene", () => {
+    expect(whatsappNumberProblem("+51992154378", "PE")).toBeNull()
+    // Un dígito de menos es un E.164 posible, pero Meta lo rechaza en cada envío.
+    expect(whatsappNumberProblem("+5199215437", "PE")).toBe("Ese número no puede ser su WhatsApp: revisa que sea un celular de 9 dígitos.")
+    // El fijo de Lima es un teléfono, no un WhatsApp.
+    expect(whatsappNumberProblem("+5111234567", "PE")).not.toBeNull()
+    expect(whatsappNumberProblem("+5491122334455", "PE")).toBeNull()
+    // Sin perfil de país no se supone ningún formato.
+    expect(whatsappNumberProblem("+5199215437", "CL")).toBeNull()
+    expect(whatsappNumberProblem("+5199215437")).toBeNull()
+  })
+
   it("normaliza teléfonos, valida documentos y compone el nombre", () => {
     // Un número nacional solo se completa con el perfil del país de la clínica.
     expect(normalizePhone("987 654 321", "PE")).toBe("+51987654321")
