@@ -11,7 +11,8 @@
  *
  * Para comparar dos versiones con las mismas personas (pareado): primero
  * `CASOS=<archivo> CASOS_SOLO=1` inventa y guarda los casos sin conversar, y
- * cada ronda corre con el mismo `CASOS=<archivo>`.
+ * cada ronda corre con el mismo `CASOS=<archivo>`. Una ronda que se cortó se
+ * termina con `INDICES=<los que faltan>` en la misma carpeta.
  *
  * Es evidencia de estas demos y de pacientes inventados por un modelo, no de una clínica real.
  */
@@ -439,11 +440,15 @@ if (CASES_FILE && env.CASOS_SOLO === "1") {
 }
 if (CASES_FILE) fixedCases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as AuditCase[]
 const LAST = fixedCases ? Math.min(TOTAL, fixedCases.length) : TOTAL
+// Solo estos casos (`INDICES=19,21,22`): para terminar una ronda que se cortó, con los mismos números.
+const queue = env.INDICES
+  ? env.INDICES.split(",").map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value >= 0 && value < LAST)
+  : Array.from({ length: LAST }, (_, index) => index)
 let next = 0
 await Promise.all(
   Array.from({ length: PARALLEL }, async () => {
-    while (next < LAST) {
-      const index = next++
+    while (next < queue.length) {
+      const index = queue[next++] ?? 0
       // Que no empiecen todas a la vez.
       await sleep(Math.random() * 15_000)
       await converse(index).catch((error: unknown) => {
