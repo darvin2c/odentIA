@@ -74,7 +74,7 @@ import { z } from "zod"
 import { createAdminDecisionModel } from "./admin.js"
 import { reportReplyUse } from "./ai-usage.js"
 import { answerOf, type DecisionModel, type DecisionQuestion, type PlatformDecisions } from "./decision/index.js"
-import { createConfiguredChatModel, type LlmSpec, resolveLlmSpec } from "./llm.js"
+import { cachedPrompt, createConfiguredChatModel, type LlmSpec, resolveLlmSpec, viaResponses } from "./llm.js"
 import type { AgentRuntime } from "./run.js"
 
 /**
@@ -239,10 +239,6 @@ La consulta:
 
 Español neutro, breve.`
 
-const CACHE_MARK: Partial<Record<LlmSpec["provider"], Record<string, unknown>>> = {
-  openai: { prompt_cache_breakpoint: { mode: "explicit" } },
-}
-
 export interface ArgosAsk {
   /** Las palabras del producto de la clínica (`productAgentTexts`). */
   texts: ProductAgentTexts
@@ -262,14 +258,14 @@ export interface ArgosAsk {
 
 /**
  * Los mensajes al modelo. Lo fijo (las reglas y las vistas de la llave) va
- * primero y marcado para la caché del proveedor: es igual en cada pregunta de
- * ese rol. Después, los nombres de la clínica (iguales en cada pregunta de esa
- * clínica, también reusables por la caché) y lo que cambia: la hora, la
- * pantalla, lo anterior y la pregunta.
+ * primero y marcado para la caché del proveedor (`cachedPrompt`; `responses`:
+ * el modelo va por /v1/responses, como cuando Argos piensa): es igual en cada
+ * pregunta de ese rol. Después, los nombres de la clínica (iguales en cada
+ * pregunta de esa clínica, también reusables por la caché) y lo que cambia: la
+ * hora, la pantalla, lo anterior y la pregunta.
  */
-export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): BaseMessage[] {
+export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk, responses: boolean): BaseMessage[] {
   const fixed = `${argosRules(input.texts)}\n\n${argosCatalogText(input.key, input.texts)}\n\nCifras oficiales (pídelas con calcular):\n${argosFiguresText(input.key, figureWords(input.texts))}`
-  const mark = CACHE_MARK[provider]
   const now = new Intl.DateTimeFormat(input.zone.locale, { timeZone: input.zone.timezone, dateStyle: "full", timeStyle: "short" }).format(input.now)
   const human = [
     input.names ?? "",
@@ -283,7 +279,7 @@ export function argosMessages(provider: LlmSpec["provider"], input: ArgosAsk): B
   ]
     .filter(Boolean)
     .join("\n\n")
-  return [new SystemMessage({ content: mark ? [{ type: "text", text: fixed, ...mark }] : fixed }), new HumanMessage({ content: human })]
+  return [new SystemMessage({ content: cachedPrompt(provider, fixed, responses) }), new HumanMessage({ content: human })]
 }
 
 /** Con el modelo de demostración: unas pocas preguntas por palabras, sin proveedor. */
@@ -364,11 +360,15 @@ export const ARGOS_REASONING: ArgosReasoning = "high"
 /** Cuántas veces se llama al modelo que escribe por pregunta (D17): en la última solo puede responder. */
 export const ARGOS_MAX_TURNS = 4
 
-/** El modelo que escribe con sus herramientas: buscar nombres, calcular y responder. Con el de demostración, null. */
-async function argosModel(
+/**
+ * El modelo que escribe con sus herramientas: buscar nombres, calcular y
+ * responder, y si va por /v1/responses (`viaResponses`). Con el de
+ * demostración, null.
+ */
+export async function argosModel(
   deps: Pick<AgentRuntime, "platform" | "createModel"> & { reasoning?: ArgosReasoning },
   texts: ProductAgentTexts,
-): Promise<{ provider: LlmSpec["provider"]; invoke: (messages: BaseMessage[], choice: string) => Promise<AIMessage> } | null> {
+): Promise<{ provider: LlmSpec["provider"]; responses: boolean; invoke: (messages: BaseMessage[], choice: string) => Promise<AIMessage> } | null> {
   const spec = resolveLlmSpec(deps.platform)
   if (spec.provider === "fake" && !deps.createModel) return null
   // Las herramientas no se ejecutan aquí: `askArgos` responde cada llamada con lo que hizo odentIA.
@@ -385,6 +385,7 @@ async function argosModel(
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
   return {
     provider: spec.provider,
+    responses: viaResponses(model),
     invoke: async (messages, choice) => {
       const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools(tools, { tool_choice: choice }) : model
       const reply = await bound.invoke(messages)
@@ -869,7 +870,7 @@ export async function askArgos(
       plan = demo
       if (outcome && "result" in outcome) ({ plan, result, binding } = outcome)
     } else {
-      const messages = argosMessages(model.provider, ask)
+      const messages = argosMessages(model.provider, ask, model.responses)
       let unreadable = 0
       let answered = 0
       // Una respuesta que no se pudo usar tiene su corrección aunque llegue en el último turno: uno más, solo para responder.
