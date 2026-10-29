@@ -21,6 +21,17 @@ const cheapest = (p: typeof plan) => {
   return prices.length ? Math.min(...prices) : null
 }
 const from = cheapest(plan)
+/** Qué cuesta ese «Desde»: los dos si cuestan lo mismo; si no, el más barato y el otro con su precio. */
+const fromWhat = (() => {
+  const sofi = plan?.tiers.informa ?? null
+  const clio = plan?.tiers.simple ?? null
+  if (!plan || sofi === null) return "Una receta de Clío"
+  if (clio === null) return "Una respuesta de Sofi"
+  if (sofi === clio) return "Una respuesta de Sofi o una receta de Clío"
+  return sofi < clio
+    ? `Una respuesta de Sofi; una receta de Clío, ${money(clio, plan.currency)}`
+    : `Una receta de Clío; una respuesta de Sofi, ${money(sofi, plan.currency)}`
+})()
 const fromBefore = founder && list ? cheapest(list) : null
 const discount = founder ? pricing.founders?.discountPercent : null
 const months = founder ? pricing.founders?.guaranteeMonths : null
@@ -40,7 +51,7 @@ const people = `${WORDS.clinicians.charAt(0).toUpperCase()}${WORDS.clinicians.sl
             <span class="from-per">por trabajo</span>
             {fromBefore !== null && fromBefore !== from ? <s class="from-was"><span class="sr">antes </span>{money(fromBefore, plan.currency)}</s> : null}
           </div>
-          <span class="from-what">Una respuesta de Sofi o una receta de Clío; lo que te trae pacientes, más.</span>
+          <span class="from-what">{fromWhat}; lo que te trae pacientes, más.</span>
         </div>
       ) : (
         <p class="lead lead-d rise d2">
