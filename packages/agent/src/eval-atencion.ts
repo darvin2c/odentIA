@@ -17,14 +17,11 @@
  */
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { consultationTierOf, type DictationDraft, dictationModelLabel, type ProductDictation } from "@odentia/services"
-import { DENTAL_DICTATION, dictationFindingsText } from "@odentia/services/dental"
-import { examSystemsText, MEDICAL_DICTATION } from "@odentia/services/medical"
+import { consultationTierOf, type DictationDraft, dictationFor, dictationModelLabel, type ProductDictation } from "@odentia/services"
 import { costMicrosOf } from "./ai-usage.js"
-import { DENTAL_DICTATION_PROFILE } from "./dental/dictation.js"
 import { askDictationModel, type DictationProfile } from "./dictation.js"
 import { createConfiguredChatModel, platformLlmFromEnv, resolveLlmSpec } from "./llm.js"
-import { MEDICAL_DICTATION_PROFILE } from "./medical/dictation.js"
+import { dictationProfileFor } from "./products.js"
 
 /** Lo que cobra la clínica por Clío en una atención, según lo que dejó hecho (ADR 0085). Fundadores, la mitad. */
 const PRICE_USD = { simple: 0.1, estandar: 0.2, completa: 0.5 } as const
@@ -51,9 +48,16 @@ const only = arg("solo", "").split(",").filter(Boolean)
 const spec = resolveLlmSpec(platformLlmFromEnv(process.env))
 if (spec.provider === "fake") throw new Error("Esta medición es con un modelo real: quita LLM_MODEL=fake y define la clave del proveedor")
 
-const PRODUCTS: Record<FullEncounter["producto"], { profile: DictationProfile; dictation: ProductDictation; catalog: string }> = {
-  dental: { profile: DENTAL_DICTATION_PROFILE, dictation: DENTAL_DICTATION, catalog: dictationFindingsText() },
-  medico: { profile: MEDICAL_DICTATION_PROFILE, dictation: MEDICAL_DICTATION, catalog: examSystemsText() },
+/**
+ * El dictado de cada producto, elegido como en la atención (`products.ts`, ADR
+ * 0079): lo común no importa lo dental ni lo médico.
+ */
+function productOf(producto: FullEncounter["producto"]): { profile: DictationProfile; dictation: ProductDictation; catalog: string } {
+  const product = producto === "medico" ? "medical" : "dental"
+  const profile = dictationProfileFor(product)
+  const dictation = dictationFor(product)
+  if (!profile || !dictation) throw new Error(`Clío no dicta en ${product}`)
+  return { profile, dictation, catalog: dictation.catalogText() }
 }
 /** Lo último ya ordenado que acompaña a cada pausa, como en la pantalla (`CONTEXT_CHARS`). */
 const CONTEXT_CHARS = 600
@@ -75,7 +79,7 @@ interface Result {
 }
 
 async function run(encounter: FullEncounter): Promise<Result> {
-  const { profile, dictation, catalog } = PRODUCTS[encounter.producto]
+  const { profile, dictation, catalog } = productOf(encounter.producto)
   const model = await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
   const result = { encounter, palabras: encounter.pausas.join(" ").split(/\s+/).length, sinHerramienta: 0, entrada: 0, leidoDeCache: 0, salida: 0, micros: 0, sinPrecio: 0 }
   let pending: DictationDraft[] = []
@@ -127,6 +131,7 @@ async function run(encounter: FullEncounter): Promise<Result> {
 }
 
 const chosen = bank.atenciones.filter((item) => only.length === 0 || only.includes(item.id))
+if (chosen.length === 0) throw new Error(`Ninguna atención se llama ${only.join(", ")}: mira los id de ${arg("file", "eval/atenciones-completas.json")}`)
 const results = await Promise.all(chosen.map((encounter) => run(encounter)))
 const usd = (micros: number) => micros / 1_000_000
 const money = (value: number) => `USD ${value.toFixed(4)}`
