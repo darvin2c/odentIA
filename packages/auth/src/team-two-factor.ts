@@ -26,9 +26,9 @@ const TEAM_PATHS = new Set([
 /**
  * No se desactiva la verificación en dos pasos mientras una clínica de la
  * persona la pida a su equipo (ADR 0107): se puede cambiar de teléfono, no
- * quedarse sin ella. Y el personal de odentIA no la enciende por esta vía: su
- * factor es el de la administración y su cuenta la deja apagada
- * (`keepStaffSignInWithoutFactor`). Ni se vuelve a activar estando activa.
+ * quedarse sin ella. Ni se vuelve a activar estando activa. (Al personal de la
+ * administración, `createAdminFactorBoundary` de la API ya le cierra
+ * `/two-factor/*` por HTTP: su factor se maneja en la administración.)
  * Marca la sesión que pasó el código y protege las operaciones del equipo.
  * Sin sesión, Better Auth responde lo suyo.
  */
@@ -70,13 +70,6 @@ export const keepTwoFactorWhileRequired = (ownerDb: Db) =>
               throw APIError.from("BAD_REQUEST", {
                 code: "TWO_FACTOR_ALREADY_ENABLED",
                 message: "Ya está activa: para otro teléfono usa «Cambiar de teléfono»",
-              })
-            }
-            const rows = await ownerDb.execute(sql`select 1 from admin.admin_staff where user_id = ${current.user.id} limit 1`)
-            if ([...rows].length > 0) {
-              throw APIError.from("FORBIDDEN", {
-                code: "STAFF_FACTOR",
-                message: "Tu verificación es la de la administración: se maneja allí",
               })
             }
           }),
