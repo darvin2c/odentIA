@@ -267,6 +267,11 @@ it("la indicación de la cita dice lo que falta según cómo va la atención, nu
   const done = routeInstruction("cita", null, { tools, urgency: "urgente", progress: { offered: true, done: "Reservar cita — Cita: lunes 2 de noviembre, 9:00" } }) ?? ""
   expect(done).toContain("En esta atención ya quedó hecho: Reservar cita — Cita: lunes 2 de noviembre, 9:00. No se la vuelvas a ofrecer")
   expect(done).not.toContain("ofrécele primero el horario más próximo")
+  // Lo urgente: en un consultorio, primero el teléfono para urgencias; si no, la hora más próxima.
+  expect(routeInstruction("cita", null, { tools, urgency: "urgente" }) ?? "").toContain("ofrécele primero el horario más próximo")
+  const byPhone = routeInstruction("cita", null, { tools, urgency: "urgente", urgentFirst: "telefono" }) ?? ""
+  expect(byPhone).toContain("dale primero el teléfono para urgencias de la clínica")
+  expect(byPhone).not.toContain("ofrécele primero el horario más próximo")
   // Quien ya contó qué le pasa no lo vuelve a contar; quien vuelve a contarlo tras recibir horarios no empieza de cero.
   expect(routeInstruction("clinico", null, { tools }) ?? "").toContain("solo si aún no dijo qué le pasa, pregúntaselo en una línea")
   const again = routeInstruction("clinico", null, { tools, progress: { offered: true } }) ?? ""

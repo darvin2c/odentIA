@@ -952,6 +952,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
             services,
             informs: clinicData.informs,
             urgency: toolCtx.alarm ? "alarma" : route.urgency !== null && route.urgency >= URGENT_SCORE ? "urgente" : null,
+            urgentFirst: agentTexts(toolCtx).urgentFirst,
             progress: { offered: progress.offered, pending: progress.pending, done: progress.done },
             again: toolCtx.topicAgain === true,
           }),

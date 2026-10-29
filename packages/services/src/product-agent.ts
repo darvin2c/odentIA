@@ -43,6 +43,13 @@ export interface ProductAgentTexts {
    * minúsculas; solo frases fuertes. odentIA no suma ninguna.
    */
   alarmSignals: readonly RegExp[]
+  /**
+   * Lo urgente sin señal de alarma (ADR 0084 y 0095) va con el teléfono para urgencias de la
+   * clínica: con «telefono» se le da primero y después la hora más próxima; sin él, primero la
+   * hora. Un dolor de muela se resuelve con la cita; en latidIA, un dolor abdominal que empeora
+   * al caminar recibía primero un horario (auditoría del ADR 0104).
+   */
+  urgentFirst?: "telefono"
   /** Qué es la clínica, en español y en inglés («clínica dental», «dental clinic»); vacío: «clínica». */
   clinic: { es: string; en: string }
   /** El recurso que se reserva con la sede y el profesional (odentIA: «unidad dental»). */

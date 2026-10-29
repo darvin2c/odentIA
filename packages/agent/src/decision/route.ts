@@ -346,6 +346,8 @@ export interface RouteFacts {
    * urgencias de la clínica.
    */
   urgency?: "alarma" | "urgente" | null
+  /** Lo urgente empieza por el teléfono para urgencias de la clínica y no por la hora (`ProductAgentTexts.urgentFirst`). */
+  urgentFirst?: "telefono"
   /**
    * Cómo va la cita en esta atención (ADR 0104): la indicación dice lo que
    * falta, no repite lo que ya se hizo. Lo arma `attentionProgress`.
@@ -485,7 +487,9 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     return `${head} reservar una cita.${consulted}${ids} ${appointmentStep(progress, propose)}${
       // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
       facts.urgency === "urgente" && !progress?.done
-        ? " Lo que cuenta no puede esperar: ofrécele primero el horario más próximo, hoy si hay, y dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; no pases el caso al equipo por eso."
+        ? facts.urgentFirst === "telefono"
+          ? " Lo que cuenta no puede esperar: dale primero el teléfono para urgencias de la clínica, si figura en lo que sabes de la clínica, para que la evalúen hoy, y después el horario más próximo, hoy si hay; no pases el caso al equipo por eso."
+          : " Lo que cuenta no puede esperar: ofrécele primero el horario más próximo, hoy si hay, y dale el teléfono para urgencias de la clínica si figura en lo que sabes de la clínica; no pases el caso al equipo por eso."
         : ""
     }`
   }
