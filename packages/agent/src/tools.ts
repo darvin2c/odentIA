@@ -188,6 +188,19 @@ const MAX_UNSUPPORTED_REPLIES = 2
 const UNKNOWN_PROFESSIONAL =
   "Ese profesional no es de un hueco de buscar_huecos: usa el dato «profesional» exacto (pro-…) del hueco elegido. Nunca inventes identificadores."
 
+/**
+ * Cómo se pide el sí de lo que espera al interlocutor, según el acto: lo que lee
+ * el modelo lo repite, así que nada suena hecho antes del sí (auditoría del ADR 0104).
+ */
+const ASK_YES: Record<string, string> = {
+  reservar_cita:
+    "la cita aún no está reservada. En una sola pregunta, con el día, la hora, la sede y con quién, pregúntale con naturalidad si se la reservas (por ejemplo «¿Te reservo el jueves a las 10:00 en … con …?»); no digas que ya la reservaste, que la tienes ni que quedó lista",
+  reprogramar_cita:
+    "la cita sigue como estaba. En una sola pregunta, con el día y la hora nuevos, pregúntale con naturalidad si se la cambias (por ejemplo «¿Te la paso al viernes a las 10:00?»); no digas que ya la cambiaste",
+  cancelar_cita:
+    "la cita sigue en pie. Pregúntale con naturalidad si se la cancelas, con el día y la hora de esa cita; no digas que ya la cancelaste",
+}
+
 /** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
 const SLOT_NOT_OFFERED =
   "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista, vuelve a consultar con buscar_huecos (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
@@ -652,7 +665,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (proposal.status === "expirada") {
       return `La propuesta ${proposal.id} expiró (48h): vuelve a proponer el acto con datos vigentes, no la confirmes.`
     }
-    return `Cita lista para su sí (id ${proposal.id}). En tu mensaje di el día, la hora, la sede y con quién, y pregúntale con naturalidad si se la reservas (por ejemplo «¿Te la reservo?»), sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
+    // «Cita lista para su sí» salía como «dejo lista la cita… ¿Te la reservo?», y mover o
+    // cancelar también se preguntaba con «¿Te la reservo?» (auditoría del ADR 0104).
+    return `Falta su sí (id ${proposal.id}): ${ASK_YES[action] ?? "todavía no se hizo nada. Pregúntale con naturalidad si lo hace"}, sin pedirle una frase exacta ni hablar de propuestas. Con su sí, usa confirmar_propuesta.`
   }
 
   /**
@@ -1473,16 +1488,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       }
       if (created?.status !== "propuesta") return proposed
       const noticeUrl = new URL("/aviso", origin).toString()
+      // En futuro: «te registro como paciente» sonaba hecho antes del sí (auditoría del ADR 0104).
       const whom = !forOther
-        ? "y que la registras como paciente con su nombre"
+        ? "y que quedará registrada como paciente con su nombre"
         : minor
-          ? `para ${givenNames} ${familyName}, y que lo registras como paciente contigo como su madre, padre o tutor`
-          : `para ${givenNames} ${familyName}, y que la registras como paciente`
+          ? `para ${givenNames} ${familyName}, y que lo registrarás como paciente con quien escribe como su madre, padre o tutor`
+          : `para ${givenNames} ${familyName}, y que la registrarás como paciente`
       const where = (await webchatNeedsContact())
         ? " En el chat web, si aún no te dio su WhatsApp ni se lo pediste, pídeselo en ese mismo mensaje para avisarle de la cita."
         : ""
-      // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona.
-      return `Cita lista para su sí (id ${created.id}); todavía no se reservó ni registró nada. En tu mensaje, en su idioma, di el día, la hora, la sede y con quién, ${whom}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?». Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
+      // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona. Su sí tiene que
+      // llegar después del aviso (ADR 0101); si ya pidió esta hora, lo único que falta es ese
+      // sí, y «¿Te la reservo?» le volvía a preguntar lo que ya pidió (auditoría del ADR 0104).
+      const accepts = `aceptas nuestro aviso de privacidad: ${noticeUrl}.`
+      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, di el día, la hora, la sede y con quién, ${whom}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere: termina en cambio con «Solo falta tu sí: al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. «Al confirmar» va una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
     },
     {
       name: "reservar_paciente_nuevo",

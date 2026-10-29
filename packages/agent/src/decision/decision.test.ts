@@ -267,11 +267,11 @@ it("la indicación de la cita dice lo que falta según cómo va la atención, nu
   const done = routeInstruction("cita", null, { tools, urgency: "urgente", progress: { offered: true, done: "Reservar cita — Cita: lunes 2 de noviembre, 9:00" } }) ?? ""
   expect(done).toContain("En esta atención ya quedó hecho: Reservar cita — Cita: lunes 2 de noviembre, 9:00. No se la vuelvas a ofrecer")
   expect(done).not.toContain("ofrécele primero el horario más próximo")
-  // Quien vuelve a contar su síntoma tras recibir horarios no empieza de cero.
-  expect(routeInstruction("clinico", null, { tools }) ?? "").toContain("pregúntale qué le pasa en una línea")
+  // Quien ya contó qué le pasa no lo vuelve a contar; quien vuelve a contarlo tras recibir horarios no empieza de cero.
+  expect(routeInstruction("clinico", null, { tools }) ?? "").toContain("solo si aún no dijo qué le pasa, pregúntaselo en una línea")
   const again = routeInstruction("clinico", null, { tools, progress: { offered: true } }) ?? ""
   expect(again).toContain("no le preguntes otra vez qué le pasa")
-  expect(again).not.toContain("pregúntale qué le pasa en una línea")
+  expect(again).not.toContain("pregúntaselo en una línea")
 })
 
 it("spam solo con el modelo de decisión muy seguro y nunca si habla de la clínica o pide una persona (ADR 0054)", async () => {

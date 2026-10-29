@@ -53,6 +53,11 @@ export function fitHistory<T extends { body: string | null }>(
 /** Lo de una cita que se propone o se hace en la conversación. */
 const APPOINTMENT_ACTIONS = new Set(["reservar_cita", "reprogramar_cita", "cancelar_cita"])
 
+/** Una pregunta por el nombre de quien escribe: «¿Con quién tengo el gusto?», «¿me dices tus nombres y apellidos?». */
+const ASKS_NAME = /\b(con quien tengo el gusto|tus? nombres?|sus? nombres?|te llamas|your (full )?name|who am i (speaking|talking))\b/
+/** Las preguntas de un mensaje, sin el resto: «te registro con tu nombre» no pregunta nada. */
+const questionsOf = (body: string): string[] => body.split(/(?<=[.!?\n])\s+/).filter((part) => part.includes("?"))
+
 /** Cómo va la atención en curso, contado por el código (ADR 0104). */
 export interface AttentionProgress {
   /** Mensajes que ya le salieron a su nombre en esta atención (también lo automático). */
@@ -65,18 +70,25 @@ export interface AttentionProgress {
   done: string | null
   /** Promociones vigentes que ya nombró en esta atención. */
   promotions: string[]
+  /** Ya le preguntó a quien escribe cómo se llama en esta atención. */
+  askedName: boolean
+  /** Ya le habló por su nombre en esta atención (si se sabe cuál es). */
+  usedName: boolean
 }
 
 /**
  * Cómo va la atención: cuántas veces le respondió, si ya ofreció horarios, qué
- * espera su sí, qué quedó hecho y qué promociones ya nombró. Sale de los
- * mensajes que lee, del estado del caso y de las promociones de la clínica.
+ * espera su sí, qué quedó hecho, qué promociones ya nombró y si ya preguntó o
+ * usó su nombre. Sale de los mensajes que lee, del estado del caso, de las
+ * promociones de la clínica y de la ficha de quien escribe.
  */
 export function attentionProgress(input: {
   items: Array<{ direction: string; senderKind: string; body: string | null; createdAt?: string }>
   startedAt: string
   state: Pick<AgentCaseState, "pending" | "recent" | "lookups">
   promotions: string[]
+  /** Los nombres de quien escribe, si su ficha los tiene. */
+  name?: string | null
 }): AttentionProgress {
   const opened = Date.parse(input.startedAt) - ATTENTION_OPENING_MS
   const inAttention = (at: string | undefined) => !at || Date.parse(at) >= opened
@@ -85,6 +97,8 @@ export function attentionProgress(input: {
   const describe = (item: { label: string; summary: string }) => `${item.label} — ${item.summary}`
   const pending = input.state.pending.find((item) => APPOINTMENT_ACTIONS.has(item.action))
   const done = input.state.recent.find((item) => item.status === "ejecutada" && APPOINTMENT_ACTIONS.has(item.action) && inAttention(item.at))
+  // Basta su primer nombre: «Valeria» por «Valeria Fernanda».
+  const firstName = normalizeForSearch(input.name ?? "").split(" ")[0] ?? ""
   return {
     replies: said.length,
     offered: input.state.lookups.some((item) => item.tool === "buscar_huecos" && inAttention(item.at)),
@@ -94,19 +108,37 @@ export function attentionProgress(input: {
       const key = normalizeForSearch(name).trim()
       return key.length > 0 && spoken.includes(key)
     }),
+    askedName: said.some((item) => questionsOf(item.body ?? "").some((question) => ASKS_NAME.test(normalizeForSearch(question)))),
+    usedName: firstName.length > 0 && ` ${spoken.replace(/\n/g, " ")} `.includes(` ${firstName} `),
   }
 }
 
 /**
- * Lo que cambia de un turno a otro en cómo se presenta y lo que ya ofreció:
- * el manual dice la regla una vez y aquí va si ya se cumplió.
+ * Lo que cambia de un turno a otro en cómo se presenta, lo que ya ofreció y lo
+ * que sabe de quien escribe: el manual dice la regla una vez y aquí va si ya se
+ * cumplió. Una falla de «no usó su nombre» o «se lo volvió a pedir» se arregla
+ * con este dato contado (auditoría del ADR 0104).
  */
-export function attentionLines(progress: AttentionProgress, persona: string): string[] {
+export function attentionLines(
+  progress: AttentionProgress,
+  persona: string,
+  who: { name?: string | null; saves?: boolean } = {},
+): string[] {
   const lines = [
     progress.replies === 0
       ? `Es tu primera respuesta en esta atención: preséntate como ${persona} en una frase.`
       : "Ya le respondiste en esta atención: no te presentes ni vuelvas a saludar; ve directo a lo que pide.",
   ]
+  const save = who.saves ? "guárdalo con update_contact en este mismo paso y " : ""
+  if (who.name) {
+    if (!progress.usedName) lines.push(`Se llama ${who.name}: aún no le hablaste por su nombre en esta atención; hazlo en esta respuesta.`)
+  } else if (progress.askedName) {
+    lines.push(`Ya le preguntaste cómo se llama en esta atención: no se lo vuelvas a preguntar. Si ya te lo dijo, ${save}háblale por su nombre.`)
+  } else {
+    lines.push(
+      `Aún no sabes cómo se llama quien escribe ni se lo preguntaste en esta atención: si ya te lo dijo en la conversación, ${save}háblale por su nombre; si no, pregúntaselo al final de esta respuesta, sin frenar lo que pidió.`,
+    )
+  }
   if (progress.promotions.length) {
     const named = progress.promotions.map((name) => `«${name}»`).join(" y ")
     const one = progress.promotions.length === 1

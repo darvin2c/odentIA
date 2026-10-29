@@ -43,7 +43,10 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
   it("sin respuestas propias, es la primera: se presenta; después no", () => {
     const first = attentionProgress({ items: [{ direction: "in", senderKind: "contact", body: "hola", createdAt: at(0) }], startedAt, state: empty, promotions: [] })
     expect(first.replies).toBe(0)
-    expect(attentionLines(first, "Sofi")).toEqual(["Es tu primera respuesta en esta atención: preséntate como Sofi en una frase."])
+    expect(attentionLines(first, "Sofi", { name: "Rosa" })).toEqual([
+      "Es tu primera respuesta en esta atención: preséntate como Sofi en una frase.",
+      "Se llama Rosa: aún no le hablaste por su nombre en esta atención; hazlo en esta respuesta.",
+    ])
     const later = attentionProgress({
       items: [
         // Lo que respondió en la atención anterior no cuenta.
@@ -70,7 +73,7 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
       promotions: ["Limpieza de octubre", "Blanqueamiento express", "Ortodoncia"],
     })
     expect(progress.promotions).toEqual(["Limpieza de octubre"])
-    expect(attentionLines(progress, "Sofi")[1]).toBe(
+    expect(attentionLines(progress, "Sofi")).toContain(
       "Ya le ofreciste en esta atención la promoción «Limpieza de octubre»: no la repitas salvo que vuelva a preguntar por el precio.",
     )
   })
@@ -95,5 +98,36 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     const before = attentionProgress({ items: [], startedAt, state: { ...empty, recent: [proposal("ejecutada", -600)] }, promotions: [] })
     expect(before.done).toBeNull()
     expect(before.offered).toBe(false)
+  })
+
+  it("si ya le preguntó su nombre no se lo vuelve a preguntar; «te registro con tu nombre» no es preguntar", () => {
+    const out = (body: string, minutes = 1) => ({ direction: "out", senderKind: "agent", body, createdAt: at(minutes) })
+    const unknown = attentionProgress({ items: [out("Hola, soy Sofi. Te registro con tu nombre. ¿Te la reservo?")], startedAt, state: empty, promotions: [] })
+    expect(unknown.askedName).toBe(false)
+    expect(attentionLines(unknown, "Sofi", { saves: true })[1]).toBe(
+      "Aún no sabes cómo se llama quien escribe ni se lo preguntaste en esta atención: si ya te lo dijo en la conversación, guárdalo con update_contact en este mismo paso y háblale por su nombre; si no, pregúntaselo al final de esta respuesta, sin frenar lo que pidió.",
+    )
+    for (const asked of ["¿Con quién tengo el gusto?", "Para registrarte, ¿me indicas tus nombres y apellidos?", "May I have your full name?"]) {
+      const progress = attentionProgress({ items: [out(`Tengo el jueves a las 10:00. ${asked}`)], startedAt, state: empty, promotions: [] })
+      expect(progress.askedName).toBe(true)
+      expect(attentionLines(progress, "Sofi")[1]).toBe("Ya le preguntaste cómo se llama en esta atención: no se lo vuelvas a preguntar. Si ya te lo dijo, háblale por su nombre.")
+    }
+    // Lo que preguntó en la atención anterior no cuenta.
+    expect(attentionProgress({ items: [out("¿Con quién tengo el gusto?", -600)], startedAt, state: empty, promotions: [] }).askedName).toBe(false)
+  })
+
+  it("con su nombre en la ficha, se le pide usarlo hasta que lo usa, sin tildes ni el segundo nombre", () => {
+    const progress = attentionProgress({
+      items: [{ direction: "out", senderKind: "agent", body: "Hola, María, soy Sofi.", createdAt: at(1) }],
+      startedAt,
+      state: empty,
+      promotions: [],
+      name: "Maria José",
+    })
+    expect(progress.usedName).toBe(true)
+    expect(attentionLines(progress, "Sofi", { name: "Maria José" })).toHaveLength(1)
+    // «Mariana» no es «María».
+    const other = attentionProgress({ items: [{ direction: "out", senderKind: "agent", body: "Gracias, Mariana.", createdAt: at(1) }], startedAt, state: empty, promotions: [], name: "María" })
+    expect(other.usedName).toBe(false)
   })
 })

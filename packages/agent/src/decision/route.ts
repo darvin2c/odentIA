@@ -456,7 +456,8 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     const started = Boolean(progress?.offered || progress?.pending || progress?.done)
     const problem = started && has("buscar_huecos")
       ? ` Si solo vuelve sobre lo que le pasa, sin pedir consejo, ya le ofreciste la cita en esta atención: no le preguntes otra vez qué le pasa y sigue con la cita. ${appointmentStep(progress, propose)}`
-      : ` Si solo cuenta un problema o un síntoma sin pedir consejo, no lo pases: pregúntale qué le pasa en una línea y ofrécele una cita${has("buscar_huecos") ? " con los horarios más próximos (buscar_huecos)" : ""}.`
+      : // «Pregúntale qué le pasa» se lo preguntaba también a quien ya lo había contado (auditoría del ADR 0104).
+        ` Si solo cuenta un problema o un síntoma sin pedir consejo, no lo pases: ofrécele una cita${has("buscar_huecos") ? " con los horarios más próximos (buscar_huecos)" : ""} y, solo si aún no dijo qué le pasa, pregúntaselo en una línea.`
     return `${head} puede ser una consulta clínica. No des consejo clínico ni diagnóstico. Si pide un consejo (qué tomar, si es grave, qué hacer), pasa el caso a una persona con request_human_handoff y avísale en message${has("buscar_huecos") ? "; si además quiere cita, búscale horarios antes y ofréceselos en ese aviso" : ""}.${problem}`
   }
   if (path === "cita" && !has("buscar_huecos")) {
