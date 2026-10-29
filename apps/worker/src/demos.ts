@@ -1,17 +1,18 @@
+import type { ClinicalProduct } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { saasDemo } from "@odentia/db/schema/admin-demos"
 import {
   advanceDemo,
   buildDemo,
   claimPendingDemo,
-  deleteDemo,
+  DEMO_BUILD_STEPS,
   type DemoRecipeRef,
+  deleteDemo,
   demosToAdvance,
   expiredDemos,
   failStaleDemos,
   purgeDemoOrganization,
 } from "@odentia/services"
-import type { ClinicalProduct } from "@odentia/clinical"
 import { eq, sql } from "drizzle-orm"
 
 /**
@@ -87,7 +88,7 @@ async function build(deps: DemosDeps, row: typeof saasDemo.$inferSelect): Promis
           historyThrough: result.historyThrough,
           advancedOn: null,
           readyAt: now,
-          progress: { step: "listo", done: 5, total: 5 },
+          progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
           updatedAt: now,
         })
         .where(eq(saasDemo.id, row.id))
