@@ -133,7 +133,8 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   // Teléfono: la misma línea, con el flujo hacia abajo y sin desbordes.
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(controlOn.getByRole("switch", { name: "Apagar: Avisar un control" })).toBeVisible()
-  expect(await overflow(page)).toBeLessThanOrEqual(0)
+  // Recién cambiada la ventana, la página aún se reacomoda: se espera a que asiente.
+  await expect.poll(() => overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("linea-abierta-movil", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
   await page.setViewportSize({ width: 1440, height: 900 })
 

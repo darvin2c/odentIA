@@ -388,7 +388,8 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await expect(page.getByText("Esta sede aún no tiene unidades dentales")).toBeVisible()
   await shot("vacio-sin-sillones")
   await page.getByRole("button", { name: "Añadir unidad dental" }).click()
-  await page.getByRole("button", { name: "Añadir unidad dental" }).last().click()
+  // El botón del formulario, no el de la agenda vacía: esperar a que se abra.
+  await page.getByRole("region", { name: "Nueva unidad dental" }).getByRole("button", { name: "Añadir unidad dental" }).click()
 
   // Con unidad dental pero sin horario: se configura ahí mismo, igual que la unidad dental.
   await expect(page.getByText("Falta el horario de atención")).toBeVisible()
