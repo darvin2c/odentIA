@@ -231,7 +231,8 @@ function ComplaintsPage() {
       return listPayload.parse(await api(`/api/admin/consumer-complaints?${params}`))
     },
   })
-  const items = list.data?.items ?? []
+  // La tabla necesita referencias estables (ver la lista de espera): sin datos, la misma lista vacía.
+  const items = React.useMemo(() => list.data?.items ?? [], [list.data?.items])
   const open = (id: string | undefined) =>
     void navigate({ search: (prev) => ({ ...prev, hoja: id }), replace: true })
 
@@ -275,9 +276,10 @@ function ComplaintsPage() {
     ],
     [compact],
   )
-  const columnVisibility: VisibilityState = compact
-    ? { createdAt: false, kind: false, status: false }
-    : {}
+  const columnVisibility = React.useMemo(
+    (): VisibilityState => (compact ? { createdAt: false, kind: false, status: false } : {}),
+    [compact],
+  )
   const table = useReactTable({
     data: items,
     columns,
