@@ -348,7 +348,7 @@
     {
       "id": "material-mascarilla",
       "texto": "Ya, terminamos la profilaxis. Usé una mascarilla nueva porque se me mojó la otra.",
-      "espera": {"materiales": [{"producto": "mascarilla", "cantidad": 1}], "hechos": [{"servicio": "profilaxis"}]}
+      "espera": {"materiales": [{"producto": "mascarilla"}], "hechos": [{"servicio": "profilaxis"}]}
     },
     {
       "id": "material-entre-charla",
@@ -363,7 +363,7 @@
     {
       "id": "material-no-es-receta",
       "texto": "Le receto ibuprofeno de 400 cada ocho horas por tres días, y usé dos pares de guantes.",
-      "espera": {"materiales": [{"producto": "guante", "cantidad": 2}], "recetas": [{"dci": "ibuprofeno"}]}
+      "espera": {"materiales": [{"producto": "guante", "cantidad": 2}], "recetas": [{"dci": "ibuprofeno", "concentracion": "400", "duracion": "3"}]}
     }
   ]
 }

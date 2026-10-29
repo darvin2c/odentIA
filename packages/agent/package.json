@@ -24,6 +24,7 @@
     "eval:search": "node --env-file-if-exists=../../infra/dev/.env ./node_modules/vitest/vitest.mjs run --config vitest.eval.config.ts src/busqueda.eval.ts",
     "eval:dictado": "tsx --env-file-if-exists=../../infra/dev/.env src/dental/eval-dictado.ts",
     "eval:dictado-medico": "tsx --env-file-if-exists=../../infra/dev/.env src/medical/eval-dictado.ts",
+    "eval:atencion": "tsx --env-file-if-exists=../../infra/dev/.env src/eval-atencion.ts",
     "eval:urgencia-medica": "tsx --env-file-if-exists=../../infra/dev/.env src/medical/eval-urgencia.ts"
   },
   "dependencies": {
