@@ -2258,6 +2258,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const raised = again.raised ? " Como ya preguntó varias veces, ese tema quedó como urgente para el equipo: díselo." : ""
         if (!notice) {
           ctx.handoffNeedsReply = true
+          // Lo que trae sobre qué pide o qué falta se guarda aunque el aviso salga después.
+          await annotate(false)
           return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él.${raised} ${REPLY_ASKED_AGAIN}`
         }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
