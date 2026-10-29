@@ -137,6 +137,23 @@ describe("cerrar y reabrir", () => {
     expect(describeAuditEvent(audit!.action, (audit!.metadata as { origin?: string }).origin)).toMatchObject({ author: "Sofi", what: "Cerró una conversación: terminó la atención" })
   })
 
+  it("la despedida no cierra si la persona escribió algo después del mensaje que respondía (ADR 0024)", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Rosa Campos")
+    const [trigger] = await c.say(conv.id, "in", "Gracias, eso era todo", new Date("2026-10-12T16:00:00Z"))
+    const [newer] = await c.say(conv.id, "in", "Ah, una cosa más: ¿atienden los sábados?", new Date("2026-10-12T16:00:05Z"))
+    // Lo nuevo tiene su propia corrida: es lo que la despedida no alcanzó a leer.
+    await ownerDb.insert(agentRunLedger).values({
+      organizationId: c.orgId, conversationId: conv.id, triggerMessageId: newer!.id, model: "fake", status: "ok",
+      startedAt: new Date("2026-10-12T16:00:06Z"), toolsUsed: [],
+    })
+    expect(await c.run((tx) => closeConversationWith(tx, c.orgId, conv.id, { reason: "resuelta", byUserId: null, unlessInboundAfter: trigger!.id }))).toBe(false)
+    expect((await c.row(conv.id)).status).not.toBe("closed")
+    // Sin nada después, cierra como siempre.
+    expect(await c.run((tx) => closeConversationWith(tx, c.orgId, conv.id, { reason: "resuelta", byUserId: null, unlessInboundAfter: newer!.id }))).toBe(true)
+    expect((await c.row(conv.id)).status).toBe("closed")
+  })
+
   it("escribir a una cerrada la reabre con quién lo hizo; «Reabrir» también, sin mensaje", async () => {
     const c = await clinic()
     const conv = await c.thread("Bruno")

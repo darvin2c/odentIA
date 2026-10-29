@@ -313,6 +313,9 @@ export async function ingestInbound(
 
   let conversationId: string
   let threadContactId: string
+  // Bloqueada: un cierre en curso (la despedida de Sofi) termina antes y aquí se ve cerrada
+  // y se reabre, o espera a este entrante y ya no cierra (ADR 0024). Las corridas van en su
+  // propio ciclo del worker, a la vez que la ingesta (ADR 0104).
   const [existing] = await tx
     .select()
     .from(conversation)
@@ -323,6 +326,7 @@ export async function ingestInbound(
         eq(conversation.externalThreadId, event.externalThreadId),
       ),
     )
+    .for("update")
     .limit(1)
   if (existing) {
     conversationId = existing.id

@@ -985,7 +985,11 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       })
       for (const proposal of sent) await traceAnswer(text, traceOutcome(proposal), verdict?.checks ?? [], proposal)
       if (!sent.some((proposal) => proposal.status === "ejecutada")) return outcome
-      await inOrg((tx) => closeConversationWith(tx, ctx.orgId, ctx.conversationId, { reason: "resuelta", byUserId: null }))
+      // Si escribió algo mientras salía la despedida, no se cierra: su corrida le responde.
+      const closed = await inOrg((tx) =>
+        closeConversationWith(tx, ctx.orgId, ctx.conversationId, { reason: "resuelta", byUserId: null, unlessInboundAfter: ctx.triggerId ?? undefined }),
+      )
+      if (!closed) return "Despedida enviada; la conversación sigue abierta porque la persona escribió algo nuevo y eso se responde aparte. No envíes más mensajes."
       ctx.closed = true
       return "Despedida enviada y conversación cerrada. No envíes más mensajes: si la persona vuelve a escribir, se reabre sola."
     },
