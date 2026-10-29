@@ -265,10 +265,7 @@ export function demoExtraction(
     }
     // «Usé una mascarilla»: un material de la atención, no una prestación.
     const material = demoMaterial(text)
-    if (material) {
-      drafts.push({ kind: "material", payload: material, sourceText: sentence })
-      continue
-    }
+    if (material) drafts.push({ kind: "material", payload: material, sourceText: sentence })
     for (const name of services) {
       const key = plain(name)
         .split(" ")

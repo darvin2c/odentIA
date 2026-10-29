@@ -29,7 +29,12 @@ import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
-import { confirmDictationSuggestion, saveDictationSegment } from "./encounter-dictation.js"
+import {
+  confirmDictationSuggestion,
+  discardDictationSuggestion,
+  saveDictationSegment,
+  undoConfirmedDictation,
+} from "./encounter-dictation.js"
 import {
   addEncounterProcedure,
   finalizeEncounter,
@@ -489,6 +494,7 @@ it("Clío: el material dicho se busca en Inventario y es el total de la atenció
   // Nombres propios: otras pruebas dejan productos con el mismo nombre.
   const tag = tagOf()
   await ownerDb.update(product).set({ name: `Guantes ${tag}` }).where(eq(product.id, gloves.id))
+  await ownerDb.update(product).set({ name: `Pasta ${tag}` }).where(eq(product.id, paste.id))
   const mask = await newProduct({ name: `Mascarilla ${tag}`, unit: "mascarilla" })
   await stockIn(f, { productId: mask.id, warehouseId: store.id, quantity: 5, code: `M-${tag}` })
   const segment = (drafts: Parameters<typeof saveDictationSegment>[5]["drafts"]) =>
@@ -511,6 +517,16 @@ it("Clío: el material dicho se busca en Inventario y es el total de la atenció
   expect((await segment([{ kind: "material", payload: { product: `mascarilla ${tag}` } }])).suggestions).toHaveLength(0)
 
   for (const item of [said, gloveTotal]) await f.run((tx) => confirmDictationSuggestion(tx, ...f.args, f.encounter.id, item!.id))
+  // Dicho otra vez ya confirmado: dice lo ya anotado, que también es un total.
+  const [again] = (await segment([{ kind: "material", payload: { product: `mascarilla ${tag}` }, sourceText: "Otra mascarilla." }])).suggestions
+  expect(again).toMatchObject({ status: "lista", payload: { quantity: 1, alreadySaid: 1 } })
+  expect(again!.summary).toContain("Ya anotaste 1 mascarilla: vale el total, no se suma")
+  await f.run((tx) => discardDictationSuggestion(tx, ...f.args, f.encounter.id, again!.id))
+  // Uno confirmado que se pide quitar por voz deja de contar: vuelve lo de su servicio.
+  const [pasteTotal] = (await segment([{ kind: "material", payload: { product: `pasta ${tag}`, quantity: 3 } }])).suggestions
+  await f.run((tx) => confirmDictationSuggestion(tx, ...f.args, f.encounter.id, pasteTotal!.id))
+  await f.run((tx) => saveDictationSegment(tx, ...f.args, f.encounter.id, { drafts: [], segmentId: randomUUID(), removals: [{ suggestionId: pasteTotal!.id, said: "no, la pasta no" }] }))
+  await f.run((tx) => undoConfirmedDictation(tx, ...f.args, f.encounter.id, pasteTotal!.id))
   // El cierre lo anuncia antes de firmar: 6 guantes (no 10), la pasta de su servicio y la mascarilla.
   const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
   expect(new Map(closing.materials?.items.map((item) => [item.productId, item.quantity]))).toEqual(

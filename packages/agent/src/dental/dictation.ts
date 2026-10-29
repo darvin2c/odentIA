@@ -177,10 +177,7 @@ export function demoExtraction(
     else if (/\b(niega alergias|no tiene alergias|sin alergias)\b/.test(text)) drafts.push({ kind: "alergia", payload: { none: true }, sourceText: sentence })
     // «Usé una mascarilla»: un material de la atención.
     const material = demoMaterial(text)
-    if (material) {
-      drafts.push({ kind: "material", payload: material, sourceText: sentence })
-      continue
-    }
+    if (material) drafts.push({ kind: "material", payload: material, sourceText: sentence })
     // Lo contado como hecho («le hice…», «terminé…») es un procedimiento de hoy, no una indicación.
     const done = /\b(le hice|hice|termine|terminamos|le puse)\b/.test(text)
     for (const name of services) {

@@ -47,7 +47,7 @@ import { OPERATIONS, operationAgentSchema } from "./operation-fields.js"
 import { addBudgetItems, assembleEncounterBudget, createBudget, duplicateBudgetOption, findDraftBudget, removeBudgetItems } from "./budgets.js"
 import { addPlanItem, listPlanItems, setPlanItemStatus } from "./plan.js"
 import { createPrescription } from "./prescriptions.js"
-import { materialsFromServices } from "./service-materials.js"
+import { dictatedMaterials, materialsFromServices } from "./service-materials.js"
 import type { DictationPrepared, ProductDictation } from "./product-hooks.js"
 import { productHooks, requireDictatingProduct } from "./products.js"
 
@@ -332,9 +332,12 @@ function summarize(kind: DictationKind, payload: Record<string, unknown>, zone: 
     const total = typeof payload["unit"] === "string" ? `${quantityWords(quantityOf(payload), payload["unit"], zone.locale)} en total` : ""
     const brought = payload["inServices"] as MaterialInServices | undefined
     const unit = typeof payload["unit"] === "string" ? payload["unit"] : ""
+    const said = typeof payload["alreadySaid"] === "number" ? payload["alreadySaid"] : null
     return [
       [name, total].filter(Boolean).join(" · "),
-      brought
+      said !== null
+        ? `Ya anotaste ${quantityWords(said, unit, zone.locale)}: vale el total, no se suma`
+        : brought
         ? `${brought.services.join(" y ")} ya trae ${quantityWords(brought.quantity, unit, zone.locale)}: vale el total, no se suma`
         : typeof payload["productId"] === "string"
           ? "Sale de la sede al firmar"
@@ -476,11 +479,13 @@ function prepareMaterial(payload: Record<string, unknown>, products: CareProduct
  * cantidad dicha queda lo que traen, o uno.
  */
 async function settleMaterial(tx: Db, orgId: string, encounterId: string, prepared: Prepared): Promise<Prepared> {
-  const { inServices: _old, ...payload } = prepared.payload
+  const { inServices: _old, alreadySaid: _said, ...payload } = prepared.payload
   if (typeof payload["productId"] !== "string") return { ...prepared, payload }
-  const brought = (await materialsFromServices(tx, orgId, encounterId)).get(payload["productId"])
-  const quantity = typeof payload["quantity"] === "number" ? payload["quantity"] : (brought?.quantity ?? 1)
-  return { ...prepared, payload: { ...payload, quantity, ...(brought ? { inServices: brought } : {}) } }
+  // Lo ya anotado de ese producto manda sobre lo de sus servicios: es lo que saldría hoy.
+  const said = (await dictatedMaterials(tx, orgId, encounterId)).get(payload["productId"])
+  const brought = said ? undefined : (await materialsFromServices(tx, orgId, encounterId)).get(payload["productId"])
+  const quantity = typeof payload["quantity"] === "number" ? payload["quantity"] : (said ?? brought?.quantity ?? 1)
+  return { ...prepared, payload: { ...payload, quantity, ...(said ? { alreadySaid: said } : brought ? { inServices: brought } : {}) } }
 }
 
 /**
@@ -1443,8 +1448,12 @@ export async function saveDictationSegment(
   const doneKey = (payload: Record<string, unknown>) => JSON.stringify([payload["planItemId"] ?? payload["serviceId"] ?? normalizeForSearch(String(payload["service"] ?? "")), placeOf(payload)])
   const pendingDone = new Set(pendingNow.filter((item) => item.kind === "procedimiento").map((item) => doneKey(item.payload)))
   // Un material pendiente se corrige («no, fueron cuatro»), no se vuelve a proponer.
-  const materialKey = (payload: Record<string, unknown>) => String(payload["productId"] ?? `dicho:${normalizeForSearch(String(payload["product"] ?? ""))}`)
-  const pendingMaterials = new Set(pendingNow.filter((item) => item.kind === "material").map((item) => materialKey(item.payload)))
+  // Por el producto y por cómo se dijo: el que no se encontró y se vuelve a decir ya encontrado es el mismo.
+  const materialKeys = (payload: Record<string, unknown>) => [
+    ...(typeof payload["productId"] === "string" ? [payload["productId"]] : []),
+    `dicho:${normalizeForSearch(String(payload["product"] ?? ""))}`,
+  ]
+  const pendingMaterials = new Set(pendingNow.filter((item) => item.kind === "material").flatMap((item) => materialKeys(item.payload)))
   let allergiesTouched = removed.length > 0 || corrected.length > 0
   let pendingBudget = pendingNow.some((item) => item.kind === "presupuesto")
   const alreadyOnFile: string[] = []
@@ -1480,9 +1489,9 @@ export async function saveDictationSegment(
       pendingDone.add(key)
     }
     if (draft.kind === "material") {
-      const key = materialKey(ready.payload)
-      if (pendingMaterials.has(key)) continue
-      pendingMaterials.add(key)
+      const keys = materialKeys(ready.payload)
+      if (keys.some((key) => pendingMaterials.has(key))) continue
+      for (const key of keys) pendingMaterials.add(key)
     }
     // Pedir otra vez el presupuesto no es otro presupuesto: el que espera se pone al día al terminar el tramo.
     if (draft.kind === "presupuesto") {

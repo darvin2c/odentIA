@@ -449,7 +449,7 @@ interface MaterialPlanLine {
 }
 
 /** Lo que dice el dictado de los materiales de la atención: el último total confirmado de cada producto. */
-async function dictatedMaterials(tx: Db, orgId: string, encounterId: string): Promise<Map<string, number>> {
+export async function dictatedMaterials(tx: Db, orgId: string, encounterId: string): Promise<Map<string, number>> {
   const rows = await tx
     .select({ payload: encounterDictationSuggestion.payload })
     .from(encounterDictationSuggestion)
