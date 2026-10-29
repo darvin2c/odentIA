@@ -228,6 +228,8 @@ variable. `LLM_OPENAI_BASE_URL` solo hace falta con una pasarela propia. `LLM_MO
 `NODE_ENV=production` y canales reales (`CHANNEL_SENDER_MODE=live` en el worker,
 `CHANNEL_VALIDATE_EXTERNAL` distinto de `false` en la API) ni la API ni el worker
 arrancan con él.
+Con `NODE_ENV=production` el worker tampoco arranca sin `CHANNEL_SENDER_MODE`:
+sin ella simularía cada envío y el hilo lo mostraría como enviado.
 
 ### Sugerencias de direcciones
 
