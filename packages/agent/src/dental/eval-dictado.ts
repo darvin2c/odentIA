@@ -65,6 +65,8 @@ interface PracticeDictation {
     sinControles?: boolean
     /** Pidió armar el presupuesto ahora (true) o no (false). */
     presupuesto?: boolean
+    /** Materiales que dijo usar (ADR 0105), por una palabra y cuántos si lo dijo. Exactos: ni uno de más. */
+    materiales?: Array<{ producto: string; cantidad?: number }>
   }
 }
 
@@ -218,6 +220,14 @@ for (const dictation of bank.dictados) {
   if (dictation.espera.citas) other("ninguna cita de más", bookings.length === dictation.espera.citas.length)
   if (dictation.espera.sinControles) other("sin control: pidió reservar", read.drafts.every((draft) => draft.kind !== "control"))
   if (dictation.espera.presupuesto !== undefined) other(dictation.espera.presupuesto ? "armar el presupuesto" : "no armar el presupuesto", read.drafts.some((draft) => draft.kind === "presupuesto") === dictation.espera.presupuesto)
+  const materials = read.drafts.filter((draft) => draft.kind === "material").map((draft) => draft.payload)
+  for (const expected of dictation.espera.materiales ?? []) {
+    other(
+      `material: ${expected.producto}${expected.cantidad ? ` ×${expected.cantidad}` : ""}`,
+      materials.some((payload) => plain(String(payload["product"] ?? "")).includes(plain(expected.producto)) && (!expected.cantidad || payload["quantity"] === expected.cantidad)),
+    )
+  }
+  if (dictation.espera.materiales) other("ningún material de más", materials.length === dictation.espera.materiales.length)
   if (dictation.espera.nuevos !== undefined) other("nada registrado otra vez", read.drafts.length === dictation.espera.nuevos)
   // Lo que no debía tocar nada pendiente («la tercera» sin tercera): no se aplica.
   if (dictation.espera.correcciones === undefined && dictation.espera.quitar === undefined && pending.length) {

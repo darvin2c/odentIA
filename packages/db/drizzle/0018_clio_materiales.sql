@@ -1,0 +1,2 @@
+ALTER TABLE "encounter_dictation_suggestion" DROP CONSTRAINT "encounter_dictation_suggestion_kind_check";--> statement-breakpoint
+ALTER TABLE "encounter_dictation_suggestion" ADD CONSTRAINT "encounter_dictation_suggestion_kind_check" CHECK ("encounter_dictation_suggestion"."kind" IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material'));

@@ -127,7 +127,8 @@ const SECTION_DICTATION: Partial<Record<CommonSectionKey, { kinds: DictationKind
   // Lo dictado en un bloque del producto lo declara el bloque (odentIA: lo de una pieza, issue 109).
   hallazgos: { kinds: ["diagnostico"], onlySuggested: "Sin diagnósticos confirmados" },
   // Lo que se dijo hecho hoy (issue 109): sale del plan, de los servicios o como acto libre.
-  procedimientos: { kinds: ["procedimiento"], onlySuggested: "Sin procedimientos registrados" },
+  // Con lo hecho, el material que se dijo usar (ADR 0105): sale de la sede al firmar.
+  procedimientos: { kinds: ["procedimiento", "material"], onlySuggested: "Sin procedimientos registrados" },
   // Los signos vitales y el examen por sistemas que dicta latidIA (issue 229).
   examen: { kinds: ["signos", "examen"], onlySuggested: "Sin examen registrado" },
   // «Plan y controles» es un solo bloque (ADR 0034): ahí se revisan indicaciones y controles.

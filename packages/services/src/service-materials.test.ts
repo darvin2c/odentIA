@@ -27,7 +27,9 @@ import {
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { upsertAgentConfig } from "./agentConfig.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
+import { confirmDictationSuggestion, saveDictationSegment } from "./encounter-dictation.js"
 import {
   addEncounterProcedure,
   finalizeEncounter,
@@ -479,4 +481,58 @@ it("«Fueron 4, no 2»: corregir hacia arriba y hacia abajo queda unido a la ate
   const readByOther = await f.run((tx) => getEncounterMaterials(tx, "org_a", other, f.patient.id, f.encounter.id, none))
   expect(readByOther.canCorrect).toBe(false)
   expect(readByOther.canAddProducts).toBe(false)
+})
+
+it("Clío: el material dicho se busca en Inventario y es el total de la atención, no se suma a lo de sus servicios (ADR 0105)", async () => {
+  const { f, store, gloves, paste } = await careScenario()
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { clinicalAssistantEnabled: true }))
+  // Nombres propios: otras pruebas dejan productos con el mismo nombre.
+  const tag = tagOf()
+  await ownerDb.update(product).set({ name: `Guantes ${tag}` }).where(eq(product.id, gloves.id))
+  const mask = await newProduct({ name: `Mascarilla ${tag}`, unit: "mascarilla" })
+  await stockIn(f, { productId: mask.id, warehouseId: store.id, quantity: 5, code: `M-${tag}` })
+  const segment = (drafts: Parameters<typeof saveDictationSegment>[5]["drafts"]) =>
+    f.run((tx) => saveDictationSegment(tx, ...f.args, f.encounter.id, { drafts }))
+
+  const [said, gloveTotal, unknown] = (
+    await segment([
+      { kind: "material", payload: { product: `mascarilla ${tag}`, quantity: 1 }, sourceText: "Usé una mascarilla." },
+      { kind: "material", payload: { product: `guantes ${tag}`, quantity: 6 }, sourceText: "Fueron seis guantes." },
+      { kind: "material", payload: { product: "barbijo" }, sourceText: "Y un barbijo." },
+    ])
+  ).suggestions
+  expect(said).toMatchObject({ status: "lista", payload: { productId: mask.id, quantity: 1 }, summary: `Mascarilla ${tag} · 1 mascarilla en total\nSale de la sede al firmar` })
+  // El servicio ya traía 4 (2 por vez, dos veces): lo dicho es el total, no se suma.
+  expect(gloveTotal).toMatchObject({ status: "lista", payload: { productId: gloves.id, quantity: 6, inServices: { quantity: 4, services: ["Tratamiento propio"] } } })
+  expect(gloveTotal!.summary).toBe(`Guantes ${tag} · 6 guantes en total\nTratamiento propio ya trae 4 guantes: vale el total, no se suma`)
+  // Lo que no está en Inventario no se puede descontar: por revisar, sin frenar nada.
+  expect(unknown).toMatchObject({ status: "por_revisar", note: "«barbijo» no está entre los productos que se usan en las atenciones: agrégalo en Inventario o descártalo." })
+  // Dicho otra vez mientras espera, no se propone de nuevo.
+  expect((await segment([{ kind: "material", payload: { product: `mascarilla ${tag}` } }])).suggestions).toHaveLength(0)
+
+  for (const item of [said, gloveTotal]) await f.run((tx) => confirmDictationSuggestion(tx, ...f.args, f.encounter.id, item!.id))
+  // El cierre lo anuncia antes de firmar: 6 guantes (no 10), la pasta de su servicio y la mascarilla.
+  const closing = await f.run((tx) => getEncounterClosing(tx, "org_a", f.actor, f.patient.id, f.encounter.id))
+  expect(new Map(closing.materials?.items.map((item) => [item.productId, item.quantity]))).toEqual(
+    new Map([
+      [gloves.id, 6],
+      [paste.id, 2],
+      [mask.id, 1],
+    ]),
+  )
+  await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
+  const used = await f.run((tx) => getEncounterMaterials(tx, ...f.args, f.encounter.id, none))
+  expect(new Map(used.items.map((item) => [item.productId, item.quantity]))).toEqual(
+    new Map([
+      [gloves.id, 6],
+      [paste.id, 2],
+      [mask.id, 1],
+    ]),
+  )
+  const maskMoves = await ownerDb
+    .select()
+    .from(stockMovement)
+    .where(and(eq(stockMovement.encounterId, f.encounter.id), eq(stockMovement.productId, mask.id)))
+  expect(maskMoves.map((move) => move.reason)).toEqual([expect.stringMatching(/^Atención del .+ · lo que se dictó$/)])
+  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { clinicalAssistantEnabled: false }))
 })

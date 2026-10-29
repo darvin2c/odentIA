@@ -853,7 +853,7 @@ test("latidIA: sin colegiatura, el cierre propone «Médico cirujano» y el CMP,
   await context.close()
 })
 
-test("latidIA: al firmar se ve lo que salió del consultorio y se agrega lo que faltó sin salir", async ({
+test("latidIA: Clío anota el material dicho, al firmar se ve lo que salió del consultorio y se agrega lo que faltó sin salir", async ({
   browser,
   fixtureDb,
   passwordHash,
@@ -946,13 +946,27 @@ test("latidIA: al firmar se ve lo que salió del consultorio y se agrega lo que 
     200,
   )
 
+  expect((await request(page, api, "PUT", "/api/agent/config", slug, { clinicalAssistantEnabled: true })).status).toBe(200)
+
   await gotoHydrated(page, latidiaUrl(slug, `/patients/${patientId}/encounters/${opened.body.data.id}`))
+  // Clío anota el material dicho: el total, no se suma a lo que trae la consulta (ADR 0105).
+  const idle = page.getByRole("region", { name: "Dictado de la atención" })
+  await idle.getByRole("button", { name: "Escribir en vez de dictar" }).click()
+  await idle.getByLabel("Escribe lo dictado").fill("Usé dos pares de guantes.")
+  await idle.getByRole("button", { name: "Ordenar lo dictado" }).click()
+  const dictated = page.getByRole("list", { name: "Sugerencias de Clío: Materiales" }).getByRole("listitem").first()
+  await expect(dictated).toContainText("2 pares en total")
+  await expect(dictated).toContainText("Consulta de prueba ya trae 1 par: vale el total, no se suma")
+  await dictated.getByRole("button", { name: "Confirmar", exact: true }).click()
+  await expect(page.getByRole("list", { name: "Sugerencias de Clío: Materiales" })).toHaveCount(0)
+
   await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const signing = page.getByRole("dialog", { name: "Finalizar y firmar" })
+  await expect(signing).toContainText("se descuentan de Sede Central: 1 unidad de bajalengua de madera y 2 pares de guantes de examen.")
   await signing.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
   const done = page.getByRole("dialog", { name: "Atención finalizada" })
   const materials = done.getByRole("region", { name: "Materiales" })
-  await expect(materials).toContainText("Salieron de Sede Central: 1 unidad de bajalengua de madera y 1 par de guantes de examen.")
+  await expect(materials).toContainText("Salieron de Sede Central: 1 unidad de bajalengua de madera y 2 pares de guantes de examen.")
   await expect(materials).toContainText("No había 1 unidad de bajalengua de madera: queda como faltante en Inventario.")
   await page.screenshot({ path: testInfo.outputPath("latidia-atencion-finalizada-materiales.png"), fullPage: true })
 
@@ -963,7 +977,7 @@ test("latidIA: al firmar se ve lo que salió del consultorio y se agrega lo que 
   await page.getByRole("option", { name: /^Mascarilla quirúrgica/ }).click()
   await drawer.getByRole("button", { name: "Guardar" }).click()
   await expect(materials).toContainText(
-    "Salieron de Sede Central: 1 unidad de bajalengua de madera, 1 par de guantes de examen y 1 unidad de mascarilla quirúrgica.",
+    "Salieron de Sede Central: 1 unidad de bajalengua de madera, 2 pares de guantes de examen y 1 unidad de mascarilla quirúrgica.",
   )
   await page.screenshot({ path: testInfo.outputPath("latidia-atencion-finalizada-corregida.png"), fullPage: true })
   await done.getByRole("button", { name: "Listo" }).click()

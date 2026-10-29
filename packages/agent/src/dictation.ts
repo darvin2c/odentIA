@@ -130,6 +130,29 @@ export function allergyAndDonePrompt(clinician: string, done: string): string[] 
 }
 
 /**
+ * El material que se dice usado en la atención (ADR 0105), igual en todo
+ * producto. El modelo lo deja con sus palabras; el servicio lo busca en
+ * Inventario y lo cuenta como el total de ese producto. `used` y `done`:
+ * ejemplos de lo usado y de lo hecho, con las palabras del producto.
+ */
+export function materialsPrompt(clinician: string, used: string, done: string): string {
+  return `En \`materiales\` va cada material o insumo que el ${clinician} dice que usó en esta atención («usé una mascarilla», ${used}), con \`product\` en sus palabras y en singular, y \`quantity\` solo si dijo cuántos: el sistema lo busca en Inventario. Lo que hizo con ellos (${done}) va en \`procedimientos\`, no aquí, y lo que receta no es un material usado.`
+}
+
+const DEMO_COUNT: Record<string, number> = { un: 1, una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6 }
+
+/**
+ * Para el doble de demostración: «usé una mascarilla», «usé dos pares de
+ * guantes». `text` ya va en minúsculas y sin tildes.
+ */
+export function demoMaterial(text: string): { product: string; quantity: number } | null {
+  const said = /\b(?:use|usamos|gaste|se fueron) (\d+|un|una|uno|dos|tres|cuatro|cinco|seis) (?:pares? de |sobres? de |cajas? de )?([a-z]{3,})/.exec(text)
+  if (!said?.[1] || !said[2]) return null
+  const quantity = /^\d+$/.test(said[1]) ? Number(said[1]) : (DEMO_COUNT[said[1]] ?? 1)
+  return { product: said[2].replace(/s$/, ""), quantity }
+}
+
+/**
  * El dictado de un producto: qué le pide al modelo y cómo se ordena sin él.
  * La consulta (`nota`), las correcciones y los «quita» son de todos; cada
  * producto suma sus listas (odentIA: el odontograma, los diagnósticos, el
