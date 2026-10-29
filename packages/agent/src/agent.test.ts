@@ -949,8 +949,9 @@ it("cada turno arma el contexto desde la base sin crecer por copia ni conservar 
   expect(model.seen).toHaveLength(2)
   const first = model.seen[0] ?? []
   const second = model.seen[1] ?? []
+  // Lo de la clínica antes del historial y lo del turno después (ADR 0104): nunca más copias.
   const systems = second.filter((m) => m instanceof SystemMessage || m.constructor?.name === "SystemMessage")
-  expect(systems).toHaveLength(1)
+  expect(systems).toHaveLength(2)
   expect(second.length).toBeLessThanOrEqual(first.length + 1)
   const systemText = systems.map((m) => String(m.content)).join("\n")
   expect(systemText).toContain("PROMPT-TURNO-DOS")
@@ -1760,7 +1761,9 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   expect(system).toContain("Propuesta pendiente de que el interlocutor confirme: Reservar cita")
   expect(system).toContain("- La cita es para Paciente dos-turnos; prefiere las mañanas.")
   expect(system).toContain("[buscar_huecos · ")
-  expect(String(seen[seen.length - 1]?.content)).toMatch(/^\[[^\]]+\] Sí$/)
+  // Lo último que dijo es el «Sí»; después solo va lo del turno.
+  expect(String(seen[seen.length - 2]?.content)).toMatch(/^\[[^\]]+\] Sí$/)
+  expect(seen[seen.length - 1]?.getType()).toBe("system")
   const booked = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
   expect(booked).toEqual([{ status: "programada" }])

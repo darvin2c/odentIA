@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
+import { AIMessage, type BaseMessage, type ContentBlock, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
 import type { Runnable } from "@langchain/core/runnables"
 import { tool } from "@langchain/core/tools"
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph"
@@ -238,8 +238,8 @@ function writtenText(msg: AIMessage): string {
 const AgentState = Annotation.Root({
   messages: Annotation<BaseMessage[]>({
     // Cada corrida empieza vacía (el grafo no guarda su estado, ADR 0051):
-    // loadContext pone [system, ...historial] leídos de la base y el modelo
-    // y las herramientas suman lo suyo, sin perder mensajes de herramientas.
+    // loadContext pone [sistema, ...historial, lo del turno] leídos de la base
+    // y el modelo y las herramientas suman lo suyo, sin perder mensajes de herramientas.
     reducer: (left, right) => left.concat(right),
     default: () => [],
   }),
@@ -493,6 +493,21 @@ function historyToMessages(items: ThreadMessage[], zone: OrgLocale): BaseMessage
     }
   }
   return out
+}
+
+/**
+ * El mensaje de sistema que va antes del historial. Lo igual para toda la
+ * organización lleva el corte de caché de OpenAI (ADR 0104): cualquier
+ * conversación de la clínica lo lee de ahí, aunque sea su primera corrida.
+ * Recepción va por /v1/responses (`receptionReasoning`), donde el bloque es
+ * `input_text`: LangChain lo envía tal cual y a uno `text` le quitaría el corte.
+ */
+function systemContent(provider: string | undefined, stable: string, thread: string): string | ContentBlock[] {
+  if (provider !== "openai") return [stable, thread].filter(Boolean).join("\n\n")
+  return [
+    { type: "input_text", text: stable, prompt_cache_breakpoint: { mode: "explicit" } },
+    ...(thread ? [{ type: "input_text", text: `\n\n${thread}` }] : []),
+  ]
 }
 
 /** Resumen corto de una consulta, para que el equipo vea qué se miró sin leer la salida entera. */
@@ -924,11 +939,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // Lo que el turno recibe de verdad: con esto se arman el manual y la indicación del camino.
     const services = agentServicesShown(clinicData)
     const picked = selecting ? await selectKnowledge(asked, faqs) : null
-    // De lo más estable a lo más cambiante. Los proveedores sirven desde su
-    // caché el prefijo idéntico entre llamadas: lo que es igual para toda la
-    // organización (instrucciones, política, conocimiento) va primero; luego
-    // lo propio del hilo; y al final lo que cambia en cada corrida. Poner la
-    // hora delante invalidaba la caché de todo lo que seguía.
     // El camino que eligió el modelo de decisión: el código trae antes lo que
     // ese camino necesita y el modelo que escribe lo recibe ya consultado.
     const route = toolCtx.route ?? null
@@ -985,10 +995,17 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       toolCtx.personTreatment === "usted"
         ? "Te escribe de usted: respóndele de usted en todo el mensaje, también en las frases que te dan las herramientas, que vienen de tú."
         : null
-    const perTurn = [contactBlock, formatLine, crossBlock, attentionBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, treatmentLine, nowLine]
+    // De lo más estable a lo más cambiante (ADR 0005 y 0104): el proveedor sirve
+    // desde su caché lo que es igual al principio de una llamada anterior. Antes
+    // del historial va lo igual para toda la organización (instrucciones,
+    // política, conocimiento) y lo del hilo que no cambia en la atención (el
+    // formato del canal, otros canales); después, en su propio mensaje, lo que
+    // cambia en cada corrida. Con eso delante del historial, ninguna corrida
+    // volvía a leer el historial de la anterior.
+    const thread = [formatLine, crossBlock].filter(Boolean).join("\n\n")
+    const perTurn = [contactBlock, attentionBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, treatmentLine, nowLine]
       .filter(Boolean)
       .join("\n\n")
-    const system = [stable, perTurn].filter(Boolean).join("\n\n")
     const said = (who: "contact" | "agent" | "team") =>
       items
         .filter((item) =>
@@ -1024,8 +1041,11 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     toolCtx.checkFailures = 0
     const history = historyToMessages(items, zone)
     if (draft) history.push(new HumanMessage({ content: draft }))
-    // OpenAI guarda sola en su caché la parte igual para toda la organización.
-    return { messages: [new SystemMessage({ content: system }), ...history] }
+    // Lo del turno va como sistema y no como usuario: OpenAI deja su corte al final del
+    // último mensaje del usuario, y así la corrida siguiente lee el historial de la caché.
+    return {
+      messages: [new SystemMessage({ content: systemContent(toolCtx.modelProvider, stable, thread) }), ...history, new SystemMessage({ content: perTurn })],
+    }
   }
 
   async function llm(state: typeof AgentState.State) {

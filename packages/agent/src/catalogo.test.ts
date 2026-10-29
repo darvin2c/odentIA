@@ -86,16 +86,16 @@ class ScriptedModel extends BaseChatModel {
     const reply = this.script(this.calls.length)
     return { generations: [{ text: "", message: reply }] }
   }
+  /** Lo que leyó como sistema: lo de la clínica antes del historial y lo del turno después. */
   system(call = 0): string {
-    const content = this.calls[call]?.[0]?.content
-    if (typeof content === "string") return content
-    return Array.isArray(content)
-      ? content
-          .map((part) =>
-            typeof part === "string" ? part : "text" in part ? String(part.text) : "",
-          )
-          .join("\n")
-      : ""
+    const text = (content: BaseMessage["content"]) =>
+      typeof content === "string"
+        ? content
+        : content.map((part) => (typeof part === "string" ? part : "text" in part ? String(part.text) : "")).join("\n")
+    return (this.calls[call] ?? [])
+      .filter((message) => message.getType() === "system")
+      .map((message) => text(message.content))
+      .join("\n")
   }
   /** Lo que devolvió la última herramienta antes de la llamada `call`. */
   lastToolResult(call: number): string {
