@@ -730,11 +730,13 @@ it("el modelo de decisión en sombra registra su triaje sin cambiar la corrida",
   await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline", decisionRoutingEnabled: false }))
   try {
     const { conversationId, messageId } = await ingestText("tg:ag-sombra", "evt-ag-sombra", "Quiero hablar con una persona, me duele mucho")
-    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Te paso con el equipo." }, "call-1"))
+    // Una respuesta que no dice haber pasado nada: «te paso con el equipo» sin pase se pide de
+    // nuevo (`claimsOf`), y aquí se mide solo que la sombra no cambie la corrida.
+    const model = new ScriptedModel(() => toolCall("send_reply", { text: "Siento que te duela. ¿Desde cuándo?" }, "call-1"))
     expect(await runScripted(model, conversationId, messageId)).toBe("done")
     // La corrida es la de siempre: una llamada, respuesta enviada, agente activo.
     expect(model.seen.length).toBe(1)
-    expect(await agentMessages(conversationId)).toEqual(["Te paso con el equipo."])
+    expect(await agentMessages(conversationId)).toEqual(["Siento que te duela. ¿Desde cuándo?"])
     expect(await agentStatusOf(conversationId)).toBe("on")
     const rows = await withOrgContext(appDb, "org_a", (tx) =>
       tx
@@ -1247,8 +1249,8 @@ it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el
   }))
   expect(badDocument).toContain("Pídele que lo revise")
   const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, givenNames: "Valeria", familyName: "Rojas Salazar" }))
-  // La pregunta lleva la frase del aviso y su enlace; todavía no hay nadie registrado.
-  expect(asked).toContain("Al confirmar, aceptas nuestro aviso de privacidad: https://")
+  // La pregunta lleva la frase del aviso y su enlace, con el registro en la misma frase; todavía no hay nadie registrado.
+  expect(asked).toContain("Al confirmar, te registro como paciente y aceptas nuestro aviso de privacidad: https://")
   // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
   ctx.evidence = [...(ctx.evidence ?? []), { kind: "sistema", source: "reservar_paciente_nuevo", text: asked }]
   const noticeUrl = asked.match(/https:\/\/\S+\/aviso/)?.[0]
@@ -1360,7 +1362,8 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   const proposed = String(await reprogram.invoke({
     appointmentId: booked.id, startsAt: dayAt(1, 16), expectedVersion: booked.version,
   }))
-  expect(proposed).toContain("pregúntale con naturalidad si se la reservas")
+  // Mover se pregunta como mover, no con «¿Te la reservo?» (auditoría del ADR 0104).
+  expect(proposed).toContain("pregúntale con naturalidad si se la cambias")
   const proposalId = /id ([0-9a-f-]{36})/.exec(proposed)?.[1]
   expect(proposalId).toBeTruthy()
   await ingestText("tg:reprog-ctx", "evt-reprog-si-1", "Sí, confirmo")
@@ -1397,7 +1400,7 @@ it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar res
   ctx.triggerId = "trig-cancel-1"
   const cancel = tools.find((t) => t.name === "cancelar_cita")!
   const pendingMsg = String(await cancel.invoke({ appointmentId: booked.id }))
-  expect(pendingMsg).toContain("pregúntale con naturalidad si se la reservas")
+  expect(pendingMsg).toContain("Pregúntale con naturalidad si se la cancelas")
   const repeatedMsg = String(await cancel.invoke({ appointmentId: booked.id }))
   const cancelId = /id ([0-9a-f-]{36})/.exec(pendingMsg)?.[1]
   expect(cancelId).toBeTruthy()
