@@ -19,8 +19,8 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 
 - **La atención entera.** Cada turno lee la atención en curso desde que empezó (`listAttentionMessages`), y al menos los últimos 20 mensajes, para no perder el aviso que la abrió. Tiene un tope por tamaño (`fitHistory`, unas 6 000 palabras): si no cabe, quedan cómo empezó y lo último, y el contexto dice cuántos mensajes no ve. Entre turnos no se guarda nada (ADR 0051).
 - **El código cuenta cómo va la atención.** `attentionProgress` lee de sus fuentes si Sofi ya respondió, si ya ofreció horarios, qué cita espera el sí, qué quedó hecho y si ya se le dijo, qué promoción ya nombró, cuántas veces le preguntó su nombre y si ya le habló por él. El manual dice cada regla una sola vez; el turno dice si ya se cumplió. La indicación del camino dice lo que falta (`appointmentStep`).
-- **Lo que la persona sigue escribiendo entra mientras Sofi redacta.** Las corridas van en su propio ciclo del worker. En un solo ciclo, una corrida frenaba la ingesta: lo que la persona escribía mientras tanto quedaba en la cola sin guardarse y Sofi respondía a pedazos.
-- **Lo que va a salir se compara con lo que consta**, sin modelo y una vez por corrida cada cosa, como `verifyReply`: el idioma, el trato de usted, el pase o la nota que dice haber hecho y el nombre preguntado dos veces. Lo que espera su sí se pregunta y nunca se afirma antes; a quien aún no es paciente, el registro va en la frase del aviso (ADR 0101).
+- **Lo que la persona sigue escribiendo entra mientras Sofi redacta.** Las corridas van en su propio ciclo del worker. En un solo ciclo, una corrida frenaba la ingesta: lo que la persona escribía mientras tanto quedaba en la cola sin guardarse y Sofi respondía a pedazos. Si llega algo nuevo antes de un paso, la corrida solo guarda lo que la persona dijo y termina: no actúa con lo de antes.
+- **Lo que va a salir se compara con lo que consta**, sin modelo y una vez por corrida cada cosa, como `verifyReply`: el idioma, el trato de usted, el pase o la nota que dice haber hecho, el nombre preguntado dos veces y empezar repitiendo lo que la persona dijo. Lo que espera su sí se pregunta y nunca se afirma antes; a quien aún no es paciente, el registro va en la frase del aviso (ADR 0101).
 - **Lo que no puede hacer ni responder lo pasa al equipo**, en vez de decirle que llame.
 - **Responder no es saludar** (`guardAnswer`). Si lo último que envió la clínica preguntaba algo, el camino «saludo» pasa a ser el abierto. Es una regla del código, como `guardBurst`.
 - **Una memoria clara.**
@@ -43,7 +43,7 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 - Las atenciones de más de 20 mensajes gastan más tokens. Las herramientas crecen unos 900 caracteres por las notas con nombre propio. El manual queda igual de largo, pero sin parches.
 - El tope por tamaño puede dejar fuera la mitad de una atención muy larga. El contexto lo dice, y las notas con nombre propio lo cubren.
 - Lo que cuenta el código se basa en lo que Sofi escribió: si dice una promoción con otras palabras, no cuenta como ofrecida.
-- Con las corridas en su propio ciclo, la que se corta porque la persona siguió escribiendo se paga igual: cuesta más por conversación.
+- Con las corridas en su propio ciclo, la que se corta porque la persona siguió escribiendo se paga hasta el paso en que se corta.
 - Las comprobaciones por forma no cubren todas las maneras de decir lo mismo: el modelo encuentra otras.
 
 ## Referencias
