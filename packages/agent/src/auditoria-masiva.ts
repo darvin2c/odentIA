@@ -534,13 +534,20 @@ async function setup() {
 mkdirSync(OUT, { recursive: true })
 await setup()
 if (CASES_FILE && env.CASOS_SOLO === "1") {
-  const made: AuditCase[] = []
-  for (let index = 0; index < TOTAL; index++) {
-    const chosen = await caseFor(index)
-    if (chosen) made.push(chosen)
-  }
-  writeFileSync(CASES_FILE, JSON.stringify(made, null, 2))
-  console.log(`casos guardados: ${made.length} en ${CASES_FILE}`)
+  // De a `PARALELO` a la vez: los de quien vuelve traen su hilo de antes y tardan.
+  const made: Array<AuditCase | null> = Array.from({ length: TOTAL }, () => null)
+  let pending = 0
+  await Promise.all(
+    Array.from({ length: PARALLEL }, async () => {
+      while (pending < TOTAL) {
+        const index = pending++
+        made[index] = await caseFor(index)
+      }
+    }),
+  )
+  const kept = made.filter((item): item is AuditCase => item !== null)
+  writeFileSync(CASES_FILE, JSON.stringify(kept, null, 2))
+  console.log(`casos guardados: ${kept.length} en ${CASES_FILE}`)
   process.exit(0)
 }
 if (CASES_FILE) fixedCases = JSON.parse(readFileSync(CASES_FILE, "utf8")) as AuditCase[]
