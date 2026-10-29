@@ -70,6 +70,7 @@ import { reportAiUse } from "./ai-usage.js"
 import { attentionLines, attentionProgress, fitHistory, HISTORY_MAX_MESSAGES, HISTORY_MIN_TAIL } from "./attention.js"
 import { channelFormatRule } from "./channel-format.js"
 import { languageOf } from "./language.js"
+import { treatmentOf } from "./treatment.js"
 import { routeInstruction, routeToolsFor, URGENT_SCORE, WIDEN_TOOL, widenDescription } from "./decision/route.js"
 import {
   type AgentEvidence,
@@ -973,7 +974,14 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       toolCtx.personLanguage === "en"
         ? "La persona te escribe en inglés: respóndele en inglés, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español; tradúcelas."
         : "Responde en el idioma del último mensaje de la persona, aunque estas indicaciones, los datos y las frases que te dan las herramientas estén en español: si te escribe en otro idioma, tradúcelas."
-    const perTurn = [contactBlock, formatLine, crossBlock, attentionBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, nowLine]
+    // El trato también lo distingue el código: las frases de las herramientas van de tú (auditoría del ADR 0104).
+    toolCtx.personTreatment =
+      toolCtx.personLanguage === "en" ? null : treatmentOf(items.filter((item) => item.direction === "in").slice(-5).map((item) => item.body ?? ""))
+    const treatmentLine =
+      toolCtx.personTreatment === "usted"
+        ? "Te escribe de usted: respóndele de usted en todo el mensaje, también en las frases que te dan las herramientas, que vienen de tú."
+        : null
+    const perTurn = [contactBlock, formatLine, crossBlock, attentionBlock, picked?.block, trialBlock, examplesBlock, routeBlock, languageLine, treatmentLine, nowLine]
       .filter(Boolean)
       .join("\n\n")
     const system = [stable, perTurn].filter(Boolean).join("\n\n")

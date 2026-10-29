@@ -98,6 +98,7 @@ import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } fr
 import { formatForChannel } from "./channel-format.js"
 import { claimsOf } from "./claims.js"
 import { languageOf } from "./language.js"
+import { tutea } from "./treatment.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
@@ -287,6 +288,10 @@ export interface AgentToolCtx {
   personLanguage?: "es" | "en" | null
   /** Ya se le pidió una vez en esta corrida que responda en el idioma de la persona. */
   languageNudged?: boolean
+  /** Quien escribe trata de usted, si se distingue (`treatmentOf`). */
+  personTreatment?: "usted" | null
+  /** Ya se le pidió una vez en esta corrida que trate de usted a quien escribe así. */
+  treatmentNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
@@ -812,6 +817,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   }
 
   /**
+   * Quien escribe trata de usted y lo que iba a salir la tutea, casi siempre en una
+   * frase copiada de una herramienta (auditoría del ADR 0104). Una vez por corrida.
+   */
+  const wrongTreatment = (text: string): string | null => {
+    if (ctx.personTreatment !== "usted" || ctx.personLanguage === "en" || ctx.treatmentNudged || !tutea(text)) return null
+    ctx.treatmentNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te trata de usted y tu mensaje la tutea. Escríbelo de usted, también las frases que te dieron las herramientas (por ejemplo «Al confirmar, acepta nuestro aviso…» o «complete sus datos»), y vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
+  /**
    * Dice que el equipo lo verá o que lo anotó, y no consta (auditoría del ADR 0104):
    * «recepción lo revisará» sin ningún pase, «ya lo anoté» sin ninguna nota. Una vez
    * por corrida, como el idioma: lo que hizo en este mismo paso cuenta (`toolsUsed`).
@@ -884,7 +899,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text) ?? unbackedClaim(text)
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text)
       if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
@@ -927,7 +942,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
       if (pending) return `No cerrado. ${pending}`
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text)
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text)
       if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
@@ -2179,8 +2194,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ reason, summary, priority, assigneeUserId, message, asks, pending, clinical, kind }: { reason: string; summary?: string; priority?: string; assigneeUserId?: string; message?: string; asks?: string; pending?: string; clinical?: boolean; kind?: string }) => {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
-      // Antes de registrar nada: el aviso en otro idioma se vuelve a pedir traducido.
-      const mismatch = notice ? wrongLanguage(notice) : null
+      // Antes de registrar nada: el aviso en otro idioma o en otro trato se vuelve a pedir.
+      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice)) : null
       if (mismatch) return mismatch
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
