@@ -1048,7 +1048,7 @@
   },
   {
     "name": "recordar_tema",
-    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?») o te da lo que faltaba para atenderlo: lo anota en el tema y avisa a quien lo tiene. Si cambió lo que pide o lo que falta, ponlo en pide y falta. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
+    "description": "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1058,16 +1058,6 @@
           "format": "uuid",
           "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
           "description": "El id del tema, de «Temas con el equipo»."
-        },
-        "pide": {
-          "description": "Solo si cambió o se precisó: lo que pide ahora sobre el tema, en una frase con hechos que ella dijo.",
-          "type": "string",
-          "maxLength": 400
-        },
-        "falta": {
-          "description": "Solo si cambió: lo que aún falta preguntarle o hacer para atenderla, en una frase; «nada» si ya dio lo que faltaba.",
-          "type": "string",
-          "maxLength": 400
         }
       },
       "required": [

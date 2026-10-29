@@ -207,9 +207,6 @@ const ASK_YES: Record<string, string> = {
 /** Lo que guarda lo que dijo la persona: con una de ellas en la corrida, «lo anoté» es cierto. */
 const CLAIM_NOTES = ["anotar_caso", "recordar_dato", "update_contact", "guardar_contacto", "elegir_mensajes"]
 
-/** «Nada», «ya no falta nada»: en `recordar_tema`, la persona dio lo que faltaba. */
-const NOTHING_PENDING = /^(ya no falta nada|no falta nada|nada|nothing|none)\.?$/i
-
 /** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
 const SLOT_NOT_OFFERED =
   "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista, vuelve a consultar con buscar_huecos (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
@@ -2261,8 +2258,6 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const raised = again.raised ? " Como ya preguntó varias veces, ese tema quedó como urgente para el equipo: díselo." : ""
         if (!notice) {
           ctx.handoffNeedsReply = true
-          // Lo que trae de nuevo sobre qué pide o qué falta se guarda aunque el aviso salga después.
-          await annotate(false)
           return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él.${raised} ${REPLY_ASKED_AGAIN}`
         }
         const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
@@ -2331,18 +2326,12 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   )
 
   const rememberTopic = tool(
-    async ({ tema_id, pide, falta }: { tema_id: string; pide?: string; falta?: string }) => {
+    async ({ tema_id }: { tema_id: string }) => {
       if (ctx.dryRun) return "[SIMULACIÓN] Se anotaría que volvió a preguntar y se avisaría a quien tiene el tema."
       const result = await inOrg((tx) =>
         recordTopicAskedAgain(tx, ctx.orgId, { handoffId: tema_id, messageId: ctx.triggerId }),
       ).catch(() => null)
       if (!result) return "Ese tema ya no está abierto: revisa el «Estado del caso» y responde con lo que haya."
-      // Lo que lee quien lo tiene queda al día: si dio lo que faltaba, ya no figura como
-      // pendiente (auditoría del ADR 0104). Solo en un tema de esta conversación.
-      if ((pide?.trim() || falta?.trim()) && result.conversationId === ctx.conversationId) {
-        const cleared = NOTHING_PENDING.test(falta?.trim() ?? "")
-        await inOrg((tx) => annotateHandoff(tx, ctx.orgId, tema_id, { asks: pide, pending: cleared ? null : falta, clearPending: cleared }))
-      }
       if (result.raised) return "Anotado: como ya preguntó varias veces, su tema quedó como urgente para el equipo. Díselo en una frase, sin prometer una hora; no respondas el tema tú."
       // Lo que ya sabe no se le repite (auditoría del ADR 0104): era la falla de fluidez más común.
       return result.assigneeName
@@ -2352,16 +2341,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "recordar_tema",
       description:
-        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?») o te da lo que faltaba para atenderlo: lo anota en el tema y avisa a quien lo tiene. Si cambió lo que pide o lo que falta, ponlo en pide y falta. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
-      schema: z.object({
-        tema_id: z.string().uuid().describe("El id del tema, de «Temas con el equipo»."),
-        pide: z.string().max(400).optional().describe("Solo si cambió o se precisó: lo que pide ahora sobre el tema, en una frase con hechos que ella dijo."),
-        falta: z
-          .string()
-          .max(400)
-          .optional()
-          .describe("Solo si cambió: lo que aún falta preguntarle o hacer para atenderla, en una frase; «nada» si ya dio lo que faltaba."),
-      }),
+        "Úsala cuando la persona vuelve a preguntar por un tema que tiene el equipo («¿y lo del descuento?»): lo anota en el tema y avisa a quien lo tiene. Después respóndele con send_reply sin repetirle el aviso que ya recibió: reconoce lo nuevo que dijo, sin prometer una hora y sin responder el tema. No la uses si la persona habla de otra cosa.",
+      schema: z.object({ tema_id: z.string().uuid().describe("El id del tema, de «Temas con el equipo».") }),
     },
   )
 
