@@ -1,9 +1,10 @@
 /**
  * La ficha de una clínica en su propia página (lienzo «Gastos por
- * organización», decisión D3): Resumen, Gastos, Precio y prueba, Equipo y
- * Actividad. La pestaña y los filtros de Gastos viven en la dirección, así que
- * el enlace a «Gastos» de una clínica se puede compartir. Soporte ve Resumen
- * sin importes, Equipo y Actividad (decisión D4, ADR 0094).
+ * organización», decisión D3): Resumen, Gastos, Precio y prueba, Equipo,
+ * Actividad y Cargar datos (ADR 0104). La pestaña y los filtros de Gastos
+ * viven en la dirección, así que el enlace a «Gastos» de una clínica se puede
+ * compartir. Soporte ve Resumen sin importes, Equipo y Actividad (decisión
+ * D4, ADR 0094).
  */
 
 import { CLINICAL_PRODUCTS } from "@odentia/clinical"
@@ -23,6 +24,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { z } from "zod"
 import { OrgBillingSection } from "../../components/org-billing"
+import { OrgImport } from "../../components/org-import"
 import { OrgSpending, type SpendingAgent, type SpendingSearch } from "../../components/org-spending"
 import { type BillingSummary, OrgSummary } from "../../components/org-summary"
 import { ProductMark } from "../../components/product"
@@ -32,7 +34,7 @@ import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../.
 import { domainOf, platformUrl } from "../../lib/host"
 import { rememberedOrganizationsSearch } from "../../lib/organizations-search"
 
-const TABS = ["resumen", "gastos", "precio", "equipo", "actividad"] as const
+const TABS = ["resumen", "gastos", "precio", "equipo", "actividad", "carga"] as const
 type Tab = (typeof TABS)[number]
 const TAB_NAMES: Record<Tab, string> = {
   resumen: "Resumen",
@@ -40,9 +42,10 @@ const TAB_NAMES: Record<Tab, string> = {
   precio: "Precio y prueba",
   equipo: "Equipo",
   actividad: "Actividad",
+  carga: "Cargar datos",
 }
-/** Lo que soporte no abre: importes y precios (decisión D4). */
-const ADMIN_TABS: Tab[] = ["gastos", "precio"]
+/** Lo que soporte no abre: importes y precios (decisión D4) y los datos de pacientes que se cargan. */
+const ADMIN_TABS: Tab[] = ["gastos", "precio", "carga"]
 
 /** Todo es opcional en la dirección: lo que falta es lo de siempre (Resumen, este mes, todo). */
 const searchSchema = z.object({
@@ -363,6 +366,7 @@ function OrganizationPage() {
         />
       ) : null}
       {tab === "precio" ? <OrgBillingSection organizationId={org.id} /> : null}
+      {tab === "carga" ? <OrgImport organizationId={org.id} organizationName={org.name} /> : null}
       {tab === "equipo" ? (
         <div className="flex flex-col gap-4">
           <section
