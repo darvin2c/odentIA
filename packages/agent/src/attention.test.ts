@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { attentionLines, attentionProgress, fitHistory, HISTORY_CHARS, HISTORY_HEAD } from "./attention"
+import { attentionLines, attentionProgress, fitHistory, HISTORY_CHARS, HISTORY_HEAD, nameQuestionsIn } from "./attention"
+
+describe("pedir el nombre dos veces en un mensaje (auditoría del ADR 0104)", () => {
+  it("cuenta las preguntas que piden su nombre, no las menciones", () => {
+    expect(nameQuestionsIn("¿Cuál horario te conviene? Y para registrarte, ¿me dices tus nombres y apellidos? ¿Con quién tengo el gusto?")).toBe(2)
+    expect(nameQuestionsIn("Para registrarte, ¿me dices tus nombres y apellidos?")).toBe(1)
+    expect(nameQuestionsIn("Te registro con tu nombre. ¿Te la reservo?")).toBe(0)
+  })
+})
 
 const said = (count: number, size = 20) => Array.from({ length: count }, (_, i) => ({ id: i, body: `${i}`.padEnd(size, ".") }))
 

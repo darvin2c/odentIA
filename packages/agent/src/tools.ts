@@ -99,6 +99,7 @@ import { formatForChannel } from "./channel-format.js"
 import { claimsOf } from "./claims.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
+import { nameQuestionsIn } from "./attention.js"
 import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
@@ -292,6 +293,8 @@ export interface AgentToolCtx {
   personTreatment?: "usted" | null
   /** Ya se le pidió una vez en esta corrida que trate de usted a quien escribe así. */
   treatmentNudged?: boolean
+  /** Ya se le pidió una vez en esta corrida que no pregunte su nombre dos veces en un mensaje. */
+  nameNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
@@ -826,6 +829,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: la persona te trata de usted y tu mensaje la tutea. Escríbelo de usted, también las frases que te dieron las herramientas (por ejemplo «Al confirmar, acepta nuestro aviso…» o «complete sus datos»), y vuelve a llamar a la misma herramienta sola en su paso.`
   }
 
+  /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
+  const nameTwice = (text: string): string | null => {
+    if (ctx.nameNudged || nameQuestionsIn(text) < 2) return null
+    ctx.nameNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: le preguntas su nombre dos veces en el mismo mensaje. Deja una sola pregunta (si le pides sus nombres y apellidos para registrarla, esa es la pregunta) y vuelve a enviar la respuesta sola en su paso.`
+  }
+
   /**
    * Dice que el equipo lo verá o que lo anotó, y no consta (auditoría del ADR 0104):
    * «recepción lo revisará» sin ningún pase, «ya lo anoté» sin ninguna nota. Una vez
@@ -899,7 +909,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text)
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text)
       if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked

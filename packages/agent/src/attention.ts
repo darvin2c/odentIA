@@ -58,6 +58,11 @@ const ASKS_NAME = /\b(con quien tengo el gusto|tus? nombres?|sus? nombres?|te ll
 /** Las preguntas de un mensaje, sin el resto: «te registro con tu nombre» no pregunta nada. */
 const questionsOf = (body: string): string[] => body.split(/(?<=[.!?\n])\s+/).filter((part) => part.includes("?"))
 
+/** Cuántas preguntas de un mensaje piden el nombre de quien escribe: dos es pedirlo dos veces. */
+export function nameQuestionsIn(body: string): number {
+  return questionsOf(body).filter((question) => ASKS_NAME.test(normalizeForSearch(question))).length
+}
+
 /** Cómo va la atención en curso, contado por el código (ADR 0104). */
 export interface AttentionProgress {
   /** Mensajes que ya le salieron a su nombre en esta atención (también lo automático). */
@@ -108,7 +113,7 @@ export function attentionProgress(input: {
       const key = normalizeForSearch(name).trim()
       return key.length > 0 && spoken.includes(key)
     }),
-    namesAsked: said.filter((item) => questionsOf(item.body ?? "").some((question) => ASKS_NAME.test(normalizeForSearch(question)))).length,
+    namesAsked: said.filter((item) => nameQuestionsIn(item.body ?? "") > 0).length,
     usedName: firstName.length > 0 && ` ${spoken.replace(/\n/g, " ")} `.includes(` ${firstName} `),
   }
 }
