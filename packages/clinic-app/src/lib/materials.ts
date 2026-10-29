@@ -61,6 +61,33 @@ export function closingMaterialsWords(
   return `${verb} de ${materials.branch.name}: ${listWords(materials.items.map((item) => materialPhrase(item, locale)))}.`
 }
 
+/** Después de firmar, como «Materiales usados»: «Salieron de Sede Miraflores: 2 guantes y 1 eyector.». */
+export function discountedMaterialsWords(
+  materials: {
+    branch: { name: string }
+    items: ReadonlyArray<{ name: string; unit: string; quantity: number }>
+  },
+  locale: string,
+): string {
+  const verb =
+    materials.items.length === 1 && materials.items[0]?.quantity === 1 ? "Salió" : "Salieron"
+  return `${verb} de ${materials.branch.name}: ${listWords(materials.items.map((item) => materialPhrase(item, locale)))}.`
+}
+
+/**
+ * Lo que no había al descontar: «No había 2 sobres de pasta: quedan como
+ * faltante en Inventario.». Null si alcanzó todo.
+ */
+export function shortageWords(
+  items: ReadonlyArray<{ name: string; unit: string; shortage: number }>,
+  locale: string,
+): string | null {
+  const short = items.filter((item) => item.shortage > 0)
+  if (short.length === 0) return null
+  const one = short.length === 1 && short[0]?.shortage === 1
+  return `No había ${listWords(short.map((item) => materialPhrase({ ...item, quantity: item.shortage }, locale)))}: ${one ? "queda" : "quedan"} como faltante en Inventario.`
+}
+
 /** Un porcentaje con el formato de la clínica: «72 %», «1.8 %». */
 export function formatShare(share: number, locale: string, fractionDigits = 0): string {
   return new Intl.NumberFormat(locale, {

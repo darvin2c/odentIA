@@ -134,6 +134,13 @@
       "when": 1793288324485,
       "tag": "0018_informa_por_bloques",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793291222189,
+      "tag": "0019_clio_materiales",
+      "breakpoints": true
     }
   ]
 }

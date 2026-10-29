@@ -162,6 +162,11 @@
       "id": "m17-control-sin-cita",
       "texto": "Control en un mes si no mejora.",
       "espera": {"citas": [], "controles": 1}
+    },
+    {
+      "id": "m18-material-nebulizacion",
+      "texto": "Le hice una nebulización con salbutamol. Usé una mascarilla de nebulizar y dos ampollas de suero.",
+      "espera": {"materiales": [{"producto": "mascarilla", "cantidad": 1}, {"producto": "suero", "cantidad": 2}], "hechos": ["nebuliz"]}
     }
   ]
 }
