@@ -503,7 +503,7 @@ async function loadItems(
     }
   }
 
-  // Las preguntas: «N de 300» mientras alcanzan las incluidas, después «Paquete». Con la
+  // Las preguntas: «N de 100» mientras alcanzan las incluidas, después «Paquete». Con la
   // regla de «Costo y margen»: un plan que no cobra paquetes no tiene tope y todas son incluidas.
   const limited = !!plan && plan.argosPackMicros !== null
   const included = limited ? (plan?.argosIncludedQuestions ?? 0) : 0
