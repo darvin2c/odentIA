@@ -22,7 +22,7 @@ export function languageOf(text: string | null | undefined): "es" | "en" | null 
   const words = (text ?? "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .match(/[a-z']+/g) ?? []
   let es = 0
   let en = 0

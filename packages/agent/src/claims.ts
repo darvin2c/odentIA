@@ -11,8 +11,8 @@ const plain = (text: string): string =>
   text
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[‘’]/g, "'")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u2018\u2019]/g, "'")
 
 /** «Recepción revisará…», «el equipo te escribirá», «lo paso al equipo», «the team will check». */
 const TEAM_WILL =
