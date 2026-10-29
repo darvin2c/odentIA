@@ -123,6 +123,8 @@ export interface AppDeps {
   addressProviders?: AddressProviders
   /** Búsquedas de Geoapify al día para todo odentIA: la administración lo ve en su Inicio. */
   geoapifyDailyLimit?: number
+  /** Producción: sin un backup verificado en 26 horas, el Inicio de la administración avisa. */
+  expectBackups?: boolean
   mailbox?: MailboxEnv
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
@@ -332,6 +334,7 @@ export function createApp(deps: AppDeps) {
     deps.ownerDb.transaction((tx) =>
       getBackofficeOverview(tx, adminContextOf(c), {
         ...(deps.addressProviders?.paciente && deps.geoapifyDailyLimit ? { geoapifyDailyLimit: deps.geoapifyDailyLimit } : {}),
+        expectBackups: deps.expectBackups === true,
       }),
     ),
   ))

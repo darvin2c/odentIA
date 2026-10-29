@@ -21,6 +21,7 @@ import { runAccountLifecycleTick } from "./account-lifecycle.js"
 import { runContactScreensTick } from "./contact-screens.js"
 import { runReportDigestTick } from "./report-digests.js"
 import { runOwnAppTokenTick, runSignupTokenTick } from "./whatsapp-tokens.js"
+import { runBackupWatchTick } from "./backup-watch.js"
 
 const db: Db = createAppDb(env.APP_DATABASE_URL)
 const ownerDb = createOwnerDb(env.DATABASE_URL)
@@ -328,6 +329,22 @@ queues.push({
     return false
   },
 })
+
+// Producción: sin un backup verificado en 26 horas, o si el último falló, Soporte recibe el caso.
+if (env.NODE_ENV === "production") {
+  const watchingSince = new Date()
+  let nextBackupPoll = 0
+  queues.push({
+    name: "backup_watch",
+    poll: async () => {
+      if (Date.now() < nextBackupPoll) return false
+      nextBackupPoll = Date.now() + 3_600_000
+      const result = await runBackupWatchTick(ownerDb, { expectedSince: watchingSince })
+      if (result.problem) console.error(`worker: backup_watch ${result.problem}`)
+      return false
+    },
+  })
+}
 
 console.log(`worker: consumiendo ${queues.map((q) => q.name).join(", ")}`)
 while (!stopping) {

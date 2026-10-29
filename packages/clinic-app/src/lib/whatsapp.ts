@@ -194,8 +194,12 @@ export function setupStep(state: { webhookVerifiedAt?: string | null; lastInboun
   return state.webhookVerifiedAt === null ? 2 : 3
 }
 
-/** Lo que le falta a una conexión activa para estar terminada. `own-app`: algo que odentIA no pudo hacer en Meta. */
-export type ConnectionPending = "address" | "first-message" | "signup" | "own-app" | null
+/**
+ * Lo que le falta a una conexión activa para estar terminada. `own-app`: algo
+ * que odentIA no pudo hacer en Meta. `meta-removed`: Meta cortó la conexión y
+ * hay que volver a conectar con el botón.
+ */
+export type ConnectionPending = "address" | "first-message" | "signup" | "own-app" | "meta-removed" | null
 
 /* ---------- La app propia de la clínica en Meta ---------- */
 
@@ -314,6 +318,8 @@ export function connectionPending(
   setup?: { webhookVerifiedAt?: string | null; lastInboundAt?: string | null } | null,
 ): ConnectionPending {
   if (connection.status !== "active") return null
+  // Lo que Meta cortó va antes que cualquier paso: hasta volver a conectar no llega ni sale nada.
+  if (connection.signup?.metaRemoved) return "meta-removed"
   if (connection.signup) return connection.signup.pending.length > 0 ? "signup" : null
   if (ownAppUnfinished(connection.ownApp) || ownAppSignatureProblem(connection.ownApp, setup?.lastInboundAt ?? connection.lastInboundAt)) {
     return "own-app"
@@ -382,6 +388,15 @@ export function connectionWords(connection: ConnectionItem, since: Since, pendin
   else if (typeof connection.health?.dailyLimit === "number") {
     const limit = connection.health.dailyLimit
     facts.push(`Puede escribirle primero a ${countWords(limit)} ${limit === 1 ? "persona" : "personas"} al día`)
+  }
+  if (pending === "meta-removed") {
+    return {
+      title,
+      tone: "pending",
+      status: "Se desconectó de Meta.",
+      detail: "No recibe ni envía mensajes hasta volver a conectar con Facebook. Las conversaciones que ya tienes se conservan.",
+      facts: [],
+    }
   }
   if (pending === "address") {
     return {

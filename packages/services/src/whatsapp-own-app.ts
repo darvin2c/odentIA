@@ -274,8 +274,12 @@ const signatureSubject = (connectionId: string) => `firma-meta:${connectionId}`
 const expirySubject = (connectionId: string) => `vence-clave-meta:${connectionId}`
 const WHATSAPP_SETTINGS_HREF = "/settings/integrations/whatsapp"
 
-/** Avisos que se retiran solos cuando se resuelven (`settleWorkspaceNotifications`). */
-async function notifyAdmins(
+/**
+ * Avisa en la campana a quien administra las integraciones (dueño y
+ * administradores: `settings.write`), con destino en la página de WhatsApp. Un
+ * aviso por asunto, que se retira solo cuando se resuelve (`settleWorkspaceNotifications`).
+ */
+export async function notifyAdmins(
   tx: Db,
   orgId: string,
   subject: string,

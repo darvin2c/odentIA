@@ -117,6 +117,16 @@ describe("mensajería", () => {
     expect(new Set(rows.map((row) => row.key)).size).toBe(5)
   })
 
+  it("un WhatsApp que Meta desconectó pide atención y dice que hay que volver a conectarlo", () => {
+    const signup = { grantedAt: minutesAgo(60), subscribedAt: minutesAgo(60), registeredAt: minutesAgo(60), pending: [] }
+    const removed = connection({ lastInboundAt: minutesAgo(30), signup: { ...signup, metaRemoved: { at: minutesAgo(5), why: "x" } } })
+    const row = channelRows([removed], since).find((item) => item.channel === "whatsapp")
+    expect(row).toMatchObject({ tone: "attention", status: "Necesita atención" })
+    expect(row?.problem).toBe("Meta lo desconectó: no recibe ni envía mensajes hasta volver a conectarlo con Facebook.")
+    const fine = channelRows([connection({ lastInboundAt: minutesAgo(30), signup: { ...signup, metaRemoved: null } })], since)
+    expect(fine.find((item) => item.channel === "whatsapp")).toMatchObject({ tone: "ok", status: "Conectado" })
+  })
+
   it("la fila es la misma antes y después de conectarla", () => {
     const before = channelRows([], since).find((row) => row.channel === "telegram")
     const after = channelRows([connection({ id: "t1", channel: "telegram" })], since).find((row) => row.channel === "telegram")

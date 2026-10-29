@@ -38,7 +38,8 @@ export interface AutomaticCaseReport {
   dedupeKey: string
   /** Título del caso; se le agregan los nombres de las clínicas. */
   title: string
-  orgId: string
+  /** Sin clínica: un motivo de toda la plataforma (el backup), un caso con una sola nota. */
+  orgId?: string
   /** Lo que se anota de esta clínica, después de su nombre. */
   note: string
   /** Detalle técnico del motivo: va a soporte, nunca a la clínica. */
@@ -59,9 +60,12 @@ export async function reportAutomaticCase(ownerDb: Db, report: AutomaticCaseRepo
   const { dedupeKey } = report
   return ownerDb.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${dedupeKey}))`)
-    const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, report.orgId)).limit(1)
-    const clinic = org?.name ?? report.orgId
-    const line = `${clinic} ${clinicMarker(report.orgId)} · ${report.note}`.slice(0, 4000)
+    const { orgId } = report
+    const [org] = orgId
+      ? await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1)
+      : []
+    const clinic = orgId ? (org?.name ?? orgId) : null
+    const line = (clinic && orgId ? `${clinic} ${clinicMarker(orgId)} · ${report.note}` : report.note).slice(0, 4000)
     const [open] = await tx
       .select()
       .from(supportCase)
@@ -80,7 +84,7 @@ export async function reportAutomaticCase(ownerDb: Db, report: AutomaticCaseRepo
         .values({
           organizationId: null,
           kind: "problema",
-          question: `${report.title} · ${clinic}`.slice(0, 500),
+          question: (clinic ? `${report.title} · ${clinic}` : report.title).slice(0, 500),
           detail: report.detail.slice(0, 500),
           screen: report.screen,
           role: AUTOMATIC_CASE_ROLE,
@@ -93,10 +97,11 @@ export async function reportAutomaticCase(ownerDb: Db, report: AutomaticCaseRepo
       await enqueueSupportInboxNotice(tx as Db, { caseId: row.id, organizationId: null, kind: "caso_nuevo", sourceId: row.id })
       return { caseId: row.id, created: true }
     }
+    if (!orgId) return { caseId: open.id, created: false }
     const [listed] = await tx
       .select({ id: supportMessage.id })
       .from(supportMessage)
-      .where(and(eq(supportMessage.caseId, open.id), eq(supportMessage.authorKind, "sistema"), sql`strpos(${supportMessage.body}, ${clinicMarker(report.orgId)}) > 0`))
+      .where(and(eq(supportMessage.caseId, open.id), eq(supportMessage.authorKind, "sistema"), sql`strpos(${supportMessage.body}, ${clinicMarker(orgId)}) > 0`))
       .limit(1)
     if (listed) return { caseId: open.id, created: false }
     await tx.insert(supportMessage).values({ caseId: open.id, organizationId: null, authorKind: "sistema", body: line, isInternal: true })
