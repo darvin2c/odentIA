@@ -194,7 +194,8 @@ describe("lo que responde el modelo, parte por parte", () => {
 })
 
 describe("lo que recibe el modelo en cada pausa", () => {
-  const ask = (provider: DictationAsk["provider"], now: Date, transcript: string) =>
+  // odentIA dicta sin razonar, por Chat Completions (`responses` en false); `llm.test.ts` sigue los dos caminos hasta el proveedor.
+  const ask =(provider: DictationAsk["provider"], now: Date, transcript: string) =>
     dictationMessages({
       provider,
       services: SERVICES,
@@ -205,7 +206,7 @@ describe("lo que recibe el modelo en cada pausa", () => {
       transcript,
       context: "",
       pending: [],
-    }, DENTAL_DICTATION_PROFILE)
+    }, DENTAL_DICTATION_PROFILE, false)
 
   it("la parte fija es igual en todas las pausas y va marcada para la caché; la fecha va con lo dictado", () => {
     const [first, firstHuman] = ask("openai", NOW, "Viene por dolor.")
