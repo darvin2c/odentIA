@@ -10,7 +10,7 @@ import {
   Input,
   Spinner,
 } from "@odentia/ui"
-import { internationalText, normalizeCountry, PhoneInput, SubmitButton, toE164 } from "@odentia/ui-patterns"
+import { internationalText, isValidE164, normalizeCountry, PhoneInput, SubmitButton, toE164 } from "@odentia/ui-patterns"
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronRight, Search, UserPlus } from "lucide-react"
@@ -141,6 +141,9 @@ export function NewConversationDialog({
   const writeError = write.error && !(write.error instanceof ApiError && write.error.shape.code === "NO_PHONE") ? write.error : null
   const createLabel = looksLikePhone(query) ? `Crear persona con ${query.trim()}` : `Crear persona «${query.trim()}»`
   const nameReady = Boolean(name.givenNames.trim() && name.familyName.trim())
+  // Un número con un dígito de menos es «posible» pero no existe: Meta lo rechazaría en cada envío.
+  const phoneReady = isValidE164(phone)
+  const phoneHint = phone && !phoneReady ? "Ese número no está completo: revisa los dígitos." : null
 
   return (
     <Dialog
@@ -162,7 +165,7 @@ export function NewConversationDialog({
             className="grid gap-3"
             onSubmit={(event) => {
               event.preventDefault()
-              if (phone) choose(needsPhoneFor, phone)
+              if (phone && phoneReady) choose(needsPhoneFor, phone)
             }}
           >
             <p className="text-sm">
@@ -170,8 +173,10 @@ export function NewConversationDialog({
             </p>
             <div className="grid gap-1.5">
               <FieldLabel htmlFor={phoneId}>Su número de WhatsApp</FieldLabel>
-              <PhoneInput id={phoneId} value={phone} defaultCountry={country} onChange={setPhone} />
-              <p className="text-xs text-muted-foreground">Queda como su WhatsApp para las próximas veces.</p>
+              <PhoneInput id={phoneId} value={phone} defaultCountry={country} onChange={setPhone} invalid={Boolean(phoneHint)} />
+              <p className={phoneHint ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+                {phoneHint ?? "Queda como su WhatsApp para las próximas veces."}
+              </p>
             </div>
             {writeError ? (
               <p role="alert" className="text-sm text-destructive">
@@ -182,7 +187,7 @@ export function NewConversationDialog({
               <Button type="button" variant="outline" onClick={() => setNeedsPhoneFor(null)}>
                 Volver
               </Button>
-              <SubmitButton type="submit" disabled={!phone} pending={write.isPending}>
+              <SubmitButton type="submit" disabled={!phoneReady} pending={write.isPending}>
                 Escribirle
               </SubmitButton>
             </DialogFooter>
@@ -192,7 +197,7 @@ export function NewConversationDialog({
             className="grid gap-3"
             onSubmit={(event) => {
               event.preventDefault()
-              if (nameReady) create.mutate()
+              if (nameReady && phoneReady) create.mutate()
             }}
           >
             <div className="grid gap-1.5">
@@ -216,8 +221,10 @@ export function NewConversationDialog({
             </div>
             <div className="grid gap-1.5">
               <FieldLabel htmlFor={phoneId}>Teléfono</FieldLabel>
-              <PhoneInput id={phoneId} value={phone} defaultCountry={country} onChange={setPhone} />
-              <p className="text-xs text-muted-foreground">Se le escribe por WhatsApp a este número.</p>
+              <PhoneInput id={phoneId} value={phone} defaultCountry={country} onChange={setPhone} invalid={Boolean(phoneHint)} />
+              <p className={phoneHint ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+                {phoneHint ?? "Se le escribe por WhatsApp a este número."}
+              </p>
             </div>
             {create.error ? (
               <p role="alert" className="text-sm text-destructive">
@@ -228,7 +235,7 @@ export function NewConversationDialog({
               <Button type="button" variant="outline" onClick={() => setCreating(false)}>
                 Volver
               </Button>
-              <SubmitButton type="submit" disabled={!nameReady || !phone} pending={create.isPending}>
+              <SubmitButton type="submit" disabled={!nameReady || !phoneReady} pending={create.isPending}>
                 Crear y escribirle
               </SubmitButton>
             </DialogFooter>

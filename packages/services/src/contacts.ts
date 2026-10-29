@@ -2,6 +2,7 @@ import {
   normalizePhone,
   normalizeTags,
   phoneFormatError,
+  whatsappNumberProblem,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { patient, patientContact, patientRegistrationLink } from "@odentia/db/schema/clinical"
@@ -152,7 +153,7 @@ export async function listContacts(
   // El mismo buscador que la lista de personas: «987 654» encuentra «+51987654100».
   if (q)
     conditions.push(
-      personSearchCondition(q, { displayName: contact.displayName, email: contact.email, phone: contact.phone }),
+      personSearchCondition(q, { displayName: contact.displayName, email: contact.email, phone: contact.phone, contactId: contact.id }),
     )
   if (active !== "all") conditions.push(eq(contact.isActive, active))
   // Una historia bloqueada no sale en ninguna lista (ADR 0080).
@@ -903,11 +904,27 @@ export async function claimWhatsAppNumber(
   contactId: string,
   phone: string,
 ): Promise<{ identityId: string; created: boolean }> {
+  // Un celular con un dígito de menos lo rechaza Meta en cada envío: no se guarda como su WhatsApp.
+  const problem = whatsappNumberProblem(phone, await findOrgCountry(tx, orgId))
+  if (problem) throw new ServiceError("NOT_WHATSAPP_NUMBER", 400, problem)
   const digits = phone.replace(/\D/g, "")
   const before = await findChannelIdentity(tx, orgId, "whatsapp", `wa:${digits}`)
   try {
     const identity = await addContactIdentity(tx, orgId, actorUserId, contactId, { channel: "whatsapp", externalUserId: digits })
-    // Lo decide una persona del equipo: si antes WhatsApp lo rechazó, se vuelve a intentar.
+    // Lo decide una persona del equipo, así que pasa a ser su WhatsApp principal: los
+    // recordatorios y «Escribirle» eligen el principal, y sin esto seguirían yendo al
+    // número de antes (el que escribió primero) aunque haya cambiado de número.
+    await tx
+      .update(contactIdentity)
+      .set({ isPrimary: sql`${contactIdentity.id} = ${identity.id}` })
+      .where(
+        and(
+          eq(contactIdentity.organizationId, orgId),
+          eq(contactIdentity.contactId, contactId),
+          eq(contactIdentity.channel, "whatsapp"),
+        ),
+      )
+    // Si antes WhatsApp lo rechazó, se vuelve a intentar.
     await tx
       .update(contactIdentity)
       .set({ noWhatsappAt: null })

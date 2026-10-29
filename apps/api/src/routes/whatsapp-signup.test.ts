@@ -162,7 +162,7 @@ beforeAll(async () => {
   ownerDb = createOwnerDb(`postgres://dentalagent:dentalagent@${host}/dentalagent`)
   await migrate(ownerDb, { migrationsFolder: "../../packages/db/drizzle" })
   appDb = createAppDb(`postgres://dentalagent_app:dentalagent_app@${host}/dentalagent`)
-  for (const id of ["org_a", "org_b", "org_c", "org_d", "org_e", "org_f", "org_g", "org_h"]) await newOrg(id)
+  for (const id of ["org_a", "org_b", "org_c", "org_d", "org_e", "org_f", "org_g", "org_h", "org_j"]) await newOrg(id)
 }, 180_000)
 
 afterAll(async () => {
@@ -647,7 +647,7 @@ describe("la dirección de avisos de la app de odentIA", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const raw = body(
       messages("7999", "9999", [text("wamid.nadie", "51933333333")]),
-      // El número de una conexión hecha a mano no recibe por aquí: sigue con su propia dirección.
+      // El número de una conexión hecha a mano con otra app no recibe por aquí: sigue con su propia dirección.
       messages("7005", "9005", [text("wamid.a-mano", "51944444444")]),
       templateChange("7999", "odentia_recordatorio_cita_v2", "APPROVED"),
     )
@@ -655,11 +655,28 @@ describe("la dirección de avisos de la app de odentIA", () => {
     expect(res.status).toBe(200)
     expect(await queued()).toHaveLength(3)
     expect(warn.mock.calls.map((call) => String(call[0]))).toEqual([
-      "[webhooks] aviso de WhatsApp descartado: el número 9999 no es de una conexión activa hecha con el botón",
-      "[webhooks] aviso de WhatsApp descartado: el número 9005 no es de una conexión activa hecha con el botón",
+      "[webhooks] aviso de WhatsApp descartado: el número 9999 no es de una conexión activa de la app de odentIA",
+      "[webhooks] aviso de WhatsApp descartado: el número 9005 no es de una conexión activa de la app de odentIA",
       "[webhooks] cambio de plantilla descartado: la cuenta 7999 no es de una conexión activa y suscrita",
     ])
     warn.mockRestore()
+  })
+
+  it("una conexión hecha a mano con la misma app de odentIA recibe por aquí: Meta no le deja otra dirección", async () => {
+    const mine = await withOrgContext(appDb, "org_j", (tx) =>
+      createConnection(
+        tx,
+        "org_j",
+        KEY,
+        { channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "Con la app de odentIA", config: { phoneNumberId: "9010", wabaId: "7010", accessToken: "clave-del-sistema", appSecret: META.appSecret } },
+        { fetch: fakeMeta().fetch },
+      ),
+    )
+    expect(mine.signup).toBeNull()
+    expect((await rowOf(mine.id)).ownApp).not.toBeNull()
+    const raw = body(messages("7010", "9010", [text("wamid.misma-app", "51966666666")]))
+    expect((await deliver(raw)).status).toBe(200)
+    expect((await queued()).at(-1)).toBe("org_j wamid.misma-app")
   })
 
   it("una plantilla que cambia de estado se aplica a la cuenta que la tiene, y solo a esa", async () => {

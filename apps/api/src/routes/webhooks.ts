@@ -19,7 +19,7 @@ import {
   noteHistoryDeclined,
   noteOwnAppSignatureRejected,
 } from "@odentia/services"
-import { and, eq, isNotNull } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { Hono } from "hono"
 import { z } from "zod"
 import { errorBody } from "../lib/error.js"
@@ -122,6 +122,25 @@ export function createWebhooksRoute(deps: WebhookDeps) {
     }
   }
 
+  /**
+   * Una conexión hecha a mano es de la app de odentIA si el aviso, ya firmado
+   * con la clave de la plataforma, también verifica con la clave secreta que
+   * guardó la clínica. Con la de otra app no: esa conexión recibe en la suya.
+   */
+  function signedWithOwnKey(
+    connection: { ownApp: unknown; configEncrypted: string },
+    headers: Record<string, string>,
+    rawBody: string,
+  ): boolean {
+    if (connection.ownApp === null) return false
+    try {
+      const appSecret = decryptConfig(deps.secretsKey, connection.configEncrypted)["appSecret"]
+      return typeof appSecret === "string" && verifyMetaSignature(headers, rawBody, appSecret)
+    } catch {
+      return false
+    }
+  }
+
   // ---- la dirección de la app de odentIA (cuentas conectadas con «Conectar con Facebook») ----
   // Registradas antes que las rutas con parámetros: `/meta/whatsapp` no es una conexión.
 
@@ -155,10 +174,14 @@ export function createWebhooksRoute(deps: WebhookDeps) {
    * https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/manage-webhooks
    * https://developers.facebook.com/documentation/business-messaging/whatsapp/webhooks/override
    *
-   * Solo reciben por aquí las conexiones hechas con el botón; una hecha a mano
-   * sigue con su propia dirección y la clave de su propia app. Lo que no es de
-   * ninguna conexión se descarta dejando registro y se responde 200: Meta
-   * reintenta durante 7 días lo que no recibe un 200.
+   * Reciben por aquí las conexiones hechas con el botón. Una hecha a mano sigue
+   * con su propia dirección y la clave de su propia app, salvo que esa app sea
+   * la de odentIA: Meta deja una sola dirección por app y es esta, así que sus
+   * mensajes y estados entran por aquí si el aviso también lleva la firma de la
+   * clave secreta guardada en la conexión. Sus cambios de plantilla no: la cuenta
+   * no queda anotada sin el botón, y los pone al día la revisión diaria. Lo que
+   * no es de ninguna conexión se descarta dejando registro y se responde 200:
+   * Meta reintenta durante 7 días lo que no recibe un 200.
    *
    * Sin probar contra Meta: la app de odentIA todavía no existe.
    */
@@ -176,19 +199,24 @@ export function createWebhooksRoute(deps: WebhookDeps) {
             id: channelConnection.id,
             organizationId: channelConnection.organizationId,
             status: channelConnection.status,
+            signup: channelConnection.signup,
+            ownApp: channelConnection.ownApp,
+            configEncrypted: channelConnection.configEncrypted,
           })
           .from(channelConnection)
           .where(
             and(
               eq(channelConnection.provider, provider),
               eq(channelConnection.externalId, delivery.phoneNumberId),
-              isNotNull(channelConnection.signup),
             ),
           )
           .limit(1)
-        if (connection?.status !== "active") {
+        if (
+          connection?.status !== "active" ||
+          !(connection.signup || signedWithOwnKey(connection, c.req.header(), rawBody))
+        ) {
           console.warn(
-            `[webhooks] aviso de WhatsApp descartado: el número ${delivery.phoneNumberId} no es de una conexión activa hecha con el botón`,
+            `[webhooks] aviso de WhatsApp descartado: el número ${delivery.phoneNumberId} no es de una conexión activa de la app de odentIA`,
           )
           continue
         }
