@@ -14,11 +14,12 @@
  *
  * Imprime, pregunta por pregunta, lo que respondió Argos al lado de la
  * respuesta correcta (`eval:argos-respuestas --json=`) y lo que costó cada
- * una con `AI_PRICES`. La calificación la hace una persona con esa lista: una
- * respuesta es buena si da la cifra correcta o, en una trampa, dice qué falta
- * sin inventar. Deja una fila en `report_question` por pregunta, como en la
- * pantalla. El resultado es evidencia de este banco y de esta semilla, no un
- * benchmark de los proveedores.
+ * una con `AI_PRICES`; si el modelo respondió algo que no se lee, lo que
+ * llegó, y al final en cuántas llamadas pasó. La calificación la hace una
+ * persona con esa lista: una respuesta es buena si da la cifra correcta o, en
+ * una trampa, dice qué falta sin inventar. Deja una fila en `report_question`
+ * por pregunta, como en la pantalla. El resultado es evidencia de este banco y
+ * de esta semilla, no un benchmark de los proveedores.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { ChatOpenAI } from "@langchain/openai"
@@ -27,7 +28,7 @@ import { createAppDb, withOrgContext } from "@odentia/db"
 import { type AiUsageEntry, knownCostMicros, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { withAiMeter } from "../ai-usage.js"
-import { ARGOS_REASONING, type ArgosAskResult, type ArgosDeps, askArgos } from "../argos.js"
+import { ARGOS_REASONING, ARGOS_UNREADABLE, type ArgosAskResult, type ArgosDeps, askArgos } from "../argos.js"
 import { createConfiguredChatModel, type LlmSpec, platformLlmFromEnv, resolveLlmSpec } from "../llm.js"
 
 interface Question {
@@ -162,14 +163,21 @@ const out: Array<Record<string, unknown>> = []
 let total = 0
 /** Del modelo que escribe: lo que costó y sus tokens de entrada, con los leídos y los escritos en la caché. */
 const writer = { micros: 0, entrada: 0, leidos: 0, escritos: 0 }
+/** Sus llamadas, las que no se leyeron y las preguntas que se quedaron sin respuesta porque no se leyó dos veces. */
+const reading = { llamadas: 0, ilegibles: 0, dosVeces: 0 }
 for (const question of bank.preguntas.filter((item) => !only.length || only.includes(item.id))) {
   const uses: AiUsageEntry[] = []
   const problems: string[] = []
+  /** Lo que llegó del modelo cada vez que no se leyó. */
+  const unread: string[] = []
   const steps: string[] = []
   const started = Date.now()
+  const onProblem = (problem: string, raw?: string) => {
+    problems.push(problem)
+    if (raw) unread.push(raw)
+  }
   const answer = await withAiMeter(
-    () =>
-      askArgos(db, { ...deps, onProblem: (problem) => problems.push(problem), onStep: (step) => steps.push(step) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto, ...(at ? { now: at } : {}) }),
+    () => askArgos(db, { ...deps, onProblem, onStep: (step) => steps.push(step) }, { orgId: ORG, userId: owner.userId, memberRole: role, text: question.texto, ...(at ? { now: at } : {}) }),
     async (entries) => {
       uses.push(...entries)
     },
@@ -184,6 +192,9 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   writer.entrada += tokens.entrada
   writer.leidos += tokens.leidos
   writer.escritos += tokens.escritos
+  reading.llamadas += writes
+  reading.ilegibles += unread.length
+  if (answer.kind === "sin_modelo" && unread.length > 1) reading.dosVeces += 1
   const row = {
     id: question.id,
     texto: question.texto,
@@ -201,6 +212,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
     llamadas: writes,
     tokens,
     problemas: problems,
+    ilegible: unread,
     usd: micros / 1_000_000,
     ms: Date.now() - started,
   }
@@ -215,7 +227,8 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   if (row.como) console.log(`- Cómo: ${row.como}`)
   if (row.sql) console.log(`- SQL: ${String(row.sql).replace(/\s+/g, " ")}`)
   if (steps.length) console.log(`- Pasos: ${steps.join(" → ")}`)
-  for (const problem of problems) console.log(`- La base rechazó: ${problem}`)
+  for (const problem of problems.filter((problem) => problem !== ARGOS_UNREADABLE)) console.log(`- La base rechazó: ${problem}`)
+  for (const raw of unread) console.log(`- No se leyó lo que respondió el modelo: ${raw}`)
   console.log(
     `- ${writes} llamada(s) al modelo que escribe · USD ${row.usd.toFixed(6)} · ${row.ms} ms · ${tokens.entrada} tokens de entrada: ${tokens.leidos} leídos de la caché y ${tokens.escritos} escritos`,
   )
@@ -225,6 +238,13 @@ console.log(`\n${out.length} preguntas · USD ${(total / 1_000_000).toFixed(5)} 
 console.log(
   `Modelo que escribe: USD ${(writer.micros / 1_000_000 / Math.max(out.length, 1)).toFixed(6)} por pregunta · de ${writer.entrada} tokens de entrada, ${share(writer.leidos)} leídos de la caché y ${share(writer.escritos)} escritos`,
 )
+console.log(
+  `No se leyó lo que respondió el modelo: ${reading.ilegibles} de ${reading.llamadas} llamadas (${reading.llamadas ? ((100 * reading.ilegibles) / reading.llamadas).toFixed(1) : 0} %) · ${reading.dosVeces} preguntas sin respuesta por no leerlo dos veces`,
+)
 const jsonPath = arg("json", "")
-if (jsonPath) writeFileSync(resolve(jsonPath), `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? openaiModel ?? "gpt-6-luna", razonamiento: reasoning ?? ARGOS_REASONING, usd: total / 1_000_000, respuestas: out }, null, 2)}\n`)
+if (jsonPath)
+  writeFileSync(
+    resolve(jsonPath),
+    `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? openaiModel ?? "gpt-6-luna", razonamiento: reasoning ?? ARGOS_REASONING, usd: total / 1_000_000, lectura: reading, respuestas: out }, null, 2)}\n`,
+  )
 process.exit(0)

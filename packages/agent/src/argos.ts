@@ -395,6 +395,24 @@ export async function argosModel(
   }
 }
 
+/** El problema que anota `onProblem` cuando la respuesta del modelo no se lee. */
+export const ARGOS_UNREADABLE = "el modelo respondió algo que no se lee"
+
+/**
+ * Lo que llegó del modelo cuando no se lee, para medir (`onProblem`): cómo
+ * terminó la respuesta y, sin herramienta, lo que devolvió tal cual (por
+ * /v1/responses, cada parte: pensar, texto, llamadas; por Chat Completions, el
+ * texto y las llamadas que no son JSON). Con una llamada que no cabe en su
+ * esquema, en qué campos y sus argumentos. El modelo no ve personas
+ * (`argosResultForModel`).
+ */
+export function argosUnreadable(reply: AIMessage, call?: { name: string; args: unknown }, issues?: z.ZodError["issues"]): string {
+  const meta = reply.response_metadata as { status?: unknown; finish_reason?: unknown; incomplete_details?: unknown; output?: unknown }
+  const ended = { estado: meta.status ?? meta.finish_reason ?? null, ...(meta.incomplete_details ? { incompleta: meta.incomplete_details } : {}) }
+  if (call) return JSON.stringify({ ...ended, llamada: call.name, campos: issues?.map((issue) => `${issue.path.map(String).join(".") || "(todo)"}: ${issue.message}`) ?? [], args: call.args })
+  return JSON.stringify({ ...ended, ...(meta.output ? { salida: meta.output } : { texto: reply.content, no_json: reply.invalid_tool_calls ?? [] }) })
+}
+
 /** La fila del buscador (decisión D1): Jev la decide con solo el texto. */
 export const argosRouteQuestion = (texts: ProductAgentTexts): DecisionQuestion => ({
   id: "argos.fila",
@@ -550,8 +568,11 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas); `null` = sin modelo de decisión. */
   decisionModel?: DecisionModel | null
-  /** Cada vez que la base rechaza una consulta del modelo o su frase no se lee (para medir; no trae datos). */
-  onProblem?: (problem: string) => void
+  /**
+   * Cada vez que la base rechaza una consulta del modelo o su frase no se lee (para medir; no trae datos). Si el
+   * modelo respondió algo que no se lee, `unread` es lo que escribió (`argosUnreadable`), que tampoco: no ve personas.
+   */
+  onProblem?: (problem: string, unread?: string) => void
   /** Cuánto piensa el modelo antes de escribir el plan (para medir); sin él, `ARGOS_REASONING`. */
   reasoning?: ArgosReasoning
   /** Cada paso, dicho para la pantalla (D22): «Busqué «ortodoncia»: …», «Calculé lo cobrado». Sin datos de pacientes. */
@@ -881,7 +902,7 @@ export async function askArgos(
         const calls = reply.tool_calls ?? []
         if (!calls.length) {
           // Una respuesta que no se lee (pasó una vez en 88) se pide otra vez, una sola.
-          deps.onProblem?.("el modelo respondió algo que no se lee")
+          deps.onProblem?.(ARGOS_UNREADABLE, argosUnreadable(reply))
           unreadable += 1
           if (unreadable > 1) break
           messages.push(new HumanMessage({ content: "Responde con una de tus herramientas." }))
@@ -892,7 +913,7 @@ export async function askArgos(
           if (call.name === TOOL_NAME) {
             const parsed = planSchema.safeParse(call.args)
             if (!parsed.success) {
-              deps.onProblem?.("el modelo respondió algo que no se lee")
+              deps.onProblem?.(ARGOS_UNREADABLE, argosUnreadable(reply, call, parsed.error.issues))
               unreadable += 1
               content = "No se pudo leer tu respuesta: revisa sus campos y responde otra vez."
             } else if (plan) content = "Ya respondiste."
