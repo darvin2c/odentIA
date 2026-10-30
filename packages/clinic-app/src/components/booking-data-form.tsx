@@ -472,6 +472,8 @@ function withKnown(draft: BookingDataDraft, info: BookingRegistrationForm): Book
   return {
     ...draft,
     known: true,
+    // Quien ya tiene su registro reserva para otra persona: no se le pregunta para quién es.
+    ...(info.ownRecord ? { who: "representative" as const } : {}),
     me: {
       ...me,
       givenNames: me.givenNames || known.givenNames || "",
@@ -734,6 +736,7 @@ export function BookingDataForm({
   }
   const info = infoQuery.data.data
   const profile = clinicalProfileFor(info.countryCode)
+  const reserveLabel = info.ownRecord ? "Reservar la cita" : "Reservar mi cita"
   const forOther = draft.who === "representative"
   const patientScope = forOther ? "other" : "me"
   const minor = forOther && isRealDate(draft.other.birthDate) && isMinor(draft.other.birthDate, info.today)
@@ -746,8 +749,10 @@ export function BookingDataForm({
     email: info.config.fields.email === "required",
     promotions: info.asksPromotions,
   }
-  const nameHint =
-    info.known.from === "conversacion"
+  // A quien ya tiene su registro, su nombre le viene de ahí: no se le dice de dónde salió.
+  const nameHint = info.ownRecord
+    ? undefined
+    : info.known.from === "conversacion"
       ? "Lo tomamos de nuestra conversación. Corrígelo si hace falta."
       : info.known.from === "perfil"
         ? "Lo tomamos de tu WhatsApp. Corrígelo si hace falta."
@@ -849,7 +854,7 @@ export function BookingDataForm({
         onRegistered()
       } else if (shape?.code === "FORM_CHANGED") {
         await queryClient.invalidateQueries({ queryKey: infoKey })
-        setSubmitError(`${clinicName} actualizó su aviso de privacidad. Revísalo y vuelve a tocar «Reservar mi cita».`)
+        setSubmitError(`${clinicName} actualizó su aviso de privacidad. Revísalo y vuelve a tocar «${reserveLabel}».`)
       } else if (shape?.message) {
         setSubmitError(shape.message)
       } else {
@@ -873,31 +878,35 @@ export function BookingDataForm({
   return (
     <form onSubmit={(event) => void submit(event)} noValidate className="flex flex-col gap-4">
       <FieldGroup className="gap-4">
-        <ChoiceCards
-          id={fieldId("who")}
-          legend="¿Para quién es la cita?"
-          options={[
-            ["patient", "Para mí"],
-            ["representative", "Para otra persona"],
-          ]}
-          value={draft.who}
-          onChange={(next) =>
-            set(
-              { who: next },
-              "me.docNumber",
-              "me.birthDate",
-              "me.sex",
-              "me.email",
-              "other.givenNames",
-              "other.familyName",
-              "other.docNumber",
-              "other.docCountry",
-              "other.birthDate",
-              "other.sex",
-              "relationship",
-            )
-          }
-        />
+        {info.ownRecord ? (
+          <p className="text-sm">Ya tienes tu registro en {clinicName}. Aquí registras a la persona que se va a atender.</p>
+        ) : (
+          <ChoiceCards
+            id={fieldId("who")}
+            legend="¿Para quién es la cita?"
+            options={[
+              ["patient", "Para mí"],
+              ["representative", "Para otra persona"],
+            ]}
+            value={draft.who}
+            onChange={(next) =>
+              set(
+                { who: next },
+                "me.docNumber",
+                "me.birthDate",
+                "me.sex",
+                "me.email",
+                "other.givenNames",
+                "other.familyName",
+                "other.docNumber",
+                "other.docCountry",
+                "other.birthDate",
+                "other.sex",
+                "relationship",
+              )
+            }
+          />
+        )}
 
         <div className="flex flex-col gap-1">
           <h3 className="font-semibold">Tus datos</h3>
@@ -1008,9 +1017,11 @@ export function BookingDataForm({
           </p>
         ) : null}
         <SubmitButton type="submit" className="min-h-12 w-full text-base" pending={busy}>
-          Reservar mi cita
+          {reserveLabel}
         </SubmitButton>
-        <p className="text-center text-sm text-muted-foreground">Tus datos y tu cita se guardan al tocar «Reservar mi cita».</p>
+        <p className="text-center text-sm text-muted-foreground">
+          {info.ownRecord ? "Sus datos y la cita se guardan al tocar «Reservar la cita»." : "Tus datos y tu cita se guardan al tocar «Reservar mi cita»."}
+        </p>
       </div>
     </form>
   )

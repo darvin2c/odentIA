@@ -1579,14 +1579,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    */
   const pickLink = async (
     origin: string,
-    slot: { patientId?: string; branchId: string; serviceId?: string; professionalUserId: string; startsAt: string },
+    slot: { patientId?: string; branchId: string; serviceId?: string; professionalUserId: string; startsAt: string; newPerson?: boolean },
   ) =>
     inOrg(async (tx) => {
-      const { patientId, serviceId, professionalUserId, startsAt, branchId } = slot
+      const { patientId, serviceId, professionalUserId, startsAt, branchId, newPerson } = slot
       const link = await issueAgendaLink(
         tx,
         ctx.orgId,
-        { conversationId: ctx.conversationId, branchId, ...(patientId ? { patientId } : {}), ...(serviceId ? { serviceId } : {}) },
+        {
+          conversationId: ctx.conversationId,
+          branchId,
+          ...(patientId ? { patientId } : {}),
+          ...(serviceId ? { serviceId } : {}),
+          ...(newPerson ? { newPerson: true } : {}),
+        },
         { secretsKey: ctx.secretsKey },
       )
       return link ? { link, url: bookingPickAddress(origin, personalLinkRef(link.linkId), { branchId, professionalUserId, startsAt }) } : null
@@ -1699,9 +1705,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   /**
    * Quien aún no es paciente reserva en su enlace (ADR 0109, que precisa la 0101): con el hueco
    * que eligió, su enlace ya trae esa hora y ahí deja sus datos (o los de su hijo, con «Para otra
-   * persona») y acepta el aviso; por el chat no se registra a nadie. Sin registro en línea, sin
-   * dirección pública o si quien escribe ya tiene pacientes vinculados (su enlace sería de ellos),
-   * lo registra recepción.
+   * persona») y acepta el aviso; por el chat no se registra a nadie. Si quien escribe ya tiene
+   * pacientes (una madre con el suyo que pide cita para su hijo nuevo), el enlace es para alguien
+   * nuevo (`newPerson`): no es el de ellos. Sin registro en línea o sin dirección pública, lo
+   * registra recepción.
    */
   const bookNewPatient = tool(
     async (input: {
@@ -1712,16 +1719,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       serviceId?: string
       durationMin?: number
       reason?: string
+      forOther?: boolean
     }) => {
       if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
       if (ctx.dryRun) return `[SIMULACIÓN] Se le daría su enlace con la hora ${input.startsAt}, para que deje sus datos y reserve ahí.`
-      // Un enlace para quien ya tiene pacientes vinculados abre lo de ellos: no registra a otra persona.
+      // Quien ya tiene pacientes vinculados recibe el enlace para alguien nuevo: su enlace de siempre abriría lo de ellos.
       const linked = await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))
-      if (linked.some((item) => item.relationship === "self")) {
-        return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente). Si la cita es para otra persona que aún no es paciente (su hijo, por ejemplo), no se la registra ni por aquí ni por su enlace: pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que la registre y le confirme; no le digas que quedó reservada."
-      }
-      if (linked.length > 0) {
-        return "Quien escribe ya tiene pacientes vinculados: si la cita es para uno de ellos, usa proponer_cita con su patientId (de ver_contexto_paciente). Si es para alguien que aún no es paciente, no se lo registra ni por aquí ni por su enlace: pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que lo registre y le confirme; no le digas que quedó reservada."
+      const ownRecord = linked.some((item) => item.relationship === "self")
+      if (ownRecord && input.forOther !== true) {
+        return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente). Si la cita es para otra persona que aún no es paciente (su hijo, por ejemplo), vuelve a llamar a reservar_paciente_nuevo con forOther."
       }
       const publicUrl = ctx.publicUrl
       const origin = publicUrl ? await inOrg((tx) => clinicLinkOrigin(tx, publicUrl)) : null
@@ -1735,7 +1741,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const toTeam = "pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que lo registre y le confirme; no le digas que quedó reservada."
       let issued: Awaited<ReturnType<typeof pickLink>>
       try {
-        issued = await pickLink(origin, { branchId, ...(input.serviceId ? { serviceId: input.serviceId } : {}), professionalUserId, startsAt: input.startsAt })
+        issued = await pickLink(origin, {
+          branchId,
+          ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+          professionalUserId,
+          startsAt: input.startsAt,
+          ...(linked.length > 0 ? { newPerson: true } : {}),
+        })
       } catch (error) {
         if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
           return "Es una prueba con una persona real: no se envía su enlace ni se reserva nada de verdad. Dile que en la prueba no se reserva."
@@ -1749,15 +1761,21 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (!issued) return `No se pudo preparar su enlace. Por eso ${toTeam}`
       return pickLinkReply(
         issued.url,
-        "aún no es paciente y por aquí no se registra a nadie; si la cita es para otra persona (su hijo o hija, por ejemplo), en la página elige «Para otra persona» y deja sus datos",
+        ownRecord
+          ? "la cita es para alguien que aún no es paciente y por aquí no se registra a nadie: en la página deja los datos de esa persona"
+          : "aún no es paciente y por aquí no se registra a nadie; si la cita es para otra persona (su hijo o hija, por ejemplo), en la página elige «Para otra persona» y deja sus datos",
         null,
       )
     },
     {
       name: "reservar_paciente_nuevo",
       description:
-        "Para quien aún no es paciente, cuando ya eligió un hueco de buscar_huecos: te da su enlace con esa hora ya elegida, para que deje sus datos (o los de la persona para quien es la cita) y quede reservada ahí. Por aquí no se registra a nadie: no le pidas apellidos, documento ni nada de salud para esto.",
-      schema: operationAgentSchema("cita.reservar", { room }).omit({ patientId: true }),
+        "Para quien aún no es paciente, cuando ya eligió un hueco de buscar_huecos: te da su enlace con esa hora ya elegida, para que deje sus datos (o los de la persona para quien es la cita) y quede reservada ahí. Si quien escribe ya es paciente y la cita es para otra persona que aún no lo es (su hijo, por ejemplo), con forOther. Por aquí no se registra a nadie: no le pidas apellidos, documento ni nada de salud para esto.",
+      schema: operationAgentSchema("cita.reservar", { room })
+        .omit({ patientId: true })
+        .extend({
+          forOther: z.boolean().optional().describe("true si quien escribe ya es paciente y la cita es para otra persona que aún no lo es."),
+        }),
     },
   )
 

@@ -83,7 +83,7 @@ function notCompleted(): ServiceError {
 const ALREADY_REGISTERED_TEXT = "Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."
 
 /** El contacto ya tiene ficha propia (su vínculo `self`). */
-async function hasOwnRecord(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+export async function hasOwnRecord(tx: Db, orgId: string, contactId: string): Promise<boolean> {
   const [own] = await tx
     .select({ id: patientContact.id })
     .from(patientContact)

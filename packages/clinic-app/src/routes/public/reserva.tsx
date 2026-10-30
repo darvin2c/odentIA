@@ -400,7 +400,7 @@ function PersonalLinkPage() {
                   : "Tus datos"
             }
             badge={missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`}
-            text={`${capital(missing.map((item) => item.label.toLowerCase()).join(", "))}${view.data?.health ? "; y si tienes alergias, alguna enfermedad o tomas medicamentos" : ""}.`}
+            text={`${capital(missing.map((item) => item.label.toLowerCase()).join(", "))}${view.data?.health ? `; y ${healthAsk(view.patientFirstName)}` : ""}.`}
             action="Completar"
             onAction={() => setScreen({ kind: "datos" })}
           />
@@ -409,7 +409,7 @@ function PersonalLinkPage() {
           <Block
             title={view.patientFirstName ? `La salud de ${view.patientFirstName}` : "Tu salud"}
             badge="Opcional"
-            text="Si tienes alergias, alguna enfermedad o tomas medicamentos, cuéntanoslo antes de venir."
+            text={`${capital(healthAsk(view.patientFirstName))}, cuéntanoslo antes de venir.`}
             action="Responder"
             onAction={() => setScreen({ kind: "datos" })}
           />
@@ -457,6 +457,13 @@ function PersonalLinkPage() {
       </div>
     </PageShell>
   )
+}
+
+/** Lo que se pregunta de su salud, de quien se atiende: de ella misma o, con su nombre, de su hijo. */
+function healthAsk(patientFirstName: string | null | undefined): string {
+  return patientFirstName
+    ? `si ${patientFirstName} tiene alergias, alguna enfermedad o toma medicamentos`
+    : "si tienes alergias, alguna enfermedad o tomas medicamentos"
 }
 
 /**

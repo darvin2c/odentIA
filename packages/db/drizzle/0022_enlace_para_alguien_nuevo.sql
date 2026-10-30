@@ -1,0 +1,1 @@
+ALTER TABLE "appointment_booking_link" ADD COLUMN "new_person" boolean DEFAULT false NOT NULL;

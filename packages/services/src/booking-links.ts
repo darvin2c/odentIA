@@ -24,7 +24,7 @@ import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } fro
 import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
-import { createPatientRegistrationLink, getPatientRegistrationConfig, registerPatient } from "./patient-registration.js"
+import { createPatientRegistrationLink, getPatientRegistrationConfig, hasOwnRecord, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
 import { scheduledItems } from "./plan-next.js"
 import { refreshConversationTier } from "./saas-actions.js"
@@ -91,6 +91,11 @@ export interface IssuePersonalLinkInput {
   branchId?: string | null
   /** Quién del equipo lo envía; vacío si el agente o un aviso. */
   createdBy?: string | null
+  /**
+   * Sin paciente, para registrar a alguien nuevo aunque quien lo abre ya tenga
+   * pacientes (su hijo, por ejemplo): no se une solo a su único paciente.
+   */
+  newPerson?: boolean
 }
 
 export interface IssuedPersonalLink {
@@ -113,6 +118,7 @@ export async function issuePersonalLink(
   deps: { secretsKey: Buffer },
 ): Promise<IssuedPersonalLink> {
   const patientId = input.patientId ?? null
+  const newPerson = !patientId && input.newPerson === true
   if (input.conversationId) {
     // Una prueba envía su enlace de verdad: lo que reserve es de su persona de prueba (ADR 0094).
     const [conv] = await tx
@@ -131,7 +137,9 @@ export async function issuePersonalLink(
   const samePerson = and(
     eq(appointmentBookingLink.organizationId, orgId),
     eq(appointmentBookingLink.contactId, input.contactId),
-    patientId ? eq(appointmentBookingLink.patientId, patientId) : isNull(appointmentBookingLink.patientId),
+    patientId
+      ? eq(appointmentBookingLink.patientId, patientId)
+      : and(isNull(appointmentBookingLink.patientId), eq(appointmentBookingLink.newPerson, newPerson)),
     isNull(appointmentBookingLink.revokedAt),
   )
   const [live] = await tx
@@ -178,6 +186,7 @@ export async function issuePersonalLink(
     appointmentId: input.appointmentId ?? null,
     booking: input.booking ?? false,
     createdBy: input.createdBy ?? null,
+    newPerson,
     tokenHash: hashToken(token),
     expiresAt,
   })
@@ -198,6 +207,12 @@ export interface CreateBookingLinkInput {
    * de un enlace con el que ya reservó.
    */
   booking?: boolean
+  /**
+   * Para alguien que aún no es paciente aunque quien escribe ya tenga pacientes
+   * vinculados (su hijo nuevo, o ella misma si solo está vinculada a su hijo): el
+   * enlace no es de ninguno de ellos y en la página se registra a quien se atiende.
+   */
+  newPerson?: boolean
 }
 
 export interface IssuedBookingLink {
@@ -278,14 +293,22 @@ async function bookingLinkFor(
   // En una prueba se reserva de verdad, para su persona de prueba (ADR 0094); nunca para una real.
   if (conv.isTest && !conv.personIsTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.")
   const linked = (await listPatientsByContact(tx, orgId, conv.contactId)).filter((item) => item.isActive)
+  // Para alguien nuevo, aunque quien escribe ya tenga pacientes: el enlace no es de ninguno.
+  const newPerson = input.newPerson === true && !input.patientId && linked.length > 0
   // Quien recién se contacta aún no tiene ficha: la crea él mismo en la página,
   // con el registro de pacientes de la clínica. Sin ese registro activo no hay
   // con qué pedirle sus datos ni su consentimiento, y el enlace no se emite.
-  if (linked.length === 0 && !(await getPatientRegistrationConfig(tx, orgId)).enabled) {
+  if ((linked.length === 0 || newPerson) && !(await getPatientRegistrationConfig(tx, orgId)).enabled) {
     throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "La persona aún no es paciente y la clínica no tiene activo el registro de pacientes en línea")
   }
-  const chosen = input.patientId ? linked.find((item) => item.id === input.patientId) : linked.length === 1 ? linked[0] : undefined
-  if (!chosen && linked.length > 0) {
+  const chosen = newPerson
+    ? undefined
+    : input.patientId
+      ? linked.find((item) => item.id === input.patientId)
+      : linked.length === 1
+        ? linked[0]
+        : undefined
+  if (!chosen && linked.length > 0 && !newPerson) {
     throw input.patientId
       ? validation("Ese paciente no está vinculado a la persona de la conversación")
       : new ServiceError("BOOKING_PATIENT_AMBIGUOUS", 409, "La persona tiene varios pacientes vinculados: indica para quién es la cita")
@@ -319,6 +342,7 @@ async function bookingLinkFor(
       conversationId: input.conversationId,
       ...(booking ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null } : { booking: false }),
       createdBy: input.createdBy ?? null,
+      ...(newPerson ? { newPerson: true } : {}),
     },
     deps,
   )
@@ -352,6 +376,8 @@ async function findLink(tx: Db, orgId: string, token: string, lock = false): Pro
  */
 async function patientOf(tx: Db, orgId: string, link: LinkRow): Promise<string | null> {
   if (link.patientId) return link.patientId
+  // El de alguien nuevo es de quien se registre ahí, no del paciente que ya tenga quien lo abre.
+  if (link.newPerson) return null
   const linked = (await listPatientsByContact(tx, orgId, link.contactId)).filter((item) => item.isActive)
   if (linked.length !== 1 || !linked[0]) return null
   await tx
@@ -920,6 +946,8 @@ export interface BookingLinkRegistrationForm {
   }
   /** Nunca respondió lo de novedades y promociones: se le pregunta al reservar. */
   asksPromotions: boolean
+  /** Quien escribe ya tiene su registro: la cita es para otra persona, a quien se registra aquí. */
+  ownRecord: boolean
 }
 
 /**
@@ -978,6 +1006,7 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
       sex: person?.sex ?? null,
     },
     asksPromotions: config.askMessages && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null,
+    ownRecord: await hasOwnRecord(tx, orgId, link.row.contactId),
   }
 }
 

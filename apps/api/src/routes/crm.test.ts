@@ -1026,7 +1026,7 @@ it("mensajes de WhatsApp: ver es de quien abre Configuración; comprobar, cambia
   const removed = await send(app, "DELETE", `${base}/${own.id}`)
   expect(removed.status).toBe(200)
   expect(await removed.json()).toEqual({ data: { ok: true } })
-  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(16)
+  expect(((await (await app.request(base)).json()) as { data: unknown[] }).data).toHaveLength(17)
 })
 
 it("bandeja, pasadas las 24 horas: lo dice antes de escribir y ofrece el mensaje aprobado", async () => {

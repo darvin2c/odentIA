@@ -21,6 +21,8 @@ Quien reservaba desde su enlace dejaba sus datos en tres lugares: el chat, el fo
    - Reservar por el chat cierra la reserva de su enlace.
    - Con datos pendientes, el enlace abre directo «Tus datos».
 6. **En lo que llena la persona, el sexo es «Femenino» o «Masculino».** «Indeterminado» es un dato clínico (CIE-10 Q56), que registra el equipo.
+7. **Por el chat solo se reserva con su sí a quien no le falta nada.** A quien es nuevo, o es paciente y le falta un dato obligatorio o aceptar el aviso, Sofi le da su enlace con la hora que eligió (`sede`, `con` y `hora`): ahí confirma sus datos y queda reservada. Por el chat no se registra a nadie.
+8. **Para alguien nuevo, aunque quien escribe ya tenga pacientes.** Una madre con su ficha que pide cita para su hijo nuevo recibe un enlace para alguien nuevo (`newPerson`): no se une a su ficha y la página no le pregunta para quién es; registra al hijo y reserva. Sirve también a quien solo está vinculada a su hijo y pide cita para sí misma.
 
 ## Alternativas descartadas
 
@@ -33,7 +35,9 @@ Quien reservaba desde su enlace dejaba sus datos en tres lugares: el chat, el fo
 
 - Reservar pide unos datos más en una clínica que exige muchos. A cambio, no queda nada pendiente ni se repite nada.
 - El recordatorio de una cita confirmada sin «Confirmar» necesita una plantilla nueva aprobada por Meta. Mientras no exista, sale la de hoy.
-- Sofi sigue registrando por el chat con el nombre y el documento. Lo que falte se le pide con el enlace que abre «Tus datos».
+- Por el chat ya no se registra a nadie. Sin registro en línea o sin dirección pública, lo registra recepción. Una cita de alguien nuevo propuesta antes de este cambio se confirma como en la 0101.
+- El enlace con la hora lleva en su dirección el usuario del profesional: el modelo lo copia tal cual, pero nunca lo escribe como dato.
+- Argos cuenta «Confirmó» solo si la cita se confirmó después del recordatorio: la que nació confirmada no cuenta.
 - Revisar si las clínicas reportan que el paso de reservar es largo o que la pregunta de promociones frena la reserva.
 
 ## Referencias

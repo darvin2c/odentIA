@@ -221,6 +221,8 @@ export interface BookingRegistrationForm {
   }
   /** Nunca respondió lo de novedades y promociones: se le pregunta al reservar. */
   asksPromotions: boolean
+  /** Quien escribe ya tiene su registro: la cita es para otra persona, a quien se registra aquí. */
+  ownRecord: boolean
 }
 
 /** Lo que hace falta para pedir sus datos a quien aún no es paciente. */

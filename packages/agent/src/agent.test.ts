@@ -64,6 +64,7 @@ import {
   getPatientRegistrationConfig,
   professionalRef,
   reserveBookingLink,
+  resolvePersonalLink,
   resolvePersonalLinkRefs,
   savePatientRegistrationConfig,
 } from "@odentia/services"
@@ -1290,12 +1291,25 @@ it("a quien aún no es paciente le da su enlace con la hora que eligió para dej
   expect(message!.match(/\/reserva\?/g)).toHaveLength(1)
   expect(message).not.toContain("La agenda completa")
 
-  // Quien ya es paciente no se registra de nuevo; para otra persona nueva, recepción.
+  // Quien ya es paciente no se registra de nuevo: para ella, proponer_cita.
   const known = await ingestText("tg:nuevo-enlace-ya", "evt-nuevo-enlace-ya", "Quiero una cita")
   const fxKnown = await bookingFixture(known.conversationId, "nuevo-enlace-ya")
-  const again = String(await makeAgentTools(publicCtx(known.conversationId, fxKnown.contactId)).find((t) => t.name === "reservar_paciente_nuevo")!.invoke(first!.slot))
+  const bookFor = (input: NonNullable<typeof first>["slot"] & { forOther?: boolean }) =>
+    makeAgentTools(publicCtx(known.conversationId, fxKnown.contactId)).find((t) => t.name === "reservar_paciente_nuevo")!.invoke(input).then(String)
+  const again = await bookFor(first!.slot)
   expect(again).toContain("Ya es paciente")
-  expect(again).toContain("recepción")
+  expect(again).toContain("forOther")
+  // Para su hijo, que aún no es paciente: el enlace para alguien nuevo, que no es el de ella.
+  const forChild = await bookFor({ ...first!.slot, forOther: true })
+  expect(forChild).toContain("confirma tus datos aquí (1 minuto)")
+  const childToken = pickOf(forChild).searchParams.get("token")!
+  const childLinks = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(and(eq(appointmentBookingLink.contactId, fxKnown.contactId), eq(appointmentBookingLink.newPerson, true))))
+  expect(childLinks).toMatchObject([{ booking: true, patientId: null, newPerson: true }])
+  // Abrirlo no lo une a su ficha: la página registra ahí a quien se atiende.
+  const opened = await withOrgContext(appDb, "org_a", (tx) => resolvePersonalLink(tx, "org_a", childToken))
+  expect(opened.patientId).toBeNull()
+  expect(opened.canBook).toBe(true)
 })
 
 it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con esa hora; si no, su sí en el chat; con una cita por venir, el sí y sus datos al confirmar (ADR 0109)", async () => {

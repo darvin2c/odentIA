@@ -718,6 +718,45 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect((await run((tx) => getBookingLinkView(tx, ORG, link.token)))).toMatchObject({ booking: { needsRegistration: false }, patientFirstName: "Mateo" })
   })
 
+  it("quien ya es paciente pide cita para su hijo nuevo: el enlace para alguien nuevo lo registra a él y no se une a ella", async () => {
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    const madre = await person("madre-ya-paciente")
+    const own = await run((tx) => createBookingLink(tx, ORG, { conversationId: madre.conversationId }, { secretsKey: KEY }))
+    const send = (token: string, answers: object) =>
+      run((tx) => registerFromBookingLink(tx, ORG, token, { submissionId: randomUUID(), formVersion: config.version, answers: answers as never }))
+    await send(own.token, {
+      demographics: { displayName: "Inés Paredes Ríos", givenNames: "Inés", familyName: "Paredes Ríos", docType: "DNI", docNumber: "40765127", phone: "+51987777004", birthDate: "1987-02-14", sex: "F" },
+      respondent: "patient",
+      privacyAccepted: true,
+    })
+    const [herself] = await run((tx) => listPatientsByContact(tx, ORG, madre.contactId))
+    // Su enlace de siempre es el de ella; el de alguien nuevo no se une a su ficha.
+    const forChild = await run((tx) => createBookingLink(tx, ORG, { conversationId: madre.conversationId, newPerson: true }, { secretsKey: KEY }))
+    expect(forChild).toMatchObject({ needsRegistration: true, forName: null })
+    expect((await run((tx) => getBookingLinkRegistrationForm(tx, ORG, forChild.token))).ownRecord).toBe(true)
+    expect(await run((tx) => getBookingLinkView(tx, ORG, forChild.token))).toMatchObject({ booking: { needsRegistration: true } })
+    // Ella ya tiene su registro: «Para mí» no la registra otra vez.
+    await expect(send(forChild.token, {
+      demographics: { displayName: "Inés Paredes Ríos", givenNames: "Inés", familyName: "Paredes Ríos", docType: "DNI", docNumber: "40765127", phone: "+51987777004", birthDate: "1987-02-14", sex: "F" },
+      respondent: "patient",
+      privacyAccepted: true,
+    })).rejects.toMatchObject({ code: "ALREADY_REGISTERED" })
+    expect(await send(forChild.token, {
+      demographics: { displayName: "Tomás Vega Paredes", givenNames: "Tomás", familyName: "Vega Paredes", docType: "DNI", docNumber: "78123457", birthDate: "2019-05-02", sex: "M" },
+      respondent: "representative",
+      representative: { displayName: "Inés Paredes Ríos", relationship: "guardian", relationshipDetail: "", phone: "+51987777004", docType: "DNI", docNumber: "40765127" },
+      privacyAccepted: true,
+    })).toEqual({ registered: true })
+    const patients = await run((tx) => listPatientsByContact(tx, ORG, madre.contactId))
+    const child = patients.find((item) => item.relationship === "guardian")
+    expect(child).toMatchObject({ displayName: "Tomás Vega Paredes" })
+    const [row] = await ownerDb.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.id, forChild.linkId))
+    expect(row).toMatchObject({ patientId: child!.id, newPerson: true })
+    // Su propio enlace sigue siendo de ella.
+    const [mine] = await ownerDb.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.id, own.linkId))
+    expect(mine?.patientId).toBe(herself!.id)
+  })
+
   it("quien se registra queda con el nombre que escribió, aunque ya tuviera otro guardado", async () => {
     const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
     const quien = await person("renombra-enlace")
