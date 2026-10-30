@@ -14,7 +14,7 @@ import {
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { automationLinkToken } from "@odentia/db/schema/automation"
-import { paymentTicket, patientResponsibility, prescription } from "@odentia/db/schema/clinical"
+import { patientDataConsent, paymentTicket, patientResponsibility, prescription } from "@odentia/db/schema/clinical"
 import { consentDocument } from "@odentia/db/schema/clinical-forms"
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -30,7 +30,8 @@ import {
 } from "./automation-messages.js"
 import { clinicName as findClinicName, firstName } from "./automation-routing.js"
 import { openRoute, previewRoute } from "./message-gate.js"
-import { getMessagePermissions, setMessageChoice } from "./automation.js"
+import { consentStatusOf } from "./message-permission.js"
+import { getMessagePermissions, setConsent, setMessageChoice } from "./automation.js"
 import {
   appointmentView,
   type BookingLinkAppointment,
@@ -44,6 +45,7 @@ import {
   patientFirstNameOf,
   requireLinkDecider,
   requireLiveLink,
+  reserveBookingLink,
   resolvePersonalLink,
   type ResolvedPersonalLink,
 } from "./booking-links.js"
@@ -129,8 +131,19 @@ export interface PersonalLinkView {
   /** Las sedes, para reservar o para elegir el horario de lo que aceptó. */
   branches: BookingLinkBranch[]
   appointment: BookingLinkAppointment | null
-  /** Tus datos: solo qué falta, nunca lo guardado. */
+  /**
+   * Tus datos: qué falta y si se le pregunta su salud (opcional). Con `missing`
+   * vacío solo queda su salud por contar.
+   */
   data: { missing: MissingPersonDatum[]; /** Si también se le pregunta su salud. */ health: boolean } | null
+  /**
+   * Quien ya es paciente y decide por él, al reservar: lo que ya sabemos, para
+   * que no lo vuelva a escribir. El documento va abreviado: el enlace prueba
+   * que tiene su chat, no quién es.
+   */
+  you: { name: string; document: string | null; phone: string | null } | null
+  /** Lo que aún no aceptó o no respondió: se le pide en el mismo paso en que reserva. */
+  pending: { privacy: boolean; promotions: boolean } | null
   /** Presupuestos que esperan su respuesta. */
   budgets: PortalBudgetView[]
   /** Consentimientos que la clínica le envió a firmar. */
@@ -153,6 +166,57 @@ async function missingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Pro
   if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return null
   const missing = await getPatientMissingData(tx, orgId, link.patientId)
   return missing.length > 0 ? missing : null
+}
+
+/**
+ * Su salud se le pregunta (opcional) solo si la clínica la pregunta y nadie la
+ * registró en su ficha, y solo a quien decide por el paciente.
+ */
+async function healthPendingOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<boolean> {
+  if (!link.patientId || !link.decides || link.row.dataSubmittedAt || link.expired) return false
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  if (!HEALTH_KEYS.some((key) => config.fields[key] !== "hidden")) return false
+  return healthNeverRecorded(tx, orgId, link.patientId)
+}
+
+const HEALTH_KEYS = ["allergies", "conditions", "medications"] as const
+
+/** «DNI ••••8912»: el documento abreviado, para que reconozca el suyo sin mostrarlo entero. */
+function shortDocument(docType: string | null, docNumber: string | null): string | null {
+  if (!docNumber) return null
+  return `${docType ?? "Documento"} ••••${docNumber.slice(-4)}`
+}
+
+/**
+ * Lo que la página muestra a quien ya es paciente al reservar: su nombre, su
+ * documento abreviado y su celular, y lo que aún le falta aceptar o responder.
+ */
+async function youOf(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+): Promise<Pick<PersonalLinkView, "you" | "pending">> {
+  if (!link.patientId || !link.decides || link.expired) return { you: null, pending: null }
+  const person = link.canBook ? await requirePatient(tx, orgId, link.patientId) : null
+  return {
+    you: person ? { name: person.displayName, document: shortDocument(person.docType, person.docNumber), phone: person.phone ?? null } : null,
+    // También al cambiar su cita o agendar lo aceptado: lo que no respondió se le pregunta ahí.
+    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId),
+  }
+}
+
+/** Si aún no aceptó el aviso de privacidad y si nunca respondió lo de novedades y promociones. */
+async function pendingOf(tx: Db, orgId: string, contactId: string, patientId: string): Promise<{ privacy: boolean; promotions: boolean }> {
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  const [accepted] = await tx
+    .select({ id: patientDataConsent.id })
+    .from(patientDataConsent)
+    .where(and(eq(patientDataConsent.organizationId, orgId), eq(patientDataConsent.patientId, patientId), isNull(patientDataConsent.revokedAt)))
+    .limit(1)
+  return {
+    privacy: !accepted && !!config.privacyNotice,
+    promotions: config.askMessages && (await consentStatusOf(tx, orgId, contactId, "novedades")) === null,
+  }
 }
 
 async function budgetsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PortalBudgetView[]> {
@@ -283,6 +347,8 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
     branches: [],
     appointment: null,
     data: null,
+    you: null,
+    pending: null,
     budgets: [],
     consents: [],
     questionnaire: null,
@@ -292,6 +358,7 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
   if (!link.live) return empty
   const appointment = link.appointment ? await appointmentView(tx, orgId, link.appointment.id) : null
   const missing = await missingOf(tx, orgId, link)
+  const health = await healthPendingOf(tx, orgId, link)
   const budgets = await budgetsOf(tx, orgId, link)
   const consents = await consentsOf(tx, orgId, link)
   const questionnaire = await questionnaireOf(tx, orgId, link)
@@ -302,7 +369,7 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
   const context = link.canBook || budgets.length > 0 || schedulable ? await bookingContext(tx, orgId, link.row) : null
   // «Tus mensajes» siempre sirve a quien los recibe: el enlace no vence por no tener otra cosa pendiente.
   const nothing =
-    !link.canBook && !appointment && !missing && budgets.length === 0 && consents.length === 0 && !questionnaire && !messages && papers.length === 0
+    !link.canBook && !appointment && !missing && !health && budgets.length === 0 && consents.length === 0 && !questionnaire && !messages && papers.length === 0
   if (nothing) return empty
   const self = link.patientId ? (await patientPersonId(tx, orgId, link.patientId)) === link.row.contactId : true
   return {
@@ -316,7 +383,8 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
         : null,
     branches: context?.branches ?? [],
     appointment,
-    data: missing && link.patientId ? { missing, health: await healthNeverRecorded(tx, orgId, link.patientId) } : missing ? { missing, health: false } : null,
+    data: missing || health ? { missing: missing ?? [], health } : null,
+    ...(await youOf(tx, orgId, link)),
     budgets,
     consents,
     questionnaire,
@@ -467,21 +535,25 @@ export interface PersonalLinkDataForm {
   asksHealth: boolean
   /** Su primer nombre, para saludarla; nulo si no se sabe. */
   firstName: string | null
+  /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va al final, antes de enviar. */
+  pending: { privacy: boolean; promotions: boolean }
 }
 
 /** Lo que pide «Tus datos»: solo lo que falta, con el país de la clínica para los documentos. */
 export async function getPersonalLinkDataForm(tx: Db, orgId: string, token: string): Promise<PersonalLinkDataForm> {
   const link = await requireLiveLink(tx, orgId, token)
   const missing = await missingOf(tx, orgId, link)
-  if (!missing || !link.patientId) throw linkExpired()
+  const health = await healthPendingOf(tx, orgId, link)
+  if ((!missing && !health) || !link.patientId) throw linkExpired()
   return {
-    missing,
+    missing: missing ?? [],
     countryCode: await findOrgCountry(tx, orgId),
     today: await patientOrganizationToday(tx, orgId),
     hasRepresentative: await hasLegalRepresentative(tx, orgId, link.patientId),
     registration: await getPatientRegistrationConfig(tx, orgId),
-    asksHealth: await healthNeverRecorded(tx, orgId, link.patientId),
+    asksHealth: health,
     firstName: firstName(await requirePatient(tx, orgId, link.patientId)) || null,
+    pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId),
   }
 }
 
@@ -522,6 +594,10 @@ export interface PersonalLinkDataInput {
   } | null
   /** Su salud, como en el registro; solo se guarda si nadie la registró antes. */
   health?: DeclaredPatientHealthInput | null
+  /** Acepta el aviso de privacidad que aún no había aceptado (registrada por teléfono, por ejemplo). */
+  privacyAccepted?: boolean
+  /** Su respuesta a novedades y promociones, si nunca la había dado. */
+  acceptsPromotions?: boolean
 }
 
 /** De quién es ya ese documento, si es de otra persona. */
@@ -589,11 +665,35 @@ export async function submitPersonalLinkData(
 ): Promise<{ received: true }> {
   const link = await requireLiveLink(tx, orgId, token, true)
   const missing = await missingOf(tx, orgId, link)
+  const health = await healthPendingOf(tx, orgId, link)
   const patientId = link.patientId
-  if (!missing || !patientId) {
+  if ((!missing && !health) || !patientId) {
     if (patientId && !link.decides) requireLinkDecider(link)
     throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
   }
+  await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, { requireSomething: true })
+  // «Tus datos» se envían una sola vez: después dice «Recibido».
+  await tx
+    .update(appointmentBookingLink)
+    .set({ dataSubmittedAt: new Date() })
+    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+  return { received: true }
+}
+
+/**
+ * Lo que escribió en su enlace (al enviar «Tus datos» o al reservar): solo lo
+ * que falta, con las reglas de la ficha, y lo que aceptó o respondió. Una sola
+ * operación para las dos pantallas.
+ */
+async function saveLinkData(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  patientId: string,
+  missing: MissingPersonDatum[],
+  input: PersonalLinkDataInput,
+  options: { requireSomething: boolean },
+): Promise<void> {
   const allowed = fieldsFor(missing)
   const patch: Record<string, string | null> = {}
   for (const [key, raw] of Object.entries(input.data ?? {})) {
@@ -602,7 +702,11 @@ export async function submitPersonalLinkData(
     if (value) patch[key] = value
   }
   const withHealth = !!input.health && (await healthNeverRecorded(tx, orgId, patientId))
-  if (Object.keys(patch).length === 0 && !withHealth) throw validation("Completa al menos un dato")
+  const consented = await saveLinkConsents(tx, orgId, link, patientId, input)
+  if (Object.keys(patch).length === 0 && !withHealth) {
+    if (options.requireSomething && !consented) throw validation("Completa al menos un dato")
+    return
+  }
   const actor = `contact:${link.row.contactId}`
   const today = await patientOrganizationToday(tx, orgId)
   const countryCode = await findOrgCountry(tx, orgId)
@@ -632,11 +736,6 @@ export async function submitPersonalLinkData(
   if (Object.keys(patch).length > 0) await updatePatient(tx, orgId, actor, patientId, patch)
   // Su salud entra como declarada por la persona: la revisa quien atiende.
   if (withHealth && input.health) await initializeDeclaredPatientHealth(tx, orgId, patientId, input.health, null)
-  // «Tus datos» se envían una sola vez: después dice «Recibido».
-  await tx
-    .update(appointmentBookingLink)
-    .set({ dataSubmittedAt: new Date() })
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
   const person = await requirePatient(tx, orgId, patientId)
   const stillMissing = await getPatientMissingData(tx, orgId, patientId)
   if (personId) {
@@ -689,7 +788,93 @@ export async function submitPersonalLinkData(
     entityId: patientId,
     metadata: { fields: Object.keys(patch), health: withHealth, duplicate: !!duplicateOf, minorWithoutRepresentative: !!pendingRepresentative, origin: "paciente" },
   })
-  return { received: true }
+}
+
+/**
+ * Lo que acepta o responde en su enlace quien decide por el paciente: el aviso
+ * de privacidad que aún no tenía (con la versión vigente, por el formulario
+ * público) y novedades y promociones si nunca respondió. Ver el texto «Te
+ * escribiremos por WhatsApp sobre tu cita» deja el permiso de sus recordatorios
+ * si no había ninguno. Nada de lo ya respondido se pisa. Devuelve si guardó algo.
+ */
+async function saveLinkConsents(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  patientId: string,
+  input: PersonalLinkDataInput,
+): Promise<boolean> {
+  if (!link.decides) return false
+  let saved = false
+  if (input.privacyAccepted) {
+    const [accepted] = await tx
+      .select({ id: patientDataConsent.id })
+      .from(patientDataConsent)
+      .where(and(eq(patientDataConsent.organizationId, orgId), eq(patientDataConsent.patientId, patientId), isNull(patientDataConsent.revokedAt)))
+      .limit(1)
+    const config = await getPatientRegistrationConfig(tx, orgId)
+    if (!accepted && config.privacyNotice) {
+      const [grantor] = await tx
+        .select({ name: contact.displayName })
+        .from(contact)
+        .where(and(eq(contact.organizationId, orgId), eq(contact.id, link.row.contactId)))
+        .limit(1)
+      await tx.insert(patientDataConsent).values({
+        organizationId: orgId,
+        patientId,
+        noticeVersion: config.version,
+        noticeText: config.privacyNotice,
+        purposes: ["atencion", "recordatorios"],
+        grantedByContactId: link.row.contactId,
+        grantedByName: grantor?.name ?? "",
+        channel: "formulario_publico",
+        recordedBy: null,
+      })
+      saved = true
+    }
+  }
+  if ((await consentStatusOf(tx, orgId, link.row.contactId, "recordatorio")) === null) {
+    await setConsent(tx, orgId, null, link.row.contactId, { purpose: "recordatorio", granted: true, source: "enlace" })
+  }
+  if (input.acceptsPromotions !== undefined && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null) {
+    await setConsent(tx, orgId, null, link.row.contactId, { purpose: "novedades", granted: input.acceptsPromotions, source: "enlace" })
+    saved = true
+  }
+  return saved
+}
+
+export interface PersonalLinkReservation {
+  branchId: string
+  startsAt: string
+  professionalUserId: string
+  roomId?: string
+  planItemIds?: string[]
+  /** Quien ya es paciente: lo que faltaba y lo que acepta, guardado en el mismo paso. */
+  you?: PersonalLinkDataInput
+}
+
+/**
+ * Reserva desde su enlace. Si ya es paciente, en el mismo paso se guarda lo
+ * que faltaba de sus datos y lo que acepta (`saveLinkData`, la misma operación
+ * de «Tus datos»); si la hora se ocupó, no se guarda nada y la página conserva
+ * lo escrito. La cita la crea `reserveBookingLink`.
+ */
+export async function reservePersonalLink(
+  tx: Db,
+  orgId: string,
+  token: string,
+  input: PersonalLinkReservation,
+  deps: { secretsKey?: Buffer } = {},
+): Promise<BookingLinkAppointment> {
+  const { you, ...choice } = input
+  if (you) {
+    const link = await requireLiveLink(tx, orgId, token, true)
+    if (link.patientId && link.decides) {
+      const missing = (await missingOf(tx, orgId, link)) ?? []
+      await saveLinkData(tx, orgId, link, link.patientId, missing, you, { requireSomething: false })
+    }
+  }
+  return reserveBookingLink(tx, orgId, token, choice, deps)
 }
 
 /**

@@ -2,6 +2,7 @@ import type { ChannelAdapter, NormalizedInbound } from "@odentia/channels"
 import { type Db, type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { agentPersonFact } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
+import { automationConsent } from "@odentia/db/schema/automation"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { patient, patientDataConsent, patientRegistration, patientRegistrationLink } from "@odentia/db/schema/clinical"
 import { channelConnection, contactIdentity, conversation } from "@odentia/db/schema/crm"
@@ -34,7 +35,7 @@ import {
   getBookingLinkRegistrationForm,
   registerFromBookingLink,
 } from "./booking-links.js"
-import { getPersonalLinkView as getBookingLinkView } from "./su-enlace.js"
+import { getPersonalLinkView as getBookingLinkView, reservePersonalLink } from "./su-enlace.js"
 import { createConnection } from "./connections.js"
 import { createContact, getContact, updateContact } from "./contacts.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
@@ -381,7 +382,8 @@ describe("reservar desde un enlace", () => {
       reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }, { secretsKey: KEY }))
     expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "Miraflores", professionalName: "Dra. Lucía Salas" })
     const rows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))
-    expect(rows.map((row) => [row.status, row.source, row.createdBy, row.conversationId])).toEqual([["programada", "enlace", null, eva.conversationId]])
+    // La eligió la propia persona: nace confirmada, sin pedirle «Confirmar».
+    expect(rows.map((row) => [row.status, row.source, row.createdBy, row.conversationId])).toEqual([["confirmada", "enlace", null, eva.conversationId]])
     // El enlace no reserva dos veces y la página muestra la cita; ese horario ya no se ofrece.
     const after = await run((tx) => listBookingLinkSlots(tx, ORG, link.token, range))
     expect(after.slots.map((slot) => slot.startsAt)).not.toContain(chosen.startsAt)
@@ -402,7 +404,7 @@ describe("reservar desde un enlace", () => {
       changeBookingLinkAppointment(tx, ORG, link.token, { startsAt: other.startsAt, professionalUserId: other.professionalUserId }, { secretsKey: KEY }))
     expect(moved).toMatchObject({ startsAt: other.startsAt, canChange: true })
     const movedRows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))
-    expect(movedRows.map((row) => [row.id, row.status, row.startsAt.toISOString()])).toEqual([[rows[0]!.id, "programada", other.startsAt]])
+    expect(movedRows.map((row) => [row.id, row.status, row.startsAt.toISOString()])).toEqual([[rows[0]!.id, "confirmada", other.startsAt]])
     // Otra organización no llega a la cita con ese enlace.
     await expect(run((tx) => cancelBookingLinkAppointment(tx, OTHER, link.token), OTHER)).rejects.toMatchObject({ status: 404 })
 
@@ -453,6 +455,73 @@ describe("reservar desde un enlace", () => {
     await expect(run((tx) =>
       reserveBookingLink(tx, ORG, pasted.token, { branchId: site!.id, startsAt: slots[1]!.startsAt, professionalUserId: professional }))).rejects.toMatchObject({ code: "BOOKING_LINK_USED" })
   })
+
+  it("quien ya es paciente reserva y en el mismo paso deja lo que faltaba y lo que acepta; un enlace para sus datos ya no abre la reserva", async () => {
+    // La clínica pide el sexo y tiene su aviso publicado.
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    await run((tx) =>
+      savePatientRegistrationConfig(tx, ORG, OWNER, {
+        expectedVersion: config.version,
+        enabled: true,
+        fields: { ...config.fields, sex: "required" },
+        privacyNotice: "Tus datos se usan solo para tu atención.",
+      }))
+    const lia = await person("lia-enlace")
+    const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Surco", timezone: "America/Lima" }).returning({ id: branch.id })
+    const professional = "dentista-paciente"
+    await ownerDb.insert(user).values([{ id: professional, name: "Dr. Iván Soto", email: "ivan.soto@enlace.test", emailVerified: true }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+    await run((tx) =>
+      setProfessionalSchedule(tx, ORG, OWNER, {
+        branchId: site!.id,
+        professionalUserId: professional,
+        rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+      }))
+    // Registrada por teléfono: sin fecha, sin sexo y sin el aviso aceptado.
+    const [created] = await insertTestPatients(ownerDb, {
+      organizationId: ORG, displayName: "Lía Campos", givenNames: "Lía", familyName: "Campos", docType: "DNI", docNumber: "41239876",
+      phone: "+51987000111", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)),
+    })
+    await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: lia.contactId, relationship: "self", isPreferred: true }))
+
+    // Al reservar ve lo que ya sabemos, con el documento abreviado, lo que falta y lo pendiente.
+    const sent = await run((tx) => createBookingLink(tx, ORG, { conversationId: lia.conversationId, branchId: site!.id }, { secretsKey: KEY }))
+    const view = await run((tx) => getBookingLinkView(tx, ORG, sent.token))
+    expect(view.you).toEqual({ name: "Lía Campos", document: "DNI ••••9876", phone: "+51987000111" })
+    expect(view.pending).toEqual({ privacy: true, promotions: true })
+    expect(view.data?.missing.map((item) => item.key)).toEqual(expect.arrayContaining(["birthDate", "sex"]))
+
+    // Un enlace para completar sus datos no se impone a ese mensaje: deja de ofrecer la reserva que no usó.
+    await run((tx) => createBookingLink(tx, ORG, { conversationId: lia.conversationId, patientId: created!.id, booking: false }, { secretsKey: KEY }))
+    expect((await run((tx) => getBookingLinkView(tx, ORG, sent.token))).booking).toBeNull()
+    // Le vuelve a llegar la agenda y reserva: en el mismo paso guarda lo que faltaba y lo que acepta.
+    await run((tx) => createBookingLink(tx, ORG, { conversationId: lia.conversationId, branchId: site!.id }, { secretsKey: KEY }))
+    const monday = upcomingMonday()
+    const range = { branchId: site!.id, from: monday.toISOString(), to: new Date(monday.getTime() + 86_400_000).toISOString() }
+    const { slots } = await run((tx) => listBookingLinkSlots(tx, ORG, sent.token, range))
+    const chosen = slots[0]!
+    const booked = await run((tx) =>
+      reservePersonalLink(tx, ORG, sent.token, {
+        branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}),
+        // El celular no faltaba: lo que no falta no se toca aunque venga.
+        you: { data: { birthDate: "1990-02-02", sex: "F", phone: "+51900000000" }, privacyAccepted: true, acceptsPromotions: false },
+      }, { secretsKey: KEY }))
+    expect(booked).toMatchObject({ startsAt: chosen.startsAt })
+    const [saved] = await selectTestPatients(ownerDb).where(eq(patient.id, created!.id))
+    expect(saved).toMatchObject({ birthDate: "1990-02-02", sex: "F", phone: "+51987000111" })
+    const rows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))
+    expect(rows.map((row) => [row.status, row.source])).toEqual([["confirmada", "enlace"]])
+    const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, created!.id))
+    expect(consents.map((row) => [row.channel, row.purposes, row.grantedByContactId])).toEqual([["formulario_publico", ["atencion", "recordatorios"], lia.contactId]])
+    const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, lia.contactId))
+    expect(permissions.map((row) => [row.purpose, row.status === "granted", row.source]).sort()).toEqual([
+      ["novedades", false, "enlace"],
+      ["recordatorio", true, "enlace"],
+    ])
+    // Ya no queda nada pendiente: no se le vuelve a preguntar.
+    expect((await run((tx) => getBookingLinkView(tx, ORG, sent.token))).pending).toEqual({ privacy: false, promotions: false })
+  })
 })
 
 describe("reservar desde un enlace quien recién se contacta", () => {
@@ -496,10 +565,20 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     // La página pide lo esencial con el registro vigente de la clínica. Escribe por Telegram: no se le supone un celular.
     const form = await run((tx) => getBookingLinkRegistrationForm(tx, ORG, link.token))
     expect(form).toMatchObject({ phone: null, config: { version: published.version, privacyNotice: "Tus datos se usan solo para tu atención." } })
+    // Lo que ya sabemos viene escrito (aquí, el nombre de su perfil) y nunca respondió lo de promociones.
+    expect(form.asksPromotions).toBe(true)
+    expect(form.known.from === null || form.known.from === "perfil").toBe(true)
+    // Al reservar se pide todo lo que la clínica exige y este paso sabe pedir: aquí, la fecha y el sexo.
     const essentials = {
-      demographics: { displayName: "Carla Núñez Prado", givenNames: "Carla", familyName: "Núñez Prado", docType: "DNI" as const, docNumber: "45678912", phone: "+51987654321" },
+      demographics: {
+        displayName: "Carla Núñez Prado", givenNames: "Carla", familyName: "Núñez Prado", docType: "DNI" as const, docNumber: "45678912",
+        phone: "+51987654321", birthDate: "1990-05-14", sex: "F" as const,
+      },
       respondent: "patient" as const,
       privacyAccepted: true,
+      // Se le dijo que le escribirán por WhatsApp sobre su cita y respondió que sí a promociones.
+      acceptsReminders: true,
+      acceptsMessages: true,
     }
     const send = (answers: object, formVersion = published.version) =>
       run((tx) => registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion, answers: answers as typeof essentials }))
@@ -508,6 +587,9 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     await expect(send({ ...essentials, demographics: { ...essentials.demographics, docNumber: "123" } })).rejects.toMatchObject({ status: 400 })
     await expect(send({ ...essentials, demographics: { ...essentials.demographics, phone: "" } })).rejects.toMatchObject({ status: 400 })
     await expect(send({ ...essentials, demographics: { ...essentials.demographics, occupation: "Abogada" } })).rejects.toMatchObject({ status: 400 })
+    // Sin la fecha de nacimiento o sin lo que la clínica marca obligatorio, no se reserva a medias.
+    await expect(send({ ...essentials, demographics: { ...essentials.demographics, birthDate: null } })).rejects.toMatchObject({ status: 400 })
+    await expect(send({ ...essentials, demographics: { ...essentials.demographics, sex: null } })).rejects.toMatchObject({ status: 400 })
     await expect(send(essentials, published.version + 1)).rejects.toMatchObject({ code: "FORM_CHANGED" })
     expect(await run((tx) => listPatientsByContact(tx, ORG, nuevo.contactId))).toEqual([])
     // Un rechazo no deja enlaces de registro a medias.
@@ -525,7 +607,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     // Queda con lo esencial y lo demás vacío; los apellidos llegan enteros, sin nada que revisar.
     expect(ficha).toMatchObject({
       displayName: "Carla Núñez Prado", docType: "DNI", docNumber: "45678912", phone: "+51987654321",
-      birthDate: null, sex: null, identityNeedsReview: false,
+      birthDate: "1990-05-14", sex: "F", identityNeedsReview: false,
     })
     // Mismo consentimiento y misma procedencia que cualquier registro: versión del aviso, enlace consumido y conversación.
     const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, registered.id))
@@ -549,7 +631,13 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const booked = await run((tx) => reserveBookingLink(tx, ORG, link.token, choice, { secretsKey: KEY }))
     expect(booked).toMatchObject({ startsAt: chosen.startsAt, branchName: "San Isidro", professionalName: "Dr. Mario Paz" })
     const rows = await ownerDb.select().from(appointment).where(eq(appointment.patientId, registered.id))
-    expect(rows.map((row) => [row.status, row.source])).toEqual([["programada", "enlace"]])
+    expect(rows.map((row) => [row.status, row.source])).toEqual([["confirmada", "enlace"]])
+    // Quedó guardado lo que se le dijo y lo que respondió: sus recordatorios y promociones, con su origen.
+    const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, nuevo.contactId))
+    expect(permissions.map((row) => [row.purpose, row.status, row.source]).sort()).toEqual([
+      ["novedades", "granted", "registro"],
+      ["recordatorio", "granted", "registro"],
+    ])
   })
 
   it("propone el celular solo cuando la conversación es de WhatsApp", async () => {
@@ -568,7 +656,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const madre = await person("madre-enlace")
     const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: madre.conversationId }, { secretsKey: KEY }))
     const answers = {
-      demographics: { displayName: "Mateo Rojas Lima", givenNames: "Mateo", familyName: "Rojas Lima", docType: "DNI" as const, docNumber: "78123456", birthDate: "2018-03-10" },
+      demographics: { displayName: "Mateo Rojas Lima", givenNames: "Mateo", familyName: "Rojas Lima", docType: "DNI" as const, docNumber: "78123456", birthDate: "2018-03-10", sex: "M" as const },
       respondent: "representative" as const,
       representative: { displayName: "Rosa Lima", relationship: "guardian" as const, relationshipDetail: "", phone: "+51955111222", docType: "DNI" as const, docNumber: "41234567" },
       privacyAccepted: true,
@@ -597,7 +685,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       updateContact(tx, ORG, quien.contactId, { givenNames: "Paciente", familyName: "Prueba WhatsApp" }, { userId: null, origin: "agent" }))
     const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }, { secretsKey: KEY }))
     const answers = {
-      demographics: { displayName: "Darvin Willy Cotrina Cervera", givenNames: "Darvin Willy", familyName: "Cotrina Cervera", docType: "DNI" as const, docNumber: "46781234", phone: "+51987333444" },
+      demographics: { displayName: "Darvin Willy Cotrina Cervera", givenNames: "Darvin Willy", familyName: "Cotrina Cervera", docType: "DNI" as const, docNumber: "46781234", phone: "+51987333444", birthDate: "1988-07-21", sex: "M" as const },
       respondent: "patient" as const,
       privacyAccepted: true,
     }
@@ -620,7 +708,7 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       updateContact(tx, ORG, quien.contactId, { givenNames: "Lucía", familyName: "Paz Soto", docType: "DNI", docNumber: "41239876" }, { userId: OWNER }))
     const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }, { secretsKey: KEY }))
     const answers = {
-      demographics: { displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", docType: "DNI" as const, docNumber: "47651234", phone: "+51987555666" },
+      demographics: { displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", docType: "DNI" as const, docNumber: "47651234", phone: "+51987555666", birthDate: "1992-11-03", sex: "F" as const },
       respondent: "patient" as const,
       privacyAccepted: true,
     }

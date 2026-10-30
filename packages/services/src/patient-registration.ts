@@ -973,9 +973,11 @@ export async function registerPatient(
     // Los permisos de mensajes son finalidades de este mismo consentimiento:
     // cuentan solo las que el registro de la clínica pregunta.
     const asked = [
-      // Los recordatorios de su cita no se preguntan: son parte del servicio (ADR 0030).
-      // `askReminders` queda sin uso; un «no» que llegue igual se guarda como baja.
-      ...(answers.acceptsReminders === false ? ["recordatorios"] : []),
+      // Los mensajes de su cita no se preguntan: son parte del servicio (ADR 0030).
+      // Cuando el formulario le dice que le escribirán por WhatsApp sobre su cita
+      // (`acceptsReminders: true`), queda guardado como su permiso, con su fecha y
+      // de dónde vino; un «no» que llegue se guarda como baja.
+      ...(answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
       ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
     ]
     const purposes = [

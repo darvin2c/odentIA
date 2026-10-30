@@ -21,7 +21,7 @@ import {
   listBookingLinkProfessionals,
   listBookingLinkSlots,
   registerFromBookingLink,
-  reserveBookingLink,
+  reservePersonalLink,
   ServiceError,
   setPersonalLinkMessages,
   signPersonalLinkConsent,
@@ -44,15 +44,6 @@ const LIMITS = { get: 240, post: 30, address: 60 } as const
 const token = z.string().regex(/^[0-9a-f]{64}$/)
 const slotsQuery = z.strictObject({ token, branchId: z.uuid(), from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) })
 const professionalsQuery = z.strictObject({ token, branchId: z.uuid() })
-const reserveBody = z.strictObject({
-  token,
-  branchId: z.uuid(),
-  startsAt: z.iso.datetime({ offset: true }),
-  professionalUserId: z.string().min(1).max(200),
-  roomId: z.uuid().optional(),
-  // «Elegir horario» de lo que aceptó en su presupuesto.
-  planItemIds: z.array(z.uuid()).min(1).max(52).optional(),
-})
 const registrationBody = z.strictObject({
   token,
   submissionId: z.uuid(),
@@ -60,9 +51,7 @@ const registrationBody = z.strictObject({
   answers: registrationAnswersSchema,
 })
 const shortText = (max: number) => z.string().trim().max(max)
-const dataBody = z.strictObject({
-  token,
-  data: z.strictObject({
+const linkData = z.strictObject({
     givenNames: shortText(100).optional(),
     familyName: shortText(200).optional(),
     birthDate: shortText(10).optional(),
@@ -84,9 +73,15 @@ const dataBody = z.strictObject({
     insuranceScheme: shortText(30).optional(),
     insurerName: shortText(200).optional(),
     affiliationNumber: shortText(50).optional(),
-  }),
+})
+const dataBody = z.strictObject({
+  token,
+  data: linkData,
   // Su salud, con las mismas reglas del registro de pacientes.
   health: registrationAnswersSchema.shape.health.nullable().optional(),
+  // El aviso que aún no aceptó y su respuesta a novedades y promociones, si nunca la dio.
+  privacyAccepted: z.boolean().optional(),
+  acceptsPromotions: z.boolean().optional(),
   representative: z
     .strictObject({
       displayName: shortText(200).min(1),
@@ -97,6 +92,23 @@ const dataBody = z.strictObject({
       relationshipDetail: shortText(100).optional(),
     })
     .nullish(),
+})
+const reserveBody = z.strictObject({
+  token,
+  branchId: z.uuid(),
+  startsAt: z.iso.datetime({ offset: true }),
+  professionalUserId: z.string().min(1).max(200),
+  roomId: z.uuid().optional(),
+  // «Elegir horario» de lo que aceptó en su presupuesto.
+  planItemIds: z.array(z.uuid()).min(1).max(52).optional(),
+  // Quien ya es paciente: lo que faltaba de sus datos y lo que acepta, en el mismo paso.
+  you: z
+    .strictObject({
+      data: linkData,
+      privacyAccepted: z.boolean().optional(),
+      acceptsPromotions: z.boolean().optional(),
+    })
+    .optional(),
 })
 const decisionBody = z.strictObject({
   token,
@@ -277,7 +289,7 @@ export function createPublicBookingRoute(deps: {
         if (!access.allowed) {
           throw new ServiceError("SAAS_RESTRICTED", 403, "La clínica pausó las reservas en línea: escríbenos por otro canal")
         }
-        return reserveBookingLink(tx, orgId, linkToken, choice, { secretsKey: deps.secretsKey })
+        return reservePersonalLink(tx, orgId, linkToken, choice, { secretsKey: deps.secretsKey })
       }),
     )
   })

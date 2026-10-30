@@ -59,7 +59,12 @@ export interface PersonalLinkView {
   booking: { needsRegistration: boolean; service: { name: string; durationMin: number | null } | null; branchId: string | null } | null
   branches: BookingLinkBranch[]
   appointment: BookingAppointment | null
+  /** Qué falta de sus datos y si se le pregunta su salud (opcional); `missing` vacío: solo su salud. */
   data: { missing: MissingDatum[]; health: boolean } | null
+  /** Quien ya es paciente, al reservar: lo que ya sabemos, con el documento abreviado. */
+  you: { name: string; document: string | null; phone: string | null } | null
+  /** Lo que aún no aceptó (el aviso) o no respondió (promociones): se pide en el mismo paso. */
+  pending: { privacy: boolean; promotions: boolean } | null
   budgets: PortalBudget[]
   consents: Array<{ id: string; title: string }>
   questionnaire: { title: string } | null
@@ -202,6 +207,20 @@ export interface BookingRegistrationForm {
   phone: string | null
   /** País de la clínica: de él dependen los documentos que se ofrecen (ADR 0036). */
   countryCode: string | null
+  /** Lo que ya sabemos de quien escribe: viene escrito y se puede corregir. */
+  known: {
+    givenNames: string | null
+    familyName: string | null
+    /** De dónde salió el nombre: lo que dijo en la conversación o su perfil de WhatsApp. */
+    from: "conversacion" | "perfil" | null
+    email: string | null
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+    sex: string | null
+  }
+  /** Nunca respondió lo de novedades y promociones: se le pregunta al reservar. */
+  asksPromotions: boolean
 }
 
 /** Lo que hace falta para pedir sus datos a quien aún no es paciente. */
@@ -217,9 +236,16 @@ export function submitBookingRegistration(
   return post(`${base(slug)}/registration`, input)
 }
 
+/** Lo que guarda la reserva de quien ya es paciente: lo que le faltaba y lo que acepta. */
+export interface BookingYou {
+  data: Partial<Record<string, string>>
+  privacyAccepted?: boolean
+  acceptsPromotions?: boolean
+}
+
 export function reserveBooking(
   slug: string,
-  input: { token: string; branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[] },
+  input: { token: string; branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[]; you?: BookingYou },
 ): Promise<{ data: BookingAppointment }> {
   return post(`${base(slug)}/reserve`, input)
 }
@@ -253,6 +279,8 @@ export interface PersonalDataForm {
   /** Si se le pregunta su salud (nadie la registró aún en su ficha). */
   asksHealth: boolean
   firstName: string | null
+  /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va antes de enviar. */
+  pending: { privacy: boolean; promotions: boolean }
 }
 
 export function fetchPersonalDataForm(slug: string, token: string): Promise<{ data: PersonalDataForm }> {
@@ -270,6 +298,8 @@ export interface PersonalDataInput {
     relationshipDetail?: string
   } | null
   health?: RegistrationAnswers["health"] | null
+  privacyAccepted?: boolean
+  acceptsPromotions?: boolean
 }
 
 /** «Tus datos»: solo lo que falta, una sola vez. */

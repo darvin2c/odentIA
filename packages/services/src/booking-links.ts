@@ -19,6 +19,7 @@ import {
   ownAppointmentChangeable,
 } from "./own-appointment.js"
 import { listAvailableSlots } from "./availability.js"
+import { consentStatusOf } from "./message-permission.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { personalLinkToken } from "./personal-link-token.js"
 import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
@@ -80,7 +81,11 @@ export interface IssuePersonalLinkInput {
   conversationId?: string | null
   /** La cita que muestra; sin ella, la próxima del paciente. */
   appointmentId?: string | null
-  /** Ofrece reservar una cita nueva (el agente). */
+  /**
+   * `true`: ofrece reservar una cita nueva (el agente). `false`: se da para otra
+   * cosa (completar sus datos) y deja de ofrecer reservar: el enlace abre lo que
+   * dice su mensaje. Sin indicar, queda como estaba.
+   */
   booking?: boolean
   serviceId?: string | null
   branchId?: string | null
@@ -148,6 +153,9 @@ export async function issuePersonalLink(
       patch.usedAt = null
       patch.serviceId = input.serviceId ?? null
       patch.branchId = input.branchId ?? null
+    } else if (input.booking === false && live.booking && !live.usedAt) {
+      // Se le da para completar sus datos: la reserva que no usó no se impone a ese mensaje.
+      patch.booking = false
     }
     await tx
       .update(appointmentBookingLink)
@@ -287,7 +295,7 @@ async function bookingLinkFor(
       contactId: conv.contactId,
       patientId: chosen?.id ?? null,
       conversationId: input.conversationId,
-      ...(booking ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null } : {}),
+      ...(booking ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null } : { booking: false }),
       createdBy: input.createdBy ?? null,
     },
     deps,
@@ -858,12 +866,39 @@ export interface BookingLinkRegistrationForm {
   phone: string | null
   /** País de la clínica (ISO 3166-1 alfa-2): de él dependen los documentos que se ofrecen (ADR 0036). */
   countryCode: string | null
+  /**
+   * Lo que ya sabemos de quien escribe, para que no lo vuelva a escribir: lo
+   * que dijo en la conversación (a Sofi o al equipo) o, si no, el nombre de su
+   * perfil de WhatsApp (`from: "perfil"`). Todo se puede corregir.
+   */
+  known: {
+    givenNames: string | null
+    familyName: string | null
+    from: "conversacion" | "perfil" | null
+    email: string | null
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+    sex: string | null
+  }
+  /** Nunca respondió lo de novedades y promociones: se le pregunta al reservar. */
+  asksPromotions: boolean
+}
+
+/**
+ * Del nombre de su perfil, nombres y apellidos para empezar: la primera palabra
+ * y el resto. Un número o algo sin letras no es un nombre. La persona lo corrige.
+ */
+function namesFromProfile(displayName: string): { givenNames: string; familyName: string | null } | null {
+  const words = displayName.trim().split(/\s+/).filter((word) => /\p{L}/u.test(word) && !/\d/.test(word))
+  if (words.length === 0) return null
+  return { givenNames: words[0] as string, familyName: words.length > 1 ? words.slice(1).join(" ") : null }
 }
 
 /**
  * Lo que la página necesita para pedir los datos de quien aún no es paciente:
- * el registro vigente de la clínica (versión y aviso de privacidad) y, si se
- * conoce, el celular desde el que escribe.
+ * el registro vigente de la clínica (versión y aviso de privacidad), lo que ya
+ * sabemos de la persona y, si se conoce, el celular desde el que escribe.
  */
 export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, token: string): Promise<BookingLinkRegistrationForm> {
   const link = await requireLiveLink(tx, orgId, token)
@@ -871,11 +906,39 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
   if (link.patientId !== null) throw alreadyPatient()
   const config = await getPatientRegistrationConfig(tx, orgId)
   if (!config.enabled) throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "La clínica no tiene activo el registro de pacientes en línea")
+  const [person] = await tx
+    .select({
+      displayName: contact.displayName,
+      givenNames: contact.givenNames,
+      familyName: contact.familyName,
+      phone: contact.phone,
+      email: contact.email,
+      docType: contact.docType,
+      docNumber: contact.docNumber,
+      birthDate: contact.birthDate,
+      sex: contact.sex,
+    })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, link.row.contactId)))
+    .limit(1)
+  const told = person && (person.givenNames || person.familyName) ? { givenNames: person.givenNames, familyName: person.familyName } : null
+  const profile = !told && person ? namesFromProfile(person.displayName) : null
   return {
     config,
     today: await patientOrganizationToday(tx, orgId),
-    phone: await conversationPhone(tx, orgId, link.row),
+    phone: (await conversationPhone(tx, orgId, link.row)) ?? person?.phone ?? null,
     countryCode: await findOrgCountry(tx, orgId),
+    known: {
+      givenNames: told?.givenNames ?? profile?.givenNames ?? null,
+      familyName: told?.familyName ?? profile?.familyName ?? null,
+      from: told ? "conversacion" : profile ? "perfil" : null,
+      email: person?.email ?? null,
+      docType: person?.docType ?? null,
+      docNumber: person?.docNumber ?? null,
+      birthDate: person?.birthDate ?? null,
+      sex: person?.sex ?? null,
+    },
+    asksPromotions: config.askMessages && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null,
   }
 }
 
@@ -992,6 +1055,8 @@ export async function reserveBookingLink(
     ...(!forTreatment && link.row.serviceId ? { serviceId: link.row.serviceId } : {}),
     ...(forTreatment ? { planItemIds: input.planItemIds } : {}),
     startsAt: input.startsAt,
+    // La eligió la propia persona: queda confirmada, sin pedirle «Confirmar» después.
+    status: "confirmada",
     source: "enlace",
     ...(link.row.conversationId ? { conversationId: link.row.conversationId } : {}),
     // Quien reserva es la propia persona, no alguien del equipo: la cita queda sin autora.

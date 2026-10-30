@@ -29,7 +29,7 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
-import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { appointment, appointmentBookingLink, scheduleRoom } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { type TopicKind, topicIsUrgent, topicKindOf, topicUrgentAt } from "./topic-urgency.js"
@@ -2877,6 +2877,8 @@ export async function executeProposal(
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
         durationMin: typeof payload.durationMin === "number" ? (payload.durationMin as number) : undefined,
         reason: typeof payload.reason === "string" ? (payload.reason as string) : undefined,
+        // La eligió la persona con su sí: queda confirmada, sin pedirle «Confirmar» después.
+        status: "confirmada",
         source: "agent",
         conversationId: locked.conversationId ?? undefined,
         // El agente y el interlocutor que confirma no son usuarios: la cita
@@ -2885,6 +2887,23 @@ export async function executeProposal(
         // Se le dijo en la misma conversación: «Recordar la cita» no repite el aviso.
         notice: false,
       })
+      // Ya reservó por el chat: su enlace deja de ofrecer reservar otra (como al reservar en la página).
+      if (locked.contactId) {
+        await tx
+          .update(appointmentBookingLink)
+          .set({ booking: false })
+          .where(
+            and(
+              eq(appointmentBookingLink.organizationId, orgId),
+              eq(appointmentBookingLink.contactId, locked.contactId),
+              // También el de antes de registrarse, que aún no tenía paciente.
+              or(eq(appointmentBookingLink.patientId, patientId), isNull(appointmentBookingLink.patientId)),
+              eq(appointmentBookingLink.booking, true),
+              isNull(appointmentBookingLink.usedAt),
+              isNull(appointmentBookingLink.revokedAt),
+            ),
+          )
+      }
       result = {
         appointmentId: created.id,
         startsAt: created.startsAt,
