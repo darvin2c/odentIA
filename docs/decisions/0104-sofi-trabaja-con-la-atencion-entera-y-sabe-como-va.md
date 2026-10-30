@@ -101,6 +101,7 @@ En el chat web, Sofi decía «Ya guardé tu WhatsApp» o «El equipo ya tiene tu
 ### Consecuencias
 
 - «Derivar», «información», «saludo» y «cambio de cita» no tienen `guardar_contacto`: si la persona escribe su número en ese turno, ya no se le dice que se guardó, pero tampoco se guarda y se le vuelve a pedir.
-- Una comprobación por forma: «te avisaremos por WhatsApp», sin decir que es el suyo, no cuenta.
+- Una comprobación por forma: «te avisaremos por WhatsApp», sin decir que es el suyo, no cuenta, y una pregunta o una condición («¿ya tenemos tu WhatsApp?», «si ya lo dejaste…») tampoco.
+- Con el caso ya en el equipo, pedir que reescriba el aviso terminaba el turno con el aviso fijo, y se perdía lo que iba a decir. Ahora vuelve al modelo una vez, para esta y para las demás comprobaciones antes de enviar.
 
 Referencias: `claims.ts`, `claims.test.ts`; `tools.ts` (`unsavedContact`, `guardar_contacto`); `webchat-reply.ts` (`webchatReplyRoutes`); la prueba del chat web en `agent.test.ts`.

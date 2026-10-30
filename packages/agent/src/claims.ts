@@ -65,14 +65,24 @@ const KEPT_EN = new RegExp(
     String.raw`|\byou(?:'ve| have)?(?: already)? (?:shared|left|gave|sent|given)(?: us| me)? ${YOUR_EN}`,
 )
 /** «El WhatsApp que compartiste» o «al correo que nos dejaste» es el suyo: se lee como «tu WhatsApp». */
-const LEFT_ONE = /\b(?:(a)l|el|la) (whatsapp|correo|celular|numero) que (?:nos |me )?(?:dejaste|compartiste|diste|indicaste|escribiste|enviaste|pasaste)\b/g
+const LEFT_ONE = /\b(?:(a)l|el|la) (whatsapp|correo|celular|numero(?: de (?:whatsapp|celular|telefono))?) que (?:nos |me )?(?:dejaste|compartiste|diste|indicaste|escribiste|enviaste|pasaste)\b/g
+
+/**
+ * Sin tildes, «sí» se leería como el «si» de una condición (`NOT_AFTER`): antes de quitarlas
+ * se cambia por otra palabra que afirma. «Conforme» u «ok» no hace falta: no están en `NOT_AFTER`.
+ */
+const YES = /(?<!\p{L})[sS][íÍ](?!\p{L})/gu
+/** Lo que pregunta o depende de algo: «¿Ya tenemos tu WhatsApp?», «If you shared your number…». */
+const ASKS_OR_IF = /\?\s*$|^\W*(?:si|if|whether|in case)\b/
 
 export function claimsOf(text: string): { team: boolean; note: boolean; contact: boolean } {
   const said = plain(text)
-  const yours = said.replace(LEFT_ONE, (_match, to: string | undefined, what: string) => `${to ? "a " : ""}tu ${what}`)
+  const yours = plain(text.replace(YES, "claro")).replace(LEFT_ONE, (_match, to: string | undefined, what: string) => `${to ? "a " : ""}tu ${what}`)
+  // Frase por frase: la que pregunta o pone una condición no afirma que lo tiene.
+  const sentences = yours.split(/(?<=[.!?])\s+|\n+/).filter((sentence) => !ASKS_OR_IF.test(sentence))
   return {
     team: TEAM_WILL.test(said) || PASSED_ON.test(said),
     note: NOTED.test(said),
-    contact: KEPT_ES.test(yours) || KEPT_EN.test(yours),
+    contact: sentences.some((sentence) => KEPT_ES.test(sentence) || KEPT_EN.test(sentence)),
   }
 }
