@@ -34,6 +34,7 @@ test("memoria de la persona: agregar, corregir y quitar un dato; la última vez;
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
+  await page.getByRole("button", { name: "Contexto", exact: true }).click()
   await page.getByRole("button", { name: "Lo que recuerda Sofi" }).click()
   const drawer = surface(page, { name: "Lo que recuerda Sofi" })
   await expect(drawer).toContainText("Solo esto, además de sus conversaciones. Lo puedes corregir o quitar.")

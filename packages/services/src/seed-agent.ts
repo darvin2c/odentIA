@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agentKnowledgeEntry, agentKnowledgeGap, agentKnowledgeRevision, agentLesson, agentPersonFact, agentProposal, agentReviewItem, agentRunLedger, agentTestCase } from "@odentia/db/schema/agent"
+import { agentActionLog, agentAnswerTrace, agentCaseMemory, agentDecisionLog, agentHandoff, agentKnowledgeEntry, agentKnowledgeGap, agentKnowledgeRevision, agentLesson, agentPersonFact, agentProposal, agentReviewItem, agentRunLedger, agentTestCase } from "@odentia/db/schema/agent"
 import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { conversation, message } from "@odentia/db/schema/crm"
@@ -209,6 +209,15 @@ export async function seedAgent(
         urgentAt: new Date(Date.now() + 2 * 3_600_000),
       })
       .onConflictDoNothing({ target: agentHandoff.id })
+    // Lo que hizo sin propuesta: se ve en el hilo, en una línea o en una tarjeta.
+    await tx
+      .insert(agentActionLog)
+      .values([
+        { id: "00000000-0000-4000-8000-00000000a630", organizationId: orgId, conversationId: first.id, kind: "etiquetas", title: "agregó la etiqueta «Primera consulta»" },
+        { id: "00000000-0000-4000-8000-00000000a631", organizationId: orgId, conversationId: first.id, kind: "tarea", title: "dejó una tarea a recepción: llamarla hoy" },
+        { id: "00000000-0000-4000-8000-00000000a632", organizationId: orgId, conversationId: first.id, kind: "enlace", title: "le envió su enlace para que elija su cita" },
+      ])
+      .onConflictDoNothing({ target: agentActionLog.id })
     // Corridas de los últimos 30 días con mezcla ok/handoff/error/sin_respuesta.
     const statuses = ["ok", "ok", "handoff", "ok", "error", "sin_respuesta", "handoff"] as const
     for (let n = 0; n < 30; n++) {

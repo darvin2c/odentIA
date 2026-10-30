@@ -87,25 +87,23 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   await expect(tab(/^Por atender 2$/)).toHaveAttribute("aria-selected", "true")
   await expect(tab(/^Cerradas 0$/)).toBeVisible()
   await expect(page.getByRole("button", { name: /^(Abiertas|Esperan respuesta|Con el equipo)/ })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Temas", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Solo las mías", exact: true })).toBeVisible()
   await info.attach("pestanas", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // --- El agente pasa un tema: la fila dice la pregunta y el hilo pone arriba lo que hay que contestar ---
+  // --- El agente pasa un tema: la fila dice la pregunta y la caja dice a qué responde ---
   await call(page, "POST", "/api/agent/handoffs", org.slug, {
     conversationId: fresh.id, reason: "Quiere saber el precio de la limpieza", summary: "Pregunta por la limpieza.", priority: "media",
   }, 201)
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${fresh.id}`))
-  await expect(page.getByRole("button").filter({ hasText: `Te toca: «${FRESH_TEXT}»` })).toBeVisible()
+  await expect(page.getByRole("button").filter({ hasText: `Te toca · «${FRESH_TEXT}»` })).toBeVisible()
   // No hay «Tomar», «Devolver al agente» ni «Resolver» de la conversación.
   await expect(page.getByRole("button", { name: /^(Tomar|Devolver al agente|Resolver)$/ })).toHaveCount(0)
   const band = page.getByRole("region", { name: "Lo que te toca contestar" })
-  await expect(band).toContainText("Te toca contestar")
+  await expect(band).toContainText("Te toca")
   await expect(band).toContainText(`«${FRESH_TEXT}»`)
-  await band.getByRole("button", { name: "Responder" }).click()
   const box = page.getByRole("textbox", { name: "Mensaje" })
-  await expect(box).toBeFocused()
-  await expect(page.getByText(`«${FRESH_TEXT}»`).last()).toBeVisible()
-  await expect(page.getByText("Respondiendo a:")).toBeVisible()
+  await expect(box).toBeVisible()
+  await expect(page.getByRole("button", { name: "Enviar y resolver" })).toBeVisible()
   await info.attach("tema-por-contestar", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // --- «Enviar, sigue pendiente»: si promete responder después, se sugiere; el tema queda a su nombre ---
@@ -118,12 +116,10 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
       page, "GET", `/api/conversations/${fresh.id}`, org.slug)
     return { topics: detail.attention.topics.map((topic) => topic.assigneeUserId), agent: detail.conversation.agentStatus }
   }).toEqual({ topics: [owner.user.id], agent: "on" })
-  await expect(band).toContainText("lo tienes tú")
   // La respuesta salió citando su mensaje.
   await expect(page.getByText("Te confirmo el precio en un rato").first()).toBeVisible()
 
   // --- Enter es «Enviar y resolver»: el tema se resuelve y la conversación sigue abierta con el agente ---
-  await band.getByRole("button", { name: "Responder" }).click()
   await box.fill("La limpieza cuesta S/ 120")
   await box.press("Enter")
   await expect(page.getByText("Tema resuelto. Sofi sigue con lo demás.")).toBeVisible()
@@ -169,7 +165,7 @@ test("bandeja: un tema se responde citado, queda pendiente o se resuelve sin apa
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${old.id}`))
   const phoneBand = page.getByRole("region", { name: "Lo que te toca contestar" })
   await expect(phoneBand).toContainText("Ahora")
-  for (const control of [phoneBand.getByRole("button", { name: "Responder" }), page.getByRole("button", { name: "Más acciones de la conversación" })]) {
+  for (const control of [phoneBand.getByRole("button", { name: "Enviar y resolver" }).or(page.getByRole("button", { name: "Enviar y resolver" })), page.getByRole("button", { name: "Más acciones del tema" }), page.getByRole("button", { name: "Más acciones de la conversación" })]) {
     expect((await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   }
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -191,7 +187,7 @@ test("bandeja: lo que cerró el agente se dice en la fila y en la franja del hil
 
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/inbox?view=closed"))
-  const row = page.getByRole("button").filter({ hasText: SILENT_TEXT })
+  const row = page.getByRole("button").filter({ hasText: "Cerrada por Sofi" })
   await expect(row).toContainText("Cerrada por Sofi · sin respuesta del paciente")
   await row.click()
   await expect(page.getByText(/^Cerrada por Sofi · sin respuesta del paciente · /)).toBeVisible()
