@@ -372,10 +372,19 @@ it("los mensajes de una conversación salen en orden: el siguiente espera al que
   expect(await processOutbound(appDb, live(false), outJob(second, 2))).toBe("done")
   expect(sentTexts).toEqual(["Tengo estos horarios", "Y también este"])
 
-  // Uno de hace más de media hora que sigue en cola no frena la conversación.
+  // Una respuesta «Por entregar» que se escribió hace horas y recién salió también va primero.
+  const held = await queuedAfter(first, "La de antes")
+  const next = await queuedAfter(first, "La de ahora")
+  await ownerDb.update(message).set({ createdAt: sql`now() - interval '3 hours'` }).where(eq(message.id, held))
+  expect(await processOutbound(appDb, live(false), outJob(next))).toBe("waiting")
+  expect(await processOutbound(appDb, live(false), outJob(held))).toBe("done")
+  expect(await processOutbound(appDb, live(false), outJob(next))).toBe("done")
+  expect(sentTexts.slice(-2)).toEqual(["La de antes", "La de ahora"])
+
+  // Uno que quedó en cola sin su trabajo nunca saldrá: no frena la conversación.
   const stuck = await queuedAfter(first, "Trabado")
   const after = await queuedAfter(first, "Después")
-  await ownerDb.update(message).set({ createdAt: sql`now() - interval '31 minutes'` }).where(eq(message.id, stuck))
+  await ownerDb.execute(sql`delete from pgmq.q_outbound_messages where message->>'messageId' = ${stuck}`)
   expect(await processOutbound(appDb, live(false), outJob(after))).toBe("done")
   expect(sentTexts.at(-1)).toBe("Después")
 })

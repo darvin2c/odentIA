@@ -4,7 +4,7 @@ import { type Db, type OutboundMessageJob, type QueueMessage, sendOutboundMessag
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { decryptConfig, isSaasSendBlocked, resolvePersonalLinkRefs, type Storage } from "@odentia/services"
-import { and, eq, gt, lt, sql } from "drizzle-orm"
+import { and, eq, lt, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 export interface SendDeps {
   storage: Storage
@@ -157,9 +157,9 @@ export async function processOutbound(
         return
       }
       // En orden: uno anterior de la conversación que sigue en cola (frenado
-      // por un límite de ritmo o por reintentar) sale primero. Solo los de la
-      // última media hora: el frenado se rinde antes, y uno trabado no frena la
-      // conversación para siempre.
+      // por un límite de ritmo, por reintentar o esperando a otro) sale
+      // primero. Solo si aún tiene su trabajo en la cola: uno que lo perdió no
+      // frena la conversación, y los que lo tienen terminan al tope de entregas.
       const [ahead] = await tx
         .select({ id: message.id })
         .from(message)
@@ -169,7 +169,7 @@ export async function processOutbound(
             eq(message.direction, "out"),
             eq(message.status, "queued"),
             lt(message.createdAt, row.message.createdAt),
-            gt(message.createdAt, sql`now() - interval '30 minutes'`),
+            sql`exists (select 1 from pgmq.q_outbound_messages q where q.message->>'messageId' = ${message.id}::text)`,
           ),
         )
         .limit(1)
