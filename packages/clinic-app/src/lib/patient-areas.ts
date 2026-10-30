@@ -213,6 +213,7 @@ const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
  */
 const COMMON_DOCUMENT_FILTERS = [
   { id: "requieren", label: "Requieren acción" },
+  { id: "presupuestos", label: "Presupuestos" },
   { id: "recetas", label: "Recetas" },
   { id: "ordenes", label: "Órdenes" },
   { id: "consentimientos", label: "Consentimientos" },

@@ -306,32 +306,6 @@ export interface Prescription {
   items?: PrescriptionItem[]
 }
 
-/** Datos de la hoja impresa de una receta. */
-export interface PrescriptionPrint {
-  prescription: Prescription
-  diagnosisDescription: string | null
-  patient: {
-    displayName: string
-    patientNumber: number
-    docType: string | null
-    docNumber: string | null
-    birthDate: string | null
-  }
-  establishment: {
-    legalName: string
-    tradeName: string | null
-    fiscalDocType: string | null
-    fiscalDocNumber: string | null
-    address: string | null
-  } | null
-}
-
-export function fetchPrescriptionPrint(patientId: string, prescriptionId: string) {
-  return apiFetch<{ data: PrescriptionPrint }>(
-    `${base(patientId)}/prescriptions/${prescriptionId}/print`,
-  )
-}
-
 export interface PrescriptionMedicationBody {
   genericName: string
   brandName?: string | null

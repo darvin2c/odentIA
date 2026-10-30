@@ -40,7 +40,7 @@ import {
 } from "@odentia/ui-patterns"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, useNavigate, Link } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ChevronDown, Plus, Tag } from "lucide-react"
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -59,7 +59,12 @@ import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
-import { useCan, usePermission } from "../../lib/crm"
+import { useCan, useMemberName, usePermission } from "../../lib/crm"
+import { formatDate } from "../../lib/clinical-journey"
+import { fetchConsentTemplates } from "../../lib/clinical-forms"
+import { fetchConsentTemplateServices } from "../../lib/encounter-documents"
+import { GuideSummary, guideToSave, hasGuide, ServiceGuideSection } from "../../components/service-guide"
+import type { PatientGuide } from "@odentia/clinical"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   draftLineOf,
@@ -82,6 +87,7 @@ import {
   fetchService,
   fetchServiceMaterials,
   fetchServices,
+  fetchTemplatePatientGuide,
   fetchTreatmentTemplate,
   type OfficialCoding,
   saveServiceMaterialsApi,
@@ -1014,16 +1020,84 @@ function OfferEditor({
     return result
   }
 
+  /*
+   * Lo que se le explica al paciente: vive en el mismo formulario y se guarda con
+   * su «Guardar». `undefined` es «tal como está guardado»; el texto sugerido solo
+   * llena este borrador.
+   */
+  const memberName = useMemberName()
+  const canReadConsents = can("clinical.read") || can("settings.read")
+  const canOpenForms = can("settings.read")
+  const [guideDraft, setGuideDraft] = useState<PatientGuide | undefined>(undefined)
+  useEffect(() => {
+    if (open) setGuideDraft(undefined)
+  }, [open])
+  const guideDirty = guideDraft !== undefined
+  const suggestionQuery = useQuery({
+    queryKey: ["services", "patient-guide", templateId],
+    queryFn: () => fetchTemplatePatientGuide(templateId as string),
+    enabled: canWrite && templateId !== null && !hasGuide(offer?.patientGuide),
+    staleTime: 300_000,
+  })
+  const consentLinksQuery = useQuery({
+    queryKey: ["consent-template-services"],
+    queryFn: fetchConsentTemplateServices,
+    enabled: offer !== null && canReadConsents,
+    staleTime: 60_000,
+  })
+  const consentKeys = (consentLinksQuery.data?.data ?? [])
+    .filter((row) => offer !== null && row.serviceIds.includes(offer.id))
+    .map((row) => row.templateKey)
+  const consentTemplatesQuery = useQuery({
+    queryKey: ["consent-templates", "publicado"],
+    queryFn: () => fetchConsentTemplates({ status: "publicado" }),
+    enabled: consentKeys.length > 0,
+    staleTime: 60_000,
+  })
+  const consentTitles = [
+    ...new Set(
+      (consentTemplatesQuery.data?.data ?? []).filter((row) => consentKeys.includes(row.key)).map((row) => row.title),
+    ),
+  ]
+  const consentLine =
+    consentTitles.length > 0 ? (
+      <p className="text-sm text-muted-foreground">
+        Riesgos y qué pasa si no se trata salen de su consentimiento:{" "}
+        {canOpenForms ? (
+          <Link to="/settings/forms" className="font-medium text-primary underline-offset-4 hover:underline">
+            {consentTitles.join(", ")}
+          </Link>
+        ) : (
+          consentTitles.join(", ")
+        )}
+        .
+      </p>
+    ) : null
+  const reviewedWords =
+    offer?.patientGuideReviewedAt && hasGuide(offer.patientGuide)
+      ? offer.patientGuideReviewedBy
+        ? `Revisado por ${memberName(offer.patientGuideReviewedBy)} el ${formatDate(offer.patientGuideReviewedAt)}`
+        : `Revisado el ${formatDate(offer.patientGuideReviewedAt)}`
+      : null
+
   const saveMutation = useMutation({
     mutationFn: async ({
       values,
       saveService,
       materials,
+      guideOnly = false,
     }: {
       values: OfferFormValues
       saveService: boolean
       materials: Array<{ productId: string; quantity: number }> | null
+      /** Solo cambió la explicación: no pide arreglar lo demás del servicio. */
+      guideOnly?: boolean
     }) => {
+      const guide = guideToSave(guideDraft) ?? {}
+      if (guideOnly && offer) {
+        await updateServiceApi(offer.id, guide)
+        return { savedService: true, savedMaterials: false }
+      }
       const body = {
         name: values.name.trim(),
         code: values.code.trim() === "" ? null : values.code.trim(),
@@ -1039,11 +1113,13 @@ function OfferEditor({
       // editar solo viaja si cambió.
       const code = codeList && (!offer || codeChanged) ? { officialCode: officialCode?.code ?? null } : {}
       let serviceId = offer?.id ?? null
+      if (!saveService && offer && guideDraft !== undefined) await updateServiceApi(offer.id, guide)
       if (saveService) {
         const saved = !offer
           ? await createServiceApi({ ...body, ...code, specialtyId: values.specialtyId, scope: values.scope })
           : await updateServiceApi(offer.id, {
               ...body,
+              ...guide,
               // La especialidad se elige siempre aquí; el ámbito de una oferta de la biblioteca viene de su plantilla.
               ...(values.specialtyId ? { specialtyId: values.specialtyId } : {}),
               ...(isTemplate ? {} : { scope: values.scope, ...code }),
@@ -1105,6 +1181,7 @@ function OfferEditor({
     if (materials === false) return
     // Solo materiales: el servicio no se vuelve a enviar; un código nuevo sí.
     const saveService = !offer || serviceDirtyRef.current || codeChangedRef.current || materials === null
+    // Un cambio de la explicación junto con materiales viaja en su propia llamada: ver `mutationFn`.
     await saveMutation
       .mutateAsync({ values: value, saveService, materials: materials?.items ?? null })
       .catch(() => undefined)
@@ -1116,7 +1193,7 @@ function OfferEditor({
   serviceDirtyRef.current = serviceDirty
   const codeChangedRef = useRef(codeChanged)
   codeChangedRef.current = codeChanged
-  const isDirty = serviceDirty || materialsDirty || codeChanged
+  const isDirty = serviceDirty || materialsDirty || codeChanged || guideDirty
 
   const headerContent = (
     <div className="flex flex-col gap-1">
@@ -1167,6 +1244,18 @@ function OfferEditor({
             )
           }
         />
+        {offer ? (
+          <ServiceGuideSection
+            idPrefix={`${offer.id}-guia`}
+            saved={offer.patientGuide}
+            suggestion={suggestionQuery.data?.data.suggestion}
+            draft={guideDraft}
+            reviewedWords={reviewedWords}
+            consents={consentLine}
+            disabled={saveMutation.isPending}
+            onChange={(next) => setGuideDraft(next)}
+          />
+        ) : null}
         {canWriteMaterials ? (
           <>
             <ServiceMaterialsEditor
@@ -1217,6 +1306,14 @@ function OfferEditor({
     const readOnly = (
       <div className="flex flex-col gap-4">
         <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
+        {hasGuide(offer.patientGuide) ? (
+          <section aria-label="Lo que se le explica al paciente" className="flex flex-col gap-2">
+            <h3 className="text-sm font-medium">Lo que se le explica al paciente</h3>
+            <GuideSummary guide={offer.patientGuide} />
+            {reviewedWords ? <p className="text-xs text-muted-foreground">{reviewedWords}</p> : null}
+            {consentLine}
+          </section>
+        ) : null}
         {seesMaterials ? (
           <ServiceMaterialsReadOnly
             data={savedMaterials}
@@ -1253,6 +1350,14 @@ function OfferEditor({
     submitLabel: offer ? common.actions.save : "Guardar y activar",
     onSubmit: (event: FormEvent) => {
       event.preventDefault()
+      // Explicar un servicio no pide arreglar lo demás: uno de antes, sin código o
+      // sin ámbito, también se explica (la API lo permite igual).
+      if (offer && guideDirty && !serviceDirty && !codeChanged && !materialsDirty) {
+        void saveMutation
+          .mutateAsync({ values: form.state.values, saveService: false, materials: null, guideOnly: true })
+          .catch(() => undefined)
+        return
+      }
       setCodeTouched(true)
       // Los errores de los materiales se marcan aunque falte otro dato del servicio.
       checkMaterials()

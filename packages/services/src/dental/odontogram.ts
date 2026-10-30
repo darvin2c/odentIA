@@ -15,9 +15,11 @@ import {
 import type { Db } from "@odentia/db"
 import { encounterPlanItem, encounterSite, patient, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { odontogramAssessment, odontogramEntry, planItemFinding } from "@odentia/db/schema/dental"
-import { auditEvent, orgProfile } from "@odentia/db/schema/org"
+import { branch, auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { requireDraftLink } from "../clinical.js"
+import { organization } from "@odentia/db/schema/auth"
+import { branchAddressColumns, branchAddressWriter } from "../branches.js"
 import { documentCheckUrl } from "../document-check.js"
 import { resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
 import { notFound, ServiceError, validation } from "../errors.js"
@@ -675,10 +677,25 @@ async function establishmentOf(tx: Db, orgId: string) {
       fiscalDocType: orgProfile.fiscalDocType,
       fiscalDocNumber: orgProfile.fiscalDocNumber,
       address: orgProfile.fiscalAddress,
+      logo: organization.logo,
     })
     .from(orgProfile)
+    .leftJoin(organization, eq(organization.id, orgProfile.organizationId))
     .where(eq(orgProfile.organizationId, orgId))
-  return org ?? null
+  if (!org) return null
+  // Como los demás papeles: con una sola sede, su nombre, dirección y teléfono.
+  const branches = await tx
+    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .limit(2)
+  const only = branches.length === 1 ? branches[0]! : null
+  return {
+    ...org,
+    address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? org.address,
+    branchName: only?.name ?? null,
+    phone: only?.phone ?? null,
+  }
 }
 
 async function printPatientOf(tx: Db, orgId: string, patientId: string) {

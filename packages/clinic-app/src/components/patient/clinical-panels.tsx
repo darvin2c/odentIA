@@ -46,7 +46,7 @@ import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/pat
 import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { FollowUpScheduler } from "./follow-up-scheduler"
-import { HealthDocumentSendDrawer } from "./health-document-send"
+import { PrescriptionPaper } from "./document-papers"
 import { productUi } from "../../product/product-ui"
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
 
@@ -620,33 +620,16 @@ export function PrescriptionEntry({
   patientId: string
   prescription: Prescription
   items?: PlanItem[]
-  /** Abierta al mostrarse sola (Documentos la abre al lado). */
+  /** Abierta al mostrarse sola. */
   defaultOpen?: boolean
 }): React.JSX.Element {
-  const uid = useId()
-  const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
-  const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ["prescription", patientId, prescription.id],
     queryFn: () => fetchPrescriptionDetail(patientId, prescription.id),
     enabled: canRead,
   })
-  const [cancelling, setCancelling] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const cancelMutation = useMutation({
-    mutationFn: () => cancelPrescriptionApi(patientId, prescription.id, { reason: reason.trim() }),
-    onSuccess: () => {
-      setCancelling(false)
-      setReason("")
-      setError(null)
-      void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
-      void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId] })
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
+  const [viewing, setViewing] = useState(false)
   const rows = detail.data?.data.items ?? prescription.items ?? []
   const planItem = items?.find((item) => item.id === prescription.planItemId) ?? null
   return (
@@ -684,11 +667,6 @@ export function PrescriptionEntry({
         {prescription.cancelReason ? (
           <p className="text-sm text-muted-foreground">Anulada: {prescription.cancelReason}</p>
         ) : null}
-        {error && !cancelling ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
         {prescription.prescriberName ? (
           <p className="text-xs text-muted-foreground">
             Prescribe {prescription.prescriberName}
@@ -698,78 +676,15 @@ export function PrescriptionEntry({
               : ""}
           </p>
         ) : null}
-        {prescription.status === "emitida" ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to="/patients/$patientId/prescriptions/$prescriptionId/print"
-              params={{ patientId, prescriptionId: prescription.id }}
-              target="_blank"
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-            >
-              Imprimir
-            </Link>
-            {canWrite ? (
-              <Button type="button" size="sm" variant="outline" onClick={() => setSending(true)}>
-                Enviar a la persona
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {sending ? (
-          <HealthDocumentSendDrawer
-            open
-            patientId={patientId}
-            documentType="prescription"
-            documentId={prescription.id}
-            onClose={() => setSending(false)}
-          />
-        ) : null}
-        {canWrite && prescription.status === "emitida" ? (
-          <div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setError(null)
-                setCancelling(true)
-              }}
-            >
-              Anular receta
-            </Button>
-          </div>
-        ) : null}
+        <div>
+          <Button type="button" size="sm" variant="outline" onClick={() => setViewing(true)}>
+            Ver
+          </Button>
+        </div>
       </div>
-      <FormDrawer
-        dock={false}
-        open={cancelling}
-        title="Anular receta"
-        description="La receta conserva su contenido original y el motivo de anulación."
-        error={cancelling ? error : null}
-        isSubmitting={cancelMutation.isPending}
-        submitLabel="Anular receta"
-        onClose={() => {
-          if (!cancelMutation.isPending) setCancelling(false)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo de la anulación.")
-            return
-          }
-          cancelMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-rx-cancel`}>Motivo de anulación</FieldLabel>
-          <Textarea
-            id={`${uid}-rx-cancel`}
-            maxLength={MAX_TEXT}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
+      {viewing ? (
+        <PrescriptionPaper patientId={patientId} prescription={prescription} onClose={() => setViewing(false)} />
+      ) : null}
     </details>
   )
 }

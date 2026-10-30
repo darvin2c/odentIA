@@ -36,7 +36,7 @@ export function NextStepButton({
   const action = step.action
   if (!action) return null
   if (step.kind === "enviar" && action.budgetId)
-    return <BudgetSendButton patientId={patient.id} budgetId={action.budgetId} showRecipient={false} size={size} variant={variant} />
+    return <BudgetSendButton patientId={patient.id} budgetId={action.budgetId} showRecipient={false} size={size} variant={variant} reviewable />
   const onClick = () => {
     if ((step.kind === "agendar" || step.kind === "continuar") && action.planItemIds?.length) {
       openBookingAnywhere({

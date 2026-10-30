@@ -1,4 +1,4 @@
-import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
+import { formatMoney, formatMoneyAmount, type PatientGuide } from "@odentia/clinical"
 import type { FormSchemaDef } from "./clinical-forms"
 import type {
   AuthenticationResponseJSON,
@@ -94,6 +94,8 @@ export interface PortalBudgetLine {
   currency: string
   decision: string
   itemStatus: string
+  /** Cómo se hace, qué incluye y qué sigue, congelado al entregar; null: sale solo con nombre y precio. */
+  patientGuide?: PatientGuide | null
 }
 
 export interface PortalBudget {
@@ -118,8 +120,24 @@ export interface PortalBudget {
   decisionNote: string | null
   /** El estado con el nombre de siempre, del servidor. */
   stateText: string
+  /** AAAA-MM-DD. Vencido no impide aceptar. */
+  validUntil?: string | null
+  /** «Lo que encontramos»: solo para la propia persona o su representante. */
+  findings?: string | null
+  proposal?: string | null
+  /** Las condiciones de la clínica; vacías, esa parte no sale. */
+  terms?: { payment: string | null; change: string | null }
   /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
-  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
+  options: Array<{
+    id: string
+    label: string
+    name?: string | null
+    pros?: string | null
+    cons?: string | null
+    isRecommended: boolean
+    decision: string
+    totalCents: number | null
+  }>
   items: PortalBudgetLine[]
 }
 

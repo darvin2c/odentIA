@@ -4,9 +4,13 @@ import {
   cn,
   Field,
   FieldDescription,
+  FieldGroup,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
   Input,
   Skeleton,
+  Textarea,
   toast,
 } from "@odentia/ui"
 import { FISCAL_DISCLAIMER } from "@odentia/clinical"
@@ -375,7 +379,7 @@ function TicketCard({
             Ticket e impresión
           </h2>
           <p className="text-sm text-muted-foreground">
-            El ticket y la hoja de cierre salen en térmica; el presupuesto, en hoja.
+            El ticket y la hoja de cierre salen en térmica; el presupuesto, en hoja, con sus condiciones.
           </p>
         </div>
         {profile && onEdit ? (
@@ -421,6 +425,9 @@ function TicketCard({
             {SHEET_SIZES[profile.sheetSize === "Letter" ? "Letter" : "A4"]}
           </TicketRow>
           <TicketRow label="Frase al pie del ticket">{profile.ticketFooter}</TicketRow>
+          <TicketRow label="Días de vigencia del presupuesto">{profile.budgetValidDays ?? 30}</TicketRow>
+          <TicketRow label="Cómo se paga">{profile.budgetPaymentTerms || "Sin texto: no sale en el presupuesto"}</TicketRow>
+          <TicketRow label="Si el importe cambia">{profile.budgetChangeTerms || "Sin texto: no sale en el presupuesto"}</TicketRow>
         </dl>
       )}
     </section>
@@ -533,14 +540,29 @@ function TicketForm({
     receiptWidth: profile.receiptWidth === "58" ? ("58" as const) : ("80" as const),
     sheetSize: profile.sheetSize === "Letter" ? ("Letter" as const) : ("A4" as const),
     ticketFooter: profile.ticketFooter,
+    budgetValidDays: String(profile.budgetValidDays ?? 30),
+    budgetPaymentTerms: profile.budgetPaymentTerms ?? "",
+    budgetChangeTerms: profile.budgetChangeTerms ?? "",
   }
   const [receiptWidth, setReceiptWidth] = useState<"58" | "80">(initial.receiptWidth)
   const [sheetSize, setSheetSize] = useState<"A4" | "Letter">(initial.sheetSize)
   const [ticketFooter, setTicketFooter] = useState(initial.ticketFooter)
+  const [validDays, setValidDays] = useState(initial.budgetValidDays)
+  const [paymentTerms, setPaymentTerms] = useState(initial.budgetPaymentTerms)
+  const [changeTerms, setChangeTerms] = useState(initial.budgetChangeTerms)
   const [error, setError] = useState<string | null>(null)
+  const days = Number(validDays)
+  const daysOk = Number.isInteger(days) && days >= 1 && days <= 365
   const save = useMutation({
     mutationFn: () =>
-      saveOrgPrinting({ receiptWidth, sheetSize, ticketFooter: ticketFooter.trim() }),
+      saveOrgPrinting({
+        receiptWidth,
+        sheetSize,
+        ticketFooter: ticketFooter.trim(),
+        budgetValidDays: days,
+        budgetPaymentTerms: paymentTerms.trim() || null,
+        budgetChangeTerms: changeTerms.trim() || null,
+      }),
     onSuccess: async () => {
       toast.success("Ticket guardado")
       await onSaved()
@@ -551,13 +573,16 @@ function TicketForm({
   const isDirty =
     receiptWidth !== initial.receiptWidth ||
     sheetSize !== initial.sheetSize ||
-    ticketFooter !== initial.ticketFooter
+    ticketFooter !== initial.ticketFooter ||
+    validDays !== initial.budgetValidDays ||
+    paymentTerms !== initial.budgetPaymentTerms ||
+    changeTerms !== initial.budgetChangeTerms
 
   return (
     <FormDrawer
       open
       title="Ticket e impresión"
-      description="Vale para los tickets y presupuestos que se impriman desde ahora."
+      description="Vale para los tickets y presupuestos que se impriman desde ahora. Lo ya entregado no cambia."
       onClose={onClose}
       onSubmit={(event: FormEvent) => {
         event.preventDefault()
@@ -567,10 +592,11 @@ function TicketForm({
       isSubmitting={save.isPending}
       isDirty={isDirty}
       error={error}
-      submitDisabled={!ticketFooter.trim()}
+      submitDisabled={!ticketFooter.trim() || !daysOk}
       submitLabel={common.actions.save}
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(36rem,calc(100vw-2rem))]"
     >
-      <div className="flex flex-col gap-4">
+      <FieldGroup>
         <Field>
           <FieldLabel htmlFor="ticket-width">Ancho del ticket</FieldLabel>
           <ChoiceSelect
@@ -613,7 +639,51 @@ function TicketForm({
             Va antes de «{FISCAL_DISCLAIMER}», que todo ticket lleva siempre. Los tickets ya emitidos conservan la frase con la que salieron.
           </FieldDescription>
         </Field>
-      </div>
+        <FieldSet>
+          <FieldLegend>Condiciones del presupuesto</FieldLegend>
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="budget-valid-days">Días de vigencia del presupuesto</FieldLabel>
+              <Input
+                id="budget-valid-days"
+                inputMode="numeric"
+                aria-describedby="budget-valid-days-help"
+                aria-invalid={!daysOk}
+                className="max-w-32"
+                value={validDays}
+                onChange={(event) => setValidDays(event.target.value.replace(/\D/g, ""))}
+              />
+              <FieldDescription id="budget-valid-days-help">
+                {daysOk ? "Con esto se propone su fecha; se puede cambiar en cada uno." : "Escribe un número de 1 a 365."}
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="budget-payment-terms">Cómo se paga</FieldLabel>
+              <Textarea
+                id="budget-payment-terms"
+                rows={3}
+                maxLength={2000}
+                aria-describedby="budget-payment-terms-help"
+                value={paymentTerms}
+                onChange={(event) => setPaymentTerms(event.target.value)}
+              />
+              <FieldDescription id="budget-payment-terms-help">Vacío, esa parte no sale en el presupuesto.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="budget-change-terms">Si el importe cambia</FieldLabel>
+              <Textarea
+                id="budget-change-terms"
+                rows={3}
+                maxLength={2000}
+                aria-describedby="budget-change-terms-help"
+                value={changeTerms}
+                onChange={(event) => setChangeTerms(event.target.value)}
+              />
+              <FieldDescription id="budget-change-terms-help">Vacío, esa parte no sale en el presupuesto.</FieldDescription>
+            </Field>
+          </FieldGroup>
+        </FieldSet>
+      </FieldGroup>
     </FormDrawer>
   )
 }

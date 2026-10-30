@@ -64,6 +64,7 @@ import {
   useBudgetFormat,
 } from "./budget-parts"
 import { BudgetResponse } from "./budget-response"
+import { BudgetReviewDrawer } from "./budget-review"
 import { BudgetSendButton } from "./budget-send"
 import { appWords } from "../../../lib/product-words"
 import { productUi } from "../../../product/product-ui"
@@ -322,6 +323,7 @@ function BudgetCard({
   const [editOpen, setEditOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [reviseOpen, setReviseOpen] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
 
   const optionMutation = useMutation({
     mutationFn: (input: { action: "duplicate" | "recommend" | "remove"; optionId: string }) =>
@@ -390,9 +392,11 @@ function BudgetCard({
 
   // La acción principal según el estado (tablero 3, «Un solo nombre para cada estado»).
   const primary = isDraft ? (
-    <Button type="button" size="sm" onClick={() => setOpen(true)}>
-      Revisar y enviar
-    </Button>
+    canSend || canWrite ? (
+      <Button type="button" size="sm" onClick={() => setReviewOpen(true)}>
+        Revisar y enviar
+      </Button>
+    ) : null
   ) : answerable && budget.awaitsAnswer ? (
     <Button type="button" size="sm" variant={open ? "outline" : "default"} onClick={() => setOpen(true)}>
       ¿Qué respondió?
@@ -553,7 +557,7 @@ function BudgetCard({
                 }
                 sendAction={
                   canSend
-                    ? (beforeSend) => <BudgetSendButton patientId={patientId} budgetId={budget.id} beforeSend={beforeSend} />
+                    ? (beforeSend) => <BudgetSendButton patientId={patientId} budgetId={budget.id} beforeSend={beforeSend} reviewable />
                     : undefined
                 }
                 secondaryActions={
@@ -603,6 +607,9 @@ function BudgetCard({
                       {isDraft ? "Imprimir y entregar" : "Imprimir"}
                     </SubmitButton>
                   ) : null}
+                  <Button type="button" variant="outline" onClick={() => setReviewOpen(true)}>
+                    Lo que se le explicó
+                  </Button>
                   {canWrite && ["presentado", "aceptado", "parcial", "pospuesto"].includes(budget.status) ? (
                     <Button type="button" variant="outline" onClick={() => setReviseOpen(true)}>
                       Crear revisión
@@ -638,6 +645,9 @@ function BudgetCard({
         </div>
       ) : null}
 
+      {reviewOpen ? (
+        <BudgetReviewDrawer patientId={patientId} budgetId={budget.id} onClose={() => setReviewOpen(false)} />
+      ) : null}
       {editOpen ? (
         <EditBudgetDrawer
           budget={budget}

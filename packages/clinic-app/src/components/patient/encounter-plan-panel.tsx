@@ -265,7 +265,7 @@ export function EncounterBudgetSend({
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <BudgetShowActions patientId={patientId} budgetId={step.action.budgetId} patientName={patientName} beforeWrite={beforeWrite} />
-          <BudgetSendButton patientId={patientId} budgetId={step.action.budgetId} size="sm" beforeSend={beforeWrite} />
+          <BudgetSendButton patientId={patientId} budgetId={step.action.budgetId} size="sm" beforeSend={beforeWrite} reviewable />
         </div>
       </div>
     )
@@ -281,6 +281,7 @@ export function EncounterBudgetSend({
           budgetId={step.action.budgetId}
           size="sm"
           beforeSend={beforeWrite}
+          reviewable
         />
         <BudgetShowActions patientId={patientId} budgetId={step.action.budgetId} patientName={patientName} beforeWrite={beforeWrite} />
       </div>

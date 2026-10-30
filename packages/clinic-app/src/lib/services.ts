@@ -1,4 +1,4 @@
-import { currencyFractionDigits } from "@odentia/clinical"
+import { currencyFractionDigits, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import { amountFromCents } from "./workspace"
 
@@ -29,6 +29,10 @@ export interface ServiceCatalogItem {
   /** Código propio en la lista del país (ADR 0069); uno de la biblioteca usa el de su tratamiento. */
   procedureSystem: string | null
   procedureCode: string | null
+  /** Lo que se le explica al paciente; solo lo guardado llega a un presupuesto. */
+  patientGuide?: PatientGuide | null
+  patientGuideReviewedAt?: string | null
+  patientGuideReviewedBy?: string | null
   isActive: boolean
   /**
    * Sus materiales («3 · S/ 2.18» o «Sin materiales», ADR 0067). Solo llega en
@@ -205,6 +209,13 @@ export function fetchTreatmentTemplate(id: string): Promise<{ data: TreatmentTem
   )
 }
 
+/** El texto sugerido por la biblioteca: un punto de partida, nunca sale a un paciente. */
+export function fetchTemplatePatientGuide(templateId: string): Promise<{ data: { suggestion: PatientGuide | null } }> {
+  return apiFetch<{ data: { suggestion: PatientGuide | null } }>(
+    `/api/services/templates/${encodeURIComponent(templateId)}/patient-guide`,
+  )
+}
+
 export interface CreateServiceBody {
   templateId?: string | null
   name?: string | null
@@ -232,6 +243,8 @@ export function createServiceApi(body: CreateServiceBody): Promise<{ data: Servi
 }
 
 export interface UpdateServiceBody {
+  /** Lo que se le explica al paciente; null la quita. */
+  patientGuide?: PatientGuide | null
   templateId?: string | null
   name?: string
   specialtyId?: string

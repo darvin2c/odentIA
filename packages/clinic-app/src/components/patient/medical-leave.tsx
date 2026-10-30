@@ -1,7 +1,5 @@
 import { MEDICAL_LEAVE_MAX_DAYS, medicalLeaveWords } from "@odentia/clinical"
 import {
-  Button,
-  buttonVariants,
   Checkbox,
   Field,
   FieldDescription,
@@ -12,17 +10,10 @@ import {
 } from "@odentia/ui"
 import { DatePickerButton, FormDrawer, regionToday } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
-import { formatDate, mutationMessage } from "../../lib/clinical-journey"
-import { usePermission } from "../../lib/crm"
-import {
-  cancelMedicalLeaveApi,
-  createMedicalLeaveApi,
-  type MedicalLeave,
-} from "../../lib/medical-leaves"
+import { mutationMessage } from "../../lib/clinical-journey"
+import { createMedicalLeaveApi, type MedicalLeave } from "../../lib/medical-leaves"
 import { DiagnosisSearch } from "./diagnosis-search"
-import { HealthDocumentSendDrawer } from "./health-document-send"
 
 /** Las claves que se refrescan cuando cambia un descanso médico. */
 export const medicalLeaveKeys = (patientId: string) => [["medical-leaves", patientId]] as const
@@ -175,128 +166,5 @@ export function NewMedicalLeaveDrawer({
         )}
       </div>
     </FormDrawer>
-  )
-}
-
-/** Un descanso médico abierto al lado: lo que dice, imprimir, enviar y anular con motivo. */
-export function MedicalLeaveEntry({
-  patientId,
-  leave,
-}: {
-  patientId: string
-  leave: MedicalLeave
-}) {
-  const uid = useId()
-  const canWrite = usePermission("clinical.write")
-  const queryClient = useQueryClient()
-  const [cancelling, setCancelling] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const cancel = useMutation({
-    mutationFn: () => cancelMedicalLeaveApi(patientId, leave.id, { reason: reason.trim() }),
-    onSuccess: () => {
-      setCancelling(false)
-      setReason("")
-      setError(null)
-      for (const queryKey of medicalLeaveKeys(patientId))
-        void queryClient.invalidateQueries({ queryKey })
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
-  const issued = leave.status === "emitido"
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm font-medium">{medicalLeaveWords(leave.startsOn, leave.days)}</p>
-      <p className="text-sm text-muted-foreground">
-        {leave.showDiagnosis && leave.diagnosisCode
-          ? `Con el diagnóstico ${leave.diagnosisCode}: la persona lo autorizó.`
-          : "Sin diagnóstico: la persona no autorizó que figure."}
-      </p>
-      {leave.notes ? <p className="text-sm">{leave.notes}</p> : null}
-      {leave.cancelReason ? (
-        <p className="text-sm text-muted-foreground">Anulado: {leave.cancelReason}</p>
-      ) : null}
-      {leave.signerName ? (
-        <p className="text-xs text-muted-foreground">
-          Emitido el {formatDate(leave.issuedAt)} por {leave.signerName}
-          {leave.signerRegistration ? ` · ${leave.signerRegistration}` : ""}
-        </p>
-      ) : null}
-      {error && !cancelling ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {issued ? (
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to="/patients/$patientId/medical-leaves/$leaveId/print"
-            params={{ patientId, leaveId: leave.id }}
-            target="_blank"
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-          >
-            Imprimir
-          </Link>
-          {canWrite ? (
-            <Button type="button" size="sm" variant="outline" onClick={() => setSending(true)}>
-              Enviar a la persona
-            </Button>
-          ) : null}
-          {canWrite ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setError(null)
-                setCancelling(true)
-              }}
-            >
-              Anular descanso médico
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      {sending ? (
-        <HealthDocumentSendDrawer
-          open
-          patientId={patientId}
-          documentType="medical_leave"
-          documentId={leave.id}
-          onClose={() => setSending(false)}
-        />
-      ) : null}
-      <FormDrawer
-        dock={false}
-        open={cancelling}
-        title="Anular descanso médico"
-        description="La constancia conserva su contenido original y el motivo de anulación."
-        error={cancelling ? error : null}
-        isSubmitting={cancel.isPending}
-        submitLabel="Anular descanso médico"
-        onClose={() => {
-          if (!cancel.isPending) setCancelling(false)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo de la anulación.")
-            return
-          }
-          cancel.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-leave-cancel`}>Motivo de anulación</FieldLabel>
-          <Textarea
-            id={`${uid}-leave-cancel`}
-            maxLength={2000}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
-    </div>
   )
 }

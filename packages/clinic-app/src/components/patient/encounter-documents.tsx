@@ -1,6 +1,6 @@
+import { medicalLeaveWords } from "@odentia/clinical"
 import {
   Button,
-  buttonVariants,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -9,7 +9,6 @@ import {
 } from "@odentia/ui"
 import { DetailDrawer, RowActions } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ApiError } from "../../lib/api"
@@ -23,24 +22,25 @@ import {
   FORM_RESPONSE_STATUS_LABELS,
 } from "../../lib/clinical-forms"
 import { fetchPrescriptionDetail, fetchPrescriptions, type Prescription } from "../../lib/clinical-journey"
+import type { ClinicalOrder } from "../../lib/clinical-forms"
+import type { MedicalLeave } from "../../lib/medical-leaves"
 import { sendConsentByLink } from "../../lib/clinical-forms"
 import { usePermission } from "../../lib/crm"
 import {
   type ConsentNeed,
   fetchConsentNeeds,
   prepareConsents,
-  sendLabel,
 } from "../../lib/encounter-documents"
-import { ageFrom, type Encounter, type EncounterDetail, type PatientFull, type PlanItem } from "../../lib/patients"
+import type { Encounter, EncounterDetail, PatientFull, PlanItem } from "../../lib/patients"
 import { RecetasPanel } from "./clinical-panels"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { DocumentOpenButton } from "./document-open-button"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
-import { HealthDocumentSendDrawer } from "./health-document-send"
+import { ConsentPaper, MedicalLeavePaper, OrderPaper, PrescriptionPaper } from "./document-papers"
 import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
-import { MedicalLeaveEntry, NewMedicalLeaveDrawer } from "./medical-leave"
+import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { fetchMedicalLeaves } from "../../lib/medical-leaves"
 import { productUi } from "../../product/product-ui"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
@@ -142,12 +142,12 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
   }
 }
 
-/** A quién se le envía: la propia persona o, si es menor, su representante. */
-function recipientWord(patient: PatientFull): string {
-  const age = ageFrom(patient.patient.birthDate)
-  if (age !== "" && Number(age) < 18) return "Enviar a su representante"
-  return sendLabel(patient.patient.givenNames ?? patient.patient.displayName)
-}
+/** El papel que se abre al lado con «Ver»: su PDF, con «Enviar» e «Imprimir». */
+type ViewedPaper =
+  | { kind: "consent"; document: ConsentDocument }
+  | { kind: "prescription"; prescription: Prescription }
+  | { kind: "order"; order: ClinicalOrder }
+  | { kind: "leave"; leave: MedicalLeave }
 
 function firstName(patient: PatientFull): string {
   return (patient.patient.givenNames ?? patient.patient.displayName).trim().split(/\s+/)[0] ?? ""
@@ -190,7 +190,7 @@ export function EncounterDocumentsBlock({
   const [creating, setCreating] = useState<NewDocumentKind | null>(null)
   const [signing, setSigning] = useState<ConsentDocument[] | null>(null)
   const [paper, setPaper] = useState<ConsentDocument | null>(null)
-  const [sending, setSending] = useState<{ type: "prescription" | "consent"; id: string } | null>(null)
+  const [viewing, setViewing] = useState<ViewedPaper | null>(null)
   const [openForm, setOpenForm] = useState<string | null>(null)
   const [paperFor, setPaperFor] = useState<ConsentNeed | null>(null)
 
@@ -244,7 +244,6 @@ export function EncounterDocumentsBlock({
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
   const firstDiagnosis = firstActive?.diagnosisCode
   const firstDiagnosisSystem = firstActive?.diagnosisSystem
-  const send = recipientWord(patient)
   const who = firstName(patient)
 
   const startNew = (kind: NewDocumentKind) => {
@@ -371,8 +370,7 @@ export function EncounterDocumentsBlock({
                   {
                     key: `print-${doc.id}`,
                     label: `Imprimir para firmar en papel: ${doc.titleSnapshot}`,
-                    onSelect: () =>
-                      window.open(`/patients/${patientId}/consents/${doc.id}/print`, "_blank", "noopener"),
+                    onSelect: () => setViewing({ kind: "consent", document: doc }),
                   },
                 ])}
               />
@@ -399,16 +397,20 @@ export function EncounterDocumentsBlock({
                 <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
                 <span className="text-xs text-muted-foreground">Firmado · {consentSignatureWords(doc)}</span>
               </div>
-              {canWrite ? (
-                <Button type="button" size="sm" variant="outline" onClick={() => setSending({ type: "consent", id: doc.id })}>
-                  {send}
-                </Button>
-              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-label={`Ver ${doc.titleSnapshot}`}
+                onClick={() => setViewing({ kind: "consent", document: doc })}
+              >
+                Ver
+              </Button>
             </li>
           ))}
         {docs.orders.map((order) => (
           <li key={order.id} className="p-3">
-            <OrderRow order={order} canWrite={canWrite} onChanged={() => void refresh()} />
+            <OrderRow order={order} onView={() => setViewing({ kind: "order", order })} />
           </li>
         ))}
         {docs.prescriptions.map((rx) => (
@@ -416,15 +418,24 @@ export function EncounterDocumentsBlock({
             key={rx.id}
             patientId={patientId}
             prescription={rx}
-            sendText={send}
-            canWrite={canWrite}
-            onSend={() => setSending({ type: "prescription", id: rx.id })}
+            onView={() => setViewing({ kind: "prescription", prescription: rx })}
           />
         ))}
         {docs.leaves.map((leave) => (
-          <li key={leave.id} className="flex flex-col gap-2 p-3">
-            <span className="text-sm font-medium">Descanso médico N.º {leave.leaveNumber}</span>
-            <MedicalLeaveEntry patientId={patientId} leave={leave} />
+          <li key={leave.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 flex-col">
+              <span className="text-sm font-medium">Descanso médico N.º {leave.leaveNumber}</span>
+              <span className="text-xs text-muted-foreground">{medicalLeaveWords(leave.startsOn, leave.days)}</span>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label={`Ver descanso médico N.º ${leave.leaveNumber}`}
+              onClick={() => setViewing({ kind: "leave", leave })}
+            >
+              Ver
+            </Button>
           </li>
         ))}
         {docs.forms.map((form) => (
@@ -510,9 +521,11 @@ export function EncounterDocumentsBlock({
           defaultDiagnosisCode={firstDiagnosis}
           defaultDiagnosisSystem={firstDiagnosisSystem}
           onClose={() => setCreating(null)}
-          onCreated={() => {
+          onCreated={(order) => {
             setCreating(null)
             void refresh()
+            // Al crearla se abre su papel: ahí se envía o se imprime.
+            setViewing({ kind: "order", order })
           }}
         />
       ) : null}
@@ -577,13 +590,31 @@ export function EncounterDocumentsBlock({
         onClose={() => setPaper(null)}
         onSigned={refresh}
       />
-      {sending ? (
-        <HealthDocumentSendDrawer
-          open
+      {viewing?.kind === "consent" ? (
+        <ConsentPaper
+          document={docs.consents.find((doc) => doc.id === viewing.document.id) ?? viewing.document}
+          onClose={() => setViewing(null)}
+          onChanged={refresh}
+        />
+      ) : viewing?.kind === "prescription" ? (
+        <PrescriptionPaper
           patientId={patientId}
-          documentType={sending.type}
-          documentId={sending.id}
-          onClose={() => setSending(null)}
+          prescription={docs.prescriptions.find((rx) => rx.id === viewing.prescription.id) ?? viewing.prescription}
+          onClose={() => setViewing(null)}
+          onChanged={refresh}
+        />
+      ) : viewing?.kind === "order" ? (
+        <OrderPaper
+          order={docs.orders.find((order) => order.id === viewing.order.id) ?? viewing.order}
+          onClose={() => setViewing(null)}
+          onChanged={refresh}
+        />
+      ) : viewing?.kind === "leave" ? (
+        <MedicalLeavePaper
+          patientId={patientId}
+          leave={docs.leaves.find((leave) => leave.id === viewing.leave.id) ?? viewing.leave}
+          onClose={() => setViewing(null)}
+          onChanged={refresh}
         />
       ) : null}
       <FormDetail
@@ -597,19 +628,15 @@ export function EncounterDocumentsBlock({
   )
 }
 
-/** «Receta · Paracetamol 500 mg · Cada 8 h por 3 días», con «Enviar a Lucía». */
+/** «Receta · Paracetamol 500 mg · Cada 8 h por 3 días», con «Ver». */
 function PrescriptionRow({
   patientId,
   prescription,
-  sendText,
-  canWrite,
-  onSend,
+  onView,
 }: {
   patientId: string
   prescription: Prescription
-  sendText: string
-  canWrite: boolean
-  onSend: () => void
+  onView: () => void
 }) {
   const detail = useQuery({
     queryKey: ["prescription", patientId, prescription.id],
@@ -632,21 +659,15 @@ function PrescriptionRow({
           </span>
         ) : null}
       </div>
-      <div className="flex items-center gap-1">
-        {canWrite ? (
-          <Button type="button" size="sm" variant="outline" onClick={onSend}>
-            {sendText}
-          </Button>
-        ) : null}
-        <Link
-          to="/patients/$patientId/prescriptions/$prescriptionId/print"
-          params={{ patientId, prescriptionId: prescription.id }}
-          target="_blank"
-          className={buttonVariants({ size: "sm", variant: "ghost" })}
-        >
-          Imprimir
-        </Link>
-      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        aria-label={`Ver receta N.º ${prescription.prescriptionNumber}`}
+        onClick={onView}
+      >
+        Ver
+      </Button>
     </li>
   )
 }

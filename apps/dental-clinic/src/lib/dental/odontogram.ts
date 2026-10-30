@@ -117,6 +117,10 @@ export interface PrintEstablishment {
   fiscalDocType: string | null
   fiscalDocNumber: string | null
   address: string | null
+  logo?: string | null
+  /** Con una sola sede, su nombre y su teléfono. */
+  branchName?: string | null
+  phone?: string | null
 }
 
 function base(patientId: string): string {
@@ -142,7 +146,13 @@ export function fetchSignedOdontogramPrint(
   patientId: string,
   assessmentId: string,
 ): Promise<{
-  data: { assessment: OdontogramAssessment; patient: PrintPatient; establishment: PrintEstablishment | null }
+  data: {
+    assessment: OdontogramAssessment
+    patient: PrintPatient
+    establishment: PrintEstablishment | null
+    /** La dirección del QR; null: el papel sale sin QR. */
+    checkUrl: string | null
+  }
 }> {
   return apiFetch(`${base(patientId)}/assessments/${assessmentId}/print`)
 }

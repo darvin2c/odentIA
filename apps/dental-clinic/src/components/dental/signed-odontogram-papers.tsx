@@ -9,8 +9,8 @@ import type { ProductPapers } from "@odentia/clinic-app/product/product-ui"
 
 /**
  * El odontograma firmado en Documentos (NTS 188; ADR 0036): solo en clínicas
- * de Perú. Se ve e imprime con el gráfico de la norma; fuera de Perú no hay
- * papel ni filtro «Odontogramas».
+ * de Perú. Se ve e imprime con el gráfico de la norma, en su hoja, en otra
+ * pestaña; fuera de Perú no hay papel ni filtro «Odontogramas».
  */
 export function useSignedOdontogramPapers(patientId: string): ProductPapers {
   const signs = useDentalProfile().odontogram?.signedOdontogram === true
@@ -36,10 +36,10 @@ export function useSignedOdontogramPapers(patientId: string): ProductPapers {
             to="/patients/$patientId/odontogram/$assessmentId/print"
             params={{ patientId, assessmentId: item.id }}
             target="_blank"
-            aria-label={`Imprimir ${title}`}
+            aria-label={`Ver ${title}`}
             className={buttonVariants({ size: "sm", variant: "outline" })}
           >
-            Imprimir
+            Ver
           </Link>
         ),
       }

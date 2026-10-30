@@ -120,7 +120,7 @@ export function BudgetShowActions({
             <SubmitButton type="button" variant="outline" pending={printing} onClick={() => void print()}>
               Imprimir
             </SubmitButton>
-            <BudgetSendButton patientId={patientId} budgetId={budgetId} beforeSend={beforeWrite} onSent={() => setOpen(false)} />
+            <BudgetSendButton patientId={patientId} budgetId={budgetId} beforeSend={beforeWrite} onSent={() => setOpen(false)} reviewable />
           </DialogFooter>
         </DialogContent>
       </Dialog>

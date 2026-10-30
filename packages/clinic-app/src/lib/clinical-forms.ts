@@ -498,30 +498,6 @@ export function generateConsentPdf(id: string) {
   return post<ConsentDocument>(`${BASE}/consents/${id}/pdf`, {})
 }
 
-export interface ConsentPrint {
-  document: ConsentDocument
-  diagnosisDescription: string | null
-  patient: {
-    displayName: string
-    patientNumber: number
-    docType: string | null
-    docNumber: string | null
-    birthDate: string | null
-    minor: boolean
-  }
-  establishment: {
-    legalName: string | null
-    tradeName: string | null
-    fiscalDocType: string | null
-    fiscalDocNumber: string | null
-    address: string | null
-  } | null
-}
-
-export function fetchConsentPrint(id: string) {
-  return apiFetch<{ data: ConsentPrint }>(`${BASE}/consents/${id}/print`)
-}
-
 export function fetchConsentHistory(id: string) {
   return apiFetch<{ data: ConsentEvent[] }>(`${BASE}/consents/${id}/history`)
 }
@@ -567,30 +543,6 @@ export function advanceOrder(
   },
 ) {
   return post<ClinicalOrder>(`${BASE}/orders/${id}/status`, body)
-}
-
-export interface OrderPrint {
-  order: ClinicalOrder
-  diagnosisDescription: string | null
-  patient: {
-    displayName: string
-    patientNumber: number
-    docType: string | null
-    docNumber: string | null
-    birthDate: string | null
-  }
-  establishment: {
-    legalName: string | null
-    tradeName: string | null
-    fiscalDocType: string | null
-    fiscalDocNumber: string | null
-    address: string | null
-  } | null
-  requestedBy: { name: string; title: string | null; registration: string | null } | null
-}
-
-export function fetchOrderPrint(id: string) {
-  return apiFetch<{ data: OrderPrint }>(`${BASE}/orders/${id}/print`)
 }
 
 /** Nombre de cada tipo de orden en pantalla. */

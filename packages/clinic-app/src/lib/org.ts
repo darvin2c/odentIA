@@ -40,6 +40,12 @@ export interface OrgProfile {
   sheetSize: string
   /** Frase al pie del ticket (recibo interno por defecto). */
   ticketFooter: string
+  /** Días que vale un presupuesto desde que se arma. */
+  budgetValidDays?: number
+  /** «Cómo se paga» del presupuesto; vacío, esa sección no sale. */
+  budgetPaymentTerms?: string | null
+  /** «Si el importe cambia» del presupuesto; vacío, esa sección no sale. */
+  budgetChangeTerms?: string | null
   /** Lista de diagnósticos de la clínica; null: la que recomienda su país. */
   diagnosisSystem: string | null
   /** Logo público de la clínica (se sube en «Datos de la clínica»); null si no tiene. */
@@ -116,11 +122,14 @@ export async function saveOrgProfile(input: OrgProfileInput): Promise<OrgProfile
   return data
 }
 
-/** Lo que se imprime; se edita en «Medios de pago y ticket». */
+/** Lo que se imprime y las condiciones del presupuesto; se edita en «Medios de pago y ticket». */
 export interface OrgPrintingInput {
   receiptWidth: "58" | "80"
   sheetSize: "A4" | "Letter"
   ticketFooter: string
+  budgetValidDays?: number
+  budgetPaymentTerms?: string | null
+  budgetChangeTerms?: string | null
 }
 
 export async function saveOrgPrinting(input: OrgPrintingInput): Promise<OrgProfile> {

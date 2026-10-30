@@ -20,7 +20,7 @@
  * reinterpretan estados; el servidor es la fuente (totalCents/acceptedCents,
  * `stateText`).
  */
-import { budgetAnswerText } from "@odentia/clinical"
+import { budgetAnswerText, type PatientGuide } from "@odentia/clinical"
 import { apiFetch } from "./api"
 import type { PlanItem, TreatmentPlan, TreatmentPlanWithStatus } from "./patients"
 
@@ -69,6 +69,12 @@ export interface Budget {
   presentedAt?: string | null
   /** «Lo vio en el portal el …»: la última vez que lo abrió en el portal (ADR 0037). */
   seenInPortalAt?: string | null
+  /** Hasta cuándo vale (AAAA-MM-DD). */
+  validUntil?: string | null
+  /** «Lo que le proponemos». */
+  proposal?: string | null
+  /** Hay «Lo que encontramos», sin decir qué: el texto solo llega por `presentation`. */
+  hasFindings?: boolean
   decidedAt: string | null
   decidedBy?: string | null
   createdBy?: string | null
@@ -119,6 +125,10 @@ export interface BudgetOption {
   position: number
   /** «Opción A». */
   label: string
+  /** Cómo la llama la clínica, a favor y a considerar. */
+  name?: string | null
+  pros?: string | null
+  cons?: string | null
   isRecommended: boolean
   /** `pendiente`, `elegida` o `no_elegida`. */
   decision: string
@@ -383,6 +393,50 @@ export function budgetOptionApi(
     `${budgetsBase(patientId)}/${budgetId}/options/${optionId}/${action}`,
     { method: "POST", body: JSON.stringify({}) },
   )
+}
+
+/** Lo que explica el presupuesto; `findings` es null si quien mira no lee la clínica. */
+export interface BudgetPresentation {
+  budgetId: string
+  status: string
+  findings: string | null
+  hasFindings: boolean
+  proposal: string | null
+  validUntil: string | null
+  options: Array<{ id: string; label: string; name: string | null; pros: string | null; cons: string | null }>
+  lines: Array<{
+    id: string
+    optionId: string
+    planItemId: string
+    title: string
+    /** El ajuste para este paciente; sin él vale el del servicio. */
+    patientGuide: PatientGuide | null
+    serviceGuide: PatientGuide | null
+  }>
+}
+
+export interface BudgetPresentationBody {
+  findings?: string | null
+  proposal?: string | null
+  validUntil?: string | null
+  options?: Array<{ optionId: string; name?: string | null; pros?: string | null; cons?: string | null }>
+  lines?: Array<{ lineId: string; patientGuide: PatientGuide | null }>
+}
+
+export function fetchBudgetPresentation(patientId: string, budgetId: string): Promise<{ data: BudgetPresentation }> {
+  return apiFetch<{ data: BudgetPresentation }>(`${budgetsBase(patientId)}/${budgetId}/presentation`)
+}
+
+/** Solo en borrador: lo entregado no cambia (409 `BUDGET_STATUS`). */
+export function updateBudgetPresentation(
+  patientId: string,
+  budgetId: string,
+  body: BudgetPresentationBody,
+): Promise<{ data: BudgetPresentation }> {
+  return apiFetch<{ data: BudgetPresentation }>(`${budgetsBase(patientId)}/${budgetId}/presentation`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
 }
 
 /** Documento PDF del servidor (mismo que se envía al paciente). */

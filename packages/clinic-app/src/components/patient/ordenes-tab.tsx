@@ -3,7 +3,6 @@ import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  buttonVariants,
   Field,
   FieldLabel,
   Input,
@@ -15,9 +14,8 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { FormDrawer, RowActions } from "@odentia/ui-patterns"
+import { FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { ApiError } from "../../lib/api"
 import {
@@ -33,7 +31,6 @@ import {
 import { useMyUserId, useOrgMembers } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
 import { DiagnosisSearch } from "./diagnosis-search"
-import { HealthDocumentSendDrawer } from "./health-document-send"
 
 const errorMessage = (e: unknown, fallback = "No se pudo completar la acción") =>
   e instanceof ApiError ? (e.shape.message ?? fallback) : e instanceof Error ? e.message : fallback
@@ -45,34 +42,14 @@ function statusVariant(status: ClinicalOrder["status"]): "default" | "secondary"
   return "secondary"
 }
 
-/**
- * Una orden en una fila: qué es, para quién, su estado y su única acción
- * («Imprimir»); lo demás (enviar, subir el resultado, cancelar) va en el menú.
- */
+/** Una orden en una fila: qué es, para quién, su estado y su única acción, «Ver». */
 export function OrderRow({
   order,
-  canWrite,
-  onChanged,
+  onView,
 }: {
   order: ClinicalOrder
-  canWrite: boolean
-  onChanged: () => void
+  onView: () => void
 }): React.JSX.Element {
-  const [sending, setSending] = useState(false)
-  const [resultOpen, setResultOpen] = useState(false)
-  const [cancelOpen, setCancelOpen] = useState(false)
-  const open = order.status === "solicitado" || order.status === "en_proceso"
-  const items = [
-    ...(order.status !== "cancelado"
-      ? [{ key: "send", label: "Enviar a la persona", onSelect: () => setSending(true) }]
-      : []),
-    ...(canWrite && open
-      ? [
-          { key: "result", label: "Subir el resultado", onSelect: () => setResultOpen(true) },
-          { key: "cancel", label: "Cancelar…", tone: "danger" as const, onSelect: () => setCancelOpen(true) },
-        ]
-      : []),
-  ]
   return (
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="flex min-w-0 flex-col">
@@ -84,47 +61,13 @@ export function OrderRow({
           {order.diagnosisCode ? ` · ${diagnosisCodeLabel(order.diagnosisSystem, order.diagnosisCode)}` : ""} · para {order.recipient}
           {order.detail ? ` · ${order.detail}` : ""}
         </p>
-        {order.status === "completado" && order.resultText ? (
-          <p className="mt-1 text-sm">
-            <strong>Resultado:</strong> {order.resultText}
-          </p>
-        ) : null}
-        {order.status === "completado" && order.resultDocumentId ? (
-          <p className="text-xs text-muted-foreground">El resultado quedó en Documentos.</p>
-        ) : null}
-        {order.status === "cancelado" && order.cancelReason ? (
-          <p className="text-xs text-muted-foreground">Cancelada: {order.cancelReason}</p>
-        ) : null}
       </div>
       <div className="flex items-center gap-1">
         <Badge variant={statusVariant(order.status)}>{ORDER_STATUS_LABELS[order.status]}</Badge>
-        {order.status !== "cancelado" ? (
-          <Link
-            to="/patients/$patientId/orders/$orderId/print"
-            params={{ patientId: order.patientId, orderId: order.id }}
-            target="_blank"
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-          >
-            Imprimir
-          </Link>
-        ) : null}
-        {items.length > 0 ? <RowActions label={`Acciones de ${order.title}`} items={items} /> : null}
+        <Button type="button" size="sm" variant="outline" aria-label={`Ver ${order.title}`} onClick={onView}>
+          Ver
+        </Button>
       </div>
-      {sending ? (
-        <HealthDocumentSendDrawer
-          open
-          patientId={order.patientId}
-          documentType="order"
-          documentId={order.id}
-          onClose={() => setSending(false)}
-        />
-      ) : null}
-      {resultOpen ? (
-        <OrderResultDrawer order={order} onClose={() => setResultOpen(false)} onSaved={onChanged} />
-      ) : null}
-      {cancelOpen ? (
-        <OrderCancelDrawer order={order} onClose={() => setCancelOpen(false)} onSaved={onChanged} />
-      ) : null}
     </div>
   )
 }
@@ -212,7 +155,7 @@ export function OrderResultDrawer({
   )
 }
 
-function OrderCancelDrawer({
+export function OrderCancelDrawer({
   order,
   onClose,
   onSaved,
@@ -280,8 +223,8 @@ function kindPlaceholder(kind: ClinicalOrderKind): string {
 /**
  * Nueva orden: tipo, qué se pide, para quién (un centro, un laboratorio, otro
  * profesional o un colega de la clínica) y el diagnóstico que la motiva, que
- * desde la atención viene puesto. «Crear y entregar» termina en imprimir o
- * enviar.
+ * desde la atención viene puesto. Al crearla, quien la pidió abre su papel, con
+ * «Enviar» e «Imprimir».
  */
 export function NewOrderDrawer({
   open,
@@ -315,8 +258,6 @@ export function NewOrderDrawer({
   const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
   const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
   const [error, setError] = useState<string | null>(null)
-  const [created, setCreated] = useState<ClinicalOrder | null>(null)
-  const [sending, setSending] = useState(false)
 
   const specialtiesQuery = useQuery({
     queryKey: ["specialties-active"],
@@ -346,55 +287,10 @@ export function NewOrderDrawer({
       toast.success(
         result.data.recipientUserId ? `Orden creada: ${result.data.recipient} recibió la tarea` : "Orden creada",
       )
-      setCreated(result.data)
+      onCreated(result.data)
     },
     onError: (e) => setError(errorMessage(e)),
   })
-
-  if (created) {
-    return (
-      <>
-        <FormDrawer
-          open={open && !sending}
-          onClose={() => onCreated(created)}
-          title="Entregar la orden"
-          description={`${ORDER_KIND_TITLES[created.kind]} · ${created.title}`}
-          hideSubmit
-          cancelLabel="Listo"
-          onSubmit={(event) => event.preventDefault()}
-        >
-          <div className="flex flex-col gap-3">
-            <p className="text-sm">Imprímela para entregarla en mano o envíasela a la persona.</p>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                to="/patients/$patientId/orders/$orderId/print"
-                params={{ patientId, orderId: created.id }}
-                target="_blank"
-                className={buttonVariants({ variant: "default" })}
-              >
-                Imprimir
-              </Link>
-              <Button type="button" variant="outline" onClick={() => setSending(true)}>
-                Enviar a la persona
-              </Button>
-            </div>
-          </div>
-        </FormDrawer>
-        {sending ? (
-          <HealthDocumentSendDrawer
-            open
-            patientId={patientId}
-            documentType="order"
-            documentId={created.id}
-            onClose={() => {
-              setSending(false)
-              onCreated(created)
-            }}
-          />
-        ) : null}
-      </>
-    )
-  }
 
   return (
     <FormDrawer
@@ -403,7 +299,7 @@ export function NewOrderDrawer({
       title="Nueva orden"
       isSubmitting={createMutation.isPending}
       error={error}
-      submitLabel="Crear y entregar"
+      submitLabel="Crear"
       isDirty={Boolean(title || recipient || detail)}
       onSubmit={(event) => {
         event.preventDefault()

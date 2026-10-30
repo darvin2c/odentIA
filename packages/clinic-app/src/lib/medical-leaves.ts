@@ -23,25 +23,6 @@ export interface MedicalLeave {
   cancelReason: string | null
 }
 
-export interface MedicalLeavePrint {
-  leave: MedicalLeave
-  diagnosisDescription: string | null
-  patient: {
-    displayName: string
-    patientNumber: number
-    docType: string | null
-    docNumber: string | null
-    birthDate: string | null
-  }
-  establishment: {
-    legalName: string | null
-    tradeName: string | null
-    fiscalDocType: string | null
-    fiscalDocNumber: string | null
-    address: string | null
-  } | null
-}
-
 export interface CreateMedicalLeaveBody {
   encounterId?: string | null
   startsOn?: string | null
@@ -74,8 +55,4 @@ export function cancelMedicalLeaveApi(
     method: "POST",
     body: JSON.stringify(body),
   })
-}
-
-export function fetchMedicalLeavePrint(patientId: string, leaveId: string) {
-  return apiFetch<{ data: MedicalLeavePrint }>(`${base(patientId)}/${leaveId}/print`)
 }
