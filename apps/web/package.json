@@ -21,6 +21,7 @@
     "@odentia/auth": "workspace:*",
     "@odentia/brand-scene": "workspace:*",
     "@odentia/dental": "workspace:*",
+    "@tanstack/react-form": "1.33.5",
     "astro": "7.3.5",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

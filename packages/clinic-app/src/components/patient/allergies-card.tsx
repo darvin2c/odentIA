@@ -1,21 +1,11 @@
 import { appWords } from "../../lib/product-words"
 import { ALLERGY_REMOVAL_REASONS } from "@odentia/clinical"
-import {
-  Button,
-  cn,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { FormDrawer, RowActions } from "@odentia/ui-patterns"
+import { Button, cn, Collapsible, CollapsibleContent, CollapsibleTrigger, toast } from "@odentia/ui"
+import { FormDrawer, RowActions, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query"
 import { ChevronRight, Plus } from "lucide-react"
 import { useId, useState } from "react"
+import { z } from "zod"
 import {
   allergyDay,
   allergyEntry,
@@ -27,7 +17,6 @@ import {
   REMOVAL_REASON_LABELS,
   sinceWords,
 } from "../../lib/allergies"
-import { ApiError } from "../../lib/api"
 import { useMemberName, usePermission } from "../../lib/crm"
 import {
   type Allergy,
@@ -62,8 +51,13 @@ const REASON_OPTIONS = ALLERGY_REMOVAL_REASONS.map((value) => ({
 }))
 type ReasonChoice = (typeof ALLERGY_REMOVAL_REASONS)[number]
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
+/** Lo que falló en una acción de un solo botón, junto a ese botón (también dentro de un texto en línea). */
+function ActionError({ error }: { error: unknown }) {
+  return error ? (
+    <span role="alert" className="block w-full text-sm text-destructive">
+      {submitErrorMessage(error)}
+    </span>
+  ) : null
 }
 
 async function refresh(queryClient: QueryClient, patientId: string): Promise<void> {
@@ -83,7 +77,8 @@ function useRestoreAllergy(patientId: string) {
       await refresh(queryClient, patientId)
       toast.success(`Alergia a ${allergyPhrase(allergy)} puesta otra vez`)
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo volver a poner la alergia")),
+    // También se llama desde el «Deshacer» del aviso: el fallo se dice en otro aviso.
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
 }
 
@@ -123,7 +118,6 @@ export function AllergiesCard({
       await refresh(queryClient, patientId)
       toast.success("Anotado: no tiene alergias")
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo guardar la revisión")),
   })
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
   const removed = health.allergies.filter((allergy) => !allergy.isActive)
@@ -164,6 +158,7 @@ export function AllergiesCard({
               {noneReviewed.isPending ? "Guardando…" : "No tiene alergias"}
             </Button>
           ) : null}
+          <ActionError error={noneReviewed.error} />
         </div>
       ) : (
         <ul className="flex flex-col gap-2">
@@ -302,6 +297,33 @@ export function AllergiesCard({
   )
 }
 
+/** Lo mismo que piden `/health/allergies` y `/code`, con las palabras del cajón. */
+function allergySchema(coding: boolean) {
+  return z
+    .object({
+      substance: z.custom<AllergenChoice | null>(),
+      severity: z.custom<SeverityChoice | "">((value) => typeof value === "string"),
+      reaction: z.string().max(2000, "Escribe como mucho 2000 caracteres."),
+    })
+    .superRefine((value, ctx) => {
+      const substance = value.substance
+      if (!substance || (coding && substance.kind !== "entry"))
+        ctx.addIssue({
+          code: "custom",
+          path: ["substance"],
+          message: coding ? "Elige la sustancia de la lista" : "Escribe la sustancia y elígela de la lista",
+        })
+      else if (substance.kind === "text" && substance.text.trim().length > 200)
+        ctx.addIssue({ code: "custom", path: ["substance"], message: "La sustancia debe tener hasta 200 caracteres" })
+      if (!coding && !value.severity)
+        ctx.addIssue({
+          code: "custom",
+          path: ["severity"],
+          message: "Elige qué tan fuerte fue; si no lo sabe, «No se sabe»",
+        })
+    })
+}
+
 /**
  * «Nueva alergia»: la sustancia de la lista (el tipo de alérgeno sale de ahí),
  * qué tan fuerte fue la reacción y, opcional, qué le pasó. Con `coding`,
@@ -322,62 +344,44 @@ export function AllergyFormDrawer({
 }) {
   const id = useId()
   const queryClient = useQueryClient()
-  const [choice, setChoice] = useState<AllergenChoice | null>(null)
-  const [severity, setSeverity] = useState<SeverityChoice | null>(null)
-  const [reaction, setReaction] = useState("")
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const reset = () => {
-    setChoice(null)
-    setSeverity(null)
-    setReaction("")
-    setErrors({})
-    save.reset()
-  }
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!choice) throw new Error("Elige la sustancia")
+  const form = useAppForm({
+    defaultValues: { substance: null as AllergenChoice | null, severity: "" as SeverityChoice | "", reaction: "" },
+    validators: { onSubmit: allergySchema(coding !== null) },
+    onSubmit: async ({ value }) => {
+      const choice = value.substance
+      if (!choice) return
       if (coding) {
-        if (choice.kind !== "entry") throw new Error("Elige la sustancia de la lista")
-        return codeAllergyApi(patientId, coding.id, {
+        if (choice.kind !== "entry") return
+        await codeAllergyApi(patientId, coding.id, {
           substanceSystem: choice.entry.system,
           substanceCode: choice.entry.code,
         })
+        await refresh(queryClient, patientId)
+        toast.success("Alergia elegida de la lista")
+      } else {
+        const result = await addAllergyApi(patientId, {
+          ...(choice.kind === "entry"
+            ? { substanceSystem: choice.entry.system, substanceCode: choice.entry.code }
+            : { substance: choice.text }),
+          severity: value.severity || null,
+          reaction: value.reaction.trim() || null,
+        })
+        await refresh(queryClient, patientId)
+        toast.success(`Alergia a ${allergyPhrase(result.data)} registrada`)
       }
-      return addAllergyApi(patientId, {
-        ...(choice.kind === "entry"
-          ? { substanceSystem: choice.entry.system, substanceCode: choice.entry.code }
-          : { substance: choice.text }),
-        severity,
-        reaction: reaction.trim() || null,
-      })
-    },
-    onSuccess: async (result) => {
-      await refresh(queryClient, patientId)
-      toast.success(
-        coding
-          ? "Alergia elegida de la lista"
-          : `Alergia a ${allergyPhrase(result.data)} registrada`,
-      )
-      reset()
+      form.reset()
       onClose()
     },
   })
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault()
-    const next: Record<string, string> = {}
-    if (!choice) next[`${id}-substance`] = "Escribe la sustancia y elígela de la lista"
-    if (!coding && !severity)
-      next[`${id}-severity`] = "Elige qué tan fuerte fue; si no lo sabe, «No se sabe»"
-    setErrors(next)
-    if (Object.keys(next).length === 0) save.mutate()
-  }
-  const entry = choice?.kind === "entry" ? choice.entry : null
+  // La sustancia va de la lista o escrita: el servidor la nombra por cualquiera de los dos.
+  const surface = useFormSurface(form, { fieldMap: { substanceSystem: "substance", substanceCode: "substance" } })
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        if (save.isPending) return
-        reset()
+        if (surface.isSubmitting) return
+        form.reset()
         onClose()
       }}
       title={
@@ -388,72 +392,82 @@ export function AllergyFormDrawer({
           ? "Elige la sustancia que quiso decir. Lo que se escribió se conserva."
           : "Se anota solo quién la registró y cuándo."
       }
-      onSubmit={submit}
-      isDirty={choice !== null || severity !== null || reaction.trim() !== ""}
-      isSubmitting={save.isPending}
-      error={save.isError ? errorText(save.error, save.error.message) : null}
-      fieldErrors={errors}
       submitLabel="Guardar"
     >
       <div className="flex flex-col gap-5">
-        <Field data-invalid={errors[`${id}-substance`] ? true : undefined}>
-          <FieldLabel htmlFor={`${id}-substance`}>Sustancia</FieldLabel>
-          <AllergenPicker
-            id={`${id}-substance`}
-            value={choice}
-            onChange={setChoice}
-            allowText={!coding}
-            invalid={Boolean(errors[`${id}-substance`])}
-            aria-describedby={`${id}-substance-help`}
-          />
-          <FieldDescription id={`${id}-substance-help`}>
-            {entry
-              ? `${allergyListDetail(entry)}: el aviso al recetar compara por su código.`
-              : `Medicamentos y sus grupos (con su código ATC), ${appWords().examples.allergyOthers} y alimentos frecuentes.`}
-          </FieldDescription>
-          {errors[`${id}-substance`] ? (
-            <p role="alert" className="text-sm text-destructive">
-              {errors[`${id}-substance`]}
-            </p>
-          ) : null}
-        </Field>
+        <form.AppField name="substance">
+          {(field) => {
+            const entry = field.state.value?.kind === "entry" ? field.state.value.entry : null
+            return (
+              <field.Control
+                id={`${id}-substance`}
+                label="Sustancia"
+                description={
+                  entry
+                    ? `${allergyListDetail(entry)}: el aviso al recetar compara por su código.`
+                    : `Medicamentos y sus grupos (con su código ATC), ${appWords().examples.allergyOthers} y alimentos frecuentes.`
+                }
+              >
+                {(control) => (
+                  <AllergenPicker
+                    id={control.id}
+                    value={field.state.value}
+                    onChange={(next) => field.handleChange(next)}
+                    allowText={!coding}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                  />
+                )}
+              </field.Control>
+            )
+          }}
+        </form.AppField>
         {coding ? null : (
           <>
-            <Field data-invalid={errors[`${id}-severity`] ? true : undefined}>
-              <FieldLabel id={`${id}-severity`}>¿Qué tan fuerte fue la reacción?</FieldLabel>
-              <ChoiceButtons
-                label="Qué tan fuerte fue la reacción"
-                value={severity}
-                options={SEVERITY_OPTIONS}
-                onChange={setSeverity}
-                tone="primary"
-              />
-              <FieldDescription>
-                Leve: picazón o ronchas · Moderada: hinchazón o vómitos · Severa: le costó respirar
-                o tuvo un shock. «No se sabe» igual avisa.
-              </FieldDescription>
-              {errors[`${id}-severity`] ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {errors[`${id}-severity`]}
-                </p>
-              ) : null}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-reaction`}>Qué le pasó (opcional)</FieldLabel>
-              <Textarea
-                id={`${id}-reaction`}
-                value={reaction}
-                maxLength={2000}
-                placeholder="Por ejemplo, se le hinchó la cara y le costó respirar"
-                onChange={(event) => setReaction(event.target.value)}
-              />
-            </Field>
+            <form.AppField name="severity">
+              {(field) => (
+                <field.Group
+                  legend="¿Qué tan fuerte fue la reacción?"
+                  description="Leve: picazón o ronchas · Moderada: hinchazón o vómitos · Severa: le costó respirar o tuvo un shock. «No se sabe» igual avisa."
+                >
+                  {(control) => (
+                    <ChoiceButtons
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      value={field.state.value || null}
+                      options={SEVERITY_OPTIONS}
+                      onChange={(next) => field.handleChange(next)}
+                      tone="primary"
+                    />
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
+            <form.AppField name="reaction">
+              {(field) => (
+                <field.TextareaField
+                  id={`${id}-reaction`}
+                  label="Qué le pasó (opcional)"
+                  maxLength={2000}
+                  placeholder="Por ejemplo, se le hinchó la cara y le costó respirar"
+                />
+              )}
+            </form.AppField>
           </>
         )}
       </div>
     </FormDrawer>
   )
 }
+
+const removeSchema = z.object({
+  reason: z.custom<ReasonChoice | "">((value) => typeof value === "string").refine(
+    (value) => value !== "",
+    "Elige por qué se quita.",
+  ),
+})
 
 /**
  * «Quitar» la alergia, con su motivo. Siempre en cajón (quita algo que avisa):
@@ -471,65 +485,53 @@ function RemoveAllergyDrawer({
   const id = useId()
   const queryClient = useQueryClient()
   const restore = useRestoreAllergy(patientId)
-  const [reason, setReason] = useState<ReasonChoice | null>(null)
-  const [missing, setMissing] = useState(false)
-  const remove = useMutation({
-    mutationFn: (input: { allergy: Allergy; reason: ReasonChoice }) =>
-      removeAllergyApi(patientId, input.allergy.id, input.reason),
-    onSuccess: async (_result, input) => {
+  const form = useAppForm({
+    defaultValues: { reason: "" as ReasonChoice | "" },
+    validators: { onSubmit: removeSchema },
+    onSubmit: async ({ value }) => {
+      if (!allergy || !value.reason) return
+      await removeAllergyApi(patientId, allergy.id, value.reason)
       await refresh(queryClient, patientId)
-      toast.success(`Alergia a ${allergyPhrase(input.allergy)} quitada`, {
-        action: { label: "Deshacer", onClick: () => restore.mutate(input.allergy) },
+      toast.success(`Alergia a ${allergyPhrase(allergy)} quitada`, {
+        action: { label: "Deshacer", onClick: () => restore.mutate(allergy) },
       })
-      setReason(null)
+      form.reset()
       onClose()
     },
   })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open={allergy !== null}
       dock={false}
       onClose={() => {
-        if (remove.isPending) return
-        setReason(null)
-        setMissing(false)
-        remove.reset()
+        if (surface.isSubmitting) return
+        form.reset()
         onClose()
       }}
       title={allergy ? `Quitar la alergia a ${allergyPhrase(allergy)}` : "Quitar la alergia"}
       description="Dejará de avisar al recetar. No se borra: queda en «Alergias quitadas» y se puede volver a poner."
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!allergy) return
-        if (!reason) {
-          setMissing(true)
-          return
-        }
-        remove.mutate({ allergy, reason })
-      }}
-      isDirty={reason !== null}
-      isSubmitting={remove.isPending}
-      error={remove.isError ? errorText(remove.error, "No se pudo quitar la alergia") : null}
       submitLabel="Quitar alergia"
     >
-      <Field data-invalid={missing && !reason ? true : undefined}>
-        <FieldLabel id={`${id}-reason`}>¿Por qué?</FieldLabel>
-        <ChoiceButtons
-          label="Por qué se quita"
-          value={reason}
-          options={REASON_OPTIONS}
-          onChange={(next) => {
-            setReason(next)
-            setMissing(false)
-          }}
-          tone="primary"
-        />
-        {missing && !reason ? (
-          <p role="alert" className="text-sm text-destructive">
-            Elige por qué se quita.
-          </p>
-        ) : null}
-      </Field>
+      <form.AppField name="reason">
+        {(field) => (
+          <field.Group id={`${id}-reason`} legend="¿Por qué?">
+            {(control) => (
+              <ChoiceButtons
+                id={control.id}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+                value={field.state.value || null}
+                options={REASON_OPTIONS}
+                onChange={(next) => field.handleChange(next)}
+                tone="primary"
+              />
+            )}
+          </field.Group>
+        )}
+      </form.AppField>
     </FormDrawer>
   )
 }
@@ -561,7 +563,6 @@ export function AllergyReviewNotice({
       await refresh(queryClient, patientId)
       toast.success("Alergias revisadas")
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo guardar la revisión")),
   })
   if (!canWrite || !health.allergyReviewDue) return null
   const active = health.allergies.filter((allergy) => allergy.isActive).sort(bySeverity)
@@ -613,6 +614,7 @@ export function AllergyReviewNotice({
           Agregar alergia
         </Button>
       </div>
+      <ActionError error={reviewed.error} />
       <AllergyFormDrawer
         patientId={patientId}
         patientName={patientName}
@@ -637,7 +639,6 @@ export function AllergyQuickActions({ patientId, patientName }: { patientId: str
       await refresh(queryClient, patientId)
       toast.success("Anotado: no tiene alergias")
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo guardar la revisión")),
   })
   return (
     <span className="flex flex-wrap gap-2">
@@ -649,6 +650,7 @@ export function AllergyQuickActions({ patientId, patientName }: { patientId: str
         Agregar alergia
       </Button>
       <AllergyFormDrawer patientId={patientId} patientName={patientName} open={adding} onClose={() => setAdding(false)} />
+      <ActionError error={reviewed.error} />
     </span>
   )
 }

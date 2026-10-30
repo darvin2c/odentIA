@@ -11,7 +11,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, sql } from "drizzle-orm"
 import { type CreateAppointmentInput, createAppointment } from "./appointments.js"
 import { requireEncounter } from "./encounters.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import { requirePatient } from "./patients.js"
 
@@ -79,15 +79,16 @@ export interface CreateFollowUpInput {
   repeatEveryMonths?: number | null
 }
 
-function instant(value: string): Date {
+function instant(value: string, field: string): Date {
   const date = new Date(value)
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(date.getTime()))
-    throw validation("Fecha ISO inválida")
+    throw invalidField(field, "Elige la fecha en el calendario.")
   return date
 }
-function note(value: string): string {
+/** `field`: el nombre del dato en el cuerpo (`outcome`, `reason`), para decirlo junto a su campo. */
+function note(value: string, field: string): string {
   const text = value?.trim()
-  if (!text || text.length > 2000) throw validation("El texto debe tener 1–2000 caracteres")
+  if (!text || text.length > 2000) throw invalidField(field, "Escribe de 1 a 2000 caracteres.")
   return text
 }
 function scoped(orgId: string, patientId: string, id: string) {
@@ -124,20 +125,20 @@ export async function createFollowUp(
 ) {
   await requirePatient(tx, orgId, patientId)
   const title = input.title?.trim()
-  if (!title || title.length > 200) throw validation("El título debe tener 1–200 caracteres")
+  if (!title || title.length > 200) throw invalidField("title", "Escribe el título del control, como mucho 200 caracteres.")
   if (!["tratamiento", "mantenimiento"].includes(input.kind))
-    throw validation("Tipo de control inválido")
+    throw invalidField("kind", "Elige el tipo de control de la lista.")
   if (input.kind === "tratamiento" && !input.planItemId)
-    throw validation("El control de tratamiento requiere una indicación")
-  const dueAt = instant(input.dueAt)
+    throw invalidField("planItemId", "Elige el tratamiento que sigue este control.")
+  const dueAt = instant(input.dueAt, "dueAt")
   if (dueAt.toISOString().slice(0, 10) < new Date().toISOString().slice(0, 10))
-    throw validation("El control debe vencer hoy o en el futuro")
+    throw invalidField("dueAt", "El control vence hoy o más adelante.")
   const repeatEveryMonths = input.repeatEveryMonths ?? null
   if (
     repeatEveryMonths !== null &&
     !(FOLLOW_UP_REPEAT_MONTHS as readonly number[]).includes(repeatEveryMonths)
   )
-    throw validation("Un control se repite cada 1, 3, 6 o 12 meses")
+    throw invalidField("repeatEveryMonths", "Un control se repite cada 1, 3, 6 o 12 meses.")
   if (input.planItemId) {
     const [item] = await tx
       .select({ id: treatmentPlanItem.id })
@@ -149,7 +150,7 @@ export async function createFollowUp(
           eq(treatmentPlanItem.patientId, patientId),
         ),
       )
-    if (!item) throw notFound("Tratamiento")
+    if (!item) throw new ServiceError("NOT_FOUND", 404, "Tratamiento no encontrado", { planItemId: "Ese tratamiento ya no está en su plan: elige otro." })
   }
   if (input.originEncounterId) await requireEncounter(tx, orgId, patientId, input.originEncounterId)
   if (input.encounterProcedureId) {
@@ -189,6 +190,28 @@ export async function createFollowUp(
   await audit(tx, orgId, actorUserId, row.id, "follow_up.created")
   return detail(tx, orgId, patientId, row.id)
 }
+/**
+ * Reserva la cita del control. Lo que la agenda rechaza (el hueco ya está
+ * tomado, fuera de horario, sin unidad libre) es de la hora elegida: se dice
+ * junto a ella, con el nombre que tiene en este cuerpo (`appointment.…`).
+ */
+async function reserveFollowUpAppointment(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  input: Extract<ScheduleFollowUpInput, { appointment: unknown }>["appointment"],
+) {
+  try {
+    return await createAppointment(tx, orgId, actorUserId, { ...input, patientId, status: "programada" })
+  } catch (error) {
+    if (!(error instanceof ServiceError) || (error.status !== 400 && error.status !== 409)) throw error
+    const fields = error.fields
+      ? Object.fromEntries(Object.entries(error.fields).map(([key, text]) => [`appointment.${key}`, text]))
+      : { "appointment.startsAt": error.message }
+    throw new ServiceError(error.code, error.status, error.message, fields)
+  }
+}
 export async function scheduleFollowUp(
   tx: Db,
   orgId: string,
@@ -201,13 +224,7 @@ export async function scheduleFollowUp(
   const appointmentId =
     "appointmentId" in input
       ? input.appointmentId
-      : (
-          await createAppointment(tx, orgId, actorUserId, {
-            ...input.appointment,
-            patientId,
-            status: "programada",
-          })
-        ).id
+      : (await reserveFollowUpAppointment(tx, orgId, actorUserId, patientId, input.appointment)).id
   const [reserved] = await tx
     .select()
     .from(appointment)
@@ -220,12 +237,15 @@ export async function scheduleFollowUp(
     )
     .for("update")
   if (!reserved) throw notFound("Cita")
-  if (!["programada", "confirmada"].includes(reserved.status))
+  if (!["programada", "confirmada"].includes(reserved.status)) {
+    const message = "La cita no admite programar el control"
     throw new ServiceError(
       "FOLLOW_UP_APPOINTMENT_STATUS",
       409,
-      "La cita no admite programar el control",
+      message,
+      "appointmentId" in input ? { appointmentId: message } : undefined,
     )
+  }
   const current = await lock(tx, orgId, patientId, id)
   if (current.status !== "pendiente")
     throw new ServiceError("FOLLOW_UP_STATUS", 409, "Solo puede programar un control pendiente")
@@ -255,18 +275,16 @@ export async function completeFollowUp(
   if (!["pendiente", "programado"].includes(current.status))
     throw new ServiceError("FOLLOW_UP_STATUS", 409, "El control está cerrado")
   const enc = await requireEncounter(tx, orgId, patientId, input.encounterId)
-  if (enc.status !== "finalizada")
-    throw new ServiceError(
-      "ENCOUNTER_NOT_FINALIZED",
-      409,
-      "Finalice la atención antes de completar el control",
-    )
+  if (enc.status !== "finalizada") {
+    const message = "Finalice la atención antes de completar el control"
+    throw new ServiceError("ENCOUNTER_NOT_FINALIZED", 409, message, { encounterId: message })
+  }
   const [row] = await tx
     .update(clinicalFollowUp)
     .set({
       status: "realizado",
       completedEncounterId: enc.id,
-      outcome: note(input.outcome),
+      outcome: note(input.outcome, "outcome"),
       completedAt: new Date(),
       updatedAt: new Date(),
     })
@@ -369,7 +387,7 @@ export async function cancelFollowUp(
     .update(clinicalFollowUp)
     .set({
       status: "cancelado",
-      cancelledReason: note(input.reason),
+      cancelledReason: note(input.reason, "reason"),
       cancelledAt: new Date(),
       updatedAt: new Date(),
     })

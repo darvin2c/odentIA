@@ -1,9 +1,9 @@
-import { Button } from "@odentia/ui"
-import { FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import { Button, FieldError, FieldLegend, FieldSet } from "@odentia/ui"
+import { FormDrawer, isUnconfirmedSubmit, LoadingState, submitErrorMessage, submitErrorOf } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { FolderOpen, Upload } from "lucide-react"
-import { useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useId, useRef, useState } from "react"
+import { apiFetch } from "../../lib/api"
 import { formatDate } from "../../lib/clinical-journey"
 import {
   dicomNameMatches,
@@ -21,6 +21,7 @@ import {
 } from "../../lib/imaging-upload"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 import { PlacesField } from "../../product/site-fields"
 import { appWords } from "../../lib/product-words"
 
@@ -112,6 +113,7 @@ export function TomographyReview({
   personName,
   nameCheck,
   teeth,
+  teethError,
   onTeethChange,
 }: {
   candidate: StudyCandidate
@@ -121,9 +123,12 @@ export function TomographyReview({
   nameCheck: boolean | null
   teeth: number[]
   onTeethChange: (teeth: number[]) => void
+  /** Lo que la ficha dijo de las piezas al empezar la subida. */
+  teethError?: string | null
 }) {
   const others = result.studies.filter((study) => study !== candidate)
   const tooBig = candidate.totalBytes > TOMOGRAPHY_MAX_BYTES
+  const teethErrorId = useId()
   return (
     <section aria-labelledby="tomography-found" className="flex flex-col gap-4">
       <h3 id="tomography-found" className="text-base font-semibold">
@@ -144,7 +149,18 @@ export function TomographyReview({
         <dt className="text-muted-foreground">Tamaño</dt>
         <dd className="font-medium">{formatBytes(candidate.totalBytes)}</dd>
       </dl>
-      <PlacesField value={teeth} onChange={onTeethChange} optional />
+      {productUi().site ? (
+        <FieldSet data-invalid={teethError ? true : undefined}>
+          <FieldLegend variant="label">{productUi().site?.placesLabel} (opcional)</FieldLegend>
+          <PlacesField
+            value={teeth}
+            onChange={onTeethChange}
+            invalid={Boolean(teethError)}
+            aria-describedby={teethError ? teethErrorId : undefined}
+          />
+          {teethError ? <FieldError id={teethErrorId}>{teethError}</FieldError> : null}
+        </FieldSet>
+      ) : null}
       {tooBig && (
         <p role="alert" className="rounded-xl bg-destructive/10 p-3 text-sm text-destructive">
           Pesa {formatBytes(candidate.totalBytes)} y el máximo por tomografía es 1 GB. Pide al centro
@@ -294,6 +310,8 @@ export function useTomographyFlow({
   const [existing, setExisting] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Lo que la ficha dijo de las piezas: va junto a las piezas, no abajo. */
+  const [teethError, setTeethError] = useState<string | null>(null)
   const jobs = useImagingUploads(patientId)
   const job = documentId ? jobs.find((j) => j.documentId === documentId) : undefined
   const candidate = result?.studies.find((study) => study.isVolume) ?? null
@@ -309,6 +327,7 @@ export function useTomographyFlow({
     if (!chosen || starting) return
     setStarting(true)
     setError(null)
+    setTeethError(null)
     try {
       const started = await startStudyUpload({
         patientId,
@@ -323,11 +342,15 @@ export function useTomographyFlow({
       else setDocumentId(started.documentId)
       refresh()
     } catch (e) {
-      setError(
-        e instanceof ApiError
-          ? (e.shape.message ?? "La ficha no aceptó la tomografía.")
-          : "No se pudo empezar la subida. Revisa la conexión y vuelve a intentarlo.",
-      )
+      if (isUnconfirmedSubmit(e)) {
+        setError("No se pudo empezar la subida. Revisa la conexión y vuelve a intentarlo.")
+        return
+      }
+      const { form, fields } = submitErrorOf(e)
+      const { toothNumbers, ...others } = fields
+      setTeethError(toothNumbers ?? null)
+      const rest = [form, ...Object.values(others)].filter((text): text is string => Boolean(text))
+      setError(rest.length > 0 ? rest.join(" ") : null)
     } finally {
       setStarting(false)
     }
@@ -335,12 +358,17 @@ export function useTomographyFlow({
 
   const cancel = async () => {
     if (!documentId) return
+    setError(null)
     try {
       await cancelStudyUpload(patientId, documentId)
       setDocumentId(null)
       refresh()
     } catch (e) {
-      setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo cancelar.") : "No se pudo cancelar.")
+      setError(
+        isUnconfirmedSubmit(e)
+          ? "No se pudo cancelar. Revisa la conexión y vuelve a intentarlo."
+          : submitErrorMessage(e),
+      )
     }
   }
 
@@ -350,6 +378,7 @@ export function useTomographyFlow({
     setDocumentId(null)
     setExisting(null)
     setError(null)
+    setTeethError(null)
   }
 
   const personName = person?.displayName ?? "esta persona"
@@ -361,7 +390,11 @@ export function useTomographyFlow({
     nameCheck,
     personName,
     teeth,
-    setTeeth,
+    setTeeth: (next: number[]) => {
+      setTeeth(next)
+      setTeethError(null)
+    },
+    teethError,
     job,
     existing,
     starting,
@@ -386,7 +419,17 @@ export function TomographyFlowBody({
 }) {
   if (flow.scanning) return <ScanningState scanning={flow.scanning} />
   if (flow.job)
-    return <TomographyProgress job={flow.job} where={flow.where} onRetry={() => void flow.start()} />
+    return (
+      <div className="flex flex-col gap-3">
+        <TomographyProgress job={flow.job} where={flow.where} onRetry={() => void flow.start()} />
+        {/* Cancelar o reintentar también pueden fallar mientras sigue la subida. */}
+        {(flow.error ?? flow.teethError) && (
+          <p role="alert" className="text-sm text-destructive">
+            {flow.error ?? flow.teethError}
+          </p>
+        )}
+      </div>
+    )
   if (flow.existing)
     return (
       <div role="status" className="flex flex-col gap-2 rounded-xl border p-4 text-sm">
@@ -410,6 +453,7 @@ export function TomographyFlowBody({
           personName={flow.personName}
           nameCheck={flow.nameCheck}
           teeth={flow.teeth}
+          teethError={flow.teethError}
           onTeethChange={flow.setTeeth}
         />
         {flow.error && (

@@ -18,39 +18,54 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
-const day = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, "Fecha AAAA-MM-DD")
+const day = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/, "Elige una fecha válida.")
+/** Mismas palabras que el cajón de conocimiento y que el servicio (`knowledge.ts`). */
+const title = z.string().min(1, "Escribe la pregunta.").max(200, "Escribe como mucho 200 caracteres.")
+const body = z.string().min(1, "Escribe la respuesta.").max(8000, "Escribe como mucho 8000 caracteres.")
+const basicKey = z.string().max(40).nullable().optional()
 const catalog = {
   branchId: z.string().uuid().nullable().optional(),
   validFrom: day.nullable().optional(),
   validUntil: day.nullable().optional(),
-  askForms: z.array(z.string().max(120)).max(20).optional(),
-  basicKey: z.string().max(40).nullable().optional(),
+  askForms: z
+    .array(z.string().max(120, "Cada forma de preguntar admite hasta 120 caracteres."))
+    .max(20, "Escribe hasta 20 formas de preguntar, una por línea.")
+    .optional(),
+  basicKey,
 }
 
 const createInput = z.object({
   kind: z.enum(["faq", "info_sede", "politica"]),
-  title: z.string().min(1).max(200),
-  body: z.string().min(1).max(8000),
+  title,
+  body,
   ...catalog,
 })
 
 const updateInput = z.object({
-  title: z.string().min(1).max(200).optional(),
-  body: z.string().min(1).max(8000).optional(),
+  title: title.optional(),
+  body: body.optional(),
   ...catalog,
 })
 
 const gapIds = z.array(z.string().uuid()).min(1).max(100)
-/** Cerrar preguntas sin respuesta: con una respuesta que ya existe o con una nueva. */
-const answerGapsInput = z.union([
-  z.object({ ids: gapIds, entryId: z.string().uuid() }),
-  z.object({
+/**
+ * Cerrar preguntas sin respuesta: con una respuesta que ya existe (`entryId`)
+ * o con una nueva. Un solo objeto (no una unión) para que cada error diga su
+ * campo: sin `entryId`, la pregunta y la respuesta son obligatorias.
+ */
+const answerGapsInput = z
+  .object({
     ids: gapIds,
-    title: z.string().min(1).max(200),
-    body: z.string().min(1).max(8000),
-    basicKey: z.string().max(40).nullable().optional(),
-  }),
-])
+    entryId: z.string().uuid().optional(),
+    title: title.optional(),
+    body: body.optional(),
+    basicKey,
+  })
+  .superRefine((input, ctx) => {
+    if (input.entryId) return
+    if (input.title === undefined) ctx.addIssue({ code: "custom", path: ["title"], message: "Escribe la pregunta." })
+    if (input.body === undefined) ctx.addIssue({ code: "custom", path: ["body"], message: "Escribe la respuesta." })
+  })
 
 const statusInput = z.object({ status: z.enum(["borrador", "publicada"]) })
 
@@ -112,7 +127,8 @@ export function createAgentKnowledgeRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "agent.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo owner/admin"), 403)
     const parsed = answerGapsInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    const { ids, ...answer } = parsed.data
+    const { ids, entryId, title, body, basicKey } = parsed.data
+    const answer = entryId ? { entryId } : { title: title ?? "", body: body ?? "", basicKey: basicKey ?? null }
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => answerKnowledgeGaps(tx, orgId, userId, ids, answer)),
     )

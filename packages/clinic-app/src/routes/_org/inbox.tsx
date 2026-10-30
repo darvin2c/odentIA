@@ -68,6 +68,7 @@ import {
   SideDockScopeProvider,
   SpeechInput,
   SubmitButton,
+  submitErrorMessage,
   useDetailMode,
   useListSearch,
 } from "@odentia/ui-patterns"
@@ -729,9 +730,13 @@ function InboxPage() {
       <UnblockDialog
         target={unblockTarget}
         pending={screenActions.unblock.isPending}
-        onClose={() => setUnblockTarget(null)}
+        error={screenActions.unblock.error}
+        onClose={() => {
+          screenActions.unblock.reset()
+          setUnblockTarget(null)
+        }}
         onConfirm={() => {
-          if (unblockTarget) screenActions.unblock.mutate(unblockTarget, { onSettled: () => setUnblockTarget(null) })
+          if (unblockTarget) screenActions.unblock.mutate(unblockTarget, { onSuccess: () => setUnblockTarget(null) })
         }}
       />
       <ConfirmDialog
@@ -1445,8 +1450,8 @@ function ThreadView({
       void queryClient.invalidateQueries({ queryKey: ["conversation", id] })
       return
     }
-    // Conexión desactivada u otro fallo real: bloquear el envío con el motivo.
-    setSendError(error instanceof ApiError ? error.message : "No se pudo enviar el mensaje")
+    // Conexión desactivada u otro fallo real: el motivo queda a la vista hasta el próximo envío.
+    setSendError(submitErrorMessage(error))
   }
 
   // Envía texto y/o adjuntos del composer. Lanza en error para que PromptInput
@@ -2260,13 +2265,11 @@ function ThreadView({
                 <PromptInputAttachmentsRow />
                 <PromptInputTextarea
                   aria-label="Mensaje"
+                  aria-describedby={sendError ? "bandeja-envio-error" : undefined}
                   rows={1}
                   placeholder="Escribe un mensaje… (Enter para enviar)"
                   value={composer}
-                  onChange={(e) => {
-                    setComposer(e.target.value)
-                    if (sendError) setSendError(null)
-                  }}
+                  onChange={(e) => setComposer(e.target.value)}
                 />
               </PromptInputBody>
               <PromptInputFooter>
@@ -2322,7 +2325,7 @@ function ThreadView({
               </p>
             ) : null}
             {sendError && (
-              <p className="text-sm text-destructive" role="alert">
+              <p id="bandeja-envio-error" className="text-sm text-destructive" role="alert">
                 {sendError}
               </p>
             )}

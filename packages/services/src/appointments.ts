@@ -28,7 +28,7 @@ import { channelConnection, contact, conversation } from "@odentia/db/schema/crm
 import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { alias } from "drizzle-orm/pg-core"
-import { validateAvailability } from "./availability.js"
+import { appointmentConflict, exclusionTarget, validateAvailability } from "./availability.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
 import { type PhoneWhatsApp, phoneWhatsAppState } from "./contacts.js"
 import {
@@ -44,6 +44,7 @@ import {
   branchNotFound,
   roomNotFound,
   isExclusionViolation,
+  invalidField,
   notFound,
   ServiceError,
   validation,
@@ -214,7 +215,12 @@ async function requireProfessional(tx: Db, orgId: string, professionalUserId: st
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, professionalUserId)))
     .limit(1)
-  if (!membership) throw notFound("Profesional")
+  if (!membership) throw onField(notFound("Profesional"), "professionalUserId")
+}
+
+/** El mismo error, dicho junto a su dato del cuerpo (`roomId`, `serviceId`…). */
+function onField(error: ServiceError, field: string): ServiceError {
+  return new ServiceError(error.code, error.status, error.message, { [field]: error.message })
 }
 
 async function requireRoom(tx: Db, orgId: string, roomId: string, branchId?: string) {
@@ -229,7 +235,7 @@ async function requireRoom(tx: Db, orgId: string, roomId: string, branchId?: str
     .from(scheduleRoom)
     .where(and(...conditions))
     .limit(1)
-  if (!row) throw roomNotFound((await roomWord(tx, orgId)).one)
+  if (!row) throw onField(roomNotFound((await roomWord(tx, orgId)).one), "roomId")
   return row
 }
 
@@ -239,7 +245,7 @@ async function requireAppointmentPatient(tx: Db, orgId: string, patientId: strin
     .from(patient)
     .where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId)))
     .limit(1)
-  if (!row) throw notFound("Paciente")
+  if (!row) throw onField(notFound("Paciente"), "patientId")
 }
 
 /** Servicio activo del tenant; su nombre se congela en la cita. */
@@ -259,7 +265,7 @@ async function requireService(tx: Db, orgId: string, serviceId: string) {
       ),
     )
     .limit(1)
-  if (!row) throw notFound("Servicio")
+  if (!row) throw onField(notFound("Servicio"), "serviceId")
   return row
 }
 
@@ -799,7 +805,8 @@ async function pickFreeRoom(
   const free =
     rooms.find((room) => room.id === moving?.roomId && !unavailable.has(room.id)) ??
     rooms.find((room) => !unavailable.has(room.id))
-  if (!free) throw conflict("NO_ROOM", `No hay una ${(await roomWord(tx, orgId)).one} libre a esa hora`)
+  // Sin unidad libre la cita no cabe a esa hora: se dice junto a la hora.
+  if (!free) throw onField(conflict("NO_ROOM", `No hay una ${(await roomWord(tx, orgId)).one} libre a esa hora`), "startsAt")
   return free.id
 }
 
@@ -857,9 +864,11 @@ async function requireSchedulableItems(tx: Db, orgId: string, patientId: string,
     )
   if (rows.length !== unique.length) throw notFound("Tratamiento")
   for (const row of rows) {
-    if (row.decision !== "aceptado") throw conflict("ITEM_NOT_ACCEPTED", "Solo se agenda lo que la persona aceptó")
+    if (row.decision !== "aceptado") {
+      throw onField(conflict("ITEM_NOT_ACCEPTED", "Solo se agenda lo que la persona aceptó"), "planItemIds")
+    }
     if (!["pendiente", "programado", "en_curso"].includes(row.status))
-      throw conflict("ITEM_CLOSED", "Ese tratamiento ya no está por hacer")
+      throw onField(conflict("ITEM_CLOSED", "Ese tratamiento ya no está por hacer"), "planItemIds")
   }
   return unique
 }
@@ -875,7 +884,7 @@ export async function createAppointment(
   const room = input.roomId ? await requireRoom(tx, orgId, input.roomId) : null
   const resolved = await resolveBranch(tx, orgId, input.branchId ?? room?.branchId)
   if (room && room.branchId !== resolved.id) {
-    throw validation(`La ${(await roomWord(tx, orgId)).one} no pertenece a la sede de la cita`)
+    throw invalidField("roomId", `La ${(await roomWord(tx, orgId)).one} no pertenece a la sede de la cita`)
   }
 
   const duration =
@@ -890,7 +899,7 @@ export async function createAppointment(
   const endsAt = input.endsAt
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + duration * 60000)
-  if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
+  if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   await requireAppointmentPatient(tx, orgId, input.patientId)
   await requireProfessional(tx, orgId, input.professionalUserId)
   const planItemIds = await requireSchedulableItems(tx, orgId, input.patientId, input.planItemIds ?? [])
@@ -903,7 +912,7 @@ export async function createAppointment(
       ))
       .where(and(eq(conversation.id, input.conversationId), eq(conversation.organizationId, orgId)))
       .limit(1)
-    if (!linked) throw validation("La conversación no corresponde a un interlocutor del paciente")
+    if (!linked) throw invalidField("patientId", "La conversación no corresponde a un interlocutor del paciente")
   }
   const status = assertStatus(input.status ?? "programada")
   const standing = status === "programada" || status === "confirmada"
@@ -997,10 +1006,7 @@ export async function createAppointment(
     return notice ? { ...item, notice } : item
   } catch (error) {
     if (isExclusionViolation(error)) {
-      throw conflict(
-        "APPOINTMENT_CONFLICT",
-        `El profesional o la ${roomName} ya están ocupados en ese horario`,
-      )
+      throw appointmentConflict(exclusionTarget(error), roomName)
     }
     throw error
   }
@@ -1046,7 +1052,7 @@ export async function moveAppointment(
   const endsAt = input.endsAt
     ? parseInstant(input.endsAt, "endsAt")
     : new Date(startsAt.getTime() + durationMs)
-  if (endsAt <= startsAt) throw validation("La cita debe terminar después de iniciar")
+  if (endsAt <= startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   const professionalUserId = input.professionalUserId ?? current.professionalUserId
   const active = current.status === "programada" || current.status === "confirmada"
   // Sin unidad dental indicada la cita conserva la suya; si a la nueva hora está ocupada, pasa a una libre.
@@ -1062,7 +1068,7 @@ export async function moveAppointment(
   if (roomId !== current.roomId) {
     const room = await requireRoom(tx, orgId, roomId)
     if (room.branchId !== current.branchId) {
-      throw validation(`La ${(await roomWord(tx, orgId)).one} no pertenece a la sede de la cita`)
+      throw invalidField("roomId", `La ${(await roomWord(tx, orgId)).one} no pertenece a la sede de la cita`)
     }
   }
   if (active) {
@@ -1124,10 +1130,7 @@ export async function moveAppointment(
     return notice ? { ...item, notice } : item
   } catch (error) {
     if (isExclusionViolation(error)) {
-      throw conflict(
-        "APPOINTMENT_CONFLICT",
-        `El profesional o la ${roomName} ya están ocupados en ese horario`,
-      )
+      throw appointmentConflict(exclusionTarget(error), roomName)
     }
     throw error
   }
@@ -1177,7 +1180,7 @@ export async function updateAppointment(
   if (roomId !== current.roomId) {
     const room = await requireRoom(tx, orgId, roomId)
     if (room.branchId !== current.branchId) {
-      throw validation(`La ${(await roomWord(tx, orgId)).one} no pertenece a la sede de la cita`)
+      throw invalidField("roomId", `La ${(await roomWord(tx, orgId)).one} no pertenece a la sede de la cita`)
     }
     set.roomId = roomId
   }
@@ -1228,10 +1231,7 @@ export async function updateAppointment(
     return await getAppointment(tx, orgId, id)
   } catch (error) {
     if (isExclusionViolation(error)) {
-      throw conflict(
-        "APPOINTMENT_CONFLICT",
-        `El profesional o la ${roomName} ya están ocupados en ese horario`,
-      )
+      throw appointmentConflict(exclusionTarget(error), roomName)
     }
     throw error
   }
@@ -1333,10 +1333,7 @@ export async function setAppointmentArrival(
       if (!updated) throw notFound("Cita")
     } catch (error) {
       if (isExclusionViolation(error)) {
-        throw conflict(
-          "APPOINTMENT_CONFLICT",
-          `El profesional o la ${roomName} ya están ocupados a esa hora: reagenda la cita`,
-        )
+        throw appointmentConflict(exclusionTarget(error), roomName, "a esa hora: reagenda la cita")
       }
       throw error
     }
@@ -1483,10 +1480,7 @@ export async function setAppointmentStatus(
     return notice ? { ...item, notice } : item
   } catch (error) {
     if (isExclusionViolation(error)) {
-      throw conflict(
-        "APPOINTMENT_CONFLICT",
-        `El profesional o la ${roomName} ya están ocupados en ese horario`,
-      )
+      throw appointmentConflict(exclusionTarget(error), roomName)
     }
     throw error
   }
@@ -1499,7 +1493,7 @@ export async function createRoom(
   input: { branchId: string; name: string },
 ): Promise<{ id: string }> {
   const name = input.name.trim()
-  if (!name) throw validation(`El nombre de la ${(await roomWord(tx, orgId)).one} es obligatorio`)
+  if (!name) throw invalidField("name", `Escribe el nombre de la ${(await roomWord(tx, orgId)).one}.`)
   await resolveBranch(tx, orgId, input.branchId)
   const [created] = await tx
     .insert(scheduleRoom)
@@ -1569,7 +1563,9 @@ export async function updateRoom(
   const fields: string[] = []
   if (patch.name !== undefined) {
     const name = patch.name.trim()
-    if (!name || name.length > 120) throw validation(`El nombre de la ${(await roomWord(tx, orgId)).one} debe tener entre 1 y 120 caracteres`)
+    if (!name || name.length > 120) {
+      throw invalidField("name", `El nombre de la ${(await roomWord(tx, orgId)).one} debe tener entre 1 y 120 caracteres.`)
+    }
     set.name = name
     fields.push("name")
   }

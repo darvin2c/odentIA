@@ -1,10 +1,13 @@
 import { declareProduct } from "@odentia/clinic-app/product/product-ui"
+import { configureZodMessages } from "@odentia/clinical"
 import { createRouter } from "@tanstack/react-router"
 import { medicalUi } from "./product/medical"
 import { routeTree } from "./routeTree.gen"
 
 // Esta es la app de latidIA: lo común le pide sus partes al producto médico (ADR 0079).
 declareProduct(medicalUi)
+// Lo que dice una regla sin mensaje propio, en el español de la interfaz.
+configureZodMessages()
 
 export function getRouter() {
   return createRouter({

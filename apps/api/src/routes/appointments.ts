@@ -83,12 +83,12 @@ const statusInput = z.object({
 
 const roomInput = z.object({
   branchId: z.uuid(),
-  name: z.string().min(1).max(120),
+  name: z.string().trim().min(1, "Escribe el nombre.").max(120, "Escribe el nombre en 120 caracteres como mucho."),
 })
 
 const roomPatch = z
   .object({
-    name: z.string().trim().min(1).max(120).optional(),
+    name: z.string().trim().min(1, "Escribe el nombre.").max(120, "Escribe el nombre en 120 caracteres como mucho.").optional(),
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -102,17 +102,18 @@ const scheduleRuleInput = z.object({
 const scheduleInput = z.object({
   branchId: z.uuid(),
   professionalUserId: z.string().min(1),
-  rules: z.array(scheduleRuleInput).max(42),
+  // El error va en `rules` y se dice junto al horario.
+  rules: z.array(scheduleRuleInput).max(42, "Como mucho 42 turnos en la semana."),
 })
 
 const blockInput = z.object({
   branchId: z.uuid(),
   professionalUserId: z.string().min(1).nullable().optional(),
-  roomId: z.uuid().nullable().optional(),
-  kind: z.enum(["bloqueo", "ausencia"]).optional(),
-  reason: z.string().max(500).optional(),
-  startsAt: z.iso.datetime({ offset: true }),
-  endsAt: z.iso.datetime({ offset: true }),
+  roomId: z.uuid("Elige qué se cierra de la lista.").nullable().optional(),
+  kind: z.enum(["bloqueo", "ausencia"], "Elige si es una ausencia o un bloqueo.").optional(),
+  reason: z.string().max(500, "Escribe el motivo en 500 caracteres como mucho.").optional(),
+  startsAt: z.iso.datetime({ offset: true, message: "Elige cuándo empieza." }),
+  endsAt: z.iso.datetime({ offset: true, message: "Elige cuándo termina." }),
 })
 
 const availabilityQuery = z.object({

@@ -3,15 +3,25 @@ import {
   ImageAdjust,
   type ImageAdjustValue,
   renderAdjustedImage,
+  useAppForm,
+  useFormSurface,
 } from "@odentia/ui-patterns"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
-import { API_URL } from "../../lib/auth-client"
-import { orgSlugFromHostname } from "../../lib/host"
+import { useStore } from "@tanstack/react-form"
+import { useQueryClient } from "@tanstack/react-query"
+import { useEffect } from "react"
+import { z } from "zod"
+import { apiUpload } from "../../lib/api"
+
+/** Sin imagen no hay foto que guardar: se dice junto a «Ajustar imagen». */
+const avatarSchema = z.object({
+  file: z.custom<ImageAdjustValue | null>((value) => value !== null, "Elige una imagen y encuádrala."),
+})
 
 /**
  * La foto del paciente con «Ajustar imagen» (tablero 6): se encuadra, se ve
  * cómo queda y se sube ya recortada a 512 px. «Cancelar» deja la anterior.
+ * El dato se llama `file`, como en el cuerpo de la subida: lo que rechace el
+ * servidor (formato, peso) se dice junto a la imagen.
  */
 export function AvatarDrawer({
   patientId,
@@ -25,28 +35,15 @@ export function AvatarDrawer({
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
-  const [value, setValue] = useState<ImageAdjustValue | null>(null)
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!value) throw new Error("Elige una imagen y encuádrala.")
-      const { blob, ext } = await renderAdjustedImage(value)
-      const form = new FormData()
-      form.append("file", blob, `avatar.${ext}`)
-      const slug = orgSlugFromHostname(window.location.hostname)
-      const response = await fetch(`${API_URL}/api/patients/${patientId}/avatar`, {
-        method: "POST",
-        credentials: "include",
-        headers: slug ? { "x-odentia-org": slug } : {},
-        body: form,
-      })
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as {
-          error?: { message?: string }
-        } | null
-        throw new Error(body?.error?.message ?? `No se pudo guardar la foto (${response.status}).`)
-      }
-    },
-    onSuccess: async () => {
+  const form = useAppForm({
+    defaultValues: { file: null as ImageAdjustValue | null },
+    validators: { onSubmit: avatarSchema },
+    onSubmit: async ({ value }) => {
+      if (!value.file) return
+      const { blob, ext } = await renderAdjustedImage(value.file)
+      const body = new FormData()
+      body.append("file", blob, `avatar.${ext}`)
+      await apiUpload(`/api/patients/${patientId}/avatar`, body)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["patient-avatar", patientId] }),
         queryClient.invalidateQueries({ queryKey: ["patient", patientId] }),
@@ -54,33 +51,46 @@ export function AvatarDrawer({
         // primera foto no se ve hasta recargar.
         queryClient.invalidateQueries({ queryKey: ["person"] }),
       ])
-      setValue(null)
       onOpenChange(false)
     },
   })
+  const surface = useFormSurface(form)
+  const submitting = useStore(form.store, (state) => state.isSubmitting)
+  useEffect(() => {
+    if (!open) form.reset()
+  }, [open, form])
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        if (save.isPending) return
-        setValue(null)
-        save.reset()
-        onOpenChange(false)
+        if (!submitting) onOpenChange(false)
       }}
       title="Foto del paciente"
       description="Elige un archivo, arrástralo o toma la foto, y encuádrala antes de guardar."
-      onSubmit={(event) => {
-        event.preventDefault()
-        save.mutate()
-      }}
-      isDirty={value !== null}
-      isSubmitting={save.isPending}
-      submitDisabled={!value}
       submitLabel="Guardar"
-      error={save.isError ? save.error.message : null}
     >
       {open ? (
-        <ImageAdjust shape="person" name={name} disabled={save.isPending} onChange={setValue} />
+        <form.AppField name="file">
+          {(field) => (
+            <field.Group legend={<span className="sr-only">Foto de {name}</span>}>
+              {(control) => (
+                <ImageAdjust
+                  shape="person"
+                  name={name}
+                  disabled={submitting}
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onChange={(next) => {
+                    field.handleChange(next)
+                    if (next) field.handleBlur()
+                  }}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
       ) : null}
     </FormDrawer>
   )

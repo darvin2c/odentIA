@@ -16,7 +16,7 @@ import { contact } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { and, desc, eq } from "drizzle-orm"
 import { MESSAGE_PERMISSIONS, type MessagePermissionKey, setConsent } from "./automation.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { requireDecisionContact } from "./responsibilities.js"
 
@@ -99,15 +99,15 @@ export async function grantDataConsent(
   await requirePatient(tx, orgId, patientId)
   const purposes = [...new Set(input.purposes)]
   if (!purposes.includes("atencion"))
-    throw validation("La finalidad de atención es la base del consentimiento")
+    throw invalidField("purposes", "La finalidad de atención es la base del consentimiento")
   for (const purpose of purposes)
     if (!(DATA_CONSENT_PURPOSES as readonly string[]).includes(purpose))
-      throw validation(`Finalidad inválida: ${purpose}`)
+      throw invalidField("purposes", `Finalidad inválida: ${purpose}`)
   const channel = input.channel ?? "presencial"
   if (!(DATA_CONSENT_CHANNELS as readonly string[]).includes(channel))
-    throw validation("Canal inválido")
+    throw invalidField("channel", "Canal inválido")
   // Otorga el propio paciente o su representante legal vigente.
-  const grantor = await requireDecisionContact(tx, orgId, patientId, input.grantedByContactId)
+  const grantor = await requireDecisionContact(tx, orgId, patientId, input.grantedByContactId, "grantedByContactId")
   const [config] = await tx
     .select({
       version: patientRegistrationConfig.version,
@@ -165,7 +165,7 @@ export async function revokeDataConsent(
 ): Promise<DataConsentRow> {
   await requirePatient(tx, orgId, patientId)
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const [current] = await tx
     .select()
     .from(patientDataConsent)

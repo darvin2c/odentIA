@@ -4,7 +4,7 @@ import type { ConnectionItem, OwnAppState } from "./crm"
 import { sinceWords } from "./integrations"
 import {
   accountWords,
-  approvedValues,
+  approvedFields,
   type ClinicMessage,
   closedWindowNotice,
   connectionPending,
@@ -423,16 +423,15 @@ describe("Bandeja, pasadas las 24 horas", () => {
     )
   })
 
-  it("los datos que escribe quien envía viajan en el orden que pide el mensaje", () => {
+  it("los datos que escribe quien envía van en el orden que pide el mensaje", () => {
     const fields = [
       { index: 2, label: "Dato 2" },
       { index: 1, label: "Dato 1" },
     ]
-    expect(approvedValues({ fields }, { 1: " 20 % en limpiezas ", 2: "octubre" })).toEqual(["20 % en limpiezas", "octubre"])
-    // Lo que falta viaja vacío: el servidor dice qué completar.
-    expect(approvedValues({ fields }, { 2: "octubre" })).toEqual(["", "octubre"])
-    // Un mensaje que no pide datos no envía ninguno.
-    expect(approvedValues({ fields: [] }, { 1: "sobra" })).toBeUndefined()
+    expect(approvedFields({ fields }).map((field) => field.index)).toEqual([1, 2])
+    // No cambia la lista del mensaje.
+    expect(fields.map((field) => field.index)).toEqual([2, 1])
+    expect(approvedFields({ fields: [] })).toEqual([])
   })
 })
 

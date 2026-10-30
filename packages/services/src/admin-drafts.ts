@@ -18,6 +18,7 @@ import {
   adminRuntime,
   findLineRule,
   lineConfigOf,
+  LINE_SETTING_MESSAGES,
   lineDays,
   lineTiming,
   type RuleRow,
@@ -31,7 +32,7 @@ import { isPromotionFor } from "./channel-templates.js"
 import { currentAutomationMessageOf, findMessageTemplate } from "./clinic-messages.js"
 import { mayWriteFirstSql } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { AGENT_NAMES } from "./agent-names.js"
 import { productHooks } from "./products.js"
 
@@ -250,7 +251,7 @@ export async function applyAdminDraft(tx: Db, orgId: string, actorUserId: string
 export async function setAdminDraftNote(tx: Db, orgId: string, key: string, note: string): Promise<void> {
   const { line, rule, draft } = await requireDraft(tx, orgId, key)
   const text = note.replace(/\s+/g, " ").trim()
-  if (text.length > TASK_NOTE_CHARS) throw validation(`La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres`)
+  if (text.length > TASK_NOTE_CHARS) throw invalidField("taskNote", LINE_SETTING_MESSAGES.taskNote)
   const changes = { ...draft.changes }
   if (text) {
     changes.taskNote = text

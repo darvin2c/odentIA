@@ -11,12 +11,17 @@ export function FirmaPad({
   disabled = false,
   label = "Área de firma manuscrita",
   describedBy,
+  id,
+  invalid = false,
 }: {
   onChange: (strokes: number[][][]) => void
   disabled?: boolean
   /** Nombre accesible del recuadro (p. ej. «Firma de la paciente»). */
   label?: string
   describedBy?: string
+  /** Para la etiqueta del campo y para llevar el foco aquí si falta la firma. */
+  id?: string
+  invalid?: boolean
 }): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const drawing = useRef<number[][] | null>(null)
@@ -56,11 +61,15 @@ export function FirmaPad({
     <div>
       <canvas
         ref={canvasRef}
+        id={id}
+        // Se enfoca solo desde el formulario (falta la firma): no es una parada de Tab.
+        tabIndex={-1}
         // Proporción fija (la del PDF): el trazo se guarda normalizado y no se deforma.
-        className="aspect-[22/7] w-full touch-none rounded-md border bg-white"
+        className="aspect-[22/7] w-full touch-none rounded-md border bg-white aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20"
         role="img"
         aria-label={label}
         aria-describedby={describedBy}
+        aria-invalid={invalid || undefined}
         onPointerDown={(event) => {
           if (disabled) return
           event.preventDefault()

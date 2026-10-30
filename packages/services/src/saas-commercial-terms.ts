@@ -3,7 +3,7 @@ import { user } from "@odentia/db/schema/auth"
 import { saasCommercialTerms } from "@odentia/db/schema/saas-billing"
 import { asc, desc, eq, lte, sql } from "drizzle-orm"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { ServiceError, validation } from "./errors.js"
+import { fieldsError, invalidField, ServiceError, validation } from "./errors.js"
 
 /**
  * Condiciones comerciales (issue 167, ADR 0074): las reglas que acompañan al
@@ -595,7 +595,7 @@ export async function setSaasTerms(tx: Db, actor: AdminActor, input: SetSaasTerm
     if (!FIELD_BY_KEY.has(key as SaasTermKey)) throw validation(`No existe la condición «${key}»`)
   }
   const reason = input.reason?.trim() || null
-  if (reason && reason.length > 500) throw validation("El motivo admite hasta 500 caracteres")
+  if (reason && reason.length > 500) throw invalidField("reason", "El motivo admite hasta 500 caracteres")
 
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('saas_commercial_terms', 0))`)
   const current = await latestRow(tx)
@@ -608,8 +608,9 @@ export async function setSaasTerms(tx: Db, actor: AdminActor, input: SetSaasTerm
   }
   const before = current ? valuesOf(current) : { ...SAAS_TERMS_INITIAL }
   const after: SaasCommercialTerms = { ...before, ...input.values }
-  const errors = checkSaasTerms(after)
-  if (errors.length > 0) throw validation(errors[0]!.message)
+  // Cada cifra con su mensaje, con el nombre que tiene en el cuerpo (`values.warnPercent`).
+  const invalid = fieldsError(Object.fromEntries(checkSaasTerms(after).map((error) => [error.key, error.message])), (key) => `values.${key}`)
+  if (invalid) throw invalid
   const changes = changesBetween(before, after)
   if (changes.length === 0) return getSaasTermsView(tx)
 

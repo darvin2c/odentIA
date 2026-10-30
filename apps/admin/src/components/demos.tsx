@@ -6,20 +6,27 @@ import {
   Label,
   RadioGroup,
   RadioGroupItem,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Skeleton,
   toast,
 } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, ErrorState, FormDrawer, common } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  DetailDrawer,
+  ErrorState,
+  FormDrawer,
+  common,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { ApiError, api } from "../lib/api"
+import { api } from "../lib/api"
 import { platformUrl } from "../lib/host"
 import { ProductMark } from "./product"
 
@@ -101,11 +108,6 @@ const optionsSchema = z.object({
   countries: z.array(z.object({ code: z.string(), name: z.string() })),
   presenters: z.array(z.object({ id: z.string(), name: z.string(), email: z.string() })),
 })
-
-function messageOf(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? common.errors.generic
-  return error instanceof Error ? error.message : common.errors.generic
-}
 
 /** Los pasos del armado, como los dice el avance (tablero 4). */
 const STEPS: Array<{ key: string; title: string; detail: (demo: DemoItem) => string }> = [
@@ -207,6 +209,47 @@ export function PendingDemoCard({ demo, onOpen }: { demo: DemoItem; onOpen: () =
 const pickName = (names: string[] | undefined) =>
   names && names.length > 0 ? (names[Math.floor(Math.random() * names.length)] as string) : ""
 
+type DemoOptions = z.infer<typeof optionsSchema>
+type DemoKindOption = DemoOptions["products"][number]["kinds"][number]
+
+const kindsOf = (options: DemoOptions | undefined, product: ClinicalProduct) =>
+  options?.products.find((item) => item.product === product)?.kinds ?? []
+/** El tipo que se propone para un producto: el segundo de la lista, o el único. */
+const proposedKind = (kinds: DemoKindOption[]) => kinds[1] ?? kinds[0]
+
+const DEMO_NAME_WORDS = "El nombre va de 3 a 80 letras"
+
+/** La receta de una demo, con los mismos límites que la ruta (`admin-demos.ts`). */
+const createDemoSchema = z.object({
+  product: z.enum(CLINICAL_PRODUCTS),
+  kind: z.string().trim().min(1, "Elige el tipo de demo"),
+  size: z.string().min(1, "Elige el tamaño"),
+  months: z.string().min(1, "Elige cuántos meses de historia"),
+  countryCode: z.string().min(1, "Elige el país"),
+  name: z.string().trim().min(3, DEMO_NAME_WORDS).max(80, DEMO_NAME_WORDS),
+  presenterUserId: z.string().min(1, "Elige quién la presenta"),
+})
+
+interface CreateDemoValues {
+  product: ClinicalProduct
+  kind: string
+  size: string
+  months: string
+  countryCode: string
+  name: string
+  presenterUserId: string
+}
+
+const EMPTY_DEMO: CreateDemoValues = {
+  product: "medical",
+  kind: "",
+  size: "mediano",
+  months: "12",
+  countryCode: "PE",
+  name: "",
+  presenterUserId: "",
+}
+
 /** «Crear demo» (tablero 3): la receta de la demo; la arma el worker. */
 export function CreateDemoDrawer({
   open,
@@ -225,77 +268,65 @@ export function CreateDemoDrawer({
     enabled: open,
     queryFn: async () => optionsSchema.parse(await api<unknown>("/api/admin/demos/options")),
   })
-  const [product, setProduct] = useState<ClinicalProduct>("medical")
-  const [kind, setKind] = useState("")
-  const [size, setSize] = useState("mediano")
-  const [months, setMonths] = useState("12")
-  const [country, setCountry] = useState("PE")
-  const [name, setName] = useState("")
-  const [presenter, setPresenter] = useState("")
-  const kinds = useMemo(
-    () => options.data?.products.find((item) => item.product === product)?.kinds ?? [],
-    [options.data, product],
-  )
-  const kindOption = kinds.find((item) => item.key === kind)
-  // El tipo y el nombre siguen al producto y al país: el nombre sale del tipo, y se puede cambiar.
-  useEffect(() => {
-    if (kinds.length > 0 && !kinds.some((item) => item.key === kind))
-      setKind((kinds[1] ?? kinds[0])?.key ?? "")
-  }, [kinds, kind])
-  useEffect(() => {
-    if (kindOption) setName(pickName(kindOption.names[country]))
-  }, [kindOption, country])
-  useEffect(() => {
-    if (!presenter && options.data)
-      setPresenter(
-        options.data.presenters.find((item) => item.id === currentUserId)?.id ??
-          options.data.presenters[0]?.id ??
-          "",
-      )
-  }, [options.data, presenter, currentUserId])
-
   const create = useMutation({
-    mutationFn: async () =>
-      z.object({ id: z.string() }).parse(
-        await api<unknown>("/api/admin/demos", {
-          method: "POST",
-          body: JSON.stringify({
-            product,
-            kind,
-            size,
-            months: Number(months),
-            countryCode: country,
-            name,
-            presenterUserId: presenter,
-          }),
-        }),
-      ),
-    onSuccess: (created) => {
+    mutationFn: async (body: Omit<CreateDemoValues, "months"> & { months: number }) =>
+      api<{ id: string }>("/api/admin/demos", { method: "POST", body: JSON.stringify(body) }),
+  })
+  const form = useAppForm({
+    defaultValues: EMPTY_DEMO,
+    validators: { onSubmit: createDemoSchema },
+    onSubmit: async ({ value, formApi }) => {
+      const created = await create.mutateAsync({
+        ...value,
+        name: value.name.trim(),
+        months: Number(value.months),
+      })
       void queryClient.invalidateQueries({ queryKey: ["admin-demos"] })
       toast.success("La demo se está armando")
+      formApi.reset(value)
       onCreated(created.id)
     },
-    onError: (error) => toast.error(messageOf(error)),
   })
+  // La receta propuesta se arma una vez, cuando llegan las opciones: el tipo, un nombre y quien presenta.
+  const proposed = useRef(false)
+  useEffect(() => {
+    const data = options.data
+    if (!data || proposed.current) return
+    proposed.current = true
+    const kind = proposedKind(kindsOf(data, EMPTY_DEMO.product))
+    form.reset({
+      ...EMPTY_DEMO,
+      kind: kind?.key ?? "",
+      name: pickName(kind?.names[EMPTY_DEMO.countryCode]),
+      presenterUserId:
+        data.presenters.find((item) => item.id === currentUserId)?.id ?? data.presenters[0]?.id ?? "",
+    })
+  }, [options.data, currentUserId, form])
+  const product = useStore(form.store, (state) => state.values.product)
+  const kinds = useMemo(() => kindsOf(options.data, product), [options.data, product])
   const kindWord = product === "dental" ? "Tipo de clínica" : "Tipo de consultorio"
+  const kindOptionOf = (key: string) => kinds.find((item) => item.key === key)
+  // El tipo y el nombre siguen al producto y al país: el nombre sale del tipo, y se puede cambiar.
+  const followProduct = (next: ClinicalProduct) => {
+    const nextKinds = kindsOf(options.data, next)
+    const kind =
+      nextKinds.find((item) => item.key === form.getFieldValue("kind")) ?? proposedKind(nextKinds)
+    // El nombre se elige aquí con el tipo nuevo: el aviso del tipo leería los del producto anterior.
+    form.setFieldValue("kind", kind?.key ?? "", { dontRunListeners: true })
+    form.setFieldValue("name", pickName(kind?.names[form.getFieldValue("countryCode")]))
+  }
 
   return (
     <FormDrawer
+      {...useFormSurface(form)}
       open={open}
       onClose={onClose}
       title="Crear demo"
       description="Una clínica inventada, con historia, para presentar el producto. Se arma sola en menos de un par de minutos y puedes cerrar esto."
-      isSubmitting={create.isPending}
+      // Sin las opciones no hay receta que pedir: se espera a que lleguen.
+      submitDisabled={!options.data}
       submitLabel="Crear demo"
       cancelLabel={common.actions.cancel}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!kind || name.trim().length < 3 || !presenter) {
-          toast.error("Elige el tipo, el nombre y quién la presenta")
-          return
-        }
-        create.mutate()
-      }}
     >
       {options.isPending ? (
         <div className="flex flex-col gap-3">
@@ -307,175 +338,215 @@ export function CreateDemoDrawer({
         <ErrorState error={options.error} onRetry={() => void options.refetch()} />
       ) : (
         <div className="flex flex-col gap-5">
-          <fieldset className="flex flex-col gap-2">
-            <legend className="pb-2 text-sm font-medium">Producto</legend>
-            <RadioGroup
-              aria-label="Producto"
-              value={product}
-              onValueChange={(value) => {
-                if (value === "dental" || value === "medical") setProduct(value)
-              }}
-              className="grid grid-cols-2 gap-2"
-            >
-              {CLINICAL_PRODUCTS.map((option) => (
-                <Label
-                  key={option}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
-                >
-                  <RadioGroupItem value={option} />
-                  <ProductMark product={option} className="text-sm" />
-                </Label>
-              ))}
-            </RadioGroup>
-          </fieldset>
+          <form.AppField
+            name="product"
+            listeners={{ onChange: ({ value }) => followProduct(value) }}
+          >
+            {(field) => (
+              <field.Group legend="Producto">
+                {(control) => (
+                  <RadioGroup
+                    aria-label="Producto"
+                    name={control.name}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    value={field.state.value}
+                    onValueChange={(value) => {
+                      if (value === "dental" || value === "medical") field.handleChange(value)
+                      field.handleBlur()
+                    }}
+                    className="grid grid-cols-2 gap-2"
+                  >
+                    {CLINICAL_PRODUCTS.map((option) => (
+                      <Label
+                        key={option}
+                        className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
+                      >
+                        <RadioGroupItem value={option} />
+                        <ProductMark product={option} className="text-sm" />
+                      </Label>
+                    ))}
+                  </RadioGroup>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="pb-2 text-sm font-medium">{kindWord}</legend>
-            <RadioGroup
-              aria-label={kindWord}
-              value={kind}
-              onValueChange={(value) => setKind(String(value))}
-              className="grid gap-2 sm:grid-cols-2"
-            >
-              {kinds.map((option) => (
-                <Label
-                  key={option.key}
-                  className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
-                >
-                  <RadioGroupItem value={option.key} className="mt-0.5" />
-                  <span className="flex flex-col">
-                    <span className="text-sm font-medium">{option.name}</span>
-                    <span className="text-xs text-muted-foreground">{option.hint}</span>
-                  </span>
-                </Label>
-              ))}
-            </RadioGroup>
-          </fieldset>
+          <form.AppField
+            name="kind"
+            listeners={{
+              onChange: ({ value }) =>
+                form.setFieldValue(
+                  "name",
+                  pickName(kindOptionOf(value)?.names[form.getFieldValue("countryCode")]),
+                ),
+            }}
+          >
+            {(field) => (
+              <field.Group legend={kindWord}>
+                {(control) => (
+                  <RadioGroup
+                    aria-label={kindWord}
+                    name={control.name}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    value={field.state.value}
+                    onValueChange={(value) => {
+                      field.handleChange(value == null ? "" : String(value))
+                      field.handleBlur()
+                    }}
+                    className="grid gap-2 sm:grid-cols-2"
+                  >
+                    {kinds.map((option) => (
+                      <Label
+                        key={option.key}
+                        className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
+                      >
+                        <RadioGroupItem
+                          value={option.key}
+                          className="mt-0.5"
+                          aria-invalid={control.invalid || undefined}
+                        />
+                        <span className="flex flex-col">
+                          <span className="text-sm font-medium">{option.name}</span>
+                          <span className="text-xs text-muted-foreground">{option.hint}</span>
+                        </span>
+                      </Label>
+                    ))}
+                  </RadioGroup>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="pb-2 text-sm font-medium">Tamaño</legend>
-            <RadioGroup
-              aria-label="Tamaño"
-              value={size}
-              onValueChange={(value) => setSize(String(value))}
-              className="grid gap-2"
-            >
-              {(options.data?.sizes ?? []).map((option) => (
-                <Label
-                  key={option.key}
-                  className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
-                >
-                  <RadioGroupItem value={option.key} className="mt-0.5" />
-                  <span className="flex flex-wrap items-baseline gap-x-2">
-                    <span className="text-sm font-medium">{option.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {option.professionals}{" "}
-                      {option.professionals === 1 ? "profesional" : "profesionales"}
-                      {option.branches > 1 ? ` · ${option.branches} sedes` : ""} · unos{" "}
-                      {option.patients.toLocaleString("es")} pacientes
-                    </span>
-                  </span>
-                </Label>
-              ))}
-            </RadioGroup>
-          </fieldset>
+          <form.AppField name="size">
+            {(field) => (
+              <field.Group legend="Tamaño">
+                {(control) => (
+                  <RadioGroup
+                    aria-label="Tamaño"
+                    name={control.name}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    value={field.state.value}
+                    onValueChange={(value) => {
+                      field.handleChange(value == null ? "" : String(value))
+                      field.handleBlur()
+                    }}
+                    className="grid gap-2"
+                  >
+                    {(options.data?.sizes ?? []).map((option) => (
+                      <Label
+                        key={option.key}
+                        className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 font-normal has-data-checked:border-foreground"
+                      >
+                        <RadioGroupItem
+                          value={option.key}
+                          className="mt-0.5"
+                          aria-invalid={control.invalid || undefined}
+                        />
+                        <span className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="text-sm font-medium">{option.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {option.professionals}{" "}
+                            {option.professionals === 1 ? "profesional" : "profesionales"}
+                            {option.branches > 1 ? ` · ${option.branches} sedes` : ""} · unos{" "}
+                            {option.patients.toLocaleString("es")} pacientes
+                          </span>
+                        </span>
+                      </Label>
+                    ))}
+                  </RadioGroup>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
 
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="demo-months">Historia</Label>
-              <Select
-                value={months}
-                onValueChange={(value) => setMonths(String(value))}
-                items={Object.fromEntries(
-                  (options.data?.months ?? []).map((value) => [String(value), `${value} meses`]),
-                )}
-              >
-                <SelectTrigger id="demo-months">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(options.data?.months ?? []).map((value) => (
-                    <SelectItem key={value} value={String(value)}>
-                      {value} meses
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="demo-country">País</Label>
-              <Select
-                value={country}
-                onValueChange={(value) => setCountry(String(value))}
-                items={Object.fromEntries(
-                  (options.data?.countries ?? []).map((item) => [item.code, item.name]),
-                )}
-              >
-                <SelectTrigger id="demo-country">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(options.data?.countries ?? []).map((item) => (
-                    <SelectItem key={item.code} value={item.code}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="demo-name">Nombre</Label>
-            <div className="flex gap-2">
-              <Input
-                id="demo-name"
-                value={name}
-                maxLength={80}
-                onChange={(event) => setName(event.target.value)}
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setName(pickName(kindOption?.names[country]))}
-              >
-                Otro
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Sale del tipo. Puedes poner el de la clínica que visitas: «Pediatría del Dr. Ruiz». Su
-              dirección sale del nombre, sin «demo».
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="demo-presenter">La presenta</Label>
-            <Select
-              value={presenter}
-              onValueChange={(value) => setPresenter(String(value))}
-              items={Object.fromEntries(
-                (options.data?.presenters ?? []).map((item) => [
-                  item.id,
-                  item.id === currentUserId ? `${item.name} (tú)` : item.name,
-                ]),
+            <form.AppField name="months">
+              {(field) => (
+                <field.SelectField
+                  id="demo-months"
+                  label="Historia"
+                  options={(options.data?.months ?? []).map((value) => ({
+                    value: String(value),
+                    label: `${value} meses`,
+                  }))}
+                />
               )}
+            </form.AppField>
+            <form.AppField
+              name="countryCode"
+              listeners={{
+                onChange: ({ value }) =>
+                  form.setFieldValue(
+                    "name",
+                    pickName(kindOptionOf(form.getFieldValue("kind"))?.names[value]),
+                  ),
+              }}
             >
-              <SelectTrigger id="demo-presenter">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(options.data?.presenters ?? []).map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.id === currentUserId ? `${item.name} (tú)` : item.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Alguien del equipo de la administración. Entra como propietario y la ve en «Elige tu
-              clínica»; el resto del equipo de la demo no tiene cuenta.
-            </p>
+              {(field) => (
+                <field.SelectField
+                  id="demo-country"
+                  label="País"
+                  options={(options.data?.countries ?? []).map((item) => ({
+                    value: item.code,
+                    label: item.name,
+                  }))}
+                />
+              )}
+            </form.AppField>
           </div>
+
+          <form.AppField name="name">
+            {(field) => (
+              <field.Control
+                id="demo-name"
+                label="Nombre"
+                description="Sale del tipo. Puedes poner el de la clínica que visitas: «Pediatría del Dr. Ruiz». Su dirección sale del nombre, sin «demo»."
+              >
+                {(control) => (
+                  <div className="flex gap-2">
+                    <Input
+                      {...control.props}
+                      value={field.state.value}
+                      maxLength={80}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        field.handleChange(
+                          pickName(
+                            kindOptionOf(form.getFieldValue("kind"))?.names[
+                              form.getFieldValue("countryCode")
+                            ],
+                          ),
+                        )
+                      }
+                    >
+                      Otro
+                    </Button>
+                  </div>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+
+          <form.AppField name="presenterUserId">
+            {(field) => (
+              <field.SelectField
+                id="demo-presenter"
+                label="La presenta"
+                description="Alguien del equipo de la administración. Entra como propietario y la ve en «Elige tu clínica»; el resto del equipo de la demo no tiene cuenta."
+                options={(options.data?.presenters ?? []).map((item) => ({
+                  value: item.id,
+                  label: item.id === currentUserId ? `${item.name} (tú)` : item.name,
+                }))}
+              />
+            )}
+          </form.AppField>
         </div>
       )}
     </FormDrawer>
@@ -497,7 +568,7 @@ export function DemoProgressDrawer({
   const retry = useMutation({
     mutationFn: async (id: string) => api(`/api/admin/demos/${id}/reset`, { method: "POST" }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["admin-demos"] }),
-    onError: (error) => toast.error(messageOf(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const done = demo?.progress?.done ?? 0
   const total = demo?.progress?.total ?? STEPS.length
@@ -639,7 +710,6 @@ export function DemoBand({
 }) {
   const queryClient = useQueryClient()
   const [confirm, setConfirm] = useState<"reset" | "delete" | null>(null)
-  const [typed, setTyped] = useState("")
   const reset = useMutation({
     mutationFn: async () => api(`/api/admin/demos/${demo.id}/reset`, { method: "POST" }),
     onSuccess: () => {
@@ -648,23 +718,36 @@ export function DemoBand({
       void queryClient.invalidateQueries({ queryKey: ["admin-demos"] })
       void queryClient.invalidateQueries({ queryKey: ["admin-demo-of", demo.organizationId] })
     },
-    onError: (error) => toast.error(messageOf(error)),
   })
   const remove = useMutation({
-    mutationFn: async () =>
+    mutationFn: async (confirmName: string) =>
       api(`/api/admin/demos/${demo.id}`, {
         method: "DELETE",
-        body: JSON.stringify({ confirmName: typed }),
+        body: JSON.stringify({ confirmName }),
       }),
-    onSuccess: () => {
+  })
+  // Borrar pide el nombre escrito tal cual: el mismo control que hace el servidor.
+  const deleteForm = useAppForm({
+    defaultValues: { confirmName: "" },
+    validators: {
+      onSubmit: z.object({
+        confirmName: z
+          .string()
+          .refine((value) => value.trim() === demo.name, "Escribe el nombre de la demo para borrarla"),
+      }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      await remove.mutateAsync(value.confirmName)
+      formApi.reset()
       setConfirm(null)
       toast.success(`«${demo.name}» se borró`)
       void queryClient.invalidateQueries({ queryKey: ["admin-demos"] })
       void queryClient.invalidateQueries({ queryKey: ["admin-organizations"] })
       onDeleted()
     },
-    onError: (error) => toast.error(messageOf(error)),
   })
+  const deleteError = useFormSubmitError(deleteForm)
+  const deleting = useStore(deleteForm.store, (state) => state.isSubmitting)
   const building = demo.status === "pendiente" || demo.status === "creando"
   return (
     <section
@@ -699,9 +782,9 @@ export function DemoBand({
             type="button"
             variant="outline"
             className="text-destructive"
-            disabled={demo.status === "creando"}
+            disabled={building}
             onClick={() => {
-              setTyped("")
+              deleteForm.reset()
               setConfirm("delete")
             }}
           >
@@ -716,28 +799,36 @@ export function DemoBand({
         confirmLabel="Volver a empezar"
         variant="default"
         pending={reset.isPending}
+        error={reset.isError ? submitErrorMessage(reset.error) : null}
         onConfirm={() => reset.mutate()}
-        onClose={() => setConfirm(null)}
+        onClose={() => {
+          reset.reset()
+          setConfirm(null)
+        }}
       />
       <ConfirmDialog
         open={confirm === "delete"}
         title={`¿Borrar «${demo.name}»?`}
         description="Se borran sus pacientes inventados, su historia y su dirección. No se puede deshacer."
         confirmLabel="Borrar demo"
-        pending={remove.isPending}
-        confirmDisabled={typed.trim() !== demo.name}
-        onConfirm={() => remove.mutate()}
-        onClose={() => setConfirm(null)}
+        pending={deleting}
+        error={deleteError}
+        onConfirm={() => void submitForm(deleteForm)}
+        onClose={() => {
+          deleteForm.reset()
+          setConfirm(null)
+        }}
       >
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="demo-confirm-name">Escribe el nombre para confirmar</Label>
-          <Input
-            id="demo-confirm-name"
-            value={typed}
-            autoComplete="off"
-            onChange={(event) => setTyped(event.target.value)}
-          />
-        </div>
+        <deleteForm.AppField name="confirmName">
+          {(field) => (
+            <field.TextField
+              id="demo-confirm-name"
+              label="Escribe el nombre para confirmar"
+              description={`Escribe «${demo.name}» tal cual`}
+              autoComplete="off"
+            />
+          )}
+        </deleteForm.AppField>
       </ConfirmDialog>
     </section>
   )

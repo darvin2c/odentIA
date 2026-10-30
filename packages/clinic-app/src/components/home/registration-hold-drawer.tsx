@@ -1,5 +1,5 @@
 import { Button, cn, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, toast } from "@odentia/ui"
-import { DetailDrawer, internationalText } from "@odentia/ui-patterns"
+import { DetailDrawer, internationalText, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
@@ -76,9 +76,7 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
   const family = data?.rows.find((row) => row.key === "familyName")
   const why = data?.match === "documento" ? "el mismo documento" : "el mismo celular"
   const problem = decide.error
-    ? decide.error instanceof ApiError
-      ? (decide.error.shape.message ?? "No se pudo guardar.")
-      : "No se pudo guardar. Revisa tu conexión."
+    ? submitErrorMessage(decide.error)
     : hold.isError
       ? hold.error instanceof ApiError
         ? (hold.error.shape.message ?? "No se pudo abrir.")
@@ -146,7 +144,7 @@ export function RegistrationHoldDrawer({ taskId, onClose }: { taskId: string | n
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium">Los apellidos no coinciden: ¿cuáles quedan?</p>
               <ChoiceButtons
-                label="Apellidos que quedan"
+                aria-label="Apellidos que quedan"
                 value={familyName}
                 options={[
                   { value: "saved", label: `«${family.saved}», el que ya está` },

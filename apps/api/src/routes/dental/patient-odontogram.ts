@@ -83,13 +83,28 @@ const toothFindingInput = z
       .nullish(),
   })
   .strict()
-const voidInput = z.object({ reason: z.string().trim().min(1).max(2000) })
+const voidInput = z.object({
+  reason: z
+    .string({ error: "Escribe el motivo de la anulación." })
+    .trim()
+    .min(1, "Escribe el motivo de la anulación.")
+    .max(2000, "Escribe el motivo en 2000 caracteres como mucho."),
+})
+const reviewInput = z.object({
+  reason: z
+    .string({ error: "Escribe el motivo de la revisión." })
+    .trim()
+    .min(1, "Escribe el motivo de la revisión.")
+    .max(2000, "Escribe el motivo en 2000 caracteres como mucho."),
+})
 // «Firmar odontograma» (solo en clínicas de Perú): quién firma no se escribe y
 // no hay trazo; nombre, título y colegiatura salen del perfil de quien firma.
 // Un cuerpo que los trae se rechaza (`strict`). El servicio admite aquí solo
 // lo judicial, lo personal y el reingreso.
 const assessmentInput = z.strictObject({
-  purpose: z.enum(["initial", "new_findings", "completion", "reentry", "legal", "personal"]),
+  purpose: z.enum(["initial", "new_findings", "completion", "reentry", "legal", "personal"], {
+    error: "Elige para qué se firma.",
+  }),
   specifications: z.string().trim().max(4000).nullish(),
   observations: z.string().trim().max(4000).nullish(),
 })
@@ -158,7 +173,7 @@ export function createPatientOdontogramRoute(deps: CrmDeps) {
   })
   app.post("/:id/odontogram/entries/:entryId/review", async (c) => {
     const { orgId, userId } = orgContextOf(c)
-    const parsed = voidInput.safeParse(await c.req.json().catch(() => null))
+    const parsed = reviewInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>

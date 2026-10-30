@@ -13,6 +13,8 @@ import { orgContextOf } from "../lib/context.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const field = z.string().trim().min(1).max(200)
+const QUANTITY = "La cantidad es un número entero de 1 a 9999."
+const WEIGHT = "Escribe el peso en kilos, de 0,5 a 400."
 const item = z
   .object({
     genericName: field,
@@ -23,26 +25,28 @@ const item = z
     route: z.enum(ADMINISTRATION_ROUTES),
     frequency: field,
     duration: field,
-    quantity: z.number().int().positive().max(9999).nullish(),
-    instructions: z.string().max(2000).nullish(),
+    quantity: z.number(QUANTITY).int(QUANTITY).positive(QUANTITY).max(9999, QUANTITY).nullish(),
+    instructions: z.string().max(2000, "Las instrucciones tienen como mucho 2000 caracteres.").nullish(),
   })
   .strict()
 const createInput = z
   .object({
     encounterId: z.uuid().nullish(),
     planItemId: z.uuid().nullish(),
-    notes: z.string().max(2000).nullish(),
+    notes: z.string().max(2000, "Las notas tienen como mucho 2000 caracteres.").nullish(),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
-    validUntil: z.iso.date().nullish(),
+    validUntil: z.iso.date("Elige la fecha en el calendario.").nullish(),
     acknowledgeAllergies: z.boolean().optional(),
-    allergyOverrideReason: z.string().max(500).nullish(),
+    allergyOverrideReason: z.string().max(500, "El motivo para recetar igual tiene como mucho 500 caracteres.").nullish(),
     /** El peso (kg) con que se receta; latidIA lo pide a un menor de 12 años (issue 229). */
-    patientWeightKg: z.number().min(0.5).max(400).nullish(),
-    items: z.array(item).min(1).max(20),
+    patientWeightKg: z.number(WEIGHT).min(0.5, WEIGHT).max(400, WEIGHT).nullish(),
+    items: z.array(item).min(1, "Añade al menos un medicamento.").max(20, "La receta lleva hasta 20 medicamentos."),
   })
   .strict()
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({ reason: z.string().trim().min(1, "Escribe el motivo de la anulación.").max(2000) })
+  .strict()
 
 export function createPatientPrescriptionsRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()

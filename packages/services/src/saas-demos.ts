@@ -25,7 +25,7 @@ import {
   purgeDemoOrganization,
 } from "./demo-build.js"
 import { DEMO_COUNTRIES, DEMO_SIZE_RECIPES } from "./demo-recipes.js"
-import { ServiceError } from "./errors.js"
+import { invalidField, ServiceError } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { demoKindsFor } from "./products.js"
 import { dayStart, reportDayOf } from "./report-periods.js"
@@ -41,10 +41,6 @@ import { dayStart, reportDayOf } from "./report-periods.js"
 export const DEMO_IDLE_DAYS = 60
 export const DEMO_WARN_DAYS = 7
 const DAY = 86_400_000
-
-function validation(message: string): ServiceError {
-  return new ServiceError("VALIDATION", 400, message)
-}
 
 function requireManager(actor: AdminActor): void {
   if (actor.role !== "admin")
@@ -123,30 +119,28 @@ async function freeSlug(tx: Db, name: string): Promise<string> {
       .limit(1)
     if (!taken && !planned) return slug
   }
-  throw new ServiceError(
-    "CONFLICT",
-    409,
-    "No hay un subdominio libre para ese nombre: prueba con otro",
-  )
+  const message = "No hay un subdominio libre para ese nombre: prueba con otro"
+  throw new ServiceError("CONFLICT", 409, message, { name: message })
 }
 
 /** Pide una demo: queda «pendiente» y el worker la arma. */
 export async function requestDemo(tx: Db, actor: AdminActor, input: DemoRequestInput) {
   requireManager(actor)
-  if (!CLINICAL_PRODUCTS.includes(input.product)) throw validation("Elige el producto")
+  if (!CLINICAL_PRODUCTS.includes(input.product)) throw invalidField("product", "Elige el producto")
   demoKindOf(input.product, input.kind)
   demoCountryOf(input.countryCode)
-  if (!DEMO_SIZES.includes(input.size)) throw validation("Elige el tamaño")
+  if (!DEMO_SIZES.includes(input.size)) throw invalidField("size", "Elige el tamaño")
   if (!(DEMO_MONTHS as readonly number[]).includes(input.months))
-    throw validation("La historia es de 6, 12 o 24 meses")
+    throw invalidField("months", "La historia es de 6, 12 o 24 meses")
   const name = input.name.trim().replace(/\s+/g, " ")
-  if (name.length < 3 || name.length > 80) throw validation("El nombre va de 3 a 80 letras")
+  if (name.length < 3 || name.length > 80) throw invalidField("name", "El nombre va de 3 a 80 letras")
   const [presenter] = await tx
     .select({ id: adminStaff.userId })
     .from(adminStaff)
     .where(and(eq(adminStaff.userId, input.presenterUserId), eq(adminStaff.active, true)))
     .limit(1)
-  if (!presenter) throw validation("Quien presenta es alguien del equipo de la administración")
+  if (!presenter)
+    throw invalidField("presenterUserId", "Quien presenta es alguien del equipo de la administración")
   const slug = await freeSlug(tx, name)
   const [row] = await tx
     .insert(saasDemo)
@@ -419,7 +413,7 @@ export async function deleteDemo(
   if (actor) requireManager(actor)
   const row = await requireDemo(tx, id, true)
   if (actor && (confirmName ?? "").trim() !== row.name)
-    throw validation("Escribe el nombre de la demo para borrarla")
+    throw invalidField("confirmName", "Escribe el nombre de la demo para borrarla")
   // Pendiente también: el worker podría tomarla en cualquier momento. Una que
   // falló sí se borra (lo que quedó es la clínica de antes, entera).
   if (row.status === "creando" || row.status === "pendiente")

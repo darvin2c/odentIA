@@ -1,3 +1,4 @@
+import { configureZodMessages } from "@odentia/clinical"
 import { createRouter } from "@tanstack/react-router"
 import { dentalUi } from "./product/dental"
 import { declareProduct } from "@odentia/clinic-app/product/product-ui"
@@ -5,6 +6,8 @@ import { routeTree } from "./routeTree.gen"
 
 // Esta es la app de odentIA: lo común le pide sus partes al producto dental (ADR 0079).
 declareProduct(dentalUi)
+// Lo que dice una regla sin mensaje propio, en el español de la interfaz.
+configureZodMessages()
 
 export function getRouter() {
   return createRouter({

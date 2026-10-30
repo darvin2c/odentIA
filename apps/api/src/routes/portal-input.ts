@@ -18,4 +18,9 @@ export const portalAccessInput = z.strictObject({
   delivery: z.enum(["qr", "whatsapp"]),
 })
 export const portalIdInput = z.strictObject({ id: z.uuid() })
-export const portalSlugInput = z.string().min(1).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+/** El código de la clínica (su dirección): el paciente lo escribe, así que cada regla dice qué revisar. */
+export const portalSlugInput = z
+  .string("Escribe el código de la clínica.")
+  .min(1, "Escribe el código de la clínica.")
+  .max(100, "El código de la clínica tiene como mucho 100 caracteres.")
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Revisa el código de la clínica: solo letras, números y guiones.")

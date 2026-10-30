@@ -253,7 +253,10 @@ describe("corregir propone una lección; nada cambia hasta aprobarla", () => {
 
     const edited = await run((tx) => updateLesson(tx, ORG, OWNER, lesson.id, { kind: "regla", title: "No prometer resultados", body: "No prometas resultados del blanqueamiento." }))
     expect(edited).toMatchObject({ kind: "regla", scope: "recepcion", title: "No prometer resultados", knowledgeEntryId: null })
-    await expect(run((tx) => updateLesson(tx, ORG, OWNER, lesson.id, { kind: "inventada" }))).rejects.toThrow(/Clase/)
+    await expect(run((tx) => updateLesson(tx, ORG, OWNER, lesson.id, { kind: "inventada" }))).rejects.toMatchObject({
+      code: "VALIDATION",
+      fields: { kind: expect.any(String) },
+    })
 
     const other = await inbound("descartar", "¿Venden cepillos?")
     const otherTrace = await agentReplies(other.conversationId, other.messageId, "Sí.")

@@ -19,7 +19,9 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
-  FieldLabel,
+  FieldLegend,
+  FieldSet,
+  Label,
   RadioGroup,
   RadioGroupItem,
   ScrollArea,
@@ -27,10 +29,9 @@ import {
   TabsList,
   TabsTrigger,
 } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import { SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ApiError } from "@odentia/clinic-app/lib/api"
 import { type PeriodontalChart as ChartData, periodontalKeys, savePeriodontalTooth, toothSaveBody } from "../../../lib/dental/periodontal"
 import { isUpper, PlaqueTooth } from "./anatomy"
 import {
@@ -62,40 +63,53 @@ const FURCATION_GRADES = [0, 1, 2, 3]
 
 /**
  * Un grado que se elige entre pocos (movilidad, furca): el `RadioGroup` del
- * sistema con cada opción como una píldora. `byKeyboard` dice si se eligió con
- * las flechas, para no sacar el foco del grupo mientras se recorre.
+ * sistema con cada opción como una píldora, dentro de su grupo con el nombre a
+ * la vista (`legend`). `byKeyboard` dice si se eligió con las flechas, para no
+ * sacar el foco del grupo mientras se recorre.
  */
 function PillRadios({
+  legend,
   label,
   value,
   options,
   onChange,
+  children,
 }: {
+  legend: string
+  /** Nombre del grupo de opciones para el lector de pantalla, con la pieza. */
   label: string
   value: string
   options: Array<{ value: string; label: string; aria?: string }>
   onChange: (value: string, byKeyboard: boolean) => void
+  children?: React.ReactNode
 }) {
   return (
-    <RadioGroup
-      aria-label={label}
-      className="flex flex-wrap gap-1"
-      value={value}
-      onValueChange={(next, details) => onChange(String(next), details.event instanceof KeyboardEvent)}
-    >
-      {options.map((option) => (
-        <FieldLabel
-          key={option.value}
-          className={cn(
-            "flex h-9 w-auto cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-sm font-semibold",
-            value === option.value ? "border-primary bg-primary-soft text-primary-soft-foreground" : "text-muted-foreground",
-          )}
-        >
-          <RadioGroupItem value={option.value} aria-label={option.aria ?? option.label} />
-          {option.label}
-        </FieldLabel>
-      ))}
-    </RadioGroup>
+    <FieldSet className="flex-row flex-wrap items-center gap-2">
+      {/* Flotante: queda en la fila, junto a las opciones, como un elemento más. */}
+      <FieldLegend variant="label" className="float-left mb-0 w-32">
+        {legend}
+      </FieldLegend>
+      <RadioGroup
+        aria-label={label}
+        className="flex flex-wrap gap-1"
+        value={value}
+        onValueChange={(next, details) => onChange(String(next), details.event instanceof KeyboardEvent)}
+      >
+        {options.map((option) => (
+          <Label
+            key={option.value}
+            className={cn(
+              "flex h-9 w-auto cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-sm font-semibold",
+              value === option.value ? "border-primary bg-primary-soft text-primary-soft-foreground" : "text-muted-foreground",
+            )}
+          >
+            <RadioGroupItem value={option.value} aria-label={option.aria ?? option.label} />
+            {option.label}
+          </Label>
+        ))}
+      </RadioGroup>
+      {children}
+    </FieldSet>
   )
 }
 const FURCATION_WORDS: Record<string, string> = {
@@ -119,6 +133,8 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [state, setState] = useState<SaveState>("saved")
   const [error, setError] = useState<string | null>(null)
+  /** La pieza que no se pudo guardar: el aviso la nombra y el gráfico la marca. */
+  const [failedTooth, setFailedTooth] = useState<number | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
 
   const drain = useCallback((): Promise<void> => {
@@ -136,14 +152,18 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
           if (isOffline(err)) {
             setState("offline")
           } else {
+            // Para cuando sale el error el cursor ya está en otra pieza: se dice cuál era.
+            const message = submitErrorMessage(err)
             setState("error")
-            setError(err instanceof ApiError && err.shape.message ? err.shape.message : "No se pudo guardar la pieza")
+            setFailedTooth(tooth)
+            setError(message.startsWith(`Pieza ${tooth}:`) ? message : `Pieza ${tooth}: ${message}`)
           }
           return
         }
       }
       setState("saved")
       setError(null)
+      setFailedTooth(null)
       setSavedAt(new Date())
       void queryClient.invalidateQueries({ queryKey: periodontalKeys.list(patientId) })
       void queryClient.invalidateQueries({ queryKey: periodontalKeys.chart(patientId, chartId) })
@@ -186,7 +206,7 @@ function useToothSaver(patientId: string, chartId: string, latest: React.RefObje
     return pending.current.size === 0
   }, [drain])
 
-  return { state, error, savedAt, schedule, flush, retry: () => void drain() }
+  return { state, error, failedTooth, savedAt, schedule, flush, retry: () => void drain() }
 }
 
 export function PeriodontalCapture({
@@ -454,50 +474,48 @@ export function PeriodontalCapture({
       {!implant && record ? (
         <div className="flex flex-col gap-3 border-t pt-3">
           {step.face === "buccal" ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="w-32 text-sm font-medium">Movilidad (Miller)</span>
-              <PillRadios
-                label={`Movilidad de la ${step.toothNumber}`}
-                value={record.mobility === null ? "" : String(record.mobility)}
-                options={MOBILITY_GRADES.map((grade) => ({ value: String(grade), label: String(grade) }))}
-                onChange={(next, byKeyboard) => {
-                  const grade = Number(next)
-                  updateTooth(
-                    step.toothNumber,
-                    (tooth) => ({ ...tooth, mobility: grade }),
-                    grade === 0 ? `${step.toothNumber}: sin movilidad` : `${step.toothNumber}: movilidad ${grade}, se verá en el odontograma como M${grade}`,
-                    !byKeyboard,
-                  )
-                }}
-              />
+            <PillRadios
+              legend="Movilidad (Miller)"
+              label={`Movilidad de la ${step.toothNumber}`}
+              value={record.mobility === null ? "" : String(record.mobility)}
+              options={MOBILITY_GRADES.map((grade) => ({ value: String(grade), label: String(grade) }))}
+              onChange={(next, byKeyboard) => {
+                const grade = Number(next)
+                updateTooth(
+                  step.toothNumber,
+                  (tooth) => ({ ...tooth, mobility: grade }),
+                  grade === 0 ? `${step.toothNumber}: sin movilidad` : `${step.toothNumber}: movilidad ${grade}, se verá en el odontograma como M${grade}`,
+                  !byKeyboard,
+                )
+              }}
+            >
               {record.mobility ? <span className="text-xs text-muted-foreground">En el odontograma: M{record.mobility}</span> : null}
-            </div>
+            </PillRadios>
           ) : null}
           {furcationEntriesFor(step.toothNumber)
             .filter((entry) => (step.face === "buccal" ? entry === "buccal" : entry !== "buccal"))
             .map((entry) => (
-              <div key={entry} className="flex flex-wrap items-center gap-2">
-                <span className="w-32 text-sm font-medium">{FURCATION_WORDS[entry]}</span>
-                <PillRadios
-                  label={`${FURCATION_WORDS[entry]} de la ${step.toothNumber} (Hamp)`}
-                  value={String(record.furcation[entry] ?? 0)}
-                  options={FURCATION_GRADES.map((grade) => ({ value: String(grade), label: HAMP[grade]!, aria: grade === 0 ? "Sin furca" : `Grado ${HAMP[grade]}` }))}
-                  onChange={(next, byKeyboard) => {
-                    const grade = Number(next)
-                    updateTooth(
-                      step.toothNumber,
-                      (tooth) => {
-                        const furcation = { ...tooth.furcation }
-                        if (grade === 0) delete furcation[entry]
-                        else furcation[entry] = grade as 1 | 2 | 3
-                        return { ...tooth, furcation }
-                      },
-                      grade === 0 ? `${step.toothNumber}: sin furca` : `${step.toothNumber}: furca grado ${HAMP[grade]}`,
-                      !byKeyboard,
-                    )
-                  }}
-                />
-              </div>
+              <PillRadios
+                key={entry}
+                legend={FURCATION_WORDS[entry] ?? entry}
+                label={`${FURCATION_WORDS[entry]} de la ${step.toothNumber} (Hamp)`}
+                value={String(record.furcation[entry] ?? 0)}
+                options={FURCATION_GRADES.map((grade) => ({ value: String(grade), label: HAMP[grade] ?? "", aria: grade === 0 ? "Sin furca" : `Grado ${HAMP[grade]}` }))}
+                onChange={(next, byKeyboard) => {
+                  const grade = Number(next)
+                  updateTooth(
+                    step.toothNumber,
+                    (tooth) => {
+                      const furcation = { ...tooth.furcation }
+                      if (grade === 0) delete furcation[entry]
+                      else furcation[entry] = grade as 1 | 2 | 3
+                      return { ...tooth, furcation }
+                    },
+                    grade === 0 ? `${step.toothNumber}: sin furca` : `${step.toothNumber}: furca grado ${HAMP[grade]}`,
+                    !byKeyboard,
+                  )
+                }}
+              />
             ))}
         </div>
       ) : null}
@@ -607,6 +625,7 @@ export function PeriodontalCapture({
                   expectedTeeth={chart.expectedTeeth}
                   implantTeeth={chart.implantTeeth}
                   selected={step?.toothNumber ?? null}
+                  failed={saver.failedTooth}
                   marker={
                     step && !capture.done
                       ? { tooth: step.toothNumber, face: chartFace(step), position: typingPositions(step)[capture.cursor.field % 3]! }

@@ -12,18 +12,21 @@ import { orgContextOf } from "../lib/context.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 /** El descanso médico (issue 229, decisión 8): emitir, listar, imprimir y anular, como la receta. */
+const DAYS = `Los días de descanso van de 1 a ${MEDICAL_LEAVE_MAX_DAYS}.`
 const createInput = z
   .object({
     encounterId: z.uuid().nullish(),
-    startsOn: z.iso.date().nullish(),
-    days: z.number().int().min(1).max(MEDICAL_LEAVE_MAX_DAYS),
+    startsOn: z.iso.date("Elige el primer día del descanso en el calendario.").nullish(),
+    days: z.number(DAYS).int(DAYS).min(1, DAYS).max(MEDICAL_LEAVE_MAX_DAYS, DAYS),
     showDiagnosis: z.boolean().optional(),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
     notes: z.string().max(2000).nullish(),
   })
   .strict()
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({ reason: z.string().trim().min(1, "Escribe el motivo de la anulación.").max(2000) })
+  .strict()
 const leaveParams = z.object({ id: z.uuid(), leaveId: z.uuid() })
 
 export function createPatientMedicalLeavesRoute(deps: Pick<CrmDeps, "db">) {

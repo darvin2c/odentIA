@@ -7,9 +7,6 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-  Field,
-  FieldDescription,
-  FieldLabel,
 } from "@odentia/ui"
 import { internationalText } from "@odentia/ui-patterns"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
@@ -53,13 +50,20 @@ export function pickedOf(row: PersonListItem): PickedPerson {
  * cita, el cobro, la tarea, la oportunidad, el portal, vincular personas y
  * los responsables. Con `patientsOnly` solo ofrece pacientes (lo que exige una
  * ficha). Lo puede usar quien ve a las personas (`patients.read`).
+ *
+ * La etiqueta, la ayuda y el error los pinta la pantalla: `id` va al buscador
+ * o, con una persona elegida, a la persona mostrada, así la etiqueta siempre
+ * la nombra.
  */
 export function PersonPicker({
+  id: idProp,
   label = "Persona",
   value,
   onChange,
   disabled = false,
-  description,
+  invalid = false,
+  onBlur,
+  "aria-describedby": describedBy,
   placeholder = "Buscar por nombre, teléfono o documento",
   patientsOnly = false,
   includeArchived = false,
@@ -67,11 +71,16 @@ export function PersonPicker({
   onCreate,
   createLabel = (typed) => `Crear a ${typed}`,
 }: {
+  id?: string
+  /** El nombre de lo que se busca, para la lista y su botón (la etiqueta visible es de la pantalla). */
   label?: string
   value: PickedPerson | null
   onChange: (person: PickedPerson | null) => void
   disabled?: boolean
-  description?: string
+  /** El error lo dice la pantalla: el campo solo se marca. */
+  invalid?: boolean
+  onBlur?: () => void
+  "aria-describedby"?: string
   placeholder?: string
   /** Solo pacientes: para lo que necesita una ficha (cita, cobro, portal). */
   patientsOnly?: boolean
@@ -84,7 +93,8 @@ export function PersonPicker({
   /** Texto del botón de crear: «Registrar a …». */
   createLabel?: (query: string) => string
 }) {
-  const id = useId()
+  const fallbackId = useId()
+  const id = idProp ?? fallbackId
   const [query, setQuery] = useState("")
   const [debounced, setDebounced] = useState("")
   const [open, setOpen] = useState(false)
@@ -110,142 +120,149 @@ export function PersonPicker({
 
   if (value) {
     return (
-      <Field>
-        <FieldLabel>{label}</FieldLabel>
-        <div className="flex min-h-11 items-center justify-between gap-2 rounded-md border px-3 py-1.5">
-          <span className="min-w-0">
-            <span className="block truncate font-medium">{value.name}</span>
-            {value.patientNumber || value.phone ? (
-              <span className="block text-xs text-muted-foreground">
-                {[
-                  value.patientNumber ? hcLabel(value.patientNumber) : null,
-                  value.phone ? internationalText(value.phone) : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            ) : null}
-          </span>
-          {!disabled ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onChange(null)}
-              aria-label={`Quitar a ${value.name}`}
-            >
-              <X aria-hidden />
-              Cambiar
-            </Button>
+      // biome-ignore lint/a11y/noStaticElementInteractions: solo escucha cuándo el foco sale de lo que tiene dentro, para dar el campo por visitado.
+      <div
+        className="flex min-h-11 items-center justify-between gap-2 rounded-md border px-3 py-1.5"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) onBlur?.()
+        }}
+      >
+        {/* La persona es lo que nombra la etiqueta: `output` se asocia a ella sin activarse al tocarla. */}
+        <output
+          id={id}
+          tabIndex={-1}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          className="min-w-0 outline-none"
+        >
+          <span className="block truncate font-medium">{value.name}</span>
+          {value.patientNumber || value.phone ? (
+            <span className="block text-xs text-muted-foreground">
+              {[
+                value.patientNumber ? hcLabel(value.patientNumber) : null,
+                value.phone ? internationalText(value.phone) : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
           ) : null}
-        </div>
-        {description ? <FieldDescription>{description}</FieldDescription> : null}
-      </Field>
+        </output>
+        {!disabled ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange(null)}
+            aria-label={`Quitar a ${value.name}`}
+          >
+            <X aria-hidden />
+            Cambiar
+          </Button>
+        ) : null}
+      </div>
     )
   }
 
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Combobox
-        items={items}
-        filter={null}
+    <Combobox
+      items={items}
+      filter={null}
+      disabled={disabled}
+      open={open && !disabled}
+      onOpenChange={setOpen}
+      value={null}
+      isItemEqualToValue={(a: PickedPerson, b: PickedPerson) => a.id === b.id}
+      itemToStringValue={(item: PickedPerson) => item.id}
+      itemToStringLabel={(item: PickedPerson) => item.name}
+      inputValue={query}
+      onInputValueChange={(next, details) => {
+        if (details.reason === "input-change") {
+          setQuery(next)
+          setOpen(true)
+        } else if (details.reason === "input-clear" || details.reason === "clear-press") {
+          setQuery("")
+        }
+      }}
+      onValueChange={(item: PickedPerson | null) => {
+        if (item) {
+          onChange(item)
+          setQuery("")
+          setOpen(false)
+        }
+      }}
+    >
+      <ComboboxInput
+        id={id}
         disabled={disabled}
-        open={open && !disabled}
-        onOpenChange={setOpen}
-        value={null}
-        isItemEqualToValue={(a: PickedPerson, b: PickedPerson) => a.id === b.id}
-        itemToStringValue={(item: PickedPerson) => item.id}
-        itemToStringLabel={(item: PickedPerson) => item.name}
-        inputValue={query}
-        onInputValueChange={(next, details) => {
-          if (details.reason === "input-change") {
-            setQuery(next)
-            setOpen(true)
-          } else if (details.reason === "input-clear" || details.reason === "clear-press") {
-            setQuery("")
-          }
-        }}
-        onValueChange={(item: PickedPerson | null) => {
-          if (item) {
-            onChange(item)
-            setQuery("")
-            setOpen(false)
-          }
-        }}
-      >
-        <ComboboxInput
-          id={id}
-          disabled={disabled}
-          placeholder={placeholder}
-          aria-label={label}
-          triggerLabel={`Mostrar personas: ${label}`}
-        />
-        <ComboboxContent aria-label={label}>
-          {results.isError ? (
-            <div role="alert" className="flex flex-col gap-2 p-2">
-              <p className="text-sm text-destructive">No se pudo buscar.</p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => void results.refetch()}
-              >
-                Reintentar
-              </Button>
-            </div>
-          ) : (
-            <>
-              <ComboboxList aria-label={label}>
-                {(item: PickedPerson) => (
-                  <ComboboxItem
-                    key={item.id}
-                    value={item}
-                    className="flex-col items-start gap-0 py-2"
+        placeholder={placeholder}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        onBlur={() => onBlur?.()}
+        triggerLabel={`Mostrar personas: ${label}`}
+      />
+      <ComboboxContent aria-label={label}>
+        {results.isError ? (
+          <div role="alert" className="flex flex-col gap-2 p-2">
+            <p className="text-sm text-destructive">No se pudo buscar.</p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void results.refetch()}
+            >
+              Reintentar
+            </Button>
+          </div>
+        ) : (
+          <>
+            <ComboboxList aria-label={label}>
+              {(item: PickedPerson) => (
+                <ComboboxItem
+                  key={item.id}
+                  value={item}
+                  className="flex-col items-start gap-0 py-2"
+                >
+                  <span className="font-medium">{item.name}</span>
+                  {item.patientNumber || item.phone ? (
+                    <span className="text-muted-foreground">
+                      {[
+                        item.patientNumber ? hcLabel(item.patientNumber) : null,
+                        item.phone ? internationalText(item.phone) : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  ) : null}
+                </ComboboxItem>
+              )}
+            </ComboboxList>
+            <ComboboxEmpty>
+              {results.isFetching ? (
+                "Buscando…"
+              ) : onCreate && query.trim().length >= 2 ? (
+                <span className="grid w-full gap-1.5 px-2">
+                  <span>Nadie con ese nombre, teléfono o documento.</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      onCreate(query.trim())
+                      setOpen(false)
+                    }}
                   >
-                    <span className="font-medium">{item.name}</span>
-                    {item.patientNumber || item.phone ? (
-                      <span className="text-muted-foreground">
-                        {[
-                          item.patientNumber ? hcLabel(item.patientNumber) : null,
-                          item.phone ? internationalText(item.phone) : null,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </span>
-                    ) : null}
-                  </ComboboxItem>
-                )}
-              </ComboboxList>
-              <ComboboxEmpty>
-                {results.isFetching ? (
-                  "Buscando…"
-                ) : onCreate && query.trim().length >= 2 ? (
-                  <span className="grid w-full gap-1.5 px-2">
-                    <span>Nadie con ese nombre, teléfono o documento.</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        onCreate(query.trim())
-                        setOpen(false)
-                      }}
-                    >
-                      {createLabel(query.trim())}
-                    </Button>
-                  </span>
-                ) : patientsOnly ? (
-                  "Ningún paciente con ese nombre, teléfono o documento."
-                ) : (
-                  "Nadie con ese nombre, teléfono o documento."
-                )}
-              </ComboboxEmpty>
-            </>
-          )}
-        </ComboboxContent>
-      </Combobox>
-      {description ? <FieldDescription>{description}</FieldDescription> : null}
-    </Field>
+                    {createLabel(query.trim())}
+                  </Button>
+                </span>
+              ) : patientsOnly ? (
+                "Ningún paciente con ese nombre, teléfono o documento."
+              ) : (
+                "Nadie con ese nombre, teléfono o documento."
+              )}
+            </ComboboxEmpty>
+          </>
+        )}
+      </ComboboxContent>
+    </Combobox>
   )
 }

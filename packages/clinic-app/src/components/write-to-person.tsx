@@ -6,14 +6,22 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  FieldLabel,
   Spinner,
 } from "@odentia/ui"
-import { normalizeCountry, PhoneInput, SubmitButton } from "@odentia/ui-patterns"
+import {
+  normalizeCountry,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
 import { useOrgProfile } from "../lib/org"
 
@@ -49,14 +57,12 @@ export function useWriteToPerson() {
   })
 }
 
-function codeOf(error: unknown): string | null {
-  return error instanceof ApiError ? (error.shape.code ?? null) : null
-}
-
-function messageOf(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? "No se pudo abrir la conversación."
-  return error instanceof Error ? error.message : "No se pudo abrir la conversación."
-}
+const phoneSchema = z.object({
+  phone: z
+    .string()
+    .nullable()
+    .refine((value) => value !== null, "Escribe su número de WhatsApp."),
+})
 
 /**
  * «Escribirle»: la única forma de escribirle a una persona desde la ficha, la
@@ -80,24 +86,42 @@ export function WriteToPersonDialog({
   const navigate = useNavigate()
   const profile = useOrgProfile()
   const write = useWriteToPerson()
-  const phoneId = useId()
   const [chosen, setChosen] = useState<WriteTarget | null>(null)
-  const [phone, setPhone] = useState<string | null>(null)
-  const needsPhone = codeOf(write.error) === "NO_PHONE"
+  // Se pide el número desde que el servidor dijo que no tiene (`NO_PHONE`) y hasta
+  // cerrar: un número rechazado se dice en su campo, sin que el campo desaparezca.
+  const [needsPhone, setNeedsPhone] = useState(false)
 
-  const go = (target: WriteTarget, typed?: string) => {
+  const openConversation = (conversationId: string) => {
+    onClose()
+    void navigate({
+      to: "/inbox",
+      search: prepareRegistration
+        ? { conversation: conversationId, prepareRegistration: true as const }
+        : { conversation: conversationId },
+    })
+  }
+
+  const phoneForm = useAppForm({
+    defaultValues: { phone: null as string | null },
+    validators: { onSubmit: phoneSchema },
+    onSubmit: async ({ value }) => {
+      if (!chosen || !value.phone) return
+      const result = await write.mutateAsync({ contactId: chosen.contactId, phone: value.phone })
+      openConversation(result.conversationId)
+    },
+  })
+  const submitPhone = useFormSubmit(phoneForm)
+  const phoneError = useFormSubmitError(phoneForm)
+  const phoneSubmitting = useStore(phoneForm.store, (state) => state.isSubmitting)
+
+  const go = (target: WriteTarget) => {
     setChosen(target)
     write.mutate(
-      { contactId: target.contactId, ...(typed ? { phone: typed } : {}) },
+      { contactId: target.contactId },
       {
-        onSuccess: (result) => {
-          onClose()
-          void navigate({
-            to: "/inbox",
-            search: prepareRegistration
-              ? { conversation: result.conversationId, prepareRegistration: true as const }
-              : { conversation: result.conversationId },
-          })
+        onSuccess: (result) => openConversation(result.conversationId),
+        onError: (error) => {
+          if (error instanceof ApiError && error.shape.code === "NO_PHONE") setNeedsPhone(true)
         },
       },
     )
@@ -108,7 +132,8 @@ export function WriteToPersonDialog({
   useEffect(() => {
     if (!open) return
     write.reset()
-    setPhone(null)
+    phoneForm.reset({ phone: null })
+    setNeedsPhone(false)
     setChosen(null)
     const only = people.length === 1 ? people[0] : undefined
     if (only) go(only)
@@ -164,28 +189,26 @@ export function WriteToPersonDialog({
             ))}
           </ul>
         ) : needsPhone && chosen ? (
-          <form
-            className="grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (phone) go(chosen, phone)
-            }}
-          >
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor={phoneId}>Su número de WhatsApp</FieldLabel>
-              <PhoneInput
-                id={phoneId}
-                value={phone}
-                defaultCountry={normalizeCountry(profile.data?.countryCode)}
-                onChange={setPhone}
-              />
-              <p className="text-xs text-muted-foreground">Queda como su WhatsApp para las próximas veces.</p>
-            </div>
+          <form className="grid gap-3" noValidate onSubmit={submitPhone}>
+            <phoneForm.AppField name="phone">
+              {(field) => (
+                <field.PhoneField
+                  label="Su número de WhatsApp"
+                  description="Queda como su WhatsApp para las próximas veces."
+                  defaultCountry={normalizeCountry(profile.data?.countryCode)}
+                />
+              )}
+            </phoneForm.AppField>
+            {phoneError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {phoneError}
+              </p>
+            ) : null}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={onClose}>
+              <Button type="button" variant="outline" disabled={phoneSubmitting} onClick={onClose}>
                 Cancelar
               </Button>
-              <SubmitButton type="submit" disabled={!phone} pending={write.isPending}>
+              <SubmitButton type="submit" pending={phoneSubmitting}>
                 Escribirle
               </SubmitButton>
             </DialogFooter>
@@ -200,7 +223,7 @@ export function WriteToPersonDialog({
         {write.error && !needsPhone ? (
           <div className="grid gap-3">
             <p role="alert" className="text-sm text-destructive">
-              {messageOf(write.error)}
+              {submitErrorMessage(write.error)}
             </p>
             <DialogFooter>
               <Button variant="outline" onClick={onClose}>

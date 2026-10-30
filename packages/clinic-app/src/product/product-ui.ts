@@ -107,6 +107,13 @@ export interface ProductHealthUi {
   asksPregnancy: boolean
   /** Sus secciones de la entrevista, después de «Familiares». */
   InterviewSections(props: InterviewSectionsProps): ReactNode
+  /**
+   * Lo suyo de la entrevista que no pasa, antes de guardar, con las mismas
+   * reglas que el servidor: «grupo.clave» → qué corregir (las claves de
+   * `InterviewSectionsProps.errors`). Vacío si todo está bien. `today`: el día
+   * de la clínica (YYYY-MM-DD).
+   */
+  validate(answers: Record<string, unknown>, today: string): SubFieldErrors
   /** Lo suyo, ya guardado, debajo del resumen de antecedentes; null si nada. */
   Summary(props: { answers: Record<string, unknown> }): ReactNode
 }
@@ -123,6 +130,13 @@ export interface InterviewSectionsProps {
   idPrefix: string
   /** El sexo de la ficha: lo gineco-obstétrico no se le pregunta a un hombre. */
   sex: string | null
+  /**
+   * El error de cada dato, junto a él: la clave es «grupo.clave» de la
+   * entrevista («habitos.tabaco», «antecedentesOdontologicos.ultimaVisita»;
+   * en una lista, con su lugar: «vacunas.0.vacuna»). Cada sección lo pinta bajo
+   * su campo, con `aria-invalid` y `aria-describedby` en el control.
+   */
+  errors?: SubFieldErrors
 }
 
 export interface ProductSummaryUi {
@@ -186,6 +200,40 @@ export interface ExaminationFieldsProps {
   draft: unknown
   onChange(next: unknown): void
   disabled: boolean
+  /**
+   * El error de cada dato del examen, junto a él: la clave es su ruta en lo que
+   * se guarda (`body`), como la señala el servidor («extraoral.atm»,
+   * «higieneOral», «sistemas.respiratorio» para el estado de un sistema,
+   * «sistemas.respiratorio.hallazgo»). Cada campo lo pinta
+   * debajo, con `aria-invalid` y `aria-describedby` en su control.
+   */
+  errors?: SubFieldErrors
+}
+
+/** Los errores de un bloque con varios datos, por la ruta de cada uno. */
+export type SubFieldErrors = Partial<Record<string, string>>
+
+/**
+ * Lo que necesita un dato de un bloque para mostrar su error: `invalid` y
+ * `describedBy` para su control, `data-invalid` del `Field` y el `FieldError`
+ * con `errorId` y `message`. Sin error, todo queda en `undefined`.
+ */
+export interface SubFieldError {
+  message: string | undefined
+  errorId: string
+  invalid: true | undefined
+  describedBy: string | undefined
+}
+
+export function subFieldError(errors: SubFieldErrors | undefined, key: string, controlId: string): SubFieldError {
+  const message = errors?.[key]
+  const errorId = `${controlId}-error`
+  return {
+    message,
+    errorId,
+    invalid: message ? true : undefined,
+    describedBy: message ? errorId : undefined,
+  }
 }
 
 /** Lo que el editor de la atención le da a los bloques del producto. */
@@ -281,6 +329,10 @@ export interface ProductLeavesUi {
     variant: string
     onChange: (condition: string, variant: string) => void
     disabled?: boolean
+    /** El error de cada dato (el hallazgo y su variante), dicho junto a su selector. */
+    errors?: { condition?: string | null; variant?: string | null }
+    /** Al salir de cualquiera de los dos selectores. */
+    onBlur?: () => void
   }): ReactNode
   /** Lo que viaja al servidor: el hallazgo y su variante, o null. */
   body(condition: string, variant: string): { condition: string; variant?: string } | null
@@ -382,13 +434,27 @@ export interface ProductSiteUi {
   findingName(condition: string): string
 }
 
+/**
+ * Elegir lugares es un control compuesto: no pinta su etiqueta, su ayuda ni su
+ * error; la pantalla lo nombra (`FieldSet` + `FieldLegend` o `field.Group`).
+ */
 export interface PlacesPickerProps {
   value: number[]
   onChange: (value: number[]) => void
   disabled?: boolean
-  label?: string
   /** Uno solo. */
   single?: boolean
+  /** Va al control que se escribe (el número del lugar), para `FieldLabel htmlFor`; los ids internos salen de él. */
+  id?: string
+  /** `aria-invalid` en el grupo y en el control que se escribe. */
+  invalid?: boolean
+  /** La ayuda y el error de la pantalla; se une a las pistas internas. */
+  "aria-describedby"?: string
+  /** Nombre del grupo cuando la pantalla no lo envuelve en un `FieldSet` con leyenda. */
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  /** Al salir del grupo (no al pasar de un botón a otro dentro). */
+  onBlur?: () => void
 }
 
 /** Un lugar con sus partes, como lo pide la API. */
@@ -397,14 +463,28 @@ export interface PlaceWithParts {
   surfaces: string[]
 }
 
+/** Un lugar y sus partes: control compuesto, sin etiqueta propia (como `PlacesPickerProps`). */
 export interface SitePickerProps {
   value: PlaceWithParts
   onChange: (value: PlaceWithParts) => void
   withSurfaces?: boolean
   disabled?: boolean
-  label?: string
-  optional?: boolean
+  /** Las partes son obligatorias: lo dice la etiqueta interna de las partes. */
   surfacesRequired?: boolean
+  /** Va al control que se escribe (el número del lugar); los ids internos salen de él. */
+  id?: string
+  /**
+   * Un solo dato (el lugar con sus partes): `aria-invalid` en el grupo, en el
+   * control que se escribe y en cada parte, si se muestran.
+   */
+  invalid?: boolean
+  /** La ayuda y el error de la pantalla; se une a las pistas internas. */
+  "aria-describedby"?: string
+  /** Nombre del grupo cuando la pantalla no lo envuelve en un `FieldSet` con leyenda. */
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  /** Al salir del grupo (no al pasar de un botón a otro dentro). */
+  onBlur?: () => void
 }
 
 const NO_FINDINGS: SiteFinding[] = []
@@ -446,7 +526,7 @@ export function bareProduct(product: ClinicalProduct): ProductUi {
       imaging: { types: DENTAL_IMAGING_TYPES, categoryLabels: {} },
       medicalLeave: false,
     },
-    health: { asksPregnancy: true, InterviewSections: () => null, Summary: () => null },
+    health: { asksPregnancy: true, InterviewSections: () => null, validate: () => ({}), Summary: () => null },
     summary: { ClinicalCards: () => null },
     prescribing: { catalog: DENTAL_MEDICATION_CATALOG, useRules: () => NO_RULES },
     encounter: {

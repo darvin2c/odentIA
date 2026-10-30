@@ -1,8 +1,9 @@
-import { formatVitals, parseVitals, VITAL_SIGNS, type Vitals } from "@odentia/clinical"
+import { formatVitals, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
 import {
   Button,
   cn,
   Field,
+  FieldError,
   FieldLabel,
   Input,
   Textarea,
@@ -19,12 +20,20 @@ import {
   DetailPanel,
   FormDrawer,
   FormPanel,
+  clearSubmitErrors,
+  setSubmitErrors,
+  submitErrorMessage,
+  submitErrorOf,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
   MasterDetail,
   useDetailMode,
   PageHeader,
   addDays,
   zonedDateOf,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
@@ -48,8 +57,6 @@ import {
   fetchMyProfessionalProfile,
   type FinalizedMaterials,
   saveProfessionalProfileApi,
-  type SignatureRegistration,
-  signatureRegistrationError,
   takeOverEncounterApi,
   voidEncounterApi,
 } from "../../lib/encounters"
@@ -65,7 +72,13 @@ import { prepareConsents, type ConsentNeed } from "../../lib/encounter-documents
 import { fetchConsents, type ConsentDocument } from "../../lib/clinical-forms"
 import { ageFrom } from "../../lib/patients"
 import { ConsentSigningScreen, useSignAs } from "./consent-signing"
-import { EncounterClosingDialog, SignatureRegistrationFields } from "./encounter-closing"
+import {
+  CLOSING_FIELD_MAP,
+  type ClosingValues,
+  EncounterClosingDialog,
+  SignatureRegistrationFields,
+  useClosingForm,
+} from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
 import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
@@ -155,12 +168,24 @@ function listWords(items: string[]): string {
 /** Lo que exige el cierre: siempre a la vista. */
 const REQUIRED_SECTIONS: readonly SectionKey[] = ["consulta", "hallazgos", "evolucion"]
 
-interface DraftValues extends Record<NoteKey, string> {
-  /** Signos vitales tal como se escriben; el servidor valida rango y unidad. */
+/** Lo que se escribe a mano en el borrador: el autoguardado los envía por clave. */
+type DraftTextKey = NoteKey | "reason" | "evolution" | "indications"
+const DRAFT_TEXT_KEYS: readonly DraftTextKey[] = [
+  "presentIllness",
+  "illnessDuration",
+  "prognosis",
+  "reason",
+  "evolution",
+  "indications",
+]
+
+/** El formulario del borrador: lo que se ve y se marca; el autoguardado lee `valuesRef`. */
+interface DraftFormValues extends Record<DraftTextKey, string> {
+  /** Signos vitales tal como se escriben; cada uno se marca si no pasa. */
   vitals: Record<string, string>
-  reason: string
-  evolution: string
-  indications: string
+}
+
+interface DraftValues extends DraftFormValues {
   teeth: number[]
   /** El borrador del examen, con la forma del producto (`ProductExaminationUi`). */
   examination: unknown
@@ -203,9 +228,11 @@ function firstNameOf(patient: PatientFull): string {
   return (patient.patient.givenNames ?? patient.patient.displayName).trim().split(/\s+/)[0] ?? ""
 }
 
-function saveMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError && err.shape.message) return err.shape.message
-  return err instanceof Error ? err.message : fallback
+/** Los errores de los signos vitales con el nombre de su campo (`vitals.peso`). */
+function vitalsFieldErrors(vitals: Record<string, string>, allowed: Parameters<typeof vitalsErrors>[1]): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(vitalsErrors(vitals, allowed)).map(([key, message]) => [`vitals.${key}`, `${message}. No se guarda hasta corregirlo.`]),
+  )
 }
 
 /**
@@ -312,19 +339,41 @@ export function EncounterEditor({
     enabled: canReadFinance,
   })
 
-  const [reason, setReason] = useState(encounter.reason ?? "")
-  const [notes, setNotes] = useState<Record<NoteKey, string>>(() => ({
-    presentIllness: encounter.presentIllness ?? "",
-    illnessDuration: encounter.illnessDuration ?? "",
-    prognosis: encounter.prognosis ?? "",
-  }))
   // El examen y los signos vitales son los del producto (issue 229).
   const exam = productUi().encounter.examination
-  const [vitals, setVitals] = useState<Record<string, string>>(() => vitalsDraft(encounter.vitals))
+  // Lo escrito en el borrador: el formulario lo muestra y marca cada campo; el
+  // autoguardado envía lo de `valuesRef`, que se actualiza a la vez.
+  const draftForm = useAppForm({
+    defaultValues: {
+      presentIllness: encounter.presentIllness ?? "",
+      illnessDuration: encounter.illnessDuration ?? "",
+      prognosis: encounter.prognosis ?? "",
+      reason: encounter.reason ?? "",
+      evolution: encounter.evolution ?? "",
+      indications: encounter.indications ?? "",
+      vitals: vitalsDraft(encounter.vitals),
+    } as DraftFormValues,
+    validators: {
+      onChange: ({ value }) => {
+        const fields = vitalsFieldErrors(value.vitals, exam.vitals)
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+      // «Enviar» el borrador es comprobar lo que exige el cierre, cada falta en su campo.
+      onSubmit: ({ value }) => {
+        const fields = vitalsFieldErrors(value.vitals, exam.vitals)
+        if (!value.reason.trim()) fields.reason = "Escribe el motivo: es obligatorio para cerrar"
+        if (!value.evolution.trim()) fields.evolution = "Escribe la evolución: es obligatoria para cerrar"
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: () => flush(),
+  })
+  const draftValues = useStore(draftForm.store, (state) => state.values)
+  const { reason, evolution, indications, vitals } = draftValues
   const parsed = parseVitals(vitals, exam.vitals)
   const parsedVitals: Vitals | null = parsed.ok ? parsed.value : null
-  const [evolution, setEvolution] = useState(encounter.evolution ?? "")
-  const [indications, setIndications] = useState(encounter.indications ?? "")
+  // Lo que el servidor rechazó del examen, por la ruta de cada dato («extraoral.atm»).
+  const [examErrors, setExamErrors] = useState<Record<string, string>>({})
   const [teeth, setTeeth] = useState<number[]>(() => sortTeeth(detail.teeth))
   const [examination, setExamination] = useState<unknown>(() => exam.draft(encounter.examination))
   // Bloque en edición; `null` colapsa el detalle y deja la lista a todo el ancho.
@@ -352,11 +401,7 @@ export function EncounterEditor({
   const [confirmWithDictation, setConfirmWithDictation] = useState(false)
   // «Lo dictado», el respaldo del odontólogo: columna lateral si cabe, cajón si no.
   const [transcriptOpen, setTranscriptOpen] = useState(false)
-  // Hora de fin declarada al cerrar (HH:MM local); vacía = ahora.
-  const [endTime, setEndTime] = useState("")
   const [voidOpen, setVoidOpen] = useState(false)
-  const [voidReason, setVoidReason] = useState("")
-  const [voiding, setVoiding] = useState(false)
   const [takingOver, setTakingOver] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   // Hora del último guardado, para «Guardado HH:MM».
@@ -365,15 +410,8 @@ export function EncounterEditor({
   const [contextOpen, setContextOpen] = useState(false)
   // Bloque recién agregado: abre su formulario sin un clic de más.
   const [justAdded, setJustAdded] = useState<SectionKey | null>(null)
-  // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
-  const [skipReason, setSkipReason] = useState("")
-  // Sin colegiatura en el perfil, el cierre la pide y la guarda antes de firmar.
-  const [registration, setRegistration] = useState<SignatureRegistration>({
-    professionalTitle: "",
-    registrationBody: "",
-    registrationNumber: "",
-  })
-  const [registrationError, setRegistrationError] = useState<string | null>(null)
+  // Sede de la atención: se guarda al elegirla; si no, el error va en su campo.
+  const [branchError, setBranchError] = useState<string | null>(null)
   const registrationNumberRef = useRef<HTMLInputElement>(null)
   // Consentimientos que se firman en la unidad dental desde el cierre.
   const [signingDocs, setSigningDocs] = useState<ConsentDocument[] | null>(null)
@@ -394,6 +432,35 @@ export function EncounterEditor({
     queryFn: fetchMyProfessionalProfile,
     enabled: canWrite,
   })
+  const needsRegistration = closingQuery.isSuccess && closingQuery.data.data.missing.includes("signature")
+  const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
+  // Firmar con lo dictado: las sugerencias marcadas se confirman dentro del mismo envío del cierre.
+  const signIdsRef = useRef<string[] | null>(null)
+  const closingForm = useClosingForm({
+    needsReason: unsignedConsents.length > 0,
+    needsRegistration,
+    onSubmit: (value) => finalizeWith(value),
+  })
+  const closingError = useFormSubmitError(closingForm)
+  const voidBodyRef = useRef<HTMLDivElement>(null)
+  const voidForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: {
+      onSubmit: ({ value }) =>
+        value.reason.trim() ? undefined : { fields: { reason: "Escribe por qué se anula" } },
+    },
+    onSubmit: async ({ value }) => {
+      clearTimer()
+      await voidEncounterApi(patientId, encounterId, value.reason.trim())
+      setVoidOpen(false)
+      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
+      await queryClient.invalidateQueries({ queryKey: ["encounters", patientId] })
+      await onChanged()
+    },
+  })
+  const voiding = useStore(voidForm.store, (state) => state.isSubmitting)
+  const voidError = useFormSubmitError(voidForm)
 
   // Tratamientos a los que se puede ligar una receta o un control desde esta
   // atención: los vinculados y los indicados aquí, sin repetir.
@@ -553,6 +620,8 @@ export function EncounterEditor({
             // La sección «Signos vitales» y la medición anterior se leen de nuevo.
             if (sendable.includes("vitals"))
               void queryClient.invalidateQueries({ queryKey: ["patient-vitals", patientId] })
+            // El examen guardado ya no tiene nada que corregir.
+            if (sendable.includes("examination") && mountedRef.current) setExamErrors({})
           } catch (err) {
             for (const key of sendable) dirtyRef.current.add(key)
             throw err
@@ -562,6 +631,8 @@ export function EncounterEditor({
         }
         if (mountedRef.current) {
           setSaveError(null)
+          // Lo guardado ya no tiene nada que corregir.
+          clearSubmitErrors(draftForm)
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
           if (sentAny) setSavedAt(new Date().toISOString())
         }
@@ -572,7 +643,7 @@ export function EncounterEditor({
             setSaveError(null)
             setSaveState("offline")
           } else {
-            setSaveError(saveMessage(err, "No se pudo guardar el borrador."))
+            setSaveError(placeAutosaveError(err))
             setSaveState("error")
           }
         }
@@ -608,34 +679,45 @@ export function EncounterEditor({
     }, AUTOSAVE_MS)
   }
 
-  const editNote = (key: NoteKey, value: string) => {
+  /**
+   * Un rechazo del autoguardado: lo que es de un campo del borrador se marca en
+   * él (aunque se siga escribiendo ahí), lo del examen en su dato y lo demás
+   * queda para el aviso, que es lo que devuelve.
+   */
+  const placeAutosaveError = (err: unknown): string => {
+    const { form, fields } = submitErrorOf(err)
+    const own: Record<string, string> = {}
+    const examFields: Record<string, string> = {}
+    const rest: string[] = []
+    for (const [key, message] of Object.entries(fields)) {
+      if (key.startsWith("examination.")) examFields[key.slice("examination.".length)] = message
+      else if (DRAFT_TEXT_KEYS.includes(key as DraftTextKey) || key.startsWith("vitals.")) own[key] = message
+      else rest.push(message)
+    }
+    setExamErrors(examFields)
+    setSubmitErrors(draftForm, { fields: own })
+    if (form) return form
+    if (rest.length > 0) return rest.join(" ")
+    return "No se guardó lo último: corrige lo marcado y se guarda solo."
+  }
+
+  /** Lo escrito en un campo del borrador (el campo ya lo tiene): lo guarda el autoguardado. */
+  const rememberText = (key: DraftTextKey, value: string) => {
     valuesRef.current[key] = value
-    setNotes((prev) => ({ ...prev, [key]: value }))
     markEdited(key)
   }
-  const editVital = (key: string, value: string) => {
-    const next = { ...valuesRef.current.vitals, [key]: value }
-    valuesRef.current.vitals = next
-    setVitals(next)
+  /** Lo que llega sin teclear (el dictado confirmado): también se ve en su campo. */
+  const editText = (key: DraftTextKey, value: string) => {
+    draftForm.setFieldValue(key, value)
+    rememberText(key, value)
+  }
+  const rememberVital = (key: string, value: string) => {
+    valuesRef.current.vitals = { ...valuesRef.current.vitals, [key]: value }
     markEdited("vitals")
   }
-
-  const editReason = (value: string) => {
-    valuesRef.current.reason = value
-    setReason(value)
-    markEdited("reason")
-  }
-
-  const editEvolution = (value: string) => {
-    valuesRef.current.evolution = value
-    setEvolution(value)
-    markEdited("evolution")
-  }
-
-  const editIndications = (value: string) => {
-    valuesRef.current.indications = value
-    setIndications(value)
-    markEdited("indications")
+  const editVital = (key: string, value: string) => {
+    draftForm.setFieldValue(`vitals.${key}`, value)
+    rememberVital(key, value)
   }
   /** El ToothSelector entrega el set completo: se ordena, se publica y el autosave lo persiste. */
   const editTeeth = (value: number[]) => {
@@ -658,16 +740,9 @@ export function EncounterEditor({
    */
   const applyDictation = (item: DictationSuggestion) => {
     if (item.kind === "nota") {
-      const text = (key: string) => (typeof item.payload[key] === "string" ? (item.payload[key] as string) : null)
-      const reasonText = text("reason")
-      if (reasonText !== null) editReason(reasonText)
-      const evolutionText = text("evolution")
-      if (evolutionText !== null) editEvolution(evolutionText)
-      const indicationsText = text("indications")
-      if (indicationsText !== null) editIndications(indicationsText)
-      for (const key of ["presentIllness", "illnessDuration", "prognosis"] as NoteKey[]) {
-        const value = text(key)
-        if (value !== null) editNote(key, value)
+      for (const key of DRAFT_TEXT_KEYS) {
+        const value = item.payload[key]
+        if (typeof value === "string") editText(key, value)
       }
     }
     // Los signos y el examen confirmados pasan por los mismos editores, para que el borrador local no los pise.
@@ -724,7 +799,7 @@ export function EncounterEditor({
       await onChanged()
     } catch (err) {
       if (mountedRef.current) {
-        setSaveError(saveMessage(err, "No se pudo guardar el borrador."))
+        setSaveError(placeAutosaveError(err))
         setSaveState("error")
       }
     } finally {
@@ -735,32 +810,21 @@ export function EncounterEditor({
   const refreshClosing = () =>
     queryClient.invalidateQueries({ queryKey: ["encounter-closing", patientId, encounterId] })
 
-  /** Hora de fin declarada: hoy a la hora indicada, en la zona de la clínica. */
-  const endedAtIso = (): string | null => {
+  /**
+   * Hora de fin declarada: hoy a la hora indicada, en la zona de la clínica. El
+   * minuto de inicio (con sus segundos en 0) queda antes del inicio: se toma
+   * el inicio mismo.
+   */
+  const endedAtIso = (endTime: string): string | null => {
     if (!endTime) return null
     const today = clinicDateTimeValue(new Date().toISOString()).slice(0, 10)
-    return instantFromClinicValue(`${today}T${endTime}`)
-  }
-
-  const handleVoid = async () => {
-    if (voiding || !voidReason.trim()) return
-    setVoiding(true)
-    clearTimer()
-    try {
-      await voidEncounterApi(patientId, encounterId, voidReason.trim())
-      setVoidOpen(false)
-      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
-      await queryClient.invalidateQueries({ queryKey: ["open-encounter", patientId] })
-      await queryClient.invalidateQueries({ queryKey: ["encounters", patientId] })
-      await onChanged()
-    } catch (err) {
-      if (mountedRef.current) {
-        setSaveError(saveMessage(err, "No se pudo anular la atención."))
-        setVoidOpen(false)
-      }
-    } finally {
-      if (mountedRef.current) setVoiding(false)
+    const iso = instantFromClinicValue(`${today}T${endTime}`)
+    const startedAt = encounter.startedAt
+    if (iso && startedAt) {
+      const early = new Date(startedAt).getTime() - new Date(iso).getTime()
+      if (early > 0 && early < 60_000) return startedAt
     }
+    return iso
   }
 
   const handleTakeOver = async () => {
@@ -772,7 +836,7 @@ export function EncounterEditor({
       await onChanged()
       await refreshClosing()
     } catch (err) {
-      setSaveError(saveMessage(err, "No se pudo tomar el relevo."))
+      setSaveError(submitErrorMessage(err))
     } finally {
       if (mountedRef.current) setTakingOver(false)
     }
@@ -800,60 +864,45 @@ export function EncounterEditor({
   }
 
   /**
-   * Lo que quedó sugerido sin confirmar no entra a la historia: se descarta y
-   * se sigue al cierre, con lo que falta y la hora de fin.
+   * El cierre (el envío de `closingForm`): guarda la colegiatura si faltaba,
+   * confirma lo dictado que se marcó y descarta lo demás, y firma. Si algo
+   * falla, lanza: el diálogo sigue abierto con lo escrito y cada rechazo en su
+   * campo (la colegiatura, el motivo para seguir sin consentimiento, la hora de
+   * fin); lo que falta registrar lo lista el diálogo con su «Registrar».
    */
-  const discardDictationAndContinue = async () => {
-    try {
-      await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
-      await dictation.refresh()
-      // Sin consentimientos por firmar, «Firmar con N marcadas» firma; si falta
-      // alguno, sigue al cierre para firmarlo o decir por qué se sigue sin él.
-      if ((closingQuery.data?.data.consents ?? []).length === 0) await handleConfirmFinalize()
-      else setConfirmWithDictation(false)
-    } catch (err) {
-      setSaveError(saveMessage(err, "No se pudieron descartar las sugerencias."))
-      setConfirmOpen(false)
-    }
-  }
-
-  /**
-   * Guarda la colegiatura escrita en el cierre (si faltaba) en el perfil
-   * profesional; si no se pudo, el cierre queda abierto con el aviso y lo escrito.
-   */
-  const saveRegistration = async (): Promise<boolean> => {
-    if (!needsRegistration) return true
-    const invalid = signatureRegistrationError(registration)
-    if (invalid) {
-      setRegistrationError(invalid)
-      return false
-    }
+  const finalizeWith = async (value: ClosingValues): Promise<void> => {
+    if (childCountRef.current > 0) return
+    const signIds = signIdsRef.current
+    signIdsRef.current = null
     setFinalizing(true)
     try {
-      await saveProfessionalProfileApi("me", {
-        professionalTitle: registration.professionalTitle.trim(),
-        registrationBody: registration.registrationBody.trim(),
-        registrationNumber: registration.registrationNumber.trim(),
-      })
-      await queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
-      return true
-    } catch (err) {
-      if (mountedRef.current) setRegistrationError(saveMessage(err, "No se pudo guardar tu colegiatura."))
-      return false
-    } finally {
-      if (mountedRef.current) setFinalizing(false)
-    }
-  }
-
-  const handleConfirmFinalize = async () => {
-    if (finalizing || childCountRef.current > 0) return
-    if (!(await saveRegistration())) return
-    setFinalizing(true)
-    try {
+      if (needsRegistration) {
+        await saveProfessionalProfileApi("me", {
+          professionalTitle: value.professionalTitle.trim(),
+          registrationBody: value.registrationBody.trim(),
+          registrationNumber: value.registrationNumber.trim(),
+        })
+        await queryClient.invalidateQueries({ queryKey: ["professional-profile"] })
+      }
+      if (signIds) {
+        // Si una no se pudo confirmar, el aviso del dictado dice cuál; no se firma.
+        const confirmed = await dictation.confirmMany.mutateAsync(signIds).then(
+          () => true,
+          () => false,
+        )
+        if (!confirmed) return
+        // Lo que quedó sugerido sin confirmar no entra a la historia: se descarta.
+        await apiFetch(`/api/patients/${patientId}/encounters/${encounterId}/dictation/discard-pending`, { method: "POST" })
+        await dictation.refresh()
+        // Con consentimientos por firmar, sigue al cierre para firmarlos o decir por qué se sigue sin ellos.
+        if (unsignedConsents.length > 0) {
+          setConfirmWithDictation(false)
+          return
+        }
+      }
       // Congela: primero todo PATCH pendiente y último dirty, recién después finalize.
       await flush()
-      const endedAt = endedAtIso()
-      const unsigned = closingQuery.data?.data.consents ?? []
+      const endedAt = endedAtIso(value.endTime)
       const result = await apiFetch<{
         data: {
           charges: Array<{ id: string }>
@@ -867,10 +916,11 @@ export function EncounterEditor({
         body: JSON.stringify({
           ...(endedAt ? { endedAt } : {}),
           // «Seguir sin él»: solo si falta algún consentimiento.
-          ...(unsigned.length > 0 ? { consentSkipReason: skipReason.trim() } : {}),
+          ...(unsignedConsents.length > 0 ? { consentSkipReason: value.consentSkipReason.trim() } : {}),
         }),
       })
       setConfirmOpen(false)
+      closingForm.reset()
       setBudgetSent(false)
       setFinalizedBudget(result.data.budget ?? null)
       setFinalizedMaterials(result.data.materials ?? null)
@@ -880,16 +930,49 @@ export function EncounterEditor({
       // Lo que salió de la sede cambia lo que hay en Inventario.
       if (result.data.materials) void queryClient.invalidateQueries({ queryKey: ["inventory"] })
     } catch (err) {
-      // Falla: se conserva el borrador intacto y se muestra el error real. El
-      // estado del guardado lo deja `drain` si lo que falló fue guardar.
-      if (mountedRef.current) {
-        setSaveError(saveMessage(err, "No se pudo finalizar la atención."))
-        setConfirmOpen(false)
-        void refreshClosing()
-      }
+      // Se conserva el borrador y lo escrito en el cierre; lo que falta se vuelve a comprobar.
+      void refreshClosing()
+      // Sin colegiatura en el perfil: el rechazo va en el número, si el cierre lo pide.
+      if (err instanceof ApiError && err.shape.code === "PROFILE_INCOMPLETE" && err.shape.message)
+        throw new ApiError(err.status, { ...err.shape, fields: { registrationNumber: err.shape.message } })
+      throw err
     } finally {
       if (mountedRef.current) setFinalizing(false)
     }
+  }
+
+  /**
+   * Lleva a lo que falta para cerrar: abre su bloque y, si es el motivo, la
+   * evolución o un signo vital, lo marca en su campo con el foco en él.
+   */
+  const requireBlock = (requirement: ClosingRequirement | "vitals") => {
+    if (requirement === "signature") {
+      setProfileOpen(true)
+      return
+    }
+    addSection(
+      requirement === "reason" ? "consulta" : requirement === "diagnosis" ? "hallazgos" : requirement === "vitals" ? "examen" : "evolucion",
+    )
+    if (requirement !== "diagnosis") void submitForm(draftForm)
+  }
+
+  /**
+   * «Finalizar y firmar»: lo que falta del borrador se dice en su campo, con su
+   * bloque abierto; si no falta nada, se abre el cierre.
+   */
+  const requestSign = () => {
+    const values = draftForm.state.values
+    const first: ClosingRequirement | "vitals" | null = !values.reason.trim()
+      ? "reason"
+      : Object.keys(vitalsErrors(values.vitals, exam.vitals)).length > 0
+        ? "vitals"
+        : !values.evolution.trim()
+          ? "evolution"
+          : missing.includes("diagnosis")
+            ? "diagnosis"
+            : null
+    if (first) requireBlock(first)
+    else openSign()
   }
 
   const handlePendingChange = (pending: boolean) => {
@@ -1073,7 +1156,6 @@ export function EncounterEditor({
   const missing = closingQuery.data?.data.missing ?? []
   const closingReady = closingQuery.data?.data.ready === true
   // Solo falta la colegiatura: se puede abrir el cierre, que la pide ahí mismo.
-  const needsRegistration = closingQuery.isSuccess && missing.includes("signature")
   const onlyRegistrationMissing = needsRegistration && missing.every((requirement) => requirement === "signature")
   const closingSections = sections.filter((section) => section.key !== "consulta")
   const recorded = closingSections.filter((section) => !section.empty).map((s) => s.summary)
@@ -1165,7 +1247,8 @@ export function EncounterEditor({
   const closingId = `${uid}-cierre`
   // No se firma lo que no se guardó: sin conexión o con cambios por guardar, espera.
   const unsaved = saveState !== "saved"
-  const canSign = !(locked || explicitSaving || !(closingReady || onlyRegistrationMissing) || dictation.busy || unsaved)
+  // Lo que falta registrar no apaga «Finalizar y firmar»: lleva a su bloque y lo marca (`requestSign`).
+  const canSign = !(locked || explicitSaving || !closingQuery.isSuccess || dictation.busy || unsaved)
   const signBlockedReason =
     saveState === "offline"
       ? "Sin conexión: lo escrito se guarda al volver y recién entonces se puede firmar."
@@ -1175,23 +1258,23 @@ export function EncounterEditor({
           ? "No se pudo guardar lo último: revisa el aviso y vuelve a intentarlo."
           : null
   const openSign = () => {
-    setEndTime("")
-    setSkipReason("")
-    if (needsRegistration) {
-      // Lo que ya tiene el perfil y, si falta, lo que propone el país del producto (COP, CMP).
+    signIdsRef.current = null
+    // Lo escrito en un cierre que falló se conserva; la primera vez, la colegiatura
+    // viene con lo que ya tiene el perfil y, si falta, lo que propone el país (COP, CMP).
+    const current = closingForm.state.values
+    if (needsRegistration && !current.professionalTitle && !current.registrationBody && !current.registrationNumber) {
       const profile = profileQuery.data?.data
       const suggested = productUi().country.professional(orgProfile?.countryCode)
-      setRegistration({
+      closingForm.reset({
+        ...current,
         professionalTitle: profile?.professionalTitle || suggested?.title || "",
         registrationBody: profile?.registrationBody || suggested?.registrationBody || "",
         registrationNumber: profile?.registrationNumber ?? "",
       })
-      setRegistrationError(null)
     }
     setConfirmWithDictation(dictationPending > 0)
     setConfirmOpen(true)
   }
-  const unsignedConsents: ConsentNeed[] = closingQuery.data?.data.consents ?? []
   const [preparing, setPreparing] = useState(false)
   /** «Preparar» desde la fila del bloque: genera los consentimientos que pide la atención. */
   const prepareFromRow = async () => {
@@ -1206,7 +1289,7 @@ export function EncounterEditor({
         refreshClosing(),
       ])
     } catch (err) {
-      setSaveError(saveMessage(err, "No se pudo preparar el consentimiento."))
+      setSaveError(submitErrorMessage(err))
     } finally {
       if (mountedRef.current) setPreparing(false)
     }
@@ -1227,27 +1310,31 @@ export function EncounterEditor({
       const pending = list.data.filter((doc) => doc.encounterId === encounterId && doc.status === "pendiente")
       if (pending.length > 0) setSigningDocs(pending)
     } catch (err) {
-      setSaveError(saveMessage(err, "No se pudo preparar el consentimiento."))
+      // Desde el cierre, el aviso va en el cierre (el diálogo tapa la página).
+      if (confirmOpen) setSubmitErrors(closingForm, { form: submitErrorMessage(err) })
+      else setSaveError(submitErrorMessage(err))
     }
   }
   /** «Firmar» desde la barra del teléfono: firma si se puede; si no, lleva a lo que falta para cerrar. */
   const signFromBar = () => {
-    if (canSign) openSign()
+    if (canSign) requestSign()
     else document.getElementById(closingId)?.scrollIntoView({ block: "start" })
   }
   const pendingDiagnoses = dictationCount("hallazgos")
 
   const consultaBody = (
     <div className="flex flex-col gap-3">
-      <Field>
+      <Field data-invalid={branchError || branchesQuery.isError ? true : undefined}>
         <FieldLabel htmlFor={`${uid}-branch`}>Sede de la atención</FieldLabel>
         <ChoiceSelect
           id={`${uid}-branch`}
-          
           disabled={locked || branchesQuery.isPending}
+          aria-invalid={branchError || branchesQuery.isError ? true : undefined}
+          aria-describedby={branchError || branchesQuery.isError ? `${uid}-branch-error` : undefined}
           value={encounter.branchId ?? ""}
           onChange={async (event) => {
             const branchId = event.target.value || null
+            setBranchError(null)
             handlePendingChange(true)
             try {
               await flush()
@@ -1257,7 +1344,7 @@ export function EncounterEditor({
               })
               await onChanged()
             } catch (err) {
-              setSaveError(saveMessage(err, "No se pudo guardar la sede."))
+              setBranchError(submitErrorMessage(err))
             } finally {
               handlePendingChange(false)
             }
@@ -1270,46 +1357,73 @@ export function EncounterEditor({
             </option>
           ))}
         </ChoiceSelect>
-        {branchesQuery.isError && <p role="alert">No se pudieron cargar las sedes.</p>}
+        {branchError || branchesQuery.isError ? (
+          <FieldError id={`${uid}-branch-error`}>{branchError ?? "No se pudieron cargar las sedes."}</FieldError>
+        ) : null}
       </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-reason`}>Motivo</FieldLabel>
-        <Textarea
-          id={`${uid}-reason`}
-          rows={2}
-          value={reason}
-          disabled={locked}
-          maxLength={MAX_REASON}
-          placeholder="Motivo de la consulta…"
-          // Al entrar sin motivo, el cursor ya está aquí: es lo primero que se escribe.
-          autoFocus={!encounter.reason?.trim()}
-          onChange={(event) => editReason(event.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-present-illness`}>Enfermedad actual (relato)</FieldLabel>
-        <Textarea
-          id={`${uid}-present-illness`}
-          rows={3}
-          value={notes.presentIllness}
-          disabled={locked}
-          maxLength={4000}
-          placeholder="Inicio, curso, síntomas y lo que lo alivia o empeora…"
-          onChange={(event) => editNote("presentIllness", event.target.value)}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-illness-duration`}>Tiempo de enfermedad</FieldLabel>
-        <Input
-          id={`${uid}-illness-duration`}
-          className="sm:w-60"
-          value={notes.illnessDuration}
-          disabled={locked}
-          maxLength={200}
-          placeholder="Ej.: 3 días"
-          onChange={(event) => editNote("illnessDuration", event.target.value)}
-        />
-      </Field>
+      <draftForm.AppField name="reason">
+        {(field) => (
+          <field.Control label="Motivo" id={`${uid}-reason`}>
+            {(control) => (
+              <Textarea
+                {...control.props}
+                aria-required
+                rows={2}
+                value={field.state.value}
+                disabled={locked}
+                maxLength={MAX_REASON}
+                placeholder="Motivo de la consulta…"
+                // Al entrar sin motivo, el cursor ya está aquí: es lo primero que se escribe.
+                autoFocus={!encounter.reason?.trim()}
+                onChange={(event) => {
+                  field.handleChange(event.target.value)
+                  rememberText("reason", event.target.value)
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </draftForm.AppField>
+      <draftForm.AppField name="presentIllness">
+        {(field) => (
+          <field.Control label="Enfermedad actual (relato)" id={`${uid}-present-illness`}>
+            {(control) => (
+              <Textarea
+                {...control.props}
+                rows={3}
+                value={field.state.value}
+                disabled={locked}
+                maxLength={4000}
+                placeholder="Inicio, curso, síntomas y lo que lo alivia o empeora…"
+                onChange={(event) => {
+                  field.handleChange(event.target.value)
+                  rememberText("presentIllness", event.target.value)
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </draftForm.AppField>
+      <draftForm.AppField name="illnessDuration">
+        {(field) => (
+          <field.Control label="Tiempo de enfermedad" id={`${uid}-illness-duration`}>
+            {(control) => (
+              <Input
+                {...control.props}
+                className="sm:w-60"
+                value={field.state.value}
+                disabled={locked}
+                maxLength={200}
+                placeholder="Ej.: 3 días"
+                onChange={(event) => {
+                  field.handleChange(event.target.value)
+                  rememberText("illnessDuration", event.target.value)
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </draftForm.AppField>
       {productUi().site ? (
         <div>
           <p className="text-xs font-medium text-muted-foreground">
@@ -1346,29 +1460,37 @@ export function EncounterEditor({
         <legend className="mb-1 text-sm font-medium">Signos vitales</legend>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {VITAL_SIGNS.filter((sign) => exam.vitals.includes(sign.key)).map((sign) => (
-            <Field key={sign.key}>
-              <FieldLabel htmlFor={`${uid}-vital-${sign.key}`} className="text-xs">
-                {sign.label} ({sign.suffix})
-              </FieldLabel>
-              <Input
-                id={`${uid}-vital-${sign.key}`}
-                inputMode="decimal"
-                value={vitals[sign.key] ?? ""}
-                disabled={locked}
-                onChange={(event) => editVital(sign.key, event.target.value.replace(",", "."))}
-              />
-            </Field>
+            <draftForm.AppField key={sign.key} name={`vitals.${sign.key}`}>
+              {(field) => (
+                <field.Control
+                  label={
+                    <span className="text-xs">
+                      {sign.label} ({sign.suffix})
+                    </span>
+                  }
+                  id={`${uid}-vital-${sign.key}`}
+                >
+                  {(control) => (
+                    <Input
+                      {...control.props}
+                      inputMode="decimal"
+                      value={field.state.value ?? ""}
+                      disabled={locked}
+                      onChange={(event) => {
+                        const value = event.target.value.replace(",", ".")
+                        field.handleChange(value)
+                        rememberVital(sign.key, value)
+                      }}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </draftForm.AppField>
           ))}
         </div>
-        {parsed.ok ? (
-          <p className="text-xs text-muted-foreground">
-            La presión se registra completa (sistólica y diastólica).
-          </p>
-        ) : (
-          <p role="alert" className="text-xs text-destructive">
-            {parsed.error}. No se guarda hasta corregirlo.
-          </p>
-        )}
+        <p className="text-xs text-muted-foreground">
+          La presión se registra completa (sistólica y diastólica).
+        </p>
         <exam.VitalsNote patientId={patientId} encounterId={encounterId} vitals={parsedVitals} />
       </fieldset>
       <exam.Fields
@@ -1376,6 +1498,7 @@ export function EncounterEditor({
         draft={examination}
         onChange={editExamination}
         disabled={locked}
+        errors={examErrors}
       />
     </div>
   )
@@ -1383,41 +1506,66 @@ export function EncounterEditor({
   const evolucionBody = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-prognosis`}>Pronóstico</FieldLabel>
-          <Textarea
-            id={`${uid}-prognosis`}
-            rows={2}
-            value={notes.prognosis}
-            disabled={locked}
-            maxLength={2000}
-            onChange={(event) => editNote("prognosis", event.target.value)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-evolution`}>Evolución</FieldLabel>
-          <Textarea
-            id={`${uid}-evolution`}
-            rows={3}
-            value={evolution}
-            disabled={locked}
-            maxLength={MAX_EVOLUTION}
-            placeholder="Evolución clínica…"
-            onChange={(event) => editEvolution(event.target.value)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-indications`}>Indicaciones</FieldLabel>
-          <Textarea
-            id={`${uid}-indications`}
-            rows={2}
-            value={indications}
-            disabled={locked}
-            maxLength={MAX_INDICATIONS}
-            placeholder="Indicaciones para el paciente…"
-            onChange={(event) => editIndications(event.target.value)}
-          />
-        </Field>
+        <draftForm.AppField name="prognosis">
+          {(field) => (
+            <field.Control label="Pronóstico" id={`${uid}-prognosis`}>
+              {(control) => (
+                <Textarea
+                  {...control.props}
+                  rows={2}
+                  value={field.state.value}
+                  disabled={locked}
+                  maxLength={2000}
+                  onChange={(event) => {
+                    field.handleChange(event.target.value)
+                    rememberText("prognosis", event.target.value)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </draftForm.AppField>
+        <draftForm.AppField name="evolution">
+          {(field) => (
+            <field.Control label="Evolución" id={`${uid}-evolution`}>
+              {(control) => (
+                <Textarea
+                  {...control.props}
+                  aria-required
+                  rows={3}
+                  value={field.state.value}
+                  disabled={locked}
+                  maxLength={MAX_EVOLUTION}
+                  placeholder="Evolución clínica…"
+                  onChange={(event) => {
+                    field.handleChange(event.target.value)
+                    rememberText("evolution", event.target.value)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </draftForm.AppField>
+        <draftForm.AppField name="indications">
+          {(field) => (
+            <field.Control label="Indicaciones" id={`${uid}-indications`}>
+              {(control) => (
+                <Textarea
+                  {...control.props}
+                  rows={2}
+                  value={field.state.value}
+                  disabled={locked}
+                  maxLength={MAX_INDICATIONS}
+                  placeholder="Indicaciones para el paciente…"
+                  onChange={(event) => {
+                    field.handleChange(event.target.value)
+                    rememberText("indications", event.target.value)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </draftForm.AppField>
       </div>
     </div>
   )
@@ -1503,7 +1651,8 @@ export function EncounterEditor({
         children: body,
         onSubmit: submitSection,
         isSubmitting: explicitSaving,
-        error: saveError,
+        // El rechazo del autoguardado, dentro del cajón solo en el teléfono: en el panel ya lo dice el aviso de la página.
+        error: target === "drawer" && saveState === "error" ? saveError : null,
         hideSubmit: true,
       }
       return target === "panel" ? <FormPanel {...form} /> : <FormDrawer open {...form} />
@@ -1518,16 +1667,11 @@ export function EncounterEditor({
 
   const registrationFields = needsRegistration ? (
     <SignatureRegistrationFields
+      form={closingForm}
       signAs={profileQuery.data?.data.signatureName ?? profileQuery.data?.data.accountName ?? null}
-      values={registration}
       askTitle={!profileQuery.data?.data.professionalTitle}
-      error={registrationError}
       disabled={finalizing}
       numberRef={registrationNumberRef}
-      onChange={(values) => {
-        setRegistration(values)
-        setRegistrationError(null)
-      }}
     />
   ) : null
   // Con quién se firma: lo mismo con o sin sugerencias pendientes (la hora de fin va en el cierre).
@@ -1806,17 +1950,7 @@ export function EncounterEditor({
                         variant="link"
                         className="h-auto p-0"
                         disabled={!attending}
-                        onClick={() => {
-                          if (requirement === "signature") setProfileOpen(true)
-                          else
-                            addSection(
-                              requirement === "reason"
-                                ? "consulta"
-                                : requirement === "diagnosis"
-                                  ? "hallazgos"
-                                  : "evolucion",
-                            )
-                        }}
+                        onClick={() => requireBlock(requirement)}
                       >
                         {requirement === "signature" ? "Completar perfil" : "Registrar"}
                       </Button>
@@ -1904,7 +2038,7 @@ export function EncounterEditor({
               className="text-destructive"
               disabled={locked || explicitSaving}
               onClick={() => {
-                setVoidReason("")
+                voidForm.reset()
                 setVoidOpen(true)
               }}
             >
@@ -1932,8 +2066,10 @@ export function EncounterEditor({
             dictationMobileBarVisible(dictation) && "max-sm:hidden",
           )}
         >
-          <span className="text-sm text-muted-foreground">{footerText}</span>
-          <Button type="button" disabled={!canSign} onClick={openSign}>
+          <span id={`${uid}-footer`} className="text-sm text-muted-foreground">
+            {footerText}
+          </span>
+          <Button type="button" disabled={!canSign} aria-describedby={`${uid}-footer`} onClick={requestSign}>
             Finalizar y firmar
           </Button>
         </div>
@@ -1955,21 +2091,23 @@ export function EncounterEditor({
 
       <EncounterClosingDialog
         open={confirmOpen && !confirmWithDictation && signingDocs === null}
+        form={closingForm}
         signAs={signAs.text}
         who={signer}
         consents={unsignedConsents}
         closing={closingQuery.data?.data ?? null}
         materials={closingQuery.data?.data.materials ?? null}
+        missing={missing}
+        onRegister={(requirement) => {
+          setConfirmOpen(false)
+          requireBlock(requirement)
+        }}
         onOpenBlock={(key) => {
           setConfirmOpen(false)
           setContextOpen(false)
           setOpenSection(key)
         }}
         startedAt={encounter.startedAt}
-        endTime={endTime}
-        onEndTime={setEndTime}
-        skipReason={skipReason}
-        onSkipReason={setSkipReason}
         pending={finalizing}
         canSign={canSign}
         blockedReason={signBlockedReason}
@@ -1977,7 +2115,6 @@ export function EncounterEditor({
         confirmLabel={needsRegistration ? "Guardar y firmar" : null}
         initialFocus={needsRegistration ? registrationNumberRef : undefined}
         onSignNow={(need) => void signConsentsNow(need)}
-        onConfirm={() => void handleConfirmFinalize()}
         onClose={() => {
           if (!finalizing) setConfirmOpen(false)
         }}
@@ -1999,6 +2136,7 @@ export function EncounterEditor({
         open={confirmOpen && confirmWithDictation}
         session={dictation}
         signing={finalizing}
+        error={closingError}
         onClose={() => setConfirmOpen(false)}
         onComplete={(id) => {
           setConfirmOpen(false)
@@ -2007,16 +2145,12 @@ export function EncounterEditor({
           if (item) dictation.openEdit(item)
         }}
         onSign={(ids) => {
-          // Sin colegiatura válida no se confirma nada: el aviso queda junto al campo.
-          const invalid = needsRegistration ? signatureRegistrationError(registration) : null
-          if (invalid) {
-            setRegistrationError(invalid)
-            return
-          }
-          void dictation.confirmMany
-            .mutateAsync(ids)
-            .then(() => discardDictationAndContinue())
-            .catch(() => undefined)
+          // Un solo envío: la colegiatura se valida en su campo, luego se confirma lo marcado y se firma.
+          signIdsRef.current = ids
+          void submitForm(closingForm, {
+            fieldMap: CLOSING_FIELD_MAP,
+            root: document.querySelector('[role="alertdialog"]'),
+          })
         }}
       >
         {signFields}
@@ -2146,23 +2280,25 @@ export function EncounterEditor({
         description="Queda en la historia como «anulada» con tu nombre, la hora y el motivo. Se anulan sus diagnósticos, procedimientos, hallazgos, recetas y controles; no genera cargos. La cita, si la hay, puede volver a atenderse."
         confirmLabel="Anular borrador"
         pending={voiding}
-        confirmDisabled={!voidReason.trim()}
-        onConfirm={() => void handleVoid()}
+        error={voidError}
+        onConfirm={() => void submitForm(voidForm, { root: voidBodyRef.current })}
         onClose={() => {
           if (!voiding) setVoidOpen(false)
         }}
       >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-void`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${uid}-void`}
-            rows={2}
-            maxLength={2000}
-            placeholder="Ej.: se abrió para el paciente equivocado"
-            value={voidReason}
-            onChange={(event) => setVoidReason(event.target.value)}
-          />
-        </Field>
+        <div ref={voidBodyRef}>
+          <voidForm.AppField name="reason">
+            {(field) => (
+              <field.TextareaField
+                label="Motivo"
+                id={`${uid}-void`}
+                rows={2}
+                maxLength={2000}
+                placeholder="Ej.: se abrió para el paciente equivocado"
+              />
+            )}
+          </voidForm.AppField>
+        </div>
       </ConfirmDialog>
 
       {profileOpen ? (

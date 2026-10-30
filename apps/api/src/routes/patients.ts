@@ -153,11 +153,13 @@ const patchInput = z.object({
   identityConfirmed: z.boolean().optional(),
 })
 
-const healthReviewState = z.enum(["unknown", "none", "recorded"])
+const healthReviewState = z.enum(["unknown", "none", "recorded"], "Elige la revisión del grupo")
+// Fechas de antecedentes: YYYY-MM-DD; el servicio comprueba que existan.
+const healthDate = z.string().max(10, "Escribe una fecha válida").nullish()
 const healthAllergy = z
   .object({
     id: z.uuid().optional(),
-    substance: z.string().min(1).max(200),
+    substance: z.string().min(1, "Escribe la sustancia").max(200),
     category: z.string().max(20).nullish(),
     reaction: z.string().max(2000).nullish(),
     /** Sin dato se guarda «desconocida». */
@@ -170,8 +172,8 @@ const healthAllergy = z
   .strict()
 const familyHistoryItem = z
   .object({
-    relationship: z.string().min(1).max(30),
-    condition: z.string().min(1).max(200),
+    relationship: z.string().min(1, "Elige el parentesco").max(30),
+    condition: z.string().min(1, "Escribe la condición").max(200),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
     notes: z.string().max(2000).nullish(),
@@ -180,27 +182,27 @@ const familyHistoryItem = z
 const healthCondition = z
   .object({
     id: z.uuid().optional(),
-    name: z.string().min(1).max(200),
+    name: z.string().min(1, "Escribe el nombre").max(200),
     diagnosisCode: z.string().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
-    status: z.string().min(1).max(20),
-    startDate: z.string().max(10).nullish(),
-    endDate: z.string().max(10).nullish(),
+    status: z.string().min(1, "Elige el estado").max(20),
+    startDate: healthDate,
+    endDate: healthDate,
     notes: z.string().max(2000).nullish(),
   })
   .strict()
 const healthMedication = z
   .object({
     id: z.uuid().optional(),
-    name: z.string().min(1).max(200),
+    name: z.string().min(1, "Escribe el nombre").max(200),
     genericName: z.string().max(200).nullish(),
     dose: z.string().max(200).nullish(),
-    doseValue: z.number().positive().nullish(),
+    doseValue: z.number().positive("Escribe la dosis con un número mayor que cero").nullish(),
     doseUnit: z.string().max(20).nullish(),
     frequency: z.string().max(200).nullish(),
     frequencyCode: z.string().max(30).nullish(),
-    startDate: z.string().max(10).nullish(),
-    endDate: z.string().max(10).nullish(),
+    startDate: healthDate,
+    endDate: healthDate,
     notes: z.string().max(2000).nullish(),
   })
   .strict()
@@ -214,9 +216,12 @@ const allergySubstance = {
 const allergyAddInput = z
   .object({ ...allergySubstance, severity: z.string().max(20).nullish(), reaction: z.string().max(2000).nullish() })
   .strict()
-const allergyRemoveInput = z.object({ reason: z.string().min(1).max(20) }).strict()
+const allergyRemoveInput = z.object({ reason: z.string().min(1, "Elige por qué se quita").max(20) }).strict()
 const allergyCodeInput = z
-  .object({ substanceSystem: z.string().min(1).max(20), substanceCode: z.string().min(1).max(20) })
+  .object({
+    substanceSystem: z.string().min(1, "Elige la sustancia de la lista").max(20),
+    substanceCode: z.string().min(1, "Elige la sustancia de la lista").max(20),
+  })
   .strict()
 // Guardado conjunto del agregado: colecciones completas con sus IDs, revisión
 // optimista y entrevista opcional con versión esperada. El servicio valida el
@@ -236,7 +241,7 @@ const healthSaveInput = z
     conditions: z.array(healthCondition).max(200),
     medications: z.array(healthMedication).max(200),
     familyHistory: z.array(familyHistoryItem).max(50).optional(),
-    asaClass: z.enum(["I", "II", "III", "IV", "V", "VI"]).nullish(),
+    asaClass: z.enum(["I", "II", "III", "IV", "V", "VI"], "Elige la clasificación ASA de la lista").nullish(),
     anamnesis: z
       .object({
         expectedVersion: z.number().int().min(0),
@@ -244,7 +249,7 @@ const healthSaveInput = z
       })
       .strict()
       .optional(),
-    bloodGroup: z.enum(BLOOD_GROUPS).nullable().optional(),
+    bloodGroup: z.enum(BLOOD_GROUPS, "Elige el grupo sanguíneo de la lista").nullable().optional(),
   })
   .strict()
 
@@ -290,9 +295,10 @@ const encounterPatchInput = z.object({
   /** Claves y rangos de @odentia/clinical (VITAL_SIGNS); el servicio valida. */
   vitals: z.record(z.string(), z.union([z.number(), z.string().max(10), z.null()])).nullish(),
 })
+const QUANTITY_RANGE = "La cantidad va de 1 a 99"
 const procedureInput = z
   .object({
-    quantity: z.number().int().min(1).max(99).nullish(),
+    quantity: z.number(QUANTITY_RANGE).int(QUANTITY_RANGE).min(1, QUANTITY_RANGE).max(99, QUANTITY_RANGE).nullish(),
     serviceId: z.uuid().nullish(),
     toothNumber: z.number().int().nullish(),
     surfaces: z.array(z.string().min(1).max(20)).max(5).nullish(),
@@ -302,7 +308,7 @@ const procedureInput = z
     diagnosisSystem: z.string().max(20).nullish(),
     planItemId: z.uuid().nullish(),
     /** Acto libre (sin servicio ni tratamiento): descripción obligatoria. */
-    description: z.string().trim().min(1).max(2000).nullish(),
+    description: z.string().trim().min(1, "Describe el acto libre").max(2000).nullish(),
     /** Hallazgo que trata un servicio directo; queda tratado al cerrar la atención. */
     odontogramEntryId: z.uuid().nullish(),
   })
@@ -312,6 +318,7 @@ const procedureInput = z
   })
   .refine((d) => Boolean(d.serviceId) || Boolean(d.planItemId) || Boolean(d.description), {
     message: "Selecciona un servicio, un tratamiento o describe el acto libre",
+    path: ["serviceId"],
   })
 // El precio NUNCA se ingresa en evaluación/presupuesto: se congela desde la
 // oferta (serviceId). title/priceCents/currency manuales se rechazan (400).
@@ -383,10 +390,14 @@ const planBatchInput = z
     diagnosisSystem: z.string().max(20).nullish(),
   })
   .strict()
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({
+    reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "El motivo admite hasta 2000 caracteres"),
+  })
+  .strict()
 const finalizeInput = z
   .object({
-    endedAt: z.iso.datetime({ offset: true }).nullish(),
+    endedAt: z.iso.datetime({ offset: true, error: "Elige la hora de fin de la lista" }).nullish(),
     // «Seguir sin él»: por qué se cierra con un consentimiento sin firmar.
     consentSkipReason: z.string().trim().max(2000).nullish(),
   })
@@ -761,8 +772,10 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   // --- Consentimiento de datos personales (Ley 29733) ---
   const dataConsentInput = z
     .object({
-      purposes: z.array(z.enum(["atencion", "recordatorios", "comunicaciones"])).min(1),
-      grantedByContactId: z.uuid(),
+      purposes: z
+        .array(z.enum(["atencion", "recordatorios", "comunicaciones"], "Una finalidad elegida no es válida"))
+        .min(1, "Marca al menos la finalidad de atención"),
+      grantedByContactId: z.uuid("Elige quién consintió"),
       channel: z.enum(["presencial", "formulario_publico", "portal"]).optional(),
     })
     .strict()
@@ -785,7 +798,13 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.post("/:id/data-consents/:consentId/revoke", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = z
-      .object({ reason: z.string().trim().min(1).max(2000) })
+      .object({
+        reason: z
+          .string("Escribe el motivo de la revocación")
+          .trim()
+          .min(1, "Escribe el motivo de la revocación")
+          .max(2000, "El motivo admite hasta 2000 caracteres"),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -1011,9 +1030,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     if (!image.success) return validationError(c, image.error.issues)
     if (!(file instanceof File))
       return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
-    if (typeof category !== "string" || typeof label !== "string" || !label.trim()) {
-      return c.json(errorBody(c, "VALIDATION", "category y label son obligatorios"), 400)
-    }
+    const missing: Record<string, string> = {}
+    if (typeof category !== "string" || !category) missing.category = "Elige la categoría."
+    if (typeof label !== "string" || !label.trim()) missing.label = "Escribe el título."
+    const [firstMissing] = Object.values(missing)
+    if (firstMissing || typeof category !== "string" || typeof label !== "string")
+      return c.json(errorBody(c, "VALIDATION", firstMissing ?? "Elige la categoría.", missing), 400)
     if (!file.size || file.size > PATIENT_DOC_MAX_BYTES) {
       return c.json(errorBody(c, "VALIDATION", "El archivo debe pesar entre 1 byte y 10 MB"), 400)
     }
@@ -1082,7 +1104,7 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.post("/:id/documents/:documentId/retire", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = z
-      .object({ reason: z.string().trim().min(1).max(2000) })
+      .object({ reason: z.string().trim().min(1, "Escribe el motivo del retiro.").max(2000) })
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
@@ -1166,12 +1188,12 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
     const patientId = c.req.param("id")
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
-    if (!(file instanceof File))
-      return c.json(errorBody(c, "VALIDATION", "Adjunta una imagen"), 400)
+    // El único dato es la imagen (`file`): cada rechazo se dice junto a ella.
+    const invalidFile = (message: string) => c.json(errorBody(c, "VALIDATION", message, { file: message }), 400)
+    if (!(file instanceof File)) return invalidFile("Adjunta una imagen")
     const ext = PATIENT_AVATAR_MIME_EXT[file.type]
-    if (!ext) return c.json(errorBody(c, "VALIDATION", "Solo se admiten JPG, PNG o WebP"), 400)
-    if (!file.size || file.size > PATIENT_AVATAR_MAX_BYTES)
-      return c.json(errorBody(c, "VALIDATION", "La imagen debe pesar entre 1 byte y 2 MB"), 400)
+    if (!ext) return invalidFile("Solo se admiten JPG, PNG o WebP")
+    if (!file.size || file.size > PATIENT_AVATAR_MAX_BYTES) return invalidFile("La imagen debe pesar entre 1 byte y 2 MB")
     return runService(c, 201, async () => {
       await withOrgContext(deps.db, orgId, (tx) => requirePatient(tx, orgId, patientId))
       const ref = await deps.storage.putPatientAvatar({
@@ -1476,7 +1498,13 @@ export function createPatientsRoute(deps: CrmDeps & { llm?: PlatformLlm }) {
   app.post("/:id/encounters/:encounterId/addenda", async (c) => {
     const { orgId, userId } = orgContextOf(c)
     const parsed = z
-      .object({ text: z.string().trim().min(1).max(4000) })
+      .object({
+        text: z
+          .string()
+          .trim()
+          .min(1, "Escribe la corrección.")
+          .max(4000, "Escribe como mucho 4000 caracteres."),
+      })
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>

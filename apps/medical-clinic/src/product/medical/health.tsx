@@ -1,8 +1,11 @@
 import { ChoiceButtons } from "@odentia/clinic-app/components/choice-buttons"
 import { ChoiceSelect } from "@odentia/clinic-app/components/ui/choice-select"
-import type {
-  InterviewSectionsProps,
-  ProductHealthUi,
+import {
+  type InterviewSectionsProps,
+  type ProductHealthUi,
+  type SubFieldError,
+  type SubFieldErrors,
+  subFieldError,
 } from "@odentia/clinic-app/product/product-ui"
 import {
   ACTIVITY,
@@ -10,6 +13,7 @@ import {
   CONTRACEPTION_METHODS,
   type MedicalHistory,
   medicalHistoryLines,
+  parseMedicalHistory,
   readMedicalHistory,
   TOBACCO,
   YES_NO,
@@ -21,6 +25,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Field,
+  FieldError,
   FieldLabel,
   Input,
 } from "@odentia/ui"
@@ -64,6 +69,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   )
 }
 
+/** El error de un dato bajo su campo; nada si no lo hay. */
+function PartError({ error }: { error: SubFieldError }) {
+  return error.message ? <FieldError id={error.errorId}>{error.message}</FieldError> : null
+}
+
 /**
  * Embarazo o lactancia: sí o no, con el día en que se dijo (hoy, por omisión);
  * otro toque sobre lo marcado lo deja sin responder.
@@ -75,6 +85,8 @@ function Statement({
   withWeeks,
   disabled,
   onChange,
+  errors,
+  errorKey,
 }: {
   label: string
   idPrefix: string
@@ -82,19 +94,33 @@ function Statement({
   withWeeks: boolean
   disabled: boolean
   onChange: (next: Rec | undefined) => void
+  errors: SubFieldErrors | undefined
+  /** «embarazoLactancia.embarazo»: lo suyo en `errors`; la clave sola es el sí o no. */
+  errorKey: string
 }) {
   const estado = value?.estado === "si" || value?.estado === "no" ? (value.estado as YesNo) : null
   const fecha = typeof value?.fecha === "string" ? value.fecha : ""
   const weeks = typeof value?.semanas === "number" ? String(value.semanas) : ""
+  const stateError = subFieldError(
+    errors,
+    errors?.[`${errorKey}.estado`] ? `${errorKey}.estado` : errorKey,
+    `${idPrefix}-estado`,
+  )
+  const dateError = subFieldError(errors, `${errorKey}.fecha`, `${idPrefix}-fecha`)
+  const weeksError = subFieldError(errors, `${errorKey}.semanas`, `${idPrefix}-semanas`)
   return (
     <div className="flex flex-col gap-2 sm:col-span-2">
-      <span className="text-sm font-medium">{label}</span>
+      <span id={`${idPrefix}-estado`} className="text-sm font-medium">
+        {label}
+      </span>
       <div className="flex flex-wrap items-end gap-3">
         <ChoiceButtons
-          label={label}
+          aria-labelledby={`${idPrefix}-estado`}
           value={estado}
           options={YES_NO_OPTIONS}
           disabled={disabled}
+          invalid={stateError.invalid}
+          aria-describedby={stateError.describedBy}
           onChange={(next) =>
             onChange({
               ...value,
@@ -106,7 +132,7 @@ function Statement({
           onClear={() => onChange(undefined)}
         />
         {estado ? (
-          <Field className="w-auto">
+          <Field className="w-auto" data-invalid={dateError.invalid}>
             <FieldLabel htmlFor={`${idPrefix}-fecha`} className="text-xs text-muted-foreground">
               Lo dijo el
             </FieldLabel>
@@ -115,12 +141,15 @@ function Statement({
               value={fecha}
               max={regionToday()}
               disabled={disabled}
+              aria-invalid={dateError.invalid}
+              aria-describedby={dateError.describedBy}
               onChange={(next) => onChange({ ...value, fecha: next || regionToday() })}
             />
+            <PartError error={dateError} />
           </Field>
         ) : null}
         {withWeeks && estado === "si" ? (
-          <Field className="w-auto">
+          <Field className="w-auto" data-invalid={weeksError.invalid}>
             <FieldLabel htmlFor={`${idPrefix}-semanas`} className="text-xs text-muted-foreground">
               Semanas ese día
             </FieldLabel>
@@ -131,6 +160,8 @@ function Statement({
               maxLength={2}
               value={weeks}
               disabled={disabled}
+              aria-invalid={weeksError.invalid}
+              aria-describedby={weeksError.describedBy}
               onChange={(event) =>
                 onChange({
                   ...value,
@@ -138,9 +169,11 @@ function Statement({
                 })
               }
             />
+            <PartError error={weeksError} />
           </Field>
         ) : null}
       </div>
+      <PartError error={stateError} />
     </div>
   )
 }
@@ -156,8 +189,18 @@ function MedicalInterviewSections({
   disabled,
   idPrefix,
   sex,
+  errors,
 }: InterviewSectionsProps) {
   const fid = (name: string) => `${idPrefix}-${name}`
+  // El error de cada dato («grupo.clave») va bajo su campo, con su control marcado.
+  const err = (key: string, name: string) => subFieldError(errors, key, fid(name))
+  const furError = err("ginecoObstetricos.fur", "go-fur")
+  const methodError = err("ginecoObstetricos.metodo", "go-metodo")
+  const tobaccoError = err("habitos.tabaco", "tabaco")
+  const cigarettesError = err("habitos.cigarrillosDia", "cigarrillos")
+  const alcoholError = err("habitos.alcohol", "alcohol")
+  const activityError = err("habitos.actividadFisica", "actividad")
+  const countsError = err("ginecoObstetricos", "go-conteos")
   const pregnancy = groupOf(answers, "embarazoLactancia")
   const gyneco = groupOf(answers, "ginecoObstetricos")
   const habits = groupOf(answers, "habitos")
@@ -179,6 +222,8 @@ function MedicalInterviewSections({
             withWeeks
             disabled={disabled}
             onChange={(next) => update("embarazoLactancia", "embarazo", next)}
+            errors={errors}
+            errorKey="embarazoLactancia.embarazo"
           />
           <Statement
             label="Lactancia"
@@ -187,6 +232,8 @@ function MedicalInterviewSections({
             withWeeks={false}
             disabled={disabled}
             onChange={(next) => update("embarazoLactancia", "lactancia", next)}
+            errors={errors}
+            errorKey="embarazoLactancia.lactancia"
           />
           <p className="text-xs text-muted-foreground sm:col-span-2">
             La receta avisa con esto: por eso se guarda el día en que se dijo.
@@ -195,7 +242,7 @@ function MedicalInterviewSections({
       )}
       {sex === "M" ? null : (
         <Section title="Gineco-obstétricos">
-          <Field>
+          <Field data-invalid={furError.invalid}>
             <FieldLabel htmlFor={fid("go-fur")}>Última regla</FieldLabel>
             <DatePickerButton
               id={fid("go-fur")}
@@ -203,15 +250,20 @@ function MedicalInterviewSections({
               max={regionToday()}
               emptyLabel="Sin registrar"
               disabled={disabled}
+              aria-invalid={furError.invalid}
+              aria-describedby={furError.describedBy}
               onChange={(next) => update("ginecoObstetricos", "fur", next || undefined)}
             />
+            <PartError error={furError} />
           </Field>
-          <Field>
+          <Field data-invalid={methodError.invalid}>
             <FieldLabel htmlFor={fid("go-metodo")}>Método anticonceptivo</FieldLabel>
             <ChoiceSelect
               id={fid("go-metodo")}
               value={typeof gyneco.metodo === "string" ? gyneco.metodo : ""}
               disabled={disabled}
+              aria-invalid={methodError.invalid}
+              aria-describedby={methodError.describedBy}
               onChange={(event) =>
                 update("ginecoObstetricos", "metodo", event.target.value || undefined)
               }
@@ -223,6 +275,7 @@ function MedicalInterviewSections({
                 </option>
               ))}
             </ChoiceSelect>
+            <PartError error={methodError} />
           </Field>
           <div className="grid grid-cols-3 gap-3 sm:col-span-2">
             {(
@@ -231,33 +284,51 @@ function MedicalInterviewSections({
                 ["partos", "Partos"],
                 ["cesareas", "Cesáreas"],
               ] as const
-            ).map(([key, label]) => (
-              <Field key={key}>
-                <FieldLabel htmlFor={fid(`go-${key}`)}>{label}</FieldLabel>
-                <Input
-                  id={fid(`go-${key}`)}
-                  inputMode="numeric"
-                  maxLength={2}
-                  value={typeof gyneco[key] === "number" ? String(gyneco[key]) : ""}
-                  disabled={disabled}
-                  onChange={setCount(key)}
-                />
-              </Field>
-            ))}
+            ).map(([key, label]) => {
+              const countError = err(`ginecoObstetricos.${key}`, `go-${key}`)
+              // La regla entre los tres (partos y cesáreas no más que embarazos) marca los tres y se dice debajo.
+              const invalid = countError.invalid ?? countsError.invalid
+              const describedBy =
+                [countError.describedBy, countsError.describedBy].filter(Boolean).join(" ") || undefined
+              return (
+                <Field key={key} data-invalid={invalid}>
+                  <FieldLabel htmlFor={fid(`go-${key}`)}>{label}</FieldLabel>
+                  <Input
+                    id={fid(`go-${key}`)}
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={typeof gyneco[key] === "number" ? String(gyneco[key]) : ""}
+                    disabled={disabled}
+                    aria-invalid={invalid}
+                    aria-describedby={describedBy}
+                    onChange={setCount(key)}
+                  />
+                  <PartError error={countError} />
+                </Field>
+              )
+            })}
+            <div className="col-span-3">
+              <PartError error={countsError} />
+            </div>
           </div>
         </Section>
       )}
       <Section title="Hábitos">
-        <Field className="sm:col-span-2">
-          <FieldLabel>Tabaco</FieldLabel>
+        <Field
+          className="sm:col-span-2"
+          data-invalid={tobaccoError.invalid || cigarettesError.invalid}
+        >
+          <FieldLabel id={fid("tabaco")}>Tabaco</FieldLabel>
           <div className="flex flex-wrap items-center gap-3">
             <ChoiceButtons
-              label="Tabaco"
+              aria-labelledby={fid("tabaco")}
               value={
                 typeof habits.tabaco === "string" ? (habits.tabaco as keyof typeof TOBACCO) : null
               }
               options={options(TOBACCO)}
               disabled={disabled}
+              invalid={tobaccoError.invalid}
+              aria-describedby={tobaccoError.describedBy}
               onChange={(next) => {
                 update("habitos", "tabaco", next)
                 if (next !== "fuma") update("habitos", "cigarrillosDia", undefined)
@@ -278,6 +349,8 @@ function MedicalInterviewSections({
                     typeof habits.cigarrillosDia === "number" ? String(habits.cigarrillosDia) : ""
                   }
                   disabled={disabled}
+                  aria-invalid={cigarettesError.invalid}
+                  aria-describedby={cigarettesError.describedBy}
                   onChange={(event) =>
                     update(
                       "habitos",
@@ -290,24 +363,29 @@ function MedicalInterviewSections({
               </span>
             ) : null}
           </div>
+          <PartError error={tobaccoError} />
+          <PartError error={cigarettesError} />
         </Field>
-        <Field>
-          <FieldLabel>Alcohol</FieldLabel>
+        <Field data-invalid={alcoholError.invalid}>
+          <FieldLabel id={fid("alcohol")}>Alcohol</FieldLabel>
           <ChoiceButtons
-            label="Alcohol"
+            aria-labelledby={fid("alcohol")}
             value={
               typeof habits.alcohol === "string" ? (habits.alcohol as keyof typeof ALCOHOL) : null
             }
             options={options(ALCOHOL)}
             disabled={disabled}
+            invalid={alcoholError.invalid}
+            aria-describedby={alcoholError.describedBy}
             onChange={(next) => update("habitos", "alcohol", next)}
             onClear={() => update("habitos", "alcohol", undefined)}
           />
+          <PartError error={alcoholError} />
         </Field>
-        <Field>
-          <FieldLabel>Actividad física</FieldLabel>
+        <Field data-invalid={activityError.invalid}>
+          <FieldLabel id={fid("actividad")}>Actividad física</FieldLabel>
           <ChoiceButtons
-            label="Actividad física"
+            aria-labelledby={fid("actividad")}
             value={
               typeof habits.actividadFisica === "string"
                 ? (habits.actividadFisica as keyof typeof ACTIVITY)
@@ -315,67 +393,80 @@ function MedicalInterviewSections({
             }
             options={options(ACTIVITY)}
             disabled={disabled}
+            invalid={activityError.invalid}
+            aria-describedby={activityError.describedBy}
             onChange={(next) => update("habitos", "actividadFisica", next)}
             onClear={() => update("habitos", "actividadFisica", undefined)}
           />
+          <PartError error={activityError} />
         </Field>
       </Section>
       <Section title="Vacunas">
         <div className="flex flex-col gap-3 sm:col-span-2">
-          {vaccines.map((row, index) => (
-            <div
-              // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id; se quitan por su lugar.
-              key={index}
-              className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_auto_auto] sm:items-end"
-            >
-              <Field>
-                <FieldLabel htmlFor={fid(`vac-${index}`)}>Vacuna</FieldLabel>
-                <Input
-                  id={fid(`vac-${index}`)}
-                  maxLength={120}
-                  placeholder="Ej.: influenza, hepatitis B, tétanos"
-                  value={row.vacuna ?? ""}
-                  disabled={disabled}
-                  onChange={(event) =>
-                    setVaccines(
-                      vaccines.map((item, i) =>
-                        i === index ? { ...item, vacuna: event.target.value } : item,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={fid(`vac-fecha-${index}`)}>Fecha</FieldLabel>
-                <DatePickerButton
-                  id={fid(`vac-fecha-${index}`)}
-                  value={row.fecha ?? ""}
-                  max={regionToday()}
-                  emptyLabel="Sin fecha"
-                  disabled={disabled}
-                  onChange={(next) =>
-                    setVaccines(
-                      vaccines.map((item, i) =>
-                        i === index
-                          ? { vacuna: item.vacuna, ...(next ? { fecha: next } : {}) }
-                          : item,
-                      ),
-                    )
-                  }
-                />
-              </Field>
-              {disabled ? null : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setVaccines(vaccines.filter((_, i) => i !== index))}
-                >
-                  Quitar
-                </Button>
-              )}
-            </div>
-          ))}
+          {vaccines.map((row, index) => {
+            const nameError = err(`vacunas.${index}.vacuna`, `vac-${index}`)
+            const dateError = err(`vacunas.${index}.fecha`, `vac-fecha-${index}`)
+            return (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: las filas no tienen id; se quitan por su lugar.
+                key={index}
+                className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_auto_auto] sm:items-end"
+              >
+                <Field data-invalid={nameError.invalid}>
+                  <FieldLabel htmlFor={fid(`vac-${index}`)}>Vacuna</FieldLabel>
+                  <Input
+                    id={fid(`vac-${index}`)}
+                    maxLength={120}
+                    placeholder="Ej.: influenza, hepatitis B, tétanos"
+                    value={row.vacuna ?? ""}
+                    disabled={disabled}
+                    aria-invalid={nameError.invalid}
+                    aria-describedby={nameError.describedBy}
+                    onChange={(event) =>
+                      setVaccines(
+                        vaccines.map((item, i) =>
+                          i === index ? { ...item, vacuna: event.target.value } : item,
+                        ),
+                      )
+                    }
+                  />
+                  <PartError error={nameError} />
+                </Field>
+                <Field data-invalid={dateError.invalid}>
+                  <FieldLabel htmlFor={fid(`vac-fecha-${index}`)}>Fecha</FieldLabel>
+                  <DatePickerButton
+                    id={fid(`vac-fecha-${index}`)}
+                    value={row.fecha ?? ""}
+                    max={regionToday()}
+                    emptyLabel="Sin fecha"
+                    disabled={disabled}
+                    aria-invalid={dateError.invalid}
+                    aria-describedby={dateError.describedBy}
+                    onChange={(next) =>
+                      setVaccines(
+                        vaccines.map((item, i) =>
+                          i === index
+                            ? { vacuna: item.vacuna, ...(next ? { fecha: next } : {}) }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
+                  <PartError error={dateError} />
+                </Field>
+                {disabled ? null : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setVaccines(vaccines.filter((_, i) => i !== index))}
+                  >
+                    Quitar
+                  </Button>
+                )}
+              </div>
+            )
+          })}
           {disabled ? null : (
             <div>
               <Button
@@ -420,4 +511,8 @@ export const medicalHealth: ProductHealthUi = {
   asksPregnancy: false,
   InterviewSections: (props) => <MedicalInterviewSections {...props} />,
   Summary: (props) => <MedicalHistorySummary {...props} />,
+  validate: (answers, today) => {
+    const parsed = parseMedicalHistory(answers, today)
+    return parsed.ok || !parsed.field ? {} : { [parsed.field]: parsed.error }
+  },
 }

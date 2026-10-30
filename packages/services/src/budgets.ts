@@ -22,7 +22,7 @@ import {
 } from "@odentia/clinical"
 import { and, asc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { budgetAwaitsAnswer } from "./budget-awaiting.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requireOrgCurrency } from "./locale.js"
 import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
 import { requirePatient } from "./patients.js"
@@ -553,21 +553,22 @@ async function loadBudget(tx: Db, orgId: string, patientId: string, budget: Budg
 
 function assertTitle(title: string | null | undefined, fallback: string): string {
   const value = (title?.trim() || fallback.trim()) ?? ""
-  if (!value || value.length > 200) throw validation("title debe tener 1–200 caracteres")
+  if (!value || value.length > 200) throw invalidField("title", "Escribe un título de 1 a 200 caracteres.")
   return value
 }
 
 function assertPatchTitle(title: string | undefined): string | undefined {
   if (title === undefined) return undefined
   const value = title.trim()
-  if (!value || value.length > 200) throw validation("title debe tener 1–200 caracteres")
+  if (!value || value.length > 200) throw invalidField("title", "Escribe un título de 1 a 200 caracteres.")
   return value
 }
 
-function assertNotes(notes: string | null | undefined): string | null | undefined {
+/** `field`: el nombre de la nota en el cuerpo (`notes`, `decisionNote`). */
+function assertNotes(notes: string | null | undefined, field = "notes"): string | null | undefined {
   if (notes === undefined) return undefined
   if (notes === null) return null
-  if (notes.length > 4000) throw validation("notes debe tener hasta 4000 caracteres")
+  if (notes.length > 4000) throw invalidField(field, "Escribe como mucho 4000 caracteres.")
   const trimmed = notes.trim()
   return trimmed ? trimmed : null
 }
@@ -1464,9 +1465,13 @@ export interface AdjustBudgetLinesInput {
   lines: AdjustBudgetLineInput[]
 }
 
-function assertPriceReason(reason: string | null | undefined): string {
+/** `field`: el nombre del motivo en el cuerpo (`lines[0].reason`) para decirlo junto a él. */
+function assertPriceReason(reason: string | null | undefined, field?: string): string {
   const value = reason?.trim() ?? ""
-  if (!value || value.length > 500) throw validation("El motivo debe tener 1–500 caracteres")
+  if (!value || value.length > 500) {
+    const message = "El motivo debe tener 1–500 caracteres"
+    throw field ? invalidField(field, message) : validation(message)
+  }
   return value
 }
 
@@ -1504,12 +1509,12 @@ export async function adjustBudgetLines(
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
   const now = new Date()
   const changes: Array<Record<string, unknown>> = []
-  for (const patch of input.lines) {
+  for (const [index, patch] of input.lines.entries()) {
     const targets = lines.filter(
       (line) => line.planItemId === patch.planItemId && (!patch.optionId || line.optionId === patch.optionId),
     )
     if (targets.length === 0) throw notFound("Línea del presupuesto")
-    for (const line of targets) changes.push(await adjustOneLine(tx, orgId, line, patch, now))
+    for (const line of targets) changes.push(await adjustOneLine(tx, orgId, line, patch, now, `lines[${index}]`))
   }
   await audit(tx, orgId, actorUserId, "budget.prices_adjusted", budgetId, {
     patientId,
@@ -1520,12 +1525,14 @@ export async function adjustBudgetLines(
   return loadBudget(tx, orgId, patientId, await requireBudget(tx, orgId, patientId, budgetId))
 }
 
+/** `at`: la línea en el cuerpo (`lines[0]`); cada rechazo se dice junto a su dato. */
 async function adjustOneLine(
   tx: Db,
   orgId: string,
   line: BudgetLineWithStatus,
   patch: AdjustBudgetLineInput,
   now: Date,
+  at: string,
 ): Promise<Record<string, unknown>> {
   let priceCents = line.priceCents
   let priceReason = line.priceReason
@@ -1535,9 +1542,9 @@ async function adjustOneLine(
   let sessionsPlanned = line.sessionsPlanned
   if (patch.sessionsPlanned !== undefined) {
     if (line.billingMode !== "session")
-      throw validation("Las visitas previstas solo aplican a lo que se cobra por sesión")
+      throw invalidField(`${at}.sessionsPlanned`, "Las visitas previstas solo aplican a lo que se cobra por sesión")
     if (!Number.isInteger(patch.sessionsPlanned) || patch.sessionsPlanned < 1 || patch.sessionsPlanned > 200)
-      throw validation("Las visitas previstas van de 1 a 200")
+      throw invalidField(`${at}.sessionsPlanned`, "Las visitas previstas van de 1 a 200")
     sessionsPlanned = patch.sessionsPlanned
   }
   if (patch.promotionId !== undefined) {
@@ -1569,20 +1576,21 @@ async function adjustOneLine(
       promotionName = snapshot.promotionName
       promotionMode = snapshot.mode
       priceCents = snapshot.priceCents
-      priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason) : null
+      priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason, `${at}.reason`) : null
     }
   }
   if (patch.priceCents !== undefined && patch.priceCents !== null) {
     if (!Number.isSafeInteger(patch.priceCents) || patch.priceCents < 0 || patch.priceCents > 2147483647) {
-      throw validation("priceCents debe ser un entero >= 0")
+      throw invalidField(`${at}.priceCents`, "El precio debe ser un importe de 0 o más")
     }
     priceCents = patch.priceCents
   }
-  if (priceCents == null) throw validation("La línea no tiene precio acordado")
+  if (priceCents == null) throw invalidField(`${at}.priceCents`, "La línea no tiene precio acordado")
   if (promotionMode === "fixed" && promotionId && line.serviceId) {
     const snapshot = await requirePromotionPrice(tx, orgId, promotionId, line.serviceId, undefined)
     if (priceCents !== snapshot.priceCents) {
-      throw conflict("PROMOTION_FIXED_PRICE", "El precio fijo de la promoción no se negocia")
+      const message = "El precio fijo de la promoción no se negocia"
+      throw new ServiceError("PROMOTION_FIXED_PRICE", 409, message, { [`${at}.priceCents`]: message })
     }
   }
   const reference =
@@ -1591,9 +1599,9 @@ async function adjustOneLine(
       : (line.tariffPriceCents ?? priceCents)
   if (promotionId === null || promotionMode === "from") {
     if (priceCents < (reference ?? priceCents)) {
-      priceReason = assertPriceReason(patch.reason ?? priceReason)
+      priceReason = assertPriceReason(patch.reason ?? priceReason, `${at}.reason`)
     } else if (patch.reason !== undefined) {
-      priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason) : null
+      priceReason = patch.reason?.trim() ? assertPriceReason(patch.reason, `${at}.reason`) : null
     }
   }
   lineTotal({ billingMode: line.billingMode, sessionsPlanned }, priceCents)
@@ -1660,43 +1668,49 @@ export async function decideBudget(
   if (current.status !== "presentado" && !isFollowUp) {
     throw conflict("BUDGET_STATUS", "Solo un presupuesto presentado puede decidirse")
   }
-  const decisionNote = assertNotes(input.decisionNote) ?? null
+  const decisionNote = assertNotes(input.decisionNote, "decisionNote") ?? null
   const options = await listOptions(tx, orgId, [budgetId])
   const already = options.find((option) => option.decision === "elegida") ?? null
   let chosen: BudgetOptionRow
   if (already) {
     if (input.optionId && input.optionId !== already.id) {
-      throw conflict("BUDGET_DECISION_FINAL", "Ya eligió otra opción: para cambiarla se crea una revisión")
+      const message = "Ya eligió otra opción: para cambiarla se crea una revisión"
+      throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { optionId: message })
     }
     chosen = already
   } else if (options.length === 1) {
     chosen = options[0]!
   } else {
     const picked = options.find((option) => option.id === input.optionId)
-    if (!picked) throw validation("Elige una de las opciones del presupuesto")
+    if (!picked) throw invalidField("optionId", "Elige una de las opciones del presupuesto")
     chosen = picked
   }
   const allLines = await listBudgetLines(tx, orgId, patientId, budgetId)
   const lines = allLines.filter((line) => line.optionId === chosen.id)
   if (!Array.isArray(input.decisions) || input.decisions.length !== lines.length) {
-    throw validation("Debe decidir cada línea exactamente una vez")
+    throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
   }
   const decisions = new Map(input.decisions.map(d => [d.planItemId, d.decision]))
   if (decisions.size !== lines.length || lines.some(l => !decisions.has(l.planItemId)) ||
     input.decisions.some(d => !["aceptado", "rechazado", "pospuesto"].includes(d.decision))) {
-    throw validation("Debe decidir cada línea exactamente una vez")
+    throw invalidField("decisions", "Debe decidir cada línea exactamente una vez")
   }
+  // La respuesta de un tratamiento en el cuerpo (`decisions[1].decision`), para decir el rechazo junto a ella.
+  const decisionField = (planItemId: string) =>
+    `decisions[${input.decisions.findIndex((d) => d.planItemId === planItemId)}].decision`
   const representative = input.decidedByContactId
-    ? await requireDecisionContact(tx, orgId, patientId, input.decidedByContactId) : null
+    ? await requireDecisionContact(tx, orgId, patientId, input.decidedByContactId, "decidedByContactId") : null
   if (isFollowUp) {
     if (current.decisionContactId && representative && current.decisionContactId !== representative.id) {
-      throw conflict("BUDGET_DECISION_OWNER", "Solo quien decidió puede completar su respuesta")
+      const message = "Solo quien decidió puede completar su respuesta"
+      throw new ServiceError("BUDGET_DECISION_OWNER", 409, message, { decidedByContactId: message })
     }
     for (const line of lines) {
       if (line.decision !== "pospuesto") {
         const next = decisions.get(line.planItemId)
         if (next !== line.decision) {
-          throw conflict("BUDGET_DECISION_FINAL", "Lo ya decidido no se reescribe al completar")
+          const message = "Lo ya decidido no se reescribe al completar"
+          throw new ServiceError("BUDGET_DECISION_FINAL", 409, message, { [decisionField(line.planItemId)]: message })
         }
       }
     }
@@ -1709,10 +1723,17 @@ export async function decideBudget(
   for (const item of items) {
     const decision = decisions.get(item.id)
     if (!decision) continue
-    if (["cancelado", "reemplazado"].includes(item.status)) throw conflict("ITEM_CLOSED", "La indicación está cerrada")
-    if (item.budgetId !== budgetId) throw conflict("BUDGET_STATUS", "La propuesta ya no es vigente para esta indicación")
+    if (["cancelado", "reemplazado"].includes(item.status)) {
+      const message = "La indicación está cerrada"
+      throw new ServiceError("ITEM_CLOSED", 409, message, { [decisionField(item.id)]: message })
+    }
+    if (item.budgetId !== budgetId) {
+      const message = "La propuesta ya no es vigente para esta indicación"
+      throw new ServiceError("BUDGET_STATUS", 409, message, { [decisionField(item.id)]: message })
+    }
     if (["en_curso", "realizado"].includes(item.status) && decision !== "aceptado") {
-      throw conflict("ITEM_IN_EXECUTION", "No puede retirar la aceptación de un tratamiento ejecutado")
+      const message = "No puede retirar la aceptación de un tratamiento ejecutado"
+      throw new ServiceError("ITEM_IN_EXECUTION", 409, message, { [decisionField(item.id)]: message })
     }
   }
   const now = new Date()
@@ -1917,21 +1938,32 @@ export async function getBudgetDetail(
   return loadBudget(tx, orgId, patientId, budget)
 }
 
+/**
+ * Lo que se quita en la revisión no puede tener ejecución ni movimientos
+ * económicos. Lo quitado no está en el cuerpo: el rechazo va a la lista
+ * (`itemIds`) y nombra cada tratamiento.
+ */
 async function assertRetainedExecutedItems(tx: Db, orgId: string, patientId: string, budgetId: string, itemIds: string[]) {
   const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
   const removed = lines.filter(l => !itemIds.includes(l.planItemId))
   if (removed.length === 0) return
-  const [procedure] = await tx.select({ id: encounterProcedure.id }).from(encounterProcedure)
+  const procedures = await tx.selectDistinct({ planItemId: encounterProcedure.planItemId }).from(encounterProcedure)
     .where(and(eq(encounterProcedure.organizationId, orgId),
-      inArray(encounterProcedure.planItemId, removed.map(l => l.planItemId)))).limit(1)
-  const [charge] = await tx.select({ id: patientCharge.id }).from(patientCharge)
+      inArray(encounterProcedure.planItemId, removed.map(l => l.planItemId))))
+  const charges = await tx.selectDistinct({ budgetItemId: patientCharge.budgetItemId }).from(patientCharge)
     .where(and(eq(patientCharge.organizationId, orgId), eq(patientCharge.patientId, patientId),
-      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientCharge.voidedAt))).limit(1)
-  const [application] = await tx.select({ id: patientPaymentApplication.id }).from(patientPaymentApplication)
+      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientCharge.voidedAt)))
+  const applications = await tx.selectDistinct({ budgetItemId: patientCharge.budgetItemId }).from(patientPaymentApplication)
     .innerJoin(patientCharge, eq(patientCharge.id, patientPaymentApplication.chargeId))
     .where(and(eq(patientPaymentApplication.organizationId, orgId), eq(patientPaymentApplication.patientId, patientId),
-      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientPaymentApplication.voidedAt))).limit(1)
-  if (procedure || charge || application) throw conflict("BUDGET_ITEM_IN_USE", "No puede retirar líneas con ejecución o movimientos económicos")
+      inArray(patientCharge.budgetItemId, removed.map(l => l.id)), isNull(patientPaymentApplication.voidedAt)))
+  const usedPlanItems = new Set(procedures.map((row) => row.planItemId))
+  const usedLines = new Set([...charges, ...applications].map((row) => row.budgetItemId))
+  const blocked = removed.filter((line) => usedPlanItems.has(line.planItemId) || usedLines.has(line.id))
+  if (blocked.length === 0) return
+  const titles = [...new Set(blocked.map((line) => `«${line.title}»`))].join(", ")
+  const message = `No puede retirar líneas con ejecución o movimientos económicos: ${titles}`
+  throw new ServiceError("BUDGET_ITEM_IN_USE", 409, message, { itemIds: message })
 }
 
 /**
@@ -1950,9 +1982,9 @@ export async function reviseBudget(
     throw conflict("BUDGET_STATUS", "Esta propuesta no admite revisión")
   }
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   if (!input.itemIds?.length || input.itemIds.length > 200 || new Set(input.itemIds).size !== input.itemIds.length) {
-    throw validation("itemIds debe contener entre 1 y 200 identificadores únicos")
+    throw invalidField("itemIds", "itemIds debe contener entre 1 y 200 identificadores únicos")
   }
   const [successor] = await tx.select({ id: treatmentBudget.id }).from(treatmentBudget)
     .where(and(eq(treatmentBudget.organizationId, orgId), eq(treatmentBudget.supersedesBudgetId, budgetId))).limit(1)
@@ -1964,9 +1996,12 @@ export async function reviseBudget(
   )).orderBy(asc(treatmentPlanItem.id)).for("update")
   if (items.length !== input.itemIds.length) throw notFound("Ítem del plan")
   for (const item of items) {
-    if (["cancelado", "reemplazado"].includes(item.status)) throw conflict("ITEM_CLOSED", "La indicación está cerrada")
-    if (item.priceCents == null || item.currency !== current.currency) throw conflict("BUDGET_CURRENCY_MIX", "Todas las líneas requieren precio en la moneda de la propuesta")
-    if (item.budgetId && item.budgetId !== current.id) throw conflict("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
+    // La casilla del tratamiento en el cuerpo (`itemIds[2]`): el rechazo se dice junto a ella.
+    const field = `itemIds[${input.itemIds.indexOf(item.id)}]`
+    const reject = (code: string, message: string) => new ServiceError(code, 409, message, { [field]: message })
+    if (["cancelado", "reemplazado"].includes(item.status)) throw reject("ITEM_CLOSED", "La indicación está cerrada")
+    if (item.priceCents == null || item.currency !== current.currency) throw reject("BUDGET_CURRENCY_MIX", "Todas las líneas requieren precio en la moneda de la propuesta")
+    if (item.budgetId && item.budgetId !== current.id) throw reject("ITEM_ALREADY_QUOTED", "La indicación pertenece a otra propuesta")
     assertExecutableCodings(item.codings)
   }
   const [revision] = await tx.insert(treatmentBudget).values({

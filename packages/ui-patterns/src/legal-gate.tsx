@@ -1,6 +1,7 @@
-import { BRAND_NAMES, Checkbox, Dialog, DialogContent, DialogDescription, DialogTitle, toast, useBrand } from "@odentia/ui"
-import { useEffect, useId, useState } from "react"
-import type { AuthFetch } from "./access-link-gate.js"
+import { BRAND_NAMES, Dialog, DialogContent, DialogDescription, DialogTitle, toast, useBrand } from "@odentia/ui"
+import { useEffect, useState } from "react"
+import { type AuthFetch, authFetchError } from "./access-link-gate.js"
+import { useAppForm, useFormSubmit, useFormSubmitError } from "./form/app-form.js"
 import { SubmitButton } from "./form/submit-button.js"
 
 export type LegalLinks = { terms: string; privacy: string; agreement: string; support: string }
@@ -49,20 +50,41 @@ export function LegalGate({
     | undefined
   links: LegalLinks
 }) {
-  const id = useId()
   const [terms, setTerms] = useState<TermsStatus["terms"] | null>(null)
   const [agreement, setAgreement] = useState<ClinicAgreementStatus | null>(null)
-  const [checked, setChecked] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const brand = useBrand()
+
+  const form = useAppForm({
+    defaultValues: { accepted: false as boolean },
+    onSubmit: async () => {
+      if (terms) {
+        const { error: failure } = await request("/legal/accept", {
+          method: "POST",
+          body: { termsVersion: terms.version },
+        })
+        if (failure) throw authFetchError(failure)
+      }
+      if (agreement) await clinic?.accept(agreement.version)
+      setTerms(null)
+      setAgreement(null)
+      toast.success("Listo. Gracias por aceptarlos.")
+    },
+  })
+  // Sin red no hay nada que duplicar: aceptar otra vez la misma versión no cambia nada.
+  const onSubmit = useFormSubmit(form, {
+    formMessage: (error) =>
+      error instanceof TypeError ? "No pudimos guardarlo. Revisa tu conexión e inténtalo de nuevo." : null,
+  })
+  const submitError = useFormSubmitError(form)
 
   useEffect(() => {
     let alive = true
-    void request("/legal/status", { method: "GET" }).then(({ data }) => {
-      const status = data as TermsStatus | null
-      if (alive && status?.terms.state === "updated") setTerms(status.terms)
-    })
+    void request("/legal/status", { method: "GET" })
+      .then(({ data }) => {
+        const status = data as TermsStatus | null
+        if (alive && status?.terms.state === "updated") setTerms(status.terms)
+      })
+      .catch(() => {})
     void clinic
       ?.load()
       .then((status) => {
@@ -97,32 +119,6 @@ export function LegalGate({
       ? `Tu clínica confía a ${BRAND_NAMES[brand]} los datos de sus pacientes. Como la administras, acéptalo en su nombre.`
       : "Lo que cambió:"
 
-  async function accept() {
-    if (!checked) {
-      setError("Marca la casilla para seguir.")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    try {
-      if (terms) {
-        const { error: failure } = await request("/legal/accept", {
-          method: "POST",
-          body: { termsVersion: terms.version },
-        })
-        if (failure) throw new Error(failure.message || "No pudimos guardarlo.")
-      }
-      if (agreement) await clinic?.accept(agreement.version)
-      setTerms(null)
-      setAgreement(null)
-      toast.success("Listo. Gracias por aceptarlos.")
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No pudimos guardarlo. Inténtalo de nuevo.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
     <Dialog open onOpenChange={() => {}}>
       <DialogContent
@@ -142,48 +138,45 @@ export function LegalGate({
               ))}
             </ul>
           ) : null}
-          <div className="flex items-start gap-2.5 text-sm text-muted-foreground">
-            <Checkbox
-              id={`${id}-acepto`}
-              className="mt-0.5"
-              checked={checked}
-              onCheckedChange={(value) => {
-                setChecked(value === true)
-                setError(null)
-              }}
-            />
-            <label htmlFor={`${id}-acepto`}>
-              Leí y acepto{" "}
-              {docs.map((d, i) => (
-                <span key={d.href}>
-                  {i > 0 ? (i === docs.length - 1 ? " y " : ", ") : ""}
-                  {d.label.startsWith("Términos") ? "los " : "el "}
-                  <a
-                    href={d.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-foreground underline"
-                  >
-                    {d.label}
-                  </a>
-                </span>
-              ))}
-              {terms ? " actualizados" : ""}.
-            </label>
-          </div>
-          {error ? (
-            <p role="alert" className="text-sm font-medium text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <SubmitButton
-            type="button"
-            pending={saving}
-            onClick={() => void accept()}
-            className="w-full"
-          >
-            Aceptar y seguir
-          </SubmitButton>
+          <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
+            <form.AppField
+              name="accepted"
+              validators={{ onSubmit: ({ value }) => (value ? undefined : "Marca la casilla para seguir.") }}
+            >
+              {(field) => (
+                <field.CheckboxField
+                  className="text-muted-foreground"
+                  label={
+                    <span className="font-normal">
+                      Leí y acepto{" "}
+                      {docs.map((d, i) => (
+                        <span key={d.href}>
+                          {i > 0 ? (i === docs.length - 1 ? " y " : ", ") : ""}
+                          {d.label.startsWith("Términos") ? "los " : "el "}
+                          <a href={d.href} target="_blank" rel="noreferrer" className="text-foreground underline">
+                            {d.label}
+                          </a>
+                        </span>
+                      ))}
+                      {terms ? " actualizados" : ""}.
+                    </span>
+                  }
+                />
+              )}
+            </form.AppField>
+            {submitError ? (
+              <p role="alert" className="text-sm font-medium text-destructive">
+                {submitError}
+              </p>
+            ) : null}
+            <form.Subscribe selector={(state) => state.isSubmitting}>
+              {(isSubmitting) => (
+                <SubmitButton type="submit" pending={isSubmitting} className="w-full">
+                  Aceptar y seguir
+                </SubmitButton>
+              )}
+            </form.Subscribe>
+          </form>
           <p className="text-xs text-muted-foreground">
             Si no estás de acuerdo,{" "}
             <a href={links.support} className="underline">

@@ -173,6 +173,32 @@ export function parseVitals(
   return { ok: true, value: Object.keys(out).length > 0 ? out : null }
 }
 
+/**
+ * Lo mismo que `parseVitals`, pero dicho por signo: la clave del signo que hay
+ * que corregir → su mensaje, para marcarlo junto a su campo. La presión
+ * incompleta va en la que falta; la sistólica no mayor, en la sistólica.
+ * Vacío: todo bien.
+ */
+export function vitalsErrors(
+  input: Record<string, unknown> | null | undefined,
+  allowed: readonly VitalSignKey[] = VITAL_SIGNS.map((v) => v.key),
+): Record<string, string> {
+  const errors: Record<string, string> = {}
+  if (!input) return errors
+  for (const [key, raw] of Object.entries(input)) {
+    const one = parseVitals({ [key]: raw }, allowed)
+    if (!one.ok) errors[key] = one.error
+  }
+  if (Object.keys(errors).length > 0) return errors
+  const whole = parseVitals(input, allowed)
+  if (whole.ok) return errors
+  const diastolic = input.presionDiastolica
+  const key: VitalSignKey =
+    diastolic === null || diastolic === undefined || diastolic === "" ? "presionDiastolica" : "presionSistolica"
+  errors[key] = whole.error
+  return errors
+}
+
 /** «PA 120/80 mmHg · FC 72 lpm · T 36.5 °C». */
 export function formatVitals(vitals: Vitals | null | undefined): string {
   if (!vitals) return ""

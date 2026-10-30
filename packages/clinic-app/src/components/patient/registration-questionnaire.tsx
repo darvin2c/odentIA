@@ -20,6 +20,7 @@ import {
   registrationFieldAsked,
   SEX_CODES,
   SEX_LABELS,
+  validateDemographics,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import {
@@ -28,6 +29,8 @@ import {
   FieldDescription,
   FieldError,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
   Input,
   Questionnaire,
   QuestionnaireActions,
@@ -51,14 +54,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { BirthDateInput, normalizeCountry, PhoneInput } from "@odentia/ui-patterns"
-import { createContext, useContext, useId, useState } from "react"
+import {
+  BirthDateInput,
+  type FieldControl,
+  normalizeCountry,
+  PhoneInput,
+  setSubmitErrors,
+  submitForm,
+  useAppForm,
+  useFieldControl,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import type { AnyFormApi } from "@tanstack/react-form"
+import { useStore } from "@tanstack/react-form"
+import { createContext, useContext, useState } from "react"
 import type { AddressSource } from "../../lib/address-suggestions"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
 import { AddressStreetField } from "../address/address-street-field"
 import { ChoiceButtons, MultiChoiceButtons } from "../choice-buttons"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
+import { placeErrors } from "./form-errors"
 import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
 import { productUi } from "../../product/product-ui"
 
@@ -266,12 +282,16 @@ const HABITS = [
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PROBLEM = "Revisa el número: está incompleto o no es un celular."
 
-/** La pantalla y el campo donde se corrige cada dato que rechaza la validación (el primer prefijo que coincide). */
-const WHERE: ReadonlyArray<readonly [string, string, string?]> = [
-  ["respondent", "respondent"],
+/**
+ * La pantalla y el campo donde se corrige cada dato que rechaza la validación
+ * o el servidor (el primer prefijo que coincide). Sin campo, se dice en
+ * «Antes de enviar».
+ */
+const WHERE: ReadonlyArray<readonly [string, string, (keyof Draft)?]> = [
+  ["respondent", "respondent", "respondent"],
   ["demographics.givenNames", "person", "givenNames"],
   ["demographics.familyName", "person", "surnames"],
-  ["demographics.displayName", "person", "givenNames"],
+  ["demographics.displayName", "person", "surnames"],
   ["demographics.birthDate", "person", "birthDate"],
   ["demographics.sex", "person", "sex"],
   ["demographics.nationality", "person", "nationality"],
@@ -282,6 +302,7 @@ const WHERE: ReadonlyArray<readonly [string, string, string?]> = [
   ["demographics.phone", "contact", "phone"],
   ["demographics.email", "contact", "email"],
   ["demographics.addressCity", "contact", "addressCity"],
+  ["demographics.addressReference", "contact", "addressReference"],
   ["demographics.address", "contact", "address"],
   ["demographics.emergencyContactName", "emergency", "emergencyName"],
   ["demographics.emergencyContactPhone", "emergency", "emergencyPhone"],
@@ -303,21 +324,81 @@ const WHERE: ReadonlyArray<readonly [string, string, string?]> = [
   ["health.conditions", "health", "conditions"],
   ["health.medications", "health", "medications"],
   ["health.bloodGroup", "health", "bloodGroup"],
+  ["health.personal.embarazo", "history", "pregnant"],
+  ["health.personal.semanasEmbarazo", "history", "pregnant"],
+  ["health.personal.cirugias", "history", "surgeries"],
+  ["health.personal.hospitalizaciones", "history", "hospitalized"],
+  ["health.personal.transfusiones", "history", "transfusion"],
   ["health.personal", "history"],
+  ["health.dental.ultimaVisita", "dental", "dentalLast"],
+  ["health.dental.experienciaPrevia", "dental", "dentalExperience"],
+  ["health.dental.ansiedadDental", "dental", "dentalAnxiety"],
+  ["health.dental.cepilladosAlDia", "dental", "brushing"],
+  ["health.dental.hiloDental", "dental", "floss"],
+  ["health.dental.bruxismo", "dental", "bruxism"],
+  ["health.dental.habitos", "dental", "habits"],
   ["health.dental", "dental"],
-  ["health.medical.lactancia", "history"],
+  ["health.medical.lactancia", "history", "breastfeeding"],
+  ["health.medical.tabaco", "habits", "tobacco"],
+  ["health.medical.alcohol", "habits", "alcohol"],
   ["health.medical", "habits"],
-  ["privacyAccepted", "send"],
+  ["acceptsMessages", "send", "messages"],
+  ["privacyAccepted", "send", "privacy"],
 ]
 
-type Problem = { item: string; field?: string; message: string } | null
-type Found = { field: string; message: string } | null
+/**
+ * El campo de un dato, por su ruta en las respuestas (`demographics.phone`),
+ * en el cuerpo que rechazó el servidor (`answers.demographics.phone`) o como
+ * lo nombra la ficha en «Su enlace» (`phone`).
+ */
+function whereOf(key: string): (typeof WHERE)[number] | undefined {
+  const bare = key.replace(/^answers\./, "")
+  const path = /^(demographics|representative|health|respondent|privacyAccepted|acceptsMessages)\b/.test(bare)
+    ? bare
+    : `demographics.${bare}`
+  return WHERE.find(([prefix]) => path.startsWith(prefix))
+}
+
+function fieldOf(key: string): string | undefined {
+  return whereOf(key)?.[2]
+}
+
+/** La pantalla de cada campo, para llevar a quien envía a lo que tiene que corregir. */
+const ITEM_OF_FIELD = new Map<string, string>(
+  WHERE.flatMap(([, item, field]) => (field ? [[field, item] as const] : [])),
+)
+
+type Found = { field: keyof Draft; message: string } | null
 /** En una pantalla donde todo es opcional, los campos no repiten «(opcional)»: lo dice la pantalla. */
 const AllOptionalContext = createContext(false)
-const ProblemContext = createContext<{ problem: Problem; setProblem: (next: Problem) => void }>({
-  problem: null,
-  setProblem: () => {},
-})
+
+function useRegistrationForm(
+  defaultValues: Draft,
+  validate: (value: Draft, formApi: AnyFormApi) => ReturnType<typeof placeErrors>,
+  submit: (value: Draft) => Promise<void>,
+) {
+  return useAppForm({
+    defaultValues,
+    validators: { onSubmit: ({ value, formApi }) => validate(value, formApi) },
+    onSubmit: ({ value }) => submit(value),
+  })
+}
+type RegistrationForm = ReturnType<typeof useRegistrationForm>
+const FormContext = createContext<RegistrationForm | null>(null)
+
+function useRegistrationFormContext(): RegistrationForm {
+  const form = useContext(FormContext)
+  if (!form) throw new Error("Falta el formulario del registro")
+  return form
+}
+
+/**
+ * Lo que falta en una pantalla, dicho junto a su campo como al enviar: sigue a
+ * la vista hasta que se corrige.
+ */
+function showFound(form: RegistrationForm, found: NonNullable<Found>): void {
+  setSubmitErrors(form, { fields: { [found.field]: found.message } })
+}
 
 /**
  * «Su enlace»: quien ya es paciente completa solo lo que le falta y, si nadie
@@ -375,17 +456,15 @@ export function RegistrationQuestionnaire({
   shortcuts?: boolean
   /** Sugerencias para «Calle y número» (Geoapify, issue 36); sin ellas, el campo de siempre. */
   addressSource?: AddressSource
-  /** Recibe las respuestas ya validadas. Si lanza un error, su mensaje se muestra en la última pantalla. */
+  /**
+   * Recibe las respuestas ya validadas. Si lanza, lo que el servidor señala por
+   * dato (`fields`, el `ApiError` tal cual) va a su campo y su pantalla; el
+   * resto se dice en la última pantalla.
+   */
   onSubmit: (answers: RegistrationAnswers) => Promise<void>
 }) {
-  const uid = useId()
-  const id = (name: string) => `${uid}-${name}`
   const profile = clinicalProfileFor(countryCode)
   const phoneCountry = normalizeCountry(countryCode)
-  const [draft, setDraft] = useState<Draft>(() => ({
-    ...EMPTY,
-    respondent: ownRecord ? "representative" : "patient",
-  }))
   const [item, setItem] = useState(() => {
     if (!fill) return ownRecord ? "person" : "respondent"
     const wants = (key: string) => fillWants(fill, key)
@@ -396,13 +475,19 @@ export function RegistrationQuestionnaire({
     if (wants("insuranceType")) return "insurance"
     return fill.health ? "health" : "send"
   })
-  const [problem, setProblem] = useState<Problem>(null)
-  const [sending, setSending] = useState(false)
+  const form = useRegistrationForm(
+    { ...EMPTY, respondent: ownRecord ? "representative" : "patient" },
+    (_value, formApi) => placeErrors(formApi, finalErrors()),
+    async () => {
+      await onSubmit(buildAnswers())
+    },
+  )
+  const draft = useStore(form.store, (state) => state.values)
+  const sending = useStore(form.store, (state) => state.isSubmitting)
 
   const set = (patch: Partial<Draft>) => {
-    setDraft((current) => ({ ...current, ...patch }))
-    // Corregir el campo quita su aviso; un aviso sin campo (del servidor) se quita con cualquier cambio.
-    if (problem && (!problem.field || problem.field in patch)) setProblem(null)
+    for (const [key, value] of Object.entries(patch) as Array<[keyof Draft, Draft[keyof Draft]]>)
+      form.setFieldValue(key, value as never)
   }
   // En «Su enlace» se pregunta solo lo que falta; la salud, si nadie la registró, como la pide la clínica.
   const wants = (key: string) => !fill || fillWants(fill, key)
@@ -417,7 +502,6 @@ export function RegistrationQuestionnaire({
   const required = (key: RegistrationFieldKey) => config.fields[key] === "required"
   // Menor sin representante legal: en «Su enlace» deja los datos de su madre, padre o tutor.
   const repInFill = !!fill && !fill.hasRepresentative
-  const flag = (field: string) => (problem?.field === field ? true : undefined)
   const forOther = draft.respondent === "representative"
   const minor = isRealDate(draft.birthDate) && isMinor(draft.birthDate, today)
   const age = ageOn(draft.birthDate, today)
@@ -650,47 +734,69 @@ export function RegistrationQuestionnaire({
     return answers
   }
 
+  /**
+   * Al enviar, la misma regla del servidor (con el producto de la clínica: lo
+   * de «Tu boca» o los hábitos solo se pide en el suyo). En «Su enlace» no se
+   * registra a nadie: se juzga lo que se escribió con la regla de la ficha.
+   */
+  function finalErrors(): Record<string, string> {
+    const answers = buildAnswers()
+    let errors: Record<string, string>
+    if (fill) {
+      const { displayName, ...rest } = answers.demographics
+      const found = validateDemographics(
+        { ...rest, displayName: displayName || fill.firstName || "—" },
+        today,
+        countryCode,
+      )
+      // Solo lo que se preguntó: lo guardado no se muestra ni se juzga aquí.
+      errors = Object.fromEntries(Object.entries(found).filter(([key]) => fillWants(fill, key)))
+    } else {
+      errors = validateRegistrationAnswers(config, answers, {
+        mode: "public",
+        today,
+        countryCode,
+        product,
+      })
+    }
+    const placed: Record<string, string> = {}
+    for (const [key, message] of Object.entries(errors)) placed[fieldOf(key) ?? key] ??= message
+    return placed
+  }
+
+  /** La pantalla del primer campo con error, con el foco en él. */
+  function goToFirstInvalid(root: HTMLElement | null): void {
+    const field = WHERE.map(([, , name]) => name).find(
+      (name) => name && (form.getFieldMeta(name)?.errors.length ?? 0) > 0,
+    )
+    if (!field) {
+      setItem("send")
+      return
+    }
+    setItem(ITEM_OF_FIELD.get(field) ?? "send")
+    // Después de mostrar la pantalla: antes está oculta y no recibe el foco.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        root
+          ?.querySelector<HTMLElement>(
+            `[data-field="${field}"] :is(input:not([hidden]), button, [role=combobox])`,
+          )
+          ?.focus()
+      }),
+    )
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     // Solo se envía desde «Antes de enviar», con su botón: nunca con un Enter en otra pantalla.
     if (sending || item !== "send") return
-    const answers = buildAnswers()
-    // En «Su enlace» no se registra a nadie: las reglas de la ficha las aplica el servidor al guardar.
-    const errors = fill
-      ? {}
-      : validateRegistrationAnswers(config, answers, {
-          mode: "public",
-          today,
-          countryCode,
-        })
-    const found = Object.entries(errors)[0]
-    if (found) {
-      const [key, message] = found
-      const where = WHERE.find(([prefix]) => key.startsWith(prefix))
-      const target = where?.[1] ?? "send"
-      setItem(target)
-      setProblem({ item: target, ...(where?.[2] ? { field: where[2] } : {}), message })
-      return
-    }
-    setSending(true)
-    setProblem(null)
-    try {
-      await onSubmit(answers)
-    } catch (error) {
-      setProblem({
-        item: "send",
-        message:
-          error instanceof Error
-            ? error.message
-            : "No pudimos enviar el registro. Inténtalo de nuevo.",
-      })
-    } finally {
-      setSending(false)
-    }
+    const root = event.currentTarget
+    const ok = await submitForm(form, { fieldMap: fieldOf, root })
+    if (!ok) goToFirstInvalid(root)
   }
 
   const phoneFound = (
-    field: string,
+    field: keyof Draft,
     value: string,
     digits: number,
     needed: boolean,
@@ -701,17 +807,14 @@ export function RegistrationQuestionnaire({
       : needed && !value
         ? { field, message: empty }
         : null
-  const needs = (condition: boolean, field: string, message: string): Found =>
+  const needs = (condition: boolean, field: keyof Draft, message: string): Found =>
     condition ? { field, message } : null
 
   return (
-    <ProblemContext.Provider value={{ problem, setProblem }}>
+    <FormContext.Provider value={form}>
       <Questionnaire
         item={item}
-        onItemChange={(next) => {
-          setItem(next)
-          setProblem(null)
-        }}
+        onItemChange={setItem}
         onSubmit={handleSubmit}
         shortcuts={shortcuts ? "letters" : undefined}
         // Las letras de atajo son del teclado: en el celular sobran.
@@ -763,6 +866,7 @@ export function RegistrationQuestionnaire({
               </QuestionnaireChoiceDescription>
             </QuestionnaireChoice>
           </QuestionnaireChoices>
+          <FieldMessage name="respondent" />
         </Question>
 
         <Question
@@ -804,15 +908,16 @@ export function RegistrationQuestionnaire({
           }
         >
           {wants("givenNames") ? (
-          <Labeled name="givenNames" label="Nombres" htmlFor={id("given")}>
-            <Input
-              id={id("given")}
-              autoComplete={forOther ? "off" : "given-name"}
-              maxLength={100}
-              value={draft.givenNames}
-              aria-invalid={flag("givenNames")}
-              onChange={(event) => set({ givenNames: event.target.value })}
-            />
+          <Labeled name="givenNames" label="Nombres">
+            {(control) => (
+              <Input
+                {...control.props}
+                autoComplete={forOther ? "off" : "given-name"}
+                maxLength={100}
+                value={draft.givenNames}
+                onChange={(event) => set({ givenNames: event.target.value })}
+              />
+            )}
           </Labeled>
           ) : null}
           {wants("familyName") ? (
@@ -820,28 +925,33 @@ export function RegistrationQuestionnaire({
             name="surnames"
             label="Apellidos"
             hint={you("Los dos, si tienes dos.", "Los dos, si tiene dos.")}
-            htmlFor={id("surnames")}
           >
-            <Input
-              id={id("surnames")}
-              autoComplete={forOther ? "off" : "family-name"}
-              maxLength={200}
-              value={draft.surnames}
-              aria-invalid={flag("surnames")}
-              onChange={(event) => set({ surnames: event.target.value })}
-            />
+            {(control) => (
+              <Input
+                {...control.props}
+                autoComplete={forOther ? "off" : "family-name"}
+                maxLength={200}
+                value={draft.surnames}
+                onChange={(event) => set({ surnames: event.target.value })}
+              />
+            )}
           </Labeled>
           ) : null}
           {wants("birthDate") ? (
-          <Labeled name="birthDate" label="Fecha de nacimiento" htmlFor={id("birth")}>
-            <BirthDateInput
-              id={id("birth")}
-              value={draft.birthDate}
-              onChange={(value) => set({ birthDate: value })}
-              today={today}
-              country={countryCode}
-              invalid={flag("birthDate")}
-            />
+          <Labeled name="birthDate" label="Fecha de nacimiento">
+            {(control) => (
+              <BirthDateInput
+                id={control.id}
+                name={control.name}
+                value={draft.birthDate}
+                onChange={(value) => set({ birthDate: value })}
+                today={today}
+                country={countryCode}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+              />
+            )}
           </Labeled>
           ) : null}
           {!fill && !forOther && !ownRecord && minor ? (
@@ -858,9 +968,14 @@ export function RegistrationQuestionnaire({
             </div>
           ) : null}
           {asked("sex") ? (
-            <Labeled name="sex" label="Sexo" optional={!required("sex")}>
+            <Labeled name="sex" group label="Sexo" optional={!required("sex")}>
+              {(control) => (
               <ChoiceButtons
-                label="Sexo"
+                id={control.id}
+                aria-labelledby={control.labelId}
+                aria-describedby={control.describedBy}
+                invalid={control.invalid}
+                onBlur={control.onBlur}
                 value={draft.sex || null}
                 // «Desconocido» es para quien registra a otro sin saberlo; quien responde aquí lo sabe o lo deja en blanco.
                 options={SEX_CODES.filter((code) => code !== "D").map((code) => ({
@@ -869,20 +984,24 @@ export function RegistrationQuestionnaire({
                 }))}
                 onChange={(value) => set({ sex: value })}
                 columns={3}
-              />
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("nationality") ? (
             <Labeled name="nationality" label="Nacionalidad" optional={!required("nationality")}>
-              <SearchSelect
-                id={id("nationality")}
-                label="Nacionalidad"
-                placeholder="Buscar país…"
-                value={draft.nationality}
-                options={countries}
-                invalid={flag("nationality")}
-                onChange={(value) => set({ nationality: value })}
-              />
+              {(control) => (
+                <SearchSelect
+                  id={control.id}
+                  label="Nacionalidad"
+                  placeholder="Buscar país…"
+                  value={draft.nationality}
+                  options={countries}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onChange={(value) => set({ nationality: value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("birthPlace") ? (
@@ -890,16 +1009,16 @@ export function RegistrationQuestionnaire({
               name="birthPlace"
               label="Lugar de nacimiento"
               optional={!required("birthPlace")}
-              htmlFor={id("birthPlace")}
             >
-              <Input
-                id={id("birthPlace")}
-                placeholder="Ciudad y país"
-                maxLength={200}
-                value={draft.birthPlace}
-                aria-invalid={flag("birthPlace")}
-                onChange={(event) => set({ birthPlace: event.target.value })}
-              />
+              {(control) => (
+                <Input
+                  {...control.props}
+                  placeholder="Ciudad y país"
+                  maxLength={200}
+                  value={draft.birthPlace}
+                  onChange={(event) => set({ birthPlace: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -933,57 +1052,68 @@ export function RegistrationQuestionnaire({
             needs(minor && !draft.repDoc.trim(), "repDoc", "Escribe tu número de documento.")
           }
         >
-          <Labeled name="repName" label="Tu nombre y apellidos" htmlFor={id("repName")}>
-            <Input
-              id={id("repName")}
-              autoComplete="name"
-              maxLength={200}
-              value={draft.repName}
-              aria-invalid={flag("repName")}
-              onChange={(event) => set({ repName: event.target.value })}
-            />
+          <Labeled name="repName" label="Tu nombre y apellidos">
+            {(control) => (
+              <Input
+                {...control.props}
+                autoComplete="name"
+                maxLength={200}
+                value={draft.repName}
+                onChange={(event) => set({ repName: event.target.value })}
+              />
+            )}
           </Labeled>
-          <Labeled name="repRelation" label={`¿Qué eres de ${name}?`}>
-            <ChoiceButtons
-              label={`Qué eres de ${name}`}
-              value={draft.repRelation || null}
-              options={RELATIONS}
-              onChange={(value) => set({ repRelation: value })}
-              columns={3}
-            />
+          <Labeled name="repRelation" group label={`¿Qué eres de ${name}?`}>
+            {(control) => (
+              <ChoiceButtons
+                id={control.id}
+                aria-labelledby={control.labelId}
+                aria-describedby={control.describedBy}
+                invalid={control.invalid}
+                onBlur={control.onBlur}
+                value={draft.repRelation || null}
+                options={RELATIONS}
+                onChange={(value) => set({ repRelation: value })}
+                columns={3}
+              />
+            )}
           </Labeled>
           <Labeled
             name="repPhone"
             label="Tu celular"
             hint={`Te avisaremos por WhatsApp sobre las citas de ${name}.`}
-            htmlFor={id("repPhone")}
           >
-            <PhoneInput
-              id={id("repPhone")}
-              value={draft.repPhone || null}
-              onChange={(value, meta) =>
-                set({ repPhone: value ?? "", repPhoneDigits: meta.digits.length })
-              }
-              defaultCountry={phoneCountry}
-              invalid={flag("repPhone")}
-            />
+            {(control) => (
+              <PhoneInput
+                id={control.id}
+                name={control.name}
+                value={draft.repPhone || null}
+                onChange={(value, meta) =>
+                  set({ repPhone: value ?? "", repPhoneDigits: meta.digits.length })
+                }
+                defaultCountry={phoneCountry}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+              />
+            )}
           </Labeled>
           {minor ? (
             <Labeled
               name="repDoc"
               label={`Tu ${DOC_TYPE_LABELS[repDocType]}`}
               hint={`${first || "La persona"} es menor de edad: quedas como su representante.`}
-              htmlFor={id("repDoc")}
             >
-              <Input
-                id={id("repDoc")}
-                inputMode="numeric"
-                autoComplete="off"
-                maxLength={20}
-                value={draft.repDoc}
-                aria-invalid={flag("repDoc")}
-                onChange={(event) => set({ repDoc: event.target.value })}
-              />
+              {(control) => (
+                <Input
+                  {...control.props}
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={20}
+                  value={draft.repDoc}
+                  onChange={(event) => set({ repDoc: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -1015,41 +1145,50 @@ export function RegistrationQuestionnaire({
             )
           }
         >
-          <Labeled name="docType" label="Tipo de documento" optional={!required("docType")}>
-            <DocTypeChoice
-              label="Tipo de documento"
-              value={draft.docType}
-              options={docTypes}
-              onChange={(value) => set({ docType: value, docCountry: "" })}
-            />
+          <Labeled name="docType" group label="Tipo de documento" optional={!required("docType")}>
+            {(control) => (
+              <DocTypeChoice
+                id={control.id}
+                aria-labelledby={control.labelId}
+                aria-describedby={control.describedBy}
+                invalid={control.invalid}
+                onBlur={control.onBlur}
+                value={draft.docType}
+                options={docTypes}
+                onChange={(value) => set({ docType: value, docCountry: "" })}
+              />
+            )}
           </Labeled>
           {draft.docType ? (
             <Labeled
               name="docNumber"
               label={`Número de ${DOC_TYPE_LABELS[draft.docType]}`}
-              htmlFor={id("docNumber")}
             >
-              <Input
-                id={id("docNumber")}
-                autoComplete="off"
-                maxLength={20}
-                value={draft.docNumber}
-                aria-invalid={flag("docNumber")}
-                onChange={(event) => set({ docNumber: event.target.value })}
-              />
+              {(control) => (
+                <Input
+                  {...control.props}
+                  autoComplete="off"
+                  maxLength={20}
+                  value={draft.docNumber}
+                  onChange={(event) => set({ docNumber: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {draft.docType && asksDocumentCountry(profile, draft.docType) ? (
             <Labeled name="docCountry" label="País que lo emitió">
-              <SearchSelect
-                id={id("docCountry")}
-                label="País que emitió el documento"
-                placeholder="Buscar país…"
-                value={draft.docCountry}
-                options={countries}
-                invalid={flag("docCountry")}
-                onChange={(value) => set({ docCountry: value })}
-              />
+              {(control) => (
+                <SearchSelect
+                  id={control.id}
+                  label="País que emitió el documento"
+                  placeholder="Buscar país…"
+                  value={draft.docCountry}
+                  options={countries}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onChange={(value) => set({ docCountry: value })}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -1116,18 +1255,22 @@ export function RegistrationQuestionnaire({
                 ? "Si no tiene, sus avisos te llegan a ti."
                 : "Te avisaremos por WhatsApp sobre tus citas."
             }
-            htmlFor={id("phone")}
           >
-            <PhoneInput
-              id={id("phone")}
-              value={draft.phone || null}
-              onChange={(value, meta) =>
-                set({ phone: value ?? "", phoneDigits: meta.digits.length })
-              }
-              defaultCountry={phoneCountry}
-              autoComplete={forOther ? "off" : "tel"}
-              invalid={flag("phone")}
-            />
+            {(control) => (
+              <PhoneInput
+                id={control.id}
+                name={control.name}
+                value={draft.phone || null}
+                onChange={(value, meta) =>
+                  set({ phone: value ?? "", phoneDigits: meta.digits.length })
+                }
+                defaultCountry={phoneCountry}
+                autoComplete={forOther ? "off" : "tel"}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+              />
+            )}
           </Labeled>
           ) : null}
           {asked("email") ? (
@@ -1136,18 +1279,18 @@ export function RegistrationQuestionnaire({
               label={you("Tu correo", "Su correo")}
               optional={!required("email") || forOther}
               hint="Para enviarte comprobantes y recetas."
-              htmlFor={id("email")}
             >
-              <Input
-                id={id("email")}
-                type="email"
-                placeholder="nombre@correo.com"
-                autoComplete={forOther ? "off" : "email"}
-                maxLength={200}
-                value={draft.email}
-                aria-invalid={flag("email")}
-                onChange={(event) => set({ email: event.target.value })}
-              />
+              {(control) => (
+                <Input
+                  {...control.props}
+                  type="email"
+                  placeholder="nombre@correo.com"
+                  autoComplete={forOther ? "off" : "email"}
+                  maxLength={200}
+                  value={draft.email}
+                  onChange={(event) => set({ email: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("address") ? (
@@ -1156,65 +1299,68 @@ export function RegistrationQuestionnaire({
                 name="address"
                 label="Dirección"
                 optional={!required("address")}
-                htmlFor={id("address")}
               >
-                {addressSource ? (
-                  <AddressStreetField
-                    id={id("address")}
-                    value={draft.address}
-                    source={addressSource}
-                    placeholder="Calle y número"
-                    autoComplete={forOther ? "off" : "street-address"}
-                    maxLength={500}
-                    invalid={flag("address")}
-                    pickedHint="Lo llenó la sugerencia; puedes corregirlo. Agrega el dpto. o interior en la calle."
-                    onChange={(next) => set({ address: next })}
-                    onPick={(pick) => {
-                      if (pick.city) set({ addressCity: pick.city })
-                    }}
-                  />
-                ) : (
-                  <Input
-                    id={id("address")}
-                    placeholder="Calle y número"
-                    autoComplete={forOther ? "off" : "street-address"}
-                    maxLength={500}
-                    value={draft.address}
-                    aria-invalid={flag("address")}
-                    onChange={(event) => set({ address: event.target.value })}
-                  />
-                )}
+                {(control) =>
+                  addressSource ? (
+                    <AddressStreetField
+                      id={control.id}
+                      value={draft.address}
+                      source={addressSource}
+                      placeholder="Calle y número"
+                      autoComplete={forOther ? "off" : "street-address"}
+                      maxLength={500}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      pickedHint="Lo llenó la sugerencia; puedes corregirlo. Agrega el dpto. o interior en la calle."
+                      onChange={(next) => set({ address: next })}
+                      onPick={(pick) => {
+                        if (pick.city) set({ addressCity: pick.city })
+                      }}
+                    />
+                  ) : (
+                    <Input
+                      {...control.props}
+                      placeholder="Calle y número"
+                      autoComplete={forOther ? "off" : "street-address"}
+                      maxLength={500}
+                      value={draft.address}
+                      onChange={(event) => set({ address: event.target.value })}
+                    />
+                  )
+                }
               </Labeled>
               <Labeled
                 name="addressCity"
                 label={profile.address.cityLabel}
                 optional={!required("address")}
-                htmlFor={id("addressCity")}
               >
-                <Input
-                  id={id("addressCity")}
-                  autoComplete={forOther ? "off" : "address-level2"}
-                  maxLength={100}
-                  value={draft.addressCity}
-                  aria-invalid={flag("addressCity")}
-                  onChange={(event) => set({ addressCity: event.target.value })}
-                />
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    autoComplete={forOther ? "off" : "address-level2"}
+                    maxLength={100}
+                    value={draft.addressCity}
+                    onChange={(event) => set({ addressCity: event.target.value })}
+                  />
+                )}
               </Labeled>
               {profile.address.reference ? (
                 <Labeled
                   name="addressReference"
                   label="Referencia"
                   optional
-                  htmlFor={id("addressReference")}
                 >
-                  <Input
-                    id={id("addressReference")}
-                    placeholder="Por ejemplo, frente al parque"
-                    autoComplete="off"
-                    maxLength={300}
-                    value={draft.addressReference}
-                    onChange={(event) => set({ addressReference: event.target.value })}
-                  />
+                  {(control) => (
+                    <Input
+                      {...control.props}
+                      placeholder="Por ejemplo, frente al parque"
+                      autoComplete="off"
+                      maxLength={300}
+                      value={draft.addressReference}
+                      onChange={(event) => set({ addressReference: event.target.value })}
+                    />
+                  )}
                 </Labeled>
               ) : null}
             </>
@@ -1249,39 +1395,49 @@ export function RegistrationQuestionnaire({
             )
           }}
         >
-          <Labeled name="emergencyName" label="Nombre" htmlFor={id("emergencyName")}>
-            <Input
-              id={id("emergencyName")}
-              autoComplete="off"
-              maxLength={200}
-              value={draft.emergencyName}
-              aria-invalid={flag("emergencyName")}
-              onChange={(event) => set({ emergencyName: event.target.value })}
-            />
+          <Labeled name="emergencyName" label="Nombre">
+            {(control) => (
+              <Input
+                {...control.props}
+                autoComplete="off"
+                maxLength={200}
+                value={draft.emergencyName}
+                onChange={(event) => set({ emergencyName: event.target.value })}
+              />
+            )}
           </Labeled>
-          <Labeled name="emergencyPhone" label="Teléfono" htmlFor={id("emergencyPhone")}>
-            <PhoneInput
-              id={id("emergencyPhone")}
-              value={draft.emergencyPhone || null}
-              onChange={(value, meta) =>
-                set({ emergencyPhone: value ?? "", emergencyPhoneDigits: meta.digits.length })
-              }
-              defaultCountry={phoneCountry}
-              autoComplete="off"
-              invalid={flag("emergencyPhone")}
-            />
+          <Labeled name="emergencyPhone" label="Teléfono">
+            {(control) => (
+              <PhoneInput
+                id={control.id}
+                name={control.name}
+                value={draft.emergencyPhone || null}
+                onChange={(value, meta) =>
+                  set({ emergencyPhone: value ?? "", emergencyPhoneDigits: meta.digits.length })
+                }
+                defaultCountry={phoneCountry}
+                autoComplete="off"
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+              />
+            )}
           </Labeled>
           <Labeled
             name="emergencyRelationship"
+            group
             label={you("¿Qué es tuyo?", `¿Qué es de ${name}?`)}
             optional
           >
-            <Pick
-              label="Parentesco del contacto de emergencia"
-              value={draft.emergencyRelationship}
-              options={KINSHIP.map((code) => ({ value: code, label: KINSHIP_LABELS[code] }))}
-              onChange={(value) => set({ emergencyRelationship: value })}
-            />
+            {(control) => (
+              <Pick
+                control={control}
+                label="Parentesco del contacto de emergencia"
+                value={draft.emergencyRelationship}
+                options={KINSHIP.map((code) => ({ value: code, label: KINSHIP_LABELS[code] }))}
+                onChange={(value) => set({ emergencyRelationship: value })}
+              />
+            )}
           </Labeled>
         </Question>
 
@@ -1299,39 +1455,48 @@ export function RegistrationQuestionnaire({
             needs(required("insuranceType") && !insurance, "insurance", "Elige una opción.")
           }
         >
-          <Labeled name="insurance" label="¿Cuál?" optional={!required("insuranceType")}>
-            <ChoiceButtons
-              label="Seguro de salud"
-              value={draft.insurance || null}
-              options={insuranceOptions}
-              onChange={(value) => set({ insurance: value })}
-              columns={2}
-            />
+          <Labeled name="insurance" group label="¿Cuál?" optional={!required("insuranceType")}>
+            {(control) => (
+              <ChoiceButtons
+                id={control.id}
+                aria-label="Seguro de salud"
+                aria-describedby={control.describedBy}
+                invalid={control.invalid}
+                onBlur={control.onBlur}
+                value={draft.insurance || null}
+                options={insuranceOptions}
+                onChange={(value) => set({ insurance: value })}
+                columns={2}
+              />
+            )}
           </Labeled>
           {privateInsurance ? (
             <>
-              <Labeled name="insurerName" label="Aseguradora" optional htmlFor={id("insurer")}>
-                <Input
-                  id={id("insurer")}
-                  autoComplete="off"
-                  maxLength={200}
-                  value={draft.insurerName}
-                  onChange={(event) => set({ insurerName: event.target.value })}
-                />
+              <Labeled name="insurerName" label="Aseguradora" optional>
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    autoComplete="off"
+                    maxLength={200}
+                    value={draft.insurerName}
+                    onChange={(event) => set({ insurerName: event.target.value })}
+                  />
+                )}
               </Labeled>
               <Labeled
                 name="affiliationNumber"
                 label="Número de afiliación o póliza"
                 optional
-                htmlFor={id("affiliation")}
               >
-                <Input
-                  id={id("affiliation")}
-                  autoComplete="off"
-                  maxLength={50}
-                  value={draft.affiliationNumber}
-                  onChange={(event) => set({ affiliationNumber: event.target.value })}
-                />
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    autoComplete="off"
+                    maxLength={50}
+                    value={draft.affiliationNumber}
+                    onChange={(event) => set({ affiliationNumber: event.target.value })}
+                  />
+                )}
               </Labeled>
             </>
           ) : null}
@@ -1431,16 +1596,19 @@ export function RegistrationQuestionnaire({
             />
           ) : null}
           {asked("bloodGroup") ? (
-            <Labeled name="bloodGroup" label="Grupo sanguíneo" optional={!required("bloodGroup")}>
-              <Pick
-                label="Grupo sanguíneo"
-                value={draft.bloodGroup}
-                options={Object.entries(BLOOD_GROUP_LABELS).map(([value, label]) => ({
-                  value,
-                  label,
-                }))}
-                onChange={(value) => set({ bloodGroup: value })}
-              />
+            <Labeled name="bloodGroup" group label="Grupo sanguíneo" optional={!required("bloodGroup")}>
+              {(control) => (
+                <Pick
+                  control={control}
+                  label="Grupo sanguíneo"
+                  value={draft.bloodGroup}
+                  options={Object.entries(BLOOD_GROUP_LABELS).map(([value, label]) => ({
+                    value,
+                    label,
+                  }))}
+                  onChange={(value) => set({ bloodGroup: value })}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -1450,6 +1618,13 @@ export function RegistrationQuestionnaire({
           grouped
           disabled={!historyAsked}
           title={you("Algo más sobre tu salud", `Algo más sobre la salud de ${name}`)}
+          check={() =>
+            needs(
+              pregnancyAsked && draft.pregnant === "si" && Number(draft.pregnancyWeeks) > 42,
+              "pregnant",
+              "Las semanas de embarazo van de 0 a 42.",
+            )
+          }
           onSkip={() =>
             set({
               pregnant: "",
@@ -1467,11 +1642,18 @@ export function RegistrationQuestionnaire({
           {pregnancyAsked ? (
             <Labeled
               name="pregnant"
+              group
               label={you("¿Estás embarazada?", `¿${first || "La persona"} está embarazada?`)}
               optional
             >
+              {(control) => (
+              <>
               <ChoiceButtons
-                label="Embarazo"
+                id={control.id}
+                aria-labelledby={control.labelId}
+                aria-describedby={control.describedBy}
+                invalid={control.invalid}
+                onBlur={control.onBlur}
                 value={draft.pregnant || null}
                 options={YES_NO_UNKNOWN}
                 onChange={(value) => set({ pregnant: value })}
@@ -1492,25 +1674,35 @@ export function RegistrationQuestionnaire({
                   <span className="text-sm text-muted-foreground">semanas (si lo sabes)</span>
                 </div>
               ) : null}
+              </>
+              )}
             </Labeled>
           ) : null}
           {breastfeedingAsked ? (
             <Labeled
               name="breastfeeding"
+              group
               label={you("¿Estás dando de lactar?", `¿${first || "La persona"} está dando de lactar?`)}
               optional
             >
-              <ChoiceButtons
-                label="Lactancia"
-                value={draft.breastfeeding || null}
-                options={YES_NO}
-                onChange={(value) => set({ breastfeeding: value })}
-                columns={2}
-              />
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.breastfeeding || null}
+                  options={YES_NO}
+                  onChange={(value) => set({ breastfeeding: value })}
+                  columns={2}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("personal.cirugias") ? (
             <YesNoField
+              name="surgeries"
               label={you("¿Te han operado alguna vez?", `¿A ${name} lo han operado alguna vez?`)}
               detail="¿De qué y cuándo?"
               answer={draft.surgeries}
@@ -1521,6 +1713,7 @@ export function RegistrationQuestionnaire({
           ) : null}
           {asked("personal.hospitalizaciones") ? (
             <YesNoField
+              name="hospitalized"
               label={you(
                 "¿Has estado internado en un hospital?",
                 `¿${first || "La persona"} ha estado internada en un hospital?`,
@@ -1534,6 +1727,7 @@ export function RegistrationQuestionnaire({
           ) : null}
           {asked("personal.transfusiones") ? (
             <YesNoField
+              name="transfusion"
               label={you(
                 "¿Te han hecho una transfusión de sangre?",
                 `¿A ${name} le han hecho una transfusión de sangre?`,
@@ -1570,95 +1764,131 @@ export function RegistrationQuestionnaire({
               name="dentalLast"
               label="¿Cuándo fue la última visita al dentista?"
               optional
-              htmlFor={id("dentalLast")}
             >
-              <Input
-                id={id("dentalLast")}
-                placeholder="Por ejemplo, hace un año"
-                autoComplete="off"
-                maxLength={200}
-                value={draft.dentalLast}
-                onChange={(event) => set({ dentalLast: event.target.value })}
-              />
+              {(control) => (
+                <Input
+                  {...control.props}
+                  placeholder="Por ejemplo, hace un año"
+                  autoComplete="off"
+                  maxLength={200}
+                  value={draft.dentalLast}
+                  onChange={(event) => set({ dentalLast: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("dental.experienciaPrevia") ? (
-            <Labeled name="dentalExperience" label="¿Cómo le fue esa vez?" optional>
-              <ChoiceButtons
-                label="Cómo le fue la última vez"
-                value={draft.dentalExperience || null}
-                options={EXPERIENCES}
-                onChange={(value) => set({ dentalExperience: value })}
-                columns={3}
-              />
+            <Labeled name="dentalExperience" group label="¿Cómo le fue esa vez?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.dentalExperience || null}
+                  options={EXPERIENCES}
+                  onChange={(value) => set({ dentalExperience: value })}
+                  columns={3}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("dental.ansiedadDental") ? (
             <Labeled
               name="dentalAnxiety"
+              group
               label={you("¿Te da miedo ir al dentista?", `¿A ${name} le da miedo ir al dentista?`)}
               optional
             >
-              <ChoiceButtons
-                label="Miedo al dentista"
-                value={draft.dentalAnxiety || null}
-                options={ANXIETY}
-                onChange={(value) => set({ dentalAnxiety: value })}
-                columns={4}
-              />
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.dentalAnxiety || null}
+                  options={ANXIETY}
+                  onChange={(value) => set({ dentalAnxiety: value })}
+                  columns={4}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("dental.cepilladosAlDia") ? (
-            <Labeled name="brushing" label="¿Cuántas veces al día se cepilla los dientes?" optional>
-              <ChoiceButtons
-                label="Veces que se cepilla al día"
-                value={draft.brushing || null}
-                options={BRUSHING}
-                onChange={(value) => set({ brushing: value })}
-                columns={4}
-              />
+            <Labeled name="brushing" group label="¿Cuántas veces al día se cepilla los dientes?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.brushing || null}
+                  options={BRUSHING}
+                  onChange={(value) => set({ brushing: value })}
+                  columns={4}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("dental.hiloDental") ? (
-            <Labeled name="floss" label="¿Usa hilo dental?" optional>
-              <ChoiceButtons
-                label="Hilo dental"
-                value={draft.floss || null}
-                options={YES_NO}
-                onChange={(value) => set({ floss: value })}
-                columns={2}
-              />
+            <Labeled name="floss" group label="¿Usa hilo dental?" optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.floss || null}
+                  options={YES_NO}
+                  onChange={(value) => set({ floss: value })}
+                  columns={2}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("dental.bruxismo") ? (
             <Labeled
               name="bruxism"
+              group
               label="¿Aprieta o rechina los dientes, por ejemplo al dormir?"
               optional
             >
-              <ChoiceButtons
-                label="Aprieta o rechina los dientes"
-                value={draft.bruxism || null}
-                options={YES_NO_UNKNOWN}
-                onChange={(value) => set({ bruxism: value })}
-                columns={3}
-              />
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.bruxism || null}
+                  options={YES_NO_UNKNOWN}
+                  onChange={(value) => set({ bruxism: value })}
+                  columns={3}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("dental.habitos") ? (
             <Labeled
               name="habits"
+              group
               label="¿Tiene alguno de estos hábitos?"
               hint="Marca todos los que correspondan."
               optional
             >
-              <MultiChoiceButtons
-                label="Hábitos"
-                value={draft.habits}
-                options={HABITS}
-                onChange={(value) => set({ habits: value })}
-                columns={2}
-              />
+              {() => (
+                <MultiChoiceButtons
+                  label="Hábitos"
+                  value={draft.habits}
+                  options={HABITS}
+                  onChange={(value) => set({ habits: value })}
+                  columns={2}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -1672,29 +1902,42 @@ export function RegistrationQuestionnaire({
           onSkip={() => set({ tobacco: "", alcohol: "" })}
         >
           {asked("medical.tabaco") ? (
-            <Labeled name="tobacco" label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
-              <ChoiceButtons
-                label="Tabaco"
-                value={draft.tobacco || null}
-                options={TOBACCO_OPTIONS}
-                onChange={(value) => set({ tobacco: value })}
-                columns={3}
-              />
+            <Labeled name="tobacco" group label={you("¿Fumas?", `¿${first || "La persona"} fuma?`)} optional>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.tobacco || null}
+                  options={TOBACCO_OPTIONS}
+                  onChange={(value) => set({ tobacco: value })}
+                  columns={3}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("medical.alcohol") ? (
             <Labeled
               name="alcohol"
+              group
               label={you("¿Tomas alcohol?", `¿${first || "La persona"} toma alcohol?`)}
               optional
             >
-              <ChoiceButtons
-                label="Alcohol"
-                value={draft.alcohol || null}
-                options={ALCOHOL_OPTIONS}
-                onChange={(value) => set({ alcohol: value })}
-                columns={3}
-              />
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.alcohol || null}
+                  options={ALCOHOL_OPTIONS}
+                  onChange={(value) => set({ alcohol: value })}
+                  columns={3}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -1716,40 +1959,48 @@ export function RegistrationQuestionnaire({
           }
         >
           {censusAsked("maritalStatus") ? (
-            <Labeled name="maritalStatus" label="Estado civil" optional>
-              <Pick
-                label="Estado civil"
-                value={draft.maritalStatus}
-                options={profile.maritalStatuses.map((status) => ({
-                  value: status,
-                  label: MARITAL_STATUS_LABELS[status],
-                }))}
-                onChange={(value) => set({ maritalStatus: value })}
-              />
+            <Labeled name="maritalStatus" group label="Estado civil" optional>
+              {(control) => (
+                <Pick
+                  control={control}
+                  label="Estado civil"
+                  value={draft.maritalStatus}
+                  options={profile.maritalStatuses.map((status) => ({
+                    value: status,
+                    label: MARITAL_STATUS_LABELS[status],
+                  }))}
+                  onChange={(value) => set({ maritalStatus: value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("educationLevel") ? (
-            <Labeled name="educationLevel" label="Hasta qué nivel estudió" optional>
-              <Pick
-                label="Nivel educativo"
-                value={draft.educationLevel}
-                options={EDUCATION_LEVELS.map((level) => ({
-                  value: level,
-                  label: EDUCATION_LEVEL_LABELS[level],
-                }))}
-                onChange={(value) => set({ educationLevel: value })}
-              />
+            <Labeled name="educationLevel" group label="Hasta qué nivel estudió" optional>
+              {(control) => (
+                <Pick
+                  control={control}
+                  label="Nivel educativo"
+                  value={draft.educationLevel}
+                  options={EDUCATION_LEVELS.map((level) => ({
+                    value: level,
+                    label: EDUCATION_LEVEL_LABELS[level],
+                  }))}
+                  onChange={(value) => set({ educationLevel: value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {censusAsked("occupation") ? (
-            <Labeled name="occupation" label="Ocupación" optional htmlFor={id("occupation")}>
-              <Input
-                id={id("occupation")}
-                autoComplete="off"
-                maxLength={200}
-                value={draft.occupation}
-                onChange={(event) => set({ occupation: event.target.value })}
-              />
+            <Labeled name="occupation" label="Ocupación" optional>
+              {(control) => (
+                <Input
+                  {...control.props}
+                  autoComplete="off"
+                  maxLength={200}
+                  value={draft.occupation}
+                  onChange={(event) => set({ occupation: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("origin") ? (
@@ -1758,38 +2009,44 @@ export function RegistrationQuestionnaire({
               label="Procedencia"
               hint="La ciudad o región de donde viene."
               optional
-              htmlFor={id("origin")}
             >
-              <Input
-                id={id("origin")}
-                autoComplete="off"
-                maxLength={200}
-                value={draft.origin}
-                onChange={(event) => set({ origin: event.target.value })}
-              />
+              {(control) => (
+                <Input
+                  {...control.props}
+                  autoComplete="off"
+                  maxLength={200}
+                  value={draft.origin}
+                  onChange={(event) => set({ origin: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("referralSource") ? (
-            <Labeled name="referralKind" label="¿Cómo nos conoció?" optional>
-              <Pick
-                label="Cómo nos conoció"
-                value={draft.referralKind}
-                options={REFERRAL_KINDS.map((kind) => ({ value: kind, label: REFERRAL_KIND_LABELS[kind] }))}
-                // Solo «Otro» lleva lo que dijo.
-                onChange={(value) => set({ referralKind: value, ...(value === "otro" ? {} : { referralSource: "" }) })}
-              />
+            <Labeled name="referralKind" group label="¿Cómo nos conoció?" optional>
+              {(control) => (
+                <Pick
+                  control={control}
+                  label="Cómo nos conoció"
+                  value={draft.referralKind}
+                  options={REFERRAL_KINDS.map((kind) => ({ value: kind, label: REFERRAL_KIND_LABELS[kind] }))}
+                  // Solo «Otro» lleva lo que dijo.
+                  onChange={(value) => set({ referralKind: value, ...(value === "otro" ? {} : { referralSource: "" }) })}
+                />
+              )}
             </Labeled>
           ) : null}
           {asked("referralSource") && draft.referralKind === "otro" ? (
-            <Labeled name="referralSource" label="¿Cuál?" optional htmlFor={id("referral")}>
-              <Input
-                id={id("referral")}
-                placeholder="Por ejemplo, la radio"
-                autoComplete="off"
-                maxLength={200}
-                value={draft.referralSource}
-                onChange={(event) => set({ referralSource: event.target.value })}
-              />
+            <Labeled name="referralSource" label="¿Cuál?" optional>
+              {(control) => (
+                <Input
+                  {...control.props}
+                  placeholder="Por ejemplo, la radio"
+                  autoComplete="off"
+                  maxLength={200}
+                  value={draft.referralSource}
+                  onChange={(event) => set({ referralSource: event.target.value })}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
@@ -1832,34 +2089,42 @@ export function RegistrationQuestionnaire({
               Autorizo el tratamiento de mis datos personales para el registro en la clínica.
             </QuestionnaireChoice>
           </QuestionnaireChoices>
+          <FieldMessage name="privacy" />
           {config.askMessages ? (
             <Labeled
               name="messages"
+              group
               label="¿Te podemos escribir para enviarte novedades y promociones?"
               hint="Los avisos de tus citas te llegan igual. Puedes darte de baja cuando quieras."
               optional
             >
-              <ChoiceButtons
-                label="Novedades y promociones"
-                value={draft.messages || null}
-                options={[
-                  { value: "si", label: "Sí, acepto" },
-                  { value: "no", label: "No, gracias" },
-                ]}
-                onChange={(value) => set({ messages: value })}
-                columns={2}
-              />
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  aria-labelledby={control.labelId}
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={draft.messages || null}
+                  options={[
+                    { value: "si", label: "Sí, acepto" },
+                    { value: "no", label: "No, gracias" },
+                  ]}
+                  onChange={(value) => set({ messages: value })}
+                  columns={2}
+                />
+              )}
             </Labeled>
           ) : null}
         </Question>
         )}
       </Questionnaire>
-    </ProblemContext.Provider>
+    </FormContext.Provider>
   )
 }
 
 /** Lo que falta en una declaración de salud: la respuesta o, si es «Sí», cuál. */
-function declaredFound(field: string, needed: boolean, state: Declared, text: string): Found {
+function declaredFound(field: keyof Draft, needed: boolean, state: Declared, text: string): Found {
   if (needed && !state) return { field, message: "Elige una respuesta." }
   if (state === "recorded" && !text.trim())
     return { field, message: "Escribe cuál, o elige «No sé»." }
@@ -1904,16 +2169,17 @@ function Question({
   missing?: string
   children: React.ReactNode
 }) {
-  const { problem, setProblem } = useContext(ProblemContext)
-  const mine = problem?.item === name ? problem : null
+  const form = useRegistrationFormContext()
   const allOptional = grouped && !required
-  // Un aviso sin campo (lo rechazó el servidor) va al pie de la pantalla.
-  const loose = mine && !mine.field ? mine.message : null
+  // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de «Antes de enviar».
+  const submitError = useFormSubmitError(form)
+  const loose = name === "send" ? submitError : null
 
   function blocked(fieldset: HTMLElement): boolean {
     const found = check?.() ?? null
-    if (!found) return false
-    setProblem({ item: name, ...found })
+    // Lo que no se pregunta en esta pantalla no la detiene: no habría dónde decirlo.
+    if (!found || !form.fieldInfo[found.field]?.instance) return false
+    showFound(form, found)
     requestAnimationFrame(() => {
       fieldset
         .querySelector<HTMLElement>(
@@ -2009,50 +2275,107 @@ function Question({
   )
 }
 
-/** Un campo con su nombre, «(opcional)» si puede quedar en blanco, su ayuda y su aviso. */
+/** Lo que recibe el control de un campo: su id, su error y, en un grupo, el id de su nombre. */
+type LabeledControl = FieldControl & { labelId: string }
+
+/**
+ * Un campo con su nombre, «(opcional)» si puede quedar en blanco, su ayuda y su
+ * aviso, unido al dato del formulario (`name`). Con `group`, varias opciones a
+ * la vista: un `FieldSet` que se nombra con su leyenda (`labelId`).
+ */
 function Labeled({
+  name,
+  ...props
+}: {
+  name: keyof Draft
+  label: string
+  optional?: boolean
+  hint?: string
+  group?: boolean
+  children: (control: LabeledControl) => React.ReactNode
+}) {
+  const form = useRegistrationFormContext()
+  return <form.AppField name={name}>{() => <LabeledField name={name} {...props} />}</form.AppField>
+}
+
+function LabeledField({
   name,
   label,
   optional = false,
   hint,
-  htmlFor,
+  group = false,
   children,
 }: {
   name: string
   label: string
   optional?: boolean
   hint?: string
-  htmlFor?: string
-  children: React.ReactNode
+  group?: boolean
+  children: (control: LabeledControl) => React.ReactNode
 }) {
-  const { problem } = useContext(ProblemContext)
+  const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: !!hint })
   const allOptional = useContext(AllOptionalContext)
-  const message = problem?.field === name ? problem.message : null
+  const labelId = `${control.id}-nombre`
+  const text = (
+    // Un solo bloque: en el celular «(opcional)» sigue al texto, no en otra columna.
+    <span>
+      {label}
+      {optional && !allOptional ? (
+        <span className="font-normal text-muted-foreground"> (opcional)</span>
+      ) : null}
+    </span>
+  )
+  const help = hint ? <FieldDescription id={descriptionId}>{hint}</FieldDescription> : null
+  const error = control.invalid ? (
+    <FieldError id={errorId} errors={errors.map((message) => ({ message }))} />
+  ) : null
+  if (group)
+    return (
+      <FieldSet data-field={name} data-invalid={control.invalid || undefined}>
+        <FieldLegend id={labelId} variant="label">
+          {text}
+        </FieldLegend>
+        {help}
+        {children({ ...control, labelId })}
+        {error}
+      </FieldSet>
+    )
   return (
-    <Field data-field={name} data-invalid={message ? true : undefined}>
-      <FieldLabel htmlFor={htmlFor}>
-        {/* Un solo bloque: en el celular «(opcional)» sigue al texto, no en otra columna. */}
-        <span>
-          {label}
-          {optional && !allOptional ? (
-            <span className="font-normal text-muted-foreground"> (opcional)</span>
-          ) : null}
-        </span>
+    <Field data-field={name} data-invalid={control.invalid || undefined}>
+      <FieldLabel id={labelId} htmlFor={control.id}>
+        {text}
       </FieldLabel>
-      {hint ? <FieldDescription>{hint}</FieldDescription> : null}
-      {children}
-      {message ? <FieldError>{message}</FieldError> : null}
+      {help}
+      {children({ ...control, labelId })}
+      {error}
     </Field>
   )
 }
 
-/** Pocas opciones cortas, como botones; si son muchas o largas, una lista. */
+/** Un aviso suelto bajo las opciones de una pantalla (quién se registra, el aviso de privacidad). */
+function FieldMessage({ name }: { name: keyof Draft }) {
+  const form = useRegistrationFormContext()
+  return <form.AppField name={name}>{() => <FieldMessageText />}</form.AppField>
+}
+
+function FieldMessageText() {
+  const { control, errors, errorId } = useFieldControl({ hasDescription: false })
+  return control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null
+}
+
+/**
+ * Pocas opciones cortas, como botones; si son muchas o largas, una lista. La
+ * pregunta de arriba nombra el grupo; `label` es el nombre del dato que se
+ * elige («Cómo nos conoció»), el mismo que lleva la lista en la ficha.
+ */
 function Pick({
+  control,
   label,
   value,
   options,
   onChange,
 }: {
+  control: LabeledControl
   label: string
   value: string
   options: ReadonlyArray<{ value: string; label: string }>
@@ -2061,7 +2384,11 @@ function Pick({
   if (options.length <= 4 && options.every((option) => option.label.length <= 20))
     return (
       <ChoiceButtons
-        label={label}
+        id={control.id}
+        aria-label={label}
+        aria-describedby={control.describedBy}
+        invalid={control.invalid}
+        onBlur={control.onBlur}
         value={value || null}
         options={options}
         onChange={onChange}
@@ -2074,7 +2401,14 @@ function Pick({
       items={Object.fromEntries(options.map((option) => [option.value, option.label]))}
       onValueChange={(next) => onChange(typeof next === "string" ? next : "")}
     >
-      <SelectTrigger aria-label={label} className="w-full">
+      <SelectTrigger
+        id={control.id}
+        aria-label={label}
+        aria-describedby={control.describedBy}
+        aria-invalid={control.invalid || undefined}
+        onBlur={control.onBlur}
+        className="w-full"
+      >
         <SelectValue placeholder="Elegir…" />
       </SelectTrigger>
       <SelectContent>
@@ -2100,7 +2434,7 @@ function DeclaredField({
   onState,
   onText,
 }: {
-  name: string
+  name: keyof Draft
   optional: boolean
   label: string
   hint?: string
@@ -2110,33 +2444,42 @@ function DeclaredField({
   onState: (value: Declared) => void
   onText: (value: string) => void
 }) {
-  const { problem } = useContext(ProblemContext)
   return (
-    <Labeled name={name} label={label} hint={hint} optional={optional}>
-      <ChoiceButtons
-        label={label}
-        value={state || null}
-        options={DECLARED}
-        onChange={onState}
-        columns={3}
-      />
-      {state === "recorded" ? (
-        <Input
-          aria-label={detailLabel}
-          placeholder={detailLabel}
-          autoComplete="off"
-          maxLength={600}
-          value={text}
-          aria-invalid={problem?.field === name && !text.trim() ? true : undefined}
-          onChange={(event) => onText(event.target.value)}
-        />
-      ) : null}
+    <Labeled name={name} group label={label} hint={hint} optional={optional}>
+      {(control) => (
+        <>
+          <ChoiceButtons
+            id={control.id}
+            aria-labelledby={control.labelId}
+            aria-describedby={control.describedBy}
+            invalid={control.invalid && !state}
+            onBlur={control.onBlur}
+            value={state || null}
+            options={DECLARED}
+            onChange={onState}
+            columns={3}
+          />
+          {state === "recorded" ? (
+            <Input
+              aria-label={detailLabel}
+              aria-describedby={control.describedBy}
+              placeholder={detailLabel}
+              autoComplete="off"
+              maxLength={600}
+              value={text}
+              aria-invalid={control.invalid && !text.trim() ? true : undefined}
+              onChange={(event) => onText(event.target.value)}
+            />
+          ) : null}
+        </>
+      )}
     </Labeled>
   )
 }
 
 /** «No / Sí» y, si es «Sí», el detalle; todo opcional. */
 function YesNoField({
+  name,
   label,
   detail,
   answer,
@@ -2144,6 +2487,7 @@ function YesNoField({
   onAnswer,
   onText,
 }: {
+  name: keyof Draft
   label: string
   detail: string
   answer: YesNo
@@ -2152,24 +2496,32 @@ function YesNoField({
   onText: (value: string) => void
 }) {
   return (
-    <Labeled name={label} label={label} optional>
-      <ChoiceButtons
-        label={label}
-        value={answer || null}
-        options={YES_NO}
-        onChange={onAnswer}
-        columns={2}
-      />
-      {answer === "si" ? (
-        <Input
-          aria-label={detail}
-          placeholder={detail}
-          autoComplete="off"
-          maxLength={500}
-          value={text}
-          onChange={(event) => onText(event.target.value)}
-        />
-      ) : null}
+    <Labeled name={name} group label={label} optional>
+      {(control) => (
+        <>
+          <ChoiceButtons
+            id={control.id}
+            aria-labelledby={control.labelId}
+            aria-describedby={control.describedBy}
+            invalid={control.invalid}
+            onBlur={control.onBlur}
+            value={answer || null}
+            options={YES_NO}
+            onChange={onAnswer}
+            columns={2}
+          />
+          {answer === "si" ? (
+            <Input
+              aria-label={detail}
+              placeholder={detail}
+              autoComplete="off"
+              maxLength={500}
+              value={text}
+              onChange={(event) => onText(event.target.value)}
+            />
+          ) : null}
+        </>
+      )}
     </Labeled>
   )
 }

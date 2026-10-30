@@ -35,7 +35,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, orgProduct } from "./locale.js"
 import { createContactNote } from "./crm-workspace.js"
 import {
@@ -328,7 +328,8 @@ export async function savePatientRegistrationConfig(
     ...(input.askMessages !== undefined ? { askMessages: input.askMessages } : {}),
   })
   if (!parsed.success) {
-    throw validation(parsed.error.issues[0]?.message ?? "Configuración inválida")
+    // Cada regla en su dato (`fields.docNumber`, `privacyNotice`), junto a su fila en Configuración.
+    throw fieldsError(issueFields(parsed.error.issues)) ?? validation(parsed.error.issues[0]?.message ?? "Configuración inválida")
   }
   // Lock incompatible con registros en curso: serializa publicación frente a
   // lecturas compartidas de registerPatient/createPatientRegistrationLink.
@@ -699,7 +700,7 @@ export async function registerPatient(
     if (!fromPerson && !newPerson) {
       throw validation("Lo mínimo se acepta para alguien nuevo o para una persona que ya existe")
     }
-    if (newPerson && !input.answers?.demographics?.phone) throw validation("Indica el teléfono")
+    if (newPerson && !input.answers?.demographics?.phone) throw invalidField("answers.demographics.phone", "Indica el teléfono")
   }
   const entryPoint: RegistrationEntryPoint = publicContext
     ? (hasToken ? "conversation" : publicContext.entryPoint)
@@ -783,7 +784,7 @@ export async function registerPatient(
   // 3. Validación de respuestas (esquema + reglas de negocio). Todo revierte al fallar.
   const shape = registrationAnswersSchema.safeParse(input.answers)
   if (!shape.success) {
-    throw validation(shape.error.issues[0]?.message ?? "Respuestas inválidas")
+    throw validation(shape.error.issues[0]?.message ?? "Respuestas inválidas", issueFields(shape.error.issues, "answers"))
   }
   const answers = shape.data
   const errors = validateRegistrationAnswers(config, answers, {
@@ -794,7 +795,8 @@ export async function registerPatient(
     product: await orgProduct(tx, orgId),
     ...(essentials ? { scope: "essentials" as const } : {}),
   })
-  if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
+  const failed = fieldsError(errors, (key) => `answers.${key}`)
+  if (failed) throw failed
 
   // 4. Resolver vínculos y contexto de token.
   let link: ResolvedLink | null = null

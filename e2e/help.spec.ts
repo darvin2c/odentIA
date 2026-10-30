@@ -110,7 +110,10 @@ test("ayuda: dónde está cada cosa, por qué no puedo, y lo que no sabe se env�
   const support = help.getByRole("region", { name: "Escribir a soporte de odentIA" })
   await expect(support.getByLabel("Tu mensaje para odentIA")).toHaveValue("")
   await expect(support.getByRole("listitem").first()).toHaveText("Pantalla: Pacientes")
-  await expect(support.getByRole("button", { name: "Enviar a odentIA" })).toBeDisabled()
+  // En blanco no se envía: el motivo se dice en el campo.
+  await support.getByRole("button", { name: "Enviar a odentIA" }).click()
+  await expect(support.getByLabel("Tu mensaje para odentIA")).toHaveAttribute("aria-invalid", "true")
+  await expect(support.getByText("Escribe lo que quieres enviar: al menos 3 caracteres.")).toBeVisible()
   await support.getByRole("button", { name: "Cancelar" }).click()
   await help.getByRole("button", { name: "Reportar un problema" }).click()
   const problem = help.getByRole("region", { name: "Reportar un problema" })

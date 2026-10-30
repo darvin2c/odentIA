@@ -1,8 +1,9 @@
-import { Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { DueAtField, ExpandableText, FormDrawer } from "@odentia/ui-patterns"
+import { DueAtField, ExpandableText, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useEffect } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import {
   type OpportunityDetail,
   type OpportunityListItem,
@@ -45,9 +46,27 @@ function ownerValue(assignee: string | null, area: string | null): string {
   return `a:${area ?? "recepcion"}`
 }
 
-function errorText(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.shape.message ?? err.message ?? fallback
-  return err instanceof Error ? err.message : fallback
+interface TaskValues {
+  title: string
+  dueAt: string | null
+  owner: string
+  person: PickedPerson | null
+  opportunityId: string
+}
+
+const taskSchema = z.object({
+  title: z.string().trim().min(1, "Escribe qué hay que hacer.").max(200, "Escribe como mucho 200 caracteres."),
+  dueAt: z.string().nullable(),
+  owner: z.string(),
+  person: z.custom<PickedPerson | null>(),
+  opportunityId: z.string(),
+})
+
+/** El nombre del dato en el cuerpo de la petición → su campo en pantalla. */
+const SERVER_FIELDS: Record<string, string> = {
+  assigneeUserId: "owner",
+  area: "owner",
+  contactId: "person",
 }
 
 /**
@@ -57,7 +76,6 @@ function errorText(err: unknown, fallback: string): string {
  * ser la próxima acción de una (una sola tarea abierta por oportunidad).
  */
 export function TaskDrawer({ open, contactId, patientId, conversationId, opportunityId, taskId, onClose, onSaved }: TaskDrawerProps) {
-  const ids = useId()
   const queryClient = useQueryClient()
   const members = useOrgMembers()
   const myUserId = useMyUserId()
@@ -78,34 +96,71 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
     enabled: open && !isEdit && !!opportunityId && canReadCrm,
   })
 
-  const [title, setTitle] = useState("")
-  const [dueAt, setDueAt] = useState<string | null>(null)
-  const [owner, setOwner] = useState("")
-  const [person, setPerson] = useState<PickedPerson | null>(null)
-  const [pickedOpportunity, setPickedOpportunity] = useState("")
+  const save = useMutation({
+    mutationFn: (input: { path: string; method: "PATCH" | "POST"; body: Record<string, unknown> }) =>
+      apiFetch(input.path, { method: input.method, body: JSON.stringify(input.body) }),
+  })
+
+  const form = useAppForm({
+    defaultValues: { title: "", dueAt: null, owner: "", person: null, opportunityId: "" } as TaskValues,
+    validators: { onSubmit: taskSchema },
+    onSubmit: async ({ value }) => {
+      const [kind, ownerId] = value.owner.split(":") as ["u" | "a" | "", string | undefined]
+      const assigneeUserId = kind === "u" ? (ownerId ?? null) : null
+      const area = kind === "a" ? ((ownerId as Area | undefined) ?? null) : null
+      const title = value.title.trim()
+      if (isEdit) {
+        if (!editTask) throw new Error("No se pudo cargar la tarea.")
+        await save.mutateAsync({
+          path: `/api/tasks/${editTask.id}`,
+          method: "PATCH",
+          body: { title, dueAt: value.dueAt, assigneeUserId, area },
+        })
+      } else {
+        const personId = contactId ?? value.person?.id
+        const chosenOpportunity = opportunityId ?? (value.opportunityId || undefined)
+        await save.mutateAsync({
+          path: "/api/tasks",
+          method: "POST",
+          body: {
+            title,
+            ...(value.dueAt ? { dueAt: value.dueAt } : {}),
+            ...(personId ? { contactId: personId } : patientId ? { patientId } : {}),
+            ...(conversationId ? { conversationId } : {}),
+            ...(chosenOpportunity ? { opportunityId: chosenOpportunity } : {}),
+            assigneeUserId,
+            ...(area ? { area } : {}),
+          },
+        })
+      }
+      for (const key of ["tasks", "opportunity", "pipeline-cards", "pipeline-list", "crm-context", "contact", "workspace-home"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
+      }
+      onSaved?.()
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS })
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir o al llegar la tarea; después el borrador es de quien escribe
   useEffect(() => {
     if (!open) return
     if (editTask) {
-      setTitle(editTask.title)
-      setDueAt(editTask.dueAt)
-      setOwner(ownerValue(editTask.assigneeUserId, editTask.area))
+      form.reset({ title: editTask.title, dueAt: editTask.dueAt, owner: ownerValue(editTask.assigneeUserId, editTask.area), person: null, opportunityId: "" })
     } else if (!isEdit) {
-      setTitle("")
-      setDueAt(null)
-      setOwner(opportunityId ? "" : `u:${myUserId}`)
+      form.reset({ title: "", dueAt: null, owner: opportunityId ? "" : `u:${myUserId}`, person: null, opportunityId: "" })
     }
-    setPerson(null)
-    setPickedOpportunity("")
-    save.reset()
   }, [open, editTask?.id])
 
+  const owner = useStore(form.store, (state) => state.values.owner)
+  const person = useStore(form.store, (state) => state.values.person)
+
   // Con la oportunidad cargada, la tarea va a quien la lleva.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `form` es estable
   useEffect(() => {
     const opp = fixedOpportunity.data?.data
     if (!open || isEdit || !opp || owner) return
-    setOwner(ownerValue(opp.assignedUserId, "recepcion"))
+    form.setFieldValue("owner", ownerValue(opp.assignedUserId, "recepcion"), { dontUpdateMeta: true })
   }, [open, isEdit, fixedOpportunity.data, owner])
 
   const effectiveContactId = contactId ?? person?.id ?? ""
@@ -117,51 +172,16 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
   })
   const openOpportunities = opportunities.data?.data ?? []
 
-  const save = useMutation({
-    mutationFn: () => {
-      if (!title.trim()) throw new Error("Escribe qué hay que hacer.")
-      const [kind, value] = owner.split(":") as ["u" | "a" | "", string | undefined]
-      const assigneeUserId = kind === "u" ? (value ?? null) : null
-      const area = kind === "a" ? ((value as Area | undefined) ?? null) : null
-      if (isEdit) {
-        if (!editTask) throw new Error("No se pudo cargar la tarea.")
-        return apiFetch(`/api/tasks/${editTask.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ title: title.trim(), dueAt, assigneeUserId, area }),
-        })
-      }
-      const chosenOpportunity = opportunityId ?? (pickedOpportunity || undefined)
-      return apiFetch("/api/tasks", {
-        method: "POST",
-        body: JSON.stringify({
-          title: title.trim(),
-          ...(dueAt ? { dueAt } : {}),
-          ...(effectiveContactId ? { contactId: effectiveContactId } : patientId ? { patientId } : {}),
-          ...(conversationId ? { conversationId } : {}),
-          ...(chosenOpportunity ? { opportunityId: chosenOpportunity } : {}),
-          assigneeUserId,
-          ...(area ? { area } : {}),
-        }),
-      })
-    },
-    onSuccess: () => {
-      for (const key of ["tasks", "opportunity", "pipeline-cards", "pipeline-list", "crm-context", "contact", "workspace-home"]) {
-        void queryClient.invalidateQueries({ queryKey: [key] })
-      }
-      onSaved?.()
-      onClose()
-    },
-  })
-
   const settled = editTask?.status !== undefined && editTask.status !== "open"
   const readOnly = !canWrite || settled
   const fixedContext = editTask ?? null
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        if (!save.isPending) onClose()
+        if (!surface.isSubmitting) onClose()
       }}
       title={isEdit ? "Tarea" : "Nueva tarea"}
       description={
@@ -177,20 +197,9 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
                   ? "Queda referida a este paciente y aparece en sus pendientes."
                   : undefined
       }
-      onSubmit={(event) => {
-        event.preventDefault()
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
       isLoading={isEdit && taskQuery.isPending}
-      isDirty={!isEdit && title.trim() !== ""}
-      error={
-        taskQuery.isError
-          ? errorText(taskQuery.error, "No se pudo cargar la tarea.")
-          : save.error
-            ? errorText(save.error, isEdit ? "No se pudo guardar la tarea." : "No se pudo crear la tarea.")
-            : null
-      }
+      isDirty={!isEdit && surface.isDirty}
+      error={taskQuery.isError ? "No se pudo cargar la tarea." : surface.error}
       submitLabel={isEdit ? "Guardar" : "Crear"}
       cancelLabel="Cancelar"
       hideSubmit={readOnly || (isEdit && !editTask)}
@@ -206,68 +215,105 @@ export function TaskDrawer({ open, contactId, patientId, conversationId, opportu
           </p>
         ) : null}
 
-        <Field>
-          <FieldLabel htmlFor={`${ids}-titulo`}>Qué hay que hacer</FieldLabel>
-          <Textarea
-            id={`${ids}-titulo`}
-            value={title}
-            maxLength={200}
-            rows={2}
-            required
-            disabled={readOnly}
-            placeholder="Llamar a Jorge para confirmar la evaluación"
-            onChange={(event) => setTitle(event.target.value)}
-          />
-        </Field>
+        <form.AppField name="title">
+          {(field) => (
+            <field.TextareaField
+              label="Qué hay que hacer"
+              maxLength={200}
+              rows={2}
+              disabled={readOnly}
+              placeholder="Llamar a Jorge para confirmar la evaluación"
+            />
+          )}
+        </form.AppField>
         {editTask?.reason ? <ExpandableText text={editTask.reason} lines={3} label="contexto de la tarea" className="text-sm text-muted-foreground" /> : null}
 
-        <DueAtField value={dueAt} onChange={setDueAt} disabled={readOnly} />
+        <form.AppField name="dueAt">
+          {(field) => (
+            <field.Control label="Vence">
+              {(control) => (
+                <DueAtField
+                  id={control.id}
+                  aria-label="Vence"
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                  disabled={readOnly}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
 
-        <Field>
-          <FieldLabel htmlFor={`${ids}-quien`}>Quién la lleva</FieldLabel>
-          <ChoiceSelect id={`${ids}-quien`} value={owner} disabled={readOnly} onChange={(event) => setOwner(event.target.value)}>
-            {members.map((item) => (
-              <option key={item.userId} value={`u:${item.userId}`}>
-                {item.userId === myUserId ? `${item.user.name} (yo)` : item.user.name}
-              </option>
-            ))}
-            {AREAS.map((area) => (
-              <option key={area} value={`a:${area}`}>
-                Sin responsable · {TASK_AREA_LABEL[area]}
-              </option>
-            ))}
-          </ChoiceSelect>
-          <FieldDescription>Sin responsable, la ve quien trabaja en esa parte del equipo.</FieldDescription>
-        </Field>
+        <form.AppField name="owner">
+          {(field) => (
+            <field.Control label="Quién la lleva" description="Sin responsable, la ve quien trabaja en esa parte del equipo.">
+              {(control) => (
+                <ChoiceSelect
+                  {...control.props}
+                  value={field.state.value}
+                  disabled={readOnly}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                >
+                  {members.map((item) => (
+                    <option key={item.userId} value={`u:${item.userId}`}>
+                      {item.userId === myUserId ? `${item.user.name} (yo)` : item.user.name}
+                    </option>
+                  ))}
+                  {AREAS.map((area) => (
+                    <option key={area} value={`a:${area}`}>
+                      Sin responsable · {TASK_AREA_LABEL[area]}
+                    </option>
+                  ))}
+                </ChoiceSelect>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
 
         {!isEdit && !contactId && !patientId && !opportunityId && canReadCrm ? (
-          <PersonPicker
-            label="De quién es (opcional)"
-            value={person}
-            onChange={(next) => {
-              setPerson(next)
-              setPickedOpportunity("")
-            }}
-          />
+          <form.AppField name="person">
+            {(field) => (
+              <field.Control label="De quién es (opcional)">
+                {(control) => (
+                  <PersonPicker
+                    id={control.id}
+                    label="De quién es (opcional)"
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      form.setFieldValue("opportunityId", "")
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : null}
 
         {!isEdit && !opportunityId && openOpportunities.length > 0 ? (
-          <Field>
-            <FieldLabel htmlFor={`${ids}-oportunidad`}>Es la próxima acción de</FieldLabel>
-            <ChoiceSelect
-              id={`${ids}-oportunidad`}
-              value={pickedOpportunity}
-              onChange={(event) => setPickedOpportunity(event.target.value)}
-            >
-              <option value="">Ninguna oportunidad</option>
-              {openOpportunities.map((item) => (
-                <option key={item.id} value={item.id} disabled={item.nextTask !== null}>
-                  {item.title} · {item.stageName}
-                  {item.nextTask ? " · ya tiene su tarea" : ""}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
+          <form.AppField name="opportunityId">
+            {(field) => (
+              <field.Control label="Es la próxima acción de">
+                {(control) => (
+                  <ChoiceSelect {...control.props} value={field.state.value} onChange={(event) => field.handleChange(event.target.value)}>
+                    <option value="">Ninguna oportunidad</option>
+                    {openOpportunities.map((item) => (
+                      <option key={item.id} value={item.id} disabled={item.nextTask !== null}>
+                        {item.title} · {item.stageName}
+                        {item.nextTask ? " · ya tiene su tarea" : ""}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : null}
       </div>
     </FormDrawer>

@@ -10,11 +10,22 @@ import {
   Input,
   Spinner,
 } from "@odentia/ui"
-import { internationalText, isValidE164, normalizeCountry, PhoneInput, SubmitButton, toE164 } from "@odentia/ui-patterns"
-import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query"
+import {
+  internationalText,
+  normalizeCountry,
+  SubmitButton,
+  submitErrorMessage,
+  toE164,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { ChevronRight, Search, UserPlus } from "lucide-react"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
 import { timeAgo, usePermission } from "../lib/crm"
 import type { PersonListItem } from "../lib/people"
@@ -26,8 +37,25 @@ function looksLikePhone(text: string): boolean {
   return /^[\d\s\-()+.]+$/.test(text.trim()) && text.replace(/\D/g, "").length >= 6
 }
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
+/** El número de WhatsApp, obligatorio (un número a medias ya lo dice el propio campo). */
+const whatsappNumber = z
+  .string()
+  .nullable()
+  .refine((value) => value !== null, "Escribe su número de WhatsApp.")
+
+const phoneSchema = z.object({ phone: whatsappNumber })
+
+/** Lo mismo que pide «Nueva persona» (`POST /api/people`), con sus topes. */
+const createSchema = z.object({
+  givenNames: z.string().trim().min(1, "Escribe sus nombres.").max(100, "Escribe como mucho 100 caracteres."),
+  familyName: z.string().trim().min(1, "Escribe sus apellidos.").max(200, "Escribe como mucho 200 caracteres."),
+  phone: whatsappNumber,
+})
+
+/** La persona que ya se creó en este diálogo: reintentar solo abre su conversación. */
+interface CreatedPerson {
+  id: string
+  displayName: string
 }
 
 /**
@@ -55,14 +83,59 @@ export function NewConversationDialog({
   const [query, setQuery] = useState(initialQuery)
   const [debounced, setDebounced] = useState(initialQuery)
   const [creating, setCreating] = useState(false)
-  const [name, setName] = useState({ givenNames: "", familyName: "" })
-  const [phone, setPhone] = useState<string | null>(null)
   const [needsPhoneFor, setNeedsPhoneFor] = useState<PersonListItem | null>(null)
+  // Si la persona ya se creó y falló abrir su conversación (el número, el WhatsApp
+  // de la clínica), reintentar no crea otra: solo vuelve a abrir la conversación.
+  const createdRef = useRef<CreatedPerson | null>(null)
+  const [created, setCreated] = useState<CreatedPerson | null>(null)
   const searchId = useId()
-  const nameId = useId()
-  const familyId = useId()
-  const phoneId = useId()
   const country = normalizeCountry(profile.data?.countryCode)
+
+  const open_ = (conversationId: string) => {
+    onClose()
+    void navigate({ to: "/inbox", search: { conversation: conversationId } })
+  }
+
+  const phoneForm = useAppForm({
+    defaultValues: { phone: null as string | null },
+    validators: { onSubmit: phoneSchema },
+    onSubmit: async ({ value }) => {
+      if (!needsPhoneFor || !value.phone) return
+      const result = await write.mutateAsync({ contactId: needsPhoneFor.id, phone: value.phone })
+      open_(result.conversationId)
+    },
+  })
+
+  const createForm = useAppForm({
+    defaultValues: { givenNames: "", familyName: "", phone: null as string | null },
+    validators: { onSubmit: createSchema },
+    onSubmit: async ({ value }) => {
+      if (!value.phone) return
+      let person = createdRef.current
+      if (!person) {
+        // La misma operación que «Nuevo contacto» (`createPerson`): nombres y apellidos, dos campos.
+        const givenNames = value.givenNames.trim()
+        const familyName = value.familyName.trim()
+        const response = await apiFetch<{ data: { id: string } }>("/api/people", {
+          method: "POST",
+          body: JSON.stringify({ givenNames, familyName, phone: value.phone }),
+        })
+        person = { id: response.data.id, displayName: `${givenNames} ${familyName}` }
+        createdRef.current = person
+        setCreated(person)
+      }
+      // Con el número escrito: si se corrigió tras un rechazo, va el nuevo.
+      const result = await write.mutateAsync({ contactId: person.id, phone: value.phone })
+      open_(result.conversationId)
+    },
+  })
+
+  const submitPhone = useFormSubmit(phoneForm)
+  const submitCreate = useFormSubmit(createForm)
+  const phoneError = useFormSubmitError(phoneForm)
+  const createError = useFormSubmitError(createForm)
+  const phoneSubmitting = useStore(phoneForm.store, (state) => state.isSubmitting)
+  const createSubmitting = useStore(createForm.store, (state) => state.isSubmitting)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: se reinicia una vez por apertura
   useEffect(() => {
@@ -70,9 +143,11 @@ export function NewConversationDialog({
     setQuery(initialQuery)
     setDebounced(initialQuery)
     setCreating(false)
-    setName({ givenNames: "", familyName: "" })
-    setPhone(null)
     setNeedsPhoneFor(null)
+    createdRef.current = null
+    setCreated(null)
+    phoneForm.reset({ phone: null })
+    createForm.reset({ givenNames: "", familyName: "", phone: null })
     write.reset()
   }, [open])
 
@@ -90,60 +165,44 @@ export function NewConversationDialog({
   })
   const people = debounced.length >= 2 ? (results.data?.data ?? []) : []
 
-  const open_ = (conversationId: string) => {
-    onClose()
-    void navigate({ to: "/inbox", search: { conversation: conversationId } })
-  }
-
-  const choose = (person: PersonListItem, typed?: string) => {
+  const choose = (person: PersonListItem) => {
     write.mutate(
-      { contactId: person.id, ...(typed ? { phone: typed } : {}) },
+      { contactId: person.id },
       {
         onSuccess: (result) => open_(result.conversationId),
         onError: (error) => {
-          if (error instanceof ApiError && error.shape.code === "NO_PHONE") setNeedsPhoneFor(person)
+          if (error instanceof ApiError && error.shape.code === "NO_PHONE") {
+            phoneForm.reset({ phone: null })
+            setNeedsPhoneFor(person)
+          }
         },
       },
     )
   }
 
-  const create = useMutation({
-    retry: false,
-    mutationFn: async () => {
-      // La misma operación que «Nuevo contacto» (`createPerson`): nombres y apellidos, dos campos.
-      const created = await apiFetch<{ data: { id: string } }>("/api/people", {
-        method: "POST",
-        body: JSON.stringify({
-          givenNames: name.givenNames.trim() || null,
-          familyName: name.familyName.trim() || null,
-          ...(phone ? { phone } : {}),
-        }),
-      })
-      return write.mutateAsync({ contactId: created.data.id })
-    },
-    onSuccess: (result) => open_(result.conversationId),
-  })
-
   const startCreating = () => {
     const text = query.trim()
     if (looksLikePhone(text)) {
-      setPhone(toE164(text, country))
-      setName({ givenNames: "", familyName: "" })
+      createForm.reset({ givenNames: "", familyName: "", phone: toE164(text, country) })
     } else {
       // Lo buscado propone los nombres; los apellidos se escriben aparte.
-      setName({ givenNames: text, familyName: "" })
-      setPhone(null)
+      createForm.reset({ givenNames: text, familyName: "", phone: null })
     }
+    write.reset()
     setCreating(true)
   }
 
-  const busy = write.isPending || create.isPending
-  const writeError = write.error && !(write.error instanceof ApiError && write.error.shape.code === "NO_PHONE") ? write.error : null
+  // Al volver a la búsqueda no queda a la vista el error del formulario que se dejó.
+  const backToSearch = () => {
+    write.reset()
+    setNeedsPhoneFor(null)
+    setCreating(false)
+  }
+
+  const busy = write.isPending || phoneSubmitting || createSubmitting
+  const writeError =
+    write.error && !(write.error instanceof ApiError && write.error.shape.code === "NO_PHONE") ? write.error : null
   const createLabel = looksLikePhone(query) ? `Crear persona con ${query.trim()}` : `Crear persona «${query.trim()}»`
-  const nameReady = Boolean(name.givenNames.trim() && name.familyName.trim())
-  // Un número con un dígito de menos es «posible» pero no existe: Meta lo rechazaría en cada envío.
-  const phoneReady = isValidE164(phone)
-  const phoneHint = phone && !phoneReady ? "Ese número no está completo: revisa los dígitos." : null
 
   return (
     <Dialog
@@ -161,82 +220,67 @@ export function NewConversationDialog({
         </DialogHeader>
 
         {needsPhoneFor ? (
-          <form
-            className="grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (phone && phoneReady) choose(needsPhoneFor, phone)
-            }}
-          >
+          <form className="grid gap-3" noValidate onSubmit={submitPhone}>
             <p className="text-sm">
               {needsPhoneFor.displayName} no tiene un número de WhatsApp. Escríbelo y se abre su conversación.
             </p>
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor={phoneId}>Su número de WhatsApp</FieldLabel>
-              <PhoneInput id={phoneId} value={phone} defaultCountry={country} onChange={setPhone} invalid={Boolean(phoneHint)} />
-              <p className={phoneHint ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
-                {phoneHint ?? "Queda como su WhatsApp para las próximas veces."}
-              </p>
-            </div>
-            {writeError ? (
+            <phoneForm.AppField name="phone">
+              {(field) => (
+                <field.PhoneField
+                  label="Su número de WhatsApp"
+                  description="Queda como su WhatsApp para las próximas veces."
+                  defaultCountry={country}
+                />
+              )}
+            </phoneForm.AppField>
+            {phoneError ? (
               <p role="alert" className="text-sm text-destructive">
-                {errorText(writeError, "No se pudo abrir la conversación.")}
+                {phoneError}
               </p>
             ) : null}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setNeedsPhoneFor(null)}>
+              <Button type="button" variant="outline" disabled={phoneSubmitting} onClick={backToSearch}>
                 Volver
               </Button>
-              <SubmitButton type="submit" disabled={!phoneReady} pending={write.isPending}>
+              <SubmitButton type="submit" pending={phoneSubmitting}>
                 Escribirle
               </SubmitButton>
             </DialogFooter>
           </form>
         ) : creating ? (
-          <form
-            className="grid gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              if (nameReady && phoneReady) create.mutate()
-            }}
-          >
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor={nameId}>Nombres</FieldLabel>
-              <Input
-                id={nameId}
-                value={name.givenNames}
-                maxLength={100}
-                autoFocus
-                onChange={(event) => setName({ ...name, givenNames: event.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor={familyId}>Apellidos</FieldLabel>
-              <Input
-                id={familyId}
-                value={name.familyName}
-                maxLength={200}
-                onChange={(event) => setName({ ...name, familyName: event.target.value })}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor={phoneId}>Teléfono</FieldLabel>
-              <PhoneInput id={phoneId} value={phone} defaultCountry={country} onChange={setPhone} invalid={Boolean(phoneHint)} />
-              <p className={phoneHint ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
-                {phoneHint ?? "Se le escribe por WhatsApp a este número."}
+          <form className="grid gap-3" noValidate onSubmit={submitCreate}>
+            {created ? (
+              <p className="text-sm">
+                Ya se creó a {created.displayName}: corrige lo que se indica y se abre su conversación. Su nombre se
+                cambia después en su ficha.
               </p>
-            </div>
-            {create.error ? (
+            ) : null}
+            <createForm.AppField name="givenNames">
+              {(field) => <field.TextField label="Nombres" maxLength={100} autoFocus readOnly={created !== null} />}
+            </createForm.AppField>
+            <createForm.AppField name="familyName">
+              {(field) => <field.TextField label="Apellidos" maxLength={200} readOnly={created !== null} />}
+            </createForm.AppField>
+            <createForm.AppField name="phone">
+              {(field) => (
+                <field.PhoneField
+                  label="Teléfono"
+                  description="Se le escribe por WhatsApp a este número."
+                  defaultCountry={country}
+                />
+              )}
+            </createForm.AppField>
+            {createError ? (
               <p role="alert" className="text-sm text-destructive">
-                {errorText(create.error, "No se pudo crear a la persona.")}
+                {createError}
               </p>
             ) : null}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setCreating(false)}>
+              <Button type="button" variant="outline" disabled={createSubmitting} onClick={backToSearch}>
                 Volver
               </Button>
-              <SubmitButton type="submit" disabled={!nameReady || !phoneReady} pending={create.isPending}>
-                Crear y escribirle
+              <SubmitButton type="submit" pending={createSubmitting}>
+                {created ? "Escribirle" : "Crear y escribirle"}
               </SubmitButton>
             </DialogFooter>
           </form>
@@ -334,7 +378,7 @@ export function NewConversationDialog({
             )}
             {writeError ? (
               <p role="alert" className="text-sm text-destructive">
-                {errorText(writeError, "No se pudo abrir la conversación.")}
+                {submitErrorMessage(writeError)}
               </p>
             ) : null}
           </div>

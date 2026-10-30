@@ -1,16 +1,41 @@
-import { Badge, Button, Field, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
+import {
+  applySubmitError,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  isUnconfirmedSubmit,
+  LoadingState,
+  PageShell,
+  SubmitButton,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CalendarCheck, ChevronLeft, FileDown, MapPin } from "lucide-react"
 import { useId, useState } from "react"
+import { z } from "zod"
 import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../../components/booking-data-form"
 import { AppointmentBlock } from "../../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
 import { LinkConsentStep, LinkQuestionnaireStep } from "../../components/public/link-steps"
 import { PersonalDataForm } from "../../components/public/personal-data-form"
-import { capital, ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../../components/public/week-slots"
+import {
+  capital,
+  longDay,
+  ProfessionalSelect,
+  SLOT_FIELD_MAP,
+  shortDay,
+  slotTakenError,
+  timeLabel,
+  useWeekSlots,
+  type WeekSlot,
+  WeekSlotsField,
+} from "../../components/public/week-slots"
 import { ApiError } from "../../lib/api"
 import {
   answerLinkBudget,
@@ -20,10 +45,10 @@ import {
   changeBooking,
   chooseLinkMessages,
   confirmBooking,
-  fetchBookingLink,
-  fetchBookingSlots,
   downloadLinkCalendar,
   downloadLinkPaper,
+  fetchBookingLink,
+  fetchBookingSlots,
   type MessageChoice,
   type PersonalLinkMessages,
   type PersonalLinkView,
@@ -70,7 +95,12 @@ type Screen =
   /** «Tus mensajes» (ADR 0040): llega directo con `#mensajes` («Elegir mis mensajes», el pie del correo). */
   | { kind: "mensajes" }
 
-const EXPIRED_TEXT = "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo."
+/** Reservar sin respuesta (la red): puede haber quedado hecha; se dice cómo saberlo, sin jerga. */
+const bookingSubmit = {
+  fieldMap: SLOT_FIELD_MAP,
+  formMessage: (error: unknown) =>
+    isUnconfirmedSubmit(error) ? "No pudimos confirmar tu reserva. Revisa tu conexión y recarga la página para ver si quedó hecha." : null,
+}
 
 function Expired() {
   return (
@@ -482,6 +512,8 @@ function MessagesStep({
     },
   })
   const error = problemOf(save.error, "No pudimos guardar lo que elegiste.")
+  // El error se dice donde se tocó: en su interruptor, en «Volver a recibir» o en la confirmación de «ninguno».
+  const failed = save.isError ? save.variables : undefined
   return (
     <div className="flex flex-col gap-4">
       {current.nothing ? (
@@ -496,11 +528,18 @@ function MessagesStep({
           >
             {save.isPending ? "Guardando…" : "Volver a recibir mensajes"}
           </Button>
+          {failed?.tipo === "ninguno" && failed.recibir ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <ul className="flex flex-col divide-y rounded-2xl border bg-card">
         {MESSAGE_SWITCHES.map((item) => {
           const labelId = `${uid}-${item.purpose}`
+          const errorId = `${labelId}-error`
+          const itemError = failed?.tipo === item.purpose ? error : null
           const on = current[item.purpose]
           return (
             <li key={item.purpose} className="flex items-start gap-3 p-4">
@@ -509,6 +548,11 @@ function MessagesStep({
                   {item.title}
                 </p>
                 <p className="text-sm text-muted-foreground">{item.detail}</p>
+                {itemError ? (
+                  <p id={errorId} role="alert" className="text-sm text-destructive">
+                    {itemError}
+                  </p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-sm text-muted-foreground" aria-hidden>
@@ -516,6 +560,8 @@ function MessagesStep({
                 </span>
                 <Switch
                   aria-labelledby={labelId}
+                  aria-invalid={itemError ? true : undefined}
+                  aria-describedby={itemError ? errorId : undefined}
                   checked={on}
                   disabled={save.isPending}
                   onCheckedChange={(recibir: boolean) => save.mutate({ tipo: item.purpose, recibir })}
@@ -535,11 +581,6 @@ function MessagesStep({
           <span className="shrink-0 text-sm font-medium">{current.nothing ? "No" : "Siempre"}</span>
         </li>
       </ul>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
       {!current.nothing ? (
         <Button
           type="button"
@@ -558,6 +599,7 @@ function MessagesStep({
         description="Tampoco te llegarán los avisos de tus citas y papeles. Si tu cita cambia, la clínica te llamará."
         confirmLabel="Sí, no quiero ninguno"
         pending={save.isPending}
+        error={failed?.tipo === "ninguno" && !failed.recibir ? error : null}
         onConfirm={() => save.mutate({ tipo: "ninguno", recibir: false })}
       />
     </div>
@@ -678,8 +720,6 @@ function ChooseSlot({
 }) {
   const queryClient = useQueryClient()
   const changing = mode === "cambiar"
-  const [branchChoice, setBranchChoice] = useState<string | null>(null)
-  const [chosen, setChosen] = useState<WeekSlot | null>(null)
   const [editing, setEditing] = useState(false)
   const [enteringData, setEnteringData] = useState(false)
   const [dataDraft, setDataDraft] = useState<BookingDataDraft>(emptyBookingDataDraft)
@@ -687,6 +727,34 @@ function ChooseSlot({
   const [registered, setRegistered] = useState(false)
 
   const fixedBranch = mode === "reservar" ? (view.booking?.branchId ?? null) : null
+  // La sede se elige solo si el enlace no la fija y hay más de una.
+  const branchSelectable = !changing && !fixedBranch && view.branches.length > 1
+  const form = useAppForm({
+    defaultValues: { branchId: "", slot: null as WeekSlot | null },
+    validators: {
+      // Primero la sede (sin ella no hay horarios) y luego el día y la hora; cada uno en su lugar.
+      onSubmit: z
+        .object({ branchId: z.string(), slot: z.custom<WeekSlot | null>() })
+        .superRefine((value, ctx) => {
+          if (branchSelectable && !value.branchId)
+            ctx.addIssue({ code: "custom", path: ["branchId"], message: "Elige una sede para ver los horarios libres." })
+          else if (value.slot === null)
+            ctx.addIssue({ code: "custom", path: ["slot"], message: `Elige un día y una hora para ${changing ? "cambiarla" : "reservar"}.` })
+        }),
+    },
+    onSubmit: async ({ value }) => {
+      if (!value.slot) return
+      if (needsData) {
+        setEnteringData(true)
+        return
+      }
+      await reserve(value.slot)
+    },
+  })
+  const submit = useFormSubmit(form, bookingSubmit)
+  const formError = useFormSubmitError(form)
+  const branchChoice = useStore(form.store, (state) => state.values.branchId)
+  const chosen = useStore(form.store, (state) => state.values.slot)
   const branch: BookingLinkBranch | undefined =
     changing && current
       ? (view.branches.find((item) => item.id === current.branchId) ?? {
@@ -697,7 +765,7 @@ function ChooseSlot({
           timeZone: current.timeZone,
           defaultMinutes: current.durationMin,
         })
-      : (view.branches.find((item) => item.id === (branchChoice ?? fixedBranch)) ?? (view.branches.length === 1 ? view.branches[0] : undefined))
+      : (view.branches.find((item) => item.id === (branchChoice || fixedBranch)) ?? (view.branches.length === 1 ? view.branches[0] : undefined))
 
   const week = useWeekSlots({
     queryKey: ["booking-slots", slug, token, mode, branch?.id ?? null],
@@ -706,11 +774,6 @@ function ChooseSlot({
     fallbackTimeZone: branch?.timeZone,
   })
   const timeZone = week.timeZone
-  const refreshSlots = () => {
-    setChosen(null)
-    setEnteringData(false)
-    week.refresh()
-  }
   const act = useMutation({
     retry: false,
     mutationFn: (slot: WeekSlot) => {
@@ -723,9 +786,25 @@ function ChooseSlot({
         ...(mode === "tratamiento" && planItems ? { planItemIds: planItems.map((item) => item.planItemId) } : {}),
       })
     },
-    onSuccess: (result) => onDone(result.data),
-    onError: refreshSlots,
   })
+  /**
+   * Reserva o cambia. Solo si el horario se ocupó se vuelve a pedir lo libre y
+   * se dice en la semana; otro motivo se dice con sus palabras y la elección
+   * se conserva.
+   */
+  async function reserve(slot: WeekSlot) {
+    try {
+      onDone((await act.mutateAsync(slot)).data)
+    } catch (error) {
+      setEnteringData(false)
+      const shown = slotTakenError(error)
+      if (shown !== error) {
+        form.setFieldValue("slot", null)
+        week.refresh()
+      }
+      throw shown
+    }
+  }
 
   const needsData = mode === "reservar" && !!view.booking?.needsRegistration && !registered
   const withData = mode === "reservar" && (!!view.booking?.needsRegistration || registered)
@@ -736,38 +815,25 @@ function ChooseSlot({
         ? (planItems ?? []).map((item) => item.title).join(" · ") || "Tu tratamiento"
         : (view.booking?.service?.name ?? "Consulta")
   const minutes = changing ? (current?.durationMin ?? null) : mode === "reservar" ? (view.booking?.service?.durationMin ?? branch?.defaultMinutes ?? null) : (branch?.defaultMinutes ?? null)
-  const actionError =
-    act.error instanceof ApiError
-      ? ["BOOKING_LINK_USED", "BOOKING_LINK_EXPIRED", "BOOKING_NOT_CHANGEABLE"].includes(act.error.shape.code ?? "")
-        ? (act.error.shape.message ?? EXPIRED_TEXT)
-        : "Ese horario acaba de ocuparse. Elige otro de la lista."
-      : act.error
-        ? "No pudimos reservar. Revisa tu conexión y vuelve a intentarlo."
-        : null
   const chosenLabel = chosen ? `${shortDay(chosen.startsAt, timeZone)}, ${timeLabel(chosen.startsAt, timeZone)}` : null
   const title = changing ? "Cambia tu cita" : mode === "tratamiento" ? "Elige el horario de tu tratamiento" : "Elige tu cita"
   const steps = withData ? 3 : 2
 
   const mainAction = (withTime: boolean) => {
     const suffix = withTime && chosenLabel ? ` ${chosenLabel}` : ""
-    if (needsData) {
-      return (
-        <Button type="button" className="min-h-11 w-full" disabled={chosen === null} onClick={() => setEnteringData(true)}>
-          Continuar con mis datos
-        </Button>
-      )
-    }
     return (
-      <SubmitButton type="button" className="min-h-11 w-full" pending={act.isPending} disabled={chosen === null} onClick={() => chosen && act.mutate(chosen)}>
-        {changing ? `Cambiar a${suffix || " este horario"}` : `Reservar${suffix}`}
+      <SubmitButton type="submit" className="min-h-11 w-full" pending={act.isPending}>
+        {needsData ? "Continuar con mis datos" : changing ? `Cambiar a${suffix || " este horario"}` : `Reservar${suffix}`}
       </SubmitButton>
     )
   }
-  const errors = actionError ? (
+  const errors = formError ? (
     <p role="alert" className="text-sm text-destructive">
-      {actionError}
+      {formError}
     </p>
   ) : null
+  // En el teléfono, sin sede elegida, la parte de elegirla queda abierta: ahí se dice qué falta.
+  const showChoices = editing || branch === undefined
   const closingNote = needsData ? "Es tu primera cita: después de elegir te pedimos unos datos y reservamos." : "Podrás cambiarla o cancelarla desde este mismo enlace."
   const backButton = onBack ? (
     <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onBack}>
@@ -818,7 +884,7 @@ function ChooseSlot({
             onRegistered={() => {
               setRegistered(true)
               void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token] })
-              act.mutate(chosen)
+              void reserve(chosen).catch((error: unknown) => applySubmitError(form, error, bookingSubmit))
             }}
           />
         </div>
@@ -828,6 +894,7 @@ function ChooseSlot({
 
   return (
     <PageShell>
+      <form onSubmit={submit} noValidate>
       {/* En teléfono el botón que avanza queda fijo abajo: el contenido deja ese espacio. */}
       <div className="mx-auto w-full max-w-7xl pb-36 lg:pb-0">
         {heading(1)}
@@ -860,48 +927,55 @@ function ChooseSlot({
                   </p>
                 ) : null}
               </div>
-              <Button type="button" variant="link" className="h-auto min-h-11 shrink-0 p-0 lg:hidden" aria-expanded={editing} onClick={() => setEditing(!editing)}>
-                {editing ? "Listo" : "Cambiar"}
-              </Button>
+              {branch !== undefined ? (
+                <Button type="button" variant="link" className="h-auto min-h-11 shrink-0 p-0 lg:hidden" aria-expanded={editing} onClick={() => setEditing(!editing)}>
+                  {editing ? "Listo" : "Cambiar"}
+                </Button>
+              ) : null}
             </div>
-            <div className={`${editing ? "flex" : "hidden"} flex-col gap-4 lg:flex`}>
-              {!changing && !fixedBranch && view.branches.length > 1 ? (
-                <Field>
-                  <FieldLabel htmlFor="reserva-sede">Sede</FieldLabel>
-                  <Select
-                    value={branch?.id ?? ""}
-                    onValueChange={(value) => {
-                      setBranchChoice(value)
-                      week.reset()
-                      setChosen(null)
-                    }}
-                  >
-                    <SelectTrigger id="reserva-sede" className="min-h-11 w-full">
-                      <SelectValue placeholder="Elige una sede">{branch?.name}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {view.branches.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {[item.name, item.address].filter(Boolean).join(" · ")}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
+            <div className={`${showChoices ? "flex" : "hidden"} flex-col gap-4 lg:flex`}>
+              {branchSelectable ? (
+                <form.AppField name="branchId">
+                  {(field) => (
+                    <field.Control label="Sede" id="reserva-sede">
+                      {(control) => (
+                        <Select
+                          value={branch?.id ?? ""}
+                          onValueChange={(value) => {
+                            field.handleChange(value ?? "")
+                            week.reset()
+                            form.setFieldValue("slot", null)
+                          }}
+                        >
+                          <SelectTrigger {...control.props} className="min-h-11 w-full">
+                            <SelectValue placeholder="Elige una sede">{branch?.name}</SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {view.branches.map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {[item.name, item.address].filter(Boolean).join(" · ")}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
               ) : branch ? (
                 <div className="flex flex-col text-sm">
                   <span className="font-semibold">Sede {branch.name}</span>
                   {branch.address ? <span className="text-muted-foreground">{branch.address}</span> : null}
                 </div>
               ) : null}
-              {branch !== undefined ? <ProfessionalSelect state={week} id="reserva-profesional" onChange={() => setChosen(null)} /> : null}
+              {branch !== undefined ? <ProfessionalSelect state={week} id="reserva-profesional" onChange={() => form.setFieldValue("slot", null)} /> : null}
             </div>
           </section>
 
           {branch === undefined ? (
             <p className="text-sm text-muted-foreground">Elige una sede para ver los horarios libres.</p>
           ) : (
-            <WeekSlotsGrid state={week} chosen={chosen} onChoose={setChosen} minutes={minutes} />
+            <form.AppField name="slot">{() => <WeekSlotsField state={week} minutes={minutes} />}</form.AppField>
           )}
 
           <aside aria-label="Tu cita" className="hidden flex-col gap-3 rounded-2xl border bg-card p-4 lg:sticky lg:top-6 lg:flex">
@@ -931,6 +1005,7 @@ function ChooseSlot({
         {mainAction(true)}
         {backButton ?? <p className="text-center text-sm text-muted-foreground">{chosen ? closingNote : "Elige un día y una hora para reservar."}</p>}
       </div>
+      </form>
     </PageShell>
   )
 }

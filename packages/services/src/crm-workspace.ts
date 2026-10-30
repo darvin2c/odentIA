@@ -20,7 +20,7 @@ import { getMessagePermissions } from "./automation.js"
 import { messageWithoutTextWords } from "./message-words.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { getContact, requireContact, type ContactFull } from "./contacts.js"
-import { notFound, validation } from "./errors.js"
+import { invalidField, notFound, validation } from "./errors.js"
 import {
   agentAttendingSql,
   handoffOpenExistsSql,
@@ -1026,8 +1026,8 @@ export async function createContactNote(
   actor: { userId: string | null },
 ): Promise<CrmActivityItem> {
   const body = input.body?.trim() ?? ""
-  if (!body) throw validation("El cuerpo de la nota es obligatorio")
-  if (body.length > NOTE_MAX_LENGTH) throw validation(`La nota supera ${NOTE_MAX_LENGTH} caracteres`)
+  if (!body) throw invalidField("body", "Escribe la nota.")
+  if (body.length > NOTE_MAX_LENGTH) throw invalidField("body", `La nota admite hasta ${NOTE_MAX_LENGTH} caracteres.`)
   await requireContact(tx, orgId, contactId)
   let conversationId: string | null = null
   if (input.conversationId !== undefined && input.conversationId !== null) {

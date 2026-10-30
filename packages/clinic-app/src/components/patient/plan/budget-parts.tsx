@@ -6,7 +6,6 @@
  */
 import { formatMoney, formatMoneyAmount } from "@odentia/clinical"
 import { Badge, cn } from "@odentia/ui"
-import { ApiError } from "../../../lib/api"
 import {
   type BudgetLine,
   type BudgetOption,
@@ -59,14 +58,6 @@ export function useBudgetFormat(): {
     retryLocale: () => void profile.refetch(),
     day,
   }
-}
-
-export function mutationMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.shape.message) return err.shape.message
-    if (err.shape.code) return `No se pudo guardar (${err.shape.code}). Inténtalo de nuevo.`
-  }
-  return err instanceof Error ? err.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
 /** Sitio clínico resumido de un ítem o línea (nunca inventa piezas). */

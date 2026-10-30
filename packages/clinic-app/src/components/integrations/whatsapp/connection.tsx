@@ -1,10 +1,11 @@
 import { Button, cn } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer, RowActions } from "@odentia/ui-patterns"
+import { ConfirmDialog, FormDrawer, RowActions, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { type FormEvent, useEffect, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../../lib/api"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../../lib/api"
 import { type ConnectionItem, usePermission } from "../../../lib/crm"
-import { sinceWords } from "../../../lib/integrations"
+import { connectionConfigField, sinceWords } from "../../../lib/integrations"
 import { activeOrgTimeZone, useOrgLocale } from "../../../lib/locale"
 import {
   accountWords,
@@ -41,9 +42,15 @@ const STATUS_WORD: Record<ConnectionTone, string> = {
 /** Cada cuánto se pregunta si Meta ya verificó la dirección o si ya llegó el primer mensaje. */
 const SETUP_POLL_MS = 4000
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError && error.shape.message ? error.shape.message : fallback
-}
+/** Basta con escribir la clave que cambió; vacías las dos, no hay nada que guardar. */
+const keysSchema = z
+  .record(z.string(), z.string())
+  .superRefine((values, context) => {
+    if (WHATSAPP_KEY_FIELDS.some((field) => (values[field.key] ?? "").trim() !== "")) return
+    for (const field of WHATSAPP_KEY_FIELDS) {
+      context.addIssue({ code: "custom", path: [field.key], message: "Escribe al menos una de las claves." })
+    }
+  })
 
 /** Lo que está abierto al lado: la clave o un mensaje (`id` nulo: uno nuevo). */
 type Surface = { kind: "key" } | { kind: "message"; id: string | null; opening: number } | null
@@ -61,11 +68,7 @@ function KeyPanel({
   onClose: () => void
   onChanged: (result: ConnectResult) => void
 }) {
-  const [values, setValues] = useState<Record<string, string>>({})
   const [shown, setShown] = useState<Record<string, boolean>>({})
-  const [empty, setEmpty] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const isDirty = Object.values(values).some((value) => value.trim() !== "")
 
   const change = useMutation({
     mutationFn: (config: Record<string, string>) =>
@@ -74,51 +77,44 @@ function KeyPanel({
         body: JSON.stringify({ config }),
       }),
     onSuccess: ({ data }) => onChanged(data),
-    onError: (failure) => setError(errorText(failure, "No pudimos cambiar la clave. Revísala y vuelve a intentarlo.")),
   })
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    setError(null)
-    // Solo viaja lo que se escribió: lo demás se conserva.
-    const filled = Object.fromEntries(
-      WHATSAPP_KEY_FIELDS.map((field) => [field.key, (values[field.key] ?? "").trim()] as const).filter(([, value]) => value !== ""),
-    )
-    if (Object.keys(filled).length === 0) {
-      setEmpty(true)
-      return
-    }
-    change.mutate(filled)
-  }
+  const form = useAppForm({
+    defaultValues: Object.fromEntries(WHATSAPP_KEY_FIELDS.map((field) => [field.key, ""])) as Record<string, string>,
+    validators: { onSubmit: keysSchema },
+    onSubmit: async ({ value }) => {
+      // Solo viaja lo que se escribió: lo demás se conserva.
+      const filled = Object.fromEntries(
+        WHATSAPP_KEY_FIELDS.map((field) => [field.key, (value[field.key] ?? "").trim()] as const).filter(([, key]) => key !== ""),
+      )
+      await change.mutateAsync(filled)
+    },
+  })
+  // Lo que WhatsApp no aceptó va a la clave que lo causó (`config.accessToken`, `config.appSecret`).
+  const surface = useFormSurface(form, { fieldMap: connectionConfigField })
 
   return (
     <FormDrawer
+      {...surface}
       open
       onClose={onClose}
       title="Cambiar la clave de WhatsApp"
       description="La conexión, su dirección y sus conversaciones siguen siendo las mismas."
-      onSubmit={submit}
-      isDirty={isDirty}
-      isSubmitting={change.isPending}
-      error={error}
       submitLabel="Guardar la clave"
     >
       <div className="flex flex-col gap-4">
         {WHATSAPP_KEY_FIELDS.map((field) => (
-          <AccountField
-            key={field.key}
-            id={`whatsapp-clave-${field.key}`}
-            field={field}
-            value={values[field.key] ?? ""}
-            shown={Boolean(shown[field.key])}
-            error={empty ? "Escribe al menos una de las claves." : null}
-            extraHint="Déjala vacía si no cambió."
-            onChange={(value) => {
-              setValues((current) => ({ ...current, [field.key]: value }))
-              setEmpty(false)
-            }}
-            onToggleShown={() => setShown((current) => ({ ...current, [field.key]: !current[field.key] }))}
-          />
+          <form.AppField key={field.key} name={field.key}>
+            {() => (
+              <AccountField
+                id={`whatsapp-clave-${field.key}`}
+                field={field}
+                shown={Boolean(shown[field.key])}
+                extraHint="Déjala vacía si no cambió."
+                onToggleShown={() => setShown((current) => ({ ...current, [field.key]: !current[field.key] }))}
+              />
+            )}
+          </form.AppField>
         ))}
         <p className="rounded-xl bg-muted px-3.5 py-3 text-sm text-muted-foreground">
           Con la clave nueva {appWords().name} comprueba que sea de la misma cuenta y vuelve a pedir a WhatsApp los mensajes que hayan
@@ -237,7 +233,7 @@ export function WhatsAppConnection({
     mutationFn: () => apiFetch(`${base}/templates/sync`, { method: "POST" }),
     onSuccess: () => Promise.all([refreshMessages(), refreshConnections()]),
   })
-  const syncError = sync.isError ? errorText(sync.error, "No pudimos actualizar los mensajes. Vuelve a intentarlo.") : null
+  const syncError = sync.isError ? submitErrorMessage(sync.error) : null
 
   const openId = surface?.kind === "message" ? surface.id : null
   const openMessage = openId ? (items?.find((item) => item.id === openId) ?? null) : null
@@ -274,7 +270,7 @@ export function WhatsAppConnection({
       )
       void refreshConnections()
     },
-    onError: (failure) => setTested({ ok: false, text: errorText(failure, "WhatsApp no respondió. Vuelve a intentarlo en un momento.") }),
+    onError: (failure) => setTested({ ok: false, text: submitErrorMessage(failure) }),
   })
 
   const setStatus = useMutation({
@@ -286,7 +282,7 @@ export function WhatsAppConnection({
       setNotice({ ok: true, text: next === "disable" ? "WhatsApp quedó desconectado." : "WhatsApp volvió a conectarse." })
     },
   })
-  const statusError = setStatus.isError ? errorText(setStatus.error, "No pudimos hacer el cambio. Vuelve a intentarlo.") : null
+  const statusError = setStatus.isError ? submitErrorMessage(setStatus.error) : null
 
   function keyChanged(result: ConnectResult) {
     setSurface(null)
@@ -595,13 +591,8 @@ export function WhatsAppConnection({
         description={WHATSAPP_DISCONNECT_CONSEQUENCE}
         confirmLabel="Desconectar"
         pending={setStatus.isPending}
-      >
-        {statusError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {statusError}
-          </p>
-        ) : null}
-      </ConfirmDialog>
+        error={statusError}
+      />
     </div>
   )
 }

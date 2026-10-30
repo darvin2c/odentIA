@@ -1,5 +1,5 @@
 import { parseMedicalHistory } from "@odentia/medical"
-import { validation } from "../errors.js"
+import { invalidField, validation } from "../errors.js"
 import { answeredOf, type ProductInterview } from "../product-hooks.js"
 
 /**
@@ -9,7 +9,9 @@ import { answeredOf, type ProductInterview } from "../product-hooks.js"
 export const medicalInterview: ProductInterview = {
   check(answers, today) {
     const parsed = parseMedicalHistory(answers, today)
-    if (!parsed.ok) throw validation(parsed.error)
+    // El error va a su dato, con el nombre que tiene en el cuerpo (`anamnesis.answers.habitos.cigarrillosDia`).
+    if (!parsed.ok)
+      throw parsed.field ? invalidField(`anamnesis.answers.${parsed.field}`, parsed.error) : validation(parsed.error)
     return parsed.value
   },
   declared(health, today) {

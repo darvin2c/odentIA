@@ -1,7 +1,17 @@
-import { Button, Field, FieldDescription, FieldError, FieldLabel, Input } from "@odentia/ui"
-import { RECOMMENDED_AUTHENTICATORS, SubmitButton, totpDigits } from "@odentia/ui-patterns"
+import { Button, Input } from "@odentia/ui"
+import {
+  RECOMMENDED_AUTHENTICATORS,
+  SubmitButton,
+  submitForm,
+  totpDigits,
+  useAppForm,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useRouterState } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
+import { z } from "zod"
+import { ApiError } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { panelUrl, tenantUrl } from "../lib/host"
 import { productUi } from "../product/product-ui"
@@ -77,42 +87,48 @@ export function TwoFactorRequiredPage({ org, need }: { org: { name: string; slug
   )
 }
 
+const totpSchema = z.object({ code: z.string().length(6, "Escribe los 6 dígitos.") })
+const backupSchema = z.object({ code: z.string().trim().min(4, "Escribe uno de tus códigos de respaldo.") })
+
 /** Ya la tiene: el código de su app (o uno de respaldo) para esta sesión, y se recarga la clínica. */
 function CodeStep({ orgName }: { orgName: string }) {
   const [recovery, setRecovery] = useState(false)
-  const [code, setCode] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const form = useAppForm({
+    defaultValues: { code: "" },
+    validators: { onSubmit: recovery ? backupSchema : totpSchema },
+    onSubmit: async ({ value }) => {
+      // Con la sesión abierta, Better Auth comprueba el código de esta misma sesión.
+      const result = await authClient
+        .$fetch(recovery ? "/two-factor/verify-backup-code" : "/two-factor/verify-totp", {
+          method: "POST",
+          body: { code: recovery ? value.code.trim() : value.code },
+        })
+        .catch(() => null)
+      if (!result) throw new Error("No pudimos conectar. Revisa tu conexión e inténtalo de nuevo.")
+      if (result.error) {
+        const { status, message } = result.error
+        // Lo que no es el código (límite de intentos, bloqueo, el servidor) se dice junto a «Seguir».
+        if (status === 429) throw new Error("Hiciste muchos intentos seguidos. Espera un minuto y vuelve a intentarlo.")
+        if (status >= 500) throw new Error("No pudimos comprobar el código ahora. Inténtalo de nuevo en un momento.")
+        if (status === 403 && message) throw new Error(message)
+        const wrong = recovery
+          ? "Ese código no existe o ya se usó."
+          : "Ese código no coincide. Escribe el que muestra ahora la app (cambia cada 30 segundos). Si sigue fallando, revisa que la hora del teléfono esté en automático."
+        throw new ApiError(status, { code: "INVALID_CODE", message: wrong, fields: { code: wrong } })
+      }
+      window.location.reload()
+    },
+  })
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
 
-  async function submit(value: string) {
-    if (pending) return
-    if (recovery ? value.trim().length < 4 : value.length < 6) {
-      setError(recovery ? "Escribe uno de tus códigos de respaldo." : "Escribe los 6 dígitos.")
-      return
-    }
-    setPending(true)
-    setError(null)
-    // Con la sesión abierta, Better Auth comprueba el código de esta misma sesión.
-    const result = await authClient
-      .$fetch(recovery ? "/two-factor/verify-backup-code" : "/two-factor/verify-totp", {
-        method: "POST",
-        body: { code: recovery ? value.trim() : value },
-      })
-      .catch(() => null)
-    if (!result || result.error) {
-      setPending(false)
-      setError(
-        !result
-          ? "No pudimos conectar. Revisa tu conexión e inténtalo de nuevo."
-          : result.error.status === 403 && result.error.message
-            ? result.error.message
-            : recovery
-            ? "Ese código no existe o ya se usó."
-            : "Ese código no coincide. Escribe el que muestra ahora la app (cambia cada 30 segundos). Si sigue fallando, revisa que la hora del teléfono esté en automático.",
-      )
-      return
-    }
-    window.location.reload()
+  async function send() {
+    if (form.state.isSubmitting) return
+    const ok = await submitForm(form, { root: formRef.current })
+    // Tras un código rechazado queda seleccionado: se escribe el nuevo encima.
+    if (!ok) requestAnimationFrame(() => inputRef.current?.select())
   }
 
   return (
@@ -126,38 +142,47 @@ function CodeStep({ orgName }: { orgName: string }) {
         </p>
       </div>
       <form
+        ref={formRef}
         className="flex flex-col gap-4"
+        noValidate
         onSubmit={(event) => {
           event.preventDefault()
-          void submit(code)
+          void send()
         }}
       >
-        <Field>
-          <FieldLabel htmlFor="clinic-code">{recovery ? "Código de respaldo" : "Código de 6 dígitos"}</FieldLabel>
-          <Input
-            id="clinic-code"
-            key={recovery ? "recovery" : "totp"}
-            inputMode={recovery ? "text" : "numeric"}
-            autoComplete="one-time-code"
-            maxLength={recovery ? 32 : 6}
-            autoFocus
-            value={code}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? "clinic-code-error" : "clinic-code-help"}
-            onChange={(event) => {
-              const value = recovery ? event.target.value : totpDigits(event.target.value)
-              setCode(value)
-              if (error) setError(null)
-              if (!recovery && value.length === 6) void submit(value)
-            }}
-            className={recovery ? "font-mono" : "h-12 font-mono text-2xl tracking-[0.4em]"}
-          />
-          {error ? (
-            <FieldError id="clinic-code-error">{error}</FieldError>
-          ) : (
-            <FieldDescription id="clinic-code-help">{recovery ? "Con guion o sin él." : "Al escribir el sexto número sigues solo."}</FieldDescription>
+        <form.AppField name="code">
+          {(field) => (
+            <field.Control
+              id="clinic-code"
+              label={recovery ? "Código de respaldo" : "Código de 6 dígitos"}
+              description={recovery ? "Con guion o sin él." : "Al escribir el sexto número sigues solo."}
+            >
+              {(control) => (
+                <Input
+                  {...control.props}
+                  ref={inputRef}
+                  key={recovery ? "recovery" : "totp"}
+                  inputMode={recovery ? "text" : "numeric"}
+                  autoComplete="one-time-code"
+                  maxLength={recovery ? 32 : 6}
+                  autoFocus
+                  value={field.state.value}
+                  onChange={(event) => {
+                    const value = recovery ? event.target.value : totpDigits(event.target.value)
+                    field.handleChange(value)
+                    if (!recovery && value.length === 6) void send()
+                  }}
+                  className={recovery ? "font-mono" : "h-12 font-mono text-2xl tracking-[0.4em]"}
+                />
+              )}
+            </field.Control>
           )}
-        </Field>
+        </form.AppField>
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
         <SubmitButton type="submit" size="lg" pending={pending}>
           Seguir
         </SubmitButton>
@@ -168,8 +193,7 @@ function CodeStep({ orgName }: { orgName: string }) {
         className="h-auto self-start p-0"
         onClick={() => {
           setRecovery((value) => !value)
-          setCode("")
-          setError(null)
+          form.reset({ code: "" })
         }}
       >
         {recovery ? "Usar el código de la app" : "Usar un código de respaldo"}

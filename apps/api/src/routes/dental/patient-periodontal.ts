@@ -41,20 +41,32 @@ const toothInput = z
   })
   .strict()
 const startInput = z.object({ encounterId: z.uuid() }).strict()
+// Lo que escribe el odontólogo: cada dato con su mensaje, para decirlo junto a su campo.
+const wholeNumber = (what: string) =>
+  z.number({ error: `Escribe ${what} con un número.` }).int("Escribe un número entero, sin decimales.")
 const classifyInput = z
   .object({
-    diagnosis: z.enum(PERIODONTAL_DIAGNOSES),
-    stage: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).nullish(),
-    grade: z.enum(PERIODONTITIS_GRADES).nullish(),
-    extent: z.enum(PERIODONTAL_EXTENTS).nullish(),
-    status: z.enum(PERIODONTITIS_STATUSES).nullish(),
-    boneLossPercent: z.number().int().nullish(),
-    teethLostToPeriodontitis: z.number().int().nullish(),
-    cigarettesPerDay: z.number().int().nullish(),
-    diabetes: z.boolean().nullish(),
-    hba1c: z.number().nullish(),
+    diagnosis: z.enum(PERIODONTAL_DIAGNOSES, { error: "Elige el diagnóstico." }),
+    stage: z
+      .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)], { error: "Elige el estadio (I a IV)." })
+      .nullish(),
+    grade: z.enum(PERIODONTITIS_GRADES, { error: "Elige el grado (A, B o C)." }).nullish(),
+    extent: z.enum(PERIODONTAL_EXTENTS, { error: "Elige la extensión." }).nullish(),
+    status: z.enum(PERIODONTITIS_STATUSES, { error: "Elige cómo está hoy." }).nullish(),
+    boneLossPercent: wholeNumber("la pérdida de hueso").nullish(),
+    teethLostToPeriodontitis: wholeNumber("las piezas perdidas").nullish(),
+    cigarettesPerDay: wholeNumber("los cigarrillos al día").nullish(),
+    diabetes: z.boolean({ error: "Elige si tiene diabetes." }).nullish(),
+    hba1c: z.number({ error: "Escribe la hemoglobina glicada con un número." }).nullish(),
     implants: z
-      .array(z.object({ toothNumber: z.number().int(), condition: z.enum(PERI_IMPLANT_CONDITIONS) }).strict())
+      .array(
+        z
+          .object({
+            toothNumber: z.number().int(),
+            condition: z.enum(PERI_IMPLANT_CONDITIONS, { error: "Elige el estado del implante." }),
+          })
+          .strict(),
+      )
       .max(32)
       .optional(),
   })

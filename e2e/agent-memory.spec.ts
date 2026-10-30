@@ -56,7 +56,8 @@ test("memoria de la persona: agregar, corregir y quitar un dato; la última vez;
   // Un dato de salud no entra y la pantalla dice por qué, sin perder lo escrito.
   await addField.fill("Es alérgica a la penicilina")
   await drawer.getByRole("button", { name: "Agregar", exact: true }).click()
-  await expect(drawer.getByRole("alert")).toContainText("Eso parece información de salud")
+  await expect(drawer.getByText(/Eso parece información de salud/)).toBeVisible()
+  await expect(addField).toHaveAttribute("aria-invalid", "true")
   await expect(addField).toHaveValue("Es alérgica a la penicilina")
   expect((await memory()).facts).toEqual([])
 

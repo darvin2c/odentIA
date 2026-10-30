@@ -1,58 +1,61 @@
-import { Button, buttonVariants, cn, FieldLabel, Input, RadioGroup, RadioGroupItem, Skeleton } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import { Button, buttonVariants, cn, FieldLabel, RadioGroup, RadioGroupItem, Skeleton } from "@odentia/ui"
+import { clearSubmitErrors, SubmitButton, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Fragment, useId, useState } from "react"
-import { ApiError, apiFetch } from "../../../lib/api"
+import { Fragment, useRef } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../../lib/api"
 import { sinceWords } from "../../../lib/integrations"
 import { activeOrgTimeZone, useOrgLocale } from "../../../lib/locale"
 import {
   type ApprovedMessageOption,
   type ApprovedMessages,
+  approvedFields,
   approvedMessagesKey,
-  approvedValues,
   closedWindowNotice,
 } from "../../../lib/whatsapp"
 import { Note } from "./note"
 import { PreviewText } from "./message-preview"
 
-/**
- * El texto de un mensaje aprobado tal como saldrá. Si el mensaje se creó en la
- * página de Meta y pide un dato, ese dato se escribe aquí, dentro del texto y
- * con su nombre: no hay «parámetros» aparte.
- */
-function OptionText({
-  option,
-  typed,
-  disabled,
-  onType,
-}: {
-  option: ApprovedMessageOption
-  typed: Record<number, string>
-  disabled: boolean
-  onType: (index: number, value: string) => void
-}) {
-  if (option.fields.length === 0) return <PreviewText parts={option.previewParts} />
-  const labels = new Map(option.fields.map((field) => [field.index, field.label]))
-  return (
-    <>
-      {option.previewParts.map((part, index) => {
-        const label = part.index === undefined ? undefined : labels.get(part.index)
-        if (part.index === undefined || label === undefined) return <Fragment key={index}>{part.text}</Fragment>
-        return (
-          <Input
-            key={index}
-            aria-label={`${label} de «${option.title}»`}
-            placeholder={label}
-            className="mx-1 inline-flex h-9 w-44 max-w-full align-middle"
-            value={typed[part.index] ?? ""}
-            disabled={disabled}
-            onChange={(event) => onType(part.index as number, event.target.value)}
-          />
-        )
-      })}
-    </>
-  )
+/** Tope de cada dato en la ruta (`approvedInput`, `routes/conversations.ts`). */
+const VALUE_MAX = 1000
+
+interface ApprovedDraft {
+  /** El mensaje elegido; vacío: el primero de la lista, el que la persona tiene delante. */
+  messageId: string
+  /** Lo escrito en cada mensaje, por su id y en el orden de `approvedFields` (`values[i]` al enviar). */
+  typed: Record<string, (string | undefined)[]>
+}
+
+const EMPTY_DRAFT: ApprovedDraft = { messageId: "", typed: {} }
+
+function chosenOption(options: ApprovedMessageOption[], messageId: string): ApprovedMessageOption | null {
+  return options.find((option) => option.id === messageId) ?? options[0] ?? null
+}
+
+/** El nombre en el formulario del dato `at` de un mensaje (`values[at]` en el cuerpo). */
+function typedName(messageId: string, at: number) {
+  return `typed.${messageId}[${at}]` as const
+}
+
+/** Cada dato del mensaje elegido, escrito y dentro del tope de la ruta; los de los otros no cuentan. */
+function approvedSchema(options: ApprovedMessageOption[]) {
+  return z
+    .object({ messageId: z.string(), typed: z.record(z.string(), z.array(z.string().optional())) })
+    .superRefine((value, ctx) => {
+      const option = chosenOption(options, value.messageId)
+      if (!option) return
+      option.fields.forEach((_, at) => {
+        const text = (value.typed[option.id]?.[at] ?? "").trim()
+        const message = !text
+          ? "Completa este dato."
+          : text.length > VALUE_MAX
+            ? `Escribe como mucho ${VALUE_MAX} caracteres.`
+            : null
+        if (message) ctx.addIssue({ code: "custom", message, path: ["typed", option.id, at] })
+      })
+    })
 }
 
 /**
@@ -78,11 +81,8 @@ export function InboxApprovedMessages({
 }) {
   const queryClient = useQueryClient()
   const locale = useOrgLocale()
-  const legendId = useId()
   const since = (iso: string) => sinceWords(iso, Date.now(), locale, activeOrgTimeZone())
-  const [chosen, setChosen] = useState<string | null>(null)
-  const [typed, setTyped] = useState<Record<string, Record<number, string>>>({})
-  const [error, setError] = useState<string | null>(null)
+  const zone = useRef<HTMLDivElement>(null)
 
   const query = useQuery({
     queryKey: approvedMessagesKey(conversationId),
@@ -91,40 +91,101 @@ export function InboxApprovedMessages({
   })
   const options = query.data?.data ?? []
   const none = query.data?.none ?? null
-  // Sin elegir todavía, el primero: es el que la persona tiene delante.
-  const selected = options.find((option) => option.id === chosen) ?? options[0] ?? null
 
   const send = useMutation({
-    mutationFn: (option: ApprovedMessageOption) => {
-      const values = approvedValues(option, typed[option.id] ?? {})
-      return apiFetch(`/api/conversations/${conversationId}/messages/approved`, {
+    mutationFn: ({ option, values }: { option: ApprovedMessageOption; values?: string[] }) =>
+      apiFetch(`/api/conversations/${conversationId}/messages/approved`, {
         method: "POST",
         body: JSON.stringify({ messageId: option.id, ...(values ? { values } : {}) }),
-      })
-    },
+      }),
     onSuccess: async () => {
-      setError(null)
-      setChosen(null)
-      setTyped({})
       onSent()
       // Tras enviar, el servidor dice cuándo se le podrá escribir de nuevo.
       await queryClient.invalidateQueries({ queryKey: approvedMessagesKey(conversationId) })
     },
-    onError: (failure) => {
-      // El servidor dice por qué no se pudo: ya no está aprobado, falta un dato, ya se envió uno hoy.
-      setError(
-        failure instanceof ApiError && failure.shape.message
-          ? failure.shape.message
-          : "No pudimos enviar el mensaje. Vuelve a intentarlo.",
-      )
-      void queryClient.invalidateQueries({ queryKey: approvedMessagesKey(conversationId) })
+    // El servidor dice por qué no se pudo (ya no está aprobado, falta un dato, ya se envió uno hoy)
+    // y la lista puede haber cambiado.
+    onError: () => void queryClient.invalidateQueries({ queryKey: approvedMessagesKey(conversationId) }),
+  })
+
+  const form = useAppForm({
+    defaultValues: EMPTY_DRAFT,
+    validators: { onSubmit: approvedSchema(options) },
+    onSubmit: async ({ value, formApi }) => {
+      const option = chosenOption(options, value.messageId)
+      if (!option) return
+      const values =
+        option.fields.length > 0 ? option.fields.map((_, at) => (value.typed[option.id]?.[at] ?? "").trim()) : undefined
+      await send.mutateAsync({ option, values })
+      formApi.reset()
     },
   })
+  const messageId = useStore(form.store, (state) => state.values.messageId)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const formError = useFormSubmitError(form)
+  // Sin elegir todavía, el primero: es el que la persona tiene delante.
+  const selected = chosenOption(options, messageId)
+
+  /** Elegir otro mensaje empieza de cero: lo que se dijo del anterior ya no vale. */
+  function choose(id: string) {
+    if (form.getFieldValue("messageId") === id) return
+    form.setFieldValue("messageId", id)
+    clearSubmitErrors(form)
+  }
+
+  function submit() {
+    void submitForm(form, {
+      root: zone.current,
+      // El servidor nombra cada dato por su posición en `values`: es el del mensaje elegido.
+      fieldMap: (key) => {
+        const at = /^values\[(\d+)\]$/.exec(key)?.[1]
+        const option = chosenOption(options, form.getFieldValue("messageId"))
+        return at !== undefined && option ? typedName(option.id, Number(at)) : undefined
+      },
+    })
+  }
+
+  /**
+   * El texto de un mensaje aprobado tal como saldrá. Si el mensaje se creó en la
+   * página de Meta y pide un dato, ese dato se escribe aquí, dentro del texto y
+   * con su nombre: no hay «parámetros» aparte.
+   */
+  function optionText(option: ApprovedMessageOption) {
+    if (option.fields.length === 0) return <PreviewText parts={option.previewParts} />
+    const positions = new Map(approvedFields(option).map((field, at) => [field.index, { at, label: field.label }]))
+    return option.previewParts.map((part, index) => {
+      const field = part.index === undefined ? undefined : positions.get(part.index)
+      if (!field) return <Fragment key={index}>{part.text}</Fragment>
+      return (
+        <form.AppField
+          key={index}
+          name={typedName(option.id, field.at)}
+          // Escribir en un mensaje lo elige.
+          listeners={{ onChange: () => choose(option.id) }}
+        >
+          {(input) => (
+            <input.TextField
+              label={
+                <>
+                  {field.label}
+                  <span className="sr-only"> de «{option.title}»</span>
+                </>
+              }
+              className="mx-1 inline-flex w-44 max-w-full align-middle"
+              inputClassName="h-9"
+              maxLength={VALUE_MAX}
+              disabled={isSubmitting}
+            />
+          )}
+        </form.AppField>
+      )
+    })
+  }
 
   const notice = closedWindowNotice(contactName, lastInboundAt, since)
 
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={zone} className="flex flex-col gap-3">
       <Note tone="waiting" icon live>
         <span>
           <strong className="font-semibold">{notice.lead}</strong> {notice.rest}
@@ -165,70 +226,68 @@ export function InboxApprovedMessages({
         ) : null
       ) : (
         <>
-          <span id={legendId} className="text-sm font-semibold">
-            Elige el mensaje
-          </span>
-          {/* La lista no tiene desplazamiento propio: en la Bandeja se desplaza toda la zona de
-              escritura (aviso, lista y botón), con su tope, y el historial queda a la vista. */}
-          <div>
-          <RadioGroup
-            aria-labelledby={legendId}
-            className="gap-2 py-0.5 pr-3 pl-0.5"
-            value={selected?.id ?? ""}
-            onValueChange={(value) => {
-              setChosen(String(value))
-              setError(null)
-            }}
-          >
-            {options.map((option) => {
-              const isSelected = selected?.id === option.id
-              const withFields = option.fields.length > 0
-              const text = (
-                <OptionText
-                  option={option}
-                  typed={typed[option.id] ?? {}}
-                  disabled={send.isPending}
-                  onType={(index, value) => {
-                    setChosen(option.id)
-                    setTyped((current) => ({ ...current, [option.id]: { ...current[option.id], [index]: value } }))
-                  }}
-                />
-              )
-              return (
-                <div
-                  key={option.id}
-                  className={cn(
-                    "flex flex-col gap-2 rounded-xl border p-3",
-                    isSelected ? "border-primary bg-primary-soft/40" : "border-border",
-                  )}
-                >
-                  <FieldLabel className="w-full cursor-pointer items-start gap-3 font-normal has-data-checked:bg-transparent">
-                    <RadioGroupItem value={option.id} className="mt-0.5" disabled={send.isPending} />
-                    <span className="flex min-w-0 flex-1 flex-col gap-1">
-                      <span className="font-semibold [overflow-wrap:anywhere]">{option.title}</span>
-                      {/* Sin datos que escribir, el texto es parte de lo que se elige. */}
-                      {withFields ? null : <span className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
-                    </span>
-                  </FieldLabel>
-                  {/* Con un dato que escribir, el texto va fuera de la etiqueta: su campo no debe activar la opción al pulsarlo. */}
-                  {withFields ? <p className="pl-7 text-sm leading-10 whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p> : null}
-                  {option.buttons.length > 0 ? (
-                    <ul aria-label={`Botones de «${option.title}»`} className="flex flex-wrap gap-1.5 pl-7">
-                      {option.buttons.map((button) => (
-                        <li key={button} className="rounded-lg border bg-card px-3 py-1 text-sm font-semibold text-primary">
-                          {button}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-              )
-            })}
-          </RadioGroup>
-          </div>
-          {error ? (
+          <form.AppField name="messageId">
+            {(field) => (
+              <field.Group legend="Elige el mensaje">
+                {(control) => (
+                  // La lista no tiene desplazamiento propio: en la Bandeja se desplaza toda la zona de
+                  // escritura (aviso, lista y botón), con su tope, y el historial queda a la vista.
+                  <div>
+                    <RadioGroup
+                      aria-label="Elige el mensaje"
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      className="gap-2 py-0.5 pr-3 pl-0.5"
+                      value={selected?.id ?? ""}
+                      onValueChange={(value) => choose(String(value))}
+                    >
+                      {options.map((option) => {
+                        const isSelected = selected?.id === option.id
+                        const withFields = option.fields.length > 0
+                        const text = optionText(option)
+                        return (
+                          <div
+                            key={option.id}
+                            className={cn(
+                              "flex flex-col gap-2 rounded-xl border p-3",
+                              isSelected ? "border-primary bg-primary-soft/40" : "border-border",
+                            )}
+                          >
+                            <FieldLabel className="w-full cursor-pointer items-start gap-3 font-normal has-data-checked:bg-transparent">
+                              <RadioGroupItem value={option.id} className="mt-0.5" disabled={isSubmitting} />
+                              <span className="flex min-w-0 flex-1 flex-col gap-1">
+                                <span className="font-semibold [overflow-wrap:anywhere]">{option.title}</span>
+                                {/* Sin datos que escribir, el texto es parte de lo que se elige. */}
+                                {withFields ? null : (
+                                  <span className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>
+                                )}
+                              </span>
+                            </FieldLabel>
+                            {/* Con un dato que escribir, el texto va fuera de la etiqueta: su campo no debe activar la opción al pulsarlo. */}
+                            {withFields ? (
+                              <div className="pl-7 text-sm leading-10 whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
+                            ) : null}
+                            {option.buttons.length > 0 ? (
+                              <ul aria-label={`Botones de «${option.title}»`} className="flex flex-wrap gap-1.5 pl-7">
+                                {option.buttons.map((button) => (
+                                  <li key={button} className="rounded-lg border bg-card px-3 py-1 text-sm font-semibold text-primary">
+                                    {button}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </RadioGroup>
+                  </div>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          {formError ? (
             <p role="alert" className="text-sm text-destructive">
-              {error}
+              {formError}
             </p>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
@@ -239,22 +298,15 @@ export function InboxApprovedMessages({
                   ? "El nombre de la persona y el de la clínica ya están puestos: los pone el sistema."
                   : "Sale tal como se ve."}
             </p>
-            <SubmitButton
-              className="h-11 shrink-0 px-5"
-              pending={send.isPending}
-              disabled={!selected}
-              onClick={() => {
-                if (selected) send.mutate(selected)
-              }}
-            >
+            <SubmitButton className="h-11 shrink-0 px-5" pending={isSubmitting} disabled={!selected} onClick={submit}>
               Enviar mensaje
             </SubmitButton>
           </div>
         </>
       )}
-      {error && options.length === 0 ? (
+      {formError && options.length === 0 ? (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {formError}
         </p>
       ) : null}
 

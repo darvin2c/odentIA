@@ -112,7 +112,6 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(mobileCorrecting).not.toContainText("Por qué está aquí")
   await expect(mobileCorrecting.getByRole("button", { name: "Estuvo bien, quitar de la lista" })).toHaveCount(0)
   const mobileSend = mobileCorrecting.getByRole("button", { name: "Enviar corrección" })
-  await expect(mobileSend).toBeDisabled()
   // Enviar queda a la vista sin desplazar, encima de «Cancelar».
   await expect(mobileCorrecting.getByRole("button", { name: "Cancelar" })).toBeInViewport({ ratio: 1 })
   await expect(mobileSend).toBeInViewport({ ratio: 1 })
@@ -139,8 +138,9 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await expect(item).toContainText("Abierta al lado")
   await expect(item.getByRole("button", { name: "Corregir", exact: true })).toHaveCount(0)
   await expect(correcting.getByRole("button", { name: "Estuvo bien, quitar de la lista" })).toBeVisible()
-  // Sin decir qué falló no se puede enviar.
-  await expect(correcting.getByRole("button", { name: "Enviar corrección" })).toBeDisabled()
+  // Sin decir qué falló no se envía: el grupo dice qué falta.
+  await correcting.getByRole("button", { name: "Enviar corrección" }).click()
+  await expect(correcting.getByRole("group", { name: "¿Qué falló?" })).toContainText("Elige qué falló")
   await correcting.getByRole("button", { name: "Le faltó un dato" }).click()
   await expect(correcting.getByRole("button", { name: "Le faltó un dato" })).toHaveAttribute("aria-pressed", "true")
   await info.attach("corregir", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
@@ -256,7 +256,7 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   await fromInbox.getByRole("button", { name: "El tono" }).click()
   await fromInbox.getByLabel("¿Cómo debió responder?").fill("Otra respuesta")
   await fromInbox.getByRole("button", { name: "Enviar corrección" }).click()
-  await expect(fromInbox).toContainText("conflicto con el estado actual")
+  await expect(fromInbox).toContainText("Esa respuesta ya se revisó")
   // Cerrar con cambios sin guardar pregunta antes.
   await fromInbox.getByRole("button", { name: "Cancelar" }).click()
   const leave = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })

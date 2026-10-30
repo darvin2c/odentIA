@@ -1,22 +1,31 @@
 import {
   Button,
-  Checkbox,
-  Field,
   FieldDescription,
   FieldGroup,
-  FieldLabel,
-  Input,
+  FieldLegend,
+  FieldSet,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
 } from "@odentia/ui"
-import { DatePickerButton, ErrorState, FormDrawer, PageHeader, PageShell, useListSearch } from "@odentia/ui-patterns"
+import {
+  DatePickerButton,
+  ErrorState,
+  FormDrawer,
+  PageHeader,
+  PageShell,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+  useListSearch,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useRef, useState } from "react"
+import { z } from "zod"
 import { KnowledgeAnswers } from "../../components/agent/knowledge-answers"
 import { KnowledgeBasics } from "../../components/agent/knowledge-basics"
 import { KnowledgeDetail } from "../../components/agent/knowledge-detail"
@@ -34,18 +43,21 @@ import { LessonDrawer } from "../../components/agent/lesson-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { activeOrgLocale } from "../../lib/locale"
 import { useReceptionName } from "../../lib/agent-names"
-import { isAmbiguousMutationError, mutationErrorMessage } from "../../lib/query-error"
+import { isAmbiguousMutationError } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
   component: AgentKnowledgePage,
 })
 
 const KIND_LABEL: Record<string, string> = { faq: "Pregunta frecuente", info_sede: "Información de sede", politica: "Política" }
-/** Límite del título de una respuesta en el servidor. */
+/** Límites de una respuesta en el servidor (`agent-knowledge.ts`, `knowledge.ts`). */
 const TITLE_CHARS = 200
+const BODY_CHARS = 8000
+const ASK_FORM_CHARS = 120
+const ASK_FORM_LIMIT = 20
 
 interface Draft {
   kind: string
@@ -59,6 +71,8 @@ interface Draft {
   publish: boolean
   /** Al cerrar una pregunta sin respuesta: usar una respuesta que ya existe en vez de escribir otra. */
   existingId: string
+  /** Se está cerrando una pregunta sin respuesta: no se piden formas, sede ni vigencia. */
+  answering: boolean
 }
 
 const EMPTY_DRAFT: Draft = {
@@ -72,7 +86,58 @@ const EMPTY_DRAFT: Draft = {
   basicKey: "",
   publish: true,
   existingId: "",
+  answering: false,
 }
+
+/**
+ * Lo que se revisa al guardar, con las palabras y los límites del servidor.
+ * Lo que no está en pantalla en un modo (formas al cerrar una pregunta, la
+ * pregunta y la respuesta al usar una existente) siempre pasa.
+ */
+const draftSchema = z
+  .object({
+    kind: z.string(),
+    title: z.string(),
+    body: z.string(),
+    branchId: z.string(),
+    validFrom: z.string(),
+    validUntil: z.string(),
+    askForms: z.string(),
+    basicKey: z.string(),
+    publish: z.boolean(),
+    existingId: z.string(),
+    answering: z.boolean(),
+  })
+  .superRefine((draft, ctx) => {
+    if (!(draft.answering && draft.existingId)) {
+      const title = draft.title.trim()
+      if (!title) ctx.addIssue({ code: "custom", path: ["title"], message: "Escribe la pregunta." })
+      else if (title.length > TITLE_CHARS) {
+        ctx.addIssue({ code: "custom", path: ["title"], message: `Escribe como mucho ${TITLE_CHARS} caracteres.` })
+      }
+      const body = draft.body.trim()
+      if (!body) ctx.addIssue({ code: "custom", path: ["body"], message: "Escribe la respuesta." })
+      else if (body.length > BODY_CHARS) {
+        ctx.addIssue({ code: "custom", path: ["body"], message: `Escribe como mucho ${BODY_CHARS} caracteres.` })
+      }
+    }
+    if (draft.answering) return
+    // El servidor junta los espacios de cada forma antes de medirla.
+    const lines = draft.askForms.split("\n").map((line) => line.replace(/\s+/g, " ").trim())
+    const long = lines.findIndex((line) => line.length > ASK_FORM_CHARS)
+    if (long >= 0) {
+      ctx.addIssue({ code: "custom", path: ["askForms"], message: `La línea ${long + 1} pasa de ${ASK_FORM_CHARS} caracteres.` })
+    } else if (lines.filter(Boolean).length > ASK_FORM_LIMIT) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["askForms"],
+        message: `Escribe hasta ${ASK_FORM_LIMIT} formas de preguntar, una por línea.`,
+      })
+    }
+    if (draft.validFrom && draft.validUntil && draft.validUntil < draft.validFrom) {
+      ctx.addIssue({ code: "custom", path: ["validUntil"], message: "La vigencia termina antes de empezar." })
+    }
+  })
 
 function basicDraft(item: KnowledgeBasicItem): Draft {
   return { ...EMPTY_DRAFT, title: item.question, basicKey: item.key }
@@ -91,10 +156,9 @@ function AgentKnowledgePage() {
   const [answering, setAnswering] = useState<Gap | null>(null)
   /** «Responder las que faltan»: al guardar una pregunta básica se pasa a la siguiente. */
   const [basicsRun, setBasicsRun] = useState(false)
-  const [form, setForm] = useState<Draft>(EMPTY_DRAFT)
-  const [baseline, setBaseline] = useState<Draft>(EMPTY_DRAFT)
+  /** Valores con los que se abrió el cajón: el formulario vuelve a ellos al reiniciarse. */
+  const [draftStart, setDraftStart] = useState<Draft>(EMPTY_DRAFT)
   const formOpen = creating || editing !== null || answering !== null
-  const formDirty = formOpen && !sameDraft(form, baseline)
 
   // Por páginas (topes de la fase 4): la respuesta 101 también se abre. La
   // búsqueda va al servidor; la sede y el estado se filtran sobre lo cargado.
@@ -142,51 +206,76 @@ function AgentKnowledgePage() {
     void queryClient.invalidateQueries({ queryKey: ["agent-knowledge-gaps"] })
   }
 
+  /** Alta cuya publicación falló: reintentar la corrige y la publica, no crea otra. */
+  const createdId = useRef<string | null>(null)
   const saveMutation = useMutation({
     retry: false,
-    // `next`: la pregunta básica que sigue cuando se están respondiendo las que faltan.
-    mutationFn: async (_input: { next: Draft | null }) => {
-      if (answering) {
-        const answer = form.existingId
-          ? { ids: answering.ids, entryId: form.existingId }
-          : { ids: answering.ids, title: form.title, body: form.body, basicKey: form.basicKey || null }
+    mutationFn: async ({ draft, editingId, gapIds }: { draft: Draft; editingId: string | null; gapIds: string[] | null }) => {
+      if (gapIds) {
+        const answer = draft.existingId
+          ? { ids: gapIds, entryId: draft.existingId }
+          : { ids: gapIds, title: draft.title, body: draft.body, basicKey: draft.basicKey || null }
         return apiFetch("/api/agent/knowledge/gaps/answer", { method: "POST", body: JSON.stringify(answer) })
       }
       const payload = {
-        title: form.title,
-        body: form.body,
-        branchId: form.branchId || null,
-        validFrom: form.validFrom || null,
-        validUntil: form.validUntil || null,
-        askForms: form.askForms.split("\n").map((line) => line.trim()).filter(Boolean),
-        basicKey: form.basicKey || null,
+        title: draft.title,
+        body: draft.body,
+        branchId: draft.branchId || null,
+        validFrom: draft.validFrom || null,
+        validUntil: draft.validUntil || null,
+        askForms: draft.askForms.split("\n").map((line) => line.trim()).filter(Boolean),
+        basicKey: draft.basicKey || null,
       }
-      if (editing) {
-        return apiFetch(`/api/agent/knowledge/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) })
+      if (editingId) {
+        return apiFetch(`/api/agent/knowledge/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) })
       }
-      const created = await apiFetch<{ data: KnowledgeEntry }>("/api/agent/knowledge", {
-        method: "POST",
-        body: JSON.stringify({ kind: form.kind, ...payload }),
-      })
-      if (form.publish) {
-        await apiFetch(`/api/agent/knowledge/${created.data.id}/status`, {
+      if (createdId.current) {
+        await apiFetch(`/api/agent/knowledge/${createdId.current}`, { method: "PATCH", body: JSON.stringify(payload) })
+      } else {
+        const created = await apiFetch<{ data: KnowledgeEntry }>("/api/agent/knowledge", {
+          method: "POST",
+          body: JSON.stringify({ kind: draft.kind, ...payload }),
+        })
+        createdId.current = created.data.id
+      }
+      if (draft.publish) {
+        await apiFetch(`/api/agent/knowledge/${createdId.current}/status`, {
           method: "POST",
           body: JSON.stringify({ status: "publicada" }),
         })
       }
-      return created
-    },
-    onSuccess: (_data, input) => {
-      if (input.next) {
-        saveMutation.reset()
-        setForm(input.next)
-        setBaseline(input.next)
-      } else closeForm()
-      invalidate()
     },
     // Si el alta salió y la publicación no, la respuesta existe como borrador: se refleja ya.
-    onError: () => invalidate(),
+    onSettled: () => invalidate(),
   })
+
+  /** Lo que el envío necesita saber de la pantalla al guardar (se actualiza en cada render). */
+  const submitContext = useRef<{ editing: KnowledgeEntry | null; answering: Gap | null; next: Draft | null }>({
+    editing: null,
+    answering: null,
+    next: null,
+  })
+  const form = useAppForm({
+    defaultValues: draftStart,
+    validators: { onSubmit: draftSchema },
+    onSubmit: async ({ value, formApi }) => {
+      const { editing: entry, answering: gap, next } = submitContext.current
+      await saveMutation.mutateAsync({ draft: value, editingId: entry?.id ?? null, gapIds: gap?.ids ?? null })
+      createdId.current = null
+      // `next`: la pregunta básica que sigue cuando se están respondiendo las que faltan.
+      if (next) {
+        saveMutation.reset()
+        setDraftStart(next)
+        formApi.reset(next)
+      } else closeForm()
+    },
+  })
+  const surface = useFormSurface(form, {
+    // Cada forma de preguntar que el servidor señala (`askForms[2]`) va al campo de formas.
+    fieldMap: (key) => (key.startsWith("askForms") ? "askForms" : key === "entryId" ? "existingId" : undefined),
+  })
+  const values = useStore(form.store, (state) => state.values)
+  const formDirty = formOpen && surface.isDirty
 
   const statusMutation = useMutation({
     retry: false,
@@ -234,16 +323,17 @@ function AgentKnowledgePage() {
     )
   }
 
-  const error = mutationErrorMessage(saveMutation.error)
   const missing = basics?.items.filter((item) => !item.covered) ?? []
   const detail = entries.find((entry) => entry.id === detailId) ?? null
 
   function open(next: Draft, target: { entry?: KnowledgeEntry; gap?: Gap; basicsRun?: boolean }) {
     saveMutation.reset()
     discardMutation.reset()
+    createdId.current = null
     setDetailId(null)
-    setForm(next)
-    setBaseline(next)
+    const start = { ...next, answering: target.gap !== undefined }
+    setDraftStart(start)
+    form.reset(start)
     setEditing(target.entry ?? null)
     setAnswering(target.gap ?? null)
     setCreating(!target.entry && !target.gap)
@@ -298,18 +388,22 @@ function AgentKnowledgePage() {
   }
 
   // En «Responder las que faltan», la que sigue a la que se está respondiendo.
-  const runRest = basicsRun ? missing.filter((item) => item.key !== form.basicKey) : []
-  const runIndex = missing.findIndex((item) => item.key === form.basicKey)
-  const runNext = runRest.length > 0 ? (missing.slice(runIndex + 1).find((item) => item.key !== form.basicKey) ?? runRest[0]) : undefined
+  const runRest = basicsRun ? missing.filter((item) => item.key !== values.basicKey) : []
+  const runIndex = missing.findIndex((item) => item.key === values.basicKey)
+  const runNext = runRest.length > 0 ? (missing.slice(runIndex + 1).find((item) => item.key !== values.basicKey) ?? runRest[0]) : undefined
+  submitContext.current = { editing, answering, next: runNext ? basicDraft(runNext) : null }
 
+  // Una respuesta perdida tras guardar no se sabe si quedó: no se vuelve a enviar a ciegas.
+  const ambiguous = isAmbiguousMutationError(saveMutation.error)
   function submit(event: FormEvent) {
-    event.preventDefault()
-    if (saveMutation.isPending || isAmbiguousMutationError(saveMutation.error)) return
-    saveMutation.mutate({ next: runNext ? basicDraft(runNext) : null })
+    if (ambiguous) {
+      event.preventDefault()
+      return
+    }
+    surface.onSubmit(event)
   }
 
-  const usesExisting = answering !== null && form.existingId !== ""
-  const incomplete = usesExisting ? false : !form.title.trim() || !form.body.trim()
+  const usesExisting = answering !== null && values.existingId !== ""
   const publishedEntries = entries.filter((entry) => entry.status === "publicada")
   const branchOptions = editing?.branchId && editing.branchName && !branches.some((branch) => branch.id === editing.branchId)
     ? [...branches, { id: editing.branchId, name: editing.branchName }]
@@ -330,7 +424,7 @@ function AgentKnowledgePage() {
           canWrite={canWrite}
           savingId={quickSaveMutation.isPending ? (quickSaveMutation.variables?.ids[0] ?? null) : null}
           blocked={quickSaveMutation.isPending}
-          saveError={mutationErrorMessage(quickSaveMutation.error)}
+          saveError={quickSaveMutation.error ? submitErrorMessage(quickSaveMutation.error) : null}
           onSave={quickSave}
           onEdit={openAnswer}
         />
@@ -381,7 +475,7 @@ function AgentKnowledgePage() {
         canWrite={canWrite}
         statusPending={statusMutation.isPending}
         statusBlocked={isAmbiguousMutationError(statusMutation.error)}
-        statusError={mutationErrorMessage(statusMutation.error)}
+        statusError={statusMutation.error ? submitErrorMessage(statusMutation.error) : null}
         onCheckStatus={() => {
           void entriesQuery.refetch().then((result) => {
             if (result.isSuccess) statusMutation.reset()
@@ -417,13 +511,11 @@ function AgentKnowledgePage() {
                   : "Es la última que falta."
                 : `${receptionName} la cita tal cual. Escríbela como se la dirías a un paciente.`
           }
+          {...surface}
           onSubmit={submit}
-          isSubmitting={saveMutation.isPending}
-          isDirty={formDirty}
-          error={error}
           submitLabel={answering ? "Guardar y publicar" : runNext ? "Guardar y seguir" : "Guardar"}
           cancelLabel="Cancelar"
-          submitDisabled={incomplete || isAmbiguousMutationError(saveMutation.error)}
+          submitDisabled={ambiguous}
         >
           <FieldGroup>
             {answering ? (
@@ -454,210 +546,187 @@ function AgentKnowledgePage() {
                   </div>
                   {discardMutation.isError ? (
                     <p role="alert" className="text-destructive">
-                      {mutationErrorMessage(discardMutation.error) ?? "No pudimos descartar la pregunta."}
+                      {submitErrorMessage(discardMutation.error)}
                     </p>
                   ) : null}
                 </div>
                 {publishedEntries.length > 0 ? (
-                  <Field>
-                    <FieldLabel htmlFor="nc-existente">¿Ya tienes una respuesta para esto?</FieldLabel>
-                    <Select
-                      value={form.existingId || "nueva"}
-                      onValueChange={(value) => setForm({ ...form, existingId: !value || value === "nueva" ? "" : value })}
-                    >
-                      <SelectTrigger id="nc-existente" aria-label="Respuesta existente" className="w-full">
-                        <SelectValue>
-                          {publishedEntries.find((entry) => entry.id === form.existingId)?.title ?? "No, escribir una nueva"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="nueva">No, escribir una nueva</SelectItem>
-                        {publishedEntries.map((entry) => (
-                          <SelectItem key={entry.id} value={entry.id}>
-                            {entry.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FieldDescription>
-                      Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra.
-                    </FieldDescription>
-                  </Field>
+                  <form.AppField name="existingId">
+                    {(field) => (
+                      <field.SelectField
+                        id="nc-existente"
+                        label="¿Ya tienes una respuesta para esto?"
+                        description="Si eliges una, esta forma de preguntar se suma a esa respuesta y no se crea otra."
+                        options={[
+                          { value: "", label: "No, escribir una nueva" },
+                          ...publishedEntries.map((entry) => ({ value: entry.id, label: entry.title })),
+                        ]}
+                      />
+                    )}
+                  </form.AppField>
                 ) : null}
               </>
             ) : null}
             {basicsRun && missing.length > 1 ? (
-              <Field>
-                <FieldLabel htmlFor="nc-falta">Pregunta básica</FieldLabel>
-                <Select
-                  value={form.basicKey}
-                  onValueChange={(value) => {
-                    const item = missing.find((candidate) => candidate.key === value)
-                    if (!item) return
-                    // Cambiar de pregunta conserva lo escrito en la respuesta.
-                    setForm({ ...form, title: item.question, basicKey: item.key })
-                    setBaseline({ ...baseline, title: item.question, basicKey: item.key })
-                  }}
-                >
-                  <SelectTrigger id="nc-falta" aria-label="Pregunta básica" className="w-full">
-                    <SelectValue>{missing.find((item) => item.key === form.basicKey)?.question ?? "Elige una pregunta"}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {missing.map((item) => (
-                      <SelectItem key={item.key} value={item.key}>
-                        {item.question}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FieldDescription>Puedes responderlas en el orden que quieras.</FieldDescription>
-              </Field>
+              <form.AppField name="basicKey">
+                {(field) => (
+                  <field.Control id="nc-falta" label="Pregunta básica" description="Puedes responderlas en el orden que quieras.">
+                    {(control) => (
+                      <Select
+                        value={field.state.value}
+                        onValueChange={(value) => {
+                          const item = missing.find((candidate) => candidate.key === value)
+                          if (!item) return
+                          // Cambiar de pregunta conserva lo escrito en la respuesta y no cuenta como cambio.
+                          form.setFieldValue("title", item.question, { dontUpdateMeta: true })
+                          form.setFieldValue("basicKey", item.key, { dontUpdateMeta: true })
+                        }}
+                      >
+                        <SelectTrigger
+                          id={control.id}
+                          aria-invalid={control.invalid || undefined}
+                          aria-describedby={control.describedBy}
+                          className="w-full"
+                        >
+                          <SelectValue>{missing.find((item) => item.key === field.state.value)?.question ?? "Elige una pregunta"}</SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {missing.map((item) => (
+                            <SelectItem key={item.key} value={item.key}>
+                              {item.question}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
             ) : null}
             {usesExisting ? null : (
               <>
                 {creating && !basicsRun ? (
-                  <Field>
-                    <FieldLabel htmlFor="nc-tipo">Tipo</FieldLabel>
-                    <Select value={form.kind} onValueChange={(value) => setForm({ ...form, kind: value ?? "faq" })}>
-                      <SelectTrigger id="nc-tipo" aria-label="Tipo" className="w-full">
-                        <SelectValue>{KIND_LABEL[form.kind] ?? form.kind}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(KIND_LABEL).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
+                  <form.AppField name="kind">
+                    {(field) => (
+                      <field.SelectField
+                        id="nc-tipo"
+                        label="Tipo"
+                        options={Object.entries(KIND_LABEL).map(([value, label]) => ({ value, label }))}
+                      />
+                    )}
+                  </form.AppField>
                 ) : null}
-                <Field>
-                  <FieldLabel htmlFor="nc-titulo">La pregunta</FieldLabel>
-                  <Input
-                    id="nc-titulo"
-                    value={form.title}
-                    maxLength={TITLE_CHARS}
-                    onChange={(event) => setForm({ ...form, title: event.target.value })}
-                    placeholder="¿Atienden sin cita?"
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="nc-cuerpo">La respuesta</FieldLabel>
-                  <Textarea
-                    id="nc-cuerpo"
-                    rows={5}
-                    value={form.body}
-                    onChange={(event) => setForm({ ...form, body: event.target.value })}
-                    placeholder="Respuesta oficial…"
-                  />
-                </Field>
+                <form.AppField name="title">
+                  {(field) => (
+                    <field.TextField id="nc-titulo" label="La pregunta" maxLength={TITLE_CHARS} placeholder="¿Atienden sin cita?" />
+                  )}
+                </form.AppField>
+                <form.AppField name="body">
+                  {(field) => (
+                    <field.TextareaField
+                      id="nc-cuerpo"
+                      label="La respuesta"
+                      rows={5}
+                      maxLength={BODY_CHARS}
+                      placeholder="Respuesta oficial…"
+                    />
+                  )}
+                </form.AppField>
               </>
             )}
             {answering ? null : (
               <>
-                <Field>
-                  <FieldLabel htmlFor="nc-formas">Otras formas de preguntarlo</FieldLabel>
-                  <Textarea
-                    id="nc-formas"
-                    rows={3}
-                    value={form.askForms}
-                    onChange={(event) => setForm({ ...form, askForms: event.target.value })}
-                    placeholder={"¿Puedo ir sin reservar?\n¿Reciben pacientes sin turno?"}
-                  />
-                  <FieldDescription>Una por línea. Ayudan a {receptionName} a encontrar esta respuesta.</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="nc-sede">Sede</FieldLabel>
-                  <Select
-                    value={form.branchId || "todas"}
-                    onValueChange={(value) => setForm({ ...form, branchId: !value || value === "todas" ? "" : value })}
-                  >
-                    <SelectTrigger id="nc-sede" aria-label="Sede" className="w-full">
-                      <SelectValue>
-                        {form.branchId
-                          ? `Solo ${branchOptions.find((branch) => branch.id === form.branchId)?.name ?? "una sede"}`
-                          : "Todas las sedes"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="todas">Todas las sedes</SelectItem>
-                      {branchOptions.map((branch) => (
-                        <SelectItem key={branch.id} value={branch.id}>
-                          Solo {branch.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Field>
-                    <FieldLabel htmlFor="nc-desde">Vale desde</FieldLabel>
-                    <DatePickerButton
-                      id="nc-desde"
-                      className="w-full"
-                      value={form.validFrom}
-                      emptyLabel="Desde ya"
-                      onChange={(validFrom) =>
-                        setForm({
-                          ...form,
-                          validFrom,
-                          // Un periodo no termina antes de empezar.
-                          validUntil: form.validUntil && validFrom && form.validUntil < validFrom ? validFrom : form.validUntil,
-                        })
-                      }
+                <form.AppField name="askForms">
+                  {(field) => (
+                    <field.TextareaField
+                      id="nc-formas"
+                      label="Otras formas de preguntarlo"
+                      description={`Una por línea. Ayudan a ${receptionName} a encontrar esta respuesta.`}
+                      rows={3}
+                      placeholder={"¿Puedo ir sin reservar?\n¿Reciben pacientes sin turno?"}
                     />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="nc-hasta">Vale hasta</FieldLabel>
-                    <DatePickerButton
-                      id="nc-hasta"
-                      className="w-full"
-                      value={form.validUntil}
-                      min={form.validFrom || undefined}
-                      emptyLabel="Sin vencimiento"
-                      onChange={(validUntil) => setForm({ ...form, validUntil })}
+                  )}
+                </form.AppField>
+                <form.AppField name="branchId">
+                  {(field) => (
+                    <field.SelectField
+                      id="nc-sede"
+                      label="Sede"
+                      options={[
+                        { value: "", label: "Todas las sedes" },
+                        ...branchOptions.map((branch) => ({ value: branch.id, label: `Solo ${branch.name}` })),
+                      ]}
                     />
-                  </Field>
-                </div>
-                <p className="-mt-2 text-sm text-muted-foreground">
-                  Déjalas vacías si vale siempre. Pasada la fecha, {receptionName} deja de usarla sin que hagas nada.
-                </p>
+                  )}
+                </form.AppField>
+                <FieldSet>
+                  <FieldLegend variant="label">Vigencia</FieldLegend>
+                  <FieldDescription>
+                    Déjalas vacías si vale siempre. Pasada la fecha, {receptionName} deja de usarla sin que hagas nada.
+                  </FieldDescription>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <form.AppField name="validFrom">
+                      {(field) => (
+                        <field.Control id="nc-desde" label="Vale desde">
+                          {(control) => (
+                            <DatePickerButton
+                              {...control.props}
+                              className="w-full"
+                              value={field.state.value}
+                              emptyLabel="Desde ya"
+                              onChange={(validFrom) => {
+                                field.handleChange(validFrom)
+                                // Un periodo no termina antes de empezar.
+                                const validUntil = form.getFieldValue("validUntil")
+                                if (validUntil && validFrom && validUntil < validFrom) form.setFieldValue("validUntil", validFrom)
+                              }}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                    <form.AppField name="validUntil">
+                      {(field) => (
+                        <field.Control id="nc-hasta" label="Vale hasta">
+                          {(control) => (
+                            <DatePickerButton
+                              {...control.props}
+                              className="w-full"
+                              value={field.state.value}
+                              min={values.validFrom || undefined}
+                              emptyLabel="Sin vencimiento"
+                              onChange={(validUntil) => field.handleChange(validUntil)}
+                            />
+                          )}
+                        </field.Control>
+                      )}
+                    </form.AppField>
+                  </div>
+                </FieldSet>
                 {basicsRun ? null : (
-                  <Field>
-                    <FieldLabel htmlFor="nc-basica">Pregunta básica que cubre</FieldLabel>
-                    <Select
-                      value={form.basicKey || "ninguna"}
-                      onValueChange={(value) => setForm({ ...form, basicKey: !value || value === "ninguna" ? "" : value })}
-                    >
-                      <SelectTrigger id="nc-basica" aria-label="Pregunta básica" className="w-full">
-                        <SelectValue>
-                          {(basics?.items ?? []).find((item) => item.key === form.basicKey)?.question ?? "Ninguna"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ninguna">Ninguna</SelectItem>
-                        {(basics?.items ?? []).map((item) => (
-                          <SelectItem key={item.key} value={item.key}>
-                            {item.question}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
+                  <form.AppField name="basicKey">
+                    {(field) => (
+                      <field.SelectField
+                        id="nc-basica"
+                        label="Pregunta básica que cubre"
+                        options={[
+                          { value: "", label: "Ninguna" },
+                          ...(basics?.items ?? []).map((item) => ({ value: item.key, label: item.question })),
+                        ]}
+                      />
+                    )}
+                  </form.AppField>
                 )}
                 {creating ? (
-                  <Field>
-                    <label htmlFor="nc-publicar" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm">
-                      <Checkbox
+                  <form.AppField name="publish">
+                    {(field) => (
+                      <field.CheckboxField
                         id="nc-publicar"
-                        checked={form.publish}
-                        onCheckedChange={(value) => setForm({ ...form, publish: value === true })}
+                        label="Publicar al guardar"
+                        description={`Sin publicar queda como borrador y ${receptionName} no la usa.`}
                       />
-                      Publicar al guardar
-                    </label>
-                    <FieldDescription>Sin publicar queda como borrador y {receptionName} no la usa.</FieldDescription>
-                  </Field>
+                    )}
+                  </form.AppField>
                 ) : null}
               </>
             )}

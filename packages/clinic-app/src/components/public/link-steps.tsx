@@ -1,12 +1,13 @@
-import { Checkbox, Field, FieldDescription, FieldLabel, Input, ScrollArea } from "@odentia/ui"
-import { ErrorState, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { ScrollArea } from "@odentia/ui"
+import { ErrorState, LoadingState, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { CircleCheck } from "lucide-react"
-import { useState } from "react"
+import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { fetchLinkConsent, fetchLinkQuestionnaire, signLinkConsent, submitLinkQuestionnaire } from "../../lib/booking-link"
 import { FirmaPad } from "../patient/firma-pad"
-import { AnswerInput, isFieldVisible, missingRequired } from "../patient/form-fields"
+import { AnswerAppField, isFieldVisible, missingRequired } from "../patient/form-fields"
 import { appWords } from "../../lib/product-words"
 
 function problemOf(error: unknown, fallback: string): string {
@@ -33,14 +34,34 @@ function Done({ title, text, onBack }: { title: string; text: string; onBack: ()
  * como firma certificada.
  */
 export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: string; token: string; consentId: string; onBack: () => void }) {
-  const [docNumber, setDocNumber] = useState("")
-  const [understood, setUnderstood] = useState(false)
-  const [strokes, setStrokes] = useState<number[][][]>([])
   const query = useQuery({ queryKey: ["link-consent", slug, token, consentId], queryFn: () => fetchLinkConsent(slug, token, consentId), retry: false })
   const sign = useMutation({
     retry: false,
-    mutationFn: () => signLinkConsent(slug, token, consentId, { docNumber: docNumber.trim(), comprehensionConfirmed: understood, signatureData: { strokes } }),
+    mutationFn: (input: { docNumber: string; comprehensionConfirmed: boolean; signatureData: { strokes: number[][][] } }) =>
+      signLinkConsent(slug, token, consentId, input),
   })
+  const docLabel = query.data?.data.signer.documentLabel ?? "documento"
+  const form = useAppForm({
+    defaultValues: { docNumber: "", comprehensionConfirmed: false, signatureData: [] as number[][][] },
+    // Cada cosa que falta se dice en su lugar, con los mismos límites que la API.
+    validators: {
+      onSubmit: z.object({
+        docNumber: z.string().trim().min(1, `Escribe tu ${docLabel}.`).max(40, "Escribe como mucho 40 caracteres."),
+        comprehensionConfirmed: z.boolean().refine((value) => value, "Marca que entendiste lo que te explicaron y aceptas."),
+        signatureData: z.array(z.array(z.array(z.number()))).min(1, "Firma con el dedo o el mouse en el recuadro."),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await sign.mutateAsync({
+        docNumber: value.docNumber.trim(),
+        comprehensionConfirmed: value.comprehensionConfirmed,
+        signatureData: { strokes: value.signatureData },
+      })
+    },
+  })
+  const submit = useFormSubmit(form)
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
   if (sign.isSuccess) return <Done title="Firmado, gracias" text={`Tu ${appWords().clinician.one} lo revisa contigo antes de empezar.`} onBack={onBack} />
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el consentimiento…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el consentimiento" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
@@ -57,10 +78,8 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         </ul>
       </div>
     ) : null
-  const docLabel = consent.signer.documentLabel ?? "documento"
-  const ready = docNumber.trim().length > 0 && understood && strokes.length > 0
   return (
-    <div className="flex flex-col gap-4">
+    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
       <h2 className="text-lg font-semibold">{consent.title}</h2>
       <ScrollArea className="flex max-h-[50svh] flex-col rounded-2xl border bg-card">
         <div className="flex flex-col gap-3 p-4 text-sm">
@@ -86,44 +105,80 @@ export function LinkConsentStep({ slug, token, consentId, onBack }: { slug: stri
         Firma {consent.signer.name}
         {consent.signer.asRepresentative ? ", como su representante" : ""}.
       </p>
-      <Field>
-        <FieldLabel htmlFor="consent-doc">Escribe tu {docLabel}</FieldLabel>
-        <Input id="consent-doc" className="min-h-11" autoComplete="off" maxLength={20} value={docNumber} onChange={(event) => setDocNumber(event.target.value)} />
-        <FieldDescription>Lo comparamos con el de tu ficha; no lo mostramos.</FieldDescription>
-      </Field>
-      <label htmlFor="consent-understood" className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-        <Checkbox id="consent-understood" checked={understood} onCheckedChange={(next) => setUnderstood(next === true)} />
-        Entendí lo que me explicaron y acepto
-      </label>
-      <FirmaPad label="Tu firma" onChange={setStrokes} />
-      {sign.isError ? (
+      <form.AppField name="docNumber">
+        {(field) => (
+          <field.TextField
+            label={`Escribe tu ${docLabel}`}
+            id="consent-doc"
+            description="Lo comparamos con el de tu ficha; no lo mostramos."
+            inputClassName="min-h-11"
+            autoComplete="off"
+            maxLength={20}
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="comprehensionConfirmed">
+        {(field) => <field.CheckboxField label="Entendí lo que me explicaron y acepto" id="consent-understood" className="min-h-11" />}
+      </form.AppField>
+      <form.AppField name="signatureData">
+        {(field) => (
+          <field.Group legend="Tu firma">
+            {(control) => (
+              <FirmaPad
+                label="Tu firma"
+                id={control.id}
+                invalid={control.invalid}
+                describedBy={control.describedBy}
+                onChange={(strokes) => field.handleChange(strokes)}
+              />
+            )}
+          </field.Group>
+        )}
+      </form.AppField>
+      {error ? (
         <p role="alert" className="text-sm text-destructive">
-          {problemOf(sign.error, "No pudimos guardar tu firma.")}
+          {error}
         </p>
       ) : null}
-      <SubmitButton type="button" className="min-h-11 w-full" pending={sign.isPending} disabled={!ready} onClick={() => sign.mutate()}>
+      <SubmitButton type="submit" className="min-h-11 w-full" pending={pending}>
         Firmar
       </SubmitButton>
-    </div>
+    </form>
   )
 }
 
 /** «Antes de tu cita»: el cuestionario de la clínica, en una sola página. */
 export function LinkQuestionnaireStep({ slug, token, onBack }: { slug: string; token: string; onBack: () => void }) {
-  const [answers, setAnswers] = useState<Record<string, unknown>>({})
-  const [problem, setProblem] = useState<string | null>(null)
   const query = useQuery({ queryKey: ["link-questionnaire", slug, token], queryFn: () => fetchLinkQuestionnaire(slug, token), retry: false })
   const send = useMutation({
     retry: false,
-    mutationFn: () => submitLinkQuestionnaire(slug, token, answers),
-    onError: (error) => setProblem(problemOf(error, "No pudimos enviar tus respuestas.")),
+    mutationFn: (answers: Record<string, unknown>) => submitLinkQuestionnaire(slug, token, answers),
   })
+  const schema = query.data?.data.schema ?? null
+  const form = useAppForm({
+    defaultValues: { answers: {} as Record<string, unknown> },
+    validators: {
+      // Lo obligatorio que falta se dice en su pregunta.
+      onSubmit: ({ value }) => {
+        const missing = schema ? missingRequired(schema, value.answers) : []
+        if (missing.length === 0) return undefined
+        return { fields: Object.fromEntries(missing.map((field) => [`answers.${field.id}`, "Responde esta pregunta."])) }
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await send.mutateAsync(value.answers)
+    },
+  })
+  const submit = useFormSubmit(form)
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const answers = useStore(form.store, (state) => state.values.answers)
   if (send.isSuccess) return <Done title="Gracias, recibimos tus respuestas" text={`Tu ${appWords().clinician.one} las revisa contigo en la cita.`} onBack={onBack} />
   if (query.isPending) return <LoadingState kind="indeterminate" message="Abriendo el cuestionario…" />
   if (query.isError) return <ErrorState title="No pudimos abrir el cuestionario" message={problemOf(query.error, "Vuelve a intentarlo.")} onRetry={() => void query.refetch()} />
   const questionnaire = query.data.data
   return (
-    <div className="flex flex-col gap-4">
+    <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
       <h2 className="text-lg font-semibold">{questionnaire.title}</h2>
       {questionnaire.schema.sections.map((section) => (
         <fieldset key={section.id} className="m-0 flex flex-col gap-4 rounded-2xl border bg-card p-4">
@@ -131,38 +186,20 @@ export function LinkQuestionnaireStep({ slug, token, onBack }: { slug: string; t
           {section.fields
             .filter((field) => isFieldVisible(field, answers))
             .map((field) => (
-              <AnswerInput
-                key={field.id}
-                field={field}
-                value={answers[field.id]}
-                onChange={(value) => {
-                  setProblem(null)
-                  setAnswers({ ...answers, [field.id]: value })
-                }}
-              />
+              <form.AppField key={field.id} name={`answers.${field.id}`}>
+                {() => <AnswerAppField field={field} />}
+              </form.AppField>
             ))}
         </fieldset>
       ))}
-      {problem ? (
+      {error ? (
         <p role="alert" className="text-sm text-destructive">
-          {problem}
+          {error}
         </p>
       ) : null}
-      <SubmitButton
-        type="button"
-        className="min-h-11 w-full"
-        pending={send.isPending}
-        onClick={() => {
-          const pending = missingRequired(questionnaire.schema, answers)
-          if (pending.length > 0) {
-            setProblem(`Falta responder: ${pending.map((field) => field.label).join(", ")}`)
-            return
-          }
-          send.mutate()
-        }}
-      >
+      <SubmitButton type="submit" className="min-h-11 w-full" pending={pending}>
         Enviar respuestas
       </SubmitButton>
-    </div>
+    </form>
   )
 }

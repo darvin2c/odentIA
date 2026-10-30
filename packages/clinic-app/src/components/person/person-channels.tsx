@@ -1,26 +1,63 @@
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
+import { Badge, Button } from "@odentia/ui"
 import {
   ConfirmDialog,
   FormDrawer,
   normalizeCountry,
-  PhoneInput,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelIcon, channelLabel, identityText } from "../../lib/channels"
 import { type ContactFull, timeAgo, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
 import type { PersonPage } from "../../lib/people"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { SummaryCard } from "../patient/resumen-tab"
 import { PersonPicker, type PickedPerson } from "../person-picker"
-import { ChoiceSelect } from "../ui/choice-select"
 
 type Identity = ContactFull["identities"][number]
 
-function codeOf(error: unknown): string | null {
-  return error instanceof ApiError ? (error.shape.code ?? null) : null
+const CHANNEL_OPTIONS = [
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "telegram", label: "Telegram" },
+]
+
+const ADD_DEFAULTS = { channel: "whatsapp", phone: null as string | null, accountId: "" }
+/** Lo que exige `normalizeChannelIdentity`, dicho en el campo antes de enviar. */
+const addSchema = z
+  .object({ channel: z.enum(["whatsapp", "telegram"]), phone: z.string().nullable(), accountId: z.string().max(100) })
+  .superRefine((value, ctx) => {
+    if (value.channel === "whatsapp") {
+      if (!value.phone) ctx.addIssue({ code: "custom", path: ["phone"], message: "Escribe su número de WhatsApp" })
+      return
+    }
+    const account = value.accountId.trim().replace(/^tg:/i, "")
+    if (!account)
+      ctx.addIssue({ code: "custom", path: ["accountId"], message: "Escribe su número de cuenta de Telegram" })
+    else if (!/^\d+$/.test(account))
+      ctx.addIssue({
+        code: "custom",
+        path: ["accountId"],
+        message: "Telegram exige el ID numérico de la plataforma (no @usuario)",
+      })
+  })
+
+const MOVE_DEFAULTS = { destination: null as PickedPerson | null, reason: "" }
+const moveSchema = z.object({
+  destination: z.custom<PickedPerson | null>((value) => value !== null, "Elige a quién pasa la cuenta"),
+  reason: z.string().trim().min(1, "Escribe por qué pasa la cuenta").max(500),
+})
+
+/** El historial sin cuenta asignada no es de un campo: se dice con el paso que lo resuelve. */
+function moveFormMessage(error: unknown): string | null {
+  return error instanceof ApiError && error.shape.code === "AMBIGUOUS_CHANNEL_HISTORY"
+    ? "Hay conversaciones de este canal sin cuenta asignada: asígnalas primero. No se mueve nada por suposición."
+    : null
 }
 
 /**
@@ -37,12 +74,7 @@ export function PersonChannels({ person }: { person: PersonPage }) {
   const profile = useOrgProfile()
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const [adding, setAdding] = useState(false)
-  const [channel, setChannel] = useState("whatsapp")
-  const [phone, setPhone] = useState<string | null>(null)
-  const [accountId, setAccountId] = useState("")
   const [moving, setMoving] = useState<Identity | null>(null)
-  const [destination, setDestination] = useState<PickedPerson | null>(null)
-  const [reason, setReason] = useState("")
   const [moved, setMoved] = useState<string | null>(null)
   const [assigning, setAssigning] = useState<{ conversationId: string; identity: Identity } | null>(
     null,
@@ -59,40 +91,47 @@ export function PersonChannels({ person }: { person: PersonPage }) {
     void queryClient.invalidateQueries({ queryKey: ["person", person.id] })
     void queryClient.invalidateQueries({ queryKey: ["person-conversations", person.id] })
   }
-  const add = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/contacts/${person.id}/identities`, {
+  const addForm = useAppForm({
+    defaultValues: ADD_DEFAULTS,
+    validators: { onSubmit: addSchema },
+    onSubmit: async ({ value }) => {
+      await apiFetch(`/api/contacts/${person.id}/identities`, {
         method: "POST",
         body: JSON.stringify({
-          channel,
-          externalUserId: channel === "whatsapp" ? (phone ?? "") : accountId.trim(),
+          channel: value.channel,
+          externalUserId: value.channel === "whatsapp" ? (value.phone ?? "") : value.accountId.trim(),
         }),
-      }),
-    onSuccess: () => {
+      })
       setAdding(false)
-      setPhone(null)
-      setAccountId("")
       refresh()
     },
   })
-  const move = useMutation({
-    mutationFn: () =>
-      apiFetch<{ data: { movedConversations: number; movedTasks: number } }>(
+  const addChannel = useStore(addForm.store, (state) => state.values.channel)
+  // El servidor nombra la cuenta `externalUserId`: aquí es el número de WhatsApp o la cuenta de Telegram.
+  const addSurface = useFormSurface(addForm, {
+    fieldMap: (key) => (key === "externalUserId" ? (addChannel === "whatsapp" ? "phone" : "accountId") : undefined),
+  })
+  const moveForm = useAppForm({
+    defaultValues: MOVE_DEFAULTS,
+    validators: { onSubmit: moveSchema },
+    onSubmit: async ({ value }) => {
+      const result = await apiFetch<{ data: { movedConversations: number; movedTasks: number } }>(
         `/api/contacts/${person.id}/identities/${moving?.id ?? ""}/move`,
         {
           method: "POST",
-          body: JSON.stringify({ toContactId: destination?.id, reason: reason.trim() }),
+          body: JSON.stringify({ toContactId: value.destination?.id, reason: value.reason.trim() }),
         },
-      ),
-    onSuccess: (result) => {
+      )
       setMoved(
-        `Se pasó la cuenta a ${destination?.name ?? "la otra persona"} con ${result.data.movedConversations} conversación(es). Sus oportunidades y vínculos se quedan aquí.`,
+        `Se pasó la cuenta a ${value.destination?.name ?? "la otra persona"} con ${result.data.movedConversations} conversación(es). Sus oportunidades y vínculos se quedan aquí.`,
       )
       setMoving(null)
-      setDestination(null)
-      setReason("")
       refresh()
     },
+  })
+  const moveSurface = useFormSurface(moveForm, {
+    fieldMap: { toContactId: "destination" },
+    formMessage: moveFormMessage,
   })
   const assign = useMutation({
     mutationFn: (input: { conversationId: string; identityId: string }) =>
@@ -114,7 +153,6 @@ export function PersonChannels({ person }: { person: PersonPage }) {
       conversation.contactIdentityId === null &&
       identities.some((identity) => identity.channel === conversation.channel),
   )
-  const ambiguous = codeOf(move.error) === "AMBIGUOUS_CHANNEL_HISTORY"
 
   return (
     <SummaryCard
@@ -126,7 +164,7 @@ export function PersonChannels({ person }: { person: PersonPage }) {
             size="sm"
             variant="outline"
             onClick={() => {
-              add.reset()
+              addForm.reset()
               setAdding(true)
             }}
           >
@@ -175,7 +213,7 @@ export function PersonChannels({ person }: { person: PersonPage }) {
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      move.reset()
+                      moveForm.reset()
                       setMoved(null)
                       setMoving(identity)
                     }}
@@ -225,75 +263,44 @@ export function PersonChannels({ person }: { person: PersonPage }) {
       ) : null}
 
       <FormDrawer
+        {...addSurface}
         open={adding}
         onClose={() => {
-          if (!add.isPending) setAdding(false)
+          if (!addSurface.isSubmitting) setAdding(false)
         }}
         title="Agregar canal"
         description="La cuenta por la que esta persona escribe o recibirá mensajes."
         submitLabel="Agregar"
-        isSubmitting={add.isPending}
-        submitDisabled={channel === "whatsapp" ? !phone : !accountId.trim()}
-        error={
-          codeOf(add.error) === "IDENTITY_IN_USE" ||
-          (add.error instanceof ApiError && add.error.status === 409)
-            ? "Esa cuenta ya es de otra persona. Si cambió de dueño, pásala desde la página de esa persona."
-            : add.error
-              ? mutationErrorMessage(add.error)
-              : null
-        }
-        onSubmit={(event) => {
-          event.preventDefault()
-          add.mutate()
-        }}
       >
         <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor="person-channel">Canal</FieldLabel>
-            <ChoiceSelect
-              id="person-channel"
-              value={channel}
-              onChange={(event) => setChannel(event.target.value)}
-            >
-              <option value="whatsapp">WhatsApp</option>
-              <option value="telegram">Telegram</option>
-            </ChoiceSelect>
-          </Field>
-          {channel === "whatsapp" ? (
-            <Field>
-              <FieldLabel htmlFor="person-channel-phone">Su número de WhatsApp</FieldLabel>
-              <PhoneInput
-                id="person-channel-phone"
-                value={phone}
-                defaultCountry={countryCode}
-                onChange={setPhone}
-              />
-            </Field>
+          <addForm.AppField name="channel">
+            {(field) => <field.SelectField label="Canal" options={CHANNEL_OPTIONS} />}
+          </addForm.AppField>
+          {addChannel === "whatsapp" ? (
+            <addForm.AppField name="phone">
+              {(field) => <field.PhoneField label="Su número de WhatsApp" defaultCountry={countryCode} />}
+            </addForm.AppField>
           ) : (
-            <Field>
-              <FieldLabel htmlFor="person-channel-account">Número de cuenta de Telegram</FieldLabel>
-              <Input
-                id="person-channel-account"
-                inputMode="numeric"
-                value={accountId}
-                onChange={(event) => setAccountId(event.target.value)}
-              />
-              <FieldDescription>
-                Es el número que Telegram le da a la persona, no su @usuario.
-              </FieldDescription>
-            </Field>
+            <addForm.AppField name="accountId">
+              {(field) => (
+                <field.TextField
+                  label="Número de cuenta de Telegram"
+                  description="Es el número que Telegram le da a la persona, no su @usuario."
+                  inputMode="numeric"
+                  maxLength={100}
+                />
+              )}
+            </addForm.AppField>
           )}
         </div>
       </FormDrawer>
 
       <FormDrawer
+        {...moveSurface}
         dock={false}
         open={moving !== null}
         onClose={() => {
-          if (!move.isPending) {
-            setMoving(null)
-            move.reset()
-          }
+          if (!moveSurface.isSubmitting) setMoving(null)
         }}
         title="Pasar el canal a otra persona"
         description={
@@ -302,38 +309,36 @@ export function PersonChannels({ person }: { person: PersonPage }) {
             : undefined
         }
         submitLabel="Pasar"
-        isSubmitting={move.isPending}
-        submitDisabled={!destination || !reason.trim()}
-        error={
-          ambiguous
-            ? "Hay conversaciones de este canal sin cuenta asignada: asígnalas primero. No se mueve nada por suposición."
-            : move.error
-              ? mutationErrorMessage(move.error)
-              : null
-        }
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (destination && reason.trim()) move.mutate()
-        }}
       >
         <div className="flex flex-col gap-4">
-          <PersonPicker
-            label="A quién pasa"
-            value={destination}
-            onChange={setDestination}
-            excludeId={person.id}
-            includeArchived
-          />
-          <Field>
-            <FieldLabel htmlFor="person-channel-reason">Por qué</FieldLabel>
-            <Textarea
-              id="person-channel-reason"
-              value={reason}
-              maxLength={500}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder="La persona contó que este número ahora lo usa…"
-            />
-          </Field>
+          <moveForm.AppField name="destination">
+            {(field) => (
+              <field.Control label="A quién pasa">
+                {(control) => (
+                  <PersonPicker
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    label="A quién pasa"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    excludeId={person.id}
+                    includeArchived
+                  />
+                )}
+              </field.Control>
+            )}
+          </moveForm.AppField>
+          <moveForm.AppField name="reason">
+            {(field) => (
+              <field.TextareaField
+                label="Por qué"
+                maxLength={500}
+                placeholder="La persona contó que este número ahora lo usa…"
+              />
+            )}
+          </moveForm.AppField>
         </div>
       </FormDrawer>
 
@@ -350,11 +355,8 @@ export function PersonChannels({ person }: { person: PersonPage }) {
           })
         }
         title="Asignar la conversación a su cuenta"
-        description={
-          assign.error
-            ? (mutationErrorMessage(assign.error) ?? "No se pudo asignar.")
-            : `La conversación queda unida a ${assigning ? identityText(assigning.identity) : ""}. Los grupos de Telegram nunca se asignan a una persona.`
-        }
+        description={`La conversación queda unida a ${assigning ? identityText(assigning.identity) : ""}. Los grupos de Telegram nunca se asignan a una persona.`}
+        error={assign.error ? submitErrorMessage(assign.error) : null}
         confirmLabel="Asignar"
         variant="default"
         pending={assign.isPending}

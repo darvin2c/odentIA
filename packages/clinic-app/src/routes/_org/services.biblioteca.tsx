@@ -3,11 +3,7 @@ import {
   Badge,
   Button,
   Checkbox,
-  cn,
-  Field,
-  FieldError,
   FieldGroup,
-  FieldLabel,
   Input,
   InputGroup,
   InputGroupAddon,
@@ -25,20 +21,28 @@ import {
   DataTable,
   EmptyState,
   ErrorState,
+  fieldErrorMessages,
   FilterBar,
   FormDrawer,
   LoadingState,
   PageHeader,
   SubmitButton,
+  setSubmitErrors,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
   useListSearch,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Library, Plus } from "lucide-react"
-import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { productUi } from "../../product/product-ui"
-import { missingOfficialCode, OfficialCodeField } from "../../components/official-code-field"
+import { missingOfficialCode, OfficialCodeField, officialCodeText } from "../../components/official-code-field"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
@@ -97,6 +101,8 @@ async function fetchAllOwnedTemplateIds(): Promise<Set<string>> {
  * vista: cambiar de «Más usados» a la biblioteca, buscar o paginar no lo borra.
  */
 interface Draft {
+  /** El tratamiento de la biblioteca (`templateId`). */
+  key: string
   chosen: boolean
   /** Nombre que usará la clínica. */
   name: string
@@ -110,25 +116,31 @@ interface Draft {
   code: string | null
 }
 
-/** Fila de la tabla: el servicio con lo elegido y lo que le falta para guardarse. */
+/**
+ * El formulario de la tabla: un borrador por tratamiento que pasó por la
+ * vista (sus campos son `items[i].price`…) y una sola respuesta a «¿Cómo
+ * dice…?» para todo lo que se guarda.
+ */
+interface BatchValues {
+  items: Draft[]
+  priceDisclosure: PriceDisclosure
+}
+
+/** Fila de la tabla: el borrador, su lugar en el formulario y de dónde salió. */
 interface AddRow extends Draft {
-  key: string
+  /** Posición en `items`: nombra sus campos. */
+  index: number
   /** Tipo de tratamiento de «Más usados» del que salió, si aplica. */
   concept: string | null
   /** Ya está en el tarifario de la clínica: no se elige otra vez. */
   owned: boolean
-  nameIssue: string | null
-  priceIssue: string | null
-  /** El precio se marca como error: ya se intentó guardar o lo escrito no vale. */
-  priceFlagged: boolean
-  durationIssue: string | null
-  ready: boolean
 }
 
 /** `listLabel`: el nombre corto de la lista del país («CPMS», «CIE-9-MC»), nunca su clave. */
 function templateDraft(template: TreatmentTemplateItem, listLabel: string | null): Draft {
   const coding = template.codings[0]
   return {
+    key: template.id,
     chosen: false,
     name: template.name,
     price: "",
@@ -140,17 +152,77 @@ function templateDraft(template: TreatmentTemplateItem, listLabel: string | null
   }
 }
 
-function draftOf(row: AddRow): Draft {
-  return {
-    chosen: row.chosen,
-    name: row.name,
-    price: row.price,
-    billingMode: row.billingMode,
-    durationMin: row.durationMin,
-    scope: row.scope,
-    libraryName: row.libraryName,
-    code: row.code,
-  }
+/** Lo escrito en el precio que no se lee como importe; vacío no es error aquí. */
+function priceTextIssue(raw: string, regional: Regional | null): string | undefined {
+  if (!regional) return undefined
+  const price = checkPrice(raw, regional)
+  return price.state === "invalid" ? price.message : undefined
+}
+
+const MISSING_PRICE = "Falta el precio"
+const ROW_DURATION_ISSUE = "Minutos entre 1 y 1440"
+
+/** Un servicio elegido se guarda cuando su precio se lee y su nombre y su duración valen. */
+function isReady(draft: Draft, regional: Regional): boolean {
+  return (
+    checkPrice(draft.price, regional).state === "ok" &&
+    checkName(draft.name) === null &&
+    checkDuration(draft.durationMin).ok
+  )
+}
+
+/**
+ * Lo que se revisa al guardar la tabla, dicho en el campo de su fila. Lo mal
+ * escrito de un servicio elegido no deja guardar. Uno elegido sin precio
+ * espera en la tabla mientras otro esté listo; si no hay ninguno listo, se
+ * pide el precio de cada uno.
+ */
+function checkBatch(
+  value: BatchValues,
+  regional: Regional | null,
+): { form?: string; fields: Record<string, string> } | undefined {
+  if (!regional) return { form: "Falta la moneda de la clínica", fields: {} }
+  const fields: Record<string, string> = {}
+  const waiting: number[] = []
+  let ready = 0
+  value.items.forEach((draft, index) => {
+    if (!draft.chosen) return
+    const name = checkName(draft.name)
+    if (name) fields[`items[${index}].name`] = name
+    const durationOk = checkDuration(draft.durationMin).ok
+    if (!durationOk) fields[`items[${index}].durationMin`] = ROW_DURATION_ISSUE
+    const price = checkPrice(draft.price, regional)
+    if (price.state === "invalid") fields[`items[${index}].price`] = price.message
+    else if (price.state === "empty") waiting.push(index)
+    else if (!name && durationOk) ready += 1
+  })
+  if (Object.keys(fields).length > 0) return { fields }
+  if (ready > 0) return undefined
+  if (waiting.length === 0) return { form: "Elige al menos un servicio y ponle su precio.", fields: {} }
+  for (const index of waiting) fields[`items[${index}].price`] = MISSING_PRICE
+  return { fields }
+}
+
+/** Cómo se llama en la fila cada dato que el servidor señala de un servicio del lote. */
+const BATCH_ROW_FIELDS: Readonly<Record<string, keyof Draft>> = {
+  templateId: "name",
+  kind: "name",
+  name: "name",
+  priceCents: "price",
+  billingMode: "billingMode",
+  durationMin: "durationMin",
+}
+
+/**
+ * El servidor nombra el servicio por su lugar en el cuerpo (`items[2].priceCents`),
+ * donde solo van los listos; `sent[k]` es el lugar de ese servicio en el formulario.
+ */
+function batchField(sent: readonly number[], serverField: string): string | undefined {
+  const match = /^items\[(\d+)\]\.(\w+)/.exec(serverField)
+  if (!match) return undefined
+  const index = sent[Number(match[1])]
+  const field = BATCH_ROW_FIELDS[match[2] ?? ""]
+  return index === undefined || !field ? undefined : `items[${index}].${field}`
 }
 
 interface Regional {
@@ -185,35 +257,6 @@ function checkName(raw: string): string | null {
   if (!name) return "Ponle un nombre"
   if (name.length > 200) return "Máximo 200 caracteres"
   return null
-}
-
-function toRow(
-  key: string,
-  draft: Draft,
-  regional: Regional,
-  extra: { concept: string | null; owned: boolean; attempted: boolean },
-): AddRow {
-  const price = checkPrice(draft.price, regional)
-  const nameIssue = checkName(draft.name)
-  const durationIssue = checkDuration(draft.durationMin).ok ? null : "Minutos entre 1 y 1440"
-  const priceIssue =
-    price.state === "empty" ? "Falta el precio" : price.state === "invalid" ? price.message : null
-  return {
-    ...draft,
-    key,
-    concept: extra.concept,
-    owned: extra.owned,
-    nameIssue,
-    priceIssue,
-    priceFlagged: price.state === "invalid" || (price.state === "empty" && extra.attempted),
-    durationIssue,
-    ready: price.state === "ok" && nameIssue === null && durationIssue === null,
-  }
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? error.message
-  return error instanceof Error ? error.message : common.errors.generic
 }
 
 /* --------------------------------- Página --------------------------------- */
@@ -254,9 +297,6 @@ function AddServicesPage() {
       : "biblioteca"
 
   const [previousCursors, setPreviousCursors] = useState<string[]>([])
-  const [drafts, setDrafts] = useState<Record<string, Draft>>({})
-  /** Tras un guardado, lo que quedó incompleto se marca como pendiente de corregir. */
-  const [attempted, setAttempted] = useState(false)
   /** Cada apertura del servicio propio empieza en blanco. */
   const [ownSession, setOwnSession] = useState(0)
   const [ownOpen, setOwnOpen] = useState(false)
@@ -316,99 +356,46 @@ function AddServicesPage() {
   )
 
   const owned = ownedQuery.data
-  const rows = useMemo<AddRow[]>(() => {
-    if (!regional) return []
-    const inView = new Set(viewTemplates.map((entry) => entry.template.id))
-    const list = viewTemplates.map(({ template, concept }) =>
-      toRow(template.id, drafts[template.id] ?? templateDraft(template, codeList?.label ?? null), regional, {
-        concept,
-        owned: view === "biblioteca" && (owned?.has(template.id) ?? false),
-        attempted,
-      }),
-    )
-    // Lo elegido en otra vista sigue a la vista: lo que se va a guardar —y lo
-    // que quedó incompleto— nunca se pierde de vista.
-    for (const [key, draft] of Object.entries(drafts)) {
-      if (inView.has(key)) continue
-      if (draft.chosen) {
-        list.push(toRow(key, draft, regional, { concept: null, owned: false, attempted }))
-      }
-    }
-    return list
-  }, [attempted, codeList, drafts, owned, regional, view, viewTemplates])
-
-  /** Todo lo elegido, esté o no en la vista: es lo que cuenta y lo que se guarda. */
-  const chosen = useMemo(
-    () =>
-      regional
-        ? Object.entries(drafts)
-            .filter(([, draft]) => draft.chosen)
-            .map(([key, draft]) =>
-              toRow(key, draft, regional, { concept: null, owned: false, attempted }),
-            )
-        : [],
-    [attempted, drafts, regional],
-  )
-  const ready = chosen.filter((row) => row.ready)
-  const missingPrice = chosen.filter((row) => row.price.trim() === "").length
-  const toFix = chosen.length - ready.length - missingPrice
-  const chosenCount = useRef(0)
-  chosenCount.current = chosen.length
-  const dirty = Object.values(drafts).some((draft) => draft.chosen)
-
-  /** Aplica un cambio a la fila; elegir respeta el tope de un guardado. */
-  const editRow = useCallback((row: AddRow, patch: Partial<Draft>) => {
-    if (patch.chosen === true && !row.chosen && chosenCount.current >= MAX_SELECTION) {
-      toast.info(`Guarda estos ${MAX_SELECTION} antes de elegir más`)
-      return
-    }
-    setDrafts((previous) => ({
-      ...previous,
-      [row.key]: { ...(previous[row.key] ?? draftOf(row)), ...patch },
-    }))
-  }, [])
-
-  const openOwn = useCallback(() => {
-    setOwnSession((session) => session + 1)
-    setOwnOpen(true)
-  }, [])
-
+  const saveMutation = useMutation({
+    mutationFn: (body: { items: QuickAddServiceBody[]; priceDisclosure: PriceDisclosure }) =>
+      quickAddServicesApi(body.items, body.priceDisclosure),
+  })
+  /** Lugar de cada servicio enviado en `items` del formulario: el servidor lo nombra por su lugar en el cuerpo. */
+  const sentIndex = useRef<number[]>([])
   /**
    * «¿Cómo dice {receptionName} estos precios?»: una sola pregunta para todo lo que
    * se guarda, con «Precio exacto» marcado (decisión 5 de la fase 4). Después
    * se cambia en Servicios, uno por uno o varios a la vez.
    */
-  const [disclosure, setDisclosure] = useState<PriceDisclosure>("exacto")
-  const disclosureLabelId = useId()
-
-  const saveMutation = useMutation({
-    mutationFn: async (toSave: AddRow[]) => {
+  const form = useAppForm({
+    defaultValues: { items: [], priceDisclosure: "exacto" } as BatchValues,
+    validators: { onSubmit: ({ value }) => checkBatch(value, regional) },
+    onSubmit: async ({ value }) => {
       if (!regional) throw new Error("Falta la moneda de la clínica")
       const items: QuickAddServiceBody[] = []
-      for (const row of toSave) {
-        const price = checkPrice(row.price, regional)
-        const duration = checkDuration(row.durationMin)
-        if (price.state !== "ok" || !duration.ok) continue
+      const sent: number[] = []
+      value.items.forEach((draft, index) => {
+        if (!draft.chosen || !isReady(draft, regional)) return
+        const price = checkPrice(draft.price, regional)
+        if (price.state !== "ok") return
         items.push({
           kind: "template",
-          templateId: row.key,
-          name: row.name.trim(),
+          templateId: draft.key,
+          name: draft.name.trim(),
           priceCents: price.cents,
-          billingMode: row.billingMode,
-          durationMin: duration.minutes,
+          billingMode: draft.billingMode,
+          durationMin: checkDuration(draft.durationMin).minutes,
         })
-      }
-      const result = await quickAddServicesApi(items, disclosure)
-      return { result, savedKeys: toSave.map((row) => row.key) }
-    },
-    onSuccess: async ({ result, savedKeys }) => {
-      // Sale de la tabla solo lo guardado; lo incompleto se queda, marcado.
-      const saved = new Set(savedKeys)
-      const left = chosen.filter((row) => !saved.has(row.key)).length
-      setDrafts((previous) =>
-        Object.fromEntries(Object.entries(previous).filter(([key]) => !saved.has(key))),
-      )
-      setAttempted(left > 0)
+        sent.push(index)
+      })
+      sentIndex.current = sent
+      const result = await saveMutation.mutateAsync({ items, priceDisclosure: value.priceDisclosure })
+      // Sale de la tabla solo lo guardado; lo que espera su precio se queda, marcado en su campo.
+      const saved = new Set(sent.map((index) => value.items[index]?.key))
+      const left = value.items.filter((draft) => !saved.has(draft.key))
+      form.setFieldValue("items", left, { dontUpdateMeta: true, dontValidate: true })
+      const waiting = left.flatMap((draft, index) => (draft.chosen ? [index] : []))
+      setSubmitErrors(form, { fields: Object.fromEntries(waiting.map((index) => [`items[${index}].price`, MISSING_PRICE])) })
       await queryClient.invalidateQueries({ queryKey: ["services"] })
       const created = result.data.created.length
       const already = result.data.existing.length
@@ -420,16 +407,90 @@ function AddServicesPage() {
       if (already > 0) {
         parts.push(already === 1 ? "1 ya estaba entre tus servicios" : `${already} ya estaban entre tus servicios`)
       }
-      if (left > 0) {
-        parts.push(left === 1 ? "queda 1 por completar en la tabla" : `quedan ${left} por completar en la tabla`)
+      if (waiting.length > 0) {
+        parts.push(
+          waiting.length === 1 ? "queda 1 por completar en la tabla" : `quedan ${waiting.length} por completar en la tabla`,
+        )
       }
       toast.success(`${parts.join(" · ")}.`)
     },
-    onError: (error) => {
-      toast.error(errorMessage(error))
-    },
   })
-  const saving = saveMutation.isPending
+  const items = useStore(form.store, (state) => state.values.items)
+  const saving = useStore(form.store, (state) => state.isSubmitting)
+  const submitError = useFormSubmitError(form)
+  const pageRef = useRef<HTMLDivElement>(null)
+  const codeLabel = codeList?.label ?? null
+
+  // Cada tratamiento de la vista tiene su borrador desde que aparece, así sus
+  // campos ya existen al escribir. Lo agregado no se quita: los índices (y
+  // con ellos los campos) no cambian al pasar de una vista a otra.
+  useEffect(() => {
+    const known = new Set(form.state.values.items.map((draft) => draft.key))
+    const missing: Draft[] = []
+    for (const { template } of viewTemplates) {
+      if (known.has(template.id)) continue
+      known.add(template.id)
+      missing.push(templateDraft(template, codeLabel))
+    }
+    if (missing.length === 0) return
+    form.setFieldValue("items", (previous) => [...previous, ...missing], { dontUpdateMeta: true, dontValidate: true })
+  }, [codeLabel, form, viewTemplates])
+
+  const { rows, syncing } = useMemo(() => {
+    const indexByKey = new Map(items.map((draft, index) => [draft.key, index]))
+    const inView = new Set<string>()
+    const list: AddRow[] = []
+    let pending = false
+    for (const { template, concept } of viewTemplates) {
+      const index = indexByKey.get(template.id)
+      const draft = index === undefined ? undefined : items[index]
+      if (index === undefined || !draft) {
+        pending = true
+        continue
+      }
+      if (inView.has(template.id)) continue
+      inView.add(template.id)
+      list.push({
+        ...draft,
+        index,
+        concept,
+        owned: view === "biblioteca" && (owned?.has(template.id) ?? false),
+      })
+    }
+    // Lo elegido en otra vista sigue a la vista: lo que se va a guardar —y lo
+    // que quedó incompleto— nunca se pierde de vista.
+    items.forEach((draft, index) => {
+      if (draft.chosen && !inView.has(draft.key)) list.push({ ...draft, index, concept: null, owned: false })
+    })
+    return { rows: list, syncing: pending }
+  }, [items, owned, view, viewTemplates])
+
+  /** Todo lo elegido, esté o no en la vista: es lo que cuenta y lo que se guarda. */
+  const chosen = useMemo(() => items.filter((draft) => draft.chosen), [items])
+  const ready = regional ? chosen.filter((draft) => isReady(draft, regional)).length : 0
+  const missingPrice = chosen.filter((draft) => draft.price.trim() === "").length
+  const toFix = chosen.length - ready - missingPrice
+  const chosenCount = useRef(0)
+  chosenCount.current = chosen.length
+  const dirty = chosen.length > 0
+
+  /** Elegir (o dejar de elegir) un servicio; elegir respeta el tope de un guardado. */
+  const setChosen = useCallback(
+    (row: AddRow, next: boolean): boolean => {
+      if (next && !row.chosen && chosenCount.current >= MAX_SELECTION) {
+        toast.info(`Guarda estos ${MAX_SELECTION} antes de elegir más`)
+        return false
+      }
+      form.setFieldValue(`items[${row.index}].chosen`, next)
+      return true
+    },
+    [form],
+  )
+
+  const openOwn = useCallback(() => {
+    setOwnSession((session) => session + 1)
+    setOwnOpen(true)
+  }, [])
 
   /** Un cambio de vista conserva lo elegido; solo cambia qué se muestra para elegir. */
   const changeView = (next: View) => {
@@ -454,14 +515,32 @@ function AddServicesPage() {
       id: "servicio",
       header: canIncorporate ? "Servicio, con el nombre que usará la clínica" : "Tratamiento",
       meta: { view: { role: "title" } },
-      cell: ({ row }) => (
-        <ServiceCell
-          row={row.original}
-          editable={canIncorporate}
-          disabled={saving}
-          onName={(name) => editRow(row.original, { name })}
-        />
-      ),
+      cell: ({ row }) => {
+        const item = row.original
+        return (
+          <ServiceCell
+            row={item}
+            nameInput={
+              // Quien administra el tarifario cambia el nombre de lo que elige.
+              canIncorporate && item.chosen ? (
+                // Tras guardar, los borradores que quedan cambian de lugar: el campo se vuelve a montar con su nombre nuevo.
+                <form.AppField key={item.index} name={`items[${item.index}].name`}>
+                  {(field) => (
+                    <field.TextField
+                      label={`Nombre que usará la clínica para ${item.libraryName}`}
+                      hideLabel
+                      className="gap-1"
+                      inputClassName="w-full min-w-48"
+                      maxLength={200}
+                      disabled={saving}
+                    />
+                  )}
+                </form.AppField>
+              ) : null
+            }
+          />
+        )
+      },
     }
     if (!canIncorporate) {
       return [
@@ -490,7 +569,7 @@ function AddServicesPage() {
           <Checkbox
             checked={row.original.chosen}
             disabled={row.original.owned || saving}
-            onCheckedChange={(value) => editRow(row.original, { chosen: value === true })}
+            onCheckedChange={(value) => setChosen(row.original, value === true)}
             aria-label={`Agregar ${row.original.name.trim() || "este servicio"}`}
           />
         ),
@@ -500,57 +579,81 @@ function AddServicesPage() {
         id: "cobro",
         header: "Se cobra",
         meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.owned ? (
-            <span className="text-muted-foreground">—</span>
-          ) : row.original.chosen ? (
-            <ChoiceSelect
-              className="w-40"
-              aria-label={`Cómo se cobra ${row.original.name.trim() || "este servicio"}`}
-              disabled={saving}
-              value={row.original.billingMode}
-              onChange={(event) =>
-                editRow(row.original, { billingMode: event.target.value as BillingMode })
-              }
-            >
-              <option value="treatment">{BILLING_MODE_LABELS.treatment}</option>
-              <option value="session">{BILLING_MODE_LABELS.session}</option>
-            </ChoiceSelect>
-          ) : (
-            BILLING_MODE_LABELS[row.original.billingMode]
-          ),
+        cell: ({ row }) => {
+          const item = row.original
+          if (item.owned) return <span className="text-muted-foreground">—</span>
+          if (!item.chosen) return BILLING_MODE_LABELS[item.billingMode]
+          return (
+            <form.AppField key={item.index} name={`items[${item.index}].billingMode`}>
+              {(field) => (
+                <field.Control
+                  label={`Cómo se cobra ${item.name.trim() || "este servicio"}`}
+                  hideLabel
+                  className="w-40 gap-1"
+                >
+                  {(control) => (
+                    <ChoiceSelect
+                      id={control.id}
+                      name={control.name}
+                      className="w-40"
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      disabled={saving}
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value as BillingMode)}
+                    >
+                      <option value="treatment">{BILLING_MODE_LABELS.treatment}</option>
+                      <option value="session">{BILLING_MODE_LABELS.session}</option>
+                    </ChoiceSelect>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
+          )
+        },
       },
       {
         id: "duracion",
         header: "Duración",
         // Principal: en teléfono también se pone la duración, junto al precio.
         meta: { view: { primary: true } },
-        cell: ({ row }) =>
-          row.original.owned ? (
-            <span className="text-muted-foreground">—</span>
-          ) : row.original.chosen ? (
-            <span className="inline-flex flex-col gap-1">
-              <span className="inline-flex items-center gap-1.5">
-                <Input
-                  className="w-16"
-                  inputMode="numeric"
-                  aria-label={`Duración en minutos de ${row.original.name.trim() || "este servicio"}`}
-                  aria-invalid={row.original.durationIssue !== null || undefined}
-                  disabled={saving}
-                  value={row.original.durationMin}
-                  onChange={(event) => editRow(row.original, { durationMin: event.target.value })}
-                />
-                <span className="text-muted-foreground">min</span>
-              </span>
-              {row.original.durationIssue ? (
-                <span className="text-xs text-destructive">{row.original.durationIssue}</span>
-              ) : null}
-            </span>
-          ) : row.original.durationMin.trim() !== "" ? (
-            `${row.original.durationMin.trim()} min`
-          ) : (
-            <span className="text-muted-foreground">Sin duración</span>
-          ),
+        cell: ({ row }) => {
+          const item = row.original
+          if (item.owned) return <span className="text-muted-foreground">—</span>
+          if (!item.chosen) {
+            return item.durationMin.trim() !== "" ? (
+              `${item.durationMin.trim()} min`
+            ) : (
+              <span className="text-muted-foreground">Sin duración</span>
+            )
+          }
+          return (
+            <form.AppField key={item.index} name={`items[${item.index}].durationMin`}>
+              {(field) => (
+                <field.Control
+                  label={`Duración en minutos de ${item.name.trim() || "este servicio"}`}
+                  hideLabel
+                  className="w-auto gap-1"
+                >
+                  {(control) => (
+                    <div className="inline-flex items-center gap-1.5">
+                      <Input
+                        {...control.props}
+                        className="w-16"
+                        inputMode="numeric"
+                        disabled={saving}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <span className="text-muted-foreground">min</span>
+                    </div>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
+          )
+        },
       },
       {
         id: "precio",
@@ -561,41 +664,47 @@ function AddServicesPage() {
           if (item.owned) return <Badge variant="secondary">Ya está entre tus servicios</Badge>
           const label = item.name.trim() || "este servicio"
           return (
-            <span className="flex flex-col gap-1">
-              <Input
-                className="w-28"
-                inputMode="decimal"
-                placeholder={pricePlaceholder}
-                aria-label={
-                  item.billingMode === "session"
-                    ? `Precio por sesión de ${label}`
-                    : `Precio de ${label}`
-                }
-                aria-invalid={(item.chosen && item.priceFlagged) || undefined}
-                disabled={saving}
-                value={item.price}
-                onChange={(event) => {
-                  const price = event.target.value
-                  // Poner el precio ya es elegirlo: no hace falta marcar antes la casilla.
-                  editRow(item, price.trim() !== "" && !item.chosen ? { price, chosen: true } : { price })
-                }}
-              />
-              {item.chosen && item.priceIssue ? (
-                <span
-                  className={cn(
-                    "text-xs",
-                    item.priceFlagged ? "text-destructive" : "text-muted-foreground",
-                  )}
+            <form.AppField
+              key={item.index}
+              name={`items[${item.index}].price`}
+              // Lo que no se lee como importe se dice al salir del campo: el formato depende de la moneda.
+              validators={{ onBlur: ({ value }) => (item.chosen ? priceTextIssue(value, regional) : undefined) }}
+            >
+              {(field) => (
+                <field.Control
+                  label={item.billingMode === "session" ? `Precio por sesión de ${label}` : `Precio de ${label}`}
+                  hideLabel
+                  className="w-28 gap-1"
+                  description={
+                    item.chosen && field.state.value.trim() === "" && field.state.meta.errors.length === 0
+                      ? MISSING_PRICE
+                      : undefined
+                  }
                 >
-                  {item.priceIssue}
-                </span>
-              ) : null}
-            </span>
+                  {(control) => (
+                    <Input
+                      {...control.props}
+                      className="w-28"
+                      inputMode="decimal"
+                      placeholder={pricePlaceholder}
+                      disabled={saving}
+                      value={field.state.value}
+                      onChange={(event) => {
+                        const price = event.target.value
+                        // Poner el precio ya es elegirlo: no hace falta marcar antes la casilla.
+                        if (price.trim() !== "" && !item.chosen && !setChosen(item, true)) return
+                        field.handleChange(price)
+                      }}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           )
         },
       },
     ]
-  }, [canIncorporate, editRow, priceHeader, pricePlaceholder, saving])
+  }, [canIncorporate, form, priceHeader, pricePlaceholder, regional, saving, setChosen])
 
   const table = useReactTable({
     data: rows,
@@ -670,7 +779,7 @@ function AddServicesPage() {
       />
     )
 
-  const body = !regional ? null : activeQuery.isPending ? (
+  const body = !regional ? null : activeQuery.isPending || (syncing && rows.length === 0) ? (
     <LoadingState />
   ) : activeQuery.isError ? (
     <ErrorState
@@ -720,7 +829,7 @@ function AddServicesPage() {
   )
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
+    <div ref={pageRef} className="flex min-w-0 flex-col gap-4">
       <PageHeader
         title={title}
         subtitle={subtitle}
@@ -779,18 +888,25 @@ function AddServicesPage() {
               className="sticky bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border border-border bg-card p-3 shadow-sm lg:bottom-0"
             >
               {chosen.length > 0 ? (
-                <div className="flex min-w-0 basis-full flex-col gap-1.5">
-                  <span id={disclosureLabelId} className="text-sm font-medium">
-                    ¿Cómo dice {receptionName} estos precios?
-                  </span>
-                  <RadioChips
-                    value={disclosure}
-                    options={PRICE_DISCLOSURE_OPTIONS}
-                    onChange={setDisclosure}
-                    labelledBy={disclosureLabelId}
-                    disabled={saving}
-                  />
-                </div>
+                <form.AppField name="priceDisclosure">
+                  {(field) => (
+                    <field.Group legend={`¿Cómo dice ${receptionName} estos precios?`} className="min-w-0 basis-full gap-1.5">
+                      {(control) => (
+                        <RadioChips
+                          id={control.id}
+                          aria-label={`¿Cómo dice ${receptionName} estos precios?`}
+                          aria-describedby={control.describedBy}
+                          invalid={control.invalid}
+                          onBlur={control.onBlur}
+                          value={field.state.value}
+                          options={PRICE_DISCLOSURE_OPTIONS}
+                          onChange={(next) => field.handleChange(next)}
+                          disabled={saving}
+                        />
+                      )}
+                    </field.Group>
+                  )}
+                </form.AppField>
               ) : null}
               <p className="hidden min-w-0 flex-1 basis-56 text-xs text-muted-foreground sm:block">
                 {codeList
@@ -798,18 +914,28 @@ function AddServicesPage() {
                   : "El nombre es el que verán caja y el paciente; se puede cambiar."}
               </p>
               <p className="text-sm font-medium" role="status">
-                {ready.length === 1 ? "1 listo" : `${ready.length} listos`}
+                {ready === 1 ? "1 listo" : `${ready} listos`}
                 {missingPrice > 0 ? ` · ${missingPrice} sin precio` : ""}
                 {toFix > 0 ? ` · ${toFix} por corregir` : ""}
               </p>
+              {/* Lo que no es de ningún servicio (o de uno que ya no está a la vista), junto al botón. */}
+              {submitError ? (
+                <p role="alert" className="basis-full text-sm text-destructive">
+                  {submitError}
+                </p>
+              ) : null}
               <SubmitButton
                 type="button"
                 className="min-h-11"
-                disabled={ready.length === 0}
                 pending={saving}
-                onClick={() => saveMutation.mutate(ready)}
+                onClick={() =>
+                  void submitForm(form, {
+                    fieldMap: (key) => batchField(sentIndex.current, key),
+                    root: pageRef.current,
+                  })
+                }
               >
-                {`Guardar y activar ${ready.length}`}
+                {`Guardar y activar ${ready}`}
               </SubmitButton>
             </div>
           ) : null}
@@ -828,45 +954,25 @@ function AddServicesPage() {
 
 /* --------------------------------- Celdas --------------------------------- */
 
-/** Nombre que usará la clínica (editable al elegirlo) y de qué servicio se trata. */
+/** Nombre que usará la clínica (su campo, al elegirlo) y de qué servicio se trata. */
 function ServiceCell({
   row,
-  editable,
-  disabled,
-  onName,
+  nameInput,
 }: {
   row: AddRow
-  /** Quien administra el tarifario cambia el nombre de lo que elige. */
-  editable: boolean
-  /** Guardando: el campo se conserva, sin aceptar cambios. */
-  disabled: boolean
-  onName: (name: string) => void
+  /** El campo del nombre cuando se puede cambiar; si no, el nombre se lee. */
+  nameInput: ReactNode
 }) {
   const official = [row.concept, row.code].filter(Boolean).join(" · ")
   return (
     // `whitespace-normal` y tope de ancho: las celdas son `nowrap` y una
     // denominación oficial larga empujaría el precio fuera de la pantalla.
-    <span className="flex min-w-48 max-w-xl flex-col gap-1 whitespace-normal">
-      {row.chosen && editable ? (
-        <>
-          <Input
-            className="w-full min-w-48"
-            aria-label={`Nombre que usará la clínica para ${row.libraryName}`}
-            aria-invalid={row.nameIssue !== null || undefined}
-            maxLength={200}
-            disabled={disabled}
-            value={row.name}
-            onChange={(event) => onName(event.target.value)}
-          />
-          {row.nameIssue ? <span className="text-xs text-destructive">{row.nameIssue}</span> : null}
-        </>
-      ) : (
-        <span className="font-medium break-words">{row.name}</span>
-      )}
+    <div className="flex min-w-48 max-w-xl flex-col gap-1 whitespace-normal">
+      {nameInput ?? <span className="font-medium break-words">{row.name}</span>}
       {official ? (
         <span className="text-xs font-normal break-words text-muted-foreground">{official}</span>
       ) : null}
-    </span>
+    </div>
   )
 }
 
@@ -876,6 +982,66 @@ const BILLING_OPTIONS: ReadonlyArray<{ value: BillingMode; label: string }> = [
 ]
 
 /* ----------------------------- Servicio propio ----------------------------- */
+
+interface OwnServiceValues {
+  name: string
+  officialCode: OfficialCoding | null
+  /** La especialidad de la clínica (una sola lista, ADR 0039). */
+  specialtyId: string
+  scope: string
+  /** Lo tratado queda dibujado: lo que deja en la pieza al completarse. */
+  leavesCondition: string
+  leavesVariant: string
+  billingMode: BillingMode
+  price: string
+  durationMin: string
+}
+
+const OWN_SERVICE_DEFAULTS: OwnServiceValues = {
+  name: "",
+  officialCode: null,
+  specialtyId: "",
+  scope: "general",
+  leavesCondition: "",
+  leavesVariant: "",
+  billingMode: "treatment",
+  price: "",
+  durationMin: "",
+}
+
+/** Lo que se revisa antes de crear el servicio propio, con los mismos límites que la API. */
+function ownServiceSchema(regional: Regional, codeList: { codeName: string; required: boolean } | null) {
+  return z.object({
+    name: z.string().trim().min(1, "Ponle un nombre").max(200, "Máximo 200 caracteres"),
+    officialCode: z.custom<OfficialCoding | null>().superRefine((value, ctx) => {
+      const issue = missingOfficialCode(codeList, value)
+      if (issue) ctx.addIssue({ code: "custom", message: issue })
+    }),
+    specialtyId: z.string().min(1, "Elige la especialidad"),
+    scope: z.string(),
+    leavesCondition: z.string(),
+    leavesVariant: z.string(),
+    billingMode: z.enum(["treatment", "session"]),
+    price: z.string().superRefine((value, ctx) => {
+      const price = checkPrice(value, regional)
+      if (price.state === "empty") ctx.addIssue({ code: "custom", message: "Pon el precio (0 si no tiene costo)" })
+      else if (price.state === "invalid") ctx.addIssue({ code: "custom", message: price.message })
+    }),
+    durationMin: z.string().refine((value) => checkDuration(value).ok, "Minutos enteros entre 1 y 1440"),
+  })
+}
+
+/**
+ * Cómo se llama en el cajón cada dato que nombra `POST /api/services`; lo que
+ * no aparece aquí se llama igual (`name`, `specialtyId`, `scope`,
+ * `officialCode`, `billingMode`, `durationMin`).
+ */
+const OWN_SERVICE_FIELDS: Readonly<Record<string, keyof OwnServiceValues>> = {
+  priceCents: "price",
+  leavesFinding: "leavesCondition",
+  "leavesFinding.condition": "leavesCondition",
+  "leavesFinding.variant": "leavesVariant",
+}
 
 /**
  * Servicio propio (tablero 26): lo que la clínica ofrece y la biblioteca no
@@ -893,207 +1059,202 @@ function OwnServiceDrawer({
 }) {
   const id = useId()
   const queryClient = useQueryClient()
-  const [name, setName] = useState("")
-  // La especialidad de la clínica (una sola lista, ADR 0039).
-  const [specialtyId, setSpecialtyId] = useState("")
   const specialtiesQuery = useClinicSpecialties({ activeOnly: true, enabled: open })
-  const [scope, setScope] = useState<string>("general")
-  const [billingMode, setBillingMode] = useState<BillingMode>("treatment")
-  const [price, setPrice] = useState("")
-  const [durationMin, setDurationMin] = useState("")
-  // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
-  const [leavesCondition, setLeavesCondition] = useState("")
-  const [leavesVariant, setLeavesVariant] = useState("")
   // Lo que el servicio deja al completarse, si el producto lo registra (odentIA: «Deja en la pieza»).
   const leaves = productUi().services.leaves
   // El código de la lista del país (tablero 3): obligatorio, opcional o sin campo.
   const codeList = useClinicalProfile().services
-  const [officialCode, setOfficialCode] = useState<OfficialCoding | null>(null)
-  const [submitted, setSubmitted] = useState(false)
+  const codeText = officialCodeText(codeList)
+  const schema = useMemo(() => ownServiceSchema(regional, codeList), [regional, codeList])
+  const saveMutation = useMutation({ mutationFn: createServiceApi })
 
-  const nameIssue = checkName(name)
-  const specialtyIssue = specialtyId ? null : "Elige la especialidad"
-  const codeIssue = missingOfficialCode(codeList, officialCode)
-  const priceCheck = checkPrice(price, regional)
-  const priceIssue =
-    priceCheck.state === "invalid"
-      ? priceCheck.message
-      : priceCheck.state === "empty" && submitted
-        ? "Pon el precio (0 si no tiene costo)"
-        : null
-  const duration = checkDuration(durationMin)
-  const durationIssue = duration.ok ? null : "Minutos enteros entre 1 y 1440"
-  const isDirty =
-    name !== "" ||
-    specialtyId !== "" ||
-    scope !== "general" ||
-    billingMode !== "treatment" ||
-    price !== "" ||
-    durationMin !== "" ||
-    leavesCondition !== "" ||
-    officialCode !== null
-
-  const saveMutation = useMutation({
-    mutationFn: (priceCents: number) =>
-      createServiceApi({
-        name: name.trim(),
-        specialtyId,
-        scope,
-        priceCents,
-        billingMode,
-        durationMin: duration.minutes,
-        leavesFinding: leaves?.body(leavesCondition, leavesVariant) ?? null,
-        officialCode: officialCode?.code ?? null,
-      }),
-    onSuccess: async (result) => {
+  const form = useAppForm({
+    defaultValues: OWN_SERVICE_DEFAULTS,
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const price = checkPrice(value.price, regional)
+      if (price.state !== "ok") throw new Error("Revisa el precio")
+      const result = await saveMutation.mutateAsync({
+        name: value.name.trim(),
+        specialtyId: value.specialtyId,
+        scope: value.scope,
+        priceCents: price.cents,
+        billingMode: value.billingMode,
+        durationMin: checkDuration(value.durationMin).minutes,
+        leavesFinding: leaves?.body(value.leavesCondition, value.leavesVariant) ?? null,
+        officialCode: value.officialCode?.code ?? null,
+      })
       await queryClient.invalidateQueries({ queryKey: ["services"] })
       toast.success(`«${result.data.name}» ya está activo entre tus servicios`)
       onClose()
     },
   })
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    setSubmitted(true)
-    if (nameIssue || specialtyIssue || codeIssue || durationIssue || priceCheck.state !== "ok") return
-    saveMutation.mutate(priceCheck.cents)
-  }
+  const surface = useFormSurface(form, { fieldMap: OWN_SERVICE_FIELDS })
+  const scope = useStore(form.store, (state) => state.values.scope)
+  const billingMode = useStore(form.store, (state) => state.values.billingMode)
+  const specialtyOptions = (specialtiesQuery.data?.data ?? []).map((option) => ({
+    value: option.id,
+    label: option.name,
+  }))
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title="Servicio propio"
       description="Lo que tu clínica ofrece y la biblioteca no trae. Queda activo al guardarlo."
-      error={saveMutation.isError ? errorMessage(saveMutation.error) : null}
-      isDirty={isDirty}
-      isSubmitting={saveMutation.isPending}
       submitLabel="Guardar y activar"
       onClose={onClose}
-      onSubmit={submit}
     >
       <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor={`${id}-nombre`}>Nombre</FieldLabel>
-          <Input
-            id={`${id}-nombre`}
-            value={name}
-            maxLength={200}
-            aria-invalid={(submitted && nameIssue !== null) || undefined}
-            onChange={(event) => setName(event.target.value)}
-          />
-          {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
-        </Field>
-        <OfficialCodeField
-          value={officialCode}
-          onChange={setOfficialCode}
-          error={submitted ? codeIssue : null}
-        />
-        <Field>
-          <FieldLabel htmlFor={`${id}-especialidad`}>Especialidad</FieldLabel>
-          <ChoiceSelect
-            id={`${id}-especialidad`}
-            value={specialtyId}
-            placeholder={specialtiesQuery.isPending ? "Cargando…" : "Elige la especialidad"}
-            disabled={specialtiesQuery.isPending}
-            aria-invalid={(submitted && specialtyIssue !== null) || undefined}
-            onChange={(event) => setSpecialtyId(event.target.value)}
-          >
-            {(specialtiesQuery.data?.data ?? []).map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </ChoiceSelect>
-          {submitted && specialtyIssue ? <FieldError>{specialtyIssue}</FieldError> : null}
-        </Field>
+        <form.AppField name="name">{(field) => <field.TextField label="Nombre" maxLength={200} />}</form.AppField>
+        {codeText ? (
+          <form.AppField name="officialCode">
+            {(field) => (
+              <field.Control label={codeText.label} description={codeText.description}>
+                {(control) => (
+                  <OfficialCodeField
+                    id={control.id}
+                    value={field.state.value}
+                    onChange={(next) => field.handleChange(next)}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        ) : null}
+        <form.AppField name="specialtyId">
+          {(field) => (
+            <field.SelectField
+              label="Especialidad"
+              options={specialtyOptions}
+              placeholder={specialtiesQuery.isPending ? "Cargando…" : "Elige la especialidad"}
+              disabled={specialtiesQuery.isPending}
+            />
+          )}
+        </form.AppField>
         {/* Sin «dónde» (latidIA, decisión 4 del issue 229), todo servicio es general. */}
         {productUi().site ? (
-          <Field>
-            <span id={`${id}-donde`} className="text-sm font-medium">
-              Dónde se hace
-            </span>
-            <RadioChips
-              labelledBy={`${id}-donde`}
-              value={scope}
-              options={SERVICE_PLACE_OPTIONS}
-              onChange={(next) => {
-                setScope(next)
-                // Lo que deja en la pieza depende de dónde se hace.
-                setLeavesCondition("")
-                setLeavesVariant("")
-              }}
-            />
-            <p className="text-xs text-muted-foreground">
-              Así la atención sabe qué pedir al registrarlo.
-            </p>
-          </Field>
+          <form.AppField name="scope">
+            {(field) => (
+              <field.Group legend="Dónde se hace" description="Así la atención sabe qué pedir al registrarlo.">
+                {(control) => (
+                  <RadioChips
+                    id={control.id}
+                    aria-label="Dónde se hace"
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    options={SERVICE_PLACE_OPTIONS}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      // Lo que deja en la pieza depende de dónde se hace.
+                      form.setFieldValue("leavesCondition", "")
+                      form.setFieldValue("leavesVariant", "")
+                    }}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
         ) : null}
         {leaves ? (
-          <leaves.Field
-            idPrefix={id}
-            scope={scope}
-            condition={leavesCondition}
-            variant={leavesVariant}
-            onChange={(nextCondition, nextVariant) => {
-              setLeavesCondition(nextCondition)
-              setLeavesVariant(nextVariant)
-            }}
-          />
-        ) : null}
-        <Field>
-          <span id={`${id}-cobro`} className="text-sm font-medium">
-            Cómo se cobra
-          </span>
-          <RadioChips
-            labelledBy={`${id}-cobro`}
-            value={billingMode}
-            options={BILLING_OPTIONS}
-            onChange={setBillingMode}
-          />
-          <p className="text-xs text-muted-foreground">
-            Por sesión: se cobra el precio en cada visita atendida.
-          </p>
-        </Field>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor={`${id}-precio`}>
-              {billingMode === "session" ? "Precio por sesión" : "Precio"}
-            </FieldLabel>
-            <InputGroup>
-              <InputGroupAddon align="inline-start">
-                <InputGroupText>{currencySymbol(regional.currency, regional.locale)}</InputGroupText>
-              </InputGroupAddon>
-              <InputGroupInput
-                id={`${id}-precio`}
-                inputMode="decimal"
-                placeholder={formatMoneyInput(0, regional.currency, regional.locale)}
-                aria-invalid={priceIssue !== null || undefined}
-                value={price}
-                onChange={(event) => setPrice(event.target.value)}
-              />
-            </InputGroup>
-            {priceIssue ? (
-              <FieldError>{priceIssue}</FieldError>
-            ) : (
-              <p className="text-xs text-muted-foreground">Usa 0 si no tiene costo.</p>
+          <form.AppField name="leavesCondition">
+            {(condition) => (
+              <form.AppField name="leavesVariant">
+                {(variant) => (
+                  <leaves.Field
+                    idPrefix={id}
+                    scope={scope}
+                    condition={condition.state.value}
+                    variant={variant.state.value}
+                    errors={{
+                      condition: fieldErrorMessages(condition.state.meta.errors)[0] ?? null,
+                      variant: fieldErrorMessages(variant.state.meta.errors)[0] ?? null,
+                    }}
+                    onBlur={() => {
+                      condition.handleBlur()
+                      variant.handleBlur()
+                    }}
+                    onChange={(nextCondition, nextVariant) => {
+                      condition.handleChange(nextCondition)
+                      variant.handleChange(nextVariant)
+                    }}
+                  />
+                )}
+              </form.AppField>
             )}
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${id}-duracion`}>Duración</FieldLabel>
-            <InputGroup>
-              <InputGroupInput
-                id={`${id}-duracion`}
-                inputMode="numeric"
-                aria-invalid={durationIssue !== null || undefined}
-                value={durationMin}
-                onChange={(event) => setDurationMin(event.target.value)}
-              />
-              <InputGroupAddon align="inline-end">
-                <InputGroupText>min</InputGroupText>
-              </InputGroupAddon>
-            </InputGroup>
-            {durationIssue ? <FieldError>{durationIssue}</FieldError> : null}
-          </Field>
+          </form.AppField>
+        ) : null}
+        <form.AppField name="billingMode">
+          {(field) => (
+            <field.Group legend="Cómo se cobra" description="Por sesión: se cobra el precio en cada visita atendida.">
+              {(control) => (
+                <RadioChips
+                  id={control.id}
+                  aria-label="Cómo se cobra"
+                  aria-describedby={control.describedBy}
+                  invalid={control.invalid}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  options={BILLING_OPTIONS}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <form.AppField
+            name="price"
+            // Lo que no se lee como importe se dice al salir del campo: el formato depende de la moneda.
+            validators={{ onBlur: ({ value }) => priceTextIssue(value, regional) }}
+          >
+            {(field) => (
+              <field.Control
+                label={billingMode === "session" ? "Precio por sesión" : "Precio"}
+                description="Usa 0 si no tiene costo."
+              >
+                {(control) => (
+                  <InputGroup>
+                    <InputGroupAddon align="inline-start">
+                      <InputGroupText>{currencySymbol(regional.currency, regional.locale)}</InputGroupText>
+                    </InputGroupAddon>
+                    <InputGroupInput
+                      {...control.props}
+                      inputMode="decimal"
+                      placeholder={formatMoneyInput(0, regional.currency, regional.locale)}
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                  </InputGroup>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="durationMin">
+            {(field) => (
+              <field.Control label="Duración">
+                {(control) => (
+                  <InputGroup>
+                    <InputGroupInput
+                      {...control.props}
+                      inputMode="numeric"
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupText>min</InputGroupText>
+                    </InputGroupAddon>
+                  </InputGroup>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         </div>
       </FieldGroup>
     </FormDrawer>

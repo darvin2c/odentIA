@@ -64,10 +64,18 @@ const words = (field: string, max: number) =>
 
 const dateOnly = z.string("El vencimiento no es una fecha válida").regex(/^\d{4}-\d{2}-\d{2}$/, "El vencimiento no es una fecha válida")
 
-const quantity = z.number("La cantidad debe ser un número").int("La cantidad debe ser un número entero")
+// Los mismos topes que el servicio: cada uno se dice en su campo (y en su fila).
+const quantity = z
+  .number("La cantidad debe ser un número")
+  .int("La cantidad debe ser un número entero")
+  .max(1_000_000_000, "La cantidad admite hasta 1000000000")
 const positive = quantity.positive("La cantidad debe ser mayor que cero")
 const cents = (field: string) =>
-  z.number(`${field} no es un importe válido`).int(`${field} no es un importe válido`).min(0, `${field} no puede ser negativo`)
+  z
+    .number(`${field} no es un importe válido`)
+    .int(`${field} no es un importe válido`)
+    .min(0, `${field} no puede ser negativo`)
+    .max(2_147_483_647, `${field} es demasiado alto`)
 const formKey = z.uuid(RETRY)
 const note = words("El detalle", 500).nullish()
 
@@ -140,6 +148,7 @@ const importRow = z.object(
     onHand: sheetValue,
     minQuantity: sheetValue,
     productId: z.uuid("El producto elegido no es válido").nullish(),
+    line: z.number("La fila no es válida").int("La fila no es válida").min(1, "La fila no es válida").nullish(),
   },
   "Una fila de la lista no es válida",
 )
@@ -164,7 +173,8 @@ const countInput = z.object(
             counted: z
               .number("Lo que hay debe ser un número")
               .int("Lo que hay debe ser un número entero")
-              .min(0, "Lo que hay no puede ser negativo"),
+              .min(0, "Lo que hay no puede ser negativo")
+              .max(1_000_000_000, "Lo que hay admite hasta 1000000000"),
           },
           "Un producto del conteo no es válido",
         ),
@@ -180,7 +190,11 @@ const writeOffInput = z.object({ branchId: z.uuid("Elige la sede"), idempotencyK
 
 const adjustInput = z.object(
   {
-    counted: z.number("Cuántos hay debe ser un número").int("Cuántos hay debe ser un número entero").min(0, "Cuántos hay no puede ser negativo"),
+    counted: z
+      .number("Cuántos hay debe ser un número")
+      .int("Cuántos hay debe ser un número entero")
+      .min(0, "Cuántos hay no puede ser negativo")
+      .max(1_000_000_000, "Cuántos hay admite hasta 1000000000"),
     reason: z.enum(["conteo", "se_dano", "vencio", "otro"], "Elige por qué se ajusta"),
     note,
     idempotencyKey: formKey,

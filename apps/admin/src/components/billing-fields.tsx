@@ -52,24 +52,37 @@ function supportedCurrencies(): string[] {
   return ["PEN", "USD", "EUR", "MXN", "CLP", "COP", "ARS"]
 }
 
-/** Moneda por su nombre; se guarda el código ISO 4217. */
+/**
+ * Moneda por su nombre; se guarda el código ISO 4217. No pinta etiqueta ni
+ * error: dentro de `field.Control` recibe `id`, `invalid`, `aria-describedby`
+ * y `onBlur` del campo.
+ */
 export function CurrencySelect({
   id,
   value,
   onChange,
+  invalid,
+  onBlur,
+  disabled,
+  "aria-describedby": describedBy,
 }: {
   id: string
   value: string
   onChange: (code: string) => void
+  invalid?: boolean
+  onBlur?: () => void
+  disabled?: boolean
+  "aria-describedby"?: string
 }) {
   return (
     <Select
       value={value}
+      disabled={disabled}
       onValueChange={(code) => {
         if (code) onChange(code)
       }}
     >
-      <SelectTrigger id={id}>
+      <SelectTrigger id={id} aria-invalid={invalid || undefined} aria-describedby={describedBy} onBlur={onBlur}>
         <SelectValue placeholder="Elige la moneda" />
       </SelectTrigger>
       <SelectContent>

@@ -1,9 +1,9 @@
-import { Button, cn, FieldLabel, RadioGroup, RadioGroupItem } from "@odentia/ui"
+import { Button, cn, FieldLabel, FieldLegend, FieldSet, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ConfirmDialog, ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { ConfirmDialog, ErrorState, LoadingState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { useCan } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PatientFull } from "../../lib/patients"
@@ -109,7 +109,8 @@ export function MessagePermissionsSection({
   })
   if (!contactId) return null
   const rows = query.data?.data ?? []
-  const error = save.error instanceof ApiError ? (save.error.shape.message ?? "No se pudo guardar") : save.error ? "No se pudo guardar" : null
+  // Siempre hay una opción elegida: lo que rechace el servidor es del cambio entero, junto a «Guardar».
+  const error = save.error ? submitErrorMessage(save.error) : null
 
   const rowOf = (purpose: Purpose): MessagePermission =>
     rows.find((candidate) => candidate.purpose === purpose) ?? { purpose, granted: null, source: null, at: null }
@@ -120,20 +121,20 @@ export function MessagePermissionsSection({
     const granted = rowOf(purpose).granted
     return purpose === "novedades" ? granted === true : granted !== false
   }
-  const howId = `${uid}-como`
+  const errorId = `${uid}-error`
   const who = recipientName ?? "la persona"
 
   /** Cómo lo dijo, antes de guardar un cambio. */
   const howChooser = (choice: Choice) =>
     editing && editing.choice === choice ? (
-      <div className="flex flex-col gap-2">
-        <span id={howId} className="font-medium">
+      <FieldSet className="gap-2">
+        <FieldLegend variant="label" className="mb-0 font-medium">
           {editing.receive ? "¿Cómo lo pidió?" : "¿Cómo pidió dejar de recibirlos?"}
-        </span>
+        </FieldLegend>
         <RadioGroup
-          aria-labelledby={howId}
           className="flex flex-wrap gap-2"
           value={editing.how}
+          aria-describedby={error && !confirmNothing ? errorId : undefined}
           onValueChange={(how) => setEditing({ ...editing, how: how as How })}
         >
           {HOW.map((option) => (
@@ -149,8 +150,8 @@ export function MessagePermissionsSection({
             </FieldLabel>
           ))}
         </RadioGroup>
-        {error ? (
-          <p role="alert" className="text-destructive">
+        {error && !confirmNothing ? (
+          <p id={errorId} role="alert" className="text-destructive">
             {error}
           </p>
         ) : null}
@@ -166,7 +167,7 @@ export function MessagePermissionsSection({
             Cancelar
           </Button>
         </div>
-      </div>
+      </FieldSet>
     ) : null
 
   return (
@@ -273,10 +274,13 @@ export function MessagePermissionsSection({
       </p>
       <ConfirmDialog
         open={confirmNothing}
-        onClose={() => setConfirmNothing(false)}
+        onClose={() => {
+          if (!save.isPending) setConfirmNothing(false)
+        }}
         title={`¿${who} no quiere ningún mensaje de la clínica?`}
         description="Dejarán de llegarle también los avisos de sus citas y papeles: si su cita cambia, habrá que llamarla. Lo verás en su página."
         confirmLabel="Sí, no enviarle nada"
+        error={confirmNothing ? error : null}
         pending={save.isPending}
         onConfirm={() => {
           if (editing) save.mutate(editing)

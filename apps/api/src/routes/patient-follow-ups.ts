@@ -16,8 +16,8 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 const createInput = z
   .object({
     kind: z.enum(["tratamiento", "mantenimiento"]),
-    title: z.string().trim().min(1).max(200),
-    dueAt: z.iso.datetime({ offset: true }),
+    title: z.string().trim().min(1, "Escribe el título del control.").max(200),
+    dueAt: z.iso.datetime({ offset: true, error: "Elige la fecha prevista en el calendario." }),
     instructions: z.string().max(4000).nullish(),
     planItemId: z.uuid().nullish(),
     encounterProcedureId: z.uuid().nullish(),
@@ -45,9 +45,14 @@ const scheduleInput = z.union([
     .strict(),
 ])
 const completeInput = z
-  .object({ encounterId: z.uuid(), outcome: z.string().trim().min(1).max(2000) })
+  .object({
+    encounterId: z.uuid("Elige la atención finalizada."),
+    outcome: z.string().trim().min(1, "Escribe el resultado del control.").max(2000),
+  })
   .strict()
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({ reason: z.string().trim().min(1, "Escribe el motivo de la cancelación.").max(2000) })
+  .strict()
 const listInput = z
   .object({ status: z.enum(["pendiente", "programado", "realizado", "cancelado"]).optional() })
   .strict()

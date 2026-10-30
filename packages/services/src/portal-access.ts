@@ -18,7 +18,7 @@ import {
 } from "@simplewebauthn/server"
 import { and, desc, eq, inArray, isNull } from "drizzle-orm"
 import { createHash, randomBytes } from "node:crypto"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import {
   ensurePortalGrant,
@@ -1088,11 +1088,9 @@ async function deliverPortalAccess(
   }
   const ready = await whatsappReady(tx, orgId, input.contactId)
   if (!ready) {
-    throw new ServiceError(
-      "PORTAL_NO_WINDOW",
-      409,
-      "No escribió por WhatsApp en las últimas 24 horas: dale acceso con el QR o pídele que escriba primero",
-    )
+    const message =
+      "No escribió por WhatsApp en las últimas 24 horas: dale acceso con el QR o pídele que escriba primero"
+    throw new ServiceError("PORTAL_NO_WINDOW", 409, message, { delivery: message })
   }
   const issued = await issuePortalLink(
     tx,
@@ -1124,10 +1122,11 @@ export async function givePortalAccess(
   if (!policy.enabled) throw portalDisabled()
   const candidate = (await portalCandidates(tx, orgId, patientId)).find((item) => item.contactId === input.contactId)
   if (!candidate) {
-    throw validation("Entra la propia persona si es mayor de edad, o su representante legal si es menor")
+    throw invalidField("contactId", "Entra la propia persona si es mayor de edad, o su representante legal si es menor")
   }
-  if (!candidate.document) throw validation("Primero completa su documento")
-  if (input.identityChecked !== true) throw validation("Marca que comprobaste su identidad con su documento")
+  if (!candidate.document) throw invalidField("contactId", "Primero completa su documento")
+  if (input.identityChecked !== true)
+    throw invalidField("identityChecked", "Marca que comprobaste su identidad con su documento")
   const scope = await assertScope(tx, orgId, patientId, input.scope)
   assertShareRights(scope, deliver)
   const grant = await createPortalGrant(tx, orgId, actorUserId, {

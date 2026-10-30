@@ -21,6 +21,7 @@ import {
   listBookingLinkSlots,
   registerFromBookingLink,
   reserveBookingLink,
+  issueFields,
   ServiceError,
   setPersonalLinkMessages,
   signPersonalLinkConsent,
@@ -103,7 +104,7 @@ const decisionBody = z.strictObject({
 })
 const signBody = z.strictObject({
   token,
-  docNumber: shortText(40).min(1),
+  docNumber: shortText(40).min(1, "Escribe tu documento."),
   comprehensionConfirmed: z.boolean(),
   signatureData: z.unknown(),
 })
@@ -194,7 +195,7 @@ export function createPublicBookingRoute(deps: {
       if (error instanceof ServiceError) {
         if (error.status === 404) return unavailable(c)
         console.error(`public-booking: rechazo ${error.code}: ${error.message.slice(0, 200)}`)
-        return c.json(errorBody(c, error.code, error.message), error.status)
+        return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
       }
       throw error
     }
@@ -244,7 +245,8 @@ export function createPublicBookingRoute(deps: {
 
   app.post("/:slug/registration", async (c) => {
     const body = registrationBody.safeParse(await bodyOf(c))
-    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos"), 400)
+    // Lo escrito por la persona se señala en su campo (`answers.…`); el enlace y el envío no son de ningún campo.
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos", issueFields(body.error.issues.filter((issue) => issue.path[0] === "answers"))), 400)
     const { token: linkToken, ...input } = body.data
     return answer(c, 201, () =>
       inOrg(c, (tx, orgId) => registerFromBookingLink(tx, orgId, linkToken, input)).catch(async (error: unknown) => {
@@ -303,9 +305,18 @@ export function createPublicBookingRoute(deps: {
 
   app.post("/:slug/data", async (c) => {
     const body = dataBody.safeParse(await bodyOf(c))
-    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos"), 400)
+    // Lo escrito se señala en su campo (`data.…`, `representative.…`); el enlace no es de ningún campo.
+    if (!body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tus datos", issueFields(body.error.issues.filter((issue) => issue.path[0] !== "token"))), 400)
     const { token: linkToken, ...input } = body.data
-    return answer(c, 201, () => inOrg(c, (tx, orgId) => submitPersonalLinkData(tx, orgId, linkToken, input)))
+    return answer(c, 201, () =>
+      inOrg(c, (tx, orgId) => submitPersonalLinkData(tx, orgId, linkToken, input)).catch((error: unknown) => {
+        // Un documento que resultó ser de otra persona no se le dice a quien escribe (ni de quién es): texto neutro.
+        if (error instanceof ServiceError && error.code === "DUPLICATE_DOCUMENT") {
+          throw new ServiceError("DATA_NOT_SAVED", 409, "No pudimos guardar tus datos. Escríbenos por el chat y te ayudamos.")
+        }
+        throw error
+      }),
+    )
   })
 
   // Tu presupuesto: «Ver y responder».
@@ -328,7 +339,9 @@ export function createPublicBookingRoute(deps: {
   app.post("/:slug/consents/:consentId/sign", async (c) => {
     const params = z.object({ consentId: z.uuid() }).safeParse({ consentId: c.req.param("consentId") })
     const body = signBody.safeParse(await bodyOf(c))
-    if (!params.success || !body.success) return c.json(errorBody(c, "VALIDATION", "Revisa tu firma"), 400)
+    // El documento escrito va a su campo; el enlace y la firma no se escriben aquí.
+    if (!params.success || !body.success)
+      return c.json(errorBody(c, "VALIDATION", "Revisa tu firma", body.success ? undefined : issueFields(body.error.issues.filter((issue) => issue.path[0] === "docNumber"))), 400)
     const { token: linkToken, ...input } = body.data
     // Desde dónde firma: la evidencia de una firma a distancia (#47).
     const evidence = { ip: address(c) ?? null, userAgent: c.req.header("user-agent") ?? null }
@@ -378,7 +391,7 @@ export function createPublicBookingRoute(deps: {
         },
       })
     } catch (error) {
-      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message), error.status)
+      if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
       throw error
     }
   })
@@ -392,7 +405,7 @@ export function createPublicBookingRoute(deps: {
     } catch (error) {
       if (error instanceof ServiceError) {
         if (error.status === 404) return unavailable(c)
-        return c.json(errorBody(c, error.code, error.message), error.status)
+        return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
       }
       throw error
     }

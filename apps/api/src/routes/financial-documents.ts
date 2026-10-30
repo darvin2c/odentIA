@@ -67,14 +67,14 @@ const sendInput = z
     documentType,
     documentId: z.uuid(),
     recipientContactId: z.uuid().nullish(),
-    connectionId: z.uuid(),
-    message: z.string().max(500).nullish(),
+    connectionId: z.uuid({ error: "Elige el canal de envío" }),
+    message: z.string().max(500, { error: "El mensaje admite hasta 500 caracteres" }).nullish(),
     savePreferredChannel: z.boolean().optional(),
     paper: z.enum(["A4", "Letter"]).nullish(),
     // Clave del intento: reenviar con la misma no manda el documento dos veces.
     requestId: z.uuid().nullish(),
     // Otro correo escrito en el momento: exige confirmación explícita de quien envía.
-    otherEmail: z.string().trim().max(200).nullish(),
+    otherEmail: z.string().trim().max(200, { error: "El correo no tiene un formato válido" }).nullish(),
     confirmOtherEmail: z.boolean().optional(),
   })
   .strict()
@@ -83,7 +83,11 @@ const recipientEmailInput = z
   .object({
     documentType,
     recipientContactId: z.uuid(),
-    email: z.string().trim().min(3).max(200),
+    email: z
+      .string()
+      .trim()
+      .min(3, { error: "El correo no tiene un formato válido" })
+      .max(200, { error: "El correo no tiene un formato válido" }),
   })
   .strict()
 
@@ -99,9 +103,9 @@ const healthSendInput = z
   .object({
     documentType: healthDocumentType,
     documentId: z.uuid(),
-    recipientContactId: z.uuid().nullish(),
-    connectionId: z.uuid(),
-    message: z.string().max(500).nullish(),
+    recipientContactId: z.uuid({ error: "Elige a quién enviarlo." }).nullish(),
+    connectionId: z.uuid({ error: "Elige por dónde enviarlo." }),
+    message: z.string().max(500, { error: "El mensaje admite hasta 500 caracteres." }).nullish(),
     requestId: z.uuid().nullish(),
   })
   .strict()

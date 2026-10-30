@@ -75,8 +75,8 @@ const visitorMessageInput = z.object({
 const sessionInput = z.object({ site: z.string().trim().min(1).max(300), ticket: z.string().trim().min(1).max(1000) })
 
 const contactInput = z.object({
-  whatsapp: z.string().trim().max(40).nullish(),
-  email: z.string().trim().max(320).nullish(),
+  whatsapp: z.string("Escribe tu WhatsApp.").trim().max(40, "Tu WhatsApp tiene como mucho 40 caracteres.").nullish(),
+  email: z.string("Escribe tu correo.").trim().max(320, "Tu correo tiene como mucho 320 caracteres.").nullish(),
 })
 
 /**
@@ -181,7 +181,8 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
     const tooMany = await limited(c, `webchat:session:${found.orgId}:${addressOf(deps, c)}`, LIMITS.session)
     if (tooMany) return tooMany
     const parsed = sessionInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Falta el sitio"), 400)
+    // El sitio lo pone la ventana del chat, no la persona: sin él, el chat no está disponible aquí.
+    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", UNAVAILABLE), 400)
     if (found.connection.status !== "active") return c.json(errorBody(c, "WEBCHAT_DISABLED", UNAVAILABLE), 409)
     // El sitio tiene que ser el que vio la API al cargar `chat.js` (su ticket), no uno escrito en la dirección.
     const seen = readWebchatSiteTicket(found.sessionKey, parsed.data.ticket)
@@ -198,7 +199,7 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
     const read = await session(c, found)
     if (read instanceof Response) return read
     const parsed = visitorMessageInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Revisa el mensaje"), 400)
+    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Revisa el mensaje: escribe algo, como mucho 2000 caracteres.", { text: "Revisa el mensaje: escribe algo, como mucho 2000 caracteres." }), 400)
     const tooMany = await limited(c, `webchat:post:${found.connection.id}:${read.sessionId}`, LIMITS.post)
     if (tooMany) return tooMany
     const event: NormalizedInbound = buildWebchatInbound(read.sessionId, parsed.data)
@@ -243,7 +244,8 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
     const tooMany = await limited(c, `webchat:contact:${found.connection.id}:${read.sessionId}`, LIMITS.contact)
     if (tooMany) return tooMany
     const parsed = contactInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Escribe tu WhatsApp o tu correo."), 400)
+    // Cada dato con su error (`whatsapp`/`email`): el visitante ve qué corregir.
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const contact = await withOrgContext(deps.db, found.orgId, (tx) =>
         saveWebchatVisitorContact(tx, found.orgId, found.connection.id, read.sessionId, parsed.data),
@@ -251,7 +253,7 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
       return c.json({ data: { contact } })
     } catch (e) {
       // Solo el motivo en palabras: nada interno al visitante.
-      if (e instanceof ServiceError) return c.json(errorBody(c, e.code, e.message), e.status)
+      if (e instanceof ServiceError) return c.json(errorBody(c, e.code, e.message, e.fields), e.status)
       throw e
     }
   })
@@ -263,7 +265,21 @@ const adminPatchInput = z
   .object({
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
     greeting: z.string().trim().max(500).nullable().optional(),
-    notifyUrl: z.string().trim().max(500).nullable().optional(),
+    // El aviso al sitio: el mismo motivo que da el canal, dicho junto al campo.
+    notifyUrl: z
+      .string()
+      .trim()
+      .max(500, "La dirección del aviso admite hasta 500 caracteres")
+      .refine((value) => {
+        if (value === "") return true
+        try {
+          return new URL(value).protocol === "https:"
+        } catch {
+          return false
+        }
+      }, "La dirección del aviso al sitio debe empezar con https://")
+      .nullable()
+      .optional(),
   })
   .strict()
 

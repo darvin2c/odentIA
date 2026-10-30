@@ -6,18 +6,29 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
   Field,
-  FieldDescription,
-  FieldError,
   FieldLabel,
   Input,
   toast,
 } from "@odentia/ui"
-import { ErrorState, LoadingState, PasswordInput, SubmitButton } from "@odentia/ui-patterns"
+import {
+  ErrorState,
+  type FieldControl,
+  LoadingState,
+  type SubmitOptions,
+  SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
 import { AdminBrand } from "../components/admin-brand"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Check, ChevronDown, Cloud, Smartphone } from "lucide-react"
 import { type ReactNode, useEffect, useState } from "react"
+import { z } from "zod"
 import { ApiError, api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { panelUrl } from "../lib/host"
@@ -53,24 +64,51 @@ interface EnrollStart {
   backupCodes: string[]
 }
 
-function apiMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? `Error ${error.status}`
-  return "No pudimos conectar. Lo que escribiste sigue aquí: intenta de nuevo."
+/** Sin respuesta del servidor, con las palabras de esta pantalla: lo escrito sigue ahí. */
+const ACCESS_SUBMIT: SubmitOptions = {
+  formMessage: (error) =>
+    error instanceof ApiError ? null : "No pudimos conectar. Lo que escribiste sigue aquí: intenta de nuevo.",
 }
 
 function apiCode(error: unknown): string | undefined {
   return error instanceof ApiError ? error.shape.code : undefined
 }
 
-/** El error de un código, dicho junto al campo (tablero 6 del lienzo). */
-function codeError(error: unknown, recovery = false): string {
-  if (apiCode(error) === "MFA_INVALID") {
-    return recovery
-      ? "Ese código no existe o ya se usó."
-      : "Ese código no coincide. Escribe el que muestra ahora la app (cambia cada 30 segundos). Si sigue fallando, revisa que la hora del teléfono esté en automático."
-  }
-  return apiMessage(error)
+/**
+ * El rechazo dicho en su campo con las palabras de esta pantalla: lo que se
+ * pide dentro de la sesión (contraseña actual, código) sí va por campo.
+ */
+function onField(error: unknown, field: string, message: string): never {
+  if (error instanceof ApiError) throw new ApiError(error.status, { ...error.shape, fields: { [field]: message } })
+  throw error
 }
+
+/** El error de un código que no vale, dicho junto al campo (tablero 6 del lienzo). */
+function codeError(recovery: boolean): string {
+  return recovery
+    ? "Ese código no existe o ya se usó."
+    : "Ese código no coincide. Escribe el que muestra ahora la app (cambia cada 30 segundos). Si sigue fallando, revisa que la hora del teléfono esté en automático."
+}
+
+/** Los 6 dígitos de la app. */
+const totpCodeSchema = z.string().regex(/^\d{6}$/, "Escribe los 6 dígitos que muestra la app.")
+
+/** El código de la app o uno de respaldo, con los mismos límites que la ruta. */
+const challengeSchema = z
+  .object({ code: z.string(), method: z.enum(["totp", "recovery"]) })
+  .superRefine((value, ctx) => {
+    if (value.method === "totp") {
+      const parsed = totpCodeSchema.safeParse(value.code)
+      if (!parsed.success) ctx.addIssue({ code: "custom", path: ["code"], message: parsed.error.issues[0]?.message ?? "" })
+      return
+    }
+    const code = value.code.trim()
+    if (code.length < 4) {
+      ctx.addIssue({ code: "custom", path: ["code"], message: "Escribe el código de respaldo completo, como está en tu lista." })
+    } else if (code.length > 16) {
+      ctx.addIssue({ code: "custom", path: ["code"], message: "Ese código es más largo que los de respaldo: revísalo." })
+    }
+  })
 
 /** Teléfono o tableta: no se puede escanear la propia pantalla (D9). */
 function useTouchDevice(): boolean {
@@ -158,7 +196,7 @@ function SecurityPage() {
           >
             Aceptar invitación
           </SubmitButton>
-          {accept.isError ? <ErrorState message={apiMessage(accept.error)} /> : null}
+          {accept.isError ? <ErrorState message={submitErrorMessage(accept.error)} /> : null}
         </div>
       ) : (
         <ErrorState
@@ -291,9 +329,8 @@ function PasswordStep(props: {
   onStarted: (enroll: EnrollStart) => void
   onAlreadyEnrolled: () => void
 }) {
-  const [password, setPassword] = useState("")
   const start = useMutation({
-    mutationFn: () =>
+    mutationFn: (password: string) =>
       api<EnrollStart>("/api/admin/access/mfa/enroll/start", {
         method: "POST",
         body: JSON.stringify({ password: password || undefined }),
@@ -303,13 +340,29 @@ function PasswordStep(props: {
       if (apiCode(error) === "MFA_ENROLLED") props.onAlreadyEnrolled()
     },
   })
-  const code = apiCode(start.error)
-  const passwordError =
-    code === "BAD_PASSWORD"
-      ? "Esa no es tu contraseña. Es la misma con la que entras al panel."
-      : code === "VALIDATION"
-        ? "Escribe tu contraseña."
-        : null
+  const form = useAppForm({
+    defaultValues: { password: "" },
+    validators: {
+      onSubmit: z.object({ password: props.hasPassword ? z.string().min(1, "Escribe tu contraseña.") : z.string() }),
+    },
+    onSubmit: async ({ value }) => {
+      try {
+        await start.mutateAsync(value.password)
+      } catch (error) {
+        const code = apiCode(error)
+        // Ya tenía el factor: la pantalla pasa a pedir el código, sin error.
+        if (code === "MFA_ENROLLED") return
+        if (code === "BAD_PASSWORD") {
+          onField(error, "password", "Esa no es tu contraseña. Es la misma con la que entras al panel.")
+        }
+        throw error
+      }
+    },
+  })
+  const onSubmit = useFormSubmit(form, ACCESS_SUBMIT)
+  const formError = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const freshLogin = apiCode(start.error) === "FRESH_LOGIN_REQUIRED"
 
   return (
     <div className="flex flex-col gap-5">
@@ -342,48 +395,31 @@ function PasswordStep(props: {
           esa, con su copia en la nube activada.
         </p>
       </section>
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          start.mutate()
-        }}
-      >
+      <form noValidate className="flex flex-col gap-4" onSubmit={onSubmit}>
         <div className="flex flex-col gap-1">
           <span className="text-sm font-semibold">Cuenta</span>
           <span className="text-sm text-muted-foreground">{props.email}</span>
         </div>
         {props.hasPassword ? (
-          <Field>
-            <FieldLabel htmlFor="enroll-password">Contraseña</FieldLabel>
-            <PasswordInput
-              id="enroll-password"
-              value={password}
-              onChange={(value) => {
-                setPassword(value)
-                if (start.isError) start.reset()
-              }}
-              autoComplete="current-password"
-              autoFocus
-              invalid={!!passwordError}
-              describedBy={passwordError ? "enroll-password-error" : "enroll-password-help"}
-            />
-            {passwordError ? (
-              <FieldError id="enroll-password-error">{passwordError}</FieldError>
-            ) : (
-              <FieldDescription id="enroll-password-help">
-                La misma con la que entraste al panel.
-              </FieldDescription>
+          <form.AppField name="password">
+            {(field) => (
+              <field.PasswordField
+                id="enroll-password"
+                label="Contraseña"
+                description="La misma con la que entraste al panel."
+                autoComplete="current-password"
+                autoFocus
+              />
             )}
-          </Field>
+          </form.AppField>
         ) : (
           <p className="text-sm text-muted-foreground">
             Entraste con Google: no hace falta contraseña.
           </p>
         )}
-        {start.isError && !passwordError && code !== "MFA_ENROLLED" ? (
+        {formError ? (
           <p role="alert" className="text-sm text-destructive">
-            {code === "FRESH_LOGIN_REQUIRED" ? (
+            {freshLogin ? (
               <>
                 Vuelve a iniciar sesión para activarlo.{" "}
                 <Button
@@ -396,11 +432,11 @@ function PasswordStep(props: {
                 </Button>
               </>
             ) : (
-              apiMessage(start.error)
+              formError
             )}
           </p>
         ) : null}
-        <SubmitButton type="submit" className="w-full" pending={start.isPending}>
+        <SubmitButton type="submit" className="w-full" pending={pending}>
           Continuar
         </SubmitButton>
       </form>
@@ -410,35 +446,18 @@ function PasswordStep(props: {
 }
 
 /** El campo de 6 dígitos: se puede pegar y al sexto se confirma solo (D5). */
-function TotpCodeField(props: {
-  id: string
-  label: string
-  value: string
-  onChange: (value: string) => void
-  error: string | null
-  help: string
-}) {
+function TotpCodeInput(props: { control: FieldControl; value: string; onChange: (value: string) => void }) {
   return (
-    <Field>
-      <FieldLabel htmlFor={props.id}>{props.label}</FieldLabel>
-      <Input
-        id={props.id}
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        maxLength={6}
-        placeholder="000000"
-        value={props.value}
-        aria-invalid={props.error ? true : undefined}
-        aria-describedby={`${props.id}-${props.error ? "error" : "help"}`}
-        onChange={(event) => props.onChange(totpDigits(event.target.value))}
-        className="h-12 font-mono text-2xl tracking-[0.4em]"
-      />
-      {props.error ? (
-        <FieldError id={`${props.id}-error`}>{props.error}</FieldError>
-      ) : (
-        <FieldDescription id={`${props.id}-help`}>{props.help}</FieldDescription>
-      )}
-    </Field>
+    <Input
+      {...props.control.props}
+      inputMode="numeric"
+      autoComplete="one-time-code"
+      maxLength={6}
+      placeholder="000000"
+      value={props.value}
+      onChange={(event) => props.onChange(totpDigits(event.target.value))}
+      className="h-12 font-mono text-2xl tracking-[0.4em]"
+    />
   )
 }
 
@@ -477,7 +496,6 @@ function ScanStep(props: {
 }) {
   const touch = useTouchDevice()
   const [qr, setQr] = useState<string | null>(null)
-  const [code, setCode] = useState("")
   const [storesOpen, setStoresOpen] = useState(false)
   const secret = groupedSecret(totpSecret(props.enroll.totpURI))
 
@@ -499,11 +517,21 @@ function ScanStep(props: {
       }),
     onSuccess: () => props.onActivated(),
   })
-  const changeCode = (value: string) => {
-    setCode(value)
-    if (confirm.isError) confirm.reset()
-    if (value.length === 6 && !confirm.isPending) confirm.mutate(value)
-  }
+  const form = useAppForm({
+    defaultValues: { code: "" },
+    validators: { onSubmit: z.object({ code: totpCodeSchema }) },
+    onSubmit: async ({ value }) => {
+      try {
+        await confirm.mutateAsync(value.code)
+      } catch (error) {
+        if (apiCode(error) === "MFA_INVALID") onField(error, "code", codeError(false))
+        throw error
+      }
+    },
+  })
+  const onSubmit = useFormSubmit(form, ACCESS_SUBMIT)
+  const formError = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
 
   const qrImage = (
     <div className="size-44 shrink-0 rounded-xl border bg-white p-1.5">
@@ -625,31 +653,37 @@ function ScanStep(props: {
           </Collapsible>
         </>
       )}
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (code.length === 6) confirm.mutate(code)
-        }}
-      >
-        <TotpCodeField
-          id="enroll-code"
-          label={
-            touch
-              ? "Vuelve aquí y escribe el código de 6 dígitos"
-              : "Escribe el código de 6 dígitos que muestra la app"
-          }
-          value={code}
-          onChange={changeCode}
-          error={confirm.isError ? codeError(confirm.error) : null}
-          help="Cambia cada 30 segundos. Al escribir el sexto número se confirma solo."
-        />
-        <SubmitButton
-          type="submit"
-          className="w-full"
-          pending={confirm.isPending}
-          disabled={code.length < 6}
-        >
+      <form noValidate className="flex flex-col gap-4" onSubmit={onSubmit}>
+        <form.AppField name="code">
+          {(field) => (
+            <field.Control
+              id="enroll-code"
+              label={
+                touch
+                  ? "Vuelve aquí y escribe el código de 6 dígitos"
+                  : "Escribe el código de 6 dígitos que muestra la app"
+              }
+              description="Cambia cada 30 segundos. Al escribir el sexto número se confirma solo."
+            >
+              {(control) => (
+                <TotpCodeInput
+                  control={control}
+                  value={field.state.value}
+                  onChange={(value) => {
+                    field.handleChange(value)
+                    if (value.length === 6 && !pending) void submitForm(form, ACCESS_SUBMIT)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        {formError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {formError}
+          </p>
+        ) : null}
+        <SubmitButton type="submit" className="w-full" pending={pending}>
           Activar
         </SubmitButton>
       </form>
@@ -751,14 +785,16 @@ function BackupCodesStep(props: { email: string; codes: string[]; onEnter: () =>
           </ol>
         </CollapsibleContent>
       </Collapsible>
-      <label htmlFor="codes-saved" className="flex items-center gap-2.5 text-sm font-semibold">
+      <Field orientation="horizontal">
         <Checkbox
           id="codes-saved"
           checked={saved}
           onCheckedChange={(checked) => setSaved(checked === true)}
         />
-        Los guardé en un lugar seguro
-      </label>
+        <FieldLabel htmlFor="codes-saved" className="font-semibold">
+          Los guardé en un lugar seguro
+        </FieldLabel>
+      </Field>
       <Button type="button" size="lg" className="w-full" disabled={!saved} onClick={props.onEnter}>
         Entrar a la administración
       </Button>
@@ -773,25 +809,35 @@ function BackupCodesStep(props: { email: string; codes: string[]; onEnter: () =>
 
 /** Las veces siguientes: solo el código; el respaldo es un enlace, no una casilla (tableros 4 y 5). */
 function ChallengeState(props: { name: string; email: string; otherCountry: boolean; onVerified: () => void }) {
-  const [recovery, setRecovery] = useState(false)
-  const [code, setCode] = useState("")
   const verify = useMutation({
-    mutationFn: (value: string) =>
+    mutationFn: (input: { code: string; method: "totp" | "recovery" }) =>
       api<{ verified: boolean }>("/api/admin/access/challenge/verify", {
         method: "POST",
-        body: JSON.stringify({ code: value, method: recovery ? "recovery" : "totp" }),
+        body: JSON.stringify(input),
       }),
-    onSuccess: () => {
-      if (recovery) toast.success("Entraste con un código de respaldo: activa tu teléfono nuevo")
+    onSuccess: (_data, input) => {
+      if (input.method === "recovery") toast.success("Entraste con un código de respaldo: activa tu teléfono nuevo")
       props.onVerified()
     },
   })
+  const form = useAppForm({
+    defaultValues: { code: "", method: "totp" as "totp" | "recovery" },
+    validators: { onSubmit: challengeSchema },
+    onSubmit: async ({ value }) => {
+      try {
+        await verify.mutateAsync({ code: value.code.trim(), method: value.method })
+      } catch (error) {
+        if (apiCode(error) === "MFA_INVALID") onField(error, "code", codeError(value.method === "recovery"))
+        throw error
+      }
+    },
+  })
+  const onSubmit = useFormSubmit(form, ACCESS_SUBMIT)
+  const formError = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const recovery = useStore(form.store, (state) => state.values.method === "recovery")
   const firstName = props.name.trim().split(/\s+/)[0]
-  const switchMode = () => {
-    setRecovery((value) => !value)
-    setCode("")
-    verify.reset()
-  }
+  const switchMode = () => form.reset({ code: "", method: recovery ? "totp" : "recovery" })
 
   return (
     <div className="flex flex-col gap-5">
@@ -805,36 +851,23 @@ function ChallengeState(props: { name: string; email: string; otherCountry: bool
               : `${firstName ? `Hola, ${firstName}. ` : ""}Tu contraseña ya está; abre tu app de autenticación y busca «odentIA · ${props.email}».`
         }
       />
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (code.trim()) verify.mutate(code.trim())
-        }}
-      >
+      <form noValidate className="flex flex-col gap-4" onSubmit={onSubmit}>
         {recovery ? (
           <>
-            <Field>
-              <FieldLabel htmlFor="backup-code">Código de respaldo</FieldLabel>
-              <Input
-                id="backup-code"
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                placeholder="xxxx-xxxx"
-                value={code}
-                aria-invalid={verify.isError || undefined}
-                aria-describedby={verify.isError ? "backup-code-error" : undefined}
-                onChange={(event) => {
-                  setCode(event.target.value)
-                  if (verify.isError) verify.reset()
-                }}
-                className="h-12 font-mono text-xl tracking-[0.12em]"
-              />
-              <FieldError id="backup-code-error">
-                {verify.isError ? codeError(verify.error, true) : null}
-              </FieldError>
-            </Field>
+            <form.AppField name="code">
+              {(field) => (
+                <field.TextField
+                  id="backup-code"
+                  label="Código de respaldo"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder="xxxx-xxxx"
+                  maxLength={16}
+                  inputClassName="h-12 font-mono text-xl tracking-[0.12em]"
+                />
+              )}
+            </form.AppField>
             <div className="flex flex-col gap-1 rounded-lg bg-warning-soft px-3 py-2.5 text-sm text-warning">
               <strong>Después de entrar, cambia de teléfono.</strong>
               <span>
@@ -844,25 +877,29 @@ function ChallengeState(props: { name: string; email: string; otherCountry: bool
             </div>
           </>
         ) : (
-          <TotpCodeField
-            id="challenge-code"
-            label="Código de 6 dígitos"
-            value={code}
-            onChange={(value) => {
-              setCode(value)
-              if (verify.isError) verify.reset()
-              if (value.length === 6 && !verify.isPending) verify.mutate(value)
-            }}
-            error={verify.isError ? codeError(verify.error) : null}
-            help="Al escribir el sexto número entras solo."
-          />
+          <form.AppField name="code">
+            {(field) => (
+              <field.Control id="challenge-code" label="Código de 6 dígitos" description="Al escribir el sexto número entras solo.">
+                {(control) => (
+                  <TotpCodeInput
+                    control={control}
+                    value={field.state.value}
+                    onChange={(value) => {
+                      field.handleChange(value)
+                      if (value.length === 6 && !pending) void submitForm(form, ACCESS_SUBMIT)
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         )}
-        <SubmitButton
-          type="submit"
-          className="w-full"
-          pending={verify.isPending}
-          disabled={recovery ? !code.trim() : code.length < 6}
-        >
+        {formError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {formError}
+          </p>
+        ) : null}
+        <SubmitButton type="submit" className="w-full" pending={pending}>
           Entrar
         </SubmitButton>
         {recovery ? null : (
@@ -887,20 +924,33 @@ function VerifiedState(props: {
   onRevoked: () => void
   onEnter: () => void
 }) {
-  const [password, setPassword] = useState("")
   const revoke = useMutation({
-    mutationFn: () =>
+    mutationFn: (password: string) =>
       api<{ ok: true }>("/api/admin/access/mfa/revoke", {
         method: "POST",
         body: JSON.stringify({ password }),
       }),
     onSuccess: () => {
       toast.success("Factor revocado: activa tu teléfono nuevo")
-      setPassword("")
       props.onRevoked()
     },
   })
-  const passwordError = apiCode(revoke.error) === "BAD_PASSWORD" ? "Esa no es tu contraseña." : null
+  const form = useAppForm({
+    defaultValues: { password: "" },
+    validators: { onSubmit: z.object({ password: z.string().min(1, "Escribe tu contraseña.") }) },
+    onSubmit: async ({ value, formApi }) => {
+      try {
+        await revoke.mutateAsync(value.password)
+      } catch (error) {
+        if (apiCode(error) === "BAD_PASSWORD") onField(error, "password", "Esa no es tu contraseña.")
+        throw error
+      }
+      formApi.reset()
+    },
+  })
+  const onSubmit = useFormSubmit(form, ACCESS_SUBMIT)
+  const formError = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center gap-2">
@@ -922,38 +972,22 @@ function VerifiedState(props: {
       <Button type="button" size="lg" className="w-full" onClick={props.onEnter}>
         Entrar a la administración
       </Button>
-      <form
-        className="flex flex-col gap-3 border-t pt-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          revoke.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor="revoke-password">
-            ¿Cambiaste de teléfono? Revoca tu factor con tu contraseña
-          </FieldLabel>
-          <PasswordInput
-            id="revoke-password"
-            value={password}
-            onChange={(value) => {
-              setPassword(value)
-              if (revoke.isError) revoke.reset()
-            }}
-            autoComplete="current-password"
-            invalid={!!passwordError}
-            describedBy={revoke.isError ? "revoke-password-error" : undefined}
-          />
-          <FieldError id="revoke-password-error">
-            {revoke.isError ? (passwordError ?? apiMessage(revoke.error)) : null}
-          </FieldError>
-        </Field>
-        <SubmitButton
-          type="submit"
-          variant="destructive"
-          pending={revoke.isPending}
-          disabled={password.length === 0}
-        >
+      <form noValidate className="flex flex-col gap-3 border-t pt-4" onSubmit={onSubmit}>
+        <form.AppField name="password">
+          {(field) => (
+            <field.PasswordField
+              id="revoke-password"
+              label="¿Cambiaste de teléfono? Revoca tu factor con tu contraseña"
+              autoComplete="current-password"
+            />
+          )}
+        </form.AppField>
+        {formError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {formError}
+          </p>
+        ) : null}
+        <SubmitButton type="submit" variant="destructive" pending={pending}>
           Revocar mi factor
         </SubmitButton>
       </form>

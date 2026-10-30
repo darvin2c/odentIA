@@ -7,8 +7,9 @@ import { CLINICAL_PRODUCTS, type ClinicalProduct, formatMoney, productWords } fr
 import {
   Button,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
   Input,
-  Label,
   RadioGroup,
   RadioGroupItem,
   Select,
@@ -16,7 +17,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
 } from "@odentia/ui"
 import {
   ConfirmDialog,
@@ -27,18 +27,26 @@ import {
   LoadingState,
   PageHeader,
   PageShell,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  useFormSurface,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
 import { createFileRoute } from "@tanstack/react-router"
+import { z } from "zod"
 import { requireAdminRole } from "../../lib/session"
 import { useState } from "react"
-import { CurrencySelect, centsToMajor, majorToCents } from "../../components/billing-fields"
-import { ApiError, api } from "../../lib/api"
+import { currencyDigits, majorToCents } from "../../components/billing-fields"
+import { api } from "../../lib/api"
 import { domainOf } from "../../lib/host"
 import { matchesProduct, type ProductChoice, ProductFilter, ProductMark, useOrgProducts } from "../../components/product"
 import { type AdminPlan, PlanDrawer } from "../../components/plan-drawer"
 import { NegotiationsSection } from "../../components/billing-terms"
+import { ReasonDialog } from "../../components/reason-dialog"
 import { CommercialTermsSection } from "../../components/commercial-terms"
 
 export const Route = createFileRoute("/_app/billing")({
@@ -143,11 +151,6 @@ function tierSummary(plan: AdminPlan): string {
   return `Por tipo (${plan.currency}) · ${parts.join(" · ")}`
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? `Error ${error.status}`
-  return "Error inesperado"
-}
-
 function BillingPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState("")
@@ -160,7 +163,6 @@ function BillingPage() {
   const [chargeDrawer, setChargeDrawer] = useState<null | { orgId: string }>(null)
   const [methodDrawer, setMethodDrawer] = useState(false)
   const [reverseTarget, setReverseTarget] = useState<PendingPayment | null>(null)
-  const [reverseReason, setReverseReason] = useState("")
 
   const overview = useQuery({
     queryKey: ["admin", "billing", "overview", statusFilter],
@@ -198,21 +200,12 @@ function BillingPage() {
   const [receiptBusy, setReceiptBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const refundPayment = useMutation({
-    mutationFn: () => {
-      if (!refundTarget) throw new Error("Sin pago")
-      return api(`/api/admin/billing/payments/${refundTarget.id}/refund`, {
+    mutationFn: ({ target, reason }: { target: { id: string; organizationId: string }; reason: string }) =>
+      api(`/api/admin/billing/payments/${target.id}/refund`, {
         method: "POST",
-        body: JSON.stringify({
-          organizationId: refundTarget.organizationId,
-          reason: reverseReason,
-        }),
-      })
-    },
-    onSuccess: () => {
-      setRefundTarget(null)
-      setReverseReason("")
-      refresh()
-    },
+        body: JSON.stringify({ organizationId: target.organizationId, reason }),
+      }),
+    onSuccess: refresh,
   })
   async function openReceipt(organizationId: string, paymentId: string) {
     setActionError(null)
@@ -223,9 +216,7 @@ function BillingPage() {
       )
       window.open(res.url, "_blank", "noopener")
     } catch (e) {
-      setActionError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo abrir") : "No se pudo abrir",
-      )
+      setActionError(submitErrorMessage(e))
     } finally {
       setReceiptBusy(null)
     }
@@ -239,21 +230,12 @@ function BillingPage() {
     onSuccess: refresh,
   })
   const reversePayment = useMutation({
-    mutationFn: () => {
-      if (!reverseTarget) throw new Error("Sin pago")
-      return api(`/api/admin/billing/payments/${reverseTarget.id}/reverse`, {
+    mutationFn: ({ target, reason }: { target: PendingPayment; reason: string }) =>
+      api(`/api/admin/billing/payments/${target.id}/reverse`, {
         method: "POST",
-        body: JSON.stringify({
-          organizationId: reverseTarget.organizationId,
-          reason: reverseReason,
-        }),
-      })
-    },
-    onSuccess: () => {
-      setReverseTarget(null)
-      setReverseReason("")
-      refresh()
-    },
+        body: JSON.stringify({ organizationId: target.organizationId, reason }),
+      }),
+    onSuccess: refresh,
   })
 
   return (
@@ -282,7 +264,7 @@ function BillingPage() {
         ) : pending.isError ? (
           <ErrorState
             title="No se pudieron cargar los comprobantes"
-            message={errorMessage(pending.error)}
+            message={submitErrorMessage(pending.error)}
             onRetry={() => void pending.refetch()}
           />
         ) : ofProduct(pending.data).length === 0 ? (
@@ -334,7 +316,7 @@ function BillingPage() {
         )}
         {confirmPayment.isError ? (
           <p role="alert" className="text-sm text-destructive">
-            {errorMessage(confirmPayment.error)}
+            {submitErrorMessage(confirmPayment.error)}
           </p>
         ) : null}
       </section>
@@ -372,7 +354,7 @@ function BillingPage() {
         ) : overview.isError ? (
           <ErrorState
             title="No se pudieron cargar las suscripciones"
-            message={errorMessage(overview.error)}
+            message={submitErrorMessage(overview.error)}
             onRetry={() => void overview.refetch()}
           />
         ) : ofProduct(overview.data).length === 0 ? (
@@ -438,7 +420,7 @@ function BillingPage() {
         ) : plans.isError ? (
           <ErrorState
             title="No se pudieron cargar los planes"
-            message={errorMessage(plans.error)}
+            message={submitErrorMessage(plans.error)}
             onRetry={() => void plans.refetch()}
           />
         ) : plans.data.length === 0 ? (
@@ -517,7 +499,7 @@ function BillingPage() {
         ) : methods.isError ? (
           <ErrorState
             title="No se pudieron cargar los medios"
-            message={errorMessage(methods.error)}
+            message={submitErrorMessage(methods.error)}
             onRetry={() => void methods.refetch()}
           />
         ) : methods.data.length === 0 ? (
@@ -561,53 +543,35 @@ function BillingPage() {
       {methodDrawer ? (
         <MethodDrawer onClose={() => setMethodDrawer(false)} onSaved={refresh} />
       ) : null}
-      <ConfirmDialog
+      <ReasonDialog
         open={reverseTarget !== null}
+        id="reverse-reason"
         title="Reversar pago"
         description="El pago dejará de sumar al cargo. Si su comisión ya se liquidó, se descuenta como ajuste en la próxima liquidación (la liquidación original no se modifica)."
         confirmLabel="Reversar"
-        onConfirm={() => reversePayment.mutate()}
-        onClose={() => {
-          setReverseTarget(null)
-          setReverseReason("")
-        }}
-      >
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="reverse-reason">Motivo</Label>
-          <Textarea
-            id="reverse-reason"
-            value={reverseReason}
-            onChange={(event) => setReverseReason(event.target.value)}
-            placeholder="Por qué se reversa"
-          />
-        </div>
-      </ConfirmDialog>
+        placeholder="Por qué se reversa"
+        onConfirm={(reason) =>
+          reverseTarget ? reversePayment.mutateAsync({ target: reverseTarget, reason }) : Promise.resolve()
+        }
+        onClose={() => setReverseTarget(null)}
+      />
       {actionError ? (
         <p role="alert" className="text-sm text-destructive">
           {actionError}
         </p>
       ) : null}
-      <ConfirmDialog
+      <ReasonDialog
         open={refundTarget !== null}
+        id="refund-reason"
         title="Devolver pago"
         description="El dinero vuelve a la clínica y el cargo deja de sumarlo. Si su comisión ya se liquidó, se descuenta como ajuste en la próxima liquidación."
         confirmLabel="Devolver"
-        onConfirm={() => refundPayment.mutate()}
-        onClose={() => {
-          setRefundTarget(null)
-          setReverseReason("")
-        }}
-      >
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="refund-reason">Motivo</Label>
-          <Textarea
-            id="refund-reason"
-            value={reverseReason}
-            onChange={(event) => setReverseReason(event.target.value)}
-            placeholder="Por qué se devuelve"
-          />
-        </div>
-      </ConfirmDialog>
+        placeholder="Por qué se devuelve"
+        onConfirm={(reason) =>
+          refundTarget ? refundPayment.mutateAsync({ target: refundTarget, reason }) : Promise.resolve()
+        }
+        onClose={() => setRefundTarget(null)}
+      />
       {manualOpen ? (
         <ManualDrawer
           orgs={overview.data ?? []}
@@ -637,6 +601,17 @@ function BillingPage() {
   )
 }
 
+const chargeSchema = z
+  .object({
+    planCode: z.string().min(1, "Elige el plan"),
+    periodStart: z.string().min(1, "Elige el inicio del período"),
+    periodEnd: z.string().min(1, "Elige el fin del período"),
+  })
+  .refine((value) => !value.periodStart || !value.periodEnd || value.periodEnd > value.periodStart, {
+    path: ["periodEnd"],
+    message: "El período debe terminar después de empezar",
+  })
+
 function ChargeDrawer({
   orgId,
   plans,
@@ -648,155 +623,130 @@ function ChargeDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
-  const [planCode, setPlanCode] = useState(plans[0]?.code ?? "")
-  const [periodStart, setPeriodStart] = useState("")
-  const [periodEnd, setPeriodEnd] = useState("")
-  const [error, setError] = useState<string | null>(null)
-
+  // Solo los planes activos: un cargo no se crea con un plan archivado.
+  const activePlans = plans.filter((plan) => plan.isActive)
   const save = useMutation({
-    mutationFn: () =>
-      api("/api/admin/billing/charges", {
-        method: "POST",
-        body: JSON.stringify({
-          organizationId: orgId,
-          planCode,
-          periodStart: new Date(`${periodStart}T00:00:00Z`).toISOString(),
-          periodEnd: new Date(`${periodEnd}T00:00:00Z`).toISOString(),
-        }),
-      }),
-    onSuccess: () => {
+    mutationFn: (body: { organizationId: string; planCode: string; periodStart: string; periodEnd: string }) =>
+      api("/api/admin/billing/charges", { method: "POST", body: JSON.stringify(body) }),
+  })
+  const form = useAppForm({
+    defaultValues: { planCode: activePlans[0]?.code ?? "", periodStart: "", periodEnd: "" },
+    validators: { onSubmit: chargeSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({
+        organizationId: orgId,
+        planCode: value.planCode,
+        periodStart: new Date(`${value.periodStart}T00:00:00Z`).toISOString(),
+        periodEnd: new Date(`${value.periodEnd}T00:00:00Z`).toISOString(),
+      })
       onSaved()
       onClose()
     },
-    onError: (e) =>
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo crear") : "No se pudo crear",
-      ),
   })
+  const periodStart = useStore(form.store, (state) => state.values.periodStart)
 
   return (
-    <FormDrawer
-      open
-      title="Crear cargo"
-      submitLabel="Crear"
-      onSubmit={() => save.mutate()}
-      onClose={onClose}
-      isSubmitting={save.isPending}
-    >
+    <FormDrawer {...useFormSurface(form)} open title="Crear cargo" submitLabel="Crear" onClose={onClose}>
       <p className="text-sm text-muted-foreground">
         El cargo congela el precio del plan; cambiar el plan después no lo modifica.
       </p>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="charge-plan">Plan</Label>
-        <Select
-          value={planCode}
-          onValueChange={(value) => {
-            if (value) setPlanCode(value)
-          }}
-        >
-          <SelectTrigger id="charge-plan">
-            <SelectValue placeholder="Elige el plan" />
-          </SelectTrigger>
-          <SelectContent>
-            {plans.map((plan) => (
-              <SelectItem key={plan.code} value={plan.code}>
-                {plan.name} · {money(plan.priceCents, plan.currency)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="charge-start">Inicio del período</Label>
-          <DatePickerButton id="charge-start" value={periodStart} onChange={setPeriodStart} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="charge-end">Fin del período</Label>
-          <DatePickerButton
-            id="charge-end"
-            value={periodEnd}
-            onChange={setPeriodEnd}
-            min={periodStart || undefined}
+      <form.AppField name="planCode">
+        {(field) => (
+          <field.SelectField
+            id="charge-plan"
+            label="Plan"
+            placeholder="Elige el plan"
+            options={activePlans.map((plan) => ({
+              value: plan.code,
+              label: `${plan.name} · ${money(plan.priceCents, plan.currency)}`,
+            }))}
           />
-        </div>
+        )}
+      </form.AppField>
+      <div className="grid grid-cols-2 gap-3">
+        <form.AppField name="periodStart">
+          {(field) => (
+            <field.Control id="charge-start" label="Inicio del período">
+              {(control) => (
+                <DatePickerButton
+                  {...control.props}
+                  value={field.state.value}
+                  onChange={(next) => {
+                    field.handleChange(next)
+                    field.handleBlur()
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="periodEnd">
+          {(field) => (
+            <field.Control id="charge-end" label="Fin del período">
+              {(control) => (
+                <DatePickerButton
+                  {...control.props}
+                  value={field.state.value}
+                  onChange={(next) => {
+                    field.handleChange(next)
+                    field.handleBlur()
+                  }}
+                  min={periodStart || undefined}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
     </FormDrawer>
   )
 }
 
-function MethodDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [code, setCode] = useState("")
-  const [name, setName] = useState("")
-  const [instructions, setInstructions] = useState("")
-  const [error, setError] = useState<string | null>(null)
+const methodSchema = z.object({
+  code: z.string().trim().min(1, "Escribe el código del medio").max(80, "Escribe el código en 80 caracteres como mucho"),
+  name: z.string().trim().min(1, "Escribe el nombre del medio").max(120, "Escribe el nombre en 120 caracteres como mucho"),
+  instructions: z.string().max(2000, "Escribe las instrucciones en 2000 caracteres como mucho"),
+})
 
+function MethodDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const save = useMutation({
-    mutationFn: () =>
-      api("/api/admin/billing/methods", {
-        method: "PUT",
-        body: JSON.stringify({
-          code: code.trim(),
-          name: name.trim(),
-          instructions: instructions.trim() || null,
-        }),
-      }),
-    onSuccess: () => {
+    mutationFn: (body: { code: string; name: string; instructions: string | null; create: true }) =>
+      api("/api/admin/billing/methods", { method: "PUT", body: JSON.stringify(body) }),
+  })
+  const form = useAppForm({
+    defaultValues: { code: "", name: "", instructions: "" },
+    validators: { onSubmit: methodSchema },
+    onSubmit: async ({ value }) => {
+      // «Nuevo medio»: un código que ya existe vuelve 409 en su campo, no se sobrescribe.
+      await save.mutateAsync({
+        code: value.code.trim(),
+        name: value.name.trim(),
+        instructions: value.instructions.trim() || null,
+        create: true,
+      })
       onSaved()
       onClose()
     },
-    onError: (e) =>
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar") : "No se pudo guardar",
-      ),
   })
 
   return (
-    <FormDrawer
-      open
-      title="Nuevo medio de pago"
-      submitLabel="Guardar"
-      onSubmit={() => save.mutate()}
-      onClose={onClose}
-      isSubmitting={save.isPending}
-    >
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="method-code">Código</Label>
-        <Input
-          id="method-code"
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          placeholder="transferencia"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="method-name">Nombre</Label>
-        <Input
-          id="method-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder="Transferencia"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="method-instructions">Cómo pagar (lo ve la clínica)</Label>
-        <Textarea
-          id="method-instructions"
-          value={instructions}
-          onChange={(event) => setInstructions(event.target.value)}
-          placeholder="Cuenta, titular y qué poner en el concepto"
-        />
-      </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+    <FormDrawer {...useFormSurface(form)} open title="Nuevo medio de pago" submitLabel="Guardar" onClose={onClose}>
+      <form.AppField name="code">
+        {(field) => <field.TextField id="method-code" label="Código" placeholder="transferencia" maxLength={80} />}
+      </form.AppField>
+      <form.AppField name="name">
+        {(field) => <field.TextField id="method-name" label="Nombre" placeholder="Transferencia" maxLength={120} />}
+      </form.AppField>
+      <form.AppField name="instructions">
+        {(field) => (
+          <field.TextareaField
+            id="method-instructions"
+            label="Cómo pagar (lo ve la clínica)"
+            placeholder="Cuenta, titular y qué poner en el concepto"
+            maxLength={2000}
+          />
+        )}
+      </form.AppField>
     </FormDrawer>
   )
 }
@@ -812,23 +762,45 @@ function UnassignedSection({
   plans: Plan[]
   onDone: () => void
 }) {
-  const [planCode, setPlanCode] = useState(plans[0]?.code ?? "")
-  const [error, setError] = useState<string | null>(null)
+  if (isPending) return <LoadingState message="Buscando clínicas sin plan…" />
+  if (!orgs || orgs.length === 0) return null
+  const activePlans = plans.filter((plan) => plan.isActive)
+  // El formulario nace con el primer plan activo (y vuelve a nacer si llega otro primero).
+  return <AssignPlanForm key={activePlans[0]?.code ?? ""} orgs={orgs} activePlans={activePlans} onDone={onDone} />
+}
+
+const assignSchema = z.object({
+  planCode: z.string().min(1, "Elige el plan a asignar"),
+  organizationId: z.string(),
+})
+
+function AssignPlanForm({
+  orgs,
+  activePlans,
+  onDone,
+}: {
+  orgs: UnassignedOrg[]
+  activePlans: Plan[]
+  onDone: () => void
+}) {
   const activate = useMutation({
-    mutationFn: (organizationId: string) =>
+    mutationFn: ({ organizationId, planCode }: { organizationId: string; planCode: string }) =>
       api(`/api/admin/billing/subscriptions/${organizationId}/activate`, {
         method: "POST",
         body: JSON.stringify({ planCode }),
       }),
     onSuccess: onDone,
-    onError: (e) =>
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo asignar") : "No se pudo asignar",
-      ),
   })
-  if (isPending) return <LoadingState message="Buscando clínicas sin plan…" />
-  if (!orgs || orgs.length === 0) return null
-  const activePlans = plans.filter((plan) => plan.isActive)
+  const form = useAppForm({
+    defaultValues: { planCode: activePlans[0]?.code ?? "", organizationId: "" },
+    validators: { onSubmit: assignSchema },
+    onSubmit: async ({ value }) => {
+      await activate.mutateAsync(value)
+    },
+  })
+  const onSubmit = useFormSubmit(form)
+  const submitError = useFormSubmitError(form)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   return (
     <section aria-labelledby="sin-plan" className="flex flex-col gap-2">
       <h2 id="sin-plan" className="text-base font-semibold">
@@ -838,55 +810,75 @@ function UnassignedSection({
         No se les cobra ni se les restringe hasta que asignes un plan (las pone en activa 30 días,
         sin deuda retroactiva).
       </p>
-      <div className="flex items-center gap-2 text-sm">
-        <span id="assign-plan-label">Plan a asignar</span>
-        <Select
-          value={planCode}
-          onValueChange={(value) => {
-            if (value) setPlanCode(value)
-          }}
-          aria-labelledby="assign-plan-label"
-        >
-          <SelectTrigger className="w-64">
-            <SelectValue placeholder="Elige el plan" />
-          </SelectTrigger>
-          <SelectContent>
-            {activePlans.map((plan) => (
-              <SelectItem key={plan.code} value={plan.code}>
-                {plan.name} · {money(plan.priceCents, plan.currency)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <ul className="flex flex-col gap-2">
-        {orgs.map((org) => (
-          <li
-            key={org.organizationId}
-            className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
-          >
-            <p className="min-w-0 flex-1 basis-56 text-sm font-medium">
-              {org.organizationName ?? org.organizationId}
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!planCode || activate.isPending}
-              onClick={() => activate.mutate(org.organizationId)}
+      <form noValidate onSubmit={onSubmit} className="flex flex-col gap-2">
+        <form.AppField name="planCode">
+          {(field) => (
+            <field.SelectField
+              id="assign-plan"
+              label="Plan a asignar"
+              placeholder="Elige el plan"
+              className="max-w-64"
+              options={activePlans.map((plan) => ({
+                value: plan.code,
+                label: `${plan.name} · ${money(plan.priceCents, plan.currency)}`,
+              }))}
+            />
+          )}
+        </form.AppField>
+        <ul className="flex flex-col gap-2">
+          {orgs.map((org) => (
+            <li
+              key={org.organizationId}
+              className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border p-4"
             >
-              Asignar plan
-            </Button>
-          </li>
-        ))}
-      </ul>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+              <p className="min-w-0 flex-1 basis-56 text-sm font-medium">
+                {org.organizationName ?? org.organizationId}
+              </p>
+              <Button
+                type="submit"
+                size="sm"
+                variant="outline"
+                disabled={isSubmitting}
+                onClick={() => form.setFieldValue("organizationId", org.organizationId)}
+              >
+                Asignar plan
+              </Button>
+            </li>
+          ))}
+        </ul>
+        {submitError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {submitError}
+          </p>
+        ) : null}
+      </form>
     </section>
   )
 }
+
+/** Lo que falla en el importe según los decimales de la moneda del cargo; vacío lo dice el esquema. */
+function amountProblem(text: string, currency: string | undefined): string | undefined {
+  const value = text.trim()
+  if (!value || !currency) return undefined
+  const digits = currencyDigits(currency)
+  const pattern = digits > 0 ? new RegExp(`^\\d+([.,]\\d{1,${digits}})?$`) : /^\d+$/
+  if (!pattern.test(value))
+    return digits > 0 ? `Escribe el importe con hasta ${digits} decimales, como 150.00` : "Escribe el importe sin decimales"
+  const cents = majorToCents(value, currency)
+  if (cents === null || cents <= 0) return "El importe debe ser mayor que cero"
+  return undefined
+}
+
+const manualSchema = z.object({
+  organizationId: z.string().min(1, "Elige la clínica"),
+  chargeId: z.string().min(1, "Elige el cargo"),
+  methodCode: z.string().min(1, "Elige el medio usado"),
+  amount: z.string().trim().min(1, "Escribe el importe"),
+  paidAt: z.string().min(1, "Elige la fecha de pago"),
+  notes: z.string().max(2000, "Escribe las notas en 2000 caracteres como mucho"),
+  file: z.custom<File | null>((value) => value instanceof File, "Adjunta el comprobante recibido"),
+})
+
 /** Staff registra un pago recibido (D1): org y cargo por nombre, fecha de pago, medio, importe y comprobante real. */
 function ManualDrawer({
   orgs,
@@ -899,14 +891,47 @@ function ManualDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
-  const [orgId, setOrgId] = useState(orgs[0]?.organizationId ?? "")
-  const [chargeId, setChargeId] = useState("")
-  const [methodCode, setMethodCode] = useState(methods[0]?.code ?? "")
-  const [amount, setAmount] = useState("")
-  const [paidAt, setPaidAt] = useState(new Date().toISOString().slice(0, 10))
-  const [notes, setNotes] = useState("")
-  const [file, setFile] = useState<File | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // El servidor solo acepta medios activos.
+  const activeMethods = methods.filter((method) => method.isActive)
+  const save = useMutation({
+    mutationFn: (body: FormData) => api("/api/admin/billing/payments/manual", { method: "POST", body }),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      organizationId: orgs[0]?.organizationId ?? "",
+      chargeId: "",
+      methodCode: activeMethods[0]?.code ?? "",
+      amount: "",
+      paidAt: new Date().toISOString().slice(0, 10),
+      notes: "",
+      file: null as File | null,
+    },
+    validators: { onSubmit: manualSchema },
+    onSubmit: async ({ value }) => {
+      const charge = charges.data?.find((item) => item.id === value.chargeId)
+      const amountCents = charge ? majorToCents(value.amount, charge.currency) : null
+      // Los validadores de cargo, importe y comprobante ya lo garantizan; si el cargo
+      // dejó de estar en la lista mientras se escribía, se dice junto a los botones.
+      if (!charge || amountCents === null || !value.file) {
+        throw new Error("El cargo elegido ya no está en la lista. Vuelve a elegirlo antes de registrar el pago.")
+      }
+      const body = new FormData()
+      body.append("organizationId", value.organizationId)
+      body.append("chargeId", charge.id)
+      body.append("methodCode", value.methodCode)
+      body.append("amountCents", String(amountCents))
+      body.append("idempotencyKey", crypto.randomUUID())
+      if (value.notes.trim()) body.append("notes", value.notes.trim())
+      body.append("paidAt", new Date(`${value.paidAt}T12:00:00Z`).toISOString())
+      body.append("file", value.file, value.file.name)
+      await save.mutateAsync(body)
+      onSaved()
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: { amountCents: "amount" } })
+  const orgId = useStore(form.store, (state) => state.values.organizationId)
+  const chargeId = useStore(form.store, (state) => state.values.chargeId)
   const charges = useQuery({
     queryKey: ["admin", "billing", "charges", orgId],
     queryFn: () =>
@@ -914,147 +939,106 @@ function ManualDrawer({
     enabled: orgId !== "",
   })
   const charge = charges.data?.find((item) => item.id === chargeId) ?? null
-  const save = useMutation({
-    mutationFn: async () => {
-      if (!orgId || !charge) throw new Error("Elige la clínica y el cargo")
-      const amountCents = majorToCents(amount, charge.currency)
-      if (amountCents === null) throw new Error("Importe inválido")
-      if (!file) throw new Error("Adjunta el comprobante recibido")
-      const form = new FormData()
-      form.append("organizationId", orgId)
-      form.append("chargeId", charge.id)
-      form.append("methodCode", methodCode)
-      form.append("amountCents", String(amountCents))
-      form.append("idempotencyKey", crypto.randomUUID())
-      if (notes.trim()) form.append("notes", notes.trim())
-      if (paidAt) form.append("paidAt", new Date(`${paidAt}T12:00:00Z`).toISOString())
-      form.append("file", file, file.name)
-      return api("/api/admin/billing/payments/manual", { method: "POST", body: form })
-    },
-    onSuccess: () => {
-      onSaved()
-      onClose()
-    },
-    onError: (e) =>
-      setError(
-        e instanceof ApiError
-          ? (e.shape.message ?? "No se pudo registrar")
-          : "No se pudo registrar",
-      ),
-  })
   return (
     <FormDrawer
+      {...surface}
       open
       title="Registrar pago recibido"
       submitLabel="Registrar y confirmar"
-      onSubmit={() => save.mutate()}
       onClose={onClose}
-      isSubmitting={save.isPending}
     >
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="manual-org">Clínica</Label>
-        <Select
-          value={orgId}
-          items={Object.fromEntries(orgs.map(org => [org.organizationId, org.organizationName ?? "Clínica"]))}
-          onValueChange={(value) => {
-            if (value) {
-              setOrgId(value)
-              setChargeId("")
-            }
-          }}
-        >
-          <SelectTrigger id="manual-org">
-            <SelectValue placeholder="Elige la clínica" />
-          </SelectTrigger>
-          <SelectContent>
-            {orgs.map((org) => (
-              <SelectItem key={org.organizationId} value={org.organizationId}>
-                {org.organizationName ?? org.organizationId}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="manual-charge">Cargo</Label>
-        <Select
-          value={chargeId}
-          items={Object.fromEntries((charges.data ?? []).map(item => [item.id, `${item.planName} · saldo ${money(item.amountCents - item.paidCents, item.currency)}`]))}
-          onValueChange={(value) => {
-            if (value) setChargeId(value)
-          }}
-        >
-          <SelectTrigger id="manual-charge">
-            <SelectValue placeholder="Elige el cargo" />
-          </SelectTrigger>
-          <SelectContent>
-            {(charges.data ?? []).map((item) => (
-              <SelectItem key={item.id} value={item.id}>
-                {item.planName} · saldo {money(item.amountCents - item.paidCents, item.currency)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="manual-method">Medio usado</Label>
-          <Select
-            value={methodCode}
-            items={Object.fromEntries(methods.map(method => [method.code, method.name]))}
-            onValueChange={(value) => {
-              if (value) setMethodCode(value)
-            }}
-          >
-            <SelectTrigger id="manual-method">
-              <SelectValue placeholder="Elige el medio" />
-            </SelectTrigger>
-            <SelectContent>
-              {methods.map((method) => (
-                <SelectItem key={method.code} value={method.code}>
-                  {method.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="manual-amount">Importe{charge ? ` (${charge.currency})` : ""}</Label>
-          <Input
-            id="manual-amount"
-            inputMode="decimal"
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-            placeholder="150.00"
+      <form.AppField name="organizationId" listeners={{ onChange: () => form.setFieldValue("chargeId", "") }}>
+        {(field) => (
+          <field.SelectField
+            id="manual-org"
+            label="Clínica"
+            placeholder="Elige la clínica"
+            options={orgs.map((org) => ({ value: org.organizationId, label: org.organizationName ?? org.organizationId }))}
           />
-        </div>
+        )}
+      </form.AppField>
+      <form.AppField
+        name="chargeId"
+        validators={{
+          onSubmit: ({ value }) =>
+            value && charges.data && !charges.data.some((item) => item.id === value)
+              ? "Ese cargo ya no está: elige otro."
+              : undefined,
+        }}
+      >
+        {(field) => (
+          <field.SelectField
+            id="manual-charge"
+            label="Cargo"
+            placeholder="Elige el cargo"
+            options={(charges.data ?? []).map((item) => ({
+              value: item.id,
+              label: `${item.planName} · saldo ${money(item.amountCents - item.paidCents, item.currency)}`,
+            }))}
+          />
+        )}
+      </form.AppField>
+      <div className="grid grid-cols-2 gap-3">
+        <form.AppField name="methodCode">
+          {(field) => (
+            <field.SelectField
+              id="manual-method"
+              label="Medio usado"
+              placeholder="Elige el medio"
+              options={activeMethods.map((method) => ({ value: method.code, label: method.name }))}
+            />
+          )}
+        </form.AppField>
+        <form.AppField
+          name="amount"
+          validators={{ onSubmit: ({ value }) => amountProblem(value, charge?.currency) }}
+        >
+          {(field) => (
+            <field.TextField
+              id="manual-amount"
+              label={`Importe${charge ? ` (${charge.currency})` : ""}`}
+              inputMode="decimal"
+              placeholder="150.00"
+            />
+          )}
+        </form.AppField>
       </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="manual-paid">Fecha de pago</Label>
-        <DatePickerButton id="manual-paid" value={paidAt} onChange={setPaidAt} />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="manual-notes">Notas (opcional)</Label>
-        <Textarea
-          id="manual-notes"
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="manual-file">Comprobante (PNG, JPG, WebP o PDF, máx. 10 MB)</Label>
-        <Input
-          id="manual-file"
-          type="file"
-          accept="image/png,image/jpeg,image/webp,application/pdf"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-        />
-      </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+      <form.AppField name="paidAt">
+        {(field) => (
+          <field.Control id="manual-paid" label="Fecha de pago">
+            {(control) => (
+              <DatePickerButton
+                {...control.props}
+                value={field.state.value}
+                onChange={(next) => {
+                  field.handleChange(next)
+                  field.handleBlur()
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      <form.AppField name="notes">
+        {(field) => <field.TextareaField id="manual-notes" label="Notas (opcional)" maxLength={2000} />}
+      </form.AppField>
+      <form.AppField name="file">
+        {(field) => (
+          <field.Control id="manual-file" label="Comprobante (PNG, JPG, WebP o PDF, máx. 10 MB)">
+            {(control) => (
+              <Input
+                {...control.props}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                onChange={(event) => {
+                  field.handleChange(event.target.files?.[0] ?? null)
+                  field.handleBlur()
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
     </FormDrawer>
   )
 }
@@ -1119,7 +1103,7 @@ function HistorySection({
       ) : payments.isError ? (
         <ErrorState
           title="No se pudieron cargar los pagos"
-          message={errorMessage(payments.error)}
+          message={submitErrorMessage(payments.error)}
           onRetry={() => void payments.refetch()}
         />
       ) : payments.data.length === 0 ? (
@@ -1215,14 +1199,14 @@ function SignupModeSection({ products }: { products: readonly ClinicalProduct[] 
       {mode.isPending ? (
         <LoadingState message="Cargando…" />
       ) : mode.isError ? (
-        <ErrorState title="No se pudo leer cómo se abren clínicas" message={errorMessage(mode.error)} onRetry={() => void mode.refetch()} />
+        <ErrorState title="No se pudo leer cómo se abren clínicas" message={submitErrorMessage(mode.error)} onRetry={() => void mode.refetch()} />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {products.map((product) => (
-            <div key={product} className="flex flex-col gap-2">
-              <h3 id={`alta-${product}`}>
+            <FieldSet key={product} className="flex flex-col gap-2">
+              <FieldLegend id={`alta-${product}`} className="mb-0">
                 <ProductMark product={product} className="text-sm" />
-              </h3>
+              </FieldLegend>
               <RadioGroup
                 aria-labelledby={`alta-${product}`}
                 value={mode.data.modes[product]}
@@ -1244,15 +1228,10 @@ function SignupModeSection({ products }: { products: readonly ClinicalProduct[] 
                   </FieldLabel>
                 ))}
               </RadioGroup>
-            </div>
+            </FieldSet>
           ))}
         </div>
       )}
-      {save.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {errorMessage(save.error)}
-        </p>
-      ) : null}
       <ConfirmDialog
         open={confirming !== null}
         title={confirming?.mode === "abierta" ? `¿Abrir el alta de ${confirmName}?` : `¿Pedir invitación en ${confirmName}?`}
@@ -1264,10 +1243,14 @@ function SignupModeSection({ products }: { products: readonly ClinicalProduct[] 
         confirmLabel={confirming?.mode === "abierta" ? "Abrir el alta" : "Pedir invitación"}
         variant="default"
         pending={save.isPending}
+        error={save.isError ? submitErrorMessage(save.error) : null}
         onConfirm={() => {
-          if (confirming) save.mutate(confirming, { onSettled: () => setConfirming(null) })
+          if (confirming) save.mutate(confirming, { onSuccess: () => setConfirming(null) })
         }}
-        onClose={() => setConfirming(null)}
+        onClose={() => {
+          save.reset()
+          setConfirming(null)
+        }}
       />
     </section>
   )

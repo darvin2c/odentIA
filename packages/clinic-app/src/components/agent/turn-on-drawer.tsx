@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck, LoaderCircle } from "lucide-react"
@@ -9,7 +9,6 @@ import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { AGENT_MODEL_LABEL } from "../../lib/crm"
-import { mutationErrorMessage } from "../../lib/query-error"
 
 function Check({
   ok,
@@ -141,7 +140,8 @@ export function TurnOnDrawer({
       description="Cinco comprobaciones. Lo que falta te lleva a donde se resuelve."
       onSubmit={submit}
       isSubmitting={turnOn.isPending}
-      error={mutationErrorMessage(turnOn.error)}
+      // El 409 `MODEL_NOT_RESPONDING` trae su explicación: se dice tal cual, junto al botón.
+      error={turnOn.isError ? submitErrorMessage(turnOn.error) : null}
       submitLabel={`Encender a ${receptionName}`}
       cancelLabel="Ahora no"
       submitDisabled={!hasChannel || !modelOk}

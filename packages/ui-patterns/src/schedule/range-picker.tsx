@@ -97,8 +97,15 @@ export interface ScheduleRangePickerProps {
    * dice dónde acaba el horario y deja colocar ahí una cita fuera de él.
    */
   marginMinutes?: number
-  /** Nombre accesible del selector. */
-  label?: string
+  /** Nombre accesible del selector; sin este ni `aria-labelledby`, «Horas del día». No se pinta. */
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  /** Del grupo. */
+  id?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  /** Al salir el foco del selector. */
+  onBlur?: () => void
   className?: string
 }
 
@@ -119,7 +126,12 @@ export function ScheduleRangePicker({
   hourHeight = 44,
   snapMinutes = 15,
   marginMinutes = 60,
-  label = "Horas del día",
+  "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
+  id,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
   className,
 }: ScheduleRangePickerProps) {
   const px = hourHeight / 60
@@ -246,9 +258,25 @@ export function ScheduleRangePicker({
   const chosenLane = lanes.find((lane) => lane.id === value?.columnId)
 
   return (
-    <section
-      aria-label={label}
-      className={cn("overflow-hidden rounded-2xl border bg-card", className)}
+    // biome-ignore lint/a11y/useSemanticElements: un fieldset trae maquetación que rompe la rejilla.
+    <div
+      role="group"
+      id={id}
+      aria-label={ariaLabel ?? (labelledBy ? undefined : "Horas del día")}
+      aria-labelledby={labelledBy}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      onBlur={
+        onBlur
+          ? (event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
+      className={cn(
+        "overflow-hidden rounded-2xl border bg-card aria-invalid:border-destructive",
+        className,
+      )}
     >
       {lanes.length > 1 ? (
         <div className="flex border-b">
@@ -394,6 +422,7 @@ export function ScheduleRangePicker({
                   ) : null}
                   <button
                     type="button"
+                    aria-invalid={invalid || undefined}
                     aria-label={`De ${hourLabel(visible.startMinutes)} a ${hourLabel(visible.endMinutes)} con ${chosenLane?.label ?? lane.label}. ${resizable ? "Flechas para mover; Mayús con flechas para cambiar la duración" : "Flechas para mover"}`}
                     className="min-h-0 flex-1 cursor-grab overflow-hidden rounded-[6px] text-center text-xs leading-none font-bold tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
                     onKeyDown={onKeyDown}
@@ -435,6 +464,6 @@ export function ScheduleRangePicker({
           />
         ) : null}
       </div>
-    </section>
+    </div>
   )
 }

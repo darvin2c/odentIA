@@ -1,8 +1,8 @@
 import { Badge, Button, toast } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, DetailField, DetailList } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, DetailField, DetailList, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { DISCONNECT_CONSEQUENCE, INTEGRATIONS, type MailRow } from "../../lib/integrations"
 
 const STATUS_BADGE = { ok: "soft", off: "secondary", attention: "warning" } as const
@@ -61,11 +61,7 @@ export function MailPanel({
       onClose()
     },
   })
-  const disconnectError = disconnect.isError
-    ? disconnect.error instanceof ApiError
-      ? (disconnect.error.shape.message ?? "No pudimos desconectar el buzón. Vuelve a intentarlo.")
-      : "No pudimos desconectar el buzón. Vuelve a intentarlo."
-    : null
+  const disconnectError = disconnect.isError ? submitErrorMessage(disconnect.error) : null
 
   const needsReconnect = connection !== null && row.tone === "attention"
 
@@ -76,7 +72,8 @@ export function MailPanel({
         onClose={onClose}
         title={name}
         description={INTEGRATIONS[row.provider].purpose}
-        error={disconnectError}
+        // Con «Desconectar» abierto, su error se dice en el diálogo (no detrás).
+        error={confirming ? null : disconnectError}
         actions={
           canManage && row.available && needsReconnect ? (
             <Button type="button" disabled={connecting} onClick={onConnect}>
@@ -118,12 +115,16 @@ export function MailPanel({
 
       <ConfirmDialog
         open={confirming}
-        onClose={() => setConfirming(false)}
+        onClose={() => {
+          setConfirming(false)
+          disconnect.reset()
+        }}
         onConfirm={() => disconnect.mutate()}
         title={`Desconectar ${name}`}
         description={DISCONNECT_CONSEQUENCE[row.provider]}
         confirmLabel="Desconectar"
         pending={disconnect.isPending}
+        error={disconnectError}
       />
     </>
   )

@@ -20,7 +20,7 @@ import type { Db } from "@odentia/db"
 import { patient, patientAllergy } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, ne } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { productHooks } from "./products.js"
 
@@ -59,18 +59,24 @@ interface ResolvedSubstance {
 /**
  * La sustancia elegida de la lista, o lo escrito: si es exactamente una de la
  * lista («Penicilina»), queda con su código; si no («amoxi»), sin codificar.
+ * Sus errores son de «Sustancia» (`substance` en el cuerpo).
  */
 function resolveSubstance(input: AllergySubstanceInput, allergens: readonly AllergenEntry[]): ResolvedSubstance {
   if (input.substanceSystem || input.substanceCode) {
     const entry = allergenByCode(input.substanceSystem, input.substanceCode, allergens)
-    if (!entry) throw validation("Elige la sustancia de la lista")
+    if (!entry) throw invalidField("substance", "Elige la sustancia de la lista")
     return { substance: entry.label, entry }
   }
   const text = input.substance?.trim().replace(/\s+/g, " ") ?? ""
-  if (!text) throw validation("Escribe o elige la sustancia")
-  if (text.length > 200) throw validation("La sustancia debe tener hasta 200 caracteres")
+  if (!text) throw invalidField("substance", "Escribe o elige la sustancia")
+  if (text.length > 200) throw invalidField("substance", "La sustancia debe tener hasta 200 caracteres")
   const entry = codeAllergySubstance(text, allergens)
   return { substance: entry ? entry.label : text, entry }
+}
+
+/** Ya tiene esa alergia vigente: es de «Sustancia». */
+function allergyExists(message: string): ServiceError {
+  return new ServiceError("ALLERGY_EXISTS", 409, message, { substance: message })
 }
 
 /** Cómo se nombra en un mensaje: «la alergia a penicilinas», «la alergia a «amoxi»». */
@@ -215,18 +221,13 @@ export async function addPatientAllergy(
   const substance = resolveSubstance(input, allergens)
   const severity = input.severity?.trim() || "desconocida"
   if (!(ALLERGY_SEVERITIES as readonly string[]).includes(severity))
-    throw validation("Elige qué tan fuerte fue la reacción: leve, moderada, severa o no se sabe")
+    throw invalidField("severity", "Elige qué tan fuerte fue la reacción: leve, moderada, severa o no se sabe")
   const reaction = input.reaction?.trim() || null
   if (reaction && reaction.length > 2000)
-    throw validation("Lo que le pasó debe tener hasta 2000 caracteres")
+    throw invalidField("reaction", "Lo que le pasó debe tener hasta 2000 caracteres")
   const locked = await lockHealth(tx, orgId, patientId)
   const existing = sameAllergy(await activeAllergies(tx, orgId, patientId), substance)
-  if (existing)
-    throw new ServiceError(
-      "ALLERGY_EXISTS",
-      409,
-      `Ya tiene registrada la alergia a ${nameOf(existing, allergens)}.`,
-    )
+  if (existing) throw allergyExists(`Ya tiene registrada la alergia a ${nameOf(existing, allergens)}.`)
   const [row] = await tx
     .insert(patientAllergy)
     .values({
@@ -267,7 +268,8 @@ export async function removePatientAllergy(
   reason: string,
 ): Promise<PatientAllergyRow> {
   if (!(ALLERGY_REMOVAL_REASONS as readonly string[]).includes(reason))
-    throw validation(
+    throw invalidField(
+      "reason",
       "Elige por qué se quita: ya no es alérgica, era otra cosa o se registró por error",
     )
   const locked = await lockHealth(tx, orgId, patientId)
@@ -313,12 +315,7 @@ export async function restorePatientAllergy(
     entry: allergenByCode(current.substanceSystem, current.substanceCode, allergens),
   }
   const existing = sameAllergy(await activeAllergies(tx, orgId, patientId), resolved)
-  if (existing)
-    throw new ServiceError(
-      "ALLERGY_EXISTS",
-      409,
-      `Ya tiene registrada la alergia a ${nameOf(existing, allergens)}.`,
-    )
+  if (existing) throw allergyExists(`Ya tiene registrada la alergia a ${nameOf(existing, allergens)}.`)
   const [row] = await tx
     .update(patientAllergy)
     .set({
@@ -355,7 +352,7 @@ export async function codePatientAllergy(
 ): Promise<PatientAllergyRow> {
   const allergens = await allergensOf(tx, orgId)
   const entry = allergenByCode(input.substanceSystem, input.substanceCode, allergens)
-  if (!entry) throw validation("Elige la sustancia de la lista")
+  if (!entry) throw invalidField("substance", "Elige la sustancia de la lista")
   const locked = await lockHealth(tx, orgId, patientId)
   const current = await requireAllergy(tx, orgId, patientId, allergyId)
   if (current.substanceCode)
@@ -366,9 +363,7 @@ export async function codePatientAllergy(
       entry,
     })
     if (existing)
-      throw new ServiceError(
-        "ALLERGY_EXISTS",
-        409,
+      throw allergyExists(
         `Ya tiene registrada la alergia a ${nameOf(existing, allergens)}: quita esta, que está repetida.`,
       )
   }

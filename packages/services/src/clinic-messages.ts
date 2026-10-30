@@ -70,7 +70,7 @@ import {
   type TemplateOrder,
 } from "./channel-templates.js"
 import { type MessageItem, sendTemplateOutbound } from "./conversations.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { fieldPath, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgLocale, orgProduct } from "./locale.js"
 import { productHooks } from "./products.js"
 import { acceptsPromotions, mayWriteFirst } from "./message-permission.js"
@@ -493,9 +493,13 @@ async function audit(
 
 // ------------------------------------------------------------ validación ---
 
+/** Dato del cuerpo de la petición al que se refiere una comprobación: ahí se dice. */
+export type TextCheckField = "title" | "body" | "buttonTitle"
+
 export interface TextCheck {
   ok: boolean
   text: string
+  field: TextCheckField
 }
 
 export interface PreviewPart {
@@ -523,7 +527,7 @@ function normalizeBody(body: string): string {
  */
 function checkBody(raw: string, data: MessageDef["data"]): TextCheck[] {
   const body = normalizeBody(raw)
-  if (!body) return [{ ok: false, text: "Escribe el texto del mensaje." }]
+  if (!body) return [{ ok: false, text: "Escribe el texto del mensaje.", field: "body" }]
   const checks: TextCheck[] = []
   const names = dataNamesOf(body)
   const allowed = new Map(data.map((item) => [item.key as string, item]))
@@ -542,13 +546,14 @@ function checkBody(raw: string, data: MessageDef["data"]): TextCheck[] {
   if (body.replace(/\{\{\s*[^{}\s]+\s*\}\}/g, "").match(/\{\{|\}\}/)) {
     problems.push("Hay llaves sueltas: un dato se elige de la lista, no se escribe a mano.")
   }
-  if (problems.length > 0) checks.push(...problems.map((text) => ({ ok: false, text })))
+  if (problems.length > 0) checks.push(...problems.map((text) => ({ ok: false, text, field: "body" as const })))
   else {
     const required = data.filter((item) => item.required).length
     if (required > 0) {
       checks.push({
         ok: true,
         text: `Bien: ${required === 1 ? "está" : "están"} ${NUMBER_WORDS[required] ?? `los ${required} datos`}.`,
+        field: "body",
       })
     }
   }
@@ -561,8 +566,9 @@ function checkBody(raw: string, data: MessageDef["data"]): TextCheck[] {
         ? {
             ok: false,
             text: "No puede empezar ni terminar con un dato: WhatsApp pide texto antes y después.",
+            field: "body",
           }
-        : { ok: true, text: "Bien: no empieza ni termina con un dato." },
+        : { ok: true, text: "Bien: no empieza ni termina con un dato.", field: "body" },
     )
   }
   // WhatsApp cuenta el texto con cada dato en su forma corta (`{{1}}`).
@@ -572,15 +578,17 @@ function checkBody(raw: string, data: MessageDef["data"]): TextCheck[] {
       ? {
           ok: false,
           text: `Tiene ${count(length)} caracteres y el máximo es ${count(MESSAGE_BODY_MAX)}.`,
+          field: "body",
         }
-      : { ok: true, text: `Bien: ${count(length)} de ${count(MESSAGE_BODY_MAX)} caracteres.` },
+      : { ok: true, text: `Bien: ${count(length)} de ${count(MESSAGE_BODY_MAX)} caracteres.`, field: "body" },
   )
   if (body.includes("\t"))
-    checks.push({ ok: false, text: "Tiene tabulaciones: cámbialas por un espacio." })
+    checks.push({ ok: false, text: "Tiene tabulaciones: cámbialas por un espacio.", field: "body" })
   if (/\n{3,}/.test(body)) {
     checks.push({
       ok: false,
       text: "Tiene más de dos saltos de línea seguidos: deja como mucho una línea en blanco.",
+      field: "body",
     })
   }
   return checks
@@ -589,19 +597,20 @@ function checkBody(raw: string, data: MessageDef["data"]): TextCheck[] {
 function checkOwnParts(title: string | undefined, buttonTitle: string | undefined): TextCheck[] {
   const checks: TextCheck[] = []
   const name = (title ?? "").trim()
-  if (!name) checks.push({ ok: false, text: "Escribe para qué sirve el mensaje." })
+  if (!name) checks.push({ ok: false, text: "Escribe para qué sirve el mensaje.", field: "title" })
   else if (name.length > MESSAGE_TITLE_MAX) {
     checks.push({
       ok: false,
       text: `«Para qué sirve» admite hasta ${MESSAGE_TITLE_MAX} caracteres.`,
+      field: "title",
     })
   }
   const button = (buttonTitle ?? "").trim()
   if (button.length > MESSAGE_BUTTON_MAX) {
-    checks.push({ ok: false, text: `El botón admite hasta ${MESSAGE_BUTTON_MAX} caracteres.` })
+    checks.push({ ok: false, text: `El botón admite hasta ${MESSAGE_BUTTON_MAX} caracteres.`, field: "buttonTitle" })
   }
   if (/[\n\t]/.test(buttonTitle ?? ""))
-    checks.push({ ok: false, text: "El botón va en una sola línea." })
+    checks.push({ ok: false, text: "El botón va en una sola línea.", field: "buttonTitle" })
   return checks
 }
 
@@ -682,7 +691,7 @@ export async function checkMessageText(
     input.buttonTitle !== undefined &&
     (input.buttonTitle.trim() || "") !== (def.row?.buttonTitle ?? "")
   ) {
-    checks.push({ ok: false, text: "Los botones de este mensaje no se cambian." })
+    checks.push({ ok: false, text: "Los botones de este mensaje no se cambian.", field: "buttonTitle" })
   }
   return {
     ok: checks.every((check) => check.ok),
@@ -691,9 +700,18 @@ export async function checkMessageText(
   }
 }
 
+/** El primer fallo, junto al dato que hay que corregir. */
 function assertValid(checks: TextCheck[]): void {
   const failed = checks.find((check) => !check.ok)
-  if (failed) throw validation(failed.text)
+  if (failed) throw invalidField(failed.field, failed.text)
+}
+
+/** El rechazo de WhatsApp a la plantilla (un 4xx con su motivo) es del texto: se dice junto a él. */
+function rejectedText(error: unknown): never {
+  if (error instanceof ServiceError && error.code === "TEMPLATE_REQUEST_FAILED" && error.status === 400) {
+    throw new ServiceError(error.code, error.status, error.message, { body: error.message })
+  }
+  throw error
 }
 
 // ------------------------------------------------- pedir y dejar vigente ---
@@ -1307,7 +1325,7 @@ export async function saveMessageText(
   assertValid(checkBody(body, found.data))
   if (found.catalog && body === namedBody(found.catalog)) {
     if (!found.row || (found.row.currentVersion === 0 && found.row.pendingVersion === null)) {
-      throw validation("Ese es el texto que ya tiene.")
+      throw invalidField("body", "Ese es el texto que ya tiene.")
     }
     return revertMessageText(tx, orgId, connectionId, actorUserId, messageId, deps)
   }
@@ -1319,7 +1337,8 @@ export async function saveMessageText(
   const current = currentText(def)
   const pending = pendingText(def)
   if (pending && body === pending.body) {
-    throw validation(
+    throw invalidField(
+      "body",
       (await findTemplateByName(tx, orgId, connectionId, pending.templateName))?.status ===
         "rechazada"
         ? "Ese es el texto que WhatsApp rechazó: cámbialo antes de pedirlo de nuevo."
@@ -1327,7 +1346,7 @@ export async function saveMessageText(
     )
   }
   if (body === current.body) {
-    if (!pending) throw validation("Ese es el texto que ya tiene.")
+    if (!pending) throw invalidField("body", "Ese es el texto que ya tiene.")
     // Volver a escribir el texto vigente es desistir del cambio pendiente.
     await tx
       .update(clinicMessage)
@@ -1356,7 +1375,7 @@ export async function saveMessageText(
     orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
     deps.secretsKey,
     deps,
-  )
+  ).catch(rejectedText)
   const waits = await currentIsApproved(tx, orgId, current)
   await tx
     .update(clinicMessage)
@@ -1465,7 +1484,8 @@ export async function createClinicMessage(
     )
   }
   if (existing.some((item) => item.title?.trim().toLowerCase() === title.toLowerCase())) {
-    throw validation("Ya hay un mensaje con ese nombre.")
+    const taken = "Ya hay un mensaje con ese nombre."
+    throw new ServiceError("MESSAGE_TITLE_TAKEN", 409, taken, { title: taken })
   }
   const [row] = await tx
     .insert(clinicMessage)
@@ -1500,7 +1520,7 @@ export async function createClinicMessage(
     orderOf(def, text, def.link ? await personalLinkButtonUrl(tx, orgId) : null, await exampleValues(tx, orgId)),
     deps.secretsKey,
     deps,
-  )
+  ).catch(rejectedText)
   await audit(tx, orgId, actorUserId, "clinic_message.created", row.id, { button: !!buttonTitle })
   return itemById(tx, orgId, connectionId, row.id)
 }
@@ -1846,10 +1866,16 @@ export async function sendApprovedMessage(
   }
   const params = option.params ?? (input.values ?? []).map(cleanVariable)
   if (params.length !== option.variables || params.some((value) => !value)) {
+    // Cada dato vacío se dice junto a él (`values[i]`, en el orden que pide el mensaje).
+    const missing: Record<string, string> = {}
+    for (let at = 0; at < option.variables; at++) {
+      if (!params[at]) missing[fieldPath(["values", at])] = "Completa este dato."
+    }
     throw validation(
       option.variables === 1
         ? "Completa el dato del mensaje."
         : `Completa los ${option.variables} datos del mensaje.`,
+      missing,
     )
   }
   return sendTemplateOutbound(tx, orgId, secretsKey, {

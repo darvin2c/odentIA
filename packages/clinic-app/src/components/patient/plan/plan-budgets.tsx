@@ -11,20 +11,26 @@ import {
   Badge,
   Button,
   ButtonGroup,
-  Checkbox,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  Field,
   FieldGroup,
-  FieldLabel,
-  Input,
-  Textarea,
 } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  LoadingState,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetchBytes } from "../../../lib/api"
 import {
   type AdjustBudgetLineBody,
@@ -58,7 +64,6 @@ import {
   BudgetTotals,
   budgetStatusTone,
   type Money,
-  mutationMessage,
   SessionNote,
   treatmentSiteLabel,
   useBudgetFormat,
@@ -143,7 +148,7 @@ export function PlanBudgets({
   const prepare = useMutation({
     mutationFn: () => runWrite(() => createBudgetApi(patientId, { itemIds: quotable.map((item) => item.id) })),
     onSuccess: () => setPrepareError(null),
-    onError: (err) => setPrepareError(mutationMessage(err)),
+    onError: (err) => setPrepareError(submitErrorMessage(err)),
   })
 
   if (budgetsQuery.isPending) return <LoadingState message="Cargando presupuestos…" />
@@ -331,13 +336,13 @@ function BudgetCard({
       if (input.action === "duplicate") setOptionId(result.data.options.at(-1)?.id ?? null)
       if (input.action === "remove") setOptionId(null)
     },
-    onError: (err) => setActionError(mutationMessage(err)),
+    onError: (err) => setActionError(submitErrorMessage(err)),
   })
   const cancelMutation = useMutation({
     mutationFn: () => runWrite(() => cancelBudgetApi(patientId, budget.id)),
     onSuccess: () => setCancelOpen(false),
     onError: (err) => {
-      setActionError(mutationMessage(err))
+      setActionError(submitErrorMessage(err))
       setCancelOpen(false)
     },
   })
@@ -364,12 +369,19 @@ function BudgetCard({
     setActionError(null)
     try {
       if (pendingLines.length > 0) await runWrite(() => adjustBudgetLinesApi(patientId, budget.id, { lines: pendingLines }))
+    } catch (err) {
+      // Lo escrito no se guardó: el borrador lo dice en cada línea y no se entrega.
+      if (win && !win.closed) win.close()
+      setPrinting(false)
+      throw err
+    }
+    try {
       await apiFetchBytes(budgetPdfUrl(patientId, budget.id))
       if (isDraft) await runWrite(() => deliverBudgetApi(patientId, budget.id))
       openPdfBytes(win, await apiFetchBytes(budgetPdfUrl(patientId, budget.id)))
     } catch (err) {
       if (win && !win.closed) win.close()
-      setActionError(mutationMessage(err))
+      setActionError(submitErrorMessage(err))
     } finally {
       setPrinting(false)
     }
@@ -543,7 +555,7 @@ function BudgetCard({
                 removeItems={(itemIds) =>
                   runWrite(() => removeBudgetItemsApi(patientId, budget.id, itemIds, several ? option.id : null))
                 }
-                onDeliver={(pending) => void deliverPrint(pending)}
+                onDeliver={(pending) => deliverPrint(pending)}
                 actionAlert={
                   actionError ? (
                     <p role="alert" className="text-sm text-destructive">
@@ -672,6 +684,11 @@ function BudgetCard({
   )
 }
 
+const editSchema = z.object({
+  title: z.string().trim().min(1, "Escribe un título para el presupuesto.").max(200, "Escribe como mucho 200 caracteres."),
+  notes: z.string().max(4000, "Escribe como mucho 4000 caracteres."),
+})
+
 function EditBudgetDrawer({
   budget,
   onClose,
@@ -681,59 +698,48 @@ function EditBudgetDrawer({
   onClose: () => void
   onSubmit: (body: { title?: string; notes?: string | null }) => Promise<unknown>
 }): React.JSX.Element {
-  const uid = useId()
-  const [title, setTitle] = useState(budget.title)
-  const [notes, setNotes] = useState(budget.notes ?? "")
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  // Los valores de partida se fijan al abrir: lo que llegue después no pisa lo escrito.
+  const [initial] = useState(() => ({ title: budget.title, notes: budget.notes ?? "" }))
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: editSchema },
+    onSubmit: async ({ value }) => {
+      const nextTitle = value.title.trim()
+      await onSubmit({
+        ...(nextTitle === budget.title ? {} : { title: nextTitle }),
+        notes: value.notes.trim() === "" ? null : value.notes.trim(),
+      })
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open
       title="Título y notas del presupuesto"
       description="Salen en la hoja que recibe la persona."
-      error={error}
-      isSubmitting={pending}
-      isDirty={title !== budget.title || notes !== (budget.notes ?? "")}
       submitLabel="Guardar"
       onClose={() => {
-        if (!pending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        const nextTitle = title.trim()
-        if (!nextTitle) {
-          setError("Escribe un título para el presupuesto.")
-          return
-        }
-        setPending(true)
-        onSubmit({
-          ...(nextTitle === budget.title ? {} : { title: nextTitle }),
-          notes: notes.trim() === "" ? null : notes.trim(),
-        })
-          .then(onClose)
-          .catch((err: unknown) => setError(mutationMessage(err)))
-          .finally(() => setPending(false))
+        if (!surface.isSubmitting) onClose()
       }}
     >
       <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-title`}>Título</FieldLabel>
-          <Input id={`${uid}-title`} value={title} maxLength={200} onChange={(e) => setTitle(e.currentTarget.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-notes`}>Notas</FieldLabel>
-          <Textarea
-            id={`${uid}-notes`}
-            value={notes}
-            rows={3}
-            maxLength={4000}
-            onChange={(e) => setNotes(e.currentTarget.value)}
-          />
-        </Field>
+        <form.AppField name="title">{(field) => <field.TextField label="Título" maxLength={200} />}</form.AppField>
+        <form.AppField name="notes">
+          {(field) => <field.TextareaField label="Notas" rows={3} maxLength={4000} />}
+        </form.AppField>
       </FieldGroup>
     </FormDrawer>
   )
 }
+
+const reviseSchema = z.object({
+  items: z
+    .array(z.object({ planItemId: z.string(), include: z.boolean() }))
+    .refine((items) => items.some((item) => item.include), "Elige al menos un tratamiento para la revisión."),
+  reason: z.string().trim().min(1, "Indica el motivo de la revisión.").max(2000, "Escribe como mucho 2000 caracteres."),
+})
 
 function ReviseBudgetDrawer({
   budget,
@@ -744,67 +750,76 @@ function ReviseBudgetDrawer({
   onClose: () => void
   onSubmit: (itemIds: string[], reason: string) => Promise<unknown>
 }): React.JSX.Element {
-  const uid = useId()
   const value = valueOption(budget)
-  const lines = value ? optionLines(budget, value.id) : budget.items
-  const [itemIds, setItemIds] = useState(() => lines.map((line) => line.planItemId))
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  // Las líneas y lo marcado se fijan al abrir.
+  const [lines] = useState(() => (value ? optionLines(budget, value.id) : budget.items))
+  const [initial] = useState(() => ({
+    items: lines.map((line) => ({ planItemId: line.planItemId, include: true })),
+    reason: "",
+  }))
+  /** La fila de cada tratamiento enviado: el servidor lo nombra por su lugar en `itemIds`. */
+  const sentAt = useRef<number[]>([])
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: reviseSchema },
+    onSubmit: async ({ value: values }) => {
+      const at = values.items.flatMap((item, index) => (item.include ? [index] : []))
+      sentAt.current = at
+      await onSubmit(
+        values.items.filter((item) => item.include).map((item) => item.planItemId),
+        values.reason.trim(),
+      )
+      onClose()
+    },
+  })
+  // `itemIds[2]` es la casilla de ese tratamiento; `itemIds` (lo que se quitó), la lista entera.
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => {
+      if (key === "itemIds") return "items"
+      const match = /^itemIds\[(\d+)\]$/.exec(key)
+      if (!match) return undefined
+      const index = sentAt.current[Number(match[1])]
+      return index === undefined ? "items" : `items[${index}].include`
+    },
+  })
   return (
     <FormDrawer
+      {...surface}
       open
       title="Crear revisión del presupuesto"
       description="La revisión conserva el número y lo versiona: el anterior queda «Reemplazado». No se puede retirar una línea ya hecha, con cargo o con pago aplicado."
-      error={error}
-      isSubmitting={pending}
       submitLabel="Crear revisión"
       onClose={() => {
-        if (!pending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (itemIds.length === 0) {
-          setError("Elige al menos un tratamiento para la revisión.")
-          return
-        }
-        if (!reason.trim()) {
-          setError("Indica el motivo de la revisión.")
-          return
-        }
-        setPending(true)
-        onSubmit(itemIds, reason.trim())
-          .then(onClose)
-          .catch((err: unknown) => setError(mutationMessage(err)))
-          .finally(() => setPending(false))
+        if (!surface.isSubmitting) onClose()
       }}
     >
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium">Tratamientos de la revisión</legend>
-        {lines.map((line) => (
-          <FieldLabel key={line.id} className="flex items-start gap-2 text-sm font-normal">
-            <Checkbox
-              checked={itemIds.includes(line.planItemId)}
-              aria-label={line.title}
-              onCheckedChange={() =>
-                setItemIds((current) =>
-                  current.includes(line.planItemId)
-                    ? current.filter((id) => id !== line.planItemId)
-                    : [...current, line.planItemId],
+      <form.AppField name="items" mode="array">
+        {(list) => (
+          <list.Group legend="Tratamientos de la revisión">
+            {() =>
+              lines.map((line, index) => {
+                const site = treatmentSiteLabel(line)
+                // Ya se atendió (o se está atendiendo): la revisión no la retira.
+                const executed = line.itemStatus === "en_curso" || line.itemStatus === "realizado"
+                return (
+                  <form.AppField key={line.id} name={`items[${index}].include`}>
+                    {(field) => (
+                      <field.CheckboxField
+                        label={`${line.title}${site ? ` · ${site}` : ""}`}
+                        description={executed ? "Ya se atendió: no se puede retirar." : undefined}
+                        disabled={executed || surface.isSubmitting}
+                      />
+                    )}
+                  </form.AppField>
                 )
-              }
-            />
-            <span>
-              {line.title}
-              {treatmentSiteLabel(line) ? ` · ${treatmentSiteLabel(line)}` : ""}
-            </span>
-          </FieldLabel>
-        ))}
-      </fieldset>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-reason`}>Motivo de la revisión</FieldLabel>
-        <Textarea id={`${uid}-reason`} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </Field>
+              })
+            }
+          </list.Group>
+        )}
+      </form.AppField>
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField label="Motivo de la revisión" maxLength={2000} />}
+      </form.AppField>
     </FormDrawer>
   )
 }

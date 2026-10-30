@@ -7,7 +7,7 @@ import {
 import type { Db } from "@odentia/db"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { eq, sql } from "drizzle-orm"
-import { ServiceError, notFound, validation } from "./errors.js"
+import { ServiceError, invalidField, notFound } from "./errors.js"
 import { ensureDefaultPaymentMethods } from "./payment-methods.js"
 import { type OrgTaxInput, taxColumnsFor } from "./clinic-taxes.js"
 
@@ -91,7 +91,7 @@ export function regionPresetForCountry(countryCode: string): RegionDefaults {
 
 function assertCountryCode(value: string | null | undefined): string {
   const code = (value ?? "").trim().toUpperCase()
-  if (!/^[A-Z]{2}$/.test(code)) throw validation("countryCode debe ser ISO 3166 de 2 letras")
+  if (!/^[A-Z]{2}$/.test(code)) throw invalidField("countryCode", "Elige el país de la lista")
   return code
 }
 
@@ -100,7 +100,7 @@ function assertCurrency(value: string | null | undefined): string {
   try {
     currencyFractionDigits(code)
   } catch {
-    throw validation("La moneda debe ser un código ISO 4217 válido")
+    throw invalidField("currency", "Elige la moneda de la lista")
   }
   return code
 }
@@ -111,42 +111,41 @@ function assertLocale(value: string | null | undefined): string {
     const canonical = Intl.getCanonicalLocales(locale)[0]
     if (!canonical) throw new Error("Idioma vacío")
     if (new Intl.Locale(canonical).language !== "es")
-      throw validation("odentIA está en español: el formato es el español del país de la clínica")
+      throw invalidField("locale", "odentIA está en español: el formato es el español del país de la clínica")
     return canonical
   } catch (error) {
     if (error instanceof ServiceError) throw error
-    throw validation("El idioma y formato debe ser una etiqueta BCP 47 válida")
+    throw invalidField("locale", "El idioma y formato debe ser una etiqueta BCP 47 válida")
   }
 }
 
 function assertTimezone(value: string | null | undefined): string {
   const zone = (value ?? "").trim()
-  if (!zone || zone.length > 80) throw validation("timezone es obligatorio (IANA)")
+  if (!zone || zone.length > 80) throw invalidField("timezone", "Elige la zona horaria de la clínica")
   try {
     Intl.DateTimeFormat("en", { timeZone: zone })
   } catch {
-    throw validation("timezone debe ser un identificador IANA válido")
+    throw invalidField("timezone", "Elige la zona horaria de la lista")
   }
   return zone
 }
 
 function assertReceiptWidth(value: string | null | undefined): ReceiptWidth {
   const width = (value ?? "80").trim()
-  if (width !== "58" && width !== "80") throw validation("receiptWidth debe ser 58|80")
+  if (width !== "58" && width !== "80") throw invalidField("receiptWidth", "Elige el ancho del ticket: 58 u 80 mm")
   return width
 }
 
 function assertSheetSize(value: string | null | undefined): SheetSize {
   const size = (value ?? "A4").trim()
-  if (size !== "A4" && size !== "Letter") throw validation("sheetSize debe ser A4|Letter")
+  if (size !== "A4" && size !== "Letter") throw invalidField("sheetSize", "Elige el tamaño de hoja: A4 o Carta")
   return size
 }
 
 function assertTicketFooter(value: string | null | undefined): string {
   const footer = (value ?? "Recibo interno. No es un documento fiscal.").trim()
-  if (!footer || footer.length > 280) {
-    throw validation("ticketFooter debe tener 1–280 caracteres")
-  }
+  if (!footer) throw invalidField("ticketFooter", "Escribe la frase al pie del ticket")
+  if (footer.length > 280) throw invalidField("ticketFooter", "La frase al pie admite hasta 280 caracteres")
   return footer
 }
 
@@ -183,14 +182,14 @@ export interface InitialOrgRegion {
 export function initialOrgRegion(
   input: Pick<UpdateOrgRegionInput, "countryCode" | "currency" | "timezone" | "locale" | "sheetSize">,
 ): InitialOrgRegion {
-  if (!input.countryCode?.trim()) throw validation("Indica el país de la clínica")
+  if (!input.countryCode?.trim()) throw invalidField("countryCode", "Indica el país de la clínica")
   const countryCode = assertCountryCode(input.countryCode)
   const preset = regionPresetForCountry(countryCode)
   if (!input.currency && !preset.currency) {
-    throw validation("Indica la moneda de la clínica: no la conocemos para ese país")
+    throw invalidField("currency", "Indica la moneda de la clínica: no la conocemos para ese país")
   }
   if (!input.timezone && !preset.timezone) {
-    throw validation("Indica la zona horaria de la clínica: ese país tiene más de una")
+    throw invalidField("timezone", "Indica la zona horaria de la clínica: ese país tiene más de una")
   }
   return {
     countryCode,
@@ -225,11 +224,8 @@ export async function assertNoForeignCurrencyHistory(
       select 1 as "found" from ${sql.identifier(table)}
       where "organization_id" = ${orgId} and "currency" <> ${nextCurrency} limit 1`)
     if (rows.length > 0) {
-      throw new ServiceError(
-        "CURRENCY_HISTORY_EXISTS",
-        409,
-        "La clínica ya tiene movimientos en otra moneda: el cambio requiere migración explícita",
-      )
+      const message = "La clínica ya tiene movimientos en otra moneda: el cambio requiere migración explícita"
+      throw new ServiceError("CURRENCY_HISTORY_EXISTS", 409, message, { currency: message })
     }
   }
 }
@@ -267,13 +263,13 @@ export async function updateOrgRegion(
       set.currency = preset.currency
       fields.push("currency")
     } else if (!input.currency) {
-      throw validation("Indica la moneda de la clínica: no la conocemos para ese país")
+      throw invalidField("currency", "Indica la moneda de la clínica: no la conocemos para ese país")
     }
     if (preset.timezone) {
       set.timezone = preset.timezone
       fields.push("timezone")
     } else if (!input.timezone) {
-      throw validation("Indica la zona horaria de la clínica: ese país tiene más de una")
+      throw invalidField("timezone", "Indica la zona horaria de la clínica: ese país tiene más de una")
     }
     set.locale = preset.locale
     set.sheetSize = preset.sheetSize

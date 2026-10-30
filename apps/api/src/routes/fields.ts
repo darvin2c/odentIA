@@ -6,18 +6,35 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
+/** Opciones de una lista: hasta 50, cada una de hasta 80 caracteres; el error dice qué línea. */
+const optionsInput = z
+  .array(z.string())
+  .max(50, "Una lista admite hasta 50 opciones")
+  .superRefine((list, ctx) => {
+    const line = list.findIndex((option) => option.trim().length > 80)
+    if (line >= 0) {
+      ctx.addIssue({ code: "custom", message: `La opción ${line + 1} pasa de 80 caracteres: acórtala` })
+    }
+  })
+
+const labelInput = z
+  .string()
+  .trim()
+  .min(1, "Escribe el nombre del campo")
+  .max(120, "El nombre del campo admite hasta 120 caracteres")
+
 const createInput = z.object({
   /** Opcional: sin ella, el servicio la genera a partir del nombre. */
   key: z.string().min(1).max(40).optional(),
-  label: z.string().min(1).max(120),
-  type: z.enum(["text", "number", "date", "select"]),
-  options: z.array(z.string().max(80)).max(50).optional(),
+  label: labelInput,
+  type: z.enum(["text", "number", "date", "select"], "Elige el tipo del campo: texto, número, fecha o lista de opciones"),
+  options: optionsInput.optional(),
   position: z.number().int().min(0).max(1000).optional(),
 })
 
 const patchInput = z.object({
-  label: z.string().min(1).max(120).optional(),
-  options: z.array(z.string().max(80)).max(50).optional(),
+  label: labelInput.optional(),
+  options: optionsInput.optional(),
   position: z.number().int().min(0).max(1000).optional(),
 })
 

@@ -1,26 +1,24 @@
+import { Button, buttonVariants, toast } from "@odentia/ui"
 import {
-  Button,
-  buttonVariants,
-  Field,
-  FieldLabel,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import {
+  applySubmitError,
   ConfirmDialog,
+  clearSubmitErrors,
   FormDrawer,
+  focusFirstInvalid,
   LoadingState,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  useFormSurface,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useId, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import {
   type ConsentDocument,
   cancelConsent,
@@ -33,16 +31,15 @@ import {
 } from "../../lib/clinical-forms"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { ConsentSheet } from "./consent-sheet"
-import { ConsentSigningScreen, PaperSignDrawer, useSignerChoices } from "./consent-signing"
+import { ConsentSigningScreen, PaperSignDrawer, type SignerChoice, useSignerChoices } from "./consent-signing"
 import { FirmaPad } from "./firma-pad"
 import { activeOrgLocale } from "../../lib/locale"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { appWords } from "../../lib/product-words"
 
-const errorMessage = (e: unknown) =>
-  e instanceof ApiError
-    ? (e.shape.message ?? "No se pudo completar la acción")
-    : "No se pudo completar la acción"
+const cancelSchema = z.object({
+  reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "Escribe como mucho 2000 caracteres."),
+})
 
 const EVENT_LABELS: Record<string, string> = {
   pendiente: "Creado (pendiente de firma)",
@@ -51,6 +48,21 @@ const EVENT_LABELS: Record<string, string> = {
   revocado: "Revocado",
   anulado: "Anulado",
 }
+
+interface NewConsentValues {
+  templateId: string
+  procedureRef: string
+  diagnosisCode: string
+  diagnosisSystem: string | null
+}
+
+/** Los mismos límites que `consentCreate` de la API. */
+const newConsentSchema = z.object({
+  templateId: z.string().min(1, "Elige una plantilla publicada"),
+  procedureRef: z.string().trim().max(500, "Escribe como mucho 500 caracteres."),
+  diagnosisCode: z.string(),
+  diagnosisSystem: z.string().nullable(),
+})
 
 export function NewConsentDrawer({
   open,
@@ -74,112 +86,101 @@ export function NewConsentDrawer({
   defaultDiagnosisSystem?: string
   onCreated: (id: string) => Promise<void>
 }) {
-  const ids = useId()
-  const [templateId, setTemplateId] = useState("")
-  const [procedureRef, setProcedureRef] = useState(defaultProcedureRef ?? "")
-  const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
-  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
-  const [error, setError] = useState<string | null>(null)
   const templatesQuery = useQuery({
     queryKey: ["consent-templates-published"],
     queryFn: () => fetchConsentTemplates({ status: "publicado" }),
     enabled: open,
   })
   const templates = templatesQuery.data?.data ?? []
-  const create = useMutation({
-    mutationFn: () =>
-      createConsent({
-        templateId,
+  const create = useMutation({ mutationFn: createConsent })
+  const defaultValues: NewConsentValues = {
+    templateId: "",
+    procedureRef: defaultProcedureRef ?? "",
+    diagnosisCode: defaultDiagnosisCode ?? "",
+    diagnosisSystem: defaultDiagnosisSystem ?? null,
+  }
+  const form = useAppForm({
+    defaultValues,
+    validators: {
+      // Desde la atención o el tratamiento, el procedimiento ya va unido; si no, se escribe.
+      onSubmit: newConsentSchema.superRefine((value, ctx) => {
+        if (!encounterId && !planItemId && !value.procedureRef.trim())
+          ctx.addIssue({ code: "custom", path: ["procedureRef"], message: "Indica el procedimiento al que aplica" })
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const result = await create.mutateAsync({
+        templateId: value.templateId,
         patientId,
         encounterId: encounterId ?? null,
         planItemId: planItemId ?? null,
-        procedureRef: procedureRef.trim() || null,
-        diagnosisCode: diagnosisCode || null,
-        diagnosisSystem: diagnosisCode ? diagnosisSystem : null,
-      }),
-    onSuccess: async (result) => {
+        procedureRef: value.procedureRef.trim() || null,
+        diagnosisCode: value.diagnosisCode || null,
+        diagnosisSystem: value.diagnosisCode ? value.diagnosisSystem : null,
+      })
       toast.success("Consentimiento generado: pendiente de firma")
-      setTemplateId("")
-      setProcedureRef("")
-      setDiagnosisCode("")
+      form.reset({ templateId: "", procedureRef: "", diagnosisCode: "", diagnosisSystem: value.diagnosisSystem })
       await onCreated(result.data.id)
     },
-    onError: (e) => setError(errorMessage(e)),
   })
+  const surface = useFormSurface(form)
+  const diagnosisSystem = useStore(form.store, (state) => state.values.diagnosisSystem)
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        setError(null)
+        clearSubmitErrors(form)
         onClose()
       }}
       title="Nuevo consentimiento"
       description="La plantilla publicada se copia al documento: lo que se firma no cambia aunque la plantilla se actualice."
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!templateId) {
-          setError("Elige una plantilla publicada")
-          return
-        }
-        if (!procedureRef.trim() && !encounterId && !planItemId) {
-          setError("Indica el procedimiento al que aplica")
-          return
-        }
-        setError(null)
-        create.mutate()
-      }}
-      isDirty={Boolean(templateId || procedureRef || diagnosisCode)}
-      isSubmitting={create.isPending}
-      error={error}
       submitLabel="Generar consentimiento"
     >
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`${ids}-template`}>Plantilla</FieldLabel>
-          <Select
-            items={Object.fromEntries(templates.map((t) => [t.id, t.title]))}
-            value={templateId}
-            onValueChange={(v) => setTemplateId(v ?? "")}
-          >
-            <SelectTrigger id={`${ids}-template`} aria-required="true">
-              <SelectValue
-                placeholder={templatesQuery.isPending ? "Cargando…" : "Elige una plantilla"}
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {templates.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {templatesQuery.isSuccess && templates.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No hay plantillas publicadas. Se publican en Configuración → Formularios y
-              consentimientos.
-            </p>
-          ) : null}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-procedure`}>Procedimiento al que aplica</FieldLabel>
-          <Input
-            id={`${ids}-procedure`}
-            value={procedureRef}
-            onChange={(event) => setProcedureRef(event.target.value)}
-            maxLength={500}
-            placeholder={`p. ej. ${appWords().examples.consentProcedure}`}
-          />
-        </Field>
-        <DiagnosisSearch
-          value={diagnosisCode}
-          system={diagnosisSystem}
-          onChange={(code, _description, system) => {
-            setDiagnosisCode(code)
-            setDiagnosisSystem(system)
-          }}
-          label="Diagnóstico que lo motiva (opcional)"
-        />
+        <form.AppField name="templateId">
+          {(field) => (
+            <field.SelectField
+              label="Plantilla"
+              placeholder={templatesQuery.isPending ? "Cargando…" : "Elige una plantilla"}
+              options={templates.map((t) => ({ value: t.id, label: t.title }))}
+              description={
+                templatesQuery.isSuccess && templates.length === 0
+                  ? "No hay plantillas publicadas. Se publican en Configuración → Formularios y consentimientos."
+                  : undefined
+              }
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="procedureRef">
+          {(field) => (
+            <field.TextField
+              label="Procedimiento al que aplica"
+              maxLength={500}
+              placeholder={`p. ej. ${appWords().examples.consentProcedure}`}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="diagnosisCode">
+          {(field) => (
+            <field.Control label="Diagnóstico que lo motiva (opcional)">
+              {(control) => (
+                <DiagnosisSearch
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  system={diagnosisSystem}
+                  onChange={(code, _description, system) => {
+                    form.setFieldValue("diagnosisSystem", system)
+                    field.handleChange(code)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
@@ -199,22 +200,24 @@ export function ConsentDetail({
     queryFn: () => fetchConsentHistory(document.id),
   })
   const [cancelOpen, setCancelOpen] = useState(false)
-  const [cancelReason, setCancelReason] = useState("")
   const [revokeOpen, setRevokeOpen] = useState(false)
   const [signing, setSigning] = useState(false)
   const [paperOpen, setPaperOpen] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const cancelId = useId()
   const signatureWords = consentSignatureWords(document)
-  const cancel = useMutation({
-    mutationFn: () => cancelConsent(document.id, cancelReason.trim()),
-    onSuccess: async () => {
+  const cancel = useMutation({ mutationFn: (reason: string) => cancelConsent(document.id, reason) })
+  const cancelForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: cancelSchema },
+    onSubmit: async ({ value }) => {
+      await cancel.mutateAsync(value.reason.trim())
       setCancelOpen(false)
       toast.success("Consentimiento anulado")
       await onChanged()
     },
-    onError: (e) => setActionError(errorMessage(e)),
   })
+  const cancelError = useFormSubmitError(cancelForm)
+  const cancelPending = useStore(cancelForm.store, (state) => state.isSubmitting)
   // Revocado, el PDF que se ve es el de la revocación (lleva el documento entero).
   const pdfIdOf = (doc: ConsentDocument) =>
     doc.status === "revocado" ? (doc.revokePdfDocumentId ?? null) : doc.pdfDocumentId
@@ -232,7 +235,7 @@ export function ConsentDetail({
       window.open(url, "_blank", "noopener")
       if (generated) await onChanged()
     },
-    onError: (e) => setActionError(errorMessage(e)),
+    onError: (e) => setActionError(submitErrorMessage(e)),
   })
   const signed = document.status === "firmado" || document.status === "revocado"
 
@@ -257,8 +260,7 @@ export function ConsentDetail({
             size="sm"
             variant="outline"
             onClick={() => {
-              setCancelReason("")
-              setActionError(null)
+              cancelForm.reset()
               setCancelOpen(true)
             }}
           >
@@ -346,27 +348,46 @@ export function ConsentDetail({
         title="Anular consentimiento pendiente"
         description="Desaparece de los pendientes y no cuenta como consentimiento. Queda en la historia con el motivo."
         confirmLabel="Anular"
-        pending={cancel.isPending}
-        confirmDisabled={!cancelReason.trim()}
-        onClose={() => setCancelOpen(false)}
-        onConfirm={() => cancel.mutate()}
+        pending={cancelPending}
+        error={cancelError}
+        onClose={() => {
+          if (!cancelPending) setCancelOpen(false)
+        }}
+        onConfirm={() => void submitForm(cancelForm)}
       >
-        <Field>
-          <FieldLabel htmlFor={cancelId}>Motivo</FieldLabel>
-          <Textarea
-            id={cancelId}
-            aria-required="true"
-            value={cancelReason}
-            maxLength={2000}
-            onChange={(event) => setCancelReason(event.target.value)}
-            placeholder="p. ej. Plantilla equivocada"
-          />
-        </Field>
+        <cancelForm.AppField name="reason">
+          {(field) => (
+            <field.TextareaField
+              label="Motivo"
+              aria-required
+              maxLength={2000}
+              placeholder="p. ej. Plantilla equivocada"
+            />
+          )}
+        </cancelForm.AppField>
       </ConfirmDialog>
     </div>
   )
 }
 
+interface RevokeValues {
+  revokerContactId: string
+  reason: string
+  signatureData: number[][][]
+}
+
+/** Los mismos límites que `consentRevoke` de la API. */
+const revokeSchema = z.object({
+  revokerContactId: z.string().min(1, "Indica quién revoca"),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "La revocación necesita un motivo")
+    .max(2000, "Escribe como mucho 2000 caracteres."),
+  signatureData: z.array(z.array(z.array(z.number()))),
+})
+
+/** Quién puede revocar llega del servidor; el formulario empieza cuando se sabe. */
 function RevokeForm({
   document,
   onCancel,
@@ -376,37 +397,10 @@ function RevokeForm({
   onCancel: () => void
   onChanged: () => Promise<void>
 }) {
-  const ids = useId()
   const { choices, loading } = useSignerChoices(document.patientId)
-  const [choiceId, setChoiceId] = useState("")
-  const selected =
-    choices.find((c) => c.contactId === choiceId) ??
-    choices.find((c) => c.contactId === document.signerContactId) ??
-    choices[0] ??
-    null
-  const [reason, setReason] = useState("")
-  const [strokes, setStrokes] = useState<number[][][]>([])
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const revoke = useMutation({
-    mutationFn: () =>
-      revokeConsent(document.id, {
-        reason: reason.trim(),
-        revokerContactId: selected!.contactId,
-        signatureData: { strokes },
-      }),
-    onSuccess: async () => {
-      setConfirmOpen(false)
-      toast.success("Consentimiento revocado")
-      await onChanged()
-    },
-    onError: (e) => {
-      setConfirmOpen(false)
-      setError(errorMessage(e))
-    },
-  })
   if (loading) return <LoadingState message="Buscando quién puede revocar…" />
-  if (!selected)
+  const initial = choices.find((c) => c.contactId === document.signerContactId) ?? choices[0]
+  if (!initial)
     return (
       <p role="alert" className="text-sm text-destructive">
         No hay una persona habilitada para revocar (la propia persona o su representante legal
@@ -414,60 +408,115 @@ function RevokeForm({
       </p>
     )
   return (
+    <RevokeFields
+      document={document}
+      choices={choices}
+      initialContactId={initial.contactId}
+      onCancel={onCancel}
+      onChanged={onChanged}
+    />
+  )
+}
+
+function RevokeFields({
+  document,
+  choices,
+  initialContactId,
+  onCancel,
+  onChanged,
+}: {
+  document: ConsentDocument
+  choices: SignerChoice[]
+  initialContactId: string
+  onCancel: () => void
+  onChanged: () => Promise<void>
+}) {
+  const ids = useId()
+  const formRef = useRef<HTMLFormElement>(null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const nameOf = (contactId: string) => (choices.find((c) => c.contactId === contactId) ?? choices[0])?.name ?? ""
+  const revoke = useMutation({
+    mutationFn: (value: RevokeValues) =>
+      revokeConsent(document.id, {
+        reason: value.reason.trim(),
+        revokerContactId: value.revokerContactId,
+        signatureData: { strokes: value.signatureData },
+      }),
+  })
+  const defaultValues: RevokeValues = { revokerContactId: initialContactId, reason: "", signatureData: [] }
+  const form = useAppForm({
+    defaultValues,
+    validators: {
+      onSubmit: revokeSchema.superRefine((value, ctx) => {
+        if (value.signatureData.length === 0)
+          ctx.addIssue({
+            code: "custom",
+            path: ["signatureData"],
+            message: `Falta la firma de ${nameOf(value.revokerContactId)}`,
+          })
+      }),
+    },
+    // Lo escrito está completo: falta la confirmación, que es la que revoca.
+    onSubmit: () => setConfirmOpen(true),
+  })
+  const onSubmit = useFormSubmit(form)
+  const error = useFormSubmitError(form)
+  const revokerContactId = useStore(form.store, (state) => state.values.revokerContactId)
+  const revokerName = nameOf(revokerContactId)
+  // Si el servidor lo rechaza, el diálogo se cierra y cada dato se dice junto a su campo.
+  const confirm = async () => {
+    try {
+      await revoke.mutateAsync(form.state.values)
+    } catch (rejection) {
+      setConfirmOpen(false)
+      applySubmitError(form, rejection)
+      focusFirstInvalid(formRef.current)
+      return
+    }
+    setConfirmOpen(false)
+    toast.success("Consentimiento revocado")
+    await onChanged()
+  }
+  return (
     <form
+      ref={formRef}
+      noValidate
       aria-labelledby={`${ids}-title`}
       className="flex flex-col gap-3 rounded-md border border-destructive/40 p-3"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!reason.trim()) {
-          setError("La revocación necesita un motivo")
-          return
-        }
-        if (strokes.length === 0) {
-          setError(`Falta la firma de ${selected.name}`)
-          return
-        }
-        setError(null)
-        setConfirmOpen(true)
-      }}
+      onSubmit={onSubmit}
     >
       <h4 id={`${ids}-title`} className="text-sm font-semibold">
         Revocar consentimiento
       </h4>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-who`}>Quién revoca</FieldLabel>
-        <Select
-          items={Object.fromEntries(choices.map((c) => [c.contactId, c.label]))}
-          value={selected.contactId}
-          onValueChange={(v) => setChoiceId(v ?? "")}
-        >
-          <SelectTrigger id={`${ids}-who`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {choices.map((c) => (
-              <SelectItem key={c.contactId} value={c.contactId}>
-                {c.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${ids}-reason`}>Motivo</FieldLabel>
-        <Textarea
-          id={`${ids}-reason`}
-          aria-required="true"
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          rows={2}
-          maxLength={2000}
-        />
-      </Field>
-      <div className="flex flex-col gap-1">
-        <p className="text-sm font-medium">Firma de {selected.name}</p>
-        <FirmaPad label={`Firma de ${selected.name} para revocar`} onChange={setStrokes} />
-      </div>
+      <form.AppField name="revokerContactId">
+        {(field) => (
+          <field.SelectField
+            label="Quién revoca"
+            options={choices.map((c) => ({ value: c.contactId, label: c.label }))}
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField label="Motivo" aria-required rows={2} maxLength={2000} />}
+      </form.AppField>
+      <form.AppField name="signatureData">
+        {(field) => (
+          <field.Group legend={`Firma de ${revokerName}`}>
+            {(control) => (
+              <FirmaPad
+                label={`Firma de ${revokerName} para revocar`}
+                id={control.id}
+                invalid={control.invalid}
+                describedBy={control.describedBy}
+                onChange={(strokes) => {
+                  field.handleChange(strokes)
+                  field.handleBlur()
+                }}
+              />
+            )}
+          </field.Group>
+        )}
+      </form.AppField>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
@@ -488,7 +537,7 @@ function RevokeForm({
         confirmLabel="Revocar"
         pending={revoke.isPending}
         onClose={() => setConfirmOpen(false)}
-        onConfirm={() => revoke.mutate()}
+        onConfirm={() => void confirm()}
       />
     </form>
   )

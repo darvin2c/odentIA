@@ -1,5 +1,5 @@
 import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, useIsMobile } from "@odentia/ui"
-import { AgentSurface, EmptyState, ErrorState, LoadingState, PageHeader, PageShell, RowActions, ViewTabs } from "@odentia/ui-patterns"
+import { AgentSurface, EmptyState, ErrorState, LoadingState, PageHeader, PageShell, RowActions, submitErrorMessage, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
@@ -28,7 +28,7 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/learn")({
   component: AgentLearnPage,
@@ -411,7 +411,7 @@ function AgentLearnPage() {
             )}
             {markOk.isError ? (
               <p role="alert" className="text-sm text-destructive">
-                {mutationErrorMessage(markOk.error)}
+                {submitErrorMessage(markOk.error)}
               </p>
             ) : null}
             {!allReview && review.length > PREVIEW ? (

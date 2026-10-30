@@ -5,10 +5,9 @@ import {
   type SelectableDiagnosisSystem,
 } from "@odentia/clinical"
 import { Button, toast } from "@odentia/ui"
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useId, useState } from "react"
-import { ApiError } from "../../lib/api"
 import { useOrgLocale } from "../../lib/locale"
 import { effectiveDiagnosisSystem, type OrgProfile, saveDiagnosisSystem } from "../../lib/org"
 import { countryName, displayLanguage } from "../../lib/region-format"
@@ -47,12 +46,6 @@ export function DiagnosisListSettings({ profile }: { profile: OrgProfile }) {
       )
       await queryClient.invalidateQueries({ queryKey: ["org-profile"] })
     },
-    onError: (error) =>
-      toast.error(
-        error instanceof ApiError && error.status < 500 && error.shape.message
-          ? error.shape.message
-          : "No pudimos cambiar la lista de diagnósticos",
-      ),
   })
 
   const notice = (system: SelectableDiagnosisSystem): string | null => {
@@ -112,10 +105,14 @@ export function DiagnosisListSettings({ profile }: { profile: OrgProfile }) {
         confirmLabel={pending ? `Cambiar a ${DIAGNOSIS_SYSTEM_INFO[pending].short}` : "Cambiar"}
         variant="default"
         pending={mutation.isPending}
+        error={mutation.error ? submitErrorMessage(mutation.error) : undefined}
         onConfirm={() => {
           if (pending) mutation.mutate(pending)
         }}
-        onClose={() => setPending(null)}
+        onClose={() => {
+          setPending(null)
+          mutation.reset()
+        }}
       >
         {pending && notice(pending) ? (
           <p className="rounded-lg bg-muted px-3 py-2.5 text-sm">{notice(pending)}</p>

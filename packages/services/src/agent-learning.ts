@@ -18,7 +18,7 @@ import { user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, count, desc, eq, inArray, isNull, sql } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   createKnowledgeEntry,
   listActiveKnowledge,
@@ -119,10 +119,11 @@ export interface TestCaseItem {
   createdAt: string
 }
 
-function cleanText(value: unknown, label: string, max: number): string {
-  if (typeof value !== "string" || !value.trim()) throw validation(`${label} es obligatorio`)
+/** `field`: el nombre del dato en el cuerpo, para decir el error junto a él. */
+function cleanText(value: unknown, field: string, label: string, max: number): string {
+  if (typeof value !== "string" || !value.trim()) throw invalidField(field, `${label} es obligatorio`)
   const text = value.trim()
-  if (text.length > max) throw validation(`${label} admite hasta ${max} caracteres`)
+  if (text.length > max) throw invalidField(field, `${label} admite hasta ${max} caracteres`)
   return text
 }
 
@@ -566,11 +567,11 @@ export interface CorrectAnswerInput {
  * lección propuesta que alguien que administra el agente aprueba o descarta.
  */
 export async function correctAnswer(tx: Db, orgId: string, actorUserId: string, input: CorrectAnswerInput): Promise<LessonItem> {
-  if (!(CORRECTION_FAILURES as readonly string[]).includes(input.failure)) throw validation("Indica qué falló")
+  if (!(CORRECTION_FAILURES as readonly string[]).includes(input.failure)) throw invalidField("failure", "Elige qué falló")
   const failure = input.failure as CorrectionFailure
   const corrected = typeof input.correctedReply === "string" ? input.correctedReply.trim() : ""
-  if (!corrected && failure !== "no_debio_responder") throw validation("Escribe cómo debió responder")
-  if (corrected.length > LESSON_BODY_CHARS) throw validation(`La respuesta admite hasta ${LESSON_BODY_CHARS} caracteres`)
+  if (!corrected && failure !== "no_debio_responder") throw invalidField("correctedReply", "Escribe cómo debió responder")
+  if (corrected.length > LESSON_BODY_CHARS) throw invalidField("correctedReply", `La respuesta admite hasta ${LESSON_BODY_CHARS} caracteres`)
   let item: ReviewItem
   if (input.reviewItemId) item = await requireReviewItem(tx, orgId, input.reviewItemId)
   else if (input.traceId) item = await flagAnswerForReview(tx, orgId, actorUserId, input.traceId)
@@ -604,7 +605,7 @@ export interface UpdateLessonInput {
 export async function updateLesson(tx: Db, orgId: string, actorUserId: string, id: string, input: UpdateLessonInput): Promise<LessonItem> {
   const current = await lockLesson(tx, orgId, id)
   if (current.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, "Solo se edita una lección que aún no se aprobó")
-  if (input.kind !== undefined && !(LESSON_KINDS as readonly string[]).includes(input.kind)) throw validation("Clase de lección desconocida")
+  if (input.kind !== undefined && !(LESSON_KINDS as readonly string[]).includes(input.kind)) throw invalidField("kind", "Elige qué clase de lección es")
   const kind = (input.kind as LessonKind | undefined) ?? current.kind
   const agent = current.scope === "clinica" ? "recepcion" : current.scope
   let knowledgeEntryId = current.knowledgeEntryId
@@ -613,8 +614,8 @@ export async function updateLesson(tx: Db, orgId: string, actorUserId: string, i
   await tx
     .update(agentLesson)
     .set({
-      title: input.title === undefined ? current.title : cleanText(input.title, "El título", LESSON_TITLE_CHARS),
-      body: input.body === undefined ? current.body : cleanText(input.body, "El texto", LESSON_BODY_CHARS),
+      title: input.title === undefined ? current.title : cleanText(input.title, "title", "El título", LESSON_TITLE_CHARS),
+      body: input.body === undefined ? current.body : cleanText(input.body, "body", "El texto", LESSON_BODY_CHARS),
       kind,
       scope: scopeOf(kind, agent),
       knowledgeEntryId,
@@ -843,8 +844,8 @@ export async function saveTestCase(
   actorUserId: string,
   input: { question: string; expected: string; agent?: string },
 ): Promise<TestCaseItem> {
-  const question = cleanText(input.question, "La pregunta", 2000)
-  const expected = cleanText(input.expected, "La respuesta esperada", 4000)
+  const question = cleanText(input.question, "question", "La pregunta", 2000)
+  const expected = cleanText(input.expected, "expected", "La respuesta esperada", 4000)
   const agent = input.agent ?? "recepcion"
   const [same] = await tx
     .select({ id: agentTestCase.id })

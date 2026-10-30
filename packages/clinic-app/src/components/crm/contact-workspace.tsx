@@ -1,5 +1,15 @@
-import { Badge, Button, buttonVariants, cn, ScrollArea, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, internationalText, LoadingState } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, ScrollArea, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  EmptyState,
+  internationalText,
+  LoadingState,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
 import {
@@ -12,6 +22,7 @@ import {
   X,
 } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
 import { channelIcon, channelLabel, identityText } from "../../lib/channels"
@@ -43,6 +54,17 @@ import { activeOrgLocale } from "../../lib/locale"
 import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { amountFromCents } from "../../lib/workspace"
 import { PhoneMatchPrompt } from "./phone-match"
+
+/** El mismo límite que `POST /api/crm/contacts/:id/notes`. */
+const NOTE_MAX_LENGTH = 2000
+
+const noteSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, "Escribe la nota.")
+    .max(NOTE_MAX_LENGTH, `La nota admite hasta ${NOTE_MAX_LENGTH} caracteres.`),
+})
 
 export interface ContactWorkspaceProps {
   contactId: string
@@ -124,8 +146,20 @@ export function ContactWorkspace({
 
   const [tab, setTab] = useState("resumen")
   const [memoryOpen, setMemoryOpen] = useState(false)
-  const [note, setNote] = useState("")
   const [noteOk, setNoteOk] = useState(false)
+  const noteForm = useAppForm({
+    defaultValues: { body: "" },
+    validators: { onSubmit: noteSchema },
+    onSubmit: async ({ value }) => {
+      await noteMutation.mutateAsync(value.body.trim())
+      noteForm.reset({ body: "" })
+      setNoteOk(true)
+      invalidateWorkspace()
+    },
+  })
+  const submitNote = useFormSubmit(noteForm)
+  const noteError = useFormSubmitError(noteForm)
+  const notePending = useStore(noteForm.store, (state) => state.isSubmitting)
   // Resultado persistente de la última confirmación registrada: la lista solo
   // trae propuestas pendientes, así que un outcome fallido/expirado se muestra
   // aquí, hasta cambiar de contacto o registrar otra.
@@ -147,7 +181,7 @@ export function ContactWorkspace({
   onRefreshRef.current = onRefresh
   const onDraftChangeRef = useRef(onDraftChange)
   onDraftChangeRef.current = onDraftChange
-  const noteDirty = note.trim().length > 0
+  const noteDirty = useStore(noteForm.store, (state) => state.values.body.trim().length > 0)
   const noteDirtyRef = useRef(noteDirty)
   noteDirtyRef.current = noteDirty
   const convRef = useRef(conversationId ?? null)
@@ -185,13 +219,13 @@ export function ContactWorkspace({
   // nombre para lectores de pantalla.
   useEffect(() => {
     setTab("resumen")
-    setNote("")
+    noteForm.reset({ body: "" })
     setNoteOk(false)
     setRegLink(null)
     setCopied(false)
     setOutcome(null)
     headingRef.current?.focus()
-  }, [contactId])
+  }, [contactId, noteForm])
 
   // Recargar o cerrar la pestaña con borrador pide confirmación del navegador.
   useEffect(() => {
@@ -320,14 +354,10 @@ export function ContactWorkspace({
   })
   const completion = useCompleteTask(() => invalidateWorkspace())
 
+  // El error de la nota lo dice su campo (o, si no es del campo, junto al botón).
   const noteMutation = useMutation({
     mutationFn: (body: string) =>
       createCrmNote(contactId, { body, conversationId: conversationId ?? undefined }),
-    onSuccess: () => {
-      setNote("")
-      setNoteOk(true)
-      invalidateWorkspace()
-    },
   })
 
   const registrationMutation = useMutation({
@@ -409,16 +439,9 @@ export function ContactWorkspace({
     if (needed === "conversations.write") return canWriteConv
     return canWriteNote
   }
-  const mutationError =
-    confirmMutation.error instanceof ApiError
-          ? (confirmMutation.error.shape.message ?? "No se pudo registrar la confirmación")
-          : taskMutation.error instanceof ApiError
-            ? (taskMutation.error.shape.message ?? "No se pudo actualizar la tarea")
-            : noteMutation.error instanceof ApiError
-              ? (noteMutation.error.shape.message ?? "No se pudo guardar la nota")
-              : registrationMutation.error instanceof ApiError
-                ? (registrationMutation.error.shape.message ?? "No se pudo crear el enlace")
-                : completion.error
+  // Las acciones sueltas (confirmar, tarea, enlace) dicen su fallo arriba, también sin red.
+  const failed = confirmMutation.error ?? taskMutation.error ?? registrationMutation.error
+  const mutationError = failed ? submitErrorMessage(failed) : completion.error
 
   return (
     // El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa.
@@ -931,36 +954,35 @@ export function ContactWorkspace({
 
           {/* Nota operativa real */}
           {canWriteNote && (
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">Nota operativa</h3>
-              <Textarea
-                aria-label="Nota operativa"
-                rows={2}
-                placeholder="Registra un dato operativo del caso…"
-                value={note}
-                onChange={(e) => {
-                  setNote(e.target.value)
-                  setNoteOk(false)
-                }}
-              />
+            <form noValidate onSubmit={submitNote} className="flex flex-col gap-2">
+              <noteForm.AppField name="body" listeners={{ onChange: () => setNoteOk(false) }}>
+                {(field) => (
+                  <field.TextareaField
+                    label="Nota operativa"
+                    rows={2}
+                    maxLength={NOTE_MAX_LENGTH}
+                    placeholder="Registra un dato operativo del caso…"
+                  />
+                )}
+              </noteForm.AppField>
               {noteOk && (
                 <p className="text-xs text-success" role="status">
                   Nota guardada en la bitácora.
                 </p>
               )}
-              {noteDirty && !noteMutation.isPending && (
+              {noteDirty && !notePending && (
                 <p className="text-xs text-warning" role="status">
                   Borrador sin guardar: cambiar de hilo o salir pedirá confirmación. Guárdalo o descártalo.
                 </p>
               )}
+              {noteError && (
+                <p className="text-xs text-destructive" role="alert">
+                  {noteError}
+                </p>
+              )}
               <span className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className="w-fit"
-                  disabled={note.trim().length === 0 || noteMutation.isPending}
-                  onClick={() => noteMutation.mutate(note.trim())}
-                >
-                  {noteMutation.isPending ? (
+                <Button type="submit" size="sm" className="w-fit" disabled={notePending}>
+                  {notePending ? (
                     <>
                       <Spinner className="size-6" aria-hidden />
                       Guardar nota
@@ -969,13 +991,14 @@ export function ContactWorkspace({
                     "Guardar nota"
                   )}
                 </Button>
-                {noteDirty && !noteMutation.isPending && (
+                {noteDirty && !notePending && (
                   <Button
+                    type="button"
                     variant="ghost"
                     size="sm"
                     className="w-fit"
                     onClick={() => {
-                      setNote("")
+                      noteForm.reset({ body: "" })
                       setNoteOk(false)
                     }}
                   >
@@ -983,7 +1006,7 @@ export function ContactWorkspace({
                   </Button>
                 )}
               </span>
-            </div>
+            </form>
           )}
         </TabsContent>
 

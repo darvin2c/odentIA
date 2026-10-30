@@ -12,7 +12,8 @@ import {
   quantityWords,
   supplierDocumentTypes,
 } from "@odentia/clinical"
-import { ApiError, apiFetch } from "./api"
+import { submitErrorMessage } from "@odentia/ui-patterns"
+import { apiFetch } from "./api"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 import { isAmbiguousMutationError } from "./query-error"
 import type { PurchaseBalance } from "./reports"
@@ -355,6 +356,8 @@ export interface ImportRowInput {
   onHand: string | null
   minQuantity: string | null
   productId?: string | null
+  /** El número de la fila en la hoja pegada (desde 1): el servidor la nombra así. */
+  line?: number | null
 }
 
 export interface ImportResult {
@@ -546,17 +549,15 @@ export const updateOrder = (
 
 export const confirmOrder = (id: string) => data(apiFetch<{ data: unknown }>(`/api/inventory/purchase-orders/${id}/confirm`, { method: "POST" }))
 
-export const receiveOrder = (
-  id: string,
-  body: {
-    idempotencyKey: string
-    lines: Array<{
-      productId: string
-      lots: Array<{ quantity: number; lotCode: string | null; expiresAt: string | null }>
-      unitCostCents?: number
-    }>
-  },
-) => data(apiFetch<{ data: PurchaseOrderView }>(`/api/inventory/purchase-orders/${id}/receive`, json(body)))
+/** Lo que llegó de un producto, en sus lotes y en unidades de compra. */
+export interface ReceptionLineBody {
+  productId: string
+  lots: Array<{ quantity: number; lotCode: string | null; expiresAt: string | null }>
+  unitCostCents?: number
+}
+
+export const receiveOrder = (id: string, body: { idempotencyKey: string; lines: ReceptionLineBody[] }) =>
+  data(apiFetch<{ data: PurchaseOrderView }>(`/api/inventory/purchase-orders/${id}/receive`, json(body)))
 
 export const closeOrder = (id: string) => data(apiFetch<{ data: PurchaseOrderView }>(`/api/inventory/purchase-orders/${id}/close`, { method: "POST" }))
 
@@ -869,30 +870,24 @@ export function orderMessage(order: {
 
 /* ---------------- errores ---------------- */
 
-/** Validador de la librería en inglés: nunca llega a la pantalla. */
-const LIBRARY_TEXT = /^(invalid|expected|required|too )/i
+/**
+ * Sin respuesta del servidor no se sabe si se guardó. Lo que lleva la clave del
+ * formulario se puede reintentar tal cual (no se repite); crear algo sin clave,
+ * no. Para `formMessage` de `useFormSurface`: lo demás lo dice la superficie.
+ */
+export function inventoryUnconfirmedMessage(error: unknown, options: { repeatable?: boolean } = {}): string | null {
+  if (!isAmbiguousMutationError(error)) return null
+  return options.repeatable === false
+    ? "No pudimos confirmar si se guardó. Mira la lista antes de volver a guardar, para no repetirlo."
+    : "No pudimos confirmar si se guardó. Vuelve a intentarlo sin cambiar nada: si ya se guardó, no se repite."
+}
 
 /**
- * El error de una operación en palabras de la clínica. Los rechazos del
- * servidor ya vienen en español («Ese código ya lo usa…»): se muestran tal
- * cual. Sin respuesta del servidor no se sabe si se aplicó: se dice así.
+ * El error de una acción suelta (un botón de fila, un interruptor) en una
+ * frase: el motivo del servidor, ya en español, o el de su estado.
  */
 export function inventoryErrorMessage(error: unknown, options: { repeatable?: boolean } = {}): string {
-  if (error == null) return ""
-  if (isAmbiguousMutationError(error)) {
-    // Lo que lleva la clave del formulario se puede reintentar; crear algo sin clave, no.
-    return options.repeatable === false
-      ? "No pudimos confirmar si se guardó. Mira la lista antes de volver a guardar, para no repetirlo."
-      : "No pudimos confirmar si se guardó. Vuelve a intentarlo sin cambiar nada: si ya se guardó, no se repite."
-  }
-  if (error instanceof ApiError) {
-    if (error.status === 401) return "Tu sesión venció. Vuelve a iniciar sesión para continuar; lo escrito se conserva."
-    const message = error.shape.message?.trim()
-    if (message && !LIBRARY_TEXT.test(message)) return message
-    if (error.status === 403) return "Tu rol no tiene permiso para hacer esto. Pídeselo a quien lleva el inventario."
-    if (error.status === 404) return "Ya no está disponible. Cierra y vuelve a abrir la lista."
-  }
-  return "No se pudo guardar. Revisa los datos y vuelve a intentarlo."
+  return inventoryUnconfirmedMessage(error, options) ?? submitErrorMessage(error)
 }
 
 /** Una clave nueva por formulario abierto: el reintento no duplica. */

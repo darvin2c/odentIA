@@ -1,22 +1,23 @@
+import { Button, cn, FieldLabel, RadioGroup, RadioGroupItem, Textarea } from "@odentia/ui"
 import {
-  Button,
-  Checkbox,
-  cn,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  RadioGroup,
-  RadioGroupItem,
-  Textarea,
-} from "@odentia/ui"
-import { DataRefreshMarker, ErrorState, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+  applySubmitError,
+  clearSubmitErrors,
+  DataRefreshMarker,
+  ErrorState,
+  FormDrawer,
+  SubmitButton,
+  setSubmitErrors,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { FileText, Send } from "lucide-react"
-import { useEffect, useId, useState, type ReactNode } from "react"
-import { ApiError, apiFetch, apiFetchBytes } from "../../lib/api"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { apiFetch, apiFetchBytes } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import { ChoiceSelect } from "../ui/choice-select"
 
 export interface SendFinancialDocumentProps {
@@ -87,11 +88,32 @@ function channelLabel(channel: string): string {
   return channel
 }
 
-/** El mensaje del servidor se muestra tal cual; el respaldo solo si no hay ninguno. */
-function errorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.shape.message ?? fallback
-  if (err instanceof TypeError) return "No hay conexión con el servidor. Revisa tu conexión e inténtalo de nuevo."
-  return err instanceof Error && err.message ? err.message : fallback
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const INVALID_EMAIL = "Escribe un correo válido."
+
+/**
+ * El borrador del envío, con los nombres del cuerpo de la petición (así cada
+ * rechazo del servidor cae en su campo). `""`/`null` = lo que propone el
+ * servidor (destinatario, canal, mensaje). `email` es «Agregar correo».
+ */
+interface SendDraft {
+  recipientContactId: string
+  connectionId: string
+  message: string | null
+  otherEmail: string
+  confirmOtherEmail: boolean
+  savePreferredChannel: boolean
+  email: string
+}
+
+const EMPTY_DRAFT: SendDraft = {
+  recipientContactId: "",
+  connectionId: "",
+  message: null,
+  otherEmail: "",
+  confirmOtherEmail: false,
+  savePreferredChannel: false,
+  email: "",
 }
 
 /**
@@ -111,27 +133,87 @@ export function SendFinancialDocument({
   onSent,
   className,
 }: SendFinancialDocumentProps) {
-  const uid = useId()
   const navigate = useNavigate()
   const canConfigure = usePermission("settings.read")
   const canInbox = usePermission("conversations.read")
   const [open, setOpen] = useState(false)
-  // null = el destinatario y el canal que propone el servidor.
-  const [recipientId, setRecipientId] = useState<string | null>(null)
-  const [connectionId, setConnectionId] = useState<string | null>(null)
   const [choosingRecipient, setChoosingRecipient] = useState(false)
-  // null = el mensaje propuesto, sin tocar.
-  const [message, setMessage] = useState<string | null>(null)
-  const [savePreferred, setSavePreferred] = useState(false)
   const [sent, setSent] = useState<SendResult | null>(null)
   const [viewing, setViewing] = useState(false)
   const [viewError, setViewError] = useState<string | null>(null)
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   // Correo escrito en el momento: para enviarlo ahí esta vez, o para guardarlo en sus datos.
   const [emailMode, setEmailMode] = useState<"otro" | "agregar" | null>(null)
-  const [emailText, setEmailText] = useState("")
-  const [emailConfirmed, setEmailConfirmed] = useState(false)
-  const [emailError, setEmailError] = useState<string | null>(null)
+
+  // Lo que la validación y el envío leen de la pantalla (canal elegido, si se están buscando canales).
+  const live = useRef<{
+    selected: ChannelOption | null
+    recipient: RecipientOption | null
+    sendingToOther: boolean
+    refreshing: boolean
+    proposedMessage: string
+  }>({ selected: null, recipient: null, sendingToOther: false, refreshing: false, proposedMessage: "" })
+
+  const sendMutation = useMutation({
+    mutationFn: (input: {
+      connectionId: string
+      recipientContactId: string
+      message: string
+      savePreferredChannel: boolean
+      otherEmail: string | null
+    }) =>
+      apiFetch<{ data: SendResult }>(`/api/patients/${patientId}/financial-documents/send`, {
+        method: "POST",
+        body: JSON.stringify({
+          documentType,
+          documentId,
+          recipientContactId: input.recipientContactId,
+          connectionId: input.connectionId,
+          message: input.message || null,
+          savePreferredChannel: input.savePreferredChannel,
+          requestId,
+          ...(input.otherEmail ? { otherEmail: input.otherEmail, confirmOtherEmail: true } : {}),
+        }),
+      }),
+    onSuccess: (result) => {
+      setSent(result.data)
+      onSent?.({ conversationId: result.data.conversationId, messageId: result.data.messageId })
+    },
+  })
+  const resetSend = sendMutation.reset
+
+  const form = useAppForm({
+    defaultValues: EMPTY_DRAFT,
+    validators: {
+      onSubmit: ({ value }) => {
+        const now = live.current
+        const fields: Partial<Record<keyof SendDraft, string>> = {}
+        if (now.refreshing) fields.connectionId = "Espera: se están buscando sus canales."
+        else if (!now.selected) fields.connectionId = "Elige por dónde enviarlo."
+        if (now.sendingToOther) {
+          if (!EMAIL_PATTERN.test(value.otherEmail.trim())) fields.otherEmail = INVALID_EMAIL
+          if (!value.confirmOtherEmail) fields.confirmOtherEmail = "Marca la confirmación para enviarlo a ese correo."
+        }
+        if ((value.message ?? now.proposedMessage).trim().length > MAX_MESSAGE)
+          fields.message = `El mensaje admite hasta ${MAX_MESSAGE} caracteres.`
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const now = live.current
+      if (!now.recipient || !now.selected) return
+      await sendMutation.mutateAsync({
+        connectionId: now.selected.connectionId,
+        recipientContactId: now.recipient.contactId,
+        message: (value.message ?? now.proposedMessage).trim(),
+        savePreferredChannel: value.savePreferredChannel && !now.selected.isPreferred && !now.sendingToOther,
+        otherEmail: now.sendingToOther ? value.otherEmail.trim() : null,
+      })
+    },
+  })
+  const surface = useFormSurface(form, { formMessage: financeFormMessage })
+  const recipientId = useStore(form.store, (state) => state.values.recipientContactId) || null
+  const connectionId = useStore(form.store, (state) => state.values.connectionId)
 
   const optionsQuery = useQuery({
     queryKey: ["financial-document-options", patientId, documentType, documentId, recipientId],
@@ -149,73 +231,30 @@ export function SendFinancialDocument({
   const options = optionsQuery.data?.data ?? null
   const refreshing = optionsQuery.isPlaceholderData
 
-  const sendMutation = useMutation({
-    mutationFn: (input: {
-      connectionId: string
-      recipientContactId: string
-      message: string
-      otherEmail: string | null
-    }) =>
-      apiFetch<{ data: SendResult }>(`/api/patients/${patientId}/financial-documents/send`, {
-        method: "POST",
-        body: JSON.stringify({
-          documentType,
-          documentId,
-          recipientContactId: input.recipientContactId,
-          connectionId: input.connectionId,
-          message: input.message || null,
-          savePreferredChannel: savePreferred,
-          requestId,
-          ...(input.otherEmail ? { otherEmail: input.otherEmail, confirmOtherEmail: true } : {}),
-        }),
-      }),
-    onSuccess: (result) => {
-      setSent(result.data)
-      onSent?.({ conversationId: result.data.conversationId, messageId: result.data.messageId })
-    },
-  })
-  const resetSend = sendMutation.reset
-
   const saveEmailMutation = useMutation({
     mutationFn: (input: { recipientContactId: string; email: string }) =>
       apiFetch(`/api/patients/${patientId}/financial-documents/recipient-email`, {
         method: "POST",
         body: JSON.stringify({ documentType, ...input }),
       }),
-    onSuccess: () => {
-      setEmailMode(null)
-      setEmailText("")
-      setEmailError(null)
-      setConnectionId(null)
-      void optionsQuery.refetch()
-    },
-    onError: (err) => setEmailError(errorMessage(err, "No se pudo guardar el correo.")),
   })
 
   // Cada apertura (o documento) es un intento nuevo: borrador limpio y clave nueva.
   useEffect(() => {
     if (!open) return
-    setRecipientId(null)
-    setConnectionId(null)
+    form.reset(EMPTY_DRAFT)
     setChoosingRecipient(false)
-    setMessage(null)
-    setSavePreferred(false)
     setSent(null)
     setViewError(null)
     setEmailMode(null)
-    setEmailText("")
-    setEmailConfirmed(false)
-    setEmailError(null)
     setRequestId(crypto.randomUUID())
     resetSend()
-  }, [open, patientId, documentType, documentId, resetSend])
+  }, [open, patientId, documentType, documentId, resetSend, form])
 
   const recipient = options?.recipient ?? null
-  const patientPerson = options?.recipients.find((item) => item.relation === "paciente") ?? null
   const channels = options?.channels ?? []
   const emailChannel = channels.find((item) => item.channel === "email") ?? null
   // Con otro correo se envía por el buzón de la clínica aunque la persona no tenga uno registrado.
-  const otherEmail = emailMode === "otro" ? emailText.trim() : ""
   const sendingToOther = emailMode === "otro" && emailChannel !== null
   const selected = sendingToOther
     ? emailChannel
@@ -225,7 +264,7 @@ export function SendFinancialDocument({
   const canSend = usableCount > 0 || sendingToOther
 
   const proposedMessage = options?.message ?? ""
-  const messageText = message ?? proposedMessage
+  live.current = { selected, recipient, sendingToOther, refreshing, proposedMessage }
 
   const viewPdf = async () => {
     if (viewing) return
@@ -244,35 +283,44 @@ export function SendFinancialDocument({
       window.setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000)
     } catch (err) {
       if (tab && !tab.closed) tab.close()
-      setViewError(errorMessage(err, "No se pudo generar el documento."))
+      setViewError(financeErrorMessage(err))
     } finally {
       setViewing(false)
     }
   }
 
-  const close = () => {
-    if (!sendMutation.isPending) setOpen(false)
+  // «Guardar correo»: su error va al campo del correo (o junto a los botones si no es de él).
+  const saveEmail = async () => {
+    if (!recipient) return
+    const email = form.getFieldValue("email").trim()
+    form.setFieldMeta("email", (meta) => ({ ...meta, isBlurred: true }))
+    if (!EMAIL_PATTERN.test(email)) {
+      setSubmitErrors(form, { fields: { email: INVALID_EMAIL } })
+      return
+    }
+    clearSubmitErrors(form)
+    try {
+      await saveEmailMutation.mutateAsync({ recipientContactId: recipient.contactId, email })
+    } catch (err) {
+      applySubmitError(form, err, { formMessage: financeFormMessage })
+      return
+    }
+    setEmailMode(null)
+    form.setFieldValue("email", "")
+    form.setFieldValue("connectionId", "")
+    void optionsQuery.refetch()
   }
 
-  const submit = () => {
-    if (!recipient || !selected || refreshing) return
-    if (sendingToOther) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(otherEmail)) {
-        setEmailError("Escribe un correo válido.")
-        return
-      }
-      if (!emailConfirmed) {
-        setEmailError("Marca la confirmación para enviarlo a ese correo.")
-        return
-      }
-    }
-    setEmailError(null)
-    sendMutation.mutate({
-      connectionId: selected.connectionId,
-      recipientContactId: recipient.contactId,
-      message: messageText.trim(),
-      otherEmail: sendingToOther ? otherEmail : null,
-    })
+  const leaveEmailMode = () => {
+    setEmailMode(null)
+    form.setFieldValue("email", "")
+    form.setFieldValue("otherEmail", "")
+    form.setFieldValue("confirmOtherEmail", false)
+    clearSubmitErrors(form)
+  }
+
+  const close = () => {
+    if (!surface.isSubmitting) setOpen(false)
   }
 
   const channelTitle = (item: ChannelOption) =>
@@ -281,6 +329,11 @@ export function SendFinancialDocument({
       : channelLabel(item.channel)
   const channelAddress = (item: ChannelOption) =>
     item.channel === "email" ? recipient?.email : item.channel === "whatsapp" ? recipient?.phone : null
+  const busy = surface.isSubmitting || saveEmailMutation.isPending
+  // Enter en un correo no envía el documento.
+  const keepEnter = (event: KeyboardEvent) => {
+    if (event.key === "Enter") event.preventDefault()
+  }
 
   return (
     <>
@@ -293,6 +346,9 @@ export function SendFinancialDocument({
         )}
       </span>
       <FormDrawer
+        {...surface}
+        isDirty={!sent && surface.isDirty}
+        error={sent ? null : surface.error}
         open={open}
         title="Enviar"
         headerContent={
@@ -303,22 +359,10 @@ export function SendFinancialDocument({
           ) : undefined
         }
         isLoading={optionsQuery.isPending}
-        isSubmitting={sendMutation.isPending}
-        isDirty={!sent && message !== null && message !== proposedMessage}
-        error={
-          sendMutation.isError
-            ? `${errorMessage(sendMutation.error, "No se pudo enviar.")} Tu mensaje se conserva: puedes intentarlo otra vez sin que se envíe dos veces.`
-            : null
-        }
         hideSubmit={sent !== null || !options || !canSend}
-        submitDisabled={!selected || refreshing}
         submitLabel={selected ? `Enviar por ${channelLabel(selected.channel).toLowerCase()}` : "Enviar"}
         cancelLabel={sent ? "Listo" : undefined}
         onClose={close}
-        onSubmit={(event) => {
-          event.preventDefault()
-          submit()
-        }}
       >
         {sent ? (
           <div className="flex flex-col gap-3" role="status">
@@ -344,7 +388,7 @@ export function SendFinancialDocument({
         ) : optionsQuery.isError || !options || !recipient ? (
           <ErrorState
             title="No se pudo preparar el envío"
-            message={errorMessage(optionsQuery.error, "No se pudieron consultar los canales.")}
+            message={financeErrorMessage(optionsQuery.error)}
             onRetry={() => void optionsQuery.refetch()}
           />
         ) : (
@@ -368,70 +412,81 @@ export function SendFinancialDocument({
             ) : null}
 
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <span id={`${uid}-canal`} className="text-sm font-semibold">
-                  Por dónde
-                </span>
-                {refreshing ? <DataRefreshMarker message="Buscando sus canales" /> : null}
-              </div>
               {channels.length === 0 ? (
-                <div className="flex flex-col gap-2 rounded-xl border px-3 py-3 text-sm">
-                  <p>
-                    La clínica no tiene ningún canal conectado para enviar documentos.{" "}
-                    {canConfigure ? "" : "Pídele a quien administra la clínica que conecte uno."}
-                  </p>
-                  {canConfigure ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="self-start"
-                      onClick={() => {
-                        setOpen(false)
-                        void navigate({ to: "/settings/integrations" })
-                      }}
-                    >
-                      Conectar un canal
-                    </Button>
-                  ) : null}
-                </div>
+                <>
+                  <span className="text-sm font-semibold">Por dónde</span>
+                  <div className="flex flex-col gap-2 rounded-xl border px-3 py-3 text-sm">
+                    <p>
+                      La clínica no tiene ningún canal conectado para enviar documentos.{" "}
+                      {canConfigure ? "" : "Pídele a quien administra la clínica que conecte uno."}
+                    </p>
+                    {canConfigure ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="self-start"
+                        onClick={() => {
+                          setOpen(false)
+                          void navigate({ to: "/settings/integrations" })
+                        }}
+                      >
+                        Conectar un canal
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
               ) : (
-                <RadioGroup
-                  aria-labelledby={`${uid}-canal`}
-                  value={selected?.connectionId ?? ""}
-                  disabled={sendingToOther}
-                  onValueChange={(next) => setConnectionId(String(next))}
-                >
-                  {channels.map((item) => (
-                    <FieldLabel
-                      key={item.connectionId}
-                      className={cn(
-                        "flex min-h-11 w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-normal",
-                        item.usable ? "cursor-pointer" : "opacity-70",
-                        selected?.connectionId === item.connectionId && "border-primary bg-primary-soft",
+                <form.AppField name="connectionId">
+                  {(field) => (
+                    <field.Group legend="Por dónde">
+                      {(control) => (
+                        <>
+                          {refreshing ? <DataRefreshMarker message="Buscando sus canales" /> : null}
+                          <RadioGroup
+                            name={control.name}
+                            aria-invalid={control.invalid || undefined}
+                            aria-describedby={control.describedBy}
+                            value={selected?.connectionId ?? ""}
+                            disabled={sendingToOther}
+                            onValueChange={(next) => field.handleChange(String(next))}
+                          >
+                            {channels.map((item) => (
+                              <FieldLabel
+                                key={item.connectionId}
+                                className={cn(
+                                  "flex min-h-11 w-full items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-normal",
+                                  item.usable ? "cursor-pointer" : "opacity-70",
+                                  selected?.connectionId === item.connectionId && "border-primary bg-primary-soft",
+                                )}
+                              >
+                                <RadioGroupItem
+                                  className="mt-0.5"
+                                  value={item.connectionId}
+                                  onBlur={control.onBlur}
+                                  disabled={!item.usable || refreshing || busy}
+                                />
+                                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                                  <span className="font-medium">{channelTitle(item)}</span>
+                                  {channelAddress(item) ? (
+                                    <span className="break-all text-muted-foreground">{channelAddress(item)}</span>
+                                  ) : null}
+                                  {!item.usable && item.reason ? (
+                                    <span className="text-muted-foreground">{item.reason}</span>
+                                  ) : null}
+                                </span>
+                                {item.usable && (item.isPreferred || item.channel === "email") ? (
+                                  <span className="shrink-0 text-xs text-muted-foreground">
+                                    {item.isPreferred ? "Su medio preferido" : "Para documentos"}
+                                  </span>
+                                ) : null}
+                              </FieldLabel>
+                            ))}
+                          </RadioGroup>
+                        </>
                       )}
-                    >
-                      <RadioGroupItem
-                        className="mt-0.5"
-                        value={item.connectionId}
-                        disabled={!item.usable || refreshing || sendMutation.isPending}
-                      />
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="font-medium">{channelTitle(item)}</span>
-                        {channelAddress(item) ? (
-                          <span className="break-all text-muted-foreground">{channelAddress(item)}</span>
-                        ) : null}
-                        {!item.usable && item.reason ? (
-                          <span className="text-muted-foreground">{item.reason}</span>
-                        ) : null}
-                      </span>
-                      {item.usable && (item.isPreferred || item.channel === "email") ? (
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {item.isPreferred ? "Su medio preferido" : "Para documentos"}
-                        </span>
-                      ) : null}
-                    </FieldLabel>
-                  ))}
-                </RadioGroup>
+                    </field.Group>
+                  )}
+                </form.AppField>
               )}
               {emailChannel && !recipient.email && emailMode === null ? (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/60 px-3 py-2 text-sm">
@@ -441,9 +496,8 @@ export function SendFinancialDocument({
                     variant="outline"
                     size="sm"
                     onClick={() => {
+                      form.setFieldValue("email", "")
                       setEmailMode("agregar")
-                      setEmailText("")
-                      setEmailError(null)
                     }}
                   >
                     Agregar correo
@@ -456,84 +510,56 @@ export function SendFinancialDocument({
               ) : null}
               {emailMode ? (
                 <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-correo`}>
-                      {emailMode === "agregar" ? `Correo de ${recipient.displayName}` : "Otro correo"}
-                    </FieldLabel>
-                    <Input
-                      id={`${uid}-correo`}
-                      type="email"
-                      inputMode="email"
-                      autoComplete="off"
-                      autoFocus
-                      maxLength={200}
-                      value={emailText}
-                      disabled={saveEmailMutation.isPending || sendMutation.isPending}
-                      onChange={(event) => {
-                        setEmailText(event.target.value)
-                        setEmailError(null)
-                      }}
-                      onKeyDown={(event) => {
-                        // Enter aquí no envía el documento.
-                        if (event.key === "Enter") event.preventDefault()
-                      }}
-                    />
-                    <FieldDescription>
-                      {emailMode === "agregar"
-                        ? "Se guarda en sus datos y queda para los próximos envíos."
-                        : "Solo para este envío: no cambia el correo registrado. Queda anotado a qué dirección se envió y quién lo decidió."}
-                    </FieldDescription>
-                  </Field>
-                  {emailMode === "otro" ? (
-                    <label className="flex cursor-pointer items-start gap-2.5 text-sm">
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={emailConfirmed}
-                        disabled={sendMutation.isPending}
-                        onCheckedChange={(value) => {
-                          setEmailConfirmed(value === true)
-                          setEmailError(null)
-                        }}
-                      />
-                      <span>Confirmo que {recipient.displayName} pidió recibirlo en este correo</span>
-                    </label>
-                  ) : null}
-                  {emailError ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {emailError}
-                    </p>
-                  ) : null}
+                  {emailMode === "agregar" ? (
+                    <form.AppField name="email">
+                      {(field) => (
+                        <field.TextField
+                          label={`Correo de ${recipient.displayName}`}
+                          description="Se guarda en sus datos y queda para los próximos envíos."
+                          type="email"
+                          inputMode="email"
+                          autoComplete="off"
+                          autoFocus
+                          maxLength={200}
+                          disabled={busy}
+                          onKeyDown={keepEnter}
+                        />
+                      )}
+                    </form.AppField>
+                  ) : (
+                    <>
+                      <form.AppField name="otherEmail">
+                        {(field) => (
+                          <field.TextField
+                            label="Otro correo"
+                            description="Solo para este envío: no cambia el correo registrado. Queda anotado a qué dirección se envió y quién lo decidió."
+                            type="email"
+                            inputMode="email"
+                            autoComplete="off"
+                            autoFocus
+                            maxLength={200}
+                            disabled={busy}
+                            onKeyDown={keepEnter}
+                          />
+                        )}
+                      </form.AppField>
+                      <form.AppField name="confirmOtherEmail">
+                        {(field) => (
+                          <field.CheckboxField
+                            label={`Confirmo que ${recipient.displayName} pidió recibirlo en este correo`}
+                            disabled={busy}
+                          />
+                        )}
+                      </form.AppField>
+                    </>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     {emailMode === "agregar" ? (
-                      <SubmitButton
-                        size="sm"
-                        pending={saveEmailMutation.isPending}
-                        onClick={() => {
-                          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailText.trim())) {
-                            setEmailError("Escribe un correo válido.")
-                            return
-                          }
-                          saveEmailMutation.mutate({
-                            recipientContactId: recipient.contactId,
-                            email: emailText.trim(),
-                          })
-                        }}
-                      >
+                      <SubmitButton size="sm" pending={saveEmailMutation.isPending} onClick={() => void saveEmail()}>
                         Guardar correo
                       </SubmitButton>
                     ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={saveEmailMutation.isPending || sendMutation.isPending}
-                      onClick={() => {
-                        setEmailMode(null)
-                        setEmailText("")
-                        setEmailConfirmed(false)
-                        setEmailError(null)
-                      }}
-                    >
+                    <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={leaveEmailMode}>
                       {emailMode === "otro" ? "Usar el correo registrado" : "Cancelar"}
                     </Button>
                   </div>
@@ -546,10 +572,9 @@ export function SendFinancialDocument({
                   size="sm"
                   className="self-start"
                   onClick={() => {
+                    form.setFieldValue("otherEmail", "")
+                    form.setFieldValue("confirmOtherEmail", false)
                     setEmailMode("otro")
-                    setEmailText("")
-                    setEmailConfirmed(false)
-                    setEmailError(null)
                   }}
                 >
                   Enviar a otro correo
@@ -557,29 +582,34 @@ export function SendFinancialDocument({
               ) : null}
               {options.recipients.length > 1 ? (
                 choosingRecipient ? (
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-destinatario`}>A quién se lo envías</FieldLabel>
-                    <ChoiceSelect
-                      id={`${uid}-destinatario`}
-                      value={recipient.contactId}
-                      disabled={sendMutation.isPending}
-                      onChange={(event) => {
-                        // Otra persona, otros canales: se vuelven a pedir al servidor.
-                        setRecipientId(event.target.value)
-                        setConnectionId(null)
-                        setSavePreferred(false)
-                      }}
-                    >
-                      {options.recipients.map((item) => (
-                        <option key={item.contactId} value={item.contactId}>
-                          {item.displayName}, {RELATION_LABELS[item.relation] ?? item.relation}
-                        </option>
-                      ))}
-                    </ChoiceSelect>
-                    <FieldDescription>
-                      Solo el paciente y sus responsables vigentes pueden recibirlo.
-                    </FieldDescription>
-                  </Field>
+                  <form.AppField name="recipientContactId">
+                    {(field) => (
+                      <field.Control
+                        label="A quién se lo envías"
+                        description="Solo el paciente y sus responsables vigentes pueden recibirlo."
+                      >
+                        {(control) => (
+                          <ChoiceSelect
+                            {...control.props}
+                            value={recipient.contactId}
+                            disabled={busy}
+                            onChange={(event) => {
+                              // Otra persona, otros canales: se vuelven a pedir al servidor.
+                              field.handleChange(event.target.value)
+                              form.setFieldValue("connectionId", "")
+                              form.setFieldValue("savePreferredChannel", false)
+                            }}
+                          >
+                            {options.recipients.map((item) => (
+                              <option key={item.contactId} value={item.contactId}>
+                                {item.displayName}, {RELATION_LABELS[item.relation] ?? item.relation}
+                              </option>
+                            ))}
+                          </ChoiceSelect>
+                        )}
+                      </field.Control>
+                    )}
+                  </form.AppField>
                 ) : (
                   <Button
                     type="button"
@@ -596,30 +626,31 @@ export function SendFinancialDocument({
 
             {canSend ? (
               <>
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-mensaje`}>Mensaje</FieldLabel>
-                  <Textarea
-                    id={`${uid}-mensaje`}
-                    rows={4}
-                    maxLength={MAX_MESSAGE}
-                    value={messageText}
-                    disabled={sendMutation.isPending}
-                    onChange={(event) => setMessage(event.target.value)}
-                  />
-                </Field>
+                <form.AppField name="message">
+                  {(field) => (
+                    <field.Control label="Mensaje">
+                      {(control) => (
+                        <Textarea
+                          {...control.props}
+                          rows={4}
+                          maxLength={MAX_MESSAGE}
+                          value={field.state.value ?? proposedMessage}
+                          disabled={busy}
+                          onChange={(event) => field.handleChange(event.target.value)}
+                        />
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
                 {selected && !selected.isPreferred && !sendingToOther ? (
-                  <label className="flex cursor-pointer items-start gap-2.5 text-sm">
-                    <Checkbox
-                      className="mt-0.5"
-                      checked={savePreferred}
-                      disabled={sendMutation.isPending}
-                      onCheckedChange={(value) => setSavePreferred(value === true)}
-                    />
-                    <span>
-                      Recordar {channelLabel(selected.channel).toLowerCase()} como el medio preferido de{" "}
-                      {recipient.displayName}
-                    </span>
-                  </label>
+                  <form.AppField name="savePreferredChannel">
+                    {(field) => (
+                      <field.CheckboxField
+                        label={`Recordar ${channelLabel(selected.channel).toLowerCase()} como el medio preferido de ${recipient.displayName}`}
+                        disabled={busy}
+                      />
+                    )}
+                  </form.AppField>
                 ) : null}
                 <p className="text-sm text-muted-foreground">
                   Queda en la conversación de {recipient.displayName}, con el documento adjunto.

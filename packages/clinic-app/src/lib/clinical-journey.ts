@@ -9,22 +9,13 @@
 
 import type { FollowUpStatus, ResponsibilityKind } from "@odentia/clinical"
 import type { AppointmentStatus } from "./agenda"
-import { ApiError, apiFetch } from "./api"
+import { apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
 import type { Encounter, PatientDocument, PlanItem, ProcedureItem, SiteFinding, TreatmentNextAction, TreatmentPlan } from "./patients"
 import { dayMinutesIn, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
 
 const base = (patientId: string) => `/api/patients/${patientId}`
-
-/** Mensaje de error en español para cualquier mutación clínica. */
-export function mutationMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.shape.message) return err.shape.message
-    if (err.shape.code) return `No se pudo guardar (${err.shape.code}). Inténtalo de nuevo.`
-  }
-  return err instanceof Error ? err.message : "No se pudo guardar. Inténtalo de nuevo."
-}
 
 /**
  * Fecha corta, en el formato y la zona de la clínica (no la del navegador);
