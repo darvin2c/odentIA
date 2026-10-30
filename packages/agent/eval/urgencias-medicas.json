@@ -104,5 +104,15 @@
     "mensaje": "Mi hijo se tomó todas las pastillas de mi mamá",
     "nivel": "urgente",
     "alarma": true
+  },
+  {
+    "mensaje": "Desperté y había un murciélago en mi cuarto, no sé si me mordió mientras dormía",
+    "nivel": "urgente",
+    "alarma": true
+  },
+  {
+    "mensaje": "A mi hijo lo mordió un perro de la calle en la pierna",
+    "nivel": "urgente",
+    "alarma": true
   }
 ]

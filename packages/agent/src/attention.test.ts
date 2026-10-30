@@ -173,4 +173,23 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     const other = attentionProgress({ items: [{ direction: "out", senderKind: "agent", body: "Gracias, Mariana.", createdAt: at(1) }], startedAt, state: empty, promotions: [], name: "María" })
     expect(other.usedName).toBe(false)
   })
+
+  it("si ya le dijo a dónde llamar, como lo escriba, no se lo repite (auditoría del ADR 0104, caso del murciélago)", () => {
+    const calls = ["+5115550188", "106"]
+    const out = (body: string, minutes = 1) => ({ direction: "out", senderKind: "agent", body, createdAt: at(minutes) })
+    const told = attentionProgress({
+      items: [out("Llama ahora al 106 o ve a la emergencia más cercana."), out("Para urgencias de la clínica, llama al +51 1 555 0188.", 2)],
+      startedAt,
+      state: empty,
+      promotions: [],
+      calls,
+    })
+    expect(told.calledOut).toBe(2)
+    expect(attentionLines(told, "Sofi").join("\n")).toContain("Ya le dijiste en esta atención a dónde llamar o ir")
+    for (const body of ["La consulta cuesta S/ 1060.", "Te escribo al 987 106 315."]) {
+      expect(attentionProgress({ items: [out(body)], startedAt, state: empty, promotions: [], calls }).calledOut, body).toBe(0)
+    }
+    // Lo dicho en la atención anterior no cuenta.
+    expect(attentionProgress({ items: [out("Llama al 106.", -600)], startedAt, state: empty, promotions: [], calls }).calledOut).toBe(0)
+  })
 })

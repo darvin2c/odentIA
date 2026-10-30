@@ -272,6 +272,17 @@ it("la indicación de la cita dice lo que falta según cómo va la atención, nu
   const byPhone = routeInstruction("cita", null, { tools, urgency: "urgente", urgentFirst: "telefono" }) ?? ""
   expect(byPhone).toContain("dale primero el teléfono para urgencias de la clínica")
   expect(byPhone).not.toContain("ofrécele primero el horario más próximo")
+  // Ya dicho a dónde llamar en esta atención, no se repite (auditoría del ADR 0104, caso del murciélago).
+  const toldPhone = routeInstruction("cita", null, { tools, urgency: "urgente", urgentFirst: "telefono", calledOut: true }) ?? ""
+  expect(toldPhone).toContain("no se lo repitas")
+  expect(toldPhone).not.toContain("dale primero el teléfono para urgencias de la clínica")
+  const alarm = (calledOut: boolean) => routeInstruction("derivar", null, { tools, urgency: "alarma", calledOut }) ?? ""
+  expect(alarm(false)).toContain("el aviso empieza diciéndole")
+  expect(alarm(true)).toContain("dile que sí, que vaya ahora a la más cercana")
+  expect(alarm(true)).not.toContain("el aviso empieza diciéndole")
+  const urgentHandoff = routeInstruction("derivar", null, { tools, urgency: "urgente", calledOut: true }) ?? ""
+  expect(urgentHandoff).toContain("ya le diste en esta atención el teléfono para urgencias de la clínica")
+  expect(urgentHandoff).not.toContain("el aviso empieza dándole el teléfono")
   // Quien ya contó qué le pasa no lo vuelve a contar; quien vuelve a contarlo tras recibir horarios no empieza de cero.
   expect(routeInstruction("clinico", null, { tools }) ?? "").toContain("solo si aún no dijo qué le pasa, pregúntaselo en una línea")
   const again = routeInstruction("clinico", null, { tools, progress: { offered: true } }) ?? ""
