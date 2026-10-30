@@ -85,10 +85,12 @@ export function createPatientRegistrationRoute(deps: CrmDeps & { cookieDomain: s
         .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, parsed.data.conversationId)))
         .limit(1)
       if (thread?.contactId !== params.data.id) throw new ServiceError("VALIDATION", 400, "La conversación no es de esta persona")
+      // Con su ficha es para completar lo que le falta y ver su cita: no vuelve a
+      // abrir la reserva de un enlace con el que ya reservó.
       const link = await createBookingLink(
         tx,
         orgId,
-        { conversationId: parsed.data.conversationId, createdBy: userId, ...(parsed.data.patientId ? { patientId: parsed.data.patientId } : {}) },
+        { conversationId: parsed.data.conversationId, createdBy: userId, ...(parsed.data.patientId ? { patientId: parsed.data.patientId, booking: false } : {}) },
         { secretsKey: deps.secretsKey },
       )
       const url = await personalLinkUrl(tx, orgId, link.token)

@@ -413,6 +413,41 @@ describe("reservar desde un enlace", () => {
     expect(notes).toContain("Cambió su cita desde su enlace")
     expect(notes).toContain("Canceló desde su enlace")
   })
+
+  it("su enlace para completar sus datos no vuelve a abrir la reserva", async () => {
+    const ines = await person("ines-enlace")
+    const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Barranco", timezone: "America/Lima" }).returning({ id: branch.id })
+    const professional = "dentista-datos"
+    await ownerDb.insert(user).values([{ id: professional, name: "Dra. Rosa Ibarra", email: "rosa.ibarra@enlace.test", emailVerified: true }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental 1" }))
+    await run((tx) =>
+      setProfessionalSchedule(tx, ORG, OWNER, {
+        branchId: site!.id,
+        professionalUserId: professional,
+        rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+      }))
+    const [created] = await insertTestPatients(ownerDb, { organizationId: ORG, displayName: "Inés Paredes", givenNames: "Inés", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)) })
+    await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: ines.contactId, relationship: "self", isPreferred: true }))
+
+    // Le llega su enlace para reservar y reserva con él.
+    const sent = await run((tx) => createBookingLink(tx, ORG, { conversationId: ines.conversationId, branchId: site!.id }, { secretsKey: KEY }))
+    const monday = upcomingMonday()
+    const range = { branchId: site!.id, from: monday.toISOString(), to: new Date(monday.getTime() + 86_400_000).toISOString() }
+    const { slots } = await run((tx) => listBookingLinkSlots(tx, ORG, sent.token, range))
+    const chosen = slots[0]!
+    await run((tx) =>
+      reserveBookingLink(tx, ORG, sent.token, { branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }, { secretsKey: KEY }))
+
+    // «Pegar su enlace» para que complete sus datos: es el mismo enlace y no le ofrece reservar otra vez.
+    const pasted = await run((tx) => createBookingLink(tx, ORG, { conversationId: ines.conversationId, patientId: created!.id, booking: false }, { secretsKey: KEY }))
+    expect(pasted.token).toBe(sent.token)
+    const view = await run((tx) => getBookingLinkView(tx, ORG, pasted.token))
+    expect(view.booking).toBeNull()
+    expect(view.appointment).toMatchObject({ startsAt: chosen.startsAt })
+    await expect(run((tx) =>
+      reserveBookingLink(tx, ORG, pasted.token, { branchId: site!.id, startsAt: slots[1]!.startsAt, professionalUserId: professional }))).rejects.toMatchObject({ code: "BOOKING_LINK_USED" })
+  })
 })
 
 describe("reservar desde un enlace quien recién se contacta", () => {

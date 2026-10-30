@@ -180,12 +180,19 @@ export interface CreateBookingLinkInput {
   branchId?: string
   /** Quién del equipo lo prepara (Bandeja); vacío si lo envía el agente. */
   createdBy?: string | null
+  /**
+   * `false`: el enlace de quien ya es paciente para completar lo que le falta y
+   * ver su cita («Pegar su enlace» de la Bandeja). No vuelve a abrir la reserva
+   * de un enlace con el que ya reservó.
+   */
+  booking?: boolean
 }
 
 /**
  * «Su enlace» para la persona de una conversación, con la reserva abierta: lo
  * que envía el agente (`enviar_enlace_cita`) y lo que prepara recepción en la
  * Bandeja. A quien aún no es paciente la página le pide sus datos esenciales.
+ * Con `booking: false` es solo su enlace, sin ofrecer otra cita.
  */
 export async function createBookingLink(
   tx: Db,
@@ -215,6 +222,9 @@ export async function createBookingLink(
       ? validation("Ese paciente no está vinculado a la persona de la conversación")
       : new ServiceError("BOOKING_PATIENT_AMBIGUOUS", 409, "La persona tiene varios pacientes vinculados: indica para quién es la cita")
   }
+  const booking = input.booking ?? true
+  // Sin ficha, su enlace solo sirve para elegir su cita y dejar sus datos.
+  if (!booking && !chosen) throw validation("Para completar sus datos, primero tiene que ser paciente")
   if (input.serviceId) {
     const [service] = await tx
       .select({ id: serviceCatalog.id })
@@ -238,9 +248,7 @@ export async function createBookingLink(
       contactId: conv.contactId,
       patientId: chosen?.id ?? null,
       conversationId: input.conversationId,
-      booking: true,
-      serviceId: input.serviceId ?? null,
-      branchId: input.branchId ?? null,
+      ...(booking ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null } : {}),
       createdBy: input.createdBy ?? null,
     },
     deps,
