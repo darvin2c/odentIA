@@ -91,11 +91,15 @@ En el chat web, Sofi decía «Ya guardé tu WhatsApp» o «El equipo ya tiene tu
 - **Medido** con `auditoria-masiva.ts`, repitiendo el caso 17 en bases nuevas, con otro WhatsApp y otro correo en cada copia (algunas con el número de un paciente de la demo, para que se rechace), y cotejando cada mensaje con el guardado que consta en la base:
   - En `main`, 2 de 7 conversaciones lo afirmaron sin que constara, las dos en el aviso de un pase. Con el cambio, 0 de 11. En 3 de ellas se pidió reescribir (4 veces): la respuesta que salió ya no lo afirmaba, y en una el turno siguiente lo guardó.
   - En odentIA (casos 20, 22, 35 y 37 del chat web), ninguna versión lo afirmó sin guardarlo y la comprobación no tuvo que actuar.
-  - Cumplir todo no cambió: el caso 17 sigue fallando por fluidez. El juez no marcó como falsas las dos afirmaciones de `main`, porque no ve si `guardar_contacto` falló: la medida es el cotejo con la base.
+  - Cumplir todo no cambió: el caso 17 sigue fallando por fluidez. El juez no marcó como falsas las dos afirmaciones de `main`, porque no veía si `guardar_contacto` falló; desde entonces `auditoria-masiva.ts` le dice cuántas corridas lo intentaron y cuántas lo guardaron.
+
+### Alternativas descartadas
+
+- **Pedirle que guarde el número apenas lo escriba**, en la línea de la corrida («si lo escribe, guárdalo…») o en la indicación de «derivar» («…no se lo vuelvas a pedir si ya lo escribió»), con `guardar_contacto` en todos los caminos. Sofi dejó de pedir el contacto: no lo pidió nunca en 7 de 8 conversaciones, frente a 1 de 8 sin el cambio, y la persona no llegó a dejarlo. Con solo la herramienta en todos los caminos, sin texto, quedó sin medir (se agotó el crédito): está en la rama `claude/contacto-en-todos-los-caminos`.
 
 ### Consecuencias
 
-- En el camino «derivar» el modelo no tiene `guardar_contacto`: si la persona escribe su número en ese turno, ya no se le dice que se guardó, pero tampoco se guarda y el aviso fijo se lo vuelve a pedir.
+- «Derivar», «información», «saludo» y «cambio de cita» no tienen `guardar_contacto`: si la persona escribe su número en ese turno, ya no se le dice que se guardó, pero tampoco se guarda y se le vuelve a pedir.
 - Una comprobación por forma: «te avisaremos por WhatsApp», sin decir que es el suyo, no cuenta.
 
 Referencias: `claims.ts`, `claims.test.ts`; `tools.ts` (`unsavedContact`, `guardar_contacto`); `webchat-reply.ts` (`webchatReplyRoutes`); la prueba del chat web en `agent.test.ts`.
