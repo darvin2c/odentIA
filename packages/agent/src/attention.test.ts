@@ -173,4 +173,29 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     const other = attentionProgress({ items: [{ direction: "out", senderKind: "agent", body: "Gracias, Mariana.", createdAt: at(1) }], startedAt, state: empty, promotions: [], name: "María" })
     expect(other.usedName).toBe(false)
   })
+
+  it("si ya le dijo a dónde llamar, como lo escriba, no se lo repite (auditoría del ADR 0104, caso del murciélago)", () => {
+    const calls = { emergency: "106", clinic: "+5115550188" }
+    const out = (body: string, minutes = 1) => ({ direction: "out", senderKind: "agent", body, createdAt: at(minutes) })
+    const progressOf = (...items: ReturnType<typeof out>[]) => attentionProgress({ items, startedAt, state: empty, promotions: [], calls })
+    const told = progressOf(out("Llama ahora al 106 o ve a la emergencia más cercana."), out("Para urgencias de la clínica, llama al +51 1 555 0188.", 2))
+    expect(told.calledOut).toEqual({ emergency: 1, clinic: 1 })
+    expect(attentionLines(told, "Sofi").join("\n")).toContain("Ya le diste en esta atención el número de emergencias y el teléfono para urgencias de la clínica")
+    // Dar el teléfono de la clínica no es dar el número de emergencias.
+    const clinicOnly = progressOf(out("Para urgencias de la clínica, llama al +51 1 555 0188."))
+    expect(clinicOnly.calledOut).toEqual({ emergency: 0, clinic: 1 })
+    expect(attentionLines(clinicOnly, "Sofi").join("\n")).not.toContain("el número de emergencias")
+    // Un número que no se le da para llamar: un precio, otro teléfono, una dirección o la sede para otra cosa.
+    for (const body of [
+      "La consulta cuesta S/ 1060.",
+      "Te escribo al 987 106 315.",
+      "Estamos en la Calle 106, para urgencias llama a la sede.",
+      "El lunes hay 10 6 cupos; para urgencias, escríbenos.",
+      "Para tu comprobante, escribe a la sede al +51 1 555 0188.",
+    ]) {
+      expect(progressOf(out(body)).calledOut, body).toEqual({ emergency: 0, clinic: 0 })
+    }
+    // Lo dicho en la atención anterior no cuenta.
+    expect(progressOf(out("Llama al 106.", -600)).calledOut).toEqual({ emergency: 0, clinic: 0 })
+  })
 })

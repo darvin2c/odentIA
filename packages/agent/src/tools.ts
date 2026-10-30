@@ -2256,7 +2256,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ? "Aviso al interlocutor registrado. No envíes más mensajes."
           : `El aviso al interlocutor no salió: ${outcome}`
       }
-      const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
+      // Alta es una alarma o una urgencia medida (`URGENT_SCORE`), como en el camino que deriva: el
+      // modelo que escribe la daba a una tos de cuatro días (auditoría del 29-oct). Una queja o un
+      // cobro no los mide esa nota: conservan la que eligió, y sin nota también.
+      const asked = priority === "alta" || priority === "baja" ? priority : "media"
+      const urgency = ctx.route?.urgency ?? null
+      const notMeasured = ctx.route?.intent === "complaint" || topicKindOf(kind) === "pago"
+      const validPriority =
+        ctx.alarm === true || (urgency ?? 0) >= URGENT_SCORE
+          ? "alta"
+          : asked === "alta" && urgency !== null && !notMeasured
+            ? "media"
+            : asked
       // Con un tema abierto en el hilo, lo que vuelve a pedir se anota en ese
       // tema y solo sale el aviso: un tema por mensaje llena la cola del equipo.
       // Abre otro solo si sube a urgente (ADR 0097).

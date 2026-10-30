@@ -111,6 +111,10 @@ const totals = {
   otrosEsperados: 0,
   costo: 0,
   sinCosto: 0,
+  /** Tokens de entrada y, de ellos, los leídos y los escritos en la caché del proveedor. */
+  entrada: 0,
+  leidos: 0,
+  escritos: 0,
 }
 const now = new Date()
 
@@ -149,6 +153,9 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
   })
   if (cost === null) totals.sinCosto += 1
   else totals.costo += cost
+  totals.entrada += meta.input_tokens ?? 0
+  totals.leidos += meta.input_token_details?.cache_read ?? 0
+  totals.escritos += meta.input_token_details?.cache_creation ?? 0
   if (!read) {
     console.log(`✗ ${dictation.id}: el modelo no respondió con la herramienta`)
     continue
@@ -315,14 +322,14 @@ for (const dictation of bank.dictados.filter((item) => !solo || item.id === solo
   // Más de una llamada a la herramienta en una respuesta: se lee solo la primera, y eso explica lo perdido.
   const calls = (reply.tool_calls ?? []).length
   console.log(
-    `${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0}${calls > 1 ? `, ${calls} llamadas` : ""}${repeated.length ? `, repitió ${repeated.join(", ")}` : ""})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`,
+    `${notes.length ? "△" : "✓"} ${dictation.id} (${money}, ${meta.input_tokens ?? "?"}+${meta.output_tokens ?? "?"} tokens, caché ${meta.input_token_details?.cache_read ?? 0} leídos y ${meta.input_token_details?.cache_creation ?? 0} escritos${calls > 1 ? `, ${calls} llamadas` : ""}${repeated.length ? `, repitió ${repeated.join(", ")}` : ""})${notes.length ? ` — ${notes.join("; ")}` : ""}${unused}`,
   )
   if (notes.length && process.argv.includes("--detalle")) console.log(JSON.stringify((reply.tool_calls ?? []).map((call) => call.args), null, 1))
 }
 
 const pct = (part: number, whole: number) => (whole ? `${Math.round((100 * part) / whole)} %` : "—")
 console.log("")
-console.log(`Modelo: ${spec.modelName} · ${bank.dictados.length} dictados`)
+console.log(`Modelo: ${spec.modelName}, razonamiento ${reasoning} · ${bank.dictados.length} dictados`)
 console.log(
   `Signos y examen: ${totals.bien} de ${totals.esperados} bien (${pct(totals.bien, totals.esperados)}), ${totals.perdidos} perdidos o mal, ${totals.inventados} agregados que no se dijeron`,
 )
@@ -331,4 +338,7 @@ console.log(
 )
 console.log(
   `Costo: USD ${(totals.costo / 1_000_000).toFixed(4)} en total, USD ${(totals.costo / 1_000_000 / Math.max(1, bank.dictados.length - totals.sinCosto)).toFixed(5)} por dictado${totals.sinCosto ? ` (${totals.sinCosto} sin costo informado)` : ""}`,
+)
+console.log(
+  `Caché: de ${totals.entrada} tokens de entrada, ${totals.leidos} leídos (${pct(totals.leidos, totals.entrada)}) y ${totals.escritos} escritos (${pct(totals.escritos, totals.entrada)})`,
 )
