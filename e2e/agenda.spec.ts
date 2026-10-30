@@ -210,8 +210,9 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await page.getByRole("option", { name: /Micaela Ríos/ }).click()
   const hours = page.getByRole("group", { name: /^Horas del/ })
   await expect(hours).toBeVisible()
-  // Con el día casi acabado no cabe una cita entera: se pasa a la semana siguiente.
-  if (lima(new Date().toISOString()).hour >= 18) {
+  // Con el día casi acabado no caben la cita y, después, moverla una hora más tarde
+  // (cerca de dos horas y cuarto antes de las 20:00): se pasa a la semana siguiente.
+  if (lima(new Date().toISOString()).hour >= 16) {
     await page.getByRole("button", { name: "Semana siguiente" }).click()
   }
   const block = hours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })
