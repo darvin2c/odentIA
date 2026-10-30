@@ -1,8 +1,28 @@
 import { DICTATION_MAX_SUGGESTIONS, DICTATION_SOURCE_CHARS } from "@odentia/services"
 import { dictationFindingsText } from "@odentia/services/dental"
 import { describe, expect, it } from "vitest"
-import { type DictationAsk, dictationMessages, groundSource, readDictation as readWith } from "../dictation.js"
+import { askDictationModel, type DictationAsk, dictationMessages, groundSource, readDictation as readWith } from "../dictation.js"
+import { createConfiguredChatModel, resolveLlmSpec } from "../llm.js"
+import { cacheMarked, fakeProvider, systemBlock, toolCallReply } from "../test-provider.js"
 import { DENTAL_DICTATION_PROFILE, demoExtraction, demoSegment } from "./dictation.js"
+
+it("el dictado de odentIA no razona: va por Chat Completions con su parte fija marcada y prompt_cache_options", async () => {
+  const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "registrar_dictado"))
+  try {
+    const spec = resolveLlmSpec({ openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
+    const profile = DENTAL_DICTATION_PROFILE
+    // Como `extractDictation`: con el razonamiento del perfil, que en odentIA no hay.
+    const model = await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
+    const pause = { services: ["Consulta"], diagnosisList: "CIE-10 (OMS)", catalog: dictationFindingsText(), transcript: "Viene por dolor en la dieciséis.", context: "", pending: [] }
+    await askDictationModel(model, spec, { ...pause, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:00:00Z") }, profile)
+    expect(provider.requests.map((request) => request.url)).toEqual(["/v1/chat/completions"])
+    expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("text"))
+    // Por Chat Completions el proveedor guarda solo hasta el corte.
+    expect(provider.requests[0]?.body).toMatchObject({ prompt_cache_options: { mode: "explicit" } })
+  } finally {
+    await provider.close()
+  }
+})
 
 /** La lectura de una respuesta con las listas de odentIA. */
 const readDictation = (args: unknown, transcript: string, pendingCount: number) =>
