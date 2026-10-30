@@ -204,10 +204,12 @@ type IdentityInput = {
  * de la persona no se pierde: queda en sus notas.
  *
  * `onlyFill` es lo que escribe alguien desde fuera (el registro en línea con
- * el enlace de su conversación): nunca reemplaza un dato que la persona ya
- * tenía, solo completa los vacíos, y lo distinto queda en sus notas para que
- * recepción lo revise. El nombre visible solo se cambia si la persona aún no
- * tenía identidad registrada (ni nombres ni documento: la creó un canal).
+ * el enlace de su conversación, o en el chat): nunca reemplaza un dato que la
+ * persona ya tenía, solo completa los vacíos, y lo distinto queda en sus notas
+ * para que recepción lo revise. El nombre es la excepción (ADR 0108): la ficha
+ * nace con el que escribió para registrarse, aunque el canal, Sofi o el equipo
+ * le hubieran puesto otro, que queda en sus notas. Solo un documento guardado
+ * que no es el que escribió conserva el nombre de antes.
  */
 async function adoptIdentity(
   tx: Db,
@@ -227,15 +229,19 @@ async function adoptIdentity(
     if (otherEmail) told.push(`correo ${identity.email}`)
     if (identity.docNumber && current.docNumber && identity.docNumber !== current.docNumber) told.push(`documento ${identity.docNumber}`)
     if (identity.birthDate && current.birthDate && identity.birthDate !== current.birthDate) told.push(`fecha de nacimiento ${identity.birthDate}`)
-    const provisional = !current.givenNames && !current.docNumber
-    if (!provisional && identity.displayName && identity.displayName !== current.displayName) told.push(`nombre ${identity.displayName}`)
+    const otherName = !!identity.displayName && identity.displayName !== current.displayName
+    const keepsName = !!current.docNumber && current.docNumber !== identity.docNumber
+    if (keepsName && otherName) told.push(`nombre ${identity.displayName}`)
+    // El nombre va entero: los nombres y apellidos de antes no se mezclan con el escrito.
+    const names = keepsName
+      ? { givenNames: current.givenNames ?? identity.givenNames ?? null, familyName: current.familyName ?? identity.familyName ?? null }
+      : { givenNames: identity.givenNames ?? null, familyName: identity.familyName ?? null }
     const takesDocument = !current.docNumber && withDocument
     await tx
       .update(contact)
       .set({
-        displayName: provisional ? identity.displayName : current.displayName,
-        givenNames: current.givenNames ?? identity.givenNames ?? null,
-        familyName: current.familyName ?? identity.familyName ?? null,
+        displayName: keepsName ? current.displayName : identity.displayName,
+        ...names,
         docType: takesDocument ? (identity.docType ?? null) : current.docType,
         docNumber: takesDocument ? (identity.docNumber ?? null) : current.docNumber,
         docCountry: takesDocument ? (identity.docCountry ?? null) : current.docCountry,
@@ -246,13 +252,13 @@ async function adoptIdentity(
         updatedAt: new Date(),
       })
       .where(and(eq(contact.organizationId, orgId), eq(contact.id, personId)))
-    if (told.length) {
-      await tx.insert(crmNote).values({
-        organizationId: orgId,
-        contactId: personId,
-        body: `En el registro en línea escribió otros datos, que no se guardaron: ${told.join(", ")}. Revisa cuáles valen.`,
-      })
-    }
+    // El nombre de un canal se reemplaza sin más; uno que alguien guardó (Sofi o el equipo) queda dicho.
+    const renamed = !keepsName && otherName && !!current.givenNames
+    const body = [
+      renamed ? `Se registró como ${identity.displayName}; antes figuraba como ${current.displayName}.` : null,
+      told.length ? `En el registro escribió otros datos, que no se guardaron: ${told.join(", ")}. Revisa cuáles valen.` : null,
+    ].filter(Boolean).join(" ")
+    if (body) await tx.insert(crmNote).values({ organizationId: orgId, contactId: personId, body })
     return
   }
   const kept: string[] = []
