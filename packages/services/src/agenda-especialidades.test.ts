@@ -186,7 +186,7 @@ describe("la agenda ofrece solo a quien atiende el servicio", () => {
 })
 
 describe("los huecos del agente (decisión 16)", () => {
-  it("dos por profesional y día, por hora, y siempre de quien atiende el servicio", async () => {
+  it("tres por profesional y día, repartidos en su jornada, y siempre de quien atiende el servicio", async () => {
     const all = await run((tx) => findFreeGaps(tx, ORG, { branchId: centro, from: tuesday, to: `${tuesday}T23:59` }))
     const perProfessional = new Map<string, number>()
     for (const gap of all.gaps) perProfessional.set(gap.professionalUserId, (perProfessional.get(gap.professionalUserId) ?? 0) + 1)
@@ -197,10 +197,16 @@ describe("los huecos del agente (decisión 16)", () => {
     })
     expect(all.gaps.map((gap) => gap.startsAt)).toEqual(all.gaps.map((gap) => gap.startsAt).sort())
     expect(all.gaps[0]?.professionalName).toBe("Dra. Ríos")
+    // Pérez atiende de 9:00 a 18:00: se ofrece su primera hora, una a media jornada y la última, no las dos primeras.
+    const day = (await run((tx) => listAvailableSlots(tx, ORG, { branchId: centro, professionalUserId: PEREZ, from: at(0), to: at(24 * 60 - 1) }))).slots
+    const perez = all.gaps.filter((gap) => gap.professionalUserId === PEREZ).map((gap) => gap.startsAt)
+    expect(perez[0]).toBe(day[0]?.startsAt)
+    expect(perez.at(-1)).toBe(day.at(-1)?.startsAt)
+    expect(perez[1]! > at(12 * 60) && perez[1]! < at(15 * 60)).toBe(true)
     const endo = await run((tx) =>
       findFreeGaps(tx, ORG, { branchId: centro, serviceId: endoServiceId, from: tuesday, to: `${tuesday}T23:59` }),
     )
-    expect(endo.gaps.map((gap) => gap.professionalUserId)).toEqual([ROJAS, ROJAS])
+    expect(endo.gaps.map((gap) => gap.professionalUserId)).toEqual(Array(GAPS_PER_PROFESSIONAL_PER_DAY).fill(ROJAS))
     expect(endo.attending).toEqual({ specialtyName: "Endodoncia", names: ["Dra. Rojas"] })
   })
 

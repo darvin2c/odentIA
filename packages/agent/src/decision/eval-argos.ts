@@ -160,6 +160,8 @@ function said(answer: ArgosAskResult): string {
 
 const out: Array<Record<string, unknown>> = []
 let total = 0
+/** Del modelo que escribe: lo que costó y sus tokens de entrada, con los leídos y los escritos en la caché. */
+const writer = { micros: 0, entrada: 0, leidos: 0, escritos: 0 }
 for (const question of bank.preguntas.filter((item) => !only.length || only.includes(item.id))) {
   const uses: AiUsageEntry[] = []
   const problems: string[] = []
@@ -174,7 +176,14 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   )
   const micros = deepseek ? deepseekMicros(uses) : openaiModel ? openaiMicros(uses) : (knownCostMicros(uses) ?? 0)
   total += micros
-  const writes = uses.filter((use) => use.provider === "openai").reduce((sum, use) => sum + use.calls, 0)
+  const written = uses.filter((use) => use.provider === "openai")
+  const writes = written.reduce((sum, use) => sum + use.calls, 0)
+  const sum = (pick: (use: AiUsageEntry) => number | null) => written.reduce((all, use) => all + (pick(use) ?? 0), 0)
+  const tokens = { entrada: sum((use) => use.inputTokens), leidos: sum((use) => use.cachedInputTokens), escritos: sum((use) => use.cacheWriteTokens), salida: sum((use) => use.outputTokens) }
+  writer.micros += deepseek ? deepseekMicros(written) : openaiModel ? openaiMicros(written) : (knownCostMicros(written) ?? 0)
+  writer.entrada += tokens.entrada
+  writer.leidos += tokens.leidos
+  writer.escritos += tokens.escritos
   const row = {
     id: question.id,
     texto: question.texto,
@@ -190,6 +199,7 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
     elige: answer.kind === "respuesta" && answer.choose ? `${answer.choose.message} (${answer.choose.options.map((option) => option.label).join("; ")})` : null,
     pasos: steps,
     llamadas: writes,
+    tokens,
     problemas: problems,
     usd: micros / 1_000_000,
     ms: Date.now() - started,
@@ -206,9 +216,15 @@ for (const question of bank.preguntas.filter((item) => !only.length || only.incl
   if (row.sql) console.log(`- SQL: ${String(row.sql).replace(/\s+/g, " ")}`)
   if (steps.length) console.log(`- Pasos: ${steps.join(" → ")}`)
   for (const problem of problems) console.log(`- La base rechazó: ${problem}`)
-  console.log(`- ${writes} llamada(s) al modelo que escribe · USD ${row.usd.toFixed(6)} · ${row.ms} ms`)
+  console.log(
+    `- ${writes} llamada(s) al modelo que escribe · USD ${row.usd.toFixed(6)} · ${row.ms} ms · ${tokens.entrada} tokens de entrada: ${tokens.leidos} leídos de la caché y ${tokens.escritos} escritos`,
+  )
 }
+const share = (part: number) => `${writer.entrada ? Math.round((100 * part) / writer.entrada) : 0} %`
 console.log(`\n${out.length} preguntas · USD ${(total / 1_000_000).toFixed(5)} en total · USD ${(total / 1_000_000 / Math.max(out.length, 1)).toFixed(6)} por pregunta`)
+console.log(
+  `Modelo que escribe: USD ${(writer.micros / 1_000_000 / Math.max(out.length, 1)).toFixed(6)} por pregunta · de ${writer.entrada} tokens de entrada, ${share(writer.leidos)} leídos de la caché y ${share(writer.escritos)} escritos`,
+)
 const jsonPath = arg("json", "")
 if (jsonPath) writeFileSync(resolve(jsonPath), `${JSON.stringify({ corrido: new Date().toISOString(), org: ORG, rol: role, modelo: deepseek ?? openaiModel ?? "gpt-6-luna", razonamiento: reasoning ?? ARGOS_REASONING, usd: total / 1_000_000, respuestas: out }, null, 2)}\n`)
 process.exit(0)

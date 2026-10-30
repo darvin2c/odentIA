@@ -1,12 +1,13 @@
-import { once } from "node:events"
-import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http"
 import { HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
 import { tool } from "@langchain/core/tools"
 import { ChatOpenAI } from "@langchain/openai"
-import { expect, it } from "vitest"
+import { agentTextsFor } from "@odentia/services"
+import { describe, expect, it } from "vitest"
 import { z } from "zod"
+import { argosMessages, argosModel } from "./argos.js"
 import { FakeChatModel } from "./fake-model.js"
 import {
+  cachedPrompt,
   createConfiguredChatModel,
   describeProviderProblem,
   isProviderConfigError,
@@ -14,41 +15,9 @@ import {
   LlmConfigError,
   platformLlmFromEnv,
   resolveLlmSpec,
+  viaResponses,
 } from "./llm.js"
-
-interface Received {
-  url: string | undefined
-  headers: IncomingHttpHeaders
-  body: Record<string, unknown>
-}
-
-/** Servidor local que hace de proveedor: responde lo que diga `reply` según la petición número n. */
-async function fakeProvider(reply: (n: number, response: ServerResponse) => void) {
-  const requests: Received[] = []
-  const server = createServer(async (request, response) => {
-    let raw = ""
-    for await (const chunk of request) raw += chunk
-    requests.push({ url: request.url, headers: request.headers, body: JSON.parse(raw) as Record<string, unknown> })
-    reply(requests.length, response)
-  })
-  server.listen(0, "127.0.0.1")
-  await once(server, "listening")
-  const address = server.address()
-  if (!address || typeof address === "string") throw new Error("El servidor de prueba no abrió un puerto")
-  return {
-    origin: `http://127.0.0.1:${address.port}`,
-    requests,
-    close: async () => {
-      server.closeAllConnections()
-      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
-    },
-  }
-}
-
-function json(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, { "content-type": "application/json" })
-  response.end(JSON.stringify(body))
-}
+import { cacheMarked, fakeProvider, json, systemBlock, toolCallReply } from "./test-provider.js"
 
 const horario = tool(async () => "09:00", {
   name: "consultar_horario",
@@ -196,6 +165,49 @@ it("ChatGPT 6 con caché explícita recibe el corte en la parte fija y devuelve 
   } finally {
     await provider.close()
   }
+})
+
+// El dictado de cada producto se prueba igual en su carpeta (`dental/dictation.test.ts`, `medical/dictation.test.ts`).
+describe("el corte de la parte fija llega al proveedor por los dos caminos", () => {
+  it("por /v1/responses va en un bloque input_text: a uno text LangChain 1.5.13 le quita el corte", async () => {
+    const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "consultar_horario"))
+    try {
+      const spec = resolveLlmSpec({ openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
+      expect(viaResponses(await createConfiguredChatModel(spec, { explicitCache: true }))).toBe(false)
+      const model = await createConfiguredChatModel(spec, { explicitCache: true, reasoning: "low" })
+      expect(viaResponses(model)).toBe(true)
+      await model.invoke([new SystemMessage({ content: cachedPrompt("openai", "Lo fijo", true) }), new HumanMessage("Lo que cambia")])
+      // Así llegaba la parte fija de Argos y del dictado de latidIA: el corte se perdía por el camino.
+      await model.invoke([new SystemMessage({ content: cachedPrompt("openai", "Lo fijo", false) }), new HumanMessage("Lo que cambia")])
+      expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses", "/v1/responses"])
+      expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text", "Lo fijo"))
+      expect(systemBlock(provider.requests[1])).toEqual({ type: "input_text", text: "Lo fijo" })
+      // Sin caché (el modelo de demostración), el texto solo.
+      expect(cachedPrompt("fake", "Lo fijo", true)).toBe("Lo fijo")
+    } finally {
+      await provider.close()
+    }
+  })
+
+  it("Argos piensa por /v1/responses y su parte fija llega con el corte; sin pensar va por Chat Completions, también con él", async () => {
+    const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "responder"))
+    try {
+      const platform = { openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 }
+      const texts = agentTextsFor("dental")
+      const ask = { texts, question: "¿Cuánto cobré este mes?", key: "gestion" as const, now: new Date("2026-10-29T15:00:00Z"), zone: { timezone: "America/Lima", locale: "es-PE" } }
+      // Como `askArgos`: con lo que piensa Argos (`ARGOS_REASONING`) y, para medir, sin pensar.
+      for (const deps of [{ platform }, { platform, reasoning: "none" as const }]) {
+        const model = await argosModel(deps, texts)
+        if (!model) throw new Error("Argos se quedó sin modelo")
+        await model.invoke(argosMessages(model.provider, ask, model.responses), "required")
+      }
+      expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses", "/v1/chat/completions"])
+      expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text", expect.stringContaining("Cifras oficiales")))
+      expect(systemBlock(provider.requests[1])).toEqual(cacheMarked("text", expect.stringContaining("Cifras oficiales")))
+    } finally {
+      await provider.close()
+    }
+  })
 })
 
 it("los errores de OpenAI se reconocen como del proveedor: cuota agotada y modelo inexistente", async () => {

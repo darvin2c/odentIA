@@ -1097,18 +1097,20 @@ export interface FreeGapResult {
   professionalNotAttending: boolean
 }
 
-/** Huecos que ofrece el agente por profesional y día (decisión 16 de la fase 4). */
-export const GAPS_PER_PROFESSIONAL_PER_DAY = 2
+/** Huecos que ofrece el agente por profesional y día, repartidos en su jornada (decisión 16 de la fase 4). */
+export const GAPS_PER_PROFESSIONAL_PER_DAY = 3
 /** Huecos que caben en una respuesta de `buscar_huecos`. */
 export const GAPS_SHOWN = 20
 
 /**
  * Huecos libres según Agenda (`listAvailableSlots`): respeta horario semanal
  * del profesional, bloqueos y citas ocupantes, y con servicio ofrece solo a
- * quien lo atiende (la misma regla que recepción y el enlace). Dos huecos por
- * profesional y día, ordenados por hora: una sola persona no se queda con la
- * lista. Sin horario configurado no hay huecos (el agente debe decirlo, no
- * inventarlos). Si `truncated`, acota el rango o pagina por días.
+ * quien lo atiende (la misma regla que recepción y el enlace). Hasta tres por
+ * profesional y día, repartidos en su jornada (`perProfessionalPerDay`, antes
+ * del tope de la agenda) y ordenados por hora: una sola persona no se queda con
+ * la lista y se ve también la tarde. Sin horario configurado no hay huecos (el
+ * agente debe decirlo, no inventarlos). Si `truncated`, acota el rango o pagina
+ * por días.
  */
 export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): Promise<FreeGapResult> {
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -2018,6 +2020,44 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
   }
 }
 
+/** Deja vencidas propuestas que esperaban el sí: su «sí» de después ya no las ejecuta. */
+async function expireProposals(tx: Db, orgId: string, ids: string[], actorUserId: string | null, metadata: Record<string, unknown>): Promise<void> {
+  for (const id of ids) {
+    await tx
+      .update(agentProposal)
+      .set({ status: "expirada", updatedAt: new Date() })
+      .where(and(eq(agentProposal.id, id), eq(agentProposal.status, "propuesta")))
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "agent.proposal_expired",
+      entity: "agent_proposal",
+      entityId: id,
+      metadata,
+    })
+  }
+}
+
+/**
+ * La persona reservó por su enlace: la cita que esperaba su sí en esa conversación ya no se
+ * reserva. Si no, con la agenda que acompaña a los horarios, reservaba en la página y su «sí»
+ * de después reservaba otra (revisión del PR 355).
+ */
+export async function expireBookingProposals(tx: Db, orgId: string, conversationId: string): Promise<void> {
+  const pending = await tx
+    .select({ id: agentProposal.id })
+    .from(agentProposal)
+    .where(
+      and(
+        eq(agentProposal.organizationId, orgId),
+        eq(agentProposal.conversationId, conversationId),
+        eq(agentProposal.action, "reservar_cita"),
+        eq(agentProposal.status, "propuesta"),
+      ),
+    )
+  await expireProposals(tx, orgId, pending.map((row) => row.id), null, { bookedByLink: true })
+}
+
 /**
  * Crea una propuesta idempotente por clave, siempre en una conversación. Si el
  * acto es `directo`, se ejecuta en el mismo acto; si lo confirma el
@@ -2120,20 +2160,7 @@ export async function createProposal(
         ? pending.every((row) => row.action === "decidir_presupuesto")
         : appointment(input.action) && pending.every((row) => appointment(row.action)))
     if (replaces) {
-      for (const row of pending) {
-        await tx
-          .update(agentProposal)
-          .set({ status: "expirada", updatedAt: new Date() })
-          .where(and(eq(agentProposal.id, row.id), eq(agentProposal.status, "propuesta")))
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: input.actorUserId ?? null,
-          action: "agent.proposal_expired",
-          entity: "agent_proposal",
-          entityId: row.id,
-          metadata: { replaced: true },
-        })
-      }
+      await expireProposals(tx, orgId, pending.map((row) => row.id), input.actorUserId ?? null, { replaced: true })
     } else if (pending.length > 0 && input.action !== "enviar_mensaje") {
       throw new ServiceError(
         "PROPOSAL_PENDING_CONFIRM",

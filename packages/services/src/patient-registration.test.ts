@@ -533,7 +533,7 @@ it("«No es ella»: el representante que nombró el registro en línea no se vin
   await expect(withOrgContext(appDb, "org_a", (tx) => discardRegistrationTask(tx, "org_a", ACTOR, other.id))).rejects.toMatchObject({ status: 404 })
 })
 
-it("con el enlace de su conversación se completa lo vacío y nunca se reemplaza lo que ya tenía", async () => {
+it("con el enlace de su conversación se completa lo vacío, nunca se reemplaza lo que ya tenía y su nombre es el que escribió", async () => {
   await seedActor()
   await publish("org_a")
   const version = await publishedVersion("org_a")
@@ -560,14 +560,14 @@ it("con el enlace de su conversación se completa lo vacío y nunca se reemplaza
     ),
   )
   const after = await withOrgContext(appDb, "org_a", (tx) => getContact(tx, "org_a", person.id))
-  // Lo que ya tenía queda; lo vacío (el documento) se completa.
-  expect(after.contact).toMatchObject({ displayName: "Lucía", email: "lucia.real@example.com", birthDate: ADULT_BIRTH, docNumber: "47000111" })
+  // Lo que ya tenía queda; lo vacío (el documento) se completa. Su ficha nace con el nombre con que se registró.
+  expect(after.contact).toMatchObject({ displayName: "Otro Nombre Escrito", email: "lucia.real@example.com", birthDate: ADULT_BIRTH, docNumber: "47000111" })
   expect(created.birthDate).toBe(ADULT_BIRTH)
-  // Lo distinto queda en sus notas para revisar.
+  // Lo distinto, y el nombre de antes, quedan en sus notas para revisar.
   const notes = await withOrgContext(appDb, "org_a", (tx) => listPersonNotes(tx, "org_a", person.id))
-  expect(JSON.stringify(notes)).toContain("otro@example.com")
-  expect(JSON.stringify(notes)).toContain("1985-01-01")
-  expect(JSON.stringify(notes)).toContain("Otro Nombre Escrito")
+  expect(notes.map((note) => note.body)).toEqual([
+    "Se registró como Otro Nombre Escrito; antes figuraba como Lucía. En el registro escribió otros datos, que no se guardaron: correo otro@example.com, fecha de nacimiento 1985-01-01. Revisa cuáles valen.",
+  ])
 })
 
 it("menor con enlace contextual queda como guardian sin modificar el contacto", async () => {

@@ -35,8 +35,11 @@ export type CaseSlot = keyof typeof CASE_SLOTS
 export function caseSlotLabel(kind: AgentCaseNote["kind"]): string | null {
   return kind !== undefined && kind in CASE_SLOTS ? CASE_SLOTS[kind as CaseSlot] : null
 }
-/** Cabe lo que se consultó en un turno: los huecos de dos sedes (unos 2 300 caracteres) no se recortan. */
-export const CASE_LOOKUP_CHARS = 4000
+/**
+ * Cabe lo que se consultó en un turno: los huecos de dos sedes con tres profesionales, tres por
+ * profesional y día (unos 4 800 caracteres), no se recortan.
+ */
+export const CASE_LOOKUP_CHARS = 6000
 /** Una consulta más antigua ya no se muestra: la agenda y los saldos cambian. */
 export const CASE_LOOKUP_TTL_MS = 6 * 60 * 60 * 1000
 /** Lo resuelto en las últimas horas sigue a la vista para no repetirlo. */
