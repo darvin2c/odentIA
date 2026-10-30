@@ -94,7 +94,7 @@ export function FilterBar({
   resetKeys,
   inlineFrom = "md",
 }: FilterBarProps) {
-  const [drawerMode, setDrawerMode] = React.useState<"all" | "overflow" | null>(null)
+  const [drawerOpen, setDrawerOpen] = React.useState(false)
   const { get, resetFilters, setParams } = useListSearch()
   const clear = () =>
     resetKeys
@@ -126,8 +126,6 @@ export function FilterBar({
   const activeFilterCount = filters.filter((filter) => hasFilterValue(filter, get)).length
   const activeOverflowCount = overflowFilters.filter((filter) => hasFilterValue(filter, get)).length
   const hasActiveCriteria = activeFilterCount > 0 || Boolean(get("q"))
-  const drawerFilters = drawerMode === "overflow" ? overflowFilters : filters
-  const drawerTitle = drawerMode === "overflow" ? common.filters.moreFilters : common.filters.label
 
   return (
     <div className={cn("flex p-3 bg-card rounded-md", className)}>
@@ -150,7 +148,7 @@ export function FilterBar({
             type="button"
             variant="outline"
             className={cn("shrink-0", activeOverflowCount > 0 && "border-accent")}
-            onClick={() => setDrawerMode("overflow")}
+            onClick={() => setDrawerOpen(true)}
             aria-label={
               activeOverflowCount > 0
                 ? `${common.filters.moreFilters}: ${activeOverflowCount}`
@@ -178,47 +176,42 @@ export function FilterBar({
           </div>
         )}
       </div>
+      {/* En el teléfono, cada filtro con su nombre y lo elegido, en una fila que se desliza
+          bajo el buscador, con el orden como uno más: sin un cajón «Filtros» que esconda qué filtra. */}
       <div
+        data-filter-row="mobile"
         className={cn(
-          "flex w-full min-w-0 items-center gap-2",
+          "flex w-full min-w-0 flex-col gap-2",
           inlineFrom === "lg" ? "lg:hidden" : "md:hidden",
         )}
       >
         {showSearch && (
-          <SearchInput placeholder={searchPlaceholder} label={searchLabel} className="min-w-0 flex-1 sm:max-w-64" isFetching={searchPending} />
+          <SearchInput placeholder={searchPlaceholder} label={searchLabel} className="w-full min-w-0" isFetching={searchPending} />
         )}
-        {/* Sin filtros que elegir, el botón no tiene nada que abrir: no se muestra. */}
-        {filters.length > 0 && (
-          <Button
-            type="button"
-            variant="outline"
-            className="shrink-0"
-            aria-label={common.filters.label}
-            onClick={() => setDrawerMode("all")}
-          >
-            <SlidersHorizontal />
-            <span>{common.filters.label}</span>
-            {activeFilterCount > 0 ? (
-              <span className="flex min-w-5 items-center justify-center rounded-full bg-accent-soft px-1.5 text-xs text-accent-foreground">
-                {activeFilterCount}
-              </span>
+        {filters.length > 0 || sortOptions.length > 0 || hasActiveCriteria ? (
+          <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {orderedFilters.map((filter) => (
+              <FilterControl key={`${filter.type}:${filter.key}`} filter={filter} layout="popover" />
+            ))}
+            {sortOptions.length > 0 && (
+              <div className="shrink-0">
+                <SortMenu options={sortOptions} />
+              </div>
+            )}
+            {hasActiveCriteria ? (
+              <Button type="button" variant="ghost" className="shrink-0" onClick={clear}>
+                <X />
+                {common.filters.clear}
+              </Button>
             ) : null}
-          </Button>
-        )}
-        {/* En el teléfono, Limpiar vive en el cajón de filtros; aquí solo queda lo que se ve. */}
-        {sortOptions.length > 0 && (
-          <div className="ml-auto shrink-0">
-            <SortMenu options={sortOptions} compact />
           </div>
-        )}
+        ) : null}
       </div>
       <FilterDrawer
-        filters={drawerFilters}
-        open={drawerMode !== null}
-        onOpenChange={(open) => {
-          if (!open) setDrawerMode(null)
-        }}
-        title={drawerTitle}
+        filters={overflowFilters}
+        open={drawerOpen}
+        onOpenChange={setDrawerOpen}
+        title={common.filters.moreFilters}
       />
     </div>
   )

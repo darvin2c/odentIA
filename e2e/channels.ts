@@ -48,7 +48,8 @@ export async function simulateWhatsAppInbound(
   apiBase: string,
   connectionId: string,
   appSecret: string,
-  input: { from: string; phoneNumberId: string; text: string; wamid: string },
+  // Sin `from`, como manda Meta a quien oculta su número: solo su BSUID (`userId`, ADR 0108).
+  input: { from?: string; userId?: string; name?: string; phoneNumberId: string; text: string; wamid: string },
 ): Promise<number> {
   const rawBody = JSON.stringify({
     object: "whatsapp_business_account",
@@ -60,10 +61,11 @@ export async function simulateWhatsAppInbound(
             value: {
               messaging_product: "whatsapp",
               metadata: { phone_number_id: input.phoneNumberId },
-              contacts: [{ profile: { name: "E2E Paciente" }, wa_id: input.from }],
+              contacts: [{ profile: { name: input.name ?? "E2E Paciente" }, wa_id: input.from, user_id: input.userId }],
               messages: [
                 {
                   from: input.from,
+                  from_user_id: input.userId,
                   id: input.wamid,
                   timestamp: String(Math.floor(Date.now() / 1000)),
                   type: "text",

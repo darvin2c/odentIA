@@ -41,6 +41,7 @@ export type SearchTarget =
   | { screen: "compra"; purchaseOrderId: string }
   | { screen: "proveedores" }
   | { screen: "gastos"; spentAt: string }
+  | { screen: "ticket"; ticketId: string; branchId: string }
   | { screen: "comisiones"; professionalUserId: string; year: number; month: number }
   | { screen: "agenda"; professionalUserId?: string; branchId?: string }
   | { screen: "conocimiento"; q: string }
@@ -173,6 +174,8 @@ export function targetVerb(target: SearchTarget): string {
       return "Ver proveedores"
     case "gastos":
       return "Ver gastos"
+    case "ticket":
+      return "Ver el ticket"
     case "comisiones":
       return "Ver comisiones"
     case "agenda":
@@ -221,6 +224,8 @@ export function targetHref(target: SearchTarget, timeZone?: string): string {
         .split("-")
       return `/finance${query({ tab: "gastos", year, month: String(Number(month)) })}`
     }
+    case "ticket":
+      return `/finance${query({ tab: "cobros", branch: target.branchId, ticket: target.ticketId })}`
     case "comisiones":
       // Comisiones lleva a Finanzas a quien la ve; quien solo ve las suyas se queda ahí.
       return `/commissions${query({ year: String(target.year), month: String(target.month), profesional: target.professionalUserId })}`

@@ -357,6 +357,8 @@ const ACTION_WORDS: Record<string, Phrase> = {
   "contact.reactivated": say("Reactivó un contacto"),
   "contact.identity_added": say("Añadió un canal a un contacto"),
   "contact.identity_moved": say("Pasó un canal de un contacto a otro"),
+  // ADR 0108: WhatsApp empezó a dar el número de quien lo ocultaba.
+  "contact.identity_number": say("Su WhatsApp ahora se conoce por su número"),
   // Spam y bloqueados (ADR 0054): sin persona del equipo lo decidió el agente.
   "contact.spam_marked": say("Mandó a una persona a Spam", "agente"),
   "contact.not_spam": say("Sacó a una persona de Spam"),

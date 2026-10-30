@@ -306,6 +306,15 @@ export function fetchTicketReceipt(
   )
 }
 
+/** El mismo ticket por su identificador, sin saber de quién es (Cobros, buscador rápido). */
+export function fetchTicketById(
+  ticketId: string,
+): Promise<{ data: { patientId: string; ticket: CollectTicketRow; closedAfter?: boolean } }> {
+  return apiFetch<{ data: { patientId: string; ticket: CollectTicketRow; closedAfter?: boolean } }>(
+    `/api/finance/tickets/${encodeURIComponent(ticketId)}`,
+  )
+}
+
 // --- Devolver desde un ticket (ADR 0068) ---------------------------------------
 
 /** Un concepto del ticket como está hoy, con lo que este ticket pagó de él. */

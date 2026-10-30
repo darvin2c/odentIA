@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
   ScrollArea,
   Slider,
+  useIsMobile,
 } from "@odentia/ui"
 import { Check, ChevronDown, Search, X } from "lucide-react"
 import * as React from "react"
@@ -479,6 +480,8 @@ function DateControl({
 }
 
 function ControlBody({ filter, layout, close }: FilterControlProps & { close?: () => void }) {
+  // En el teléfono el calendario de un rango cabe con un solo mes a la vista.
+  const isMobile = useIsMobile()
   switch (filter.type) {
     case "multi":
       return <MultiOptions filter={filter} />
@@ -488,7 +491,7 @@ function ControlBody({ filter, layout, close }: FilterControlProps & { close?: (
       return <NumberRangeControl filter={filter} />
     case "date":
     case "date-range":
-      return <DateControl filter={filter} compact={layout === "inline"} />
+      return <DateControl filter={filter} compact={layout === "inline" || isMobile} />
   }
 }
 
@@ -515,7 +518,8 @@ export function FilterControl({ filter, layout }: FilterControlProps) {
     <Popover open={open} onOpenChange={setOpen}>
       <div
         className={cn(
-          "inline-flex h-9 max-w-64 shrink-0 items-center rounded-full border bg-surface text-foreground transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50",
+          // En el teléfono el filtro va en la fila de la barra: 44 px para tocarlo con el dedo.
+          "inline-flex h-11 max-w-64 shrink-0 items-center rounded-full border bg-surface text-foreground transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50 md:h-9",
           hasFilterValue(filter, get) ? "border-accent" : "border-border hover:bg-surface-muted",
         )}
       >

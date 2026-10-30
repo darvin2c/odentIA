@@ -14,6 +14,8 @@ export interface DebtRow {
   chargesCount: number
   /** Hasta tres conceptos, del más antiguo al más nuevo. */
   concepts: string[]
+  /** Todo lo que debe, concepto por concepto, con su saldo y desde cuándo. */
+  items: Array<{ description: string; outstandingCents: number; since: string | null }>
   lastAttended: { at: string; professionalName: string | null } | null
   /** Cuándo salió hoy de su atención (o se le anotó algo hoy); lo decide el servidor con el día de la sede. */
   attendedTodayAt: string | null

@@ -47,6 +47,20 @@ export function foldedWordsMatch(
   return and(...words.map((word) => or(...columns.map((column) => foldedContains(column, word)))!))!
 }
 
+/** Texto plegado como `search_fold` de la base: sin tildes ni mayúsculas. */
+export function foldText(text: string): string {
+  return text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()
+}
+
+/**
+ * La misma regla que `foldedWordsMatch` para una lista ya leída: cada palabra
+ * de `q` aparece en alguno de `texts`. Sin palabras, todo coincide.
+ */
+export function textMatchesWords(texts: Array<string | null | undefined>, q: string): boolean {
+  const haystack = texts.filter((text): text is string => !!text).map(foldText)
+  return searchWords(q).every((word) => haystack.some((text) => text.includes(foldText(word))))
+}
+
 /**
  * El número de algo escrito con su prefijo o sin él: «HC-000123», «OC-12»,
  * «P-0045», «N.º 123», «#123» o «123». Nulo si no es un número así.

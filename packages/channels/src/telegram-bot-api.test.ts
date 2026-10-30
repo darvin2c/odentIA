@@ -6,6 +6,7 @@ import {
   createStubFetch,
   runAdapterContract,
 } from "./contract.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 import { setTelegramWebhook, telegramBotApiAdapter } from "./telegram-bot-api.js"
 
 // Golden JSON con forma oficial de Bot API; el contrato lo valida en runtime.
@@ -25,6 +26,21 @@ it("rechaza enviar plantillas", async () => {
     ),
   ).rejects.toThrow("plantillas")
   expect(captured).toEqual([])
+})
+
+it("lo que Telegram rechaza no salió; con 429 se puede reintentar; un 5xx sigue siendo ambiguo", async () => {
+  const send = (status: number, json: unknown) =>
+    telegramBotApiAdapter.sendMessage(fx.config, { to: "tg:555", kind: { type: "text", text: "hola" } }, {
+      fetch: (async () => new Response(JSON.stringify(json), { status })) as typeof fetch,
+    })
+  const blocked = send(403, { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" })
+  await expect(blocked).rejects.toBeInstanceOf(ProviderRejectedError)
+  await expect(blocked).rejects.not.toBeInstanceOf(ProviderThrottledError)
+  await expect(blocked).rejects.toThrow("bot was blocked by the user")
+  await expect(
+    send(429, { ok: false, error_code: 429, description: "Too Many Requests: retry after 5", parameters: { retry_after: 5 } }),
+  ).rejects.toBeInstanceOf(ProviderThrottledError)
+  await expect(send(502, null)).rejects.not.toBeInstanceOf(ProviderRejectedError)
 })
 
 it("validateConnection resuelve getMe", async () => {

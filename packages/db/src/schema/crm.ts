@@ -497,6 +497,12 @@ export const contactIdentity = pgTable(
      * puede si escribió en las últimas 24 horas).
      */
     providerBlockedAt: timestamp("provider_blocked_at", { withTimezone: true }),
+    /**
+     * El id que el proveedor le da a la persona y que llega aunque oculte su
+     * número (WhatsApp: BSUID). Une sus mensajes con número y sin él a esta
+     * misma identidad (ADR 0108). Nulo mientras no llegue.
+     */
+    providerUserId: text("provider_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -508,6 +514,9 @@ export const contactIdentity = pgTable(
       table.channel,
       table.externalUserId,
     ),
+    uniqueIndex("contact_identity_org_channel_provider_user_uidx")
+      .on(table.organizationId, table.channel, table.providerUserId)
+      .where(sql`${table.providerUserId} IS NOT NULL`),
   ],
 )
 

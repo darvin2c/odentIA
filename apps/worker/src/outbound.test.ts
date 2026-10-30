@@ -2,10 +2,10 @@ import { telegramBotApiAdapter } from "@odentia/channels"
 import { type OutboundMessageJob, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { closeConversationWith, createConnection, ingestInbound, personalLinkRef, personalLinkToken, sendOutbound } from "@odentia/services"
-import { eq } from "drizzle-orm"
+import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { processOutbound } from "./outbound.js"
-import { appDb, KEY, setupTestDb, storageStub, tgConnId } from "./test-setup.js"
+import { processOutbound, throttledDelaySeconds } from "./outbound.js"
+import { appDb, KEY, ownerDb, setupTestDb, storageStub, tgConnId } from "./test-setup.js"
 
 setupTestDb()
 
@@ -239,6 +239,97 @@ it("media sale con link firmado y caption vía sendPhoto", async () => {
     caption: "Mira esto",
   })
   expect((await messageState(sent.id))?.status).toBe("sent")
+})
+
+/** Un mensaje de Sofi en cola para una conversación de WhatsApp con esa dirección. */
+async function queuedWhatsApp(address: string): Promise<string> {
+  await ownerDb.execute(sql`update channel_connection set status = 'disabled' where organization_id = 'org_a' and channel = 'whatsapp' and status = 'active'`)
+  const connection = await withOrgContext(appDb, "org_a", (tx) =>
+    createConnection(
+      tx,
+      "org_a",
+      KEY,
+      { channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA", config: { phoneNumberId: "P", wabaId: "W", accessToken: "T", appSecret: "S" } },
+      { fetch, validateExternal: false },
+    ),
+  )
+  const id = `wamid.${Math.random()}`
+  const ingested = await withOrgContext(appDb, "org_a", (tx) =>
+    ingestInbound(
+      tx,
+      {
+        orgId: "org_a",
+        connectionId: connection.id,
+        event: { externalEventId: id, externalMessageId: id, externalThreadId: address, senderExternalId: address, content: { type: "text", text: "Quisiera una cita" }, sentAt: new Date().toISOString() },
+      },
+      telegramBotApiAdapter,
+      { storage: storageStub, fetch, secretsKey: KEY },
+    ),
+  )
+  const sent = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: ingested.conversationId, senderKind: "agent", content: { type: "text", text: "Tengo estos horarios" } }),
+  )
+  return sent.id
+}
+
+it("a quien oculta su número se le responde por su BSUID (ADR 0108)", async () => {
+  const messageId = await queuedWhatsApp("wa:PE.13491208655302741918")
+  const seen: unknown[] = []
+  const live = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async (_url: unknown, init?: { body?: unknown }) => {
+      seen.push(typeof init?.body === "string" ? JSON.parse(init.body) : null)
+      return new Response(JSON.stringify({ messages: [{ id: "wamid.OUT1" }] }), { status: 200 })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, live, outJob(messageId))).toBe("done")
+  expect(seen[0]).toMatchObject({ recipient: "PE.13491208655302741918", type: "text" })
+  expect(seen[0]).not.toHaveProperty("to")
+  expect((await messageState(messageId))?.status).toBe("sent")
+})
+
+it("lo que Meta rechaza con su error queda como no entregado, con su motivo y sin reenviar", async () => {
+  const messageId = await queuedWhatsApp("wa:51911100009")
+  let calls = 0
+  const rejecting = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => {
+      calls++
+      return new Response(JSON.stringify({ error: { message: "(#131009) Parameter value is not valid", code: 131009 } }), { status: 400 })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, rejecting, outJob(messageId))).toBe("done")
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: message.status, error: message.error }).from(message).where(eq(message.id, messageId)),
+  )
+  expect(row).toEqual({ status: "failed", error: "WhatsApp send falló: 400 (#131009) Parameter value is not valid" })
+  expect(await processOutbound(appDb, rejecting, outJob(messageId, 5))).toBe("done")
+  expect(calls).toBe(1)
+})
+
+it("un límite de ritmo de Meta deja el mensaje en cola para reintentarlo más tarde; al tope, queda como no entregado", async () => {
+  const messageId = await queuedWhatsApp("wa:51911100010")
+  let calls = 0
+  const throttled = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => {
+      calls++
+      return new Response(JSON.stringify({ error: { message: "(#131056) Pair rate limit hit", code: 131056 } }), { status: 400 })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, throttled, outJob(messageId, 1))).toBe("throttled")
+  expect((await messageState(messageId))?.status).toBe("queued")
+  expect(await processOutbound(appDb, throttled, outJob(messageId, 5))).toBe("done")
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: message.status, error: message.error }).from(message).where(eq(message.id, messageId)),
+  )
+  expect(row?.status).toBe("failed")
+  expect(row?.error).toContain("demasiados mensajes seguidos a esta persona")
+  expect(calls).toBe(2)
+  expect([1, 2, 3, 4, 9].map(throttledDelaySeconds)).toEqual([60, 120, 240, 480, 900])
 })
 
 it("«Su enlace» se guarda como referencia y sale con su token: el token solo existe al entregarlo", async () => {

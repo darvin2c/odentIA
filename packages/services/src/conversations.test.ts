@@ -984,3 +984,132 @@ it("una reacción se pega al mensaje: no crea mensaje ni cuenta como sin leer, y
   )
   expect(lost.created).toBe(false)
 })
+
+async function makeWhatsAppConnection(orgId: string): Promise<string> {
+  await retireWhatsApp(orgId)
+  return withOrgContext(appDb, orgId, async (tx) => {
+    const created = await createConnection(
+      tx,
+      orgId,
+      KEY,
+      {
+        channel: "whatsapp",
+        provider: "whatsapp_cloud_api",
+        displayName: "WA",
+        config: { phoneNumberId: "PNID-BSUID", wabaId: "WABA", accessToken: "T", appSecret: "S" },
+      },
+      { fetch, validateExternal: false },
+    )
+    return created.id
+  })
+}
+
+/** Un mensaje de WhatsApp: con su número o, sin él, con su BSUID como dirección (ADR 0108). */
+function waEvent(id: string, address: string, userId?: string): NormalizedInbound {
+  return textEvent({
+    externalEventId: id,
+    externalMessageId: id,
+    externalThreadId: address,
+    senderExternalId: address,
+    ...(userId ? { senderUserId: userId } : {}),
+  })
+}
+
+async function identitiesOf(contactId: string) {
+  return ownerDb
+    .select({ externalUserId: contactIdentity.externalUserId, providerUserId: contactIdentity.providerUserId })
+    .from(contactIdentity)
+    .where(eq(contactIdentity.contactId, contactId))
+}
+
+it("quien oculta su número entra por su BSUID y, cuando llega su número, sigue siendo la misma persona y el mismo hilo", async () => {
+  const connId = await makeWhatsAppConnection("org_a")
+  const bsuid = "PE.13491208655302741918"
+  const hidden = await ingest("org_a", connId, waEvent("wamid.b1", `wa:${bsuid}`, bsuid))
+  const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, hidden.conversationId))
+  expect(thread?.externalThreadId).toBe(`wa:${bsuid}`)
+  expect(await identitiesOf(thread!.contactId)).toEqual([{ externalUserId: `wa:${bsuid}`, providerUserId: bsuid }])
+
+  // Después de responderle, Meta manda su número junto al BSUID: la identidad y el hilo pasan a su número.
+  const known = await ingest("org_a", connId, waEvent("wamid.b2", "wa:51911100001", bsuid))
+  expect(known.conversationId).toBe(hidden.conversationId)
+  const [moved] = await ownerDb.select().from(conversation).where(eq(conversation.id, hidden.conversationId))
+  expect(moved?.externalThreadId).toBe("wa:51911100001")
+  expect(await identitiesOf(thread!.contactId)).toEqual([{ externalUserId: "wa:51911100001", providerUserId: bsuid }])
+  const [audit] = await ownerDb
+    .select({ action: auditEvent.action })
+    .from(auditEvent)
+    .where(and(eq(auditEvent.organizationId, "org_a"), eq(auditEvent.entityId, thread!.contactId), eq(auditEvent.action, "contact.identity_number")))
+  expect(audit?.action).toBe("contact.identity_number")
+
+  // Si vuelve a ocultarlo, entra igual en su hilo de siempre.
+  const again = await ingest("org_a", connId, waEvent("wamid.b3", `wa:${bsuid}`, bsuid))
+  expect(again.conversationId).toBe(hidden.conversationId)
+  const messages = await ownerDb.select({ id: message.id }).from(message).where(eq(message.conversationId, hidden.conversationId))
+  expect(messages).toHaveLength(3)
+})
+
+it("a quien ya escribía con su número se le guarda el BSUID, y sin número entra en su hilo; otro BSUID es otra persona", async () => {
+  const connId = await makeWhatsAppConnection("org_a")
+  const bsuid = "PE.55500011122233344455"
+  const before = await ingest("org_a", connId, waEvent("wamid.p1", "wa:51911100002"))
+  const withUser = await ingest("org_a", connId, waEvent("wamid.p2", "wa:51911100002", bsuid))
+  expect(withUser.conversationId).toBe(before.conversationId)
+  const [thread] = await ownerDb.select().from(conversation).where(eq(conversation.id, before.conversationId))
+  expect(await identitiesOf(thread!.contactId)).toEqual([{ externalUserId: "wa:51911100002", providerUserId: bsuid }])
+  const hidden = await ingest("org_a", connId, waEvent("wamid.p3", `wa:${bsuid}`, bsuid))
+  expect(hidden.conversationId).toBe(before.conversationId)
+
+  const stranger = await ingest("org_a", connId, waEvent("wamid.p4", "wa:PE.99988877766655544433", "PE.99988877766655544433"))
+  expect(stranger.conversationId).not.toBe(before.conversationId)
+  const [other] = await ownerDb.select().from(conversation).where(eq(conversation.id, stranger.conversationId))
+  expect(other?.contactId).not.toBe(thread!.contactId)
+})
+
+it("si su ficha ya tenía su número como WhatsApp, queda una sola identidad con su BSUID; nunca une dos fichas", async () => {
+  const connId = await makeWhatsAppConnection("org_a")
+  const claim = (contactId: string, phone: string) =>
+    withOrgContext(appDb, "org_a", (tx) => addContactIdentity(tx, "org_a", null, contactId, { channel: "whatsapp", externalUserId: phone }))
+  const contactOf = async (conversationId: string) =>
+    (await ownerDb.select().from(conversation).where(eq(conversation.id, conversationId)))[0]!
+
+  // Sin conversación por su número: la que tenía pasa a su número.
+  const one = "PE.11122233344455566677"
+  const hidden = await ingest("org_a", connId, waEvent("wamid.f1", `wa:${one}`, one))
+  const person = (await contactOf(hidden.conversationId)).contactId
+  const blockedAt = new Date("2026-10-01T12:00:00Z")
+  await ownerDb.update(contactIdentity).set({ providerBlockedAt: blockedAt, isPrimary: true }).where(eq(contactIdentity.providerUserId, one))
+  await claim(person, "51911100003")
+  const known = await ingest("org_a", connId, waEvent("wamid.f2", "wa:51911100003", one))
+  expect(known.conversationId).toBe(hidden.conversationId)
+  expect((await contactOf(hidden.conversationId)).externalThreadId).toBe("wa:51911100003")
+  expect(await identitiesOf(person)).toEqual([{ externalUserId: "wa:51911100003", providerUserId: one }])
+  // Lo que sabía la identidad sin número (principal, bloqueada en WhatsApp) pasa a la del número.
+  expect((await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, person)))[0]).toMatchObject({ isPrimary: true, providerBlockedAt: blockedAt })
+
+  // Con una conversación ya abierta por su número: sigue en esa, y la anterior queda como su historial.
+  const two = "PE.22233344455566677788"
+  const hidden2 = await ingest("org_a", connId, waEvent("wamid.f3", `wa:${two}`, two))
+  const person2 = (await contactOf(hidden2.conversationId)).contactId
+  const claimed = await claim(person2, "51911100004")
+  const [byPhone] = await ownerDb
+    .insert(conversation)
+    .values({ organizationId: "org_a", contactId: person2, contactIdentityId: claimed.id, channelConnectionId: connId, externalThreadId: "wa:51911100004" })
+    .returning({ id: conversation.id })
+  const known2 = await ingest("org_a", connId, waEvent("wamid.f4", "wa:51911100004", two))
+  expect(known2.conversationId).toBe(byPhone!.id)
+  expect(await contactOf(hidden2.conversationId)).toMatchObject({ externalThreadId: `wa:${two}`, contactIdentityId: claimed.id })
+  expect(await identitiesOf(person2)).toEqual([{ externalUserId: "wa:51911100004", providerUserId: two }])
+  const again = await ingest("org_a", connId, waEvent("wamid.f5", `wa:${two}`, two))
+  expect(again.conversationId).toBe(byPhone!.id)
+
+  // Su número es el WhatsApp de otra ficha: no se unen, y cada mensaje entra por su dirección.
+  const three = "PE.33344455566677788899"
+  const hidden3 = await ingest("org_a", connId, waEvent("wamid.f6", `wa:${three}`, three))
+  const person3 = (await contactOf(hidden3.conversationId)).contactId
+  await claim(person, "51911100005")
+  const elsewhere = await ingest("org_a", connId, waEvent("wamid.f7", "wa:51911100005", three))
+  expect((await contactOf(elsewhere.conversationId)).contactId).toBe(person)
+  expect(await identitiesOf(person3)).toEqual([{ externalUserId: `wa:${three}`, providerUserId: three }])
+  expect((await ingest("org_a", connId, waEvent("wamid.f8", `wa:${three}`, three))).conversationId).toBe(hidden3.conversationId)
+})

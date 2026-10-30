@@ -5,6 +5,7 @@ import type {
   OutboundMessage,
   WebhookParseResult,
 } from "./protocol.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 
 export interface TelegramBotConfig {
   botToken: string
@@ -216,7 +217,15 @@ async function telegramCall(
   })
   const json: unknown = await res.json().catch(() => null)
   if (!res.ok || !isOkResult(json)) {
-    throw new Error(`Telegram ${method} falló: ${failureReason(json, res.status)}`)
+    const detail = `Telegram ${method} falló: ${failureReason(json, res.status)}`
+    // Telegram contestó con su error: no lo aceptó, y con 429 pide esperar. Un
+    // 5xx o una respuesta que no es suya no dicen si salió.
+    const answered = !!json && typeof json === "object" && "ok" in json && json.ok === false
+    if (answered && res.status >= 400 && res.status < 500) {
+      if (res.status === 429) throw new ProviderThrottledError(detail)
+      throw new ProviderRejectedError(detail)
+    }
+    throw new Error(detail)
   }
   return json.result
 }
@@ -286,7 +295,7 @@ export const telegramBotApiAdapter: ChannelAdapter = {
   async sendMessage(config, msg: OutboundMessage, deps) {
     const cfg = getConfig(config)
     if (msg.kind.type === "template") {
-      throw new Error("Telegram no soporta plantillas")
+      throw new ProviderRejectedError("Telegram no soporta plantillas")
     }
     // `to` es el externalThreadId del parse (`tg:<chatId>`).
     const chatId = msg.to.startsWith("tg:") ? msg.to.slice("tg:".length) : msg.to

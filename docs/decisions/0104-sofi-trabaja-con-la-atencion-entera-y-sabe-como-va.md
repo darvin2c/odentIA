@@ -20,7 +20,7 @@ En la auditoría con conversaciones reales (issue #328), solo el 14 % de las con
 - **La atención entera.** Cada turno lee la atención en curso desde que empezó (`listAttentionMessages`), y al menos los últimos 20 mensajes, para no perder el aviso que la abrió. Tiene un tope por tamaño (`fitHistory`, unas 6 000 palabras): si no cabe, quedan cómo empezó y lo último, y el contexto dice cuántos mensajes no ve. Entre turnos no se guarda nada (ADR 0051).
 - **El código cuenta cómo va la atención.** `attentionProgress` lee de sus fuentes si Sofi ya respondió, si ya ofreció horarios, qué cita espera el sí, qué quedó hecho y si ya se le dijo, qué promoción ya nombró, cuántas veces le preguntó su nombre y si ya le habló por él. El manual dice cada regla una sola vez; el turno dice si ya se cumplió. La indicación del camino dice lo que falta (`appointmentStep`).
 - **Lo que la persona sigue escribiendo entra mientras Sofi redacta.** Las corridas van en su propio ciclo del worker. En un solo ciclo, una corrida frenaba la ingesta: lo que la persona escribía mientras tanto quedaba en la cola sin guardarse y Sofi respondía a pedazos. Si llega algo nuevo antes de un paso, la corrida solo guarda lo que la persona dijo y termina: no actúa con lo de antes. Como la ingesta corre a la vez, lee la conversación con la fila bloqueada y la despedida no cierra si llegó algo nuevo (ADR 0024).
-- **Lo que va a salir se compara con lo que consta**, sin modelo y una vez por corrida cada cosa, como `verifyReply`: el idioma, el trato de usted, el pase o la nota que dice haber hecho, el nombre preguntado dos veces y volver a empezar con «Entiendo…» o a decir «anoté que…». Lo que espera su sí se pregunta y nunca se afirma antes; a quien aún no es paciente, el registro va en la frase del aviso (ADR 0101).
+- **Lo que va a salir se compara con lo que consta**, sin modelo y una vez por corrida cada cosa, como `verifyReply`: el idioma, el trato de usted, el pase o la nota que dice haber hecho, en el chat web el WhatsApp o el correo que dice tener (ver la actualización de dónde avisarle), el nombre preguntado dos veces y volver a empezar con «Entiendo…» o a decir «anoté que…». Lo que espera su sí se pregunta y nunca se afirma antes; a quien aún no es paciente, el registro va en la frase del aviso (ADR 0101).
 - **Lo que no puede hacer ni responder lo pasa al equipo**, en vez de decirle que llame.
 - **Recepción razona poco antes de responder** (`receptionReasoning` de `AGENT_MODEL`), con el mismo modelo: sin cambiar de modelo, gasta menos tokens por conversación y repite y afirma de más con menos frecuencia.
 - **Responder no es saludar** (`guardAnswer`). Si lo último que envió la clínica preguntaba algo, el camino «saludo» pasa a ser el abierto. Es una regla del código, como `guardBurst`.
@@ -83,3 +83,25 @@ En las rondas de la auditoría, cada llamada de Recepción llevaba unos 14 500 t
 - `usage.test.ts` fija el orden: lo de la clínica, igual para dos personas; lo de la corrida, al final; y la corrida siguiente, igual a la anterior hasta su último mensaje.
 
 Referencias: `graph.ts` (`loadContext`, `systemContent`); `llm.ts` (`createConfiguredChatModel`); `usage.test.ts`; `auditoria-masiva.ts` (`VUELVE`); la guía de la caché de OpenAI (developers.openai.com/api/docs/guides/prompt-caching).
+
+## Actualización del 2026-10-29: dónde avisarle no se da por guardado
+
+En el chat web, Sofi decía «Ya guardé tu WhatsApp» o «El equipo ya tiene tu consulta y tu WhatsApp» sin haber llamado a `guardar_contacto`, o después de que lo rechazara (un número que ya es de otra persona, un correo sin buzón conectado). Después volvía a pedirlo, y la persona quedaba sin aviso. Pasó en el caso 17 de latidIA, casi siempre en el aviso de un pase, que no pasaba por `claimsOf`.
+
+- **Decisión.** `claimsOf` reconoce también que dice tener dónde avisarle: que lo guardó, lo anotó o lo tiene, que el equipo lo tiene, que la persona ya lo dejó o que le avisarán ahí. En el chat web, si ni `guardar_contacto` lo guardó en esa corrida ni hay por dónde avisarle (`webchatReplyRoutes`, la misma regla del reenvío y de «Sin forma de avisarle»), se pide reescribir una vez por corrida: guardarlo, decirle que no se pudo o no afirmarlo. Vale para la respuesta, la despedida y el aviso de un pase. Lo negado, lo condicional y lo que se lo pide no cuentan; tampoco «Ya tenemos cómo avisarte», a secas, que es lo que responde `guardar_contacto` a quien la clínica ya conoce.
+- **Medido** con `auditoria-masiva.ts`, repitiendo el caso 17 en bases nuevas, con otro WhatsApp y otro correo en cada copia (algunas con el número de un paciente de la demo, para que se rechace), y cotejando cada mensaje con el guardado que consta en la base:
+  - En `main`, 2 de 7 conversaciones lo afirmaron sin que constara, las dos en el aviso de un pase. Con el cambio, 0 de 11. En 3 de ellas se pidió reescribir (4 veces): la respuesta que salió ya no lo afirmaba, y en una el turno siguiente lo guardó.
+  - En odentIA (casos 20, 22, 35 y 37 del chat web), ninguna versión lo afirmó sin guardarlo y la comprobación no tuvo que actuar.
+  - Cumplir todo no cambió: el caso 17 sigue fallando por fluidez. El juez no marcó como falsas las dos afirmaciones de `main`, porque no veía si `guardar_contacto` falló; desde entonces `auditoria-masiva.ts` le dice cuántas corridas lo intentaron y cuántas lo guardaron.
+
+### Alternativas descartadas
+
+- **`guardar_contacto` en todos los caminos**, para que el número que escribe en «derivar», «información», «saludo» o «cambio de cita» no se pierda. Sofi dejó de pedir el contacto y casi nadie llegó a dejarlo. En tres comparaciones a la vez con la misma versión sin el cambio, la que no lo pidió nunca fue de 1 de 8 a 6 de 8 (con «si lo escribe, guárdalo…» en la línea de la corrida y lo de «derivar»), a 7 de 8 (solo con «…no se lo vuelvas a pedir si ya lo escribió» en la indicación de «derivar») y a 5 de 8 (solo la herramienta, sin texto). Sin el cambio guardó 12 de 16 números válidos; con él, 4 de 4.
+
+### Consecuencias
+
+- «Derivar», «información», «saludo» y «cambio de cita» no tienen `guardar_contacto`: si la persona escribe su número en ese turno, ya no se le dice que se guardó, pero tampoco se guarda y se le vuelve a pedir.
+- Una comprobación por forma: «te avisaremos por WhatsApp», sin decir que es el suyo, no cuenta, y una pregunta o una condición («¿ya tenemos tu WhatsApp?», «si ya lo dejaste…») tampoco.
+- Con el caso ya en el equipo, pedir que reescriba el aviso terminaba el turno con el aviso fijo, y se perdía lo que iba a decir. Ahora vuelve al modelo una vez, para esta y para las demás comprobaciones antes de enviar.
+
+Referencias: `claims.ts`, `claims.test.ts`; `tools.ts` (`unsavedContact`, `guardar_contacto`); `webchat-reply.ts` (`webchatReplyRoutes`); la prueba del chat web en `agent.test.ts`.

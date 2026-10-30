@@ -11,6 +11,12 @@ describe("identityText", () => {
     )
   })
 
+  it("quien oculta su número en WhatsApp se lee por su nombre, nunca por los dígitos de su BSUID", () => {
+    const hidden = { channel: "whatsapp", externalUserId: "wa:PE.13491208655302741918" }
+    expect(identityText({ ...hidden, displayName: "Cyndy" })).toBe("Cyndy")
+    expect(identityText({ ...hidden, displayName: null })).toBe("Cuenta de WhatsApp")
+  })
+
   it("otro canal dice su nombre o de qué canal es, sin el identificador técnico", () => {
     expect(identityText({ channel: "telegram", externalUserId: "tg:123456", displayName: "Carmen H." })).toBe("Carmen H.")
     expect(identityText({ channel: "telegram", externalUserId: "tg:123456", displayName: null })).toBe(

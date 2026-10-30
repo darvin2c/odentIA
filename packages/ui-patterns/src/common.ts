@@ -56,6 +56,8 @@ export const common = {
     last3Days: "Últimos 3 días",
     last7Days: "Últimos 7 días",
     last30Days: "Últimos 30 días",
+    thisMonth: "Este mes",
+    lastMonth: "Mes pasado",
     previous: "Anterior",
     next: "Siguiente",
     search: "Buscar",

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto"
-import type { NormalizedTemplateStatus } from "@odentia/channels"
+import { isWhatsAppAccountFailure, type NormalizedTemplateStatus } from "@odentia/channels"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
 import { member } from "@odentia/db/schema/auth"
@@ -2665,16 +2665,19 @@ export async function reconcileDeliveries(tx: Db, orgId: string, now: Date): Pro
   const rules = new Map<string, RuleRow | null>()
   const words = CAUSE_WORDS.no_entregado
   for (const { job, error } of rows) {
+    // Un rechazo por la cuenta de la clínica (pago, clave vencida) se arregla
+    // una vez en la conexión: no es del número de la persona ni deja su tarea.
+    const account = isWhatsAppAccountFailure(error)
     await tx
       .update(automationJob)
       .set({
         status: "fallido",
-        cause: "no_entregado",
+        cause: account ? "proveedor" : "no_entregado",
         lastError: error ?? "El canal no entregó el mensaje",
         updatedAt: now,
       })
       .where(eq(automationJob.id, job.id))
-    if (!job.ruleId) continue
+    if (!job.ruleId || account) continue
     if (!rules.has(job.ruleId)) {
       const [rule] = await tx
         .select()

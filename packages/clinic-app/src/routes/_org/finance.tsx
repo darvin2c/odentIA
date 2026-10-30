@@ -1,15 +1,19 @@
 /**
- * Finanzas: la caja del día por sede, las deudas y los gastos del mes.
+ * Finanzas: la caja del día por sede, todos los cobros con su ticket, las
+ * deudas y los gastos del mes.
  *
  * La caja se crea sola con el primer cobro y nunca bloquea: se cierra contando
- * solo el efectivo y cada cierre deja su hoja, que no se edita. Lectura con
+ * solo el efectivo y cada cierre deja su hoja, que no se edita. Caja es el día;
+ * lo de antes se busca en Cobros, Deudas, Gastos y Cierres, cada uno con la
+ * misma barra de búsqueda y filtros, y todo vive en la dirección. Lectura con
  * `finance.read`; cobrar, gastar, ingresar o retirar con `finance.write`;
  * cerrar con `finance.close` (decide siempre el servidor). Comisiones vive en
  * `/commissions`.
  *
- * `?tab=` conserva la sección y `?cierre=<id>` abre la hoja de ese cierre: es
- * el enlace del aviso que recibe administración. Dinero con
- * `@odentia/clinical`; moneda, formato y zona de la clínica o la sede.
+ * `?tab=` conserva la sección, `?ticket=<id>` abre ese ticket al lado (lo usa
+ * el buscador rápido) y `?cierre=<id>` abre la hoja de ese cierre: es el enlace
+ * del aviso que recibe administración. Dinero con `@odentia/clinical`; moneda,
+ * formato y zona de la clínica o la sede.
  */
 import { formatMoney } from "@odentia/clinical"
 import {
@@ -19,14 +23,11 @@ import {
   Badge,
   Button,
   cn,
-  Field,
-  FieldLabel,
   Skeleton,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-  Textarea,
   toast,
   useIsMobile,
 } from "@odentia/ui"
@@ -35,65 +36,60 @@ import {
   DetailDrawer,
   EmptyState,
   ErrorState,
-  FormDrawer,
+  FilterBar,
   LoadingState,
   PageHeader,
   PageShell,
-  ViewTabs,
+  useListSearch,
 } from "@odentia/ui-patterns"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft, Banknote, Lock, Plus } from "lucide-react"
-import { useEffect, useId, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
-import { WriteToPersonDialog } from "../../components/write-to-person"
 import {
   CashCloseDrawer,
   CashMoveDrawer,
   ClosureSheetDrawer,
 } from "../../components/finance/cash-close-drawer"
 import { CollectDrawer } from "../../components/finance/collect-drawer"
+import { DebtsTab } from "../../components/finance/debts-tab"
 import { ExpenseFormDrawer } from "../../components/finance/expense-form-drawer"
+import { ExpensesTab } from "../../components/finance/expenses-tab"
 import {
   CommissionsAdminPanel,
   MonthPicker,
   MyCommissionsPanel,
 } from "../../components/finance/CommissionsPanel"
+import { TicketPanel } from "../../components/finance/ticket-panel"
 import { TicketView, ticketDisplayNumber } from "../../components/finance/ticket-view"
-import { ChoiceSelect } from "../../components/ui/choice-select"
+import { TicketsTab } from "../../components/finance/tickets-tab"
+import { VoidDrawer } from "../../components/finance/void-drawer"
 import { useActiveBranch } from "../../lib/active-branch"
 import { compareMonths, FIRST_YEAR, plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
-import { purchaseOrderLabel } from "../../lib/reports"
 import { financeErrorMessage } from "../../lib/finance"
 import {
-  attendedTodayAt,
   CLOSURES_PAGE,
   CASH_TERMS,
   type CashBreakdown,
   cashErrorMessage,
   currentMonthIn,
   type DayEntry,
-  daysBetween,
   dayKeyOf,
-  debtAgeDays,
   debtConcepts,
   debtDue,
   type DebtRow,
+  type DebtTotals,
   differenceLabel,
-  type ExpenseRow,
   fetchClosures,
   fetchDayMovements,
-  fetchDebts,
-  fetchMonthExpenses,
-  fetchPurchasesToPay,
+  fetchDebtList,
   financeKeys,
   formatClock,
   formatDateTimeLong,
   formatDayMonth,
   formatDayShort,
-  formatMonth,
-  formatMonthName,
   groupDayMovements,
   hasEarlierDaysOpen,
   invalidateFinance,
@@ -102,47 +98,60 @@ import {
   momentDay,
   momentShort,
   type MonthRef,
-  monthsBack,
-  monthValue,
-  NO_RECEIPT,
   otherMethods,
-  parseMonthValue,
   spokenMoment,
   todayIn,
-  totalsByCurrency,
   useBranchesStatus,
   useCashState,
   voidCashMovementApi,
-  voidExpenseApi,
 } from "../../lib/finance-cash"
 import {
   type CollectResultBody,
-  fetchTicketReceipt,
   useOrgFinanceProfile,
 } from "../../lib/finance-collect"
 import { useOrgEvents } from "../../lib/org-events"
 
-type FinanceView = "caja" | "deudas" | "gastos" | "comisiones" | "cierres"
+type FinanceView = "caja" | "cobros" | "deudas" | "gastos" | "comisiones" | "cierres"
 
-const VIEWS: readonly FinanceView[] = ["caja", "deudas", "gastos", "comisiones", "cierres"]
+const VIEWS: readonly FinanceView[] = ["caja", "cobros", "deudas", "gastos", "comisiones", "cierres"]
 
 function isView(value: unknown): value is FinanceView {
   return typeof value === "string" && (VIEWS as readonly string[]).includes(value)
 }
 
-interface FinanceSearch {
+/**
+ * Lo que la barra de cada lista guarda en la dirección (`useListSearch`): la
+ * búsqueda, el orden y los filtros. Al cambiar de sección se limpian.
+ */
+const LIST_KEYS = [
+  "q",
+  "sort",
+  "fecha_from",
+  "fecha_to",
+  "medio",
+  "cobro",
+  "estado",
+  "antiguedad",
+  "tipo",
+  "resultado",
+] as const
+type ListKey = (typeof LIST_KEYS)[number]
+
+type FinanceSearch = {
   /** Sección; `cierres` es la lista de cierres anteriores, dentro de Caja. */
   tab?: FinanceView
   /** Cierre (o su ventana) cuya hoja está abierta. */
   cierre?: string
+  /** Ticket abierto al lado. */
+  ticket?: string
   /** Sede elegida (`useActiveBranch`). */
   branch?: string
-  /** Mes de Comisiones, y el mes con que abre Gastos («Ver gasto» de una compra); sin él, el mes en curso de la clínica. */
+  /** Mes de Gastos y de Comisiones; sin él, el mes en curso de la clínica. */
   year?: number
   month?: number
   /** Profesional con el detalle abierto en Comisiones (solo administración). */
   profesional?: string
-}
+} & Partial<Record<ListKey, string>>
 
 /** Un mes mal escrito en el enlace no rompe la pantalla: se muestra el mes en curso. */
 function monthOfSearch(search: Record<string, unknown>): { year: number; month: number } | null {
@@ -158,15 +167,20 @@ function monthOfSearch(search: Record<string, unknown>): { year: number; month: 
   return valid ? { year, month } : null
 }
 
+function textOf(search: Record<string, unknown>, key: string): Record<string, string> {
+  const value = search[key]
+  return typeof value === "string" && value ? { [key]: value } : {}
+}
+
 export const Route = createFileRoute("/_org/finance")({
   validateSearch: (search: Record<string, unknown>): FinanceSearch => ({
     ...(isView(search.tab) ? { tab: search.tab } : {}),
-    ...(typeof search.cierre === "string" && search.cierre ? { cierre: search.cierre } : {}),
-    ...(typeof search.branch === "string" && search.branch ? { branch: search.branch } : {}),
+    ...textOf(search, "cierre"),
+    ...textOf(search, "ticket"),
+    ...textOf(search, "branch"),
     ...(monthOfSearch(search) ?? {}),
-    ...(typeof search.profesional === "string" && search.profesional
-      ? { profesional: search.profesional }
-      : {}),
+    ...textOf(search, "profesional"),
+    ...Object.assign({}, ...LIST_KEYS.map((key) => textOf(search, key))),
   }),
   component: FinancePage,
 })
@@ -182,12 +196,8 @@ const FINANCE_EVENT_KINDS = [
   "encounter.finalized",
 ]
 
-/** Personas «de antes» a la vista en Caja; el resto se ve en Deudas. */
-const CASH_EARLIER_LIMIT = 8
-/** Deudas a la vista antes de «Ver las N que faltan». */
-const DEBTS_PAGE = 12
-/** Meses que ofrece el selector de Gastos. */
-const EXPENSE_MONTHS = 24
+/** Personas atendidas hoy a la vista en «Por cobrar ahora» de la Caja. */
+const ATTENDED_TODAY_LIMIT = 50
 
 /** Lo que cada sección necesita saber de la clínica y la sede. */
 interface Workspace {
@@ -239,7 +249,7 @@ function FinancePage() {
   if (!canRead) {
     return (
       <PageShell className="flex flex-col gap-4">
-        <PageHeader title="Finanzas" subtitle="Caja por sede, deudas y gastos" />
+        <PageHeader title="Finanzas" subtitle="Caja por sede, cobros, deudas y gastos" />
         <AccessDenied />
       </PageShell>
     )
@@ -264,8 +274,8 @@ function FinanceWorkspace() {
   const [ticket, setTicket] = useState<{ result: CollectResultBody; patientId: string } | null>(null)
   // Cierre recién hecho: la hoja que se abre lo dice (y si ya estaba cerrada).
   const [justClosed, setJustClosed] = useState<{ id: string; alreadyClosed: boolean } | null>(null)
-  // Ticket consultado desde «Movimientos de hoy».
-  const [review, setReview] = useState<{ patientId: string; ticketId: string } | null>(null)
+  // Los tickets a la vista en Cobros, en su orden: «Anterior / Siguiente» del ticket abierto.
+  const [ticketList, setTicketList] = useState<string[]>([])
 
   const branchId = sede.branchId ?? sede.branches[0]?.id ?? ""
   const branchName = sede.branches.find((item) => item.id === branchId)?.name ?? ""
@@ -285,9 +295,25 @@ function FinanceWorkspace() {
       // Abrir una hoja o cambiar de sección no debe devolver la página arriba.
       resetScroll: false,
     })
-  const showView = (next: FinanceView) => setSearch({ tab: next === "caja" ? undefined : next })
-
-  const collect = (patient: CollectTarget | null = null) => setPanel({ kind: "cobrar", patient })
+  const cleared = Object.fromEntries(LIST_KEYS.map((key) => [key, undefined])) as Partial<FinanceSearch>
+  // La búsqueda y los filtros son de cada lista: al cambiar de sección se limpian.
+  const showView = (next: FinanceView, patch: Partial<FinanceSearch> = {}) =>
+    setSearch({ ...cleared, ticket: undefined, tab: next === "caja" ? undefined : next, ...patch })
+  // Estables: las tablas de Cobros y Deudas los usan en sus columnas.
+  const ticketOpen = !!search.ticket
+  const openTicket = useCallback(
+    (ticketId: string) =>
+      void navigate({
+        search: (previous) => ({ ...previous, ticket: ticketId }),
+        replace: view === "cobros" && ticketOpen,
+        resetScroll: false,
+      }),
+    [navigate, view, ticketOpen],
+  )
+  const collect = useCallback(
+    (patient: CollectTarget | null = null) => setPanel({ kind: "cobrar", patient }),
+    [],
+  )
   const ws: Workspace | null =
     prof && branchId
       ? {
@@ -300,7 +326,7 @@ function FinanceWorkspace() {
         }
       : null
 
-  // Comisiones: el mes vive en el enlace y el mes en curso no se escribe.
+  // Gastos y Comisiones van por mes: el mes vive en el enlace y el mes en curso no se escribe.
   const thisMonth = prof ? currentMonthIn(prof.timezone) : null
   const period =
     search.year !== undefined && search.month !== undefined
@@ -313,8 +339,9 @@ function FinanceWorkspace() {
       month: isCurrent ? undefined : next.month,
     })
   }
+  const byMonth = view === "gastos" || (view === "comisiones" && canCommissions)
   const monthPicker =
-    view === "comisiones" && canCommissions && prof && period && thisMonth ? (
+    byMonth && prof && period && thisMonth ? (
       <MonthPicker value={period} onChange={setPeriod} max={thisMonth} locale={prof.locale} />
     ) : null
 
@@ -358,6 +385,7 @@ function FinanceWorkspace() {
         </>
       )
     }
+    if ((view === "cobros" || view === "deudas") && canWrite) return collectButton(mobile)
     if (view === "gastos" && canWrite) return expenseButton(mobile, true)
     return null
   }
@@ -366,7 +394,7 @@ function FinanceWorkspace() {
   const headerOn = !isMobile && ws !== null
   const headerPrimary = !headerOn
     ? undefined
-    : view === "caja" && canWrite
+    : (view === "caja" || view === "cobros" || view === "deudas") && canWrite
       ? { label: "Cobrar", icon: <Banknote aria-hidden />, onClick: () => collect() }
       : view === "caja" && canClose
         ? { label: "Cerrar caja", icon: <Lock aria-hidden />, onClick: () => setPanel({ kind: "cerrar" }) }
@@ -399,7 +427,7 @@ function FinanceWorkspace() {
                 onChange={(id) => sede.choose(id)}
               />
             ) : (
-              <p className="min-w-0">Caja por sede, deudas y gastos</p>
+              <p className="min-w-0">Caja por sede, cobros, deudas y gastos</p>
             )}
             {headerOn && monthPicker ? monthPicker : null}
           </>
@@ -459,17 +487,21 @@ function FinanceWorkspace() {
           }}
         >
           <div className="flex flex-wrap items-center gap-2">
-            <TabsList aria-label="Secciones de Finanzas">
-              <TabsTrigger value="caja">Caja</TabsTrigger>
-              <TabsTrigger value="deudas">Deudas</TabsTrigger>
-              <TabsTrigger value="gastos">Gastos</TabsTrigger>
-              {canCommissions ? <TabsTrigger value="comisiones">Comisiones</TabsTrigger> : null}
+            <TabsList
+              aria-label="Secciones de Finanzas"
+              className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              <TabsTrigger value="caja" className="shrink-0">Caja</TabsTrigger>
+              <TabsTrigger value="cobros" className="shrink-0">Cobros</TabsTrigger>
+              <TabsTrigger value="deudas" className="shrink-0">Deudas</TabsTrigger>
+              <TabsTrigger value="gastos" className="shrink-0">Gastos</TabsTrigger>
+              {canCommissions ? <TabsTrigger value="comisiones" className="shrink-0">Comisiones</TabsTrigger> : null}
             </TabsList>
             {isMobile && monthPicker ? <div className="ml-auto">{monthPicker}</div> : null}
             {canReports ? (
               <Link
                 to="/reports"
-                search={{ tab: "finanzas", ...(view === "gastos" || view === "caja" ? { branch: ws.branchId } : {}) }}
+                search={{ tab: "finanzas", ...(view !== "comisiones" ? { branch: ws.branchId } : {}) }}
                 className="ml-auto inline-flex min-h-11 items-center text-sm font-semibold text-primary-soft-foreground underline-offset-2 hover:underline sm:min-h-8"
               >
                 Ver el reporte
@@ -489,8 +521,23 @@ function FinanceWorkspace() {
                 onCloseCash={() => setPanel({ kind: "cerrar" })}
                 onCashMove={() => setPanel({ kind: "efectivo" })}
                 onShowDebts={() => showView("deudas")}
+                onShowTickets={(from) => showView("cobros", { fecha_from: from, fecha_to: todayIn(ws.timeZone) })}
                 onShowClosures={() => showView("cierres")}
-                onOpenTicket={setReview}
+                onOpenTicket={openTicket}
+              />
+            ) : null}
+            {view === "cobros" ? (
+              <TicketsTab
+                key={ws.branchId}
+                branchId={ws.branchId}
+                branchName={ws.branchName}
+                locale={ws.locale}
+                timeZone={ws.timeZone}
+                canWrite={canWrite}
+                openTicketId={search.ticket ?? null}
+                onOpenTicket={openTicket}
+                onListChange={setTicketList}
+                onCollect={collect}
               />
             ) : null}
             {view === "comisiones" ? (
@@ -536,14 +583,24 @@ function FinanceWorkspace() {
               />
             ) : null}
             {view === "deudas" ? (
-              <DebtsTab key={ws.branchId} ws={ws} canWrite={canWrite} onCollect={collect} />
+              <DebtsTab
+                key={ws.branchId}
+                branchId={ws.branchId}
+                locale={ws.locale}
+                timeZone={ws.timeZone}
+                canWrite={canWrite}
+                onCollect={collect}
+              />
             ) : null}
-            {view === "gastos" ? (
+            {view === "gastos" && period ? (
               <ExpensesTab
                 key={ws.branchId}
-                ws={ws}
+                branchId={ws.branchId}
+                locale={ws.locale}
+                orgTimeZone={ws.orgTimeZone}
+                currency={ws.currency}
+                month={period}
                 canWrite={canWrite}
-                initialMonth={search.year !== undefined && search.month !== undefined ? { year: search.year, month: search.month } : undefined}
                 onExpense={() => setPanel({ kind: "gasto" })}
               />
             ) : null}
@@ -612,6 +669,9 @@ function FinanceWorkspace() {
                 : "Caja cerrada. Imprime la hoja para firmar la entrega."
               : null
           }
+          onShowTickets={(range) =>
+            showView("cobros", { cierre: undefined, fecha_from: range.from, fecha_to: range.to })
+          }
           onClose={() => {
             setJustClosed(null)
             setSearch({ cierre: undefined }, true)
@@ -620,12 +680,14 @@ function FinanceWorkspace() {
       ) : null}
 
       {prof ? (
-        <TicketReviewDrawer
-          target={review}
+        <TicketPanel
+          ticketId={search.ticket ?? null}
           locale={prof.locale}
           timeZone={ws?.timeZone ?? prof.timezone}
           ticketFooter={prof.ticketFooter}
-          onClose={() => setReview(null)}
+          siblings={view === "cobros" ? ticketList : undefined}
+          onOpen={(id) => setSearch({ ticket: id }, true)}
+          onClose={() => setSearch({ ticket: undefined }, true)}
           onChanged={() => invalidateFinance(queryClient)}
         />
       ) : null}
@@ -663,151 +725,18 @@ function FinanceWorkspace() {
 
 // --- Piezas compartidas ---------------------------------------------------------------
 
-/** Confirmación de una anulación: siempre en cajón y siempre con motivo. */
-function VoidDrawer({
-  open,
-  title,
-  description,
-  isSubmitting,
-  error,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean
-  title: string
-  description: string
-  isSubmitting: boolean
-  error: string | null
-  onClose: () => void
-  onConfirm: (reason: string) => void
-}) {
-  const fieldId = useId()
-  const [reason, setReason] = useState("")
-  const [missing, setMissing] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    setReason("")
-    setMissing(false)
-  }, [open])
-
-  return (
-    <FormDrawer
-      dock={false}
-      open={open}
-      title={title}
-      description={description}
-      error={missing ? "Escribe el motivo de la anulación." : error}
-      isSubmitting={isSubmitting}
-      isDirty={reason !== ""}
-      submitLabel="Anular"
-      cancelLabel="No anular"
-      onClose={() => {
-        if (!isSubmitting) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!reason.trim()) {
-          setMissing(true)
-          return
-        }
-        setMissing(false)
-        onConfirm(reason.trim())
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor={fieldId}>Motivo</FieldLabel>
-        <Textarea
-          id={fieldId}
-          maxLength={2000}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </Field>
-    </FormDrawer>
-  )
-}
-
-/** Ticket ya emitido, abierto desde su renglón: se lee completo del servidor. */
-function TicketReviewDrawer({
-  target,
-  locale,
-  timeZone,
-  ticketFooter,
-  onClose,
-  onChanged,
-}: {
-  target: { patientId: string; ticketId: string } | null
-  locale: string
-  timeZone: string
-  ticketFooter: string | null
-  onClose: () => void
-  onChanged: () => void
-}) {
-  const queryClient = useQueryClient()
-  const receipt = useQuery({
-    queryKey: ["ticket-receipt", target?.patientId ?? "", target?.ticketId ?? ""],
-    queryFn: () => fetchTicketReceipt(target?.patientId ?? "", target?.ticketId ?? ""),
-    enabled: target !== null,
-  })
-  const row = target ? (receipt.data?.data.ticket ?? null) : null
-  return (
-    <DetailDrawer
-      open={target !== null}
-      onClose={onClose}
-      title={row ? `Ticket ${ticketDisplayNumber(row.ticketNumber)}` : "Ticket"}
-      isLoading={target !== null && receipt.isPending}
-      showClose={!row}
-    >
-      {receipt.isError ? (
-        <ErrorState
-          title="No se pudo abrir el ticket"
-          message={financeErrorMessage(receipt.error)}
-          onRetry={() => void receipt.refetch()}
-        />
-      ) : row && target ? (
-        <TicketView
-          key={row.id}
-          ticket={row}
-          remainingCents={0}
-          patientName={row.snapshot.patient.displayName}
-          branchName={row.snapshot.branch.name}
-          locale={locale}
-          timeZone={timeZone}
-          ticketFooter={ticketFooter}
-          mode="review"
-          onDone={onClose}
-          onChanged={() => {
-            onChanged()
-            void receipt.refetch()
-            void queryClient.invalidateQueries({ queryKey: ["patient-account3", target.patientId] })
-          }}
-        />
-      ) : null}
-    </DetailDrawer>
-  )
-}
-
-/** Una persona que debe: quién, qué, desde cuándo, cuánto y qué se puede hacer. */
+/** Una persona que salió hoy de su atención con algo por pagar: quién, qué, cuánto y «Cobrar». */
 function DebtLine({
   row,
   locale,
   detail,
-  badge,
   canWrite,
-  onMessage,
   onCollect,
 }: {
   row: DebtRow
   locale: string
   detail: string
-  badge?: string
   canWrite: boolean
-  /**
-   * «Escribirle» (solo en Deudas y con permiso de conversaciones): abre su
-   * conversación en la Bandeja, la misma vía que en la ficha y la Agenda.
-   */
-  onMessage?: (row: DebtRow) => void
   onCollect: (patient: CollectTarget) => void
 }) {
   const { dueCents, creditUsedCents } = debtDue(row)
@@ -816,17 +745,14 @@ function DebtLine({
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
       <div className="min-w-0 flex-1 basis-56">
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <Link
-            to="/patients/$patientId"
-            params={{ patientId: row.patientId }}
-            search={{ tab: "cuenta" }}
-            className="text-base font-medium underline-offset-4 hover:underline"
-          >
-            {name}
-          </Link>
-          {badge ? <Badge variant="warning">{badge}</Badge> : null}
-        </p>
+        <Link
+          to="/patients/$patientId"
+          params={{ patientId: row.patientId }}
+          search={{ tab: "cuenta" }}
+          className="text-base font-medium underline-offset-4 hover:underline"
+        >
+          {name}
+        </Link>
         <p className="text-sm text-muted-foreground">{debtConcepts(row)}</p>
         <p className="text-sm text-muted-foreground">{detail}</p>
       </div>
@@ -840,11 +766,6 @@ function DebtLine({
             </p>
           ) : null}
         </div>
-        {onMessage && row.contactId ? (
-          <Button variant="ghost" aria-label={`Escribirle a ${name}`} onClick={() => onMessage(row)}>
-            Escribirle
-          </Button>
-        ) : null}
         {/* En el teléfono, cobrar a alguien es la barra de abajo: sin repetir el botón en cada fila. */}
         {canWrite ? (
           <Button className="max-sm:hidden" aria-label={`Cobrar a ${name}`} onClick={() => onCollect({ id: row.patientId, name })}>
@@ -856,17 +777,8 @@ function DebtLine({
   )
 }
 
-function debtTotalsText(rows: DebtRow[], locale: string): string {
-  return totalsByCurrency(rows.map((row) => ({ currency: row.currency, cents: debtDue(row).dueCents })))
-    .map(([unit, cents]) => formatMoney(cents, unit, locale))
-    .join(" · ")
-}
-
-function byOldest(a: DebtRow, b: DebtRow): number {
-  return (
-    (a.oldestSince ? Date.parse(a.oldestSince) : Number.POSITIVE_INFINITY) -
-    (b.oldestSince ? Date.parse(b.oldestSince) : Number.POSITIVE_INFINITY)
-  )
+function totalsText(totals: DebtTotals, locale: string): string {
+  return totals.totals.map((row) => formatMoney(row.cents, row.currency, locale)).join(" · ")
 }
 
 // --- Caja -----------------------------------------------------------------------------
@@ -894,13 +806,14 @@ function CashTab({
   onCloseCash,
   onCashMove,
   onShowDebts,
+  onShowTickets,
   onShowClosures,
   onOpenTicket,
 }: {
   ws: Workspace
   canWrite: boolean
   canClose: boolean
-  onOpenTicket: (target: { patientId: string; ticketId: string }) => void
+  onOpenTicket: (ticketId: string) => void
   /** En el teléfono «Registrar gasto» no cabe en la barra: va junto a los movimientos. */
   expenseShortcut: boolean
   onCollect: (patient?: CollectTarget | null) => void
@@ -908,6 +821,8 @@ function CashTab({
   onCloseCash: () => void
   onCashMove: () => void
   onShowDebts: () => void
+  /** Cobros desde ese día (de la sede) hasta hoy. */
+  onShowTickets: (from: string) => void
   onShowClosures: () => void
 }) {
   const { branchId, locale, timeZone } = ws
@@ -918,9 +833,10 @@ function CashTab({
     queryKey: financeKeys.movements(branchId, today),
     queryFn: () => fetchDayMovements(branchId, today),
   })
+  // Solo quienes salieron hoy de su atención; lo de antes se dice en una línea y vive en Deudas.
   const debts = useQuery({
-    queryKey: financeKeys.debts(branchId),
-    queryFn: () => fetchDebts(branchId),
+    queryKey: financeKeys.debtList(branchId, { when: "hoy" }),
+    queryFn: () => fetchDebtList(branchId, { when: "hoy" }, null, ATTENDED_TODAY_LIMIT),
   })
   const [voiding, setVoiding] = useState<DayEntry | null>(null)
   const [voidError, setVoidError] = useState<string | null>(null)
@@ -956,19 +872,8 @@ function CashTab({
     () => groupDayMovements(dayBody?.movements ?? [], dayBody?.voidedTickets ?? []),
     [dayBody],
   )
-  const debtRows = debts.data?.data ?? []
-  const { attended, earlier } = useMemo(() => {
-    const todayRows: Array<{ row: DebtRow; at: string }> = []
-    const before: DebtRow[] = []
-    for (const row of debtRows) {
-      const at = attendedTodayAt(row)
-      if (at) todayRows.push({ row, at })
-      else before.push(row)
-    }
-    todayRows.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
-    before.sort(byOldest)
-    return { attended: todayRows, earlier: before }
-  }, [debtRows])
+  const attended = debts.data?.data.data ?? []
+  const earlier = debts.data?.data.summary.earlier ?? null
 
   if (
     (cash.isError && isForbidden(cash.error)) ||
@@ -991,6 +896,16 @@ function CashTab({
   const ticketCount = entries.filter((entry) => entry.type === "cobro" && !entry.voided).length
   const expenseCount = entries.filter((entry) => entry.type === "gasto").length
   const openedDay = state?.openedAt ? spokenMoment(state.openedAt, locale, zone) : null
+  // Lo de hoy es lo de la sede menos lo de antes: cuenta también a quien no cupo en la lista.
+  const attendedTotal = debts.data?.data.total ?? attended.length
+  const attendedDue = (debts.data?.data.summary.totals ?? [])
+    .map((row) => ({
+      currency: row.currency,
+      cents: row.cents - (earlier?.totals.find((item) => item.currency === row.currency)?.cents ?? 0),
+    }))
+    .filter((row) => row.cents > 0)
+  // «Ver cobros» abre lo mismo que suma la tarjeta: desde el último cierre si la caja va de varios días.
+  const collectedFrom = unclosedSince && reference ? dayKeyOf(reference, zone) : today
 
   return (
     <div className="flex flex-col gap-4">
@@ -1024,7 +939,7 @@ function CashTab({
           ) : null}
         </div>
         <Button variant="link" className="h-auto p-0" onClick={onShowClosures}>
-          Cierres anteriores
+          Cierres
         </Button>
       </div>
 
@@ -1073,6 +988,14 @@ function CashTab({
             <p className="mt-1 text-xl font-semibold tabular-nums">{money(collected)}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {plural(state.tickets, "ticket", "tickets")}
+              {state.tickets > 0 ? (
+                <>
+                  {" · "}
+                  <Button variant="link" className="h-auto p-0 align-baseline" onClick={() => onShowTickets(collectedFrom)}>
+                    Ver cobros
+                  </Button>
+                </>
+              ) : null}
             </p>
           </div>
         </section>
@@ -1081,17 +1004,18 @@ function CashTab({
       <section aria-labelledby="caja-por-cobrar" className="elevated rounded-xl border bg-card p-4 sm:p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <h2 id="caja-por-cobrar" className="font-heading text-base font-medium">
-            Por cobrar
+            Por cobrar ahora
           </h2>
-          {debtRows.length > 0 ? (
+          {attended.length > 0 ? (
             <p className="text-sm text-muted-foreground">
-              {plural(debtRows.length, "persona", "personas")} · {debtTotalsText(debtRows, locale)}
+              Salieron hoy de su atención · {plural(attendedTotal, "persona", "personas")} ·{" "}
+              {attendedDue.map((row) => formatMoney(row.cents, row.currency, locale)).join(" · ")}
             </p>
           ) : null}
         </div>
         {debts.isPending ? (
           <div className="mt-3">
-            <DataTableSkeleton view="list" rowCount={3} label="Consultando quién debe" />
+            <DataTableSkeleton view="list" rowCount={2} label="Consultando quién salió hoy con algo por pagar" />
           </div>
         ) : debts.isError ? (
           <ErrorState
@@ -1100,7 +1024,7 @@ function CashTab({
             message={financeErrorMessage(debts.error)}
             onRetry={() => void debts.refetch()}
           />
-        ) : debtRows.length === 0 ? (
+        ) : attended.length === 0 && (!earlier || earlier.people === 0) ? (
           <EmptyState
             className="mt-3"
             title="Nadie debe por ahora"
@@ -1109,65 +1033,51 @@ function CashTab({
             onAction={canWrite ? () => onCollect() : undefined}
           />
         ) : (
-          <div className="mt-2 flex flex-col gap-2">
+          <>
             {attended.length > 0 ? (
-              <div>
-                <h3 className="pt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                  Atendidos hoy
-                </h3>
-                <ul className="divide-y">
-                  {attended.map(({ row, at }) => {
-                    const left =
-                      row.lastAttended?.at === at
-                        ? `Salió a las ${formatClock(at, locale, zone)}${row.lastAttended.professionalName ? ` · ${row.lastAttended.professionalName}` : ""}`
-                        : `Anotado hoy a las ${formatClock(at, locale, zone)}`
-                    const older =
-                      row.oldestSince && dayKeyOf(row.oldestSince, zone) < today
-                        ? ` · también debe desde el ${formatDayMonth(row.oldestSince, locale, zone)}`
-                        : ""
-                    return (
-                      <DebtLine
-                        key={`${row.patientId}-${row.currency}`}
-                        row={row}
-                        locale={locale}
-                        detail={`${left}${older}`}
-                        canWrite={canWrite}
-                        onCollect={onCollect}
-                      />
-                    )
-                  })}
-                </ul>
-              </div>
-            ) : null}
-            {earlier.length > 0 ? (
-              <div>
-                <h3 className="pt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                  Deben de antes
-                </h3>
-                <ul className="divide-y">
-                  {earlier.slice(0, CASH_EARLIER_LIMIT).map((row) => (
+              <ul className="mt-1 divide-y">
+                {attended.map((row) => {
+                  const at = row.attendedTodayAt ?? ""
+                  const left =
+                    row.lastAttended?.at === at
+                      ? `Salió a las ${formatClock(at, locale, zone)}${row.lastAttended.professionalName ? ` · ${row.lastAttended.professionalName}` : ""}`
+                      : `Anotado hoy a las ${formatClock(at, locale, zone)}`
+                  const older =
+                    row.oldestSince && dayKeyOf(row.oldestSince, zone) < today
+                      ? ` · también debe desde el ${formatDayMonth(row.oldestSince, locale, zone)}`
+                      : ""
+                  return (
                     <DebtLine
                       key={`${row.patientId}-${row.currency}`}
                       row={row}
                       locale={locale}
-                      detail={
-                        row.oldestSince
-                          ? `Debe desde el ${formatDayMonth(row.oldestSince, locale, zone)}`
-                          : "Debe de antes"
-                      }
+                      detail={`${left}${older}`}
                       canWrite={canWrite}
                       onCollect={onCollect}
                     />
-                  ))}
-                </ul>
-                {earlier.length > CASH_EARLIER_LIMIT ? (
-                  <Button variant="link" className="mt-1 h-auto p-0" onClick={onShowDebts}>
-                    Ver las {earlier.length - CASH_EARLIER_LIMIT} que faltan
-                  </Button>
+                  )
+                })}
+                {attendedTotal > attended.length ? (
+                  <li className="py-3 text-sm">
+                    <Button variant="link" className="h-auto p-0" onClick={onShowDebts}>
+                      Ver las {attendedTotal - attended.length} que faltan en Deudas
+                    </Button>
+                  </li>
                 ) : null}
-              </div>
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-muted-foreground">Nadie salió hoy de su atención con algo por pagar.</p>
+            )}
+            {earlier && earlier.people > 0 ? (
+              <p className="mt-2 border-t pt-3 text-sm text-muted-foreground">
+                {attended.length > 0 ? "Además, " : ""}
+                {plural(earlier.people, "persona debe", "personas deben")} de antes: {totalsText(earlier, locale)} ·{" "}
+                <Button variant="link" className="h-auto p-0 align-baseline" onClick={onShowDebts}>
+                  Ver deudas
+                </Button>
+              </p>
             ) : null}
-          </div>
+          </>
         )}
       </section>
 
@@ -1282,7 +1192,7 @@ function MovementLine({
   entry: DayEntry
   locale: string
   timeZone: string
-  onOpenTicket: (target: { patientId: string; ticketId: string }) => void
+  onOpenTicket: (ticketId: string) => void
   /** Solo los ingresos y retiros hechos a mano se anulan desde aquí. */
   onVoid?: () => void
 }) {
@@ -1294,8 +1204,8 @@ function MovementLine({
   let open: (() => void) | null = null
   const voided = entry.type === "cobro" ? entry.voided : null
   if (entry.type === "cobro") {
-    const { patientId, ticketId } = entry
-    if (patientId && ticketId) open = () => onOpenTicket({ patientId, ticketId })
+    const { ticketId } = entry
+    if (ticketId) open = () => onOpenTicket(ticketId)
     const name = entry.patientName || "Cobro"
     title = entry.patientId ? (
       <Link
@@ -1409,9 +1319,11 @@ function ClosuresView({
   onCloseCash: () => void
 }) {
   const { branchId, locale, timeZone } = ws
+  const listSearch = useListSearch()
+  const result = listSearch.get("resultado") === "descuadre" ? "descuadre" : undefined
   const closures = useInfiniteQuery({
-    queryKey: financeKeys.closures(branchId),
-    queryFn: ({ pageParam }) => fetchClosures(branchId, pageParam),
+    queryKey: financeKeys.closures(branchId, result),
+    queryFn: ({ pageParam }) => fetchClosures(branchId, pageParam, result),
     initialPageParam: null as string | null,
     // Hay más mientras la página llegue completa: sigue desde su último cierre.
     getNextPageParam: (last) =>
@@ -1427,7 +1339,15 @@ function ClosuresView({
           Volver a Caja
         </Button>
       </div>
-      <h2 className="font-heading text-base font-medium">Cierres anteriores</h2>
+      <h2 className="font-heading text-base font-medium">Cierres de {ws.branchName}</h2>
+      <FilterBar
+        filters={[
+          { key: "resultado", label: "Resultado", type: "select", options: [{ value: "descuadre", label: "No cuadró" }] },
+        ]}
+        sortOptions={[]}
+        showSearch={false}
+        resetKeys={["resultado"]}
+      />
       {closures.isPending ? (
         <DataTableSkeleton view="list" rowCount={4} label="Consultando los cierres" />
       ) : closures.isError ? (
@@ -1441,12 +1361,21 @@ function ClosuresView({
           />
         )
       ) : rows.length === 0 ? (
-        <EmptyState
-          title="Aún no hay cierres en esta sede"
-          description="Cada vez que se cierra la caja queda aquí su hoja, con lo contado y lo entregado."
-          actionLabel={canClose ? "Cerrar caja" : undefined}
-          onAction={canClose ? onCloseCash : undefined}
-        />
+        result ? (
+          <EmptyState
+            title="Todos los cierres cuadraron"
+            description="Ningún cierre de esta sede tuvo faltante ni sobrante."
+            actionLabel="Ver todos"
+            onAction={() => listSearch.setParam("resultado", undefined)}
+          />
+        ) : (
+          <EmptyState
+            title="Aún no hay cierres en esta sede"
+            description="Cada vez que se cierra la caja queda aquí su hoja, con lo contado y lo entregado."
+            actionLabel={canClose ? "Cerrar caja" : undefined}
+            onAction={canClose ? onCloseCash : undefined}
+          />
+        )
       ) : (
         <ul className="divide-y rounded-xl border bg-card">
           {rows.map((row) => {
@@ -1517,429 +1446,6 @@ function ClosuresView({
         Un cierre no se edita. Lo que se corrija después queda como movimiento del día en que se
         corrige.
       </p>
-    </div>
-  )
-}
-
-// --- Deudas -------------------------------------------------------------------------------
-
-type DebtFilter = "todas" | "30" | "90"
-
-function DebtsTab({
-  ws,
-  canWrite,
-  onCollect,
-}: {
-  ws: Workspace
-  canWrite: boolean
-  onCollect: (patient?: CollectTarget | null) => void
-}) {
-  const { branchId, locale, timeZone } = ws
-  const canMessage = usePermission("conversations.read")
-  const [filter, setFilter] = useState<DebtFilter>("todas")
-  const [expanded, setExpanded] = useState(false)
-  // Sin conversación abierta: se elige por dónde escribirle.
-  const [writeTo, setWriteTo] = useState<DebtRow | null>(null)
-  const debts = useQuery({
-    queryKey: financeKeys.debts(branchId),
-    queryFn: () => fetchDebts(branchId),
-  })
-  const today = todayIn(timeZone)
-  const all = useMemo(
-    () =>
-      [...(debts.data?.data ?? [])]
-        .sort(byOldest)
-        .map((row) => ({ row, days: debtAgeDays(row, timeZone, today) })),
-    [debts.data, timeZone, today],
-  )
-
-  if (debts.isError && isForbidden(debts.error)) {
-    return <AccessDenied message={financeErrorMessage(debts.error)} />
-  }
-
-  const over30 = all.filter((item) => (item.days ?? 0) > 30)
-  const over90 = all.filter((item) => (item.days ?? 0) > 90)
-  const visible = filter === "30" ? over30 : filter === "90" ? over90 : all
-  const shown = expanded ? visible : visible.slice(0, DEBTS_PAGE)
-  const filters: Array<{ value: DebtFilter; label: string; count: number }> = [
-    { value: "todas", label: "Todas", count: all.length },
-    { value: "30", label: "Más de 30 días", count: over30.length },
-    { value: "90", label: "Más de 90 días", count: over90.length },
-  ]
-
-  return (
-    <div className="flex flex-col gap-4">
-      <section aria-labelledby="deudas-total" className="elevated rounded-xl border bg-card p-4 sm:p-5">
-        <h2 id="deudas-total" className="text-sm font-medium text-muted-foreground">
-          Por cobrar en total
-          {debts.isSuccess ? ` · ${plural(all.length, "persona", "personas")}` : ""}
-        </h2>
-        {debts.isPending ? (
-          <Skeleton className="mt-2 h-9 w-48" />
-        ) : debts.isError ? null : (
-          <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
-            {all.length > 0
-              ? debtTotalsText(
-                  all.map((item) => item.row),
-                  locale,
-                )
-              : formatMoney(0, ws.currency, locale)}
-          </p>
-        )}
-      </section>
-
-      <ViewTabs
-        label="Antigüedad de la deuda"
-        value={filter}
-        options={filters.map((option) => ({ ...option, count: debts.isSuccess ? option.count : undefined }))}
-        onValueChange={(next) => {
-          setFilter(next)
-          setExpanded(false)
-        }}
-      />
-
-      {debts.isPending ? (
-        <DataTableSkeleton view="list" rowCount={5} label="Consultando las deudas" />
-      ) : debts.isError ? (
-        <ErrorState
-          title="No se pudieron consultar las deudas"
-          message={financeErrorMessage(debts.error)}
-          onRetry={() => void debts.refetch()}
-        />
-      ) : all.length === 0 ? (
-        <EmptyState
-          title="Nadie debe por ahora"
-          description="Cuando se cierre una atención con costo, la persona aparece aquí sola."
-          actionLabel={canWrite ? "Cobrar un adelanto" : undefined}
-          onAction={canWrite ? () => onCollect() : undefined}
-        />
-      ) : visible.length === 0 ? (
-        <EmptyState
-          title={`Nadie debe desde hace más de ${filter} días`}
-          description="Las deudas más recientes siguen en «Todas»."
-          actionLabel="Ver todas"
-          onAction={() => setFilter("todas")}
-        />
-      ) : (
-        <div className="rounded-xl border bg-card px-4">
-          <ul className="divide-y">
-            {shown.map(({ row, days }) => (
-              <DebtLine
-                key={`${row.patientId}-${row.currency}`}
-                row={row}
-                locale={locale}
-                badge={days !== null && days > 90 ? "Más de 90 días" : undefined}
-                detail={
-                  row.oldestSince
-                    ? `Debe desde el ${formatDayMonth(row.oldestSince, locale, timeZone)}${
-                        days === null
-                          ? ""
-                          : days === 0
-                            ? ", desde hoy"
-                            : `, hace ${plural(days, "día", "días")}`
-                      }`
-                    : "Sin fecha registrada"
-                }
-                canWrite={canWrite}
-                onMessage={canMessage ? setWriteTo : undefined}
-                onCollect={onCollect}
-              />
-            ))}
-          </ul>
-          {visible.length > shown.length ? (
-            <div className="border-t py-2">
-              <Button variant="link" className="h-auto p-0" onClick={() => setExpanded(true)}>
-                Ver las {visible.length - shown.length} que faltan
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      <p className="text-sm text-muted-foreground">
-        Lo aceptado en un presupuesto que todavía no se atiende no aparece aquí: no es deuda.
-      </p>
-
-      <WriteToPersonDialog
-        open={writeTo !== null}
-        onClose={() => setWriteTo(null)}
-        people={writeTo?.contactId ? [{ contactId: writeTo.contactId, displayName: writeTo.displayName }] : []}
-      />
-    </div>
-  )
-}
-
-// --- Gastos -------------------------------------------------------------------------------
-
-function receiptText(row: ExpenseRow): string | null {
-  const kind = row.receiptKind && row.receiptKind !== NO_RECEIPT ? row.receiptKind : ""
-  const number = row.receiptNumber ?? ""
-  if (kind) return number ? `${kind} ${number}` : kind
-  return number ? `comprobante ${number}` : null
-}
-
-function ExpensesTab({
-  ws,
-  canWrite,
-  initialMonth,
-  onExpense,
-}: {
-  ws: Workspace
-  canWrite: boolean
-  /** El mes con que abre (el del pago de una compra); sin él, el mes en curso. */
-  initialMonth?: MonthRef | undefined
-  onExpense: () => void
-}) {
-  const { branchId, locale, orgTimeZone } = ws
-  const queryClient = useQueryClient()
-  const thisMonth = currentMonthIn(orgTimeZone)
-  const [month, setMonth] = useState<MonthRef>(initialMonth ?? thisMonth)
-  const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
-  const [voidError, setVoidError] = useState<string | null>(null)
-  const expenses = useQuery({
-    queryKey: financeKeys.expenses(branchId, month),
-    queryFn: () => fetchMonthExpenses({ branchId, ...month }),
-  })
-  const voidMutation = useMutation({
-    mutationFn: (input: { id: string; reason: string }) => voidExpenseApi(input.id, input.reason),
-    onSuccess: () => {
-      invalidateFinance(queryClient)
-      toast.success("Gasto anulado")
-      setVoiding(null)
-      setVoidError(null)
-    },
-    onError: (err) => setVoidError(cashErrorMessage(err)),
-  })
-
-  const canInventory = usePermission("inventory.read")
-  const purchases = useQuery({
-    queryKey: financeKeys.purchases(branchId),
-    queryFn: () => fetchPurchasesToPay(branchId),
-  })
-  const unpaid = purchases.data?.data.unpaid ?? null
-
-  const data = expenses.data?.data ?? null
-  const zone = data?.timezone ?? orgTimeZone
-  const days = useMemo(() => {
-    const groups: Array<{ day: string; rows: ExpenseRow[] }> = []
-    for (const row of data?.expenses ?? []) {
-      const day = dayKeyOf(row.spentAt, zone)
-      const group = groups.at(-1)
-      if (group && group.day === day) group.rows.push(row)
-      else groups.push({ day, rows: [row] })
-    }
-    return groups
-  }, [data, zone])
-  const recent = monthsBack(thisMonth, EXPENSE_MONTHS)
-  const options = recent.some((item) => monthValue(item) === monthValue(month))
-    ? recent
-    : [month, ...recent]
-
-  if (expenses.isError && isForbidden(expenses.error)) {
-    return <AccessDenied message={financeErrorMessage(expenses.error)} />
-  }
-
-  const monthName = formatMonthName(month, locale)
-
-  return (
-    <div className="flex flex-col gap-4">
-      <section aria-labelledby="gastos-total" className="elevated rounded-xl border bg-card p-4 sm:p-5">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 id="gastos-total" className="text-sm font-medium text-muted-foreground">
-              Gastado en {monthName}
-            </h2>
-            {expenses.isPending ? (
-              <Skeleton className="mt-2 h-9 w-48" />
-            ) : data ? (
-              <p className="mt-1 text-3xl leading-tight font-bold tracking-tight tabular-nums">
-                {formatMoney(data.totalCents, data.currency, locale)}
-              </p>
-            ) : null}
-          </div>
-          <Field className="w-full sm:w-56">
-            <FieldLabel htmlFor="gastos-mes">Mes</FieldLabel>
-            <ChoiceSelect
-              id="gastos-mes"
-              value={monthValue(month)}
-              onChange={(event) => {
-                const next = parseMonthValue(event.target.value)
-                if (next) setMonth(next)
-              }}
-            >
-              {options.map((item) => (
-                <option key={monthValue(item)} value={monthValue(item)}>
-                  {formatMonth(item, locale)}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
-        </div>
-        {data && data.byCategory.length > 0 ? (
-          <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 border-t pt-4 sm:grid-cols-3 lg:grid-cols-4">
-            {data.byCategory.map((entry) => (
-              <div key={entry.category}>
-                <dt className="text-sm text-muted-foreground">{entry.category}</dt>
-                <dd className="font-semibold tabular-nums">
-                  {plainAmount(entry.cents, data.currency, locale)}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        ) : null}
-      </section>
-
-      {unpaid && (unpaid.orders > 0 || unpaid.otherCurrencies.length > 0) ? (
-        <Alert className="border-warning/40 bg-warning-soft">
-          <AlertTitle>
-            {[
-              ...(unpaid.orders > 0
-                ? [`${plural(unpaid.orders, "compra recibida", "compras recibidas")} sin pagar: ${formatMoney(unpaid.cents, ws.currency, locale)}`]
-                : []),
-              // Las de otra moneda van aparte y sin convertir.
-              ...unpaid.otherCurrencies.map(
-                (other) =>
-                  `${plural(other.orders, "compra recibida", "compras recibidas")} sin pagar en ${other.currency}: ${formatMoney(other.cents, other.currency, locale)}`,
-              ),
-            ].join(" · ")}
-          </AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-            <span>
-              {unpaid.oldest?.firstReceivedAt
-                ? `La más antigua llegó hace ${plural(Math.max(0, daysBetween(dayKeyOf(unpaid.oldest.firstReceivedAt, zone), todayIn(zone))), "día", "días")} (${purchaseOrderLabel(unpaid.oldest.orderNumber)}, ${unpaid.oldest.supplierName}).`
-                : null}{" "}
-              Una compra se paga desde Inventario o desde «Registrar gasto» con el tipo Materiales: es el mismo pago.
-            </span>
-            {canInventory ? (
-              <Link to="/inventory" search={{ tab: "compras", pago: "por_pagar" }} className="font-semibold underline">
-                Ver compras
-              </Link>
-            ) : null}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {expenses.isPending ? (
-        <DataTableSkeleton view="list" rowCount={5} label="Consultando los gastos del mes" />
-      ) : expenses.isError || !data ? (
-        <ErrorState
-          title="No se pudieron consultar los gastos"
-          message={financeErrorMessage(expenses.error)}
-          onRetry={() => void expenses.refetch()}
-        />
-      ) : days.length === 0 ? (
-        <EmptyState
-          title={`Sin gastos en ${monthName}`}
-          description="Aquí se anota en qué se va el dinero de la sede: materiales, laboratorio, alquiler y lo demás."
-          actionLabel={canWrite ? "Registrar gasto" : undefined}
-          onAction={canWrite ? onExpense : undefined}
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {days.map((group) => (
-            <section key={group.day} aria-label={formatDayShort(group.rows[0].spentAt, locale, zone)}>
-              <h3 className="px-1 pb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                {formatDayShort(group.rows[0].spentAt, locale, zone)}
-              </h3>
-              <ul className="divide-y rounded-xl border bg-card">
-                {group.rows.map((row) => {
-                  const voided = row.voidedAt !== null
-                  const facts = [
-                    row.category,
-                    row.fromCash ? "salió del efectivo de la caja" : null,
-                    receiptText(row),
-                  ].filter((item): item is string => !!item)
-                  return (
-                    <li key={row.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3">
-                      <div className="min-w-0 flex-1 basis-56">
-                        <p
-                          className={cn(
-                            "text-base font-medium break-words",
-                            voided && "text-muted-foreground line-through",
-                          )}
-                        >
-                          {row.concept}
-                        </p>
-                        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
-                          {facts.join(" · ")}
-                          {row.purchaseOrderId && row.purchaseOrderNumber !== null ? (
-                            canInventory ? (
-                              <Link
-                                to="/inventory"
-                                search={{ tab: "compras", orden: row.purchaseOrderId }}
-                                className="rounded-full bg-primary-soft px-2 py-0.5 text-xs font-bold text-primary-soft-foreground no-underline"
-                              >
-                                Compra {purchaseOrderLabel(row.purchaseOrderNumber)}
-                              </Link>
-                            ) : (
-                              <Badge variant="secondary">Compra {purchaseOrderLabel(row.purchaseOrderNumber)}</Badge>
-                            )
-                          ) : null}
-                          {row.commission ? <Badge variant="secondary">Comisión</Badge> : null}
-                        </p>
-                        {voided ? (
-                          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                            <Badge variant="destructive">Anulado</Badge>
-                            {row.voidReason ? <span>Motivo: {row.voidReason}</span> : null}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="ml-auto flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "font-medium tabular-nums",
-                            voided && "text-muted-foreground line-through",
-                          )}
-                        >
-                          {plainAmount(row.amountCents, row.currency, locale)}
-                        </span>
-                        {!voided && canWrite ? (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            aria-label={`Anular el gasto ${row.concept}`}
-                            onClick={() => {
-                              setVoidError(null)
-                              setVoiding(row)
-                            }}
-                          >
-                            Anular
-                          </Button>
-                        ) : null}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            </section>
-          ))}
-        </div>
-      )}
-
-      <p className="text-sm text-muted-foreground">
-        Un gasto se anula con motivo y queda en el historial; no se borra.
-      </p>
-
-      <VoidDrawer
-        open={voiding !== null}
-        title="Anular gasto"
-        description={
-          voiding?.fromCash
-            ? "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja si aún no se cerró."
-            : "Queda en el historial con su motivo y deja de sumar en el mes."
-        }
-        isSubmitting={voidMutation.isPending}
-        error={voidError}
-        onClose={() => {
-          setVoiding(null)
-          setVoidError(null)
-        }}
-        onConfirm={(reason) => {
-          if (!voiding) return
-          setVoidError(null)
-          voidMutation.mutate({ id: voiding.id, reason })
-        }}
-      />
     </div>
   )
 }

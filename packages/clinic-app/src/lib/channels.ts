@@ -33,9 +33,9 @@ export function identityText(identity: {
   externalUserId: string
   displayName: string | null
 }): string {
-  if (identity.channel === "whatsapp") {
-    const digits = identity.externalUserId.replace(/\D/g, "")
-    if (digits) return internationalText(`+${digits}`)
+  // Quien oculta su número tiene por dirección su BSUID (`wa:PE.1349…`), que no es un teléfono (ADR 0108).
+  if (identity.channel === "whatsapp" && /^wa:\+?\d+$/.test(identity.externalUserId)) {
+    return internationalText(`+${identity.externalUserId.replace(/\D/g, "")}`)
   }
   return identity.displayName || `Cuenta de ${channelLabel(identity.channel)}`
 }
