@@ -18,12 +18,12 @@ import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
 import type { Db } from "@odentia/db"
 import { account, member, organization, user } from "@odentia/db/schema/auth"
-import { encounter, orgSpecialty, treatmentTemplate } from "@odentia/db/schema/clinical"
+import { encounter, orgSpecialty, serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, eq, inArray } from "drizzle-orm"
-import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
+import { DEFAULT_REGISTRATION_CONFIG, type PatientGuide } from "@odentia/clinical"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
@@ -37,7 +37,9 @@ import { savePatientRegistrationConfig } from "../patient-registration.js"
 import { ensureDefaultPaymentMethods } from "../payment-methods.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
 import { seedOperation, seedPromotions } from "../seed-operation.js"
-import { fromTemplates } from "../service-catalog.js"
+import { createBudget, deliverBudget, updateBudgetPresentation } from "../budgets.js"
+import { addPlanItem } from "../plan.js"
+import { fromTemplates, updateService } from "../service-catalog.js"
 import { ensureClinicSpecialties } from "../specialties.js"
 import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
 
@@ -196,6 +198,9 @@ export async function seedMedicalDemo(
     electrocardiograma: 6000,
     "glucosa-capilar": 1000,
     "ecografia-transvaginal": 12000,
+    "control-prenatal-7-o-mas": 120000,
+    "ecografia-obstetrica": 12000,
+    papanicolaou: 6000,
   }
   const library = await db
     .select({ id: treatmentTemplate.id, key: treatmentTemplate.key })
@@ -415,6 +420,102 @@ export async function seedMedicalDemo(
       repeatEveryMonths: 3,
     }),
   )
+
+  // El presupuesto de atención de Julia, embarazada (el papel de latidIA, sin etapas): un
+  // consultorio no lo necesita para atender (`budgetRequired: false`), pero puede entregarlo.
+  const prenatal = await db
+    .select({ id: serviceCatalog.id, key: treatmentTemplate.key })
+    .from(serviceCatalog)
+    .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+    .where(and(eq(serviceCatalog.organizationId, ORG), inArray(treatmentTemplate.key, ["control-prenatal-7-o-mas", "ecografia-obstetrica", "papanicolaou"])))
+  const prenatalId = (key: string) => {
+    const found = prenatal.find((row) => row.key === key)
+    if (!found) throw new Error(`Falta el servicio ${key}`)
+    return found.id
+  }
+  const guides: Record<string, PatientGuide> = {
+    "control-prenatal-7-o-mas": {
+      visitLength: "unos 30 minutos",
+      how: "En cada control se toman su presión y su peso, se mide el crecimiento del útero, se escucha el corazón del bebé y se revisan sus dudas y sus resultados.",
+      includes: "todos los controles hasta el parto y las indicaciones de vitaminas y hierro.",
+      excludes: "Parto, cesárea y hospitalización\nAnálisis de laboratorio y medicamentos\nVacunas y evaluación de otros especialistas",
+      schedule: [
+        { when: "Semanas 10 a 13", what: "Primer control, Papanicolaou y primera ecografía" },
+        { when: "Semanas 14 a 27", what: "Cada 4 semanas; ecografía de las semanas 18 a 22" },
+        { when: "Semanas 28 a 36", what: "Cada 2 semanas; ecografía de las semanas 30 a 34" },
+        { when: "Semana 37 hasta el parto", what: "Cada semana; preparación para el parto" },
+      ],
+      warnings: "Sangrado o pérdida de líquido, dolor fuerte en el vientre, fiebre, dolor de cabeza intenso o visión borrosa, hinchazón repentina de cara o manos, o si, más adelante, nota que su bebé se mueve menos.",
+    },
+    "ecografia-obstetrica": {
+      how: "Sin dolor ni radiación. Comprueban la edad del embarazo, la formación del bebé, su crecimiento y la placenta.",
+      includes: "las ecografías con su informe.",
+    },
+    papanicolaou: {
+      visits: "1",
+      how: "Una muestra del cuello del útero para descartar lesiones. Es seguro en el embarazo y se omite si tiene uno reciente.",
+      includes: "la toma de la muestra y la revisión del resultado.",
+    },
+  }
+  await db.transaction(async (tx) => {
+    for (const [key, patientGuide] of Object.entries(guides)) {
+      await updateService(tx, ORG, VELA_ID, prenatalId(key), { patientGuide })
+    }
+    const startedAt = new Date(lima(0, "09:00"))
+    const [visit] = await tx
+      .insert(encounter)
+      .values({
+        organizationId: ORG,
+        patientId: julia,
+        branchId: sede.id,
+        professionalUserId: VELA_ID,
+        status: "borrador",
+        reason: "Primer control de embarazo",
+        startedAt,
+      })
+      .returning({ id: encounter.id })
+    if (!visit) throw new Error("No se creó la atención prenatal")
+    const items = []
+    for (const key of Object.keys(guides)) {
+      items.push(
+        await addPlanItem(tx, ORG, VELA_ID, julia, {
+          serviceId: prenatalId(key),
+          sourceEncounterId: visit.id,
+          diagnosisCode: "Z34.0",
+          ...(key === "ecografia-obstetrica" ? { plannedSessions: 3 } : {}),
+        }),
+      )
+    }
+    const prenatalBudget = await createBudget(tx, ORG, VELA_ID, julia, {
+      itemIds: items.map((item) => item.id),
+      title: "Control de embarazo hasta el parto",
+    })
+    await updateBudgetPresentation(
+      tx,
+      ORG,
+      VELA_ID,
+      julia,
+      prenatalBudget.id,
+      {
+        findings: "Está en la semana 12 de su primer embarazo y, por lo que vimos hoy, va con normalidad.",
+        proposal: "Acompañarla hasta el parto, con controles y exámenes en las semanas que importan, para cuidar su salud y la de su bebé y detectar a tiempo cualquier problema.",
+      },
+      { clinicalAccess: true },
+    )
+    await deliverBudget(tx, ORG, VELA_ID, julia, prenatalBudget.id)
+    await tx
+      .update(encounter)
+      .set({
+        status: "finalizada",
+        endedAt: new Date(startedAt.getTime() + 30 * 60 * 1000),
+        finalizedAt: new Date(startedAt.getTime() + 30 * 60 * 1000),
+        finalizedBy: VELA_ID,
+        signerName: "Elena Vela",
+        signerTitle: "Médico cirujano",
+        signerRegistration: "CMP 045678",
+      })
+      .where(and(eq(encounter.id, visit.id), eq(encounter.organizationId, ORG)))
+  })
 
   const recipe = MEDICAL_DEMO_KINDS.find((kind) => kind.key === "medicina_general")
   if (!recipe) throw new Error("Falta la receta de Medicina general")

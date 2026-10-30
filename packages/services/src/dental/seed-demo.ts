@@ -108,6 +108,7 @@ import {
   duplicateBudgetOption,
   removeBudgetItems,
   reviseBudget,
+  updateBudgetPresentation,
 } from "../budgets.js"
 import {
   addClinicalNote,
@@ -169,6 +170,7 @@ import { seedAutomation, seedChannelTemplates } from "../seed-automation.js"
 import { seedAvailability } from "../seed-availability.js"
 import { seedChannels } from "../seed-channels.js"
 import { seedPeriodontalCase } from "./seed-periodontal.js"
+import type { PatientGuide } from "@odentia/clinical"
 import { generateConsentPdf } from "../consent-pdf.js"
 import { makeImageThumbnail } from "../thumbnails.js"
 import { registerToothFinding } from "./tooth-panel.js"
@@ -1912,6 +1914,18 @@ const seedOffers: Array<{
     priceDisclosure: "desde",
     leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
   },
+  // Un molar no es unirradicular: la endodoncia de la 46 es esta.
+  {
+    code: "ENDODONCIA_POSTERIOR",
+    officialCode: "D3330",
+    name: "Endodoncia posterior vital",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 65000,
+    durationMin: 90,
+    priceDisclosure: "desde",
+    leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
+  },
   {
     code: "CORONA",
     officialCode: "D2740",
@@ -1997,8 +2011,36 @@ const serviceIdA = (code: string): string => {
   return found.id
 }
 // Lo que no se dice con precio exacto ofrece la evaluación de la clínica.
-for (const code of ["ENDODONCIA", "CORONA", "EXODONCIA"]) {
+for (const code of ["ENDODONCIA", "ENDODONCIA_POSTERIOR", "CORONA", "EXODONCIA"]) {
   await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { evaluationServiceId: serviceIdA("EVALUACION") })
+}
+// Las explicaciones de los servicios del presupuesto de Rosa, como las deja la clínica.
+// Textos breves de demostración: los sugeridos reales van en la biblioteca.
+const demoGuides: Record<string, PatientGuide> = {
+  ENDODONCIA_POSTERIOR: {
+    visits: "1 a 2",
+    visitLength: "60 a 90 minutos",
+    how: "Con anestesia y el diente aislado, se retira el nervio dañado y se limpian y sellan sus conductos. Queda con una obturación provisional.",
+    includes: "anestesia, radiografías durante el tratamiento y obturación provisional.",
+    excludes: "Medicamentos de farmacia\nRepetir la endodoncia o una cirugía, si hiciera falta",
+    aftercare: "molestia de 2 a 3 días al morder, que es normal. No mastique cosas duras de ese lado hasta tener la corona.",
+  },
+  OBTURACION: {
+    visits: "1",
+    visitLength: "45 minutos",
+    how: "Con anestesia, se quita la caries y se rellena con resina del color del diente.",
+    includes: "anestesia y ajuste de la mordida.",
+  },
+  CORONA: {
+    visits: "2 a 3",
+    visitLength: "30 a 45 minutos",
+    how: "Se talla el diente, se toma la impresión y se coloca una corona provisional. El laboratorio la fabrica; se prueba, se ajusta y se cementa.",
+    includes: "trabajo de laboratorio, corona provisional, elección del color y ajustes.",
+    aftercare: "no conviene postergarla. Sin corona, un molar con endodoncia puede fracturarse y perderse.",
+  },
+}
+for (const [code, patientGuide] of Object.entries(demoGuides)) {
+  await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { patientGuide })
 }
 await db.transaction(async (tx) => {
   await createPromotion(tx, ORG_A, ANA_ID, {
@@ -2124,7 +2166,7 @@ const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   detail: "Obturación pieza 36",
 })
 const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("ENDODONCIA"),
+  serviceId: serviceIdA("ENDODONCIA_POSTERIOR"),
   planId: planRestaurador.id,
   sourceEncounterId: draft.id,
   toothNumber: 46,
@@ -2149,6 +2191,19 @@ const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan restaurador molar",
   notes: "Obturación 36 + endodoncia 46; corona diferida a segunda etapa.",
 })
+await updateBudgetPresentation(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  budgetRestaurador.id,
+  {
+    findings: "Una caries profunda llegó al nervio del molar 46 y por eso le duele. En el 36 hay una caries en la cara de masticar que aún no llega al nervio.",
+    proposal: "Primero quitar el dolor y salvar el molar 46; luego detener la caries del 36 y, al final, proteger el 46 con una corona para que no se fracture.",
+    validUntil: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10),
+  },
+  { clinicalAccess: true },
+)
 await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
   decisions: [
@@ -2595,6 +2650,32 @@ await addBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
   itemIds: [coronaOpcion46.id],
   optionId: opcionB,
 })
+await updateBudgetPresentation(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  opciones46.id,
+  {
+    findings: "Tras la endodoncia, el molar 46 necesita una restauración definitiva. Hay dos caminos para protegerlo.",
+    proposal: "Le recomendamos la corona: es lo que mejor protege un molar con endodoncia.",
+    options: [
+      {
+        optionId: conCorona.options[0]!.id,
+        name: "Restaurar con resina",
+        pros: "Es de menor costo y se resuelve en una sola visita.",
+        cons: "Un molar con endodoncia queda frágil: la resina protege menos y puede fracturarse.",
+      },
+      {
+        optionId: opcionB,
+        name: "Proteger con corona",
+        pros: "Cubre todo el diente y es lo que mejor lo protege de una fractura.",
+        cons: "Cuesta más y lleva varias visitas, porque el laboratorio la fabrica.",
+      },
+    ],
+  },
+  { clinicalAccess: true },
+)
 await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id)
 
 // El cierre clínico requiere atención finalizada, no una reserva retrospectiva.

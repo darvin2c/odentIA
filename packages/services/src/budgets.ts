@@ -2034,7 +2034,7 @@ export async function cancelBudget(
   patientId: string,
   budgetId: string,
   opts: BudgetActorOpts = {},
-): Promise<BudgetRow> {
+): Promise<BudgetPublicRow> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
@@ -2076,13 +2076,14 @@ export async function cancelBudget(
         ),
       )
   }
+  // Quien anula no necesariamente lee lo clínico: lo encontrado no sale en la respuesta.
   await audit(tx, orgId, actorUserId, "budget.cancelled", budgetId, {
     patientId,
     from: current.status,
     itemCount: itemIds.length,
   })
   await notifyBudget(tx, orgId)
-  return updated
+  return withoutFindings(updated)
 }
 
 /**

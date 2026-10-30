@@ -958,14 +958,17 @@ export async function updateService(
     fields.push("patientGuide")
   }
 
+  // Explicar un servicio no pide arreglar lo demás: un servicio de antes sin código ni
+  // ámbito también se explica. Lo demás se valida cuando se edita lo demás.
+  const onlyGuide = fields.length === 1 && fields[0] === "patientGuide"
   const resolvedScope = (set.scope ?? current.scope) as string | null
-  if (!resolvedScope) throw validation("Elige dónde se hace el servicio")
+  if (!resolvedScope && !onlyGuide) throw validation("Elige dónde se hace el servicio")
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
   // Donde la lista es obligatoria, un servicio propio no se guarda sin su código
   // (ADR 0069), tampoco si se edita otra cosa: p. ej. uno que dejó de ser «Heredada».
   const finalTemplateId = set.templateId !== undefined ? set.templateId : current.templateId
   const finalCode = set.procedureCode !== undefined ? set.procedureCode : current.procedureCode
-  if (list?.required && !finalTemplateId && !finalCode) {
+  if (list?.required && !finalTemplateId && !finalCode && !onlyGuide) {
     throw validation(`Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
   }
 
