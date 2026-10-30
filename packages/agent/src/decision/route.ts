@@ -355,8 +355,12 @@ export interface RouteFacts {
   progress?: RouteProgress
   /** Vuelve sobre un tema que ya tiene el equipo: ya recibió un aviso y no se le repite (ADR 0104). */
   again?: boolean
-  /** Ya se le dijo en esta atención a dónde llamar (`attentionProgress`): el aviso no vuelve a empezar por ahí. */
-  calledOut?: boolean
+  /**
+   * Lo que ya se le dijo en esta atención (`attentionProgress`): el número de emergencias y el
+   * teléfono para urgencias de la clínica, cada uno por su lado. El aviso no vuelve a empezar por lo
+   * ya dicho, pero una alarma sin el número de emergencias dicho lo sigue dando.
+   */
+  calledOut?: { emergency: boolean; clinic: boolean }
 }
 
 /** Cómo va la cita en esta atención, con el texto con que se nombra cada paso. */
@@ -438,11 +442,11 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     // Ya dicho en esta atención, no se repite en cada respuesta (auditoría del ADR 0104).
     const urgent =
       facts.urgency === "alarma"
-        ? facts.calledOut
+        ? facts.calledOut?.emergency
           ? " Su vida puede estar en peligro, y ya le dijiste en esta atención a dónde llamar o ir: no le repitas ese aviso. Responde a lo nuevo que dijo; si pregunta si debe ir a la emergencia, dile que sí, que vaya ahora a la más cercana."
           : " Su vida puede estar en peligro: el aviso empieza diciéndole, tal cual figura en lo que sabes de la clínica, a qué número de emergencias llamar ahora o que vaya a la emergencia más cercana, y el teléfono para urgencias de la clínica si figura."
         : facts.urgency === "urgente"
-          ? `${facts.calledOut ? " Es urgente, y ya le diste en esta atención el teléfono para urgencias de la clínica: no se lo repitas salvo que te lo pida." : " Es urgente: si figura en lo que sabes de la clínica, el aviso empieza dándole el teléfono para urgencias de la clínica."} No le digas que llame al número de emergencias del país salvo que lo que contó ponga en peligro su vida (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar); si podría llegar a eso, puedes decirle que, si pasa, vaya a la emergencia más cercana.`
+          ? `${facts.calledOut?.clinic ? " Es urgente, y ya le diste en esta atención el teléfono para urgencias de la clínica: no se lo repitas salvo que te lo pida." : " Es urgente: si figura en lo que sabes de la clínica, el aviso empieza dándole el teléfono para urgencias de la clínica."} No le digas que llame al número de emergencias del país salvo que lo que contó ponga en peligro su vida (dolor de pecho, falta de aire, un sangrado que no para, un desmayo, una hinchazón que no le deja respirar o tragar); si podría llegar a eso, puedes decirle que, si pasa, vaya a la emergencia más cercana.`
           : ""
     return `${head} el caso ya pasó a una persona del equipo y el equipo ya recibió el aviso. En este mismo paso llama a request_human_handoff solo para dejar en message el aviso al interlocutor (no se crea otra derivación; en reason y summary basta «Aviso al interlocutor»). En asks deja una frase con lo que la persona pide, solo con lo que ella dijo, y en pending lo que aún falta preguntarle o hacer para atenderla: es lo que leerá quien tome el caso.${urgent} El aviso dice, con sus palabras y según lo que contó, que una persona del equipo continuará la atención y qué va a pasar ahora, y le da algo concreto cuando lo hay: si es sobre una cita suya, revísala antes con ver_resumen_paciente y dile lo que ves; si pide hablar con alguien ya, el teléfono de la sede (ver_sedes_y_servicios) si figura;${
       has("elegir_mensajes") ? " si pide que no le escriban más o dejar de recibir un tipo de mensaje, anótalo antes con elegir_mensajes y díselo en el aviso;" : ""
@@ -492,7 +496,7 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
     return `${head} reservar una cita.${consulted}${ids} ${appointmentStep(progress, propose)}${
       // Un síntoma que no espera pide la hora más próxima, no el equipo (ADR 0095).
       facts.urgency === "urgente" && !progress?.done
-        ? facts.calledOut
+        ? facts.calledOut?.clinic
           ? " Lo que cuenta no puede esperar: ofrécele el horario más próximo, hoy si hay; ya le diste en esta atención el teléfono para urgencias de la clínica, no se lo repitas. No pases el caso al equipo por eso."
           : facts.urgentFirst === "telefono"
           ? " Lo que cuenta no puede esperar: dale primero el teléfono para urgencias de la clínica, si figura en lo que sabes de la clínica, para que la evalúen hoy, y después el horario más próximo, hoy si hay; no pases el caso al equipo por eso."

@@ -34,7 +34,9 @@ const PERSON =
   "(?:hij|nin|beb|espos|mama|papa|abuel|herman|sobrin|niet|tio|tia|prim|pareja|novi|amig|vecin|senor|chiqu|menor|muchach|joven|persona)"
 // Con un murciélago basta el contacto, el sueño o el cuarto; «hay murciélagos en la selva» no.
 // Sin negación: su mordida puede no notarse, y «no me mordió» no lo descarta.
-const BAT_CONTACT = String.raw`(?:mord\w*|aran\w*|rasgun\w*|toc\w*|lami\w*|pic\w*|chup\w*|encima|dorm\w*|despert\w*|cuarto|habitacion|dormitorio|cama|cuna|herid\w*|marc\w*|puntito|sangr\w*|emergencia\w*)`
+// Las raíces que también son otra cosa van con sus formas: «tocó», no «toca el tema»; «picó»,
+// no «picante»; «una marca», no «marcar la cita».
+const BAT_CONTACT = String.raw`(?:mord\w*|aran\w*|rasgun\w*|toc(?:o|ado|ada|aron)\b|lami\w*|pic(?:o|ado|ada|adura|aron)\b|chup\w*|encima|dorm\w*|despert\w*|cuarto|habitacion|dormitorio|cama|cuna|herid\w*|marc(?:a|as|ita|itas)\b|puntito|sangr\w*|emergencia\w*)`
 
 const SIGNALS: readonly RegExp[] = [
   // Dolor u opresión en el pecho; «no me duele el pecho» o «el pecho no me duele», no.
@@ -79,7 +81,7 @@ const SIGNALS: readonly RegExp[] = [
   // Posible rabia: «me mordió un perro», «a mi hijo lo mordió un perro», «un perro
   // mordió a mi hija», «una mordedura de gato», «desperté con un murciélago en el cuarto».
   new RegExp(
-    String.raw`${NOT_BIT}\b(?:me|le|les|nos) ${BIT}\b(?: \w+){0,3}? ${WHOSE} (?:\w+ ){0,2}?${ANIMAL}\b`,
+    String.raw`${NOT_BIT}\b(?:me|le|les|nos) ${BIT}\b${THING}(?: \w+){0,3}? ${WHOSE} (?:\w+ ){0,2}?${ANIMAL}\b`,
   ),
   // Con «lo» o «la», solo un animal cualquiera: «el retenedor lo mordió mi perro» no.
   new RegExp(

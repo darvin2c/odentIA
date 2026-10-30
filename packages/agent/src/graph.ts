@@ -953,7 +953,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
       state,
       promotions: clinicData.promotions.map((promo) => promo.name),
       name: givenName,
-      calls: [snapshot.emergencyPhone, snapshot.emergencyNumber],
+      calls: { emergency: snapshot.emergencyNumber, clinic: snapshot.emergencyPhone },
     })
     // `send_reply` pide de nuevo la respuesta que vuelve a «Entiendo…» o «anoté que…».
     toolCtx.formulas = progress.formulas
@@ -974,7 +974,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
             urgentFirst: agentTexts(toolCtx).urgentFirst,
             progress: { offered: progress.offered, pending: progress.pending, done: progress.done },
             again: toolCtx.topicAgain === true,
-            calledOut: progress.calledOut > 0,
+            calledOut: { emergency: progress.calledOut.emergency > 0, clinic: progress.calledOut.clinic > 0 },
           }),
           toolCtx.routeHint,
           toolCtx.topicRaised

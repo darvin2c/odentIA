@@ -101,8 +101,11 @@ export interface AttentionProgress {
   usedName: boolean
   /** Respuestas suyas en esta atención que empezaron con «Entiendo…» o dijeron «anoté que…» (`formulasIn`). */
   formulas: { opener: number; noted: number }
-  /** Respuestas suyas en esta atención que ya le dijeron a dónde llamar (`calls`): el teléfono para urgencias de la clínica o el de emergencias. */
-  calledOut: number
+  /**
+   * Respuestas suyas en esta atención que ya le dijeron a dónde llamar (`calls`), por separado: el
+   * número de emergencias del país y el teléfono para urgencias de la clínica. Dar uno no es dar el otro.
+   */
+  calledOut: { emergency: number; clinic: number }
 }
 
 /**
@@ -118,8 +121,8 @@ export function attentionProgress(input: {
   promotions: string[]
   /** Los nombres de quien escribe, si su ficha los tiene. */
   name?: string | null
-  /** A dónde llamar ante una urgencia: el teléfono para urgencias de la clínica y el número de emergencias del país. */
-  calls?: Array<string | null | undefined>
+  /** A dónde llamar ante una urgencia: el número de emergencias del país y el teléfono para urgencias de la clínica. */
+  calls?: { emergency?: string | null; clinic?: string | null }
 }): AttentionProgress {
   const opened = Date.parse(input.startedAt) - ATTENTION_OPENING_MS
   const inAttention = (at: string | undefined) => !at || Date.parse(at) >= opened
@@ -149,17 +152,26 @@ export function attentionProgress(input: {
       opener: said.filter((item) => formulasIn(item.body ?? "").opener).length,
       noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
     },
-    calledOut: said.filter((item) => saysNumber(item.body ?? "", input.calls ?? [])).length,
+    calledOut: {
+      emergency: said.filter((item) => saysNumber(item.body ?? "", input.calls?.emergency)).length,
+      clinic: said.filter((item) => saysNumber(item.body ?? "", input.calls?.clinic)).length,
+    },
   }
 }
 
-/** El mensaje dice alguno de los números, con espacios o guiones o sin ellos: «+51 1 555 0188», «106». */
-function saysNumber(text: string, numbers: Array<string | null | undefined>): boolean {
-  const joined = text.replace(/(?<=\d)[\s().-]+(?=\d)/g, "")
-  return numbers.some((number) => {
-    const digits = number?.replace(/\D/g, "") ?? ""
-    return digits.length >= 3 && new RegExp(`(?<!\\d)${digits}(?!\\d)`).test(joined)
-  })
+/**
+ * El mensaje le dice que llame a ese número: va justo después de llamar o de una urgencia («llama al
+ * 106», «para urgencias de la clínica, llama al +51 1 555 0188»). Un teléfono se escribe con espacios
+ * o guiones; un número corto (106) va junto, así «10 6 cupos» no cuenta. Tampoco «Calle 106» ni el
+ * teléfono de la sede dado para otra cosa («escríbenos al…»): si no se reconoce, se repite, que es lo
+ * que menos cuesta.
+ */
+function saysNumber(text: string, number: string | null | undefined): boolean {
+  const digits = number?.replace(/\D/g, "") ?? ""
+  if (digits.length < 3) return false
+  const written = digits.length < 7 ? `(?<![\\d][\\s().-]?)${digits}(?![\\s().-]?\\d)` : `\\+?${digits.split("").join("[\\s().-]*")}(?!\\d)`
+  const plain = text.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  return new RegExp(`\\b(?:urgenc|emergenc|llam|marca)[^.!?\\n]{0,40}?${written}`).test(plain)
 }
 
 /**
@@ -209,9 +221,13 @@ export function attentionLines(
     )
   }
   // Ante quien insiste, «Para urgencias de la clínica, llama al…» salía en cada respuesta (auditoría del ADR 0104, caso del murciélago).
-  if (progress.calledOut > 0) {
+  const told = [
+    progress.calledOut.emergency > 0 ? "el número de emergencias" : null,
+    progress.calledOut.clinic > 0 ? "el teléfono para urgencias de la clínica" : null,
+  ].filter(Boolean)
+  if (told.length) {
     lines.push(
-      "Ya le dijiste en esta atención a dónde llamar o ir: no se lo repitas en cada respuesta ni repitas la advertencia que lo acompañaba. Responde directo a lo nuevo que pregunta.",
+      `Ya le diste en esta atención ${told.join(" y ")}: no se lo repitas en cada respuesta ni repitas la advertencia que lo acompañaba. Responde directo a lo nuevo que pregunta.`,
     )
   }
   return lines

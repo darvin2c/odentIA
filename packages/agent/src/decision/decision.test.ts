@@ -273,14 +273,17 @@ it("la indicación de la cita dice lo que falta según cómo va la atención, nu
   expect(byPhone).toContain("dale primero el teléfono para urgencias de la clínica")
   expect(byPhone).not.toContain("ofrécele primero el horario más próximo")
   // Ya dicho a dónde llamar en esta atención, no se repite (auditoría del ADR 0104, caso del murciélago).
-  const toldPhone = routeInstruction("cita", null, { tools, urgency: "urgente", urgentFirst: "telefono", calledOut: true }) ?? ""
+  const clinic = { emergency: false, clinic: true }
+  const toldPhone = routeInstruction("cita", null, { tools, urgency: "urgente", urgentFirst: "telefono", calledOut: clinic }) ?? ""
   expect(toldPhone).toContain("no se lo repitas")
   expect(toldPhone).not.toContain("dale primero el teléfono para urgencias de la clínica")
-  const alarm = (calledOut: boolean) => routeInstruction("derivar", null, { tools, urgency: "alarma", calledOut }) ?? ""
-  expect(alarm(false)).toContain("el aviso empieza diciéndole")
-  expect(alarm(true)).toContain("dile que sí, que vaya ahora a la más cercana")
-  expect(alarm(true)).not.toContain("el aviso empieza diciéndole")
-  const urgentHandoff = routeInstruction("derivar", null, { tools, urgency: "urgente", calledOut: true }) ?? ""
+  const alarm = (calledOut: { emergency: boolean; clinic: boolean }) => routeInstruction("derivar", null, { tools, urgency: "alarma", calledOut }) ?? ""
+  expect(alarm({ emergency: false, clinic: false })).toContain("el aviso empieza diciéndole")
+  expect(alarm({ emergency: true, clinic: false })).toContain("dile que sí, que vaya ahora a la más cercana")
+  expect(alarm({ emergency: true, clinic: false })).not.toContain("el aviso empieza diciéndole")
+  // Pasar de una urgencia a una alarma: con solo el teléfono de la clínica dicho, el número de emergencias sigue saliendo.
+  expect(alarm(clinic)).toContain("el aviso empieza diciéndole")
+  const urgentHandoff = routeInstruction("derivar", null, { tools, urgency: "urgente", calledOut: clinic }) ?? ""
   expect(urgentHandoff).toContain("ya le diste en esta atención el teléfono para urgencias de la clínica")
   expect(urgentHandoff).not.toContain("el aviso empieza dándole el teléfono")
   // Quien ya contó qué le pasa no lo vuelve a contar; quien vuelve a contarlo tras recibir horarios no empieza de cero.
