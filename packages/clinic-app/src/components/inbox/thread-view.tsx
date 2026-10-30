@@ -1354,7 +1354,8 @@ function PassTopicDialog({
           {topic ? <DialogDescription>«{topicQuote(topic, 120)}»</DialogDescription> : null}
         </DialogHeader>
         <Input aria-label="Buscar en el equipo" placeholder="Buscar en el equipo" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <ul className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+        <ScrollArea className="max-h-64 [&_[data-slot=scroll-area-viewport]]:max-h-64">
+        <ul className="flex flex-col gap-0.5">
           {options.map((member) => (
             <li key={member.userId}>
               <Button
@@ -1373,6 +1374,7 @@ function PassTopicDialog({
           ))}
           {options.length === 0 ? <li className="px-3 py-2 text-sm text-muted-foreground">Nadie coincide con la búsqueda.</li> : null}
         </ul>
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   )
