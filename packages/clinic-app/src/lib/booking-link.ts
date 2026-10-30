@@ -169,9 +169,9 @@ function linkPost(url: string, body: Record<string, unknown>): Promise<Response>
 export function fetchBookingSlots(
   slug: string,
   token: string,
-  range: { branchId: string; from: string; to: string },
+  range: { branchId: string; from: string; to: string; changing?: boolean },
 ): Promise<{ data: { slots: BookingSlot[]; timeZone: string; truncated: boolean } }> {
-  const query = new URLSearchParams({ token, branchId: range.branchId, from: range.from, to: range.to })
+  const query = new URLSearchParams({ token, branchId: range.branchId, from: range.from, to: range.to, ...(range.changing ? { mode: "cambiar" } : {}) })
   return publicFetch(`${base(slug)}/slots?${query.toString()}`)
 }
 
@@ -194,8 +194,8 @@ export interface BookingProfessionals {
 }
 
 /** Con quién se puede reservar en la sede y el próximo horario libre de cada uno: lo entrega el servidor. */
-export function fetchBookingProfessionals(slug: string, token: string, branchId: string): Promise<{ data: BookingProfessionals }> {
-  const query = new URLSearchParams({ token, branchId })
+export function fetchBookingProfessionals(slug: string, token: string, branchId: string, changing = false): Promise<{ data: BookingProfessionals }> {
+  const query = new URLSearchParams({ token, branchId, ...(changing ? { mode: "cambiar" } : {}) })
   return publicFetch(`${base(slug)}/professionals?${query.toString()}`)
 }
 

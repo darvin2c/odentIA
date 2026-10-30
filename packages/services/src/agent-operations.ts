@@ -2896,8 +2896,10 @@ export async function executeProposal(
             and(
               eq(appointmentBookingLink.organizationId, orgId),
               eq(appointmentBookingLink.contactId, locked.contactId),
-              // También el de antes de registrarse, que aún no tenía paciente.
-              or(eq(appointmentBookingLink.patientId, patientId), isNull(appointmentBookingLink.patientId)),
+              // También el de antes de registrarse, que aún no tenía paciente, si se registró a sí misma.
+              fresh && !fresh.forOther
+                ? or(eq(appointmentBookingLink.patientId, patientId), isNull(appointmentBookingLink.patientId))
+                : eq(appointmentBookingLink.patientId, patientId),
               eq(appointmentBookingLink.booking, true),
               isNull(appointmentBookingLink.usedAt),
               isNull(appointmentBookingLink.revokedAt),

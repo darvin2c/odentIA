@@ -214,7 +214,7 @@ export function ChooseAppointment({
   const professionalsKey = (id: string) => ["booking-professionals", slug, token, mode, id] as const
   const professionals = useQuery({
     queryKey: professionalsKey(branchId ?? ""),
-    queryFn: async () => (await fetchBookingProfessionals(slug, token, branchId ?? "")).data,
+    queryFn: async () => (await fetchBookingProfessionals(slug, token, branchId ?? "", changing)).data,
     enabled: branchId !== null && step !== "sede",
     retry: false,
   })
@@ -238,7 +238,7 @@ export function ChooseAppointment({
   const range = effectiveStart ? windowRange(effectiveStart, timeZone, now) : null
   const slots = useQuery({
     queryKey: ["booking-slots", slug, token, mode, branchId, range?.from ?? null, range?.to ?? null],
-    queryFn: async () => (await fetchBookingSlots(slug, token, { branchId: branchId ?? "", from: range?.from ?? "", to: range?.to ?? "" })).data,
+    queryFn: async () => (await fetchBookingSlots(slug, token, { branchId: branchId ?? "", from: range?.from ?? "", to: range?.to ?? "", changing })).data,
     enabled: branchId !== null && range !== null && step !== "sede",
     retry: false,
   })
@@ -512,7 +512,7 @@ export function ChooseAppointment({
             branches={view.branches}
             chosen={branchId}
             onChoose={chooseBranch}
-            load={(id) => ({ queryKey: professionalsKey(id), queryFn: async () => (await fetchBookingProfessionals(slug, token, id)).data })}
+            load={(id) => ({ queryKey: professionalsKey(id), queryFn: async () => (await fetchBookingProfessionals(slug, token, id, changing)).data })}
           />
           <p className="text-sm text-muted-foreground">Cada sede dice su primer horario libre. «Cómo llegar» está antes de reservar.</p>
         </section>

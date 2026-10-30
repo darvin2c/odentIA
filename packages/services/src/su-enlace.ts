@@ -671,7 +671,7 @@ export async function submitPersonalLinkData(
     if (patientId && !link.decides) requireLinkDecider(link)
     throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
   }
-  await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, { requireSomething: true })
+  await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, { requireSomething: true, toldWhatsApp: false })
   // «Tus datos» se envían una sola vez: después dice «Recibido».
   await tx
     .update(appointmentBookingLink)
@@ -692,7 +692,7 @@ async function saveLinkData(
   patientId: string,
   missing: MissingPersonDatum[],
   input: PersonalLinkDataInput,
-  options: { requireSomething: boolean },
+  options: { requireSomething: boolean; /** La pantalla le dijo «Te escribiremos por WhatsApp sobre tu cita». */ toldWhatsApp: boolean },
 ): Promise<void> {
   const allowed = fieldsFor(missing)
   const patch: Record<string, string | null> = {}
@@ -702,7 +702,7 @@ async function saveLinkData(
     if (value) patch[key] = value
   }
   const withHealth = !!input.health && (await healthNeverRecorded(tx, orgId, patientId))
-  const consented = await saveLinkConsents(tx, orgId, link, patientId, input)
+  const consented = await saveLinkConsents(tx, orgId, link, patientId, input, options.toldWhatsApp)
   if (Object.keys(patch).length === 0 && !withHealth) {
     if (options.requireSomething && !consented) throw validation("Completa al menos un dato")
     return
@@ -793,9 +793,9 @@ async function saveLinkData(
 /**
  * Lo que acepta o responde en su enlace quien decide por el paciente: el aviso
  * de privacidad que aún no tenía (con la versión vigente, por el formulario
- * público) y novedades y promociones si nunca respondió. Ver el texto «Te
- * escribiremos por WhatsApp sobre tu cita» deja el permiso de sus recordatorios
- * si no había ninguno. Nada de lo ya respondido se pisa. Devuelve si guardó algo.
+ * público) y novedades y promociones si nunca respondió. Si la pantalla le dijo
+ * «Te escribiremos por WhatsApp sobre tu cita» (al reservar), queda el permiso de
+ * sus recordatorios si no había ninguno. Nada de lo ya respondido se pisa. Devuelve si guardó algo.
  */
 async function saveLinkConsents(
   tx: Db,
@@ -803,6 +803,7 @@ async function saveLinkConsents(
   link: ResolvedPersonalLink,
   patientId: string,
   input: PersonalLinkDataInput,
+  toldWhatsApp: boolean,
 ): Promise<boolean> {
   if (!link.decides) return false
   let saved = false
@@ -833,7 +834,7 @@ async function saveLinkConsents(
       saved = true
     }
   }
-  if ((await consentStatusOf(tx, orgId, link.row.contactId, "recordatorio")) === null) {
+  if (toldWhatsApp && (await consentStatusOf(tx, orgId, link.row.contactId, "recordatorio")) === null) {
     await setConsent(tx, orgId, null, link.row.contactId, { purpose: "recordatorio", granted: true, source: "enlace" })
   }
   if (input.acceptsPromotions !== undefined && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null) {
@@ -871,7 +872,7 @@ export async function reservePersonalLink(
     const link = await requireLiveLink(tx, orgId, token, true)
     if (link.patientId && link.decides) {
       const missing = (await missingOf(tx, orgId, link)) ?? []
-      await saveLinkData(tx, orgId, link, link.patientId, missing, you, { requireSomething: false }).catch((error: unknown) => {
+      await saveLinkData(tx, orgId, link, link.patientId, missing, you, { requireSomething: false, toldWhatsApp: true }).catch((error: unknown) => {
         // Un dato mal escrito no es una hora ocupada: la página lo dice junto a sus datos, sin volver a elegir la hora.
         if (error instanceof ServiceError && error.code === "VALIDATION") throw new ServiceError("LINK_DATA_INVALID", 400, error.message)
         throw error
@@ -907,7 +908,8 @@ export async function bookedDataLink(
   const link = await issuePersonalLink(
     tx,
     orgId,
-    { contactId: input.contactId, patientId: input.patientId, ...(input.appointmentId ? { appointmentId: input.appointmentId } : {}) },
+    // Se da para completar sus datos: una reserva sin usar no se impone a ese mensaje.
+    { contactId: input.contactId, patientId: input.patientId, booking: false, ...(input.appointmentId ? { appointmentId: input.appointmentId } : {}) },
     deps,
   )
   const url = await personalLinkUrl(tx, orgId, link.token)
@@ -1183,7 +1185,8 @@ export async function sendPersonalLink(
   const link = await issuePersonalLink(
     tx,
     orgId,
-    { contactId: recipient.contactId, patientId: input.patientId, createdBy: actorUserId },
+    // «Ver lo pendiente»: abre lo que tiene pendiente, no una reserva sin usar.
+    { contactId: recipient.contactId, patientId: input.patientId, createdBy: actorUserId, booking: false },
     deps,
   )
   // En el mensaje no queda el token: lo pone el worker al enviarlo.
@@ -1265,7 +1268,8 @@ export async function showPersonalLink(
   const link = await issuePersonalLink(
     tx,
     orgId,
-    { contactId: recipient.contactId, patientId, createdBy: actorUserId },
+    // El código QR para que complete sus datos: no abre una reserva sin usar.
+    { contactId: recipient.contactId, patientId, createdBy: actorUserId, booking: false },
     deps,
   )
   const url = await personalLinkUrl(tx, orgId, link.token)

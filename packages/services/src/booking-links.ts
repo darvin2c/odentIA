@@ -700,10 +700,11 @@ interface LinkSlotRules {
  * su servicio; para cambiar su cita, solo los de su sede y con su duración;
  * para lo aceptado de su presupuesto, lo que dura una cita en la sede.
  */
-async function linkSlotRules(tx: Db, orgId: string, token: string, branchId: string): Promise<LinkSlotRules> {
+async function linkSlotRules(tx: Db, orgId: string, token: string, branchId: string, changing = false): Promise<LinkSlotRules> {
   const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
   const forTest = await personIsTest(tx, orgId, link.row.contactId)
-  if (link.canBook) {
+  // Al cambiar su cita valen las reglas de su cita, aunque el enlace también ofrezca reservar otra.
+  if (link.canBook && !(changing && link.appointment && isChangeable(link.appointment))) {
     if (link.row.branchId && link.row.branchId !== branchId) throw validation("Este enlace es para otra sede")
     return { serviceId: link.row.serviceId, durationMin: null, forTest, currentProfessionalUserId: null }
   }
@@ -729,10 +730,11 @@ export async function listBookingLinkSlots(
   tx: Db,
   orgId: string,
   token: string,
-  input: { branchId: string; from: string; to: string },
+  input: { branchId: string; from: string; to: string; changing?: boolean },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
-  const rules = await linkSlotRules(tx, orgId, token, input.branchId)
-  return listWeekSlots(tx, orgId, { ...input, serviceId: rules.serviceId, durationMin: rules.durationMin, forTest: rules.forTest })
+  const { changing, ...range } = input
+  const rules = await linkSlotRules(tx, orgId, token, input.branchId, changing)
+  return listWeekSlots(tx, orgId, { ...range, serviceId: rules.serviceId, durationMin: rules.durationMin, forTest: rules.forTest })
 }
 
 export interface BookingLinkProfessional {
@@ -766,9 +768,9 @@ export async function listBookingLinkProfessionals(
   tx: Db,
   orgId: string,
   token: string,
-  input: { branchId: string },
+  input: { branchId: string; changing?: boolean },
 ): Promise<BookingLinkProfessionals> {
-  const rules = await linkSlotRules(tx, orgId, token, input.branchId)
+  const rules = await linkSlotRules(tx, orgId, token, input.branchId, input.changing)
   const now = new Date()
   const until = new Date(now.getTime() + NEXT_FREE_HORIZON_DAYS * 86_400_000)
   const attending = rules.serviceId ? await attendingRule(tx, orgId, { serviceId: rules.serviceId, branchId: input.branchId }) : null
@@ -838,6 +840,18 @@ export async function hasSchedulableItems(tx: Db, orgId: string, patientId: stri
  * verdad: la conversación del enlace es de WhatsApp, cuyo identificador es el
  * número. En cualquier otro canal no se supone ninguno.
  */
+/** El canal de la conversación del enlace, si salió de una. */
+async function conversationChannel(tx: Db, orgId: string, link: LinkRow): Promise<string | null> {
+  if (!link.conversationId) return null
+  const [row] = await tx
+    .select({ channel: channelConnection.channel })
+    .from(conversation)
+    .innerJoin(channelConnection, and(eq(channelConnection.id, conversation.channelConnectionId), eq(channelConnection.organizationId, orgId)))
+    .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, link.conversationId)))
+    .limit(1)
+  return row?.channel ?? null
+}
+
 async function conversationPhone(tx: Db, orgId: string, link: LinkRow): Promise<string | null> {
   if (!link.conversationId) return null
   const [row] = await tx
@@ -869,7 +883,8 @@ export interface BookingLinkRegistrationForm {
   /**
    * Lo que ya sabemos de quien escribe, para que no lo vuelva a escribir: lo
    * que dijo en la conversación (a Sofi o al equipo) o, si no, el nombre de su
-   * perfil de WhatsApp (`from: "perfil"`). Todo se puede corregir.
+   * perfil de WhatsApp (`from: "perfil"`), su sexo y su correo. Todo se puede
+   * corregir. El documento y la fecha guardados nunca vienen escritos.
    */
   known: {
     givenNames: string | null
@@ -922,7 +937,8 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
     .where(and(eq(contact.organizationId, orgId), eq(contact.id, link.row.contactId)))
     .limit(1)
   const told = person && (person.givenNames || person.familyName) ? { givenNames: person.givenNames, familyName: person.familyName } : null
-  const profile = !told && person ? namesFromProfile(person.displayName) : null
+  // El nombre del perfil solo se toma de WhatsApp: es el que la página dice de dónde salió.
+  const profile = !told && person && (await conversationChannel(tx, orgId, link.row)) === "whatsapp" ? namesFromProfile(person.displayName) : null
   return {
     config,
     today: await patientOrganizationToday(tx, orgId),
@@ -933,9 +949,10 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
       familyName: told?.familyName ?? profile?.familyName ?? null,
       from: told ? "conversacion" : profile ? "perfil" : null,
       email: person?.email ?? null,
+      // El documento y la fecha guardados no se escriben de antemano: el enlace prueba que tiene su chat, no quién es.
       docType: person?.docType ?? null,
-      docNumber: person?.docNumber ?? null,
-      birthDate: person?.birthDate ?? null,
+      docNumber: null,
+      birthDate: null,
       sex: person?.sex ?? null,
     },
     asksPromotions: config.askMessages && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null,
