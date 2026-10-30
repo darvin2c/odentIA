@@ -276,7 +276,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
               </ul>
             </>
           ) : (
-            <div className="flex flex-col gap-3 p-3.5">
+            <div className="flex flex-col gap-3 p-3.5 [&_[class*=grid-cols]]:!grid-cols-1">
               <Suspense fallback={<LoadingState message="Cargando…" />}>
                 {current.id === "citas" ? <CitasSection context={context} conversationId={conversationId} /> : null}
                 {current.id === "plan" && patientId ? <PlanTab patientId={patientId} patientName={context.name} /> : null}

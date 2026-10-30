@@ -1236,7 +1236,7 @@ export function ThreadView({
                   />
                 </PromptInputBody>
                 <PromptInputFooter>
-                  <PromptInputTools>
+                  <PromptInputTools className="min-w-0 flex-1">
                     {/* Una respuesta por entregar es solo texto: un adjunto no espera a «Ver respuesta». */}
                     {holdReply || viaWhatsapp ? null : (
                       <PromptInputActionMenu>
@@ -1257,13 +1257,13 @@ export function ThreadView({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-auto min-h-11 min-w-0 justify-start truncate px-1.5 py-1 text-xs font-normal text-muted-foreground sm:min-h-8"
+                        className="h-auto min-h-11 min-w-0 shrink justify-start px-1.5 py-1 text-xs font-normal text-muted-foreground sm:min-h-8"
                         disabled={ownLinkMutation.isPending}
                         onClick={() => {
                           if (detail.missingData) ownLinkMutation.mutate({ contactId: detail.contact.id, patientId: detail.missingData.patientId })
                         }}
                       >
-                        <span className="truncate">
+                        <span className="min-w-0 truncate">
                           Le falta: {filiationGapsText(detail.missingData.missing).toLowerCase()} · <span className="font-semibold text-primary">Pegar su enlace</span>
                         </span>
                       </Button>

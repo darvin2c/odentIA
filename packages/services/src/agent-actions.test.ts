@@ -65,7 +65,7 @@ it("dice lo que hizo en todos los canales de la persona, por hora y sin sus mens
   expect([...items].sort((a, b) => a.at.localeCompare(b.at)).map((item) => item.id)).toEqual(items.map((item) => item.id))
 
   const booked = items.find((item) => item.title === "reservó una cita")
-  expect(booked).toMatchObject({ style: "tarjeta", state: "hecho", opens: "citas", what: "Cita: mar 4 nov, 09:00" })
+  expect(booked).toMatchObject({ style: "tarjeta", state: "hecho", opens: "citas", what: "mar 4 nov, 09:00" })
   expect(items.find((item) => item.title === "creó una oportunidad")).toMatchObject({ style: "linea" })
   const waiting = items.find((item) => item.title === "propuso mover una cita")
   expect(waiting).toMatchObject({ state: "espera", style: "tarjeta" })

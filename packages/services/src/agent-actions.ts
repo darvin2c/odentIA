@@ -125,7 +125,7 @@ function proposalAction(item: ProposalItem, caps: AgentActionCapabilities): Agen
     conversationId: item.conversationId,
     style: canSee ? title.style : "linea",
     title: proposalTitle(item, title),
-    what: canSee ? item.context.afterSummary : null,
+    what: canSee ? shortWhat(item.context.afterSummary) : null,
     detail: !canSee
       ? null
       : state === "no_se_pudo"

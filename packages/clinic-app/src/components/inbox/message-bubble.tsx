@@ -134,7 +134,7 @@ export function MessageBubble({
       <MessageContent
         className={
           !out
-            ? `gap-0.5 rounded-2xl rounded-bl-md border bg-card px-3.5 py-2 ${highlight === "urgent" ? "ring-2 ring-destructive" : highlight ? "ring-2 ring-warning" : ""}`
+            ? `gap-0.5 rounded-2xl rounded-bl-md border bg-card px-3.5 py-2 ${highlight === "urgent" ? "ring-2 ring-inset ring-destructive" : highlight ? "ring-2 ring-inset ring-warning" : ""}`
             : byAgent
               ? "gap-0.5 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:border group-[.is-user]:border-agent-border group-[.is-user]:bg-agent-soft group-[.is-user]:px-3.5 group-[.is-user]:py-2"
               : "gap-0.5 group-[.is-user]:rounded-2xl group-[.is-user]:rounded-br-md group-[.is-user]:px-3.5 group-[.is-user]:py-2"

@@ -437,7 +437,7 @@ function InboxPage() {
     // La Bandeja ya reparte la ventana en lista, hilo y «Contexto»: lo que se
     // abre desde aquí va en cajón, no en la columna lateral.
     <SideDockScopeProvider value="fixed">
-    <PageShell fill className="gap-3 sm:p-4">
+    <PageShell fill className={`gap-3 sm:p-4 ${mode !== "panel" && selectedId ? "max-sm:p-1.5" : ""}`}>
       {/* En el celular, con una conversación abierta, la pantalla es de la conversación:
           la cabecera de la Bandeja vuelve con la lista (tablero 3 del pulido). */}
       {mode === "panel" || !selectedId ? (

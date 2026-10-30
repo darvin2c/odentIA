@@ -61,7 +61,7 @@ export async function getConversationContext(tx: Db, orgId: string, conversation
     }
     if (can("clinical.read") || can("clinical.alerts")) {
       const allergies = await activeAllergies(tx, orgId, patientId)
-      lines.alertas = allergies.length > 0 ? `Alergia: ${allergies.map((item) => item.substance).join(", ")}` : "Ninguna registrada"
+      lines.alertas = allergies.length > 0 ? `Alergia: ${allergies.map((item) => item.substance).join(", ")}` : "Alergias: ninguna registrada"
       if (allergies.length > 0) attention.push("alertas")
     }
     if (can("finance.read")) {
