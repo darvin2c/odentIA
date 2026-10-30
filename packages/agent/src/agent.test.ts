@@ -1278,6 +1278,11 @@ it("a quien aún no es paciente le da su enlace con la hora que eligió para dej
   const patients = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
   expect(patients[0]?.n).toBe(0)
 
+  // Con ese enlace ya dado en la atención, otra llamada con la misma hora no lo vuelve a armar (ronda del ADR 0109).
+  ctx.pickLinks = [new Date(first!.slot.startsAt).toISOString()]
+  expect(await book()).toContain("Ya le diste su enlace con esa hora en esta atención")
+  ctx.pickLinks = []
+
   // Sale tal como lo escribe Sofi: un solo enlace (la agenda no se suma), con la referencia del token.
   ctx.evidence = [...(ctx.evidence ?? []), linksOf(sent)]
   ctx.toolsUsed.push("reservar_paciente_nuevo")

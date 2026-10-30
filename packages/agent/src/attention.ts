@@ -101,7 +101,12 @@ export interface AttentionProgress {
   usedName: boolean
   /** Respuestas suyas en esta atención que empezaron con «Entiendo…» o dijeron «anoté que…» (`formulasIn`). */
   formulas: { opener: number; noted: number }
+  /** Las horas (ISO 8601) de los enlaces con la hora elegida que ya le dio en esta atención (ADR 0109). */
+  pickLinks: string[]
 }
+
+/** La hora del enlace con la hora elegida (`bookingPickAddress`), tal como queda en el mensaje. */
+const PICK_LINK_HOUR = /\/reserva\?\S*?[?&]hora=([^&\s]+)/g
 
 /**
  * Cómo va la atención: cuántas veces le respondió, si ya ofreció horarios, qué
@@ -145,6 +150,7 @@ export function attentionProgress(input: {
       opener: said.filter((item) => formulasIn(item.body ?? "").opener).length,
       noted: said.filter((item) => formulasIn(item.body ?? "").noted).length,
     },
+    pickLinks: [...new Set(said.flatMap((item) => [...(item.body ?? "").matchAll(PICK_LINK_HOUR)].map((match) => decodeURIComponent(match[1] ?? ""))))],
   }
 }
 
@@ -167,6 +173,13 @@ export function attentionLines(
   if (progress.formulas.opener > 0 || progress.formulas.noted > 0) {
     lines.push(
       "En esta atención ya le respondiste con «Entiendo…» o «anoté que…»: no vuelvas a empezar así ni le repitas lo que acaba de decir. Responde directo a lo que pide o pregunta; si no hay nada nuevo que decirle, una frase corta basta.",
+    )
+  }
+  // Repetía la cita entera y el mismo enlace a cada «ya» o «¿por aquí no se puede?», e insistía con
+  // quien no quería usarlo (ronda del ADR 0109).
+  if (progress.pickLinks.length) {
+    lines.push(
+      "Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar ni le repitas la cita. Si escribe de nuevo, respóndele en una frase a lo que dice: al confirmar sus datos en esa página queda reservada, y se le avisa por aquí. Si no quiere o no puede usar el enlace, no insistas ni le digas que se reserva por aquí: pasa el caso a recepción una sola vez con request_human_handoff, con la hora que eligió, para que se la reserven.",
     )
   }
   if (progress.done && !progress.doneTold) {

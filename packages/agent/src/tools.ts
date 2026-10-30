@@ -312,6 +312,8 @@ export interface AgentToolCtx {
   nameNudged?: boolean
   /** Cuántas respuestas de esta atención ya usaron «Entiendo…» o «anoté que…» (`formulasIn`). */
   formulas?: { opener: number; noted: number }
+  /** Las horas de los enlaces con la hora elegida que ya le dio en esta atención (`attentionProgress`). */
+  pickLinks?: string[]
   /** Ya se le pidió una vez en esta corrida que no repita esas fórmulas. */
   formulaNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
@@ -1598,12 +1600,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       return link ? { link, url: bookingPickAddress(origin, personalLinkRef(link.linkId), { branchId, professionalUserId, startsAt }) } : null
     })
 
+  /** Ya le dio en esta atención el enlace con esa misma hora: no se le manda otra vez. */
+  const PICK_LINK_GIVEN =
+    "Ya le diste su enlace con esa hora en esta atención: no se lo vuelvas a mandar ni le repitas la cita. Respóndele en una frase a lo que dice; si no quiere o no puede usar el enlace, pasa el caso a recepción con request_human_handoff, con esa hora, y no le digas que se reserva por aquí."
+  const pickGiven = (startsAt: string): boolean => {
+    const at = Date.parse(startsAt)
+    return !Number.isNaN(at) && (ctx.pickLinks ?? []).some((given) => Date.parse(given) === at)
+  }
+
   /** Lo que se le dice al modelo para enviar ese enlace: con sus palabras, como lo pidió la clínica (ADR 0109). */
   const pickLinkReply = (url: string, why: string, forName: string | null): string =>
     `Todavía no se reservó nada: ${why}. Esa hora se reserva en su enlace, que ya la trae elegida: ahí confirma sus datos y queda reservada (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días): ${url}\n` +
     `Envíaselo con send_reply en un solo mensaje, con tus palabras, en su idioma y con el trato de la clínica, por ejemplo «¡Perfecto, Rosa! Para reservarte el martes 3 de noviembre a las 9:00 a. m. con el Dr. Luis Prado, confirma tus datos aquí (1 minuto): ${url}»: ` +
     `si sabes cómo se llama, empieza por su nombre; di el día, la hora y con quién del hueco que eligió${forName ? ` y que la cita es para ${forName}` : ""}, y escribe el enlace tal cual, sin cambiarlo. ` +
-    "No le pidas por aquí su sí ni sus datos, y no digas que ya quedó reservada: queda reservada cuando confirme en la página, y el sistema se lo dice en esta conversación."
+    "No le pidas por aquí su sí ni sus datos, no le digas que se reserva por aquí y no digas que ya quedó reservada: queda reservada cuando confirme en la página, y el sistema se lo dice en esta conversación."
 
   /**
    * La sede del hueco que se ofreció con ese inicio, ese profesional y esa sala: la que lleva el
@@ -1647,6 +1657,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const publicUrl = ctx.publicUrl
         const branchId = input.branchId ?? offeredBranch(input)
         if (!publicUrl || !branchId) return null
+        if (pickGiven(input.startsAt)) return PICK_LINK_GIVEN
         try {
           const found = await inOrg(async (tx) => {
             const origin = await clinicLinkOrigin(tx, publicUrl)
@@ -1738,6 +1749,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
       const branchId = input.branchId ?? offeredBranch(input)
       if (!branchId) return "Falta la sede del hueco que eligió: vuelve a llamar con su branchId exacto (el dato «sede» del hueco de buscar_huecos)."
+      if (pickGiven(input.startsAt)) return PICK_LINK_GIVEN
       const toTeam = "pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que lo registre y le confirme; no le digas que quedó reservada."
       let issued: Awaited<ReturnType<typeof pickLink>>
       try {
