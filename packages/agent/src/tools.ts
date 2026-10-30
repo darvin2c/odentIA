@@ -45,6 +45,7 @@ import {
   getProposal,
   createProposal,
   createTask,
+  recordAgentAction,
   findFreeGaps,
   getAgentPatientSummary,
   getContact,
@@ -670,6 +671,17 @@ export function makeAgentTools(ctx: AgentToolCtx) {
    * reportan al modelo, nunca como aprobación. Si el hilo ya espera un «sí»
    * (PROPOSAL_PENDING_CONFIRM), se guía al modelo a pedir la confirmación.
    */
+  /**
+   * Deja en el hilo lo que hizo sin propuesta, para que el equipo lo vea. Es solo
+   * un registro: si falla, la corrida sigue igual y el modelo nunca lo lee.
+   */
+  const noteAction = async (kind: string, title: string, detail?: string): Promise<void> => {
+    if (ctx.dryRun) return
+    await inOrg((tx) =>
+      recordAgentAction(tx, ctx.orgId, { conversationId: ctx.conversationId, triggerMessageId: ctx.triggerId, kind, title, detail }),
+    ).catch(() => undefined)
+  }
+
   const propose = async (
     action: string,
     payload: Record<string, unknown>,
@@ -1125,6 +1137,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         await updateContact(tx, ctx.orgId, contactId, { tags: next }, { userId: null, origin: "agent" })
         return next
       })
+      await noteAction("etiquetas", tags.length === 1 ? `agregó la etiqueta «${tags[0]}»` : `agregó las etiquetas ${tags.map((tag) => `«${tag}»`).join(", ")}`)
       return `Etiquetas: ${merged.join(", ")}.`
     },
     {
@@ -1161,6 +1174,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           : displayName ? { displayName } : {}
       if (!Object.keys(names).length && !customFields) return "No se guardó nada: no venía un nombre ni un campo."
       await inOrg((tx) => updateContact(tx, ctx.orgId, contactId, { ...names, customFields }, { userId: null, origin: "agent" }))
+      await noteAction("datos", Object.keys(names).length > 0 ? "anotó su nombre" : "actualizó sus datos")
       return "Contacto actualizado."
     },
     {
@@ -1198,6 +1212,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           }),
         }),
       )
+      await noteAction("tarea", `dejó una tarea a recepción: ${title}`)
       return `Tarea creada para recepción (id ${created.id}).`
     },
     {
@@ -1513,6 +1528,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const next = link.needsRegistration
           ? " Como aún no es paciente, ahí deja sus datos y reserva: díselo en una frase y no le ofrezcas reservar por aquí. Si ya eligió una hora contigo, dile que elija esa misma en la página (por ejemplo «ahí eliges el jueves a las 8:00»), sin pedirle que vuelva a decidir."
           : " Ofrece también seguir por aquí si lo prefiere."
+        await noteAction("enlace", "le envió su enlace para que elija su cita")
         return `Su enlace, para que ${link.patientName ?? "la persona"} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url}\nEnvíalo tal cual con send_reply, en un solo mensaje.${next} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
       } catch (error) {
         if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
@@ -1558,6 +1574,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (result.status === "sin_acceso") {
         return "La persona no tiene acceso al portal. El acceso se da en la clínica, en persona y con su documento: díselo con send_reply. No envíes ningún enlace de acceso."
       }
+      await noteAction("portal", "dejó a recepción su pedido de volver a entrar al portal")
       return "Listo: recepción tiene el pedido y le enviará un enlace nuevo; el código se lo dan en recepción o por llamada. Díselo con send_reply, por ejemplo: «Te damos tu código en recepción o por llamada». No envíes enlaces ni códigos: eso lo hace una persona del equipo."
     },
     {
@@ -1791,6 +1808,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         const list = result.appointments
           .map((item) => `- ${said(item)}${item.was === "ya_confirmada" ? " (ya estaba confirmada)" : ""}`)
           .join("\n")
+        if (result.outcome === "confirmada") await noteAction("cita", "registró que confirmó su cita", result.appointments.map((item) => said(item)).join(" · "))
         const head =
           result.outcome === "confirmada"
             ? result.appointments.length > 1 ? "Citas confirmadas:" : "Cita confirmada:"
@@ -1819,6 +1837,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const outcome = await inOrg((tx) => answerGeneralPermission(tx, ctx.orgId, { conversationId: ctx.conversationId, granted }))
       if (outcome === "no_preguntado") return "No se le hizo esa pregunta: no hay nada que anotar. Sigue la conversación."
       if (outcome === "ya_respondio") return "Ya había respondido antes; no cambia nada. Sigue la conversación."
+      await noteAction("mensajes", granted ? "anotó que acepta novedades y promociones" : "anotó que no quiere novedades ni promociones")
       // La misma frase que el botón: lo que deja de recibir son las novedades y promociones, nada más (ADR 0030).
       return `Anotado. Díselo con send_reply, con estas palabras: «${granted ? GENERAL_PERMISSION_YES : GENERAL_PERMISSION_NO}» No le digas que dejará de recibir otros mensajes: sus citas, controles y presupuestos le siguen llegando.`
     },
@@ -1851,6 +1870,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           { secretsKey: ctx.secretsKey },
         ),
       )
+      if (result.changed.length > 0) await noteAction("mensajes", "cambió los mensajes que recibe")
       return `${result.changed.length > 0 ? "Anotado. " : ""}Díselo con send_reply, con estas palabras: «${result.reply}» No prometas nada más.`
     },
     {
@@ -1909,6 +1929,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         return "No hay un comprobante de los últimos 30 días que se le pueda enviar a quien escribe. Díselo y ofrece que recepción se lo entregue."
       }
       ctx.replySettled = true
+      await noteAction("comprobante", "le envió su comprobante", sent.label)
       return `${sent.label} enviado en esta conversación. No envíes más mensajes.`
     },
     {
@@ -1957,6 +1978,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
             ? "aquí mismo (le llega el aviso «Presupuesto listo» y el documento al tocar «Ver y responder»)"
             : "aquí mismo, con el documento"
           : `por ${by}`
+        await noteAction("presupuesto", "reenvió su presupuesto", `Presupuesto ${budgetNumberText(outcome.budgetNumber)}`)
         const who = outcome.toInterlocutor ? "" : ` a ${outcome.recipientName} (le llega a la persona o, si es menor, a su representante legal)`
         return `Presupuesto ${budgetNumberText(outcome.budgetNumber)} reenviado${who} ${where}. Díselo en una línea con send_reply, sin repetir precios, y ofrécele ayuda si quiere responderlo.`
       }
@@ -1972,6 +1994,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
             : usted
               ? "No pude enviárselo por aquí. Ya le avisé al equipo para que se lo haga llegar."
               : "No pude enviártelo por aquí. Ya le avisé al equipo para que te lo haga llegar."
+      await noteAction("tarea", "dejó una tarea a recepción: enviarle su presupuesto")
       const why =
         outcome.outcome === "no_listo"
           ? "El presupuesto todavía no está listo: la clínica lo está preparando. No lo envíes ni des precios de él."
@@ -2438,6 +2461,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       try {
         const saved = await inOrg((tx) => saveWebchatContactForConversation(tx, ctx.orgId, ctx.conversationId, { whatsapp: whatsapp ?? null, email: email ?? null }))
         ctx.contactOnFile = true
+        await noteAction("datos", "guardó dónde avisarle")
         const where = [saved?.whatsapp ? `WhatsApp ${saved.whatsapp}` : null, saved?.email ? `correo ${saved.email}` : null].filter(Boolean).join(" y ")
         return `Guardado: le avisaremos por ${where || "lo que dejó"}. Si ya dijo que sí a una cita propuesta, confírmala ahora con confirmar_propuesta (la del «Estado del caso»); si no, pídele su sí.`
       } catch (error) {

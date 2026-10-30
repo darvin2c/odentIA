@@ -108,7 +108,7 @@ export interface CrmContactWorkspace {
  * La próxima cita en pie de los pacientes de esta persona (ella misma o a
  * quien lleva): cuándo, dónde y con quién. Se calcula al leer.
  */
-async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Promise<CrmNextAppointment | null> {
+export async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Promise<CrmNextAppointment | null> {
   const [row] = await tx
     .select({
       id: appointment.id,
@@ -898,7 +898,7 @@ export async function listContactActivity(
  * resueltos igual que listTasks. Sin límite silencioso: son todas las
  * abiertas del contacto.
  */
-async function listContactTasks(tx: Db, orgId: string, contactId: string): Promise<TaskItem[]> {
+export async function listContactTasks(tx: Db, orgId: string, contactId: string): Promise<TaskItem[]> {
   const convIds = await contactConversationIds(tx, orgId, contactId)
   const scope = [eq(crmTask.contactId, contactId)]
   if (convIds.length > 0) scope.push(inArray(crmTask.conversationId, convIds))

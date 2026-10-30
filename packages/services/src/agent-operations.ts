@@ -2278,6 +2278,9 @@ export async function listProposals(
     contactId?: string
     /** Propuestas que actúan sobre este paciente (ficha). */
     patientId?: string
+    /** Sin los mensajes: lo que hizo el agente en el hilo; sus mensajes ya se ven como mensajes. */
+    excludeAction?: string
+    proposedBy?: string
     limit?: number
   } = {},
 ): Promise<ProposalItem[]> {
@@ -2293,6 +2296,8 @@ export async function listProposals(
   }
   if (input.conversationId) conditions.push(eq(agentProposal.conversationId, input.conversationId))
   if (input.contactId) conditions.push(eq(agentProposal.contactId, input.contactId))
+  if (input.excludeAction) conditions.push(ne(agentProposal.action, input.excludeAction))
+  if (input.proposedBy) conditions.push(eq(agentProposal.proposedBy, input.proposedBy))
   if (input.patientId) {
     if (!/^[0-9a-f-]{36}$/i.test(input.patientId)) throw validation("patientId inválido")
     conditions.push(eq(agentProposal.patientId, input.patientId))

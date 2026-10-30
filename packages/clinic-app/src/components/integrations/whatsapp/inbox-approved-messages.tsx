@@ -1,7 +1,8 @@
-import { Button, buttonVariants, cn, FieldLabel, Input, RadioGroup, RadioGroupItem, Skeleton } from "@odentia/ui"
+import { Button, buttonVariants, cn, Input, ScrollArea, Skeleton } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
+import { Search, X } from "lucide-react"
 import { Fragment, useId, useState } from "react"
 import { ApiError, apiFetch } from "../../../lib/api"
 import { sinceWords } from "../../../lib/integrations"
@@ -57,9 +58,10 @@ function OptionText({
 
 /**
  * La zona de escritura de un hilo de WhatsApp cuando ya pasaron las 24 horas:
- * lo dice antes de escribir, ofrece los mensajes aprobados por lo que dicen —con
- * los datos de esa persona ya puestos— y envía el elegido. Lo que hay y por qué
- * no hay ninguno lo decide el servidor; aquí solo se muestra.
+ * lo dice en una línea y la lista se abre solo al pedirla, para no comerse el
+ * hilo: los títulos a un lado, con buscador, y al otro el mensaje tal como
+ * saldrá, con los datos de esa persona ya puestos. Lo que hay y por qué no hay
+ * ninguno lo decide el servidor; aquí solo se muestra.
  */
 export function InboxApprovedMessages({
   conversationId,
@@ -83,6 +85,8 @@ export function InboxApprovedMessages({
   const [chosen, setChosen] = useState<string | null>(null)
   const [typed, setTyped] = useState<Record<string, Record<number, string>>>({})
   const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
 
   const query = useQuery({
     queryKey: approvedMessagesKey(conversationId),
@@ -91,8 +95,10 @@ export function InboxApprovedMessages({
   })
   const options = query.data?.data ?? []
   const none = query.data?.none ?? null
-  // Sin elegir todavía, el primero: es el que la persona tiene delante.
-  const selected = options.find((option) => option.id === chosen) ?? options[0] ?? null
+  const text = search.trim().toLowerCase()
+  const shown = text ? options.filter((option) => option.title.toLowerCase().includes(text)) : options
+  // Sin elegir todavía, el primero: su texto está a la vista antes de enviar.
+  const selected = shown.find((option) => option.id === chosen) ?? shown[0] ?? null
 
   const send = useMutation({
     mutationFn: (option: ApprovedMessageOption) => {
@@ -106,6 +112,8 @@ export function InboxApprovedMessages({
       setError(null)
       setChosen(null)
       setTyped({})
+      setOpen(false)
+      setSearch("")
       onSent()
       // Tras enviar, el servidor dice cuándo se le podrá escribir de nuevo.
       await queryClient.invalidateQueries({ queryKey: approvedMessagesKey(conversationId) })
@@ -164,93 +172,113 @@ export function InboxApprovedMessages({
           </Note>
         ) : null
       ) : (
-        <>
-          <span id={legendId} className="text-sm font-semibold">
-            Elige el mensaje
-          </span>
-          {/* La lista no tiene desplazamiento propio: en la Bandeja se desplaza toda la zona de
-              escritura (aviso, lista y botón), con su tope, y el historial queda a la vista. */}
-          <div>
-          <RadioGroup
-            aria-labelledby={legendId}
-            className="gap-2 py-0.5 pr-3 pl-0.5"
-            value={selected?.id ?? ""}
-            onValueChange={(value) => {
-              setChosen(String(value))
-              setError(null)
-            }}
-          >
-            {options.map((option) => {
-              const isSelected = selected?.id === option.id
-              const withFields = option.fields.length > 0
-              const text = (
-                <OptionText
-                  option={option}
-                  typed={typed[option.id] ?? {}}
-                  disabled={send.isPending}
-                  onType={(index, value) => {
-                    setChosen(option.id)
-                    setTyped((current) => ({ ...current, [option.id]: { ...current[option.id], [index]: value } }))
-                  }}
+        <div className="flex flex-col gap-2">
+          {!open ? (
+            <Button type="button" size="sm" className="min-h-11 w-fit sm:min-h-8" onClick={() => setOpen(true)}>
+              Elegir un mensaje aprobado
+            </Button>
+          ) : (
+            <div className="flex h-[19rem] flex-col overflow-hidden rounded-2xl border bg-card max-sm:h-[24rem]">
+              <div className="flex shrink-0 items-center gap-2 border-b py-1 pr-1 pl-3">
+                <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <Input
+                  aria-label="Buscar un mensaje aprobado"
+                  placeholder="Buscar un mensaje"
+                  className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
                 />
-              )
-              return (
-                <div
-                  key={option.id}
-                  className={cn(
-                    "flex flex-col gap-2 rounded-xl border p-3",
-                    isSelected ? "border-primary bg-primary-soft/40" : "border-border",
-                  )}
-                >
-                  <FieldLabel className="w-full cursor-pointer items-start gap-3 font-normal has-data-checked:bg-transparent">
-                    <RadioGroupItem value={option.id} className="mt-0.5" disabled={send.isPending} />
-                    <span className="flex min-w-0 flex-1 flex-col gap-1">
-                      <span className="font-semibold [overflow-wrap:anywhere]">{option.title}</span>
-                      {/* Sin datos que escribir, el texto es parte de lo que se elige. */}
-                      {withFields ? null : <span className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>}
+                <Button type="button" variant="ghost" size="icon-sm" className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8" aria-label="Cerrar la lista de mensajes" onClick={() => setOpen(false)}>
+                  <X className="size-4" />
+                </Button>
+              </div>
+              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(0,3fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,2fr)_minmax(0,3fr)]">
+                <ScrollArea className="min-h-0 border-r max-sm:border-r-0 max-sm:border-b">
+                  <div role="radiogroup" aria-labelledby={legendId} className="flex flex-col gap-0.5 p-1.5">
+                    <span id={legendId} className="sr-only">
+                      Elige el mensaje
                     </span>
-                  </FieldLabel>
-                  {/* Con un dato que escribir, el texto va fuera de la etiqueta: su campo no debe activar la opción al pulsarlo. */}
-                  {withFields ? <p className="pl-7 text-sm leading-10 whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</p> : null}
-                  {option.buttons.length > 0 ? (
-                    <ul aria-label={`Botones de «${option.title}»`} className="flex flex-wrap gap-1.5 pl-7">
-                      {option.buttons.map((button) => (
-                        <li key={button} className="rounded-lg border bg-card px-3 py-1 text-sm font-semibold text-primary">
-                          {button}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
+                    {shown.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected?.id === option.id}
+                        disabled={send.isPending}
+                        className={cn(
+                          "min-h-11 rounded-xl px-3 py-2 text-left text-sm outline-none [overflow-wrap:anywhere] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9",
+                          selected?.id === option.id && "bg-primary-soft font-semibold text-primary-soft-foreground hover:bg-primary-soft",
+                        )}
+                        onClick={() => {
+                          setChosen(option.id)
+                          setError(null)
+                        }}
+                      >
+                        {option.title}
+                      </button>
+                    ))}
+                    {shown.length === 0 ? <p className="px-3 py-2 text-sm text-muted-foreground">Ningún mensaje coincide.</p> : null}
+                  </div>
+                </ScrollArea>
+                <div className="flex min-h-0 min-w-0 flex-col bg-canvas/60">
+                  <ScrollArea className="min-h-0 flex-1">
+                    {selected ? (
+                      <div className="flex flex-col gap-2 p-3">
+                        <div className="ml-auto flex max-w-full flex-col gap-2 rounded-2xl rounded-br-md bg-secondary px-3.5 py-2.5 text-sm leading-relaxed">
+                          <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">
+                            <OptionText
+                              option={selected}
+                              typed={typed[selected.id] ?? {}}
+                              disabled={send.isPending}
+                              onType={(index, value) => {
+                                setChosen(selected.id)
+                                setTyped((current) => ({ ...current, [selected.id]: { ...current[selected.id], [index]: value } }))
+                              }}
+                            />
+                          </p>
+                          {selected.buttons.length > 0 ? (
+                            <ul aria-label={`Botones de «${selected.title}»`} className="flex flex-col gap-1">
+                              {selected.buttons.map((button) => (
+                                <li key={button} className="rounded-lg bg-card px-3 py-1 text-center text-[13px] font-semibold text-primary">
+                                  {button}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </ScrollArea>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2">
+                    <p className="min-w-0 flex-1 basis-40 text-xs text-muted-foreground">
+                      {selected && selected.fields.length > 0
+                        ? "Lo que escribas va dentro del mensaje."
+                        : selected?.previewParts.some((part) => part.data)
+                          ? "Su nombre y el de la clínica ya están puestos."
+                          : "Sale tal como se ve."}
+                    </p>
+                    <SubmitButton
+                      size="sm"
+                      className="min-h-11 shrink-0 sm:min-h-8"
+                      pending={send.isPending}
+                      disabled={!selected}
+                      onClick={() => {
+                        if (selected) send.mutate(selected)
+                      }}
+                    >
+                      Enviar mensaje
+                    </SubmitButton>
+                  </div>
                 </div>
-              )
-            })}
-          </RadioGroup>
-          </div>
+              </div>
+            </div>
+          )}
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           ) : null}
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="min-w-0 flex-1 basis-64 text-sm text-muted-foreground">
-              {selected && selected.fields.length > 0
-                ? "Lo que escribas va dentro del mensaje, tal como se ve arriba."
-                : selected?.previewParts.some((part) => part.data)
-                  ? "El nombre de la persona y el de la clínica ya están puestos: los pone el sistema."
-                  : "Sale tal como se ve."}
-            </p>
-            <SubmitButton
-              className="h-11 shrink-0 px-5"
-              pending={send.isPending}
-              disabled={!selected}
-              onClick={() => {
-                if (selected) send.mutate(selected)
-              }}
-            >
-              Enviar mensaje
-            </SubmitButton>
-          </div>
-        </>
+        </div>
       )}
       {error && options.length === 0 ? (
         <p role="alert" className="text-sm text-destructive">
@@ -259,11 +287,9 @@ export function InboxApprovedMessages({
       ) : null}
 
       {draft.trim() ? (
-        <div className="flex flex-col gap-1 rounded-xl bg-muted px-3.5 py-3 text-sm">
-          <strong className="font-semibold">Lo que habías escrito se conserva</strong>
-          <span className="text-muted-foreground">Vuelve al campo de escritura cuando {contactName} responda:</span>
-          <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{draft}</span>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          <strong className="font-semibold">Lo que habías escrito se conserva</strong> para cuando {contactName} responda: <span>{draft}</span>
+        </p>
       ) : null}
     </div>
   )

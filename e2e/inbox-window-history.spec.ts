@@ -59,7 +59,10 @@ test("con la ventana cerrada, los mensajes aprobados no tapan lo que la persona 
   for (const [label, size] of [["computadora", { width: 1440, height: 900 }], ["celular", { width: 375, height: 812 }]] as const) {
     await page.setViewportSize(size)
     await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
-    await expect(page.getByText("Elige el mensaje", { exact: true })).toBeVisible()
+    // La lista no se come el hilo: se abre al pedirla.
+    await expect(page.getByRole("radiogroup", { name: "Elige el mensaje" })).toHaveCount(0)
+    await page.getByRole("button", { name: "Elegir un mensaje aprobado" }).click()
+    await expect(page.getByRole("radiogroup", { name: "Elige el mensaje" })).toBeVisible()
     // Lo último que escribió está a la vista, sin desplazar nada.
     // En la computadora el texto también está en la fila de la lista; en el hilo va después.
     const lastSaid = page.getByText(last, { exact: true }).last()

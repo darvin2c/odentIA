@@ -558,6 +558,34 @@ export const agentAnswerTrace = pgTable(
   ],
 )
 
+/**
+ * Lo que el agente hizo en una conversación sin pasar por una propuesta
+ * (etiquetas, datos, tareas, enlaces, comprobantes): una frase para que el
+ * equipo lo vea en el hilo. Solo se anexa; no decide nada ni lo lee el modelo.
+ * La clave evita repetir la línea si la corrida se reintenta.
+ */
+export const agentActionLog = pgTable(
+  "agent_action_log",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    organizationId: orgFk("organization_id"),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    triggerMessageId: uuid("trigger_message_id"),
+    /** Qué fue: decide si se ve como tarjeta o como línea y qué sección abre. */
+    kind: text("kind").notNull(),
+    /** Lo que hizo, sin el nombre del agente: «agregó la etiqueta «Corona»». */
+    title: text("title").notNull(),
+    detail: text("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_action_log_conversation_idx").on(table.organizationId, table.conversationId, table.createdAt),
+    uniqueIndex("agent_action_log_once_uidx").on(table.conversationId, table.triggerMessageId, table.kind, table.title),
+  ],
+)
+
 /* ---------- Aprender: lo que se revisa, lo que se corrige y lo que queda aprendido ---------- */
 
 /** Por qué una respuesta entró en «Por revisar». */
