@@ -13,6 +13,7 @@ import { formatMoney } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { member, user } from "@odentia/db/schema/auth"
 import { conversation } from "@odentia/db/schema/crm"
+import { appointment } from "@odentia/db/schema/agenda"
 import {
   encounter,
   encounterProcedure,
@@ -22,6 +23,7 @@ import {
   patientPayment,
   patientPaymentApplication,
   patientPaymentRefund,
+  paymentReturn,
   paymentTicket,
 } from "@odentia/db/schema/clinical"
 import {
@@ -36,7 +38,7 @@ import {
 } from "@odentia/db/schema/finance"
 import { purchaseOrder, supplier, supplierCreditUse } from "@odentia/db/schema/inventory"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, type SQL, sql } from "drizzle-orm"
 import {
   branchNotFound,
   isUniqueViolation,
@@ -51,6 +53,8 @@ import { monthStart } from "./report-periods.js"
 import { bySpan, safeCents, type Span, spansSql } from "./report-spans.js"
 import { createWorkspaceNotification } from "./workspace.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import type { TicketFrozen } from "./payments.js"
+import { digitsContain, foldedWordsMatch, referenceNumber, searchDigits, textMatchesWords } from "./search-text.js"
 export const MOVEMENT_DIRECTIONS = ["ingreso", "egreso"] as const
 export const EXPENSE_CATEGORIES = ["Personal", "Alquiler", "Laboratorio", "Materiales", "Servicios", "Impuestos", "Otros"] as const
 /** El tipo del pago del impuesto de lo cobrado (ADR 0083): solo un gasto de «Impuestos» puede serlo. */
@@ -980,12 +984,14 @@ export async function listExpenses(
 
 /**
  * Gastos de un mes (el de la zona horaria de la clínica) con su total por
- * tipo. Los anulados siguen en la lista, marcados, y no suman.
+ * tipo. Los anulados siguen en la lista, marcados, y no suman. `q` (concepto,
+ * proveedor, comprobante o nota) y `category` acotan la lista y su total
+ * (`shown`); el total del mes y el de cada tipo siguen siendo del mes entero.
  */
 export async function getMonthExpenses(
   tx: Db,
   orgId: string,
-  query: { year: number; month: number; branchId?: string },
+  query: { year: number; month: number; branchId?: string; q?: string; category?: string },
 ) {
   const { timezone, currency: unit } = await getOrgLocale(tx, orgId)
   const { start, end } = monthBounds(timezone, query.year, query.month)
@@ -1003,8 +1009,9 @@ export async function getMonthExpenses(
   const orderIds = [...new Set(rows.map((row) => row.purchaseOrderId).filter((id): id is string => id !== null))]
   const orders = orderIds.length
     ? await tx
-        .select({ id: purchaseOrder.id, orderNumber: purchaseOrder.orderNumber })
+        .select({ id: purchaseOrder.id, orderNumber: purchaseOrder.orderNumber, supplierName: supplier.name })
         .from(purchaseOrder)
+        .leftJoin(supplier, and(eq(supplier.organizationId, purchaseOrder.organizationId), eq(supplier.id, purchaseOrder.supplierId)))
         .where(and(eq(purchaseOrder.organizationId, orgId), inArray(purchaseOrder.id, orderIds)))
     : []
   const commissionExpenses = rows.length
@@ -1017,6 +1024,20 @@ export async function getMonthExpenses(
         ).map((row) => row.expenseId),
       )
     : new Set<string | null>()
+  const expenses = rows
+    .map((row) => {
+      const order = orders.find((item) => item.id === row.purchaseOrderId)
+      return {
+        ...row,
+        fromCash: row.shiftId !== null,
+        purchaseOrderNumber: order?.orderNumber ?? null,
+        supplierName: order?.supplierName ?? null,
+        commission: commissionExpenses.has(row.id),
+      }
+    })
+    .filter((row) => !query.category || row.category === query.category)
+    .filter((row) => !query.q?.trim() || textMatchesWords([row.concept, row.supplierName, row.receiptNumber, row.notes], query.q))
+  const shownLive = expenses.filter((row) => !row.voidedAt && row.currency === unit)
   return {
     year: query.year,
     month: query.month,
@@ -1026,12 +1047,9 @@ export async function getMonthExpenses(
     byCategory: [...byCategory.entries()]
       .map(([category, cents]) => ({ category, cents }))
       .sort((a, b) => b.cents - a.cents),
-    expenses: rows.map((row) => ({
-      ...row,
-      fromCash: row.shiftId !== null,
-      purchaseOrderNumber: orders.find((order) => order.id === row.purchaseOrderId)?.orderNumber ?? null,
-      commission: commissionExpenses.has(row.id),
-    })),
+    /** Lo que queda a la vista con la búsqueda y el tipo: cuántos y cuánto suman. */
+    shown: { count: shownLive.length, totalCents: sumCents(shownLive.map((row) => ({ amountCents: row.amountCents }))) },
+    expenses,
   }
 }
 
@@ -2481,6 +2499,8 @@ export interface DebtRow {
   chargesCount: number
   /** Conceptos pendientes, del más antiguo al más nuevo (hasta tres). */
   concepts: string[]
+  /** Todo lo que debe, concepto por concepto, con su saldo y desde cuándo. */
+  items: Array<{ description: string; outstandingCents: number; since: Date | null }>
   /** Última atención que dejó algo por cobrar: cuándo terminó y quién atendió. */
   lastAttended: { at: Date; professionalName: string | null } | null
   /**
@@ -2532,6 +2552,7 @@ export async function getDebts(
       latestSince: null as Date | null,
       chargesCount: 0,
       concepts: [],
+      items: [],
       lastAttended: null,
       attendedTodayAt: null,
       contactId: null,
@@ -2542,6 +2563,7 @@ export async function getDebts(
     entry.chargesCount += 1
     if (entry.concepts.length < 3) entry.concepts.push(row.charge.description)
     const at = row.charge.createdAt
+    entry.items.push({ description: row.charge.description, outstandingCents: row.outstandingCents, since: at })
     if (!entry.oldestSince || (at && at < entry.oldestSince)) entry.oldestSince = at
     if (!entry.latestSince || (at && at > entry.latestSince)) entry.latestSince = at
     groups[key] = entry
@@ -2763,8 +2785,20 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
       ),
     )
     .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
-  // Ticket, número y persona de cada cobro: la pantalla muestra un renglón
-  // por ticket (un cobro con dos medios es un solo cobro) con su nombre.
+  return {
+    branchId: branchRow.id,
+    day: query.day,
+    timezone,
+    movements: await withTicketOrigin(tx, orgId, movements),
+    voidedTickets,
+  }
+}
+
+/**
+ * Ticket, número y persona de cada cobro: la pantalla muestra un renglón por
+ * ticket (un cobro con dos medios es un solo cobro) con su nombre.
+ */
+async function withTicketOrigin(tx: Db, orgId: string, movements: Array<typeof cashMovement.$inferSelect>) {
   const paymentIds = [
     ...new Set(movements.map((m) => m.patientPaymentId).filter((id): id is string => id !== null)),
   ]
@@ -2788,22 +2822,31 @@ export async function getDayMovements(tx: Db, orgId: string, query: DayMovements
       .where(and(eq(patientPayment.organizationId, orgId), inArray(patientPayment.id, paymentIds)))
     for (const row of rows) origin.set(row.paymentId, row)
   }
-  return {
-    branchId: branchRow.id,
-    day: query.day,
-    timezone,
-    movements: movements.map((m) => {
-      const from = m.patientPaymentId ? origin.get(m.patientPaymentId) : undefined
-      return {
-        ...m,
-        ticketId: from?.ticketId ?? null,
-        ticketNumber: from?.ticketNumber ?? null,
-        patientId: from?.patientId ?? null,
-        patientName: from?.patientName ?? null,
-      }
-    }),
-    voidedTickets,
-  }
+  return movements.map((m) => {
+    const from = m.patientPaymentId ? origin.get(m.patientPaymentId) : undefined
+    return {
+      ...m,
+      ticketId: from?.ticketId ?? null,
+      ticketNumber: from?.ticketNumber ?? null,
+      patientId: from?.patientId ?? null,
+      patientName: from?.patientName ?? null,
+    }
+  })
+}
+
+/**
+ * Lo que contó un cierre: los movimientos de su ventana que mueven el
+ * efectivo (cobros con su ticket, gastos, ingresos, retiros y devoluciones),
+ * del más antiguo al más nuevo. Lo electrónico no se cuenta en el cajón.
+ */
+async function countedMovements(tx: Db, orgId: string, shiftId: string) {
+  const movements = await tx
+    .select()
+    .from(cashMovement)
+    .where(and(eq(cashMovement.organizationId, orgId), eq(cashMovement.shiftId, shiftId), isNull(cashMovement.voidedAt)))
+    .orderBy(asc(cashMovement.createdAt), asc(cashMovement.id))
+  const counted = movements.filter((m) => !isElectronic(m) && (m.direction !== "egreso" || isCashEgreso(m)))
+  return withTicketOrigin(tx, orgId, counted)
 }
 
 /** Ticket anulado del día: sigue a la vista, marcado y con su motivo, sin sumar. */
@@ -3028,7 +3071,8 @@ export interface ClosureListItem {
 export async function listClosures(
   tx: Db,
   orgId: string,
-  query: { branchId?: string; limit?: number; before?: string } = {},
+  /** `descuadre`: solo los que no cuadraron (faltó o sobró). */
+  query: { branchId?: string; limit?: number; before?: string; result?: "descuadre" } = {},
 ): Promise<ClosureListItem[]> {
   const limit = Math.min(Math.max(query.limit ?? 20, 1), 100)
   // Página siguiente: lo cerrado antes del último cierre ya mostrado.
@@ -3036,6 +3080,7 @@ export async function listClosures(
   const closureFilters = [eq(cashClosure.organizationId, orgId)]
   if (before) closureFilters.push(lt(cashClosure.closedAt, before))
   if (query.branchId) closureFilters.push(eq(cashClosure.branchId, query.branchId))
+  if (query.result === "descuadre") closureFilters.push(sql`${cashClosure.differenceCents} <> 0`)
   const closures = await tx
     .select()
     .from(cashClosure)
@@ -3048,6 +3093,8 @@ export async function listClosures(
   ]
   if (query.branchId) shiftFilters.push(eq(cashShift.branchId, query.branchId))
   if (before) shiftFilters.push(lt(cashShift.closedAt, before))
+  // Un turno anterior sin diferencia registrada no se sabe si cuadró: no entra.
+  if (query.result === "descuadre") shiftFilters.push(sql`${cashShift.differenceCents} <> 0`)
   const shifts = await tx
     .select()
     .from(cashShift)
@@ -3116,6 +3163,7 @@ export async function getClosureSheet(tx: Db, orgId: string, closureId: string) 
       legacy: false as const,
       closure,
       totalsByMethod: closure.totalsByMethod,
+      counted: await countedMovements(tx, orgId, closure.shiftId),
       ...context,
     }
   }
@@ -3150,6 +3198,7 @@ export async function getClosureSheet(tx: Db, orgId: string, closureId: string) 
       closedAt: shift.closedAt,
     },
     totalsByMethod: null as unknown,
+    counted: await countedMovements(tx, orgId, shift.id),
     ...context,
   }
 }
@@ -3172,4 +3221,428 @@ async function closureContext(
     ? await tx.select({ name: user.name }).from(user).where(eq(user.id, closedBy))
     : []
   return { branch: branchRow ?? null, orgProfile: profile ?? null, closedByName: closer?.name ?? null }
+}
+
+// --- Cobros: todos los tickets de la sede ----------------------------------------------------
+
+export const TICKET_SORTS = ["recientes", "antiguos", "monto"] as const
+export type TicketSort = (typeof TICKET_SORTS)[number]
+/** `devolucion`: los que tienen al menos una devolución. */
+export const TICKET_STATES = ["vigentes", "anulados", "devolucion"] as const
+export type TicketState = (typeof TICKET_STATES)[number]
+
+export interface TicketListQuery {
+  branchId: string
+  /** Nombre, documento o número del ticket. Un número busca en todas las fechas. */
+  q?: string
+  /** Días `AAAA-MM-DD` de la sede, ambos incluidos. */
+  from?: string
+  to?: string
+  methodIds?: string[]
+  cashierIds?: string[]
+  state?: TicketState
+  sort?: TicketSort
+  cursor?: string
+  limit?: number
+}
+
+/** Un ticket como se lee en la lista: lo que congeló al cobrar y lo que pasó después. */
+export interface TicketListRow {
+  id: string
+  number: number
+  patientId: string
+  displayName: string
+  docType: string | null
+  docNumber: string | null
+  createdAt: Date
+  currency: string
+  totalCents: number
+  creditAppliedCents: number
+  lines: Array<{ description: string; appliedCents: number }>
+  methods: Array<{ name: string; amountCents: number }>
+  cashierName: string | null
+  /** Lo que quedó por pagar de esos conceptos al cobrar. */
+  remainingCents: number
+  voided: { at: Date; reason: string | null; byName: string | null } | null
+  /** Lo devuelto de este ticket (en dinero o a su saldo a favor). */
+  returnedCents: number
+}
+
+/** Lo que suma la lista entera con sus filtros, por moneda: nunca se mezclan. */
+export interface TicketTotals {
+  currency: string
+  /** Tickets vigentes: los anulados no suman. */
+  tickets: number
+  cobradoCents: number
+  /** Devuelto en dinero de estos tickets. */
+  refundedCents: number
+  byMethod: Array<{ name: string; cents: number }>
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+interface TicketCursor {
+  /** `created_at` como lo escribe la base: conserva los microsegundos. */
+  at: string
+  id: string
+  cents?: number
+}
+
+function decodeTicketCursor(raw: string): TicketCursor {
+  try {
+    const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as TicketCursor
+    const valid =
+      typeof value.at === "string" &&
+      typeof value.id === "string" &&
+      UUID.test(value.id) &&
+      (value.cents === undefined || Number.isInteger(value.cents))
+    if (valid) return value
+  } catch {
+    // Cae al error de abajo: una página que no se entiende no se pide.
+  }
+  throw validation("La página pedida no es válida")
+}
+
+function bigintCents(value: unknown): number {
+  return Number(value ?? 0)
+}
+
+/**
+ * Todos los tickets de una sede, del más nuevo al más antiguo por defecto, por
+ * páginas y con lo que suma la lista entera (`totals`). Un número escrito es
+ * el de un ticket o un documento: se busca en todas las fechas (`allDates`).
+ */
+export async function listTickets(tx: Db, orgId: string, query: TicketListQuery) {
+  const branchRow = await requireBranch(tx, orgId, query.branchId)
+  const timezone = await branchTimezone(tx, orgId, branchRow)
+  const limit = Math.min(Math.max(query.limit ?? 30, 1), 100)
+  const sort: TicketSort = query.sort ?? "recientes"
+  const q = query.q?.trim() ?? ""
+  const number = q ? referenceNumber(q, ["ticket", "t"]) : null
+  const digits = q ? searchDigits(q) : ""
+  const allDates = number !== null || digits !== ""
+  // El nombre y el documento como se congelaron en el ticket (un nombre cambiado después también encuentra).
+  const frozenName = sql`${paymentTicket.snapshot}->'patient'->>'displayName'`
+  const frozenDocument = sql`${paymentTicket.snapshot}->'patient'->>'docNumber'`
+
+  const filters: SQL[] = [eq(paymentTicket.organizationId, orgId), eq(paymentTicket.branchId, branchRow.id)]
+  if (q)
+    filters.push(
+      allDates
+        ? or(
+            number !== null ? eq(paymentTicket.ticketNumber, number) : sql`false`,
+            digits ? digitsContain(patientPerson.docNumber, digits) : sql`false`,
+            digits ? digitsContain(frozenDocument, digits) : sql`false`,
+          )!
+        : foldedWordsMatch([patientPerson.displayName, frozenName], q),
+    )
+  if (!allDates && query.from) filters.push(gte(paymentTicket.createdAt, dayBoundsUTC(day(query.from), timezone).start))
+  if (!allDates && query.to) filters.push(lt(paymentTicket.createdAt, dayBoundsUTC(day(query.to), timezone).end))
+  if (query.methodIds?.length) {
+    const methodIds = query.methodIds.filter((id) => UUID.test(id))
+    filters.push(
+      methodIds.length
+        ? sql`exists (select 1 from ${patientPayment} where ${patientPayment.organizationId} = ${paymentTicket.organizationId}
+            and ${patientPayment.ticketId} = ${paymentTicket.id}
+            and ${patientPayment.paymentMethodId} in (${sql.join(methodIds.map((id) => sql`${id}::uuid`), sql`, `)}))`
+        : sql`false`,
+    )
+  }
+  if (query.cashierIds?.length) filters.push(inArray(paymentTicket.createdBy, query.cashierIds))
+  if (query.state === "vigentes") filters.push(isNull(paymentTicket.voidedAt))
+  if (query.state === "anulados") filters.push(sql`${paymentTicket.voidedAt} is not null`)
+  if (query.state === "devolucion")
+    filters.push(sql`exists (select 1 from ${paymentReturn} where ${paymentReturn.organizationId} = ${paymentTicket.organizationId}
+      and ${paymentReturn.ticketId} = ${paymentTicket.id})`)
+  const where = and(...filters)!
+
+  const cursor = query.cursor ? decodeTicketCursor(query.cursor) : null
+  const after = !cursor
+    ? sql`true`
+    : sort === "monto"
+      ? sql`(${paymentTicket.totalCents}, ${paymentTicket.createdAt}, ${paymentTicket.id}) < (${cursor.cents ?? 0}::int, ${cursor.at}::timestamptz, ${cursor.id}::uuid)`
+      : sort === "antiguos"
+        ? sql`(${paymentTicket.createdAt}, ${paymentTicket.id}) > (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
+        : sql`(${paymentTicket.createdAt}, ${paymentTicket.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
+  const order =
+    sort === "monto"
+      ? [desc(paymentTicket.totalCents), desc(paymentTicket.createdAt), desc(paymentTicket.id)]
+      : sort === "antiguos"
+        ? [asc(paymentTicket.createdAt), asc(paymentTicket.id)]
+        : [desc(paymentTicket.createdAt), desc(paymentTicket.id)]
+
+  const page = await tx
+    .select({
+      ticket: paymentTicket,
+      at: sql<string>`${paymentTicket.createdAt}::text`,
+      displayName: patientPerson.displayName,
+      docType: patientPerson.docType,
+      docNumber: patientPerson.docNumber,
+    })
+    .from(paymentTicket)
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(where, after))
+    .orderBy(...order)
+    .limit(limit + 1)
+  const rows = page.slice(0, limit)
+  const last = rows.at(-1)
+  const nextCursor =
+    page.length > limit && last
+      ? Buffer.from(
+          JSON.stringify({ at: last.at, id: last.ticket.id, ...(sort === "monto" ? { cents: last.ticket.totalCents } : {}) }),
+          "utf8",
+        ).toString("base64url")
+      : null
+
+  const ids = rows.map((row) => row.ticket.id)
+  const returned = ids.length
+    ? await tx
+        .select({ ticketId: paymentReturn.ticketId, cents: sql<string>`sum(${paymentReturn.totalCents})::bigint` })
+        .from(paymentReturn)
+        .where(and(eq(paymentReturn.organizationId, orgId), inArray(paymentReturn.ticketId, ids)))
+        .groupBy(paymentReturn.ticketId)
+    : []
+  const returnedOf = new Map(returned.map((row) => [row.ticketId, bigintCents(row.cents)]))
+  const voiders = await userNames(
+    tx,
+    rows.map((row) => row.ticket.voidedBy).filter((id): id is string => !!id),
+  )
+
+  const counts = await tx
+    .select({
+      currency: paymentTicket.currency,
+      rows: sql<number>`count(*)::int`,
+      tickets: sql<number>`(count(*) filter (where ${paymentTicket.voidedAt} is null))::int`,
+      cents: sql<string>`coalesce(sum(${paymentTicket.totalCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
+    })
+    .from(paymentTicket)
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(where)
+    .groupBy(paymentTicket.currency)
+  const methods = await tx
+    .select({
+      currency: patientPayment.currency,
+      name: patientPayment.methodName,
+      cents: sql<string>`sum(${patientPayment.amountCents})::bigint`,
+    })
+    .from(patientPayment)
+    .innerJoin(
+      paymentTicket,
+      and(eq(paymentTicket.organizationId, patientPayment.organizationId), eq(paymentTicket.id, patientPayment.ticketId)),
+    )
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(where, isNull(paymentTicket.voidedAt)))
+    .groupBy(patientPayment.currency, patientPayment.methodName)
+  const refunds = await tx
+    .select({ currency: paymentReturn.currency, cents: sql<string>`sum(${paymentReturn.totalCents})::bigint` })
+    .from(paymentReturn)
+    .innerJoin(
+      paymentTicket,
+      and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
+    )
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(where, eq(paymentReturn.outcome, "pagado")))
+    .groupBy(paymentReturn.currency)
+
+  const totals: TicketTotals[] = counts.map((row) => ({
+    currency: row.currency,
+    tickets: row.tickets,
+    cobradoCents: bigintCents(row.cents),
+    refundedCents: bigintCents(refunds.find((item) => item.currency === row.currency)?.cents),
+    byMethod: methods
+      .filter((item) => item.currency === row.currency)
+      .map((item) => ({ name: item.name, cents: bigintCents(item.cents) }))
+      .sort((a, b) => b.cents - a.cents),
+  }))
+
+  return {
+    timezone,
+    /** La búsqueda fue un número: se buscó en todas las fechas, sin la de los filtros. */
+    allDates,
+    /** Filas de la lista entera, anuladas incluidas. */
+    total: counts.reduce((sum, row) => sum + row.rows, 0),
+    totals,
+    nextCursor,
+    /** Quiénes cobraron en esta sede: las opciones de «Cobró» (solo en la primera página). */
+    cashiers: cursor ? null : await ticketCashiers(tx, orgId, branchRow.id),
+    data: rows.map(({ ticket, displayName, docType, docNumber }): TicketListRow => {
+      const frozen = ticket.snapshot as Partial<TicketFrozen> | null
+      return {
+        id: ticket.id,
+        number: ticket.ticketNumber,
+        patientId: ticket.patientId,
+        displayName,
+        docType: docType ?? frozen?.patient?.docType ?? null,
+        docNumber: docNumber ?? frozen?.patient?.docNumber ?? null,
+        createdAt: ticket.createdAt,
+        currency: ticket.currency,
+        totalCents: ticket.totalCents,
+        creditAppliedCents: ticket.creditAppliedCents,
+        lines: (frozen?.lines ?? []).map((line) => ({ description: line.description, appliedCents: line.appliedCents })),
+        methods: (frozen?.methods ?? []).map((method) => ({ name: method.name, amountCents: method.amountCents })),
+        cashierName: frozen?.issuer?.name ?? null,
+        remainingCents: frozen?.remainingCents ?? 0,
+        voided: ticket.voidedAt
+          ? { at: ticket.voidedAt, reason: ticket.voidReason, byName: ticket.voidedBy ? (voiders.get(ticket.voidedBy) ?? null) : null }
+          : null,
+        returnedCents: returnedOf.get(ticket.id) ?? 0,
+      }
+    }),
+  }
+}
+
+/** Quiénes cobraron alguna vez en la sede, por nombre. */
+async function ticketCashiers(tx: Db, orgId: string, branchId: string) {
+  return tx
+    .selectDistinct({ id: user.id, name: user.name })
+    .from(paymentTicket)
+    .innerJoin(user, eq(user.id, paymentTicket.createdBy))
+    .where(and(eq(paymentTicket.organizationId, orgId), eq(paymentTicket.branchId, branchId)))
+    .orderBy(asc(user.name))
+}
+
+// --- Deudas: la lista para cobrar lo pendiente ----------------------------------------------
+
+/** `monto`: lo que debe, de mayor a menor; `antigua`: desde cuándo; `reciente`: lo último atendido. */
+export const DEBT_SORTS = ["monto", "antigua", "reciente"] as const
+export type DebtSort = (typeof DEBT_SORTS)[number]
+
+export interface DebtListQuery {
+  branchId: string
+  /** Nombre o documento. */
+  q?: string
+  /** Debe desde hace más de 30 o de 90 días. */
+  age?: "30" | "90"
+  /** `hoy`: solo quienes salieron hoy de su atención (la Caja). */
+  when?: "hoy"
+  sort?: DebtSort
+  cursor?: string
+  limit?: number
+}
+
+export interface DebtListRow extends DebtRow {
+  /** Lo que debe ya descontado su saldo a favor. */
+  dueCents: number
+  creditUsedCents: number
+  /** Días de calendario, en la zona de la sede, desde lo más antiguo que debe. */
+  ageDays: number | null
+  docType: string | null
+  docNumber: string | null
+  /** Su próxima cita: a quien ya viene se le cobra entonces. */
+  nextAppointmentAt: Date | null
+}
+
+function debtTotals(rows: DebtListRow[]) {
+  const totals = new Map<string, number>()
+  for (const row of rows) totals.set(row.currency, addCents(totals.get(row.currency) ?? 0, row.dueCents))
+  return {
+    people: new Set(rows.map((row) => row.patientId)).size,
+    totals: [...totals.entries()].map(([currency, cents]) => ({ currency, cents })),
+  }
+}
+
+function daysBetweenKeys(from: string, to: string): number {
+  return Math.max(0, Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000))
+}
+
+/**
+ * Quién debe en una sede, por páginas, con lo que debe concepto por concepto,
+ * su documento y su próxima cita. `summary` es de la sede entera (sin la
+ * búsqueda ni la antigüedad): cuánto se debe, desde hace más de 30 y de 90
+ * días, y lo que se debe de antes de hoy.
+ */
+export async function listDebts(tx: Db, orgId: string, query: DebtListQuery) {
+  const branchRow = await requireBranch(tx, orgId, query.branchId)
+  const timezone = await branchTimezone(tx, orgId, branchRow)
+  const today = dayKeyIn(new Date(), timezone)
+  const limit = Math.min(Math.max(query.limit ?? 30, 1), 100)
+  const offset = query.cursor ? Number(query.cursor) : 0
+  if (!Number.isInteger(offset) || offset < 0) throw validation("La página pedida no es válida")
+  const debts = await getDebts(tx, orgId, { branchId: branchRow.id })
+  const patientIds = [...new Set(debts.map((row) => row.patientId))]
+  const docs = patientIds.length
+    ? await tx
+        .select({ id: patient.id, docType: patientPerson.docType, docNumber: patientPerson.docNumber })
+        .from(patient)
+        .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+        .where(and(eq(patient.organizationId, orgId), inArray(patient.id, patientIds)))
+    : []
+  const docOf = new Map(docs.map((row) => [row.id, row]))
+  const all: DebtListRow[] = debts.map((row) => {
+    const creditUsedCents = Math.max(0, Math.min(row.creditCents, row.totalCents))
+    return {
+      ...row,
+      dueCents: row.totalCents - creditUsedCents,
+      creditUsedCents,
+      ageDays: row.oldestSince ? daysBetweenKeys(dayKeyIn(row.oldestSince, timezone), today) : null,
+      docType: docOf.get(row.patientId)?.docType ?? null,
+      docNumber: docOf.get(row.patientId)?.docNumber ?? null,
+      nextAppointmentAt: null,
+    }
+  })
+  const olderThan = (days: number) => all.filter((row) => (row.ageDays ?? 0) > days)
+
+  const q = query.q?.trim() ?? ""
+  const digits = q ? searchDigits(q) : ""
+  const listed = all
+    .filter((row) => query.when !== "hoy" || row.attendedTodayAt !== null)
+    .filter((row) => !query.age || (row.ageDays ?? 0) > Number(query.age))
+    .filter((row) =>
+      !q
+        ? true
+        : digits
+          ? (row.docNumber ?? "").replace(/\D/g, "").includes(digits)
+          : textMatchesWords([row.displayName, row.docNumber], q),
+    )
+  const time = (at: Date | null) => at?.getTime() ?? 0
+  const sort: DebtSort = query.sort ?? "monto"
+  listed.sort((a, b) =>
+    query.when === "hoy"
+      ? time(a.attendedTodayAt) - time(b.attendedTodayAt)
+      : sort === "antigua"
+        ? (a.oldestSince ? time(a.oldestSince) : Number.POSITIVE_INFINITY) -
+          (b.oldestSince ? time(b.oldestSince) : Number.POSITIVE_INFINITY)
+        : sort === "reciente"
+          ? time(b.lastAttended?.at ?? b.latestSince) - time(a.lastAttended?.at ?? a.latestSince)
+          : b.dueCents - a.dueCents,
+  )
+  const page = listed.slice(offset, offset + limit)
+  const pageIds = [...new Set(page.map((row) => row.patientId))]
+  const next = pageIds.length
+    ? await tx
+        .select({
+          patientId: appointment.patientId,
+          at: sql<Date>`min(${appointment.startsAt})`.mapWith(appointment.startsAt),
+        })
+        .from(appointment)
+        .where(
+          and(
+            eq(appointment.organizationId, orgId),
+            inArray(appointment.patientId, pageIds),
+            gt(appointment.startsAt, new Date()),
+            inArray(appointment.status, ["programada", "confirmada"]),
+            eq(appointment.isTest, false),
+          ),
+        )
+        .groupBy(appointment.patientId)
+    : []
+  const nextOf = new Map(next.map((row) => [row.patientId, row.at]))
+
+  return {
+    timezone,
+    total: listed.length,
+    nextCursor: offset + limit < listed.length ? String(offset + limit) : null,
+    summary: {
+      ...debtTotals(all),
+      over30: debtTotals(olderThan(30)),
+      over90: debtTotals(olderThan(90)),
+      /** Lo que se debe de antes de hoy: la línea de la Caja. */
+      earlier: debtTotals(all.filter((row) => row.attendedTodayAt === null)),
+    },
+    data: page.map((row) => ({ ...row, nextAppointmentAt: nextOf.get(row.patientId) ?? null })),
+  }
 }

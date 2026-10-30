@@ -18,10 +18,16 @@ import {
   addCashMovement,
   closeCashWindow,
   createExpense,
+  DEBT_SORTS,
   getCashState,
   getClosureSheet,
   getDayMovements,
   getDebts,
+  getTicketReceiptById,
+  listDebts,
+  listTickets,
+  TICKET_SORTS,
+  TICKET_STATES,
   dismissExpenseGap,
   EXPENSE_CATEGORIES,
   getMonthExpenses,
@@ -109,6 +115,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         limit: z.coerce.number().int().min(1).max(100).optional(),
         // Página siguiente: `closedAt` del último cierre ya recibido.
         before: isoDateTime.optional(),
+        // `descuadre`: solo los que no cuadraron.
+        result: z.enum(["descuadre"]).optional(),
       })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -164,6 +172,73 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
     )
   })
 
+  // Deudas de una sede por páginas, con búsqueda, antigüedad y orden.
+  app.get("/debts/list", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid(),
+        q: z.string().max(200).optional(),
+        age: z.enum(["30", "90"]).optional(),
+        when: z.enum(["hoy"]).optional(),
+        sort: z.enum(DEBT_SORTS).optional(),
+        cursor: z.string().max(20).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .strict()
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => listDebts(tx, orgId, parsed.data)),
+    )
+  })
+
+  // --- Cobros: todos los tickets de la sede ------------------------------------------
+  // Medios y quién cobró van separados por comas: `methods=<id>,<id>`.
+  const idList = z
+    .string()
+    .max(2000)
+    .transform((value) => value.split(",").map((item) => item.trim()).filter(Boolean))
+  app.get("/tickets", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const parsed = z
+      .object({
+        branchId: z.uuid(),
+        q: z.string().max(200).optional(),
+        from: isoDay.optional(),
+        to: isoDay.optional(),
+        methods: idList.optional(),
+        cashiers: idList.optional(),
+        state: z.enum(TICKET_STATES).optional(),
+        sort: z.enum(TICKET_SORTS).optional(),
+        cursor: z.string().max(500).optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .strict()
+      .safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const { methods, cashiers, ...query } = parsed.data
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listTickets(tx, orgId, {
+          ...query,
+          ...(methods ? { methodIds: methods } : {}),
+          ...(cashiers ? { cashierIds: cashiers } : {}),
+        }),
+      ),
+    )
+  })
+
+  // Un ticket por su identificador: la lista y el buscador rápido lo abren sin saber de quién es.
+  app.get("/tickets/:id", async (c) => {
+    const { orgId } = orgContextOf(c)
+    const params = z.object({ id: z.uuid() }).safeParse(c.req.param())
+    if (!params.success) return validationError(c, params.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getTicketReceiptById(tx, orgId, params.data.id)),
+    )
+  })
+
   app.get("/movements", async (c) => {
     const { orgId } = orgContextOf(c)
     const parsed = z
@@ -201,6 +276,8 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         year: z.coerce.number().int().min(2000).max(2100),
         month: z.coerce.number().int().min(1).max(12),
         branchId: z.uuid().optional(),
+        q: z.string().max(200).optional(),
+        category: z.enum(EXPENSE_CATEGORIES).optional(),
       })
       .safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)

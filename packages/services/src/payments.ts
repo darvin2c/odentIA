@@ -2747,6 +2747,20 @@ export async function getTicketReceipt(tx: Db, orgId: string, patientId: string,
   }
 }
 
+/**
+ * El mismo ticket, buscado solo por su identificador: la lista de Cobros y el
+ * buscador rápido lo abren sin saber de quién es. Dice también de qué paciente.
+ */
+export async function getTicketReceiptById(tx: Db, orgId: string, ticketId: string) {
+  const [row] = await tx
+    .select({ patientId: paymentTicket.patientId })
+    .from(paymentTicket)
+    .where(and(eq(paymentTicket.id, ticketId), eq(paymentTicket.organizationId, orgId)))
+    .limit(1)
+  if (!row) throw notFound("Ticket")
+  return { patientId: row.patientId, ...(await getTicketReceipt(tx, orgId, row.patientId, ticketId)) }
+}
+
 export async function getPatientAccount(tx: Db, orgId: string, patientId: string) {
   await requirePatient(tx, orgId, patientId)
   const charges = await tx

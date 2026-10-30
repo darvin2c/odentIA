@@ -73,6 +73,7 @@ export type SearchTarget =
   | { screen: "compra"; purchaseOrderId: string }
   | { screen: "proveedores" }
   | { screen: "gastos"; spentAt: string }
+  | { screen: "ticket"; ticketId: string; branchId: string }
   | { screen: "comisiones"; professionalUserId: string; year: number; month: number }
   | { screen: "agenda"; professionalUserId?: string; branchId?: string }
   | { screen: "conocimiento"; q: string }
@@ -454,7 +455,7 @@ export async function searchEverything(
   }
   if (seesPeople && can("finance.read") && on("dinero") && docNumber != null) {
     const tickets = await rows(sql`
-      select t.id, t.ticket_number, t.total_cents, t.currency, t.created_at, p.person_id
+      select t.id, t.ticket_number, t.total_cents, t.currency, t.created_at, t.branch_id, p.person_id
       from payment_ticket t join patient p on p.organization_id = t.organization_id and p.id = t.patient_id
       where t.organization_id = ${orgId} and t.voided_at is null and t.ticket_number = ${docNumber}
       order by t.created_at desc limit ${PER_TYPE}`)
@@ -468,7 +469,8 @@ export async function searchEverything(
         at: iso(row.created_at),
         amount: { cents: num(row.total_cents), currency: String(row.currency) },
         matched: true,
-        target: { screen: "persona", personId: String(row.person_id), section: "cuenta" },
+        // El ticket mismo, abierto en Cobros de su sede (no la cuenta de la persona).
+        target: { screen: "ticket", ticketId: String(row.id), branchId: String(row.branch_id) },
       })
   }
   if (can("finance.read") && on("dinero") && !digits) {

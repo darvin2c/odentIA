@@ -141,6 +141,140 @@ export function totalsByCurrency(rows: Array<{ currency: string; cents: number }
   return [...totals.entries()]
 }
 
+// --- Deudas por páginas: GET /finance/debts/list -------------------------------------
+
+/** El orden de Deudas; sin `sort` en la dirección, lo que más se debe primero. */
+export const DEBT_SORT_OPTIONS = [
+  { value: "monto", label: "Mayor monto" },
+  { value: "antigua", label: "Más antigua" },
+  { value: "reciente", label: "Atendido hace poco" },
+] as const
+
+export interface DebtListRow extends DebtRow {
+  /** Lo que debe ya descontado su saldo a favor. */
+  dueCents: number
+  creditUsedCents: number
+  /** Días de calendario en la zona de la sede desde lo más antiguo que debe. */
+  ageDays: number | null
+  docType: string | null
+  docNumber: string | null
+  nextAppointmentAt: string | null
+}
+
+export interface DebtTotals {
+  people: number
+  totals: Array<{ currency: string; cents: number }>
+}
+
+export interface DebtListBody {
+  timezone: string
+  total: number
+  nextCursor: string | null
+  /** De la sede entera, sin la búsqueda ni la antigüedad. */
+  summary: DebtTotals & { over30: DebtTotals; over90: DebtTotals; earlier: DebtTotals }
+  data: DebtListRow[]
+}
+
+export interface DebtListParams {
+  q?: string
+  age?: "30" | "90"
+  /** `hoy`: quienes salieron hoy de su atención (la Caja). */
+  when?: "hoy"
+  sort?: string
+}
+
+export function fetchDebtList(
+  branchId: string,
+  params: DebtListParams,
+  cursor: string | null,
+  limit = 30,
+): Promise<{ data: DebtListBody }> {
+  const search = new URLSearchParams({ branchId, limit: String(limit) })
+  if (params.q?.trim()) search.set("q", params.q.trim())
+  if (params.age) search.set("age", params.age)
+  if (params.when) search.set("when", params.when)
+  if (params.sort) search.set("sort", params.sort)
+  if (cursor) search.set("cursor", cursor)
+  return apiFetch<{ data: DebtListBody }>(`/api/finance/debts/list?${search}`)
+}
+
+// --- Cobros: GET /finance/tickets ------------------------------------------------------
+
+/** El orden de Cobros; sin `sort` en la dirección, los más recientes primero. */
+export const TICKET_SORT_OPTIONS = [
+  { value: "recientes", label: "Más recientes" },
+  { value: "antiguos", label: "Más antiguos" },
+  { value: "monto", label: "Mayor monto" },
+] as const
+
+export const TICKET_STATE_OPTIONS = [
+  { value: "vigentes", label: "Vigentes" },
+  { value: "anulados", label: "Anulados" },
+  { value: "devolucion", label: "Con devolución" },
+] as const
+
+/** Un ticket en la lista de Cobros: lo que congeló al cobrar y lo que pasó después. */
+export interface TicketListRow {
+  id: string
+  number: number
+  patientId: string
+  displayName: string
+  docType: string | null
+  docNumber: string | null
+  createdAt: string
+  currency: string
+  totalCents: number
+  creditAppliedCents: number
+  lines: Array<{ description: string; appliedCents: number }>
+  methods: Array<{ name: string; amountCents: number }>
+  cashierName: string | null
+  remainingCents: number
+  voided: { at: string; reason: string | null; byName: string | null } | null
+  returnedCents: number
+}
+
+export interface TicketTotals {
+  currency: string
+  tickets: number
+  cobradoCents: number
+  refundedCents: number
+  byMethod: Array<{ name: string; cents: number }>
+}
+
+export interface TicketListBody {
+  timezone: string
+  /** La búsqueda fue un número: se buscó en todas las fechas. */
+  allDates: boolean
+  total: number
+  totals: TicketTotals[]
+  nextCursor: string | null
+  /** Solo en la primera página: quiénes cobraron en la sede. */
+  cashiers: Array<{ id: string; name: string }> | null
+  data: TicketListRow[]
+}
+
+export interface TicketListParams {
+  q?: string
+  from?: string
+  to?: string
+  methods?: string
+  cashiers?: string
+  state?: string
+  sort?: string
+}
+
+export function fetchTickets(
+  branchId: string,
+  params: TicketListParams,
+  cursor: string | null,
+  limit = 30,
+): Promise<{ data: TicketListBody }> {
+  const search = new URLSearchParams({ branchId, limit: String(limit) })
+  for (const [key, value] of Object.entries(params)) if (value?.trim()) search.set(key, value.trim())
+  if (cursor) search.set("cursor", cursor)
+  return apiFetch<{ data: TicketListBody }>(`/api/finance/tickets?${search}`)
+}
+
 // --- Movimientos del día: GET /finance/movements ------------------------------------
 
 export type MovementKind = "apertura" | "cobro" | "gasto" | "aporte" | "retiro" | "devolucion"
@@ -401,13 +535,18 @@ export interface ClosureListItem {
 /** Cierres por página; hay más mientras una página llegue completa. */
 export const CLOSURES_PAGE = 20
 
-/** `before`: `closedAt` del último cierre ya recibido (página siguiente). */
+/**
+ * `before`: `closedAt` del último cierre ya recibido (página siguiente).
+ * `result`: `descuadre` deja solo los que no cuadraron.
+ */
 export function fetchClosures(
   branchId: string,
   before?: string | null,
+  result?: "descuadre",
 ): Promise<{ data: ClosureListItem[] }> {
   const params = new URLSearchParams({ branchId, limit: String(CLOSURES_PAGE) })
   if (before) params.set("before", before)
+  if (result) params.set("result", result)
   return apiFetch<{ data: ClosureListItem[] }>(`/api/finance/closures?${params}`)
 }
 
@@ -444,6 +583,8 @@ export interface ClosureSheet {
     receiptWidth: string
   } | null
   closedByName: string | null
+  /** Lo que contó: los movimientos de la ventana que mueven el efectivo. */
+  counted: DayMovement[]
 }
 
 /** Acepta el id del cierre o el de su ventana (el que trae el aviso de diferencia). */
@@ -497,6 +638,8 @@ export interface ExpenseRow {
   /** Es el pago de una compra de Inventario (ADR 0061). */
   purchaseOrderId: string | null
   purchaseOrderNumber: number | null
+  /** El proveedor de esa compra. */
+  supplierName: string | null
   /** Es el pago de una comisión. */
   commission: boolean
 }
@@ -506,9 +649,11 @@ export interface MonthExpenses {
   month: number
   currency: string
   timezone: string
-  /** Sin los anulados y solo en la moneda de la clínica. */
+  /** Del mes entero, sin los anulados y solo en la moneda de la clínica. */
   totalCents: number
   byCategory: Array<{ category: string; cents: number }>
+  /** Lo que queda a la vista con la búsqueda y el tipo. */
+  shown: { count: number; totalCents: number }
   /** Incluye los anulados, marcados. */
   expenses: ExpenseRow[]
 }
@@ -517,12 +662,16 @@ export function fetchMonthExpenses(query: {
   branchId: string
   year: number
   month: number
+  q?: string
+  category?: string
 }): Promise<{ data: MonthExpenses }> {
   const params = new URLSearchParams({
     branchId: query.branchId,
     year: String(query.year),
     month: String(query.month),
   })
+  if (query.q?.trim()) params.set("q", query.q.trim())
+  if (query.category) params.set("category", query.category)
   return apiFetch<{ data: MonthExpenses }>(`/api/finance/expenses/month?${params}`)
 }
 
@@ -634,13 +783,15 @@ export function formatMonthName(ref: MonthRef, locale: string): string {
 /** Claves de React Query: Caja, sus paneles y el cobro invalidan por estos prefijos. */
 export const financeKeys = {
   cash: (branchId: string) => ["finance-cash", branchId] as const,
-  debts: (branchId: string) => ["finance-debts", branchId] as const,
+  debtList: (branchId: string, params: DebtListParams) => ["finance-debts", "list", branchId, params] as const,
   movements: (branchId: string, day: string) => ["finance-movements", branchId, day] as const,
-  closures: (branchId: string) => ["finance-closures", branchId] as const,
+  closures: (branchId: string, result?: string) => ["finance-closures", branchId, result ?? "todos"] as const,
   closure: (id: string) => ["finance-closure", id] as const,
-  expenses: (branchId: string, ref: MonthRef) =>
-    ["finance-expenses", branchId, ref.year, ref.month] as const,
+  expenses: (branchId: string, ref: MonthRef, q = "", category = "") =>
+    ["finance-expenses", branchId, ref.year, ref.month, q, category] as const,
   purchases: (branchId: string | null) => ["finance-purchases", branchId] as const,
+  tickets: (branchId: string, params: TicketListParams) => ["finance-tickets", branchId, params] as const,
+  ticket: (id: string) => ["finance-ticket", id] as const,
 }
 
 /** Todo lo que cambia cuando entra o sale dinero, o cuando la caja se cierra. */
@@ -652,6 +803,8 @@ export function invalidateFinance(queryClient: QueryClient): void {
     "finance-closures",
     "finance-expenses",
     "finance-purchases",
+    "finance-tickets",
+    "finance-ticket",
     // Un gasto o el pago de una compra cambian Inventario y Reportes.
     "inventory",
     "report",
