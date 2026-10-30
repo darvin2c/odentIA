@@ -14,7 +14,7 @@ Receta, orden, descanso, consentimiento, presupuesto, ticket, devolución, histo
 - **Explicación por servicio** (`PatientGuide`): biblioteca → servicio → ajuste del presupuesto → copia al entregar. La biblioteca solo sugiere: nada le llega a un paciente hasta que la clínica lo guarda, y sin explicación el servicio sale solo con nombre y precio. Lo entregado no cambia: lo protege también la base.
 - **Lo clínico del presupuesto** (`findings`, diagnósticos y alergias) sale solo a quien tiene `clinical.read` o en el papel para la propia persona o su representante. `findings` no viaja en `getBudgetDetail`, así que no llega al agente ni a lo público por esa vía.
 - **Sin Clío en esta entrega**: `findings` lo escribe el profesional; por defecto sale el nombre del diagnóstico.
-- **Un papel no crea enlaces**: el QR de «Su enlace» en el presupuesto sale solo si quien decide ya tiene uno vivo. Generarlo renueva o revoca enlaces, un efecto que un GET de impresión no debe tener; enviar el presupuesto sí lo emite, y lo hace antes de armar la hoja.
+- **Un papel no crea enlaces**: el QR de «Su enlace» en el presupuesto sale solo si quien decide ya tiene uno vivo. Generarlo renueva o revoca enlaces, un efecto que un GET de impresión no debe tener; enviar el presupuesto sí lo emite, y lo hace antes de armar la hoja. Ajusta [0037](0037-su-enlace-y-portal-en-un-paso.md): el QR lleva el enlace en el PDF guardado, y quien ve ese PDF lo tiene, como quien hoy usa «Copiar enlace» o «Mostrar su código». El equipo no gana un acceso nuevo; a cambio, la persona responde sin imprimir.
 
 ## Alternativas descartadas
 
