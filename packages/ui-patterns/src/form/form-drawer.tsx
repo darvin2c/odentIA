@@ -19,7 +19,6 @@ export interface FormDrawerProps {
   isSubmitting?: boolean
   isLoading?: boolean
   error?: string | null
-  fieldErrors?: Record<string, string>
   submitLabel?: string
   cancelLabel?: string
   submitDisabled?: boolean

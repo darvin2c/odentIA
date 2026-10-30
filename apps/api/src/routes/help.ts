@@ -30,16 +30,21 @@ import { orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
 
-const askInput = z.object({ question: z.string().trim().min(3).max(500), screen: z.string().max(200) })
+const askInput = z.object({
+  question: z.string().trim().min(3, "Escribe tu pregunta: al menos 3 caracteres.").max(500, "Escribe como mucho 500 caracteres."),
+  screen: z.string().max(200),
+})
 const feedbackInput = z.object({ helpful: z.boolean() })
 const requestInput = z.object({
-  question: z.string().trim().min(3).max(500),
+  question: z.string().trim().min(3, "Escribe lo que quieres enviar: al menos 3 caracteres.").max(500, "Escribe como mucho 500 caracteres."),
   screen: z.string().max(200),
   kind: z.enum(["pregunta", "problema"]).optional(),
-  detail: z.string().max(500).optional(),
+  detail: z.string().max(500, "Escribe como mucho 500 caracteres.").optional(),
 })
-const caseMessageInput = z.object({ body: z.string().trim().min(1).max(4000) })
-const grantInput = z.object({ minutes: z.number().int().min(5).max(60).optional() })
+const caseMessageInput = z.object({ body: z.string().trim().min(1, "Escribe tu respuesta.").max(4000, "Escribe como mucho 4000 caracteres.") })
+const grantInput = z.object({
+  minutes: z.number().int("El acceso se autoriza entre 5 y 60 minutos.").min(5, "El acceso se autoriza entre 5 y 60 minutos.").max(60, "El acceso se autoriza entre 5 y 60 minutos.").optional(),
+})
 const grantRevokeInput = z.object({ grantId: z.uuid() })
 
 /**
@@ -179,7 +184,7 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const caseId = c.req.param("id")
     const declaredSize = Number(c.req.header("content-length") ?? 0)
     if (Number.isFinite(declaredSize) && declaredSize > SUPPORT_ATTACHMENT_MAX_BYTES + 65_536) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 413)
+      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB", { file: "El archivo no puede superar 10 MB" }), 413)
     }
     // Auth primero: pertenencia, autoría y caso escribible, sin subir nada aún.
     try {
@@ -190,10 +195,10 @@ export function createHelpRoute(deps: CrmDeps & { appVersion?: string | null }) 
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
     if (!(file instanceof File)) {
-      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
+      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo", { file: "Adjunta un archivo" }), 400)
     }
     if (file.size > SUPPORT_ATTACHMENT_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 400)
+      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB", { file: "El archivo no puede superar 10 MB" }), 400)
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
     let sniffed: { mimeType: string; ext: string }

@@ -3,22 +3,27 @@
  * mensual con resumen por correo y anulación trazable.
  */
 import { formatMoney } from "@odentia/clinical"
-import { Button, Input, Label } from "@odentia/ui"
+import { Button } from "@odentia/ui"
 import {
-  ConfirmDialog,
   EmptyState,
   ErrorState,
   FormDrawer,
   LoadingState,
   PageHeader,
   PageShell,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { requireAdminRole } from "../../lib/session"
 import { Plus } from "lucide-react"
 import { useState } from "react"
-import { ApiError, api } from "../../lib/api"
+import { z } from "zod"
+import { api } from "../../lib/api"
+import { CurrencySelect } from "../../components/billing-fields"
+import { ReasonDialog } from "../../components/reason-dialog"
 
 export const Route = createFileRoute("/_app/commissions")({
   beforeLoad: requireAdminRole,
@@ -72,17 +77,11 @@ function percent(rateBps: number): string {
   return `${new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 }).format(rateBps / 100)} %`
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? `Error ${error.status}`
-  return "Error inesperado"
-}
-
 function CommissionsPage() {
   const queryClient = useQueryClient()
   const [sellerDrawer, setSellerDrawer] = useState<null | { seller?: Seller }>(null)
   const [settleDrawer, setSettleDrawer] = useState<null | { seller: Seller }>(null)
   const [voidTarget, setVoidTarget] = useState<Settlement | null>(null)
-  const [voidReason, setVoidReason] = useState("")
 
   const sellers = useQuery({
     queryKey: ["admin", "commissions", "sellers"],
@@ -102,18 +101,12 @@ function CommissionsPage() {
   }
 
   const voidSettlement = useMutation({
-    mutationFn: () => {
-      if (!voidTarget) throw new Error("Sin liquidación")
-      return api(`/api/admin/billing/settlements/${voidTarget.id}/void`, {
+    mutationFn: ({ target, reason }: { target: Settlement; reason: string }) =>
+      api(`/api/admin/billing/settlements/${target.id}/void`, {
         method: "POST",
-        body: JSON.stringify({ reason: voidReason }),
-      })
-    },
-    onSuccess: () => {
-      setVoidTarget(null)
-      setVoidReason("")
-      refresh()
-    },
+        body: JSON.stringify({ reason }),
+      }),
+    onSuccess: refresh,
   })
 
   return (
@@ -133,7 +126,7 @@ function CommissionsPage() {
         ) : sellers.isError ? (
           <ErrorState
             title="No se pudieron cargar los vendedores"
-            message={errorMessage(sellers.error)}
+            message={submitErrorMessage(sellers.error)}
             onRetry={() => void sellers.refetch()}
           />
         ) : sellers.data.length === 0 ? (
@@ -184,7 +177,7 @@ function CommissionsPage() {
         ) : pending.isError ? (
           <ErrorState
             title="No se pudieron cargar las comisiones"
-            message={errorMessage(pending.error)}
+            message={submitErrorMessage(pending.error)}
             onRetry={() => void pending.refetch()}
           />
         ) : pending.data.length === 0 ? (
@@ -226,7 +219,7 @@ function CommissionsPage() {
         ) : settlements.isError ? (
           <ErrorState
             title="No se pudieron cargar las liquidaciones"
-            message={errorMessage(settlements.error)}
+            message={submitErrorMessage(settlements.error)}
             onRetry={() => void settlements.refetch()}
           />
         ) : settlements.data.length === 0 ? (
@@ -276,30 +269,41 @@ function CommissionsPage() {
           onSaved={refresh}
         />
       ) : null}
-      <ConfirmDialog
+      <ReasonDialog
         open={voidTarget !== null}
+        id="void-reason"
         title="Anular liquidación"
         description="Las comisiones vuelven a quedar por liquidar y los ajustes a quedar por aplicar. Las líneas originales se conservan (no se borran)."
         confirmLabel="Anular"
-        onConfirm={() => voidSettlement.mutate()}
-        onClose={() => {
-          setVoidTarget(null)
-          setVoidReason("")
-        }}
-      >
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="void-reason">Motivo</Label>
-          <Input
-            id="void-reason"
-            value={voidReason}
-            onChange={(event) => setVoidReason(event.target.value)}
-            placeholder="Por qué se anula"
-          />
-        </div>
-      </ConfirmDialog>
+        placeholder="Por qué se anula"
+        onConfirm={(reason) =>
+          voidTarget ? voidSettlement.mutateAsync({ target: voidTarget, reason }) : Promise.resolve()
+        }
+        onClose={() => setVoidTarget(null)}
+      />
     </PageShell>
   )
 }
+
+const sellerSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(1, "Escribe el nombre del vendedor")
+    .max(120, "Escribe el nombre en 120 caracteres como mucho"),
+  rate: z
+    .string()
+    .trim()
+    .min(1, "Escribe el porcentaje")
+    .regex(/^\d{1,3}([.,]\d{1,2})?$/, "Escribe el porcentaje con hasta dos decimales, como 10 o 12,5")
+    .refine((value) => Number(value.replace(",", ".")) <= 100, "El porcentaje debe estar entre 0 y 100 %"),
+  windowDays: z
+    .string()
+    .trim()
+    .min(1, "Escribe la ventana en días")
+    .regex(/^\d+$/, "Escribe la ventana en días enteros")
+    .refine((value) => Number(value) <= 730, "La ventana debe estar entre 0 y 730 días"),
+})
 
 function SellerDrawer({
   seller,
@@ -310,86 +314,69 @@ function SellerDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
-  const [displayName, setDisplayName] = useState(seller?.displayName ?? "")
-  const [rate, setRate] = useState(seller ? String(seller.rateBps / 100) : "")
-  const [windowDays, setWindowDays] = useState(seller ? String(seller.windowDays) : "90")
-  const [error, setError] = useState<string | null>(null)
-
   const save = useMutation({
-    mutationFn: () => {
-      const rateBps = Math.round(Number(rate) * 100)
-      if (!Number.isInteger(rateBps) || rateBps < 0 || rateBps > 10000) {
-        throw new Error("Porcentaje inválido (0–100)")
-      }
-      return api("/api/admin/billing/sellers", {
-        method: "PUT",
-        body: JSON.stringify({
-          userId: seller?.userId ?? null,
-          displayName: displayName.trim(),
-          rateBps,
-          windowDays: Number(windowDays),
-        }),
-      })
+    mutationFn: (body: { userId: string | null; displayName: string; rateBps: number; windowDays: number }) =>
+      api("/api/admin/billing/sellers", { method: "PUT", body: JSON.stringify(body) }),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      displayName: seller?.displayName ?? "",
+      rate: seller ? String(seller.rateBps / 100) : "",
+      windowDays: seller ? String(seller.windowDays) : "90",
     },
-    onSuccess: () => {
+    validators: { onSubmit: sellerSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({
+        userId: seller?.userId ?? null,
+        displayName: value.displayName.trim(),
+        rateBps: Math.round(Number(value.rate.trim().replace(",", ".")) * 100),
+        windowDays: Number(value.windowDays.trim()),
+      })
       onSaved()
       onClose()
     },
-    onError: (e) =>
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar") : "No se pudo guardar",
-      ),
   })
 
   return (
     <FormDrawer
+      {...useFormSurface(form, { fieldMap: { rateBps: "rate" } })}
       open
       title={seller ? "Editar vendedor" : "Nuevo vendedor"}
       submitLabel="Guardar"
-      onSubmit={() => save.mutate()}
       onClose={onClose}
-      isSubmitting={save.isPending}
     >
       <p className="text-sm text-muted-foreground">
         El porcentaje y la ventana se congelan por cobro al confirmar; cambiarlos no toca lo ya
         liquidado.
       </p>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="seller-name">Nombre</Label>
-        <Input
-          id="seller-name"
-          value={displayName}
-          onChange={(event) => setDisplayName(event.target.value)}
-        />
-      </div>
+      <form.AppField name="displayName">
+        {(field) => <field.TextField id="seller-name" label="Nombre" maxLength={120} />}
+      </form.AppField>
       <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="seller-rate">Porcentaje (0–100)</Label>
-          <Input
-            id="seller-rate"
-            inputMode="decimal"
-            value={rate}
-            onChange={(event) => setRate(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="seller-window">Ventana (días)</Label>
-          <Input
-            id="seller-window"
-            inputMode="numeric"
-            value={windowDays}
-            onChange={(event) => setWindowDays(event.target.value)}
-          />
-        </div>
+        <form.AppField name="rate">
+          {(field) => <field.TextField id="seller-rate" label="Porcentaje (0–100)" inputMode="decimal" />}
+        </form.AppField>
+        <form.AppField name="windowDays">
+          {(field) => <field.TextField id="seller-window" label="Ventana (días)" inputMode="numeric" />}
+        </form.AppField>
       </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
     </FormDrawer>
   )
 }
+
+const settleSchema = z.object({
+  year: z
+    .string()
+    .trim()
+    .regex(/^\d{4}$/, "Escribe el año con cuatro cifras")
+    .refine((value) => Number(value) >= 2000 && Number(value) <= 2100, "El año debe estar entre 2000 y 2100"),
+  month: z
+    .string()
+    .trim()
+    .regex(/^\d{1,2}$/, "Escribe el mes con un número del 1 al 12")
+    .refine((value) => Number(value) >= 1 && Number(value) <= 12, "El mes debe estar entre 1 y 12"),
+  currency: z.string().min(1, "Elige la moneda"),
+})
 
 function SettleDrawer({
   seller,
@@ -400,79 +387,62 @@ function SettleDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
-  const now = new Date()
-  const [year, setYear] = useState(String(now.getUTCFullYear()))
-  const [month, setMonth] = useState(String(now.getUTCMonth() + 1))
-  const [currency, setCurrency] = useState("PEN")
-  const [error, setError] = useState<string | null>(null)
-
   const save = useMutation({
-    mutationFn: () =>
-      api("/api/admin/billing/settlements", {
-        method: "POST",
-        body: JSON.stringify({
-          sellerId: seller.id,
-          year: Number(year),
-          month: Number(month),
-          currency,
-        }),
-      }),
-    onSuccess: () => {
+    mutationFn: (body: { sellerId: string; year: number; month: number; currency: string }) =>
+      api("/api/admin/billing/settlements", { method: "POST", body: JSON.stringify(body) }),
+  })
+  const now = new Date()
+  const form = useAppForm({
+    defaultValues: { year: String(now.getUTCFullYear()), month: String(now.getUTCMonth() + 1), currency: "PEN" },
+    validators: { onSubmit: settleSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({
+        sellerId: seller.id,
+        year: Number(value.year.trim()),
+        month: Number(value.month.trim()),
+        currency: value.currency,
+      })
       onSaved()
       onClose()
     },
-    onError: (e) =>
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo liquidar") : "No se pudo liquidar",
-      ),
   })
 
   return (
     <FormDrawer
+      {...useFormSurface(form)}
       open
       title={`Liquidar a ${seller.displayName}`}
       submitLabel="Liquidar y avisar por correo"
-      onSubmit={() => save.mutate()}
       onClose={onClose}
-      isSubmitting={save.isPending}
     >
       <p className="text-sm text-muted-foreground">
         Congela las comisiones pendientes del mes y los ajustes por reversos. Se envía un resumen
         por correo una sola vez.
       </p>
       <div className="grid grid-cols-3 gap-3">
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="settle-year">Año</Label>
-          <Input
-            id="settle-year"
-            inputMode="numeric"
-            value={year}
-            onChange={(event) => setYear(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="settle-month">Mes</Label>
-          <Input
-            id="settle-month"
-            inputMode="numeric"
-            value={month}
-            onChange={(event) => setMonth(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="settle-currency">Moneda</Label>
-          <Input
-            id="settle-currency"
-            value={currency}
-            onChange={(event) => setCurrency(event.target.value)}
-          />
-        </div>
+        <form.AppField name="year">
+          {(field) => <field.TextField id="settle-year" label="Año" inputMode="numeric" maxLength={4} />}
+        </form.AppField>
+        <form.AppField name="month">
+          {(field) => <field.TextField id="settle-month" label="Mes" inputMode="numeric" maxLength={2} />}
+        </form.AppField>
+        <form.AppField name="currency">
+          {(field) => (
+            <field.Control id="settle-currency" label="Moneda">
+              {(control) => (
+                <CurrencySelect
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  onChange={(code) => field.handleChange(code)}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </div>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
     </FormDrawer>
   )
 }

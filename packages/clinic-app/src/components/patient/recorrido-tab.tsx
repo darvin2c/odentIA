@@ -9,11 +9,19 @@
 
 import { label } from "../../lib/glossary"
 import { diagnosisCodeLabel } from "@odentia/clinical"
-import { Badge, Button, Checkbox, Field, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { EmptyState, FormDrawer } from "@odentia/ui-patterns"
+import { Badge, Button, Checkbox } from "@odentia/ui"
+import {
+  EmptyState,
+  FormDrawer,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useId, useState } from "react"
+import { useState } from "react"
+import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetch } from "../../lib/api"
 import { budgetStatusLabel, planDecisionLabel } from "../../lib/budgets"
@@ -25,7 +33,6 @@ import {
   formatDate,
   formatDateTime,
   journeyBalances,
-  mutationMessage,
   NEXT_ACTION_LABELS,
   resumeTreatmentApi,
   reviseTreatmentApi,
@@ -36,7 +43,7 @@ import type { Encounter, PatientSummary, PlanItem, TreatmentNextAction } from ".
 import { planStatusLabel } from "../../lib/patients"
 import { formatMoney } from "@odentia/clinical"
 import { useOrgProfile } from "../../lib/org"
-import { type ServiceCatalogItem } from "../../lib/services"
+import type { ServiceCatalogItem } from "../../lib/services"
 import { ChoiceSelect } from "../ui/choice-select"
 import { DiagnosisSearch } from "./diagnosis-search"
 import { ControlesPanel, RecetasPanel } from "./clinical-panels"
@@ -99,7 +106,6 @@ export function RecorridoClinicoTab({
   onChangeItem: (itemId: string) => void
   onTabChange: (tab: RecorridoTarget, target?: RecorridoNavigation) => void
 }): React.JSX.Element {
-  const uid = useId()
   const navigate = useNavigate()
   const goToEncounter = (encounterId: string) =>
     void navigate({
@@ -163,21 +169,13 @@ export function RecorridoClinicoTab({
 
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<"revise" | "suspend" | "cancel" | null>(null)
-  const [reason, setReason] = useState("")
-  const [service, setService] = useState<ServiceCatalogItem | null>(null)
-  const [toothNumber, setToothNumber] = useState("")
-  const [surfaces, setSurfaces] = useState<string[]>([])
-  const [quadrant, setQuadrant] = useState("")
-  const [arch, setArch] = useState("")
-  const [detail, setDetail] = useState("")
-  const [diagnosis, setDiagnosis] = useState("")
-
-  const reviseTooth = toothNumber.trim() === "" ? null : Number(toothNumber)
-  const surfaceOptions = reviseTooth != null ? (productUi().site?.partsOf(reviseTooth) ?? []) : []
-  const toggleSurface = (surface: string) =>
-    setSurfaces((prev) =>
-      prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface],
-    )
+  // Cada apertura monta un borrador nuevo (valores iniciales una vez, al abrir).
+  const [formKey, setFormKey] = useState(0)
+  const openForm = (kind: "revise" | "suspend" | "cancel") => {
+    setError(null)
+    setFormKey((key) => key + 1)
+    setForm(kind)
+  }
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId, selectedId] })
@@ -187,77 +185,13 @@ export function RecorridoClinicoTab({
     void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
     void queryClient.invalidateQueries({ queryKey: ["patient-account", patientId] })
   }
-  const close = () => {
-    setForm(null)
-    setError(null)
-    setReason("")
-  }
+  const close = () => setForm(null)
 
   const completeMutation = useMutation({
     mutationFn: (encounterId: string) =>
       completeTreatmentApi(patientId, selectedId, { encounterId }),
     onSuccess: invalidate,
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
-  const reviseMutation = useMutation({
-    mutationFn: (encounterId: string) => {
-      if (!service) throw new Error("Elige la nueva prestación.")
-      const scope = service.scope ?? "general"
-      const tooth = toothNumber.trim() === "" ? null : Number(toothNumber)
-      if ((scope === "tooth" || scope === "surfaces") && tooth == null) {
-        throw new Error("Indica la pieza de la nueva indicación.")
-      }
-      if (scope === "surfaces" && surfaces.length === 0) {
-        throw new Error("Marca al menos una superficie.")
-      }
-      if (scope === "quadrant" && !quadrant) throw new Error("Elige el cuadrante.")
-      if (scope === "arch" && !arch) throw new Error("Elige la arcada.")
-      return reviseTreatmentApi(patientId, selectedId, {
-        encounterId,
-        reason: reason.trim(),
-        serviceId: service.id,
-        toothNumber: tooth,
-        surfaces: scope === "surfaces" ? surfaces : null,
-        quadrant: scope === "quadrant" ? Number(quadrant) : null,
-        arch: scope === "arch" ? (arch as "upper" | "lower") : null,
-        detail: detail.trim() === "" ? null : detail.trim(),
-        diagnosisCode: diagnosis.trim() === "" ? null : diagnosis.trim(),
-      })
-    },
-    onSuccess: () => {
-      close()
-      setSurfaces([])
-      setQuadrant("")
-      setArch("")
-      setDetail("")
-      setDiagnosis("")
-      invalidate()
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
-  const suspendMutation = useMutation({
-    mutationFn: () =>
-      suspendTreatmentApi(patientId, selectedId, {
-        reason: reason.trim(),
-        encounterId: summary?.openEncounterId ?? undefined,
-      }),
-    onSuccess: () => {
-      close()
-      invalidate()
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
-  const cancelMutation = useMutation({
-    mutationFn: () =>
-      cancelTreatmentApi(patientId, selectedId, {
-        reason: reason.trim(),
-        encounterId: summary?.openEncounterId ?? undefined,
-      }),
-    onSuccess: () => {
-      close()
-      invalidate()
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
+    onError: (mutationError) => setError(submitErrorMessage(mutationError)),
   })
 
   const summary = summaryQuery.data?.data ?? null
@@ -314,7 +248,7 @@ export function RecorridoClinicoTab({
       })
       invalidate()
     } catch (mutationError) {
-      setError(mutationMessage(mutationError))
+      setError(submitErrorMessage(mutationError))
     } finally {
       setStartingSession(false)
     }
@@ -343,7 +277,7 @@ export function RecorridoClinicoTab({
         invalidate()
         openEncounter(created.data.id)
       } catch (mutationError) {
-        setError(mutationMessage(mutationError))
+        setError(submitErrorMessage(mutationError))
       } finally {
         setStartingSession(false)
       }
@@ -665,14 +599,7 @@ export function RecorridoClinicoTab({
                       size="sm"
                       variant="outline"
                       disabled={!openEncounterId}
-                      onClick={() => {
-                        setError(null)
-                        setService(null)
-                        setToothNumber(
-                          journey.item.toothNumber != null ? String(journey.item.toothNumber) : "",
-                        )
-                        setForm("revise")
-                      }}
+                      onClick={() => openForm("revise")}
                     >
                       Revisar indicación
                     </Button>
@@ -696,10 +623,7 @@ export function RecorridoClinicoTab({
                         type="button"
                         size="sm"
                         variant="outline"
-                        onClick={() => {
-                          setError(null)
-                          setForm("suspend")
-                        }}
+                        onClick={() => openForm("suspend")}
                       >
                         Suspender
                       </Button>
@@ -708,10 +632,7 @@ export function RecorridoClinicoTab({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => {
-                        setError(null)
-                        setForm("cancel")
-                      }}
+                      onClick={() => openForm("cancel")}
                     >
                       Cancelar tratamiento
                     </Button>
@@ -854,161 +775,364 @@ export function RecorridoClinicoTab({
         </>
       )}
 
-      <FormDrawer
+      <ReviseDrawer
+        key={`revise-${formKey}`}
         open={form === "revise"}
-        title="Revisar indicación"
-        description="La indicación anterior queda reemplazada y sus sesiones se conservan en la historia."
-        error={form === "revise" ? error : null}
-        isSubmitting={reviseMutation.isPending}
-        submitLabel="Registrar la revisión"
-        onClose={() => {
-          if (!reviseMutation.isPending) close()
+        patientId={patientId}
+        itemId={selectedId}
+        encounterId={openEncounterId}
+        initialTooth={journey?.item.toothNumber ?? null}
+        onClose={close}
+        onDone={() => {
+          close()
+          invalidate()
         }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!openEncounterId) {
-            setError("Necesitas una atención abierta para revisar la indicación.")
-            return
-          }
-          if (!service) {
-            setError("Elige la nueva prestación.")
-            return
-          }
-          if (!reason.trim()) {
-            setError("Indica el motivo de la revisión.")
-            return
-          }
-          reviseMutation.mutate(openEncounterId)
-        }}
-      >
-        <div className="flex flex-col gap-4">
-          <ServicePicker
-            value={service?.id ?? ""}
-            onChange={(next) => {
-              setService(next)
-              setSurfaces([])
-              setQuadrant("")
-              setArch("")
-              setError(null)
-            }}
-            label="Nueva prestación"
-          />
-          {service?.scope === "surfaces" ? (
-            <Field>
-              <FieldLabel>Superficies revisadas</FieldLabel>
-              <div className="flex flex-wrap gap-2">
-                {surfaceOptions.map((surface) => (
-                  <label key={surface} className="flex items-center gap-1.5 text-sm">
-                    <Checkbox checked={surfaces.includes(surface)} onCheckedChange={() => toggleSurface(surface)} />
-                    {surface}
-                  </label>
-                ))}
-              </div>
-            </Field>
-          ) : null}
-          {service?.scope === "quadrant" ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-revise-quadrant`}>Cuadrante</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-revise-quadrant`}
-                className="w-full"
-                value={quadrant}
-                onChange={(event) => setQuadrant(event.target.value)}
-              >
-                <option value="">Elige el cuadrante</option>
-                {QUADRANTS.map((value) => (
-                  <option key={value} value={value}>
-                    Cuadrante {value}
-                  </option>
-                ))}
-              </ChoiceSelect>
-            </Field>
-          ) : null}
-          {service?.scope === "arch" ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-revise-arch`}>Arcada</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-revise-arch`}
-                className="w-full"
-                value={arch}
-                onChange={(event) => setArch(event.target.value)}
-              >
-                <option value="">Elige la arcada</option>
-                <option value="upper">Superior</option>
-                <option value="lower">Inferior</option>
-              </ChoiceSelect>
-            </Field>
-          ) : null}
-          {productUi().site ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-revise-tooth`}>
-                {service?.scope === "quadrant" || service?.scope === "arch" ? "Pieza (opcional)" : "Pieza"}
-              </FieldLabel>
-              <Input
-                id={`${uid}-revise-tooth`}
-                inputMode="numeric"
-                value={toothNumber}
-                onChange={(event) => setToothNumber(event.target.value)}
-              />
-            </Field>
-          ) : null}
-          <DiagnosisSearch value={diagnosis} onChange={(code) => setDiagnosis(code)} label="Diagnóstico" />
-          <Field>
-            <FieldLabel htmlFor={`${uid}-revise-detail`}>Detalle clínico</FieldLabel>
-            <Textarea
-              id={`${uid}-revise-detail`}
-              maxLength={MAX_TEXT}
-              value={detail}
-              onChange={(event) => setDetail(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-revise-reason`}>Motivo de la revisión</FieldLabel>
-            <Textarea
-              id={`${uid}-revise-reason`}
-              maxLength={MAX_TEXT}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
-        </div>
-      </FormDrawer>
-
-      <FormDrawer
-        dock={false}
+      />
+      <StatusDrawer
+        key={`status-${formKey}`}
+        kind={form === "cancel" ? "cancel" : "suspend"}
         open={form === "suspend" || form === "cancel"}
-        title={form === "cancel" ? "Cancelar tratamiento" : "Suspender tratamiento"}
-        description={
-          form === "cancel"
-            ? "El tratamiento queda cancelado; sus sesiones y documentos se conservan."
-            : "El tratamiento queda suspendido y puede reactivarse después."
-        }
-        error={form != null && form !== "revise" ? error : null}
-        isSubmitting={suspendMutation.isPending || cancelMutation.isPending}
-        submitLabel={form === "cancel" ? "Cancelar tratamiento" : "Suspender"}
-        onClose={() => {
-          if (!suspendMutation.isPending && !cancelMutation.isPending) close()
+        patientId={patientId}
+        itemId={selectedId}
+        encounterId={openEncounterId}
+        onClose={close}
+        onDone={() => {
+          close()
+          invalidate()
         }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo.")
-            return
-          }
-          if (form === "cancel") cancelMutation.mutate()
-          else suspendMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-status-reason`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${uid}-status-reason`}
-            maxLength={MAX_TEXT}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
+      />
     </div>
+  )
+}
+
+const PIECE_TEXT = "Indica la pieza con un número entero, sin decimales."
+
+interface ReviseValues {
+  service: ServiceCatalogItem | null
+  toothNumber: string
+  surfaces: string[]
+  quadrant: string
+  arch: string
+  diagnosis: string
+  detail: string
+  reason: string
+}
+
+/** Lo que antes se rechazaba al enviar, ahora en el campo que hay que corregir. */
+function reviseSchema(hasSite: boolean) {
+  return z
+    .object({
+      service: z.custom<ServiceCatalogItem | null>(),
+      toothNumber: z.string(),
+      surfaces: z.array(z.string()),
+      quadrant: z.string(),
+      arch: z.string(),
+      diagnosis: z.string(),
+      detail: z.string().max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
+      reason: z
+        .string()
+        .trim()
+        .min(1, "Indica el motivo de la revisión.")
+        .max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
+    })
+    .superRefine((value, ctx) => {
+      if (!value.service) {
+        ctx.addIssue({ code: "custom", path: ["service"], message: "Elige la nueva prestación." })
+        return
+      }
+      const scope = value.service.scope ?? "general"
+      const tooth = value.toothNumber.trim()
+      if (tooth !== "" && !/^\d+$/.test(tooth)) {
+        ctx.addIssue({ code: "custom", path: ["toothNumber"], message: PIECE_TEXT })
+      } else if (hasSite && tooth === "" && (scope === "tooth" || scope === "surfaces")) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["toothNumber"],
+          message: "Indica la pieza de la nueva indicación.",
+        })
+      }
+      if (scope === "surfaces" && value.surfaces.length === 0) {
+        ctx.addIssue({ code: "custom", path: ["surfaces"], message: "Marca al menos una superficie." })
+      }
+      if (scope === "quadrant" && !value.quadrant) {
+        ctx.addIssue({ code: "custom", path: ["quadrant"], message: "Elige el cuadrante." })
+      }
+      if (scope === "arch" && !value.arch) {
+        ctx.addIssue({ code: "custom", path: ["arch"], message: "Elige la arcada." })
+      }
+    })
+}
+
+/** Revisar la indicación: la anterior queda reemplazada por la nueva. */
+function ReviseDrawer({
+  open,
+  patientId,
+  itemId,
+  encounterId,
+  initialTooth,
+  onClose,
+  onDone,
+}: {
+  open: boolean
+  patientId: string
+  itemId: string
+  encounterId: string | null
+  initialTooth: number | null
+  onClose: () => void
+  onDone: () => void
+}) {
+  const site = productUi().site
+  const revise = useMutation({
+    mutationFn: (body: Parameters<typeof reviseTreatmentApi>[2]) =>
+      reviseTreatmentApi(patientId, itemId, body),
+  })
+  const defaultValues: ReviseValues = {
+    service: null,
+    toothNumber: initialTooth != null ? String(initialTooth) : "",
+    surfaces: [],
+    quadrant: "",
+    arch: "",
+    diagnosis: "",
+    detail: "",
+    reason: "",
+  }
+  const form = useAppForm({
+    defaultValues,
+    validators: { onSubmit: reviseSchema(site != null) },
+    onSubmit: async ({ value }) => {
+      if (!encounterId) throw new Error("Necesitas una atención abierta para revisar la indicación.")
+      // El esquema ya exige la prestación.
+      const service = value.service as ServiceCatalogItem
+      const scope = service.scope ?? "general"
+      const tooth = value.toothNumber.trim()
+      const diagnosis = value.diagnosis.trim()
+      const detail = value.detail.trim()
+      await revise.mutateAsync({
+        encounterId,
+        reason: value.reason.trim(),
+        serviceId: service.id,
+        toothNumber: tooth === "" ? null : Number(tooth),
+        surfaces: scope === "surfaces" ? value.surfaces : null,
+        quadrant: scope === "quadrant" ? Number(value.quadrant) : null,
+        arch: scope === "arch" ? (value.arch as "upper" | "lower") : null,
+        detail: detail === "" ? null : detail,
+        diagnosisCode: diagnosis === "" ? null : diagnosis,
+      })
+      onDone()
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: { serviceId: "service", diagnosisCode: "diagnosis" },
+  })
+  const scope = useStore(form.store, (state) => state.values.service?.scope ?? null)
+  const tooth = useStore(form.store, (state) => state.values.toothNumber.trim())
+  const surfaceOptions = /^\d+$/.test(tooth) ? (site?.partsOf(Number(tooth)) ?? []) : []
+
+  return (
+    <FormDrawer
+      {...surface}
+      open={open}
+      title="Revisar indicación"
+      description="La indicación anterior queda reemplazada y sus sesiones se conservan en la historia."
+      submitLabel="Registrar la revisión"
+      onClose={() => {
+        if (!surface.isSubmitting) onClose()
+      }}
+    >
+      <div className="flex flex-col gap-4">
+        <form.AppField name="service">
+          {(field) => (
+            <field.Control label="Nueva prestación">
+              {(control) => (
+                <ServicePicker
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value?.id ?? ""}
+                  onChange={(next) => {
+                    field.handleChange(next)
+                    form.setFieldValue("surfaces", [])
+                    form.setFieldValue("quadrant", "")
+                    form.setFieldValue("arch", "")
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        {scope === "surfaces" ? (
+          <form.AppField name="surfaces">
+            {(field) => (
+              <field.Group legend="Superficies revisadas">
+                {(control) => (
+                  <div className="flex flex-wrap gap-2">
+                    {surfaceOptions.map((option) => (
+                      <label key={option} className="flex items-center gap-1.5 text-sm">
+                        <Checkbox
+                          aria-invalid={control.invalid || undefined}
+                          aria-describedby={control.describedBy}
+                          checked={field.state.value.includes(option)}
+                          onBlur={control.onBlur}
+                          onCheckedChange={() =>
+                            field.handleChange(
+                              field.state.value.includes(option)
+                                ? field.state.value.filter((s) => s !== option)
+                                : [...field.state.value, option],
+                            )
+                          }
+                        />
+                        {option}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+        ) : null}
+        {scope === "quadrant" ? (
+          <form.AppField name="quadrant">
+            {(field) => (
+              <field.Control label="Cuadrante">
+                {(control) => (
+                  <ChoiceSelect
+                    {...control.props}
+                    className="w-full"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  >
+                    <option value="">Elige el cuadrante</option>
+                    {QUADRANTS.map((value) => (
+                      <option key={value} value={value}>
+                        Cuadrante {value}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        ) : null}
+        {scope === "arch" ? (
+          <form.AppField name="arch">
+            {(field) => (
+              <field.Control label="Arcada">
+                {(control) => (
+                  <ChoiceSelect
+                    {...control.props}
+                    className="w-full"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  >
+                    <option value="">Elige la arcada</option>
+                    <option value="upper">Superior</option>
+                    <option value="lower">Inferior</option>
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+        ) : null}
+        {site ? (
+          <form.AppField name="toothNumber">
+            {(field) => (
+              <field.TextField
+                label={scope === "quadrant" || scope === "arch" ? "Pieza (opcional)" : "Pieza"}
+                inputMode="numeric"
+              />
+            )}
+          </form.AppField>
+        ) : null}
+        <form.AppField name="diagnosis">
+          {(field) => (
+            <field.Control label="Diagnóstico">
+              {(control) => (
+                <DiagnosisSearch
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  onChange={(code) => field.handleChange(code)}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="detail">
+          {(field) => <field.TextareaField label="Detalle clínico" maxLength={MAX_TEXT} />}
+        </form.AppField>
+        <form.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo de la revisión" maxLength={MAX_TEXT} />}
+        </form.AppField>
+      </div>
+    </FormDrawer>
+  )
+}
+
+const statusSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Indica el motivo.")
+    .max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
+})
+
+/** Suspender o cancelar: el motivo y su error dentro del cajón, no detrás. */
+function StatusDrawer({
+  kind,
+  open,
+  patientId,
+  itemId,
+  encounterId,
+  onClose,
+  onDone,
+}: {
+  kind: "suspend" | "cancel"
+  open: boolean
+  patientId: string
+  itemId: string
+  encounterId: string | null
+  onClose: () => void
+  onDone: () => void
+}) {
+  const change = useMutation({
+    mutationFn: (reason: string) =>
+      (kind === "cancel" ? cancelTreatmentApi : suspendTreatmentApi)(patientId, itemId, {
+        reason,
+        encounterId: encounterId ?? undefined,
+      }),
+  })
+  const form = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: statusSchema },
+    onSubmit: async ({ value }) => {
+      await change.mutateAsync(value.reason.trim())
+      onDone()
+    },
+  })
+  // El servicio llama al motivo `statusReason`; en el cuerpo de esta ruta es `reason`.
+  const surface = useFormSurface(form, { fieldMap: { statusReason: "reason" } })
+  return (
+    <FormDrawer
+      {...surface}
+      dock={false}
+      open={open}
+      title={kind === "cancel" ? "Cancelar tratamiento" : "Suspender tratamiento"}
+      description={
+        kind === "cancel"
+          ? "El tratamiento queda cancelado; sus sesiones y documentos se conservan."
+          : "El tratamiento queda suspendido y puede reactivarse después."
+      }
+      submitLabel={kind === "cancel" ? "Cancelar tratamiento" : "Suspender"}
+      onClose={() => {
+        if (!surface.isSubmitting) onClose()
+      }}
+    >
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField label="Motivo" maxLength={MAX_TEXT} />}
+      </form.AppField>
+    </FormDrawer>
   )
 }

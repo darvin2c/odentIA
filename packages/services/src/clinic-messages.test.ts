@@ -318,9 +318,9 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
     const good = await check(FORMAL)
     expect(good.ok).toBe(true)
     expect(good.checks).toEqual([
-      { ok: true, text: "Bien: están los tres datos." },
-      { ok: true, text: "Bien: no empieza ni termina con un dato." },
-      { ok: true, text: "Bien: 102 de 1\u00a0024 caracteres." },
+      { ok: true, text: "Bien: están los tres datos.", field: "body" },
+      { ok: true, text: "Bien: no empieza ni termina con un dato.", field: "body" },
+      { ok: true, text: "Bien: 102 de 1\u00a0024 caracteres.", field: "body" },
     ])
     expect(good.previewParts.map((part) => part.text).join("")).toBe(
       "Estimada Lucía: le recordamos su cita en Clínica Sonríe, sede Centro: mañana, martes 13 de octubre, a las 10:00, con Dra. Ana Torres. Si necesita cambiarla, responda a este mensaje.",
@@ -359,12 +359,19 @@ describe("los mensajes vienen escritos y son de la clínica", () => {
     ])
     // Uno nuevo de la clínica: solo el nombre de la persona y el de la clínica, y ninguno es obligatorio.
     expect(await failures("Tu trabajo ya llegó. Escríbenos.", { title: "Tu trabajo ya está listo" })).toEqual([])
-    expect(await failures("Hola, {{persona}}. Tu cita: {{citas}}. Te esperamos.", { title: "", buttonTitle: "Quiero coordinar mi cita ya" })).toEqual([
-      "Escribe para qué sirve el mensaje.",
-      "El botón admite hasta 20 caracteres.",
-      "«citas» no es un dato de este mensaje: quítalo.",
+    // Cada comprobación dice de qué dato es: la pantalla la pinta en ese campo.
+    const own = await check("Hola, {{persona}}. Tu cita: {{citas}}. Te esperamos.", { title: "", buttonTitle: "Quiero coordinar mi cita ya" })
+    expect(own.checks.filter((item) => !item.ok).map(({ field, text }) => ({ field, text }))).toEqual([
+      { field: "title", text: "Escribe para qué sirve el mensaje." },
+      { field: "buttonTitle", text: "El botón admite hasta 20 caracteres." },
+      { field: "body", text: "«citas» no es un dato de este mensaje: quítalo." },
     ])
-    await expect(save(c, "recordatorio_cita", "Hola, {{persona}}.")).rejects.toMatchObject({ code: "VALIDATION", message: "Falta el dato «Clínica y sede»." })
+    // Al guardar, el primer fallo va en su campo.
+    await expect(save(c, "recordatorio_cita", "Hola, {{persona}}.")).rejects.toMatchObject({
+      code: "VALIDATION",
+      message: "Falta el dato «Clínica y sede».",
+      fields: { body: "Falta el dato «Clínica y sede»." },
+    })
   })
 })
 
@@ -583,8 +590,14 @@ describe("mensajes creados por la clínica", () => {
       ],
     })
     expect((await messages(c)).map((item) => item.id)).toHaveLength(19)
-    await expect(create(c, { title: "tu trabajo ya está listo", body: "Otro texto." })).rejects.toThrow("Ya hay un mensaje con ese nombre.")
-    await expect(create(c, { title: "Con datos de cita", body: "Hola. Tu cita: {{citas}}. Chau." })).rejects.toThrow("«citas» no es un dato de este mensaje")
+    await expect(create(c, { title: "tu trabajo ya está listo", body: "Otro texto." })).rejects.toMatchObject({
+      status: 409,
+      message: "Ya hay un mensaje con ese nombre.",
+      fields: { title: "Ya hay un mensaje con ese nombre." },
+    })
+    await expect(create(c, { title: "Con datos de cita", body: "Hola. Tu cita: {{citas}}. Chau." })).rejects.toMatchObject({
+      fields: { body: expect.stringContaining("«citas» no es un dato de este mensaje") },
+    })
     // También se le cambia el texto, con la misma regla: el aprobado sigue hasta que aprueben el nuevo.
     await whatsappSays(c, version!.templateName, "aprobada")
     const edited = await save(c, created.id, "Hola, {{persona}}. Tu trabajo ya está en {{clinica}}. Escríbenos.")
@@ -733,7 +746,10 @@ describe("Bandeja, pasadas las 24 horas", () => {
     ])
     // Un mensaje del agente pide los datos de una cita: no se envía a mano.
     await expect(send(c, id, "recordatorio_cita")).rejects.toMatchObject({ code: "APPROVED_MESSAGE_UNAVAILABLE" })
-    await expect(send(c, id, data[2]!.id)).rejects.toThrow("Completa el dato del mensaje.")
+    await expect(send(c, id, data[2]!.id)).rejects.toMatchObject({
+      message: "Completa el dato del mensaje.",
+      fields: { "values[0]": "Completa este dato." },
+    })
     // A quien nunca escribió no se le ofrece «Retomar»: no hay consulta que continuar.
     const cold = await thread(c, "Jorge Salas", null)
     expect((await offered(c, cold)).data.map((item) => item.title)).toEqual(["Tu trabajo ya está listo", "Promo mes"])
@@ -877,7 +893,25 @@ describe("la conexión de WhatsApp", () => {
       status: 400,
       message: "WhatsApp no aceptó esos datos: la clave no sirve o venció, o el identificador del número no es de esa cuenta. Copia la clave de nuevo; debe ser la permanente, no la temporal de 24 horas.",
     })
-    await expect(connect(another.orgId, bad, { config: { ...WA_CONFIG, accessToken: "" } })).rejects.toThrow("Falta la clave de acceso.")
+    await expect(connect(another.orgId, bad, { config: { ...WA_CONFIG, accessToken: "" } })).rejects.toMatchObject({
+      message: "Falta la clave de acceso.",
+      fields: { "config.accessToken": "Falta la clave de acceso." },
+    })
+    // Cuando Meta dice cuál dato rechazó (190: la clave; 100: el identificador), el error va a ese dato.
+    const expired = fakeMeta((call) =>
+      call.url.includes("fields=display_phone_number") ? { status: 401, json: { error: { message: "Error validating access token", code: 190 } } } : undefined,
+    )
+    await expect(connect(another.orgId, expired)).rejects.toMatchObject({
+      code: "CONNECTION_REJECTED",
+      fields: { "config.accessToken": expect.stringContaining("WhatsApp no aceptó esta clave") },
+    })
+    const unknownNumber = fakeMeta((call) =>
+      call.url.includes("fields=display_phone_number") ? { status: 400, json: { error: { message: "Unsupported get request", code: 100 } } } : undefined,
+    )
+    await expect(connect(another.orgId, unknownNumber)).rejects.toMatchObject({
+      code: "CONNECTION_REJECTED",
+      fields: { "config.phoneNumberId": expect.stringContaining("WhatsApp no encuentra este número") },
+    })
     expect(await ownerDb.select().from(channelConnection).where(eq(channelConnection.organizationId, another.orgId))).toEqual([])
   })
 
@@ -1059,7 +1093,7 @@ describe("Telegram recibe mensajes desde que se conecta", () => {
       withOrgContext(appDb, orgId, (tx) =>
         createConnection(tx, orgId, KEY, { channel: "telegram", provider: "telegram_bot_api", config: { botToken: "tok" } }, { fetch: meta.fetch, webhookBaseUrl: "https://api.clinica.test" }),
       ),
-    ).rejects.toMatchObject({ code: "CONNECTION_REJECTED", message: expect.stringContaining("Bad Request: bad webhook") })
+    ).rejects.toMatchObject({ code: "TELEGRAM_WEBHOOK_REJECTED", message: expect.stringContaining("Bad Request: bad webhook") })
     expect(await ownerDb.select().from(channelConnection).where(and(eq(channelConnection.organizationId, orgId)))).toEqual([])
   })
 })

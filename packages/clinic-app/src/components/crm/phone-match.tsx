@@ -1,8 +1,8 @@
 import { Button } from "@odentia/ui"
+import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { mutationErrorMessage } from "../../lib/query-error"
 
 /**
  * Escribe alguien desde un número que es el «Teléfono» de otra persona de la
@@ -56,7 +56,7 @@ export function PhoneMatchPrompt({ conversationId }: { conversationId: string })
       </div>
       {confirm.error ? (
         <p role="alert" className="text-xs text-destructive">
-          {mutationErrorMessage(confirm.error)}
+          {submitErrorMessage(confirm.error)}
         </p>
       ) : null}
     </div>

@@ -9,21 +9,34 @@ import {
   AttachmentMedia,
   AttachmentTitle,
   Button,
-  Field,
   FieldError,
-  FieldLabel,
-  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { DatePickerButton, FormDrawer, regionToday } from "@odentia/ui-patterns"
+import {
+  type ApiErrorShape,
+  DatePickerButton,
+  FormDrawer,
+  focusFirstInvalid,
+  isUnconfirmedSubmit,
+  regionToday,
+  setSubmitErrors,
+  submitErrorOf,
+  submitForm,
+  useAppForm,
+  useFieldControl,
+  useFormSurface,
+  withForm,
+} from "@odentia/ui-patterns"
+import { type AnyFormApi, useStore } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
 import { FileText, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
-import { apiFetch } from "../../lib/api"
+import { z } from "zod"
+import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL } from "../../lib/auth-client"
 import { instantFromClinicValue } from "../../lib/clinical-journey"
 import { orgSlugFromHostname } from "../../lib/host"
@@ -40,8 +53,8 @@ import {
   planItemLabel,
   UPLOAD_CATEGORIES,
 } from "./document-labels"
-import { DocumentLinkSelects } from "./document-link-selects"
-import { TagsInput } from "./tags-input"
+import { DocumentLinkSelects, type DocumentLinkValue } from "./document-link-selects"
+import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "./tags-input"
 import {
   TomographyDropZone,
   TomographyFlowBody,
@@ -52,10 +65,9 @@ import { PlacesField } from "../../product/site-fields"
 
 type RowStatus = "pending" | "uploading" | "saved" | "error" | "unconfirmed"
 
-interface QueuedFile {
+/** Lo que se escribe de cada archivo: los campos de su fila. */
+interface RowValues {
   key: string
-  file: File
-  previewUrl: string | null
   title: string
   category: string
   /** Subtipo de imagen (radiografía o foto clínica). */
@@ -66,16 +78,93 @@ interface QueuedFile {
   teeth: number[]
   tags: string[]
   planItemId: string
-  encounterProcedureId: string
-  budgetId: string
-  followUpId: string
-  prescriptionId: string
-  paymentId: string
-  expanded: boolean
-  status: RowStatus
-  error: string | null
-  validationError: string | null
+  links: DocumentLinkValue
 }
+
+/** El archivo de una fila y cómo va su subida (no son datos que se escriban). */
+interface RowFile {
+  file: File
+  previewUrl: string | null
+  status: RowStatus
+  /** Lo que la ficha dijo del archivo y no es de ningún campo de la fila. */
+  error: string | null
+  expanded: boolean
+}
+
+interface UploadValues {
+  encounterId: string
+  rows: RowValues[]
+}
+
+const NO_LINKS: DocumentLinkValue = {
+  budgetId: "",
+  followUpId: "",
+  prescriptionId: "",
+  paymentId: "",
+  encounterProcedureId: "",
+}
+
+const EMPTY_UPLOAD: UploadValues = { encounterId: "", rows: [] }
+
+const UNCONFIRMED_ROW =
+  "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar."
+
+/**
+ * Lo que se comprueba de cada fila antes de subirla: los mismos límites que
+ * `POST /api/patients/:id/documents` (título 1–200, categoría, tipo de imagen
+ * de esa categoría, toma no futura, origen hasta 120).
+ */
+const rowSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, { error: "Escribe el título." })
+      .max(200, { error: "El título admite hasta 200 caracteres." }),
+    category: z.string().min(1, { error: "Elige la categoría." }),
+    imageType: z.string(),
+    capturedAt: z.string(),
+    source: z.string(),
+  })
+  .superRefine((row, ctx) => {
+    // Tipo, fecha de toma y origen solo se piden (y se envían) en las categorías de imagen.
+    if (imageTypesFor(row.category).length === 0) return
+    if (!row.imageType)
+      ctx.addIssue({ code: "custom", path: ["imageType"], message: "Elige el tipo de imagen." })
+    // El día de toma se elige en la zona de la clínica, no en la del navegador.
+    if (row.capturedAt && row.capturedAt > regionToday())
+      ctx.addIssue({ code: "custom", path: ["capturedAt"], message: "La fecha de toma no puede ser futura." })
+    if (row.source.trim().length > 120)
+      ctx.addIssue({ code: "custom", path: ["source"], message: "El origen admite hasta 120 caracteres." })
+  })
+
+/** Cómo se llama en la fila cada dato que la API señala por su nombre en el cuerpo. */
+const ROW_FIELD: Record<string, keyof RowValues> = {
+  label: "title",
+  category: "category",
+  imageType: "imageType",
+  capturedAt: "capturedAt",
+  source: "source",
+  planItemId: "planItemId",
+  toothNumbers: "teeth",
+  tags: "tags",
+  budgetId: "links",
+  followUpId: "links",
+  prescriptionId: "links",
+  paymentId: "links",
+  encounterProcedureId: "links",
+}
+
+/** Los campos que viven en «Extras»: si el error cae en uno, se abre. */
+const EXTRAS_FIELDS: Partial<Record<keyof RowValues, true>> = {
+  source: true,
+  planItemId: true,
+  teeth: true,
+  tags: true,
+  links: true,
+}
+
+type RowOutcome = { ok: true } | { ok: false; message: string | null; fields: Record<string, string> }
 
 export interface DocumentUploadDialogProps {
   patientId: string
@@ -118,32 +207,31 @@ function toRow(
   file: File,
   initialTeeth: number[],
   defaultPlanItemId?: string,
-): QueuedFile | { fileError: string } {
+): { values: RowValues; meta: RowFile } | { fileError: string } {
   if (!isAcceptedFile(file)) return { fileError: "Solo se admiten JPG, PNG, WebP, PDF o DICOM." }
   if (file.size === 0) return { fileError: "El archivo está vacío." }
   if (file.size > MAX_BYTES) return { fileError: "El archivo no puede superar 10 MB." }
   rowSeq += 1
   return {
-    key: `${Date.now()}-${rowSeq}`,
-    file,
-    previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
-    title: basenameWithoutExtension(file.name),
-    category: "",
-    imageType: "",
-    capturedAt: "",
-    source: "",
-    teeth: [...initialTeeth],
-    tags: [],
-    planItemId: defaultPlanItemId ?? "",
-    encounterProcedureId: "",
-    budgetId: "",
-    followUpId: "",
-    prescriptionId: "",
-    paymentId: "",
-    expanded: false,
-    status: "pending",
-    error: null,
-    validationError: null,
+    values: {
+      key: `${Date.now()}-${rowSeq}`,
+      title: basenameWithoutExtension(file.name),
+      category: "",
+      imageType: "",
+      capturedAt: "",
+      source: "",
+      teeth: [...initialTeeth],
+      tags: [],
+      planItemId: defaultPlanItemId ?? "",
+      links: { ...NO_LINKS },
+    },
+    meta: {
+      file,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      status: "pending",
+      error: null,
+      expanded: false,
+    },
   }
 }
 
@@ -153,6 +241,10 @@ function toRow(
  * guardado, error o resultado no confirmado). Sin reintento ciego:
  * un fallo de red deja la fila como "no confirmado" y refresca el
  * listado antes de permitir reenviar, para no duplicar archivos.
+ *
+ * Cada fila es parte de un mismo formulario (`rows[i].…`): lo que falta o lo
+ * que la ficha rechaza se dice en el campo de esa fila; lo que es de la
+ * atención común, en ella; el resumen, junto a los botones.
  */
 export function DocumentUploadDialog({
   patientId,
@@ -180,25 +272,148 @@ export function DocumentUploadDialog({
     onChange: () => void onSuccess(),
   })
   const [noStudy, setNoStudy] = useState(false)
-  const [encounterChoice, setEncounterChoice] = useState<string>(
-    defaultIsDraft ? (defaultEncounterId ?? "") : "",
-  )
-  const [rows, setRows] = useState<QueuedFile[]>([])
+  const [files, setFiles] = useState<Record<string, RowFile>>({})
   const [rejected, setRejected] = useState<string[]>([])
-  const [serverError, setServerError] = useState<string | null>(null)
-  const fileId = useId()
-  const encounterChoiceId = useId()
   const wasOpen = useRef(false)
+  /** Las filas que sube este envío: las pendientes, o la que se reintenta. */
+  const targets = useRef<ReadonlySet<string>>(new Set())
 
-  const patchRow = (key: string, patch: Partial<QueuedFile>) =>
-    setRows((prev) => prev.map((row) => (row.key === key ? { ...row, ...patch } : row)))
+  const patchFile = (key: string, patch: Partial<RowFile>) =>
+    setFiles((prev) => (prev[key] ? { ...prev, [key]: { ...prev[key], ...patch } } : prev))
+
+  const uploadRow = async (row: RowValues, file: File, encounterId: string): Promise<RowOutcome> => {
+    patchFile(row.key, { status: "uploading", error: null })
+    try {
+      const body = new FormData()
+      body.append("file", file)
+      body.append("category", row.category)
+      body.append("label", row.title.trim())
+      const types = imageTypesFor(row.category)
+      if (types.length > 0) {
+        if (types.includes(row.imageType)) body.append("imageType", row.imageType)
+        const capturedAt = capturedInstant(row.capturedAt)
+        if (capturedAt) body.append("capturedAt", capturedAt)
+        if (row.source.trim()) body.append("source", row.source.trim())
+      }
+      if (encounterId) body.append("encounterId", encounterId)
+      if (row.planItemId) body.append("planItemId", row.planItemId)
+      for (const [name, id] of Object.entries(row.links)) if (id) body.append(name, id)
+      body.append("toothNumbers", JSON.stringify(row.teeth))
+      body.append("tags", JSON.stringify(row.tags))
+      const slug =
+        typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname)
+      const response = await fetch(`${API_URL}/api/patients/${patientId}/documents`, {
+        method: "POST",
+        credentials: "include",
+        headers: slug ? { "x-odentia-org": slug } : {},
+        body,
+      })
+      if (!response.ok) {
+        const shape = await response
+          .json()
+          .then((parsed: { error?: ApiErrorShape }) => parsed.error ?? {})
+          .catch(() => ({}))
+        const error = new ApiError(response.status, shape)
+        // 5xx/408: no se sabe si quedó guardado; se trata como la red.
+        if (isUnconfirmedSubmit(error)) throw error
+        const { form: message, fields } = submitErrorOf(error)
+        patchFile(row.key, { status: "error" })
+        return { ok: false, message, fields }
+      }
+      patchFile(row.key, { status: "saved", error: null })
+      await onSuccess()
+      return { ok: true }
+    } catch {
+      // Fallo de red o respuesta ilegible: el archivo pudo haberse guardado.
+      // No se reintenta a ciegas: se refresca el listado y la fila exige
+      // decisión explícita (verificar en Documentos o reenviar).
+      patchFile(row.key, { status: "unconfirmed", error: UNCONFIRMED_ROW })
+      await onSuccess()
+      return { ok: false, message: null, fields: {} }
+    }
+  }
+
+  const form = useAppForm({
+    defaultValues: {
+      encounterId: defaultIsDraft ? (defaultEncounterId ?? "") : "",
+      rows: [],
+    } as UploadValues,
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        const queued = value.rows.filter((row) => targets.current.has(row.key))
+        if (queued.length === 0)
+          fields.rows =
+            value.rows.length === 0
+              ? "Elige los archivos que quieres subir."
+              : "No queda ningún archivo por subir: los no confirmados se reenvían desde su fila."
+        value.rows.forEach((row, index) => {
+          if (!targets.current.has(row.key)) return
+          const parsed = rowSchema.safeParse(row)
+          if (parsed.success) return
+          for (const issue of parsed.error.issues)
+            fields[`rows[${index}].${String(issue.path[0])}`] ??= issue.message
+        })
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value, formApi }) => {
+      const queue = value.rows.flatMap((row, index) => {
+        const meta = files[row.key]
+        return targets.current.has(row.key) && meta ? [{ row, index, file: meta.file }] : []
+      })
+      onPendingChange?.(true)
+      try {
+        // Si guardar antes la atención falla, el error sale de aquí y se dice junto a los botones.
+        await beforeWrite?.()
+        const api = formApi as unknown as AnyFormApi
+        // Solo los campos en pantalla: lo que no lo está se dice como texto de su fila.
+        const fieldInfo = api.fieldInfo as Record<string, { instance: unknown } | undefined>
+        const placed: Record<string, string> = {}
+        let failures = 0
+        for (const { row, index, file } of queue) {
+          const outcome = await uploadRow(row, file, value.encounterId)
+          if (outcome.ok) continue
+          failures += 1
+          const loose: string[] = []
+          let inExtras = false
+          for (const [serverField, message] of Object.entries(outcome.fields)) {
+            const sub = ROW_FIELD[serverField]
+            const name = serverField === "encounterId" ? "encounterId" : sub ? `rows[${index}].${sub}` : null
+            if (name && fieldInfo[name]?.instance) {
+              placed[name] ??= message
+              if (sub && EXTRAS_FIELDS[sub]) inExtras = true
+            } else loose.push(message)
+          }
+          const text = [outcome.message, ...loose].filter((part): part is string => Boolean(part))
+          if (text.length > 0 || inExtras)
+            patchFile(row.key, {
+              ...(text.length > 0 ? { error: [...new Set(text)].join(" ") } : {}),
+              ...(inExtras ? { expanded: true } : {}),
+            })
+        }
+        // Sin cierre automático ni toast de éxito global: si algo falló, el
+        // diálogo queda abierto con cada fila marcada para decidir.
+        if (failures > 0) {
+          setSubmitErrors(api, {
+            form: `${failures} archivo(s) sin guardar. Revisa cada fila: corrige, reenvía o descarta.`,
+            fields: placed,
+          })
+          focusFirstInvalid(null)
+        }
+      } finally {
+        onPendingChange?.(false)
+      }
+    },
+  })
+  const surface = useFormSurface(form)
+  const uploading = surface.isSubmitting
 
   const reset = () => {
-    for (const row of rows) if (row.previewUrl) URL.revokeObjectURL(row.previewUrl)
-    setRows([])
+    for (const meta of Object.values(files)) if (meta.previewUrl) URL.revokeObjectURL(meta.previewUrl)
+    setFiles({})
     setRejected([])
-    setServerError(null)
-    setEncounterChoice(defaultIsDraft ? (defaultEncounterId ?? "") : "")
+    form.reset()
     tomography.reset()
     setNoStudy(false)
   }
@@ -208,7 +423,8 @@ export function DocumentUploadDialog({
     wasOpen.current = open
   })
 
-  const uploading = rows.some((row) => row.status === "uploading")
+  const rows = useStore(form.store, (state) => state.values.rows)
+  const encounterChoice = useStore(form.store, (state) => state.values.encounterId)
   // Los procedimientos solo existen dentro de una atención: el vínculo se elige
   // con la atención a la vista, nunca escribiendo un identificador.
   const procedureQuery = useQuery({
@@ -220,20 +436,26 @@ export function DocumentUploadDialog({
     enabled: open && encounterChoice !== "",
   })
   const procedures = procedureQuery.data?.data.procedures ?? []
-  const pendingRows = rows.filter((row) => row.status === "pending" || row.status === "error")
-  const unconfirmedRows = rows.filter((row) => row.status === "unconfirmed")
-  const addFiles = (files: FileList | File[] | undefined | null) => {
-    if (!files || disabled) return
-    const list = [...files]
-    if (!list.length) return
-    const added: QueuedFile[] = []
+  const statusOf = (key: string) => files[key]?.status
+  const pendingKeys = rows
+    .filter((row) => statusOf(row.key) === "pending" || statusOf(row.key) === "error")
+    .map((row) => row.key)
+  const unconfirmedCount = rows.filter((row) => statusOf(row.key) === "unconfirmed").length
+
+  const addFiles = (list: File[]) => {
+    if (disabled || !list.length) return
     const bad: string[] = []
+    const added: Record<string, RowFile> = {}
     for (const file of list) {
       const row = toRow(file, initialTeeth ?? [], defaultPlanItemId)
-      if ("fileError" in row) bad.push(`${file.name}: ${row.fileError}`)
-      else added.push(row)
+      if ("fileError" in row) {
+        bad.push(`${file.name}: ${row.fileError}`)
+        continue
+      }
+      added[row.values.key] = row.meta
+      form.pushFieldValue("rows", row.values)
     }
-    if (added.length > 0) setRows((prev) => [...prev, ...added])
+    if (Object.keys(added).length > 0) setFiles((prev) => ({ ...prev, ...added }))
     if (bad.length > 0) setRejected((prev) => [...prev, ...bad])
   }
 
@@ -263,123 +485,25 @@ export function DocumentUploadDialog({
     addFiles(selection.map((item) => item.file as File))
   }
 
-  const removeRow = (key: string) => {
-    setRows((prev) => {
-      const row = prev.find((r) => r.key === key)
-      if (row?.previewUrl) URL.revokeObjectURL(row.previewUrl)
-      return prev.filter((r) => r.key !== key)
+  const removeRow = (index: number) => {
+    const row = rows[index]
+    if (!row) return
+    const meta = files[row.key]
+    if (meta?.previewUrl) URL.revokeObjectURL(meta.previewUrl)
+    void form.removeFieldValue("rows", index)
+    setFiles((prev) => {
+      const next = { ...prev }
+      delete next[row.key]
+      return next
     })
   }
 
-  const validateRow = (row: QueuedFile): string | null => {
-    const title = row.title.trim()
-    if (!title) return "El título es obligatorio."
-    if (title.length > 200) return "El título debe tener 1–200 caracteres."
-    if (!row.category) return "Elige la categoría."
-    if (imageTypesFor(row.category).length > 0 && !row.imageType)
-      return "Elige el tipo de imagen."
-    // El día de toma se elige en la zona de la clínica, no en la del navegador.
-    if (row.capturedAt && row.capturedAt > regionToday()) return "La fecha de toma no puede ser futura."
-    return null
-  }
-
-  const uploadRow = async (row: QueuedFile): Promise<boolean> => {
-    patchRow(row.key, { status: "uploading", error: null })
-    try {
-      const form = new FormData()
-      form.append("file", row.file)
-      form.append("category", row.category)
-      form.append("label", row.title.trim())
-      if (row.imageType && imageTypesFor(row.category).includes(row.imageType as never))
-        form.append("imageType", row.imageType)
-      const capturedAt = capturedInstant(row.capturedAt)
-      if (capturedAt) form.append("capturedAt", capturedAt)
-      if (row.source.trim()) form.append("source", row.source.trim())
-      if (encounterChoice) form.append("encounterId", encounterChoice)
-      if (row.planItemId) form.append("planItemId", row.planItemId)
-      if (row.encounterProcedureId) form.append("encounterProcedureId", row.encounterProcedureId)
-      if (row.budgetId) form.append("budgetId", row.budgetId)
-      if (row.followUpId) form.append("followUpId", row.followUpId)
-      if (row.prescriptionId) form.append("prescriptionId", row.prescriptionId)
-      if (row.paymentId) form.append("paymentId", row.paymentId)
-      form.append("toothNumbers", JSON.stringify(row.teeth))
-      form.append("tags", JSON.stringify(row.tags))
-      const slug =
-        typeof window === "undefined" ? null : orgSlugFromHostname(window.location.hostname)
-      const response = await fetch(`${API_URL}/api/patients/${patientId}/documents`, {
-        method: "POST",
-        credentials: "include",
-        headers: slug ? { "x-odentia-org": slug } : {},
-        body: form,
-      })
-      if (!response.ok) {
-        let message = `Error ${response.status}`
-        try {
-          const body = (await response.json()) as { error?: { message?: string } }
-          if (body.error?.message) message = body.error.message
-        } catch {
-          // cuerpo no-JSON
-        }
-        patchRow(row.key, { status: "error", error: message })
-        return false
-      }
-      patchRow(row.key, { status: "saved", error: null })
-      await onSuccess()
-      return true
-    } catch {
-      // Fallo de red o respuesta ilegible: el archivo pudo haberse guardado.
-      // No se reintenta a ciegas: se refresca el listado y la fila exige
-      // decisión explícita (verificar en Documentos o reenviar).
-      patchRow(row.key, {
-        status: "unconfirmed",
-        error:
-          "Resultado no confirmado: se perdió la conexión durante la subida. Revisa la lista de Documentos antes de reenviar para no duplicar.",
-      })
-      await onSuccess()
-      return false
-    }
-  }
-
-  const uploadRows = async (targets: QueuedFile[]) => {
-    if (uploading || disabled || targets.length === 0) return
-    let invalid = 0
-    const valid: QueuedFile[] = []
-    for (const row of targets) {
-      const error = validateRow(row)
-      patchRow(row.key, { validationError: error })
-      if (error) invalid += 1
-      else valid.push(row)
-    }
-    if (valid.length === 0) {
-      setServerError(invalid > 0 ? "Revisa las filas marcadas antes de subir." : null)
-      return
-    }
-    setServerError(null)
-    onPendingChange?.(true)
-    try {
-      await beforeWrite?.()
-      let failures = 0
-      for (const row of valid) {
-        const ok = await uploadRow(row)
-        if (!ok) failures += 1
-      }
-      // Sin cierre automático ni toast de éxito global: si algo falló, el
-      // diálogo queda abierto con cada fila marcada para decidir.
-      if (failures > 0) {
-        setServerError(
-          `${failures} archivo(s) sin guardar. Revisa cada fila: corrige, reenvía o descarta.`,
-        )
-      }
-    } finally {
-      onPendingChange?.(false)
-    }
-  }
-
-  const retryRow = async (row: QueuedFile) => {
+  const retryRow = (key: string) => {
     if (uploading || disabled) return
     // Tras un resultado no confirmado el listado ya se refrescó al fallar;
     // reenviar es una decisión explícita del usuario sobre esa fila.
-    await uploadRows([{ ...row, status: "pending", error: null }])
+    targets.current = new Set([key])
+    void submitForm(form)
   }
 
   const close = () => {
@@ -445,101 +569,130 @@ export function DocumentUploadDialog({
       onClose={close}
       title="Subir imágenes o documentos"
       description="JPG, PNG, WebP, PDF o DICOM, máx. 10 MB por archivo; la tomografía, hasta 1 GB. El formato se verifica por contenido. Sin atención queda como General."
-      onSubmit={(e) => {
-        e.preventDefault()
-        void uploadRows(pendingRows)
+      onSubmit={(event) => {
+        targets.current = new Set(pendingKeys)
+        surface.onSubmit(event)
       }}
       isSubmitting={uploading}
-      submitDisabled={disabled || pendingRows.length === 0}
-      submitLabel={uploading ? "Subiendo…" : `Subir ${pendingRows.length}`}
-      error={serverError}
+      error={surface.error}
+      // Solo por permiso: lo que falta en una fila se dice en su campo al subir.
+      submitDisabled={disabled}
+      submitLabel={uploading ? "Subiendo…" : `Subir ${pendingKeys.length}`}
     >
       <fieldset disabled={uploading || disabled} className="flex flex-col gap-3">
-        <Field>
-          <FieldLabel htmlFor={encounterChoiceId}>Atención común (opcional)</FieldLabel>
-          <Select
-            items={Object.fromEntries(drafts.map((e) => [e.id, encounterLabel(e)] as const))}
-            value={encounterChoice}
-            onValueChange={(v) => setEncounterChoice(v ?? "")}
-          >
-            <SelectTrigger id={encounterChoiceId} aria-label="Atención a vincular">
-              <SelectValue placeholder="General (sin atención)" />
-            </SelectTrigger>
-            <SelectContent>
-              {drafts.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {encounterLabel(e)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {encounterChoice && (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setEncounterChoice("")}>
-              Subir como general
-            </Button>
-          )}
-          <p className="text-xs text-muted-foreground">
-            {defaultEncounterId && !defaultIsDraft
-              ? "La atención actual está cerrada: los archivos se suben como general y luego puedes vincularlos con una revisión de contexto (queda auditado)."
-              : "Solo atenciones en borrador. Para una atención cerrada, sube como general y vincúlalo después con una revisión de contexto."}
-          </p>
-        </Field>
-
-        <Field>
-          <FieldLabel htmlFor={fileId}>Archivos</FieldLabel>
-          <div id={fileId}>
-            <TomographyDropZone
-              disabled={disabled}
-              onSelect={(selection) => void select(selection)}
-              hint="Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo y 1 GB por tomografía."
-            />
-          </div>
-          {noStudy && (
-            <p className="text-xs text-muted-foreground">
-              No encontramos una tomografía en lo elegido: se agregan solo sus imágenes y documentos.
-            </p>
-          )}
-          {rejected.length > 0 && (
-            <ul className="flex flex-col gap-1">
-              {rejected.map((message) => (
-                <li key={message} className="flex items-center gap-2 text-xs text-destructive">
-                  <span className="min-w-0 flex-1">{message}</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setRejected((prev) => prev.filter((m) => m !== message))}
+        <form.AppField name="encounterId">
+          {(field) => (
+            <field.Control
+              label="Atención común (opcional)"
+              description={
+                defaultEncounterId && !defaultIsDraft
+                  ? "La atención actual está cerrada: los archivos se suben como general y luego puedes vincularlos con una revisión de contexto (queda auditado)."
+                  : "Solo atenciones en borrador. Para una atención cerrada, sube como general y vincúlalo después con una revisión de contexto."
+              }
+            >
+              {(control) => (
+                <>
+                  <Select
+                    items={Object.fromEntries(drafts.map((e) => [e.id, encounterLabel(e)] as const))}
+                    value={field.state.value}
+                    onValueChange={(v) => field.handleChange(v ?? "")}
                   >
-                    Descartar
-                  </Button>
-                </li>
-              ))}
-            </ul>
+                    <SelectTrigger
+                      id={control.id}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                    >
+                      <SelectValue placeholder="General (sin atención)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {drafts.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {encounterLabel(e)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {field.state.value && (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => field.handleChange("")}>
+                      Subir como general
+                    </Button>
+                  )}
+                </>
+              )}
+            </field.Control>
           )}
-        </Field>
+        </form.AppField>
 
-        {rows.length > 0 && (
-          <ol className="flex flex-col gap-3">
-            {rows.map((row) => (
-              <QueuedRow
-                key={row.key}
-                row={row}
-                patientId={patientId}
-                planItems={planItems}
-                procedures={procedures}
-                suggestions={suggestions}
-                busy={uploading}
-                onPatch={(patch) => patchRow(row.key, patch)}
-                onRemove={() => removeRow(row.key)}
-                onRetry={() => void retryRow(row)}
-              />
-            ))}
-          </ol>
-        )}
+        <form.AppField name="rows" mode="array">
+          {(rowsField) => (
+            <>
+              <rowsField.Group legend="Archivos">
+                {(control) => (
+                  <>
+                    <div aria-invalid={control.invalid || undefined} aria-describedby={control.describedBy}>
+                      <TomographyDropZone
+                        disabled={disabled}
+                        onSelect={(selection) => void select(selection)}
+                        hint="Fotos, PDF, radiografías y tomografías. Hasta 10 MB por archivo y 1 GB por tomografía."
+                      />
+                    </div>
+                    {noStudy && (
+                      <p className="text-xs text-muted-foreground">
+                        No encontramos una tomografía en lo elegido: se agregan solo sus imágenes y documentos.
+                      </p>
+                    )}
+                    {rejected.length > 0 && (
+                      <ul role="alert" className="flex flex-col gap-1">
+                        {rejected.map((message) => (
+                          <li key={message} className="flex items-center gap-2 text-xs text-destructive">
+                            <span className="min-w-0 flex-1">{message}</span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setRejected((prev) => prev.filter((m) => m !== message))}
+                            >
+                              Descartar
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </rowsField.Group>
 
-        {unconfirmedRows.length > 0 && (
+              {rows.length > 0 && (
+                <ol className="flex flex-col gap-3">
+                  {rows.map((row, index) => {
+                    const meta = files[row.key]
+                    return meta ? (
+                      <QueuedRow
+                        key={row.key}
+                        form={form}
+                        index={index}
+                        meta={meta}
+                        patientId={patientId}
+                        planItems={planItems}
+                        procedures={procedures}
+                        suggestions={suggestions}
+                        busy={uploading}
+                        onToggle={(expanded) => patchFile(row.key, { expanded })}
+                        onRemove={() => removeRow(index)}
+                        onRetry={() => retryRow(row.key)}
+                      />
+                    ) : null
+                  })}
+                </ol>
+              )}
+            </>
+          )}
+        </form.AppField>
+
+        {unconfirmedCount > 0 && (
           <p className="text-xs text-muted-foreground">
-            Hay {unconfirmedRows.length} archivo(s) con resultado no confirmado. La lista de Documentos ya se
+            Hay {unconfirmedCount} archivo(s) con resultado no confirmado. La lista de Documentos ya se
             actualizó: verifica si aparecen antes de reenviar.
           </p>
         )}
@@ -563,266 +716,317 @@ function rowStateLabel(status: RowStatus): string {
   }
 }
 
-function QueuedRow({
-  row,
+/** Los vínculos de la fila: un grupo de selects con el error del que la ficha no encontró. */
+function LinksControl({
+  id,
   patientId,
-  planItems,
   procedures,
-  suggestions,
-  busy,
-  onPatch,
-  onRemove,
-  onRetry,
+  value,
+  onChange,
 }: {
-  row: QueuedFile
+  id: string
+  patientId: string
+  procedures: Array<{ id: string; description: string }>
+  value: DocumentLinkValue
+  onChange: (next: DocumentLinkValue) => void
+}) {
+  const { control, errors, errorId } = useFieldControl({ id, hasDescription: false })
+  return (
+    <div data-invalid={control.invalid || undefined} className="flex flex-col gap-2">
+      <DocumentLinkSelects
+        patientId={patientId}
+        id={id}
+        procedures={procedures}
+        value={value}
+        onChange={(patch) => onChange({ ...value, ...patch })}
+        invalid={control.invalid}
+        onBlur={control.onBlur}
+        aria-describedby={control.describedBy}
+        aria-label="Vínculos del archivo"
+      />
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
+    </div>
+  )
+}
+
+interface QueuedRowProps {
+  index: number
+  meta: RowFile
   patientId: string
   planItems: PlanItem[]
   /** Procedimientos de la atención elegida; vacío sin atención. */
   procedures: Array<{ id: string; description: string }>
   suggestions: string[]
   busy: boolean
-  onPatch: (patch: Partial<QueuedFile>) => void
+  onToggle: (expanded: boolean) => void
   onRemove: () => void
   onRetry: () => void
-}) {
-  const titleId = useId()
-  const categoryId = useId()
-  const planChoiceId = useId()
-  const removable =
-    row.status === "pending" || row.status === "error" || row.status === "unconfirmed"
-  return (
-    <li className="flex flex-col gap-2 rounded-lg border p-3">
-      <Attachment
-        state={
-          row.status === "uploading"
-            ? "uploading"
-            : row.status === "error" || row.status === "unconfirmed"
-              ? "error"
-              : "done"
-        }
-        orientation="horizontal"
-        className="w-full"
-      >
-        <AttachmentMedia variant={row.previewUrl ? "image" : "icon"}>
-          {row.previewUrl ? (
-            <img src={row.previewUrl} alt={row.file.name} />
-          ) : (
-            <FileText aria-hidden="true" />
-          )}
-        </AttachmentMedia>
-        <AttachmentContent>
-          <AttachmentTitle>{row.file.name}</AttachmentTitle>
-          <AttachmentDescription>
-            {row.file.type || "archivo"} · {(row.file.size / 1024).toFixed(0)} KB ·{" "}
-            {rowStateLabel(row.status)}
-          </AttachmentDescription>
-        </AttachmentContent>
-        <AttachmentActions>
-          {removable && (
-            <AttachmentAction
-              aria-label={`Descartar ${row.file.name}`}
-              disabled={busy}
-              onClick={onRemove}
-            >
-              <X aria-hidden="true" />
-            </AttachmentAction>
-          )}
-        </AttachmentActions>
-      </Attachment>
-
-      {row.status !== "saved" ? (
-        <div className="flex flex-col gap-2">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor={titleId}>Título</FieldLabel>
-              <Input
-                id={titleId}
-                value={row.title}
-                disabled={busy}
-                onChange={(e) => onPatch({ title: e.currentTarget.value, validationError: null })}
-                placeholder={`p. ej. ${appWords().examples.imagingTitle}`}
-                maxLength={200}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={categoryId}>Categoría</FieldLabel>
-              <Select
-                items={Object.fromEntries(UPLOAD_CATEGORIES.map((c) => [c, categoryLabel(c)]))}
-                value={row.category}
-                onValueChange={(v) =>
-                  onPatch({
-                    category: v ?? "",
-                    imageType: imageTypesFor(v ?? "").includes(row.imageType as never)
-                      ? row.imageType
-                      : "",
-                    validationError: null,
-                  })
-                }
-              >
-                <SelectTrigger id={categoryId} aria-label={`Categoría de ${row.file.name}`}>
-                  <SelectValue placeholder="Elige la categoría" />
-                </SelectTrigger>
-                <SelectContent>
-                  {UPLOAD_CATEGORIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {categoryLabel(c)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
-          {imageTypesFor(row.category).length > 0 && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <Field>
-                <FieldLabel htmlFor={`${titleId}-type`}>Tipo de imagen</FieldLabel>
-                <Select
-                  items={Object.fromEntries(
-                    imageTypesFor(row.category).map((t) => [t, imageTypeLabel(t)] as const),
-                  )}
-                  value={row.imageType}
-                  onValueChange={(v) => onPatch({ imageType: v ?? "", validationError: null })}
-                >
-                  <SelectTrigger
-                    id={`${titleId}-type`}
-                    aria-required="true"
-                    aria-label={`Tipo de imagen de ${row.file.name}`}
-                  >
-                    <SelectValue placeholder="Elige el tipo" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {imageTypesFor(row.category).map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {imageTypeLabel(t)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${titleId}-taken`}>Fecha de toma</FieldLabel>
-                <DatePickerButton
-                  id={`${titleId}-taken`}
-                  className="w-full"
-                  value={row.capturedAt}
-                  disabled={busy}
-                  max={regionToday()}
-                  emptyLabel="La de subida"
-                  onChange={(next) => onPatch({ capturedAt: next, validationError: null })}
-                  aria-describedby={`${titleId}-taken-help`}
-                />
-                <p id={`${titleId}-taken-help`} className="text-xs text-muted-foreground">
-                  Si queda vacía se usa la fecha de subida.
-                </p>
-              </Field>
-            </div>
-          )}
-          {row.validationError && <FieldError>{row.validationError}</FieldError>}
-
-          <details
-            open={row.expanded}
-            onToggle={(e) => onPatch({ expanded: (e.currentTarget as HTMLDetailsElement).open })}
-          >
-            <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-              {productUi().site ? "Extras: piezas, tratamiento, vínculos y etiquetas" : "Extras: tratamiento, vínculos y etiquetas"}
-              {row.teeth.length > 0 ||
-              row.planItemId ||
-              row.encounterProcedureId ||
-              row.budgetId ||
-              row.followUpId ||
-              row.prescriptionId ||
-              row.paymentId ||
-              row.tags.length > 0
-                ? " (con datos)"
-                : ""}
-            </summary>
-            <div className="flex flex-col gap-2 pt-2">
-              {imageTypesFor(row.category).length > 0 && (
-                <Field>
-                  <FieldLabel htmlFor={`${titleId}-source`}>Origen (opcional)</FieldLabel>
-                  <Input
-                    id={`${titleId}-source`}
-                    value={row.source}
-                    maxLength={120}
-                    disabled={busy}
-                    placeholder={`p. ej. ${appWords().examples.imagingSource}`}
-                    onChange={(e) => onPatch({ source: e.currentTarget.value })}
-                  />
-                </Field>
-              )}
-              <Field>
-                <FieldLabel htmlFor={planChoiceId}>Tratamiento (opcional)</FieldLabel>
-                <Select
-                  items={Object.fromEntries(
-                    planItems.map((p) => [p.id, planItemLabel(p)] as const),
-                  )}
-                  value={row.planItemId}
-                  onValueChange={(v) => onPatch({ planItemId: v ?? "" })}
-                >
-                  <SelectTrigger id={planChoiceId} aria-label={`Tratamiento de ${row.file.name}`}>
-                    <SelectValue placeholder="Sin tratamiento" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {planItems.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {planItemLabel(p)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {row.planItemId && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => onPatch({ planItemId: "" })}
-                  >
-                    Quitar vínculo a tratamiento
-                  </Button>
-                )}
-              </Field>
-              <PlacesField value={row.teeth} onChange={(teeth) => onPatch({ teeth })} optional />
-              <DocumentLinkSelects
-                patientId={patientId}
-                idPrefix={`${planChoiceId}-links`}
-                procedures={procedures}
-                value={{
-                  budgetId: row.budgetId,
-                  followUpId: row.followUpId,
-                  prescriptionId: row.prescriptionId,
-                  paymentId: row.paymentId,
-                  encounterProcedureId: row.encounterProcedureId,
-                }}
-                onChange={(patch) => onPatch(patch)}
-              />
-              <TagsInput
-                value={row.tags}
-                onChange={(tags) => onPatch({ tags })}
-                suggestions={suggestions}
-              />
-            </div>
-          </details>
-
-          {(row.status === "error" || row.status === "unconfirmed") && row.error && (
-            <div className="flex flex-wrap items-center gap-2">
-              <p role="alert" className="min-w-0 flex-1 text-xs text-destructive">
-                {row.error}
-              </p>
-              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onRetry}>
-                {row.status === "unconfirmed" ? "Verifiqué: reenviar" : "Reintentar"}
-              </Button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          Guardado en Documentos
-          {row.category
-            ? ` como ${imageTypeLabel(row.imageType) ?? categoryLabel(row.category)}`
-            : ""}
-          .
-        </p>
-      )}
-    </li>
-  )
 }
+
+const QueuedRow = withForm({
+  defaultValues: EMPTY_UPLOAD,
+  props: {} as QueuedRowProps,
+  render: function QueuedRowRender({
+    form,
+    index,
+    meta,
+    patientId,
+    planItems,
+    procedures,
+    suggestions,
+    busy,
+    onToggle,
+    onRemove,
+    onRetry,
+  }) {
+    const id = useId()
+    const row = useStore(form.store, (state) => state.values.rows[index])
+    if (!row) return null
+    const name = meta.file.name
+    const forFile = <span className="sr-only"> de {name}</span>
+    const types = imageTypesFor(row.category)
+    const removable = meta.status === "pending" || meta.status === "error" || meta.status === "unconfirmed"
+    const at = `rows[${index}]` as const
+    const withExtras =
+      row.teeth.length > 0 ||
+      row.planItemId ||
+      Object.values(row.links).some(Boolean) ||
+      row.tags.length > 0
+    return (
+      <li className="flex flex-col gap-2 rounded-lg border p-3">
+        <Attachment
+          state={
+            meta.status === "uploading"
+              ? "uploading"
+              : meta.status === "error" || meta.status === "unconfirmed"
+                ? "error"
+                : "done"
+          }
+          orientation="horizontal"
+          className="w-full"
+        >
+          <AttachmentMedia variant={meta.previewUrl ? "image" : "icon"}>
+            {meta.previewUrl ? <img src={meta.previewUrl} alt={name} /> : <FileText aria-hidden="true" />}
+          </AttachmentMedia>
+          <AttachmentContent>
+            <AttachmentTitle>{name}</AttachmentTitle>
+            <AttachmentDescription>
+              {meta.file.type || "archivo"} · {(meta.file.size / 1024).toFixed(0)} KB ·{" "}
+              {rowStateLabel(meta.status)}
+            </AttachmentDescription>
+          </AttachmentContent>
+          <AttachmentActions>
+            {removable && (
+              <AttachmentAction aria-label={`Descartar ${name}`} disabled={busy} onClick={onRemove}>
+                <X aria-hidden="true" />
+              </AttachmentAction>
+            )}
+          </AttachmentActions>
+        </Attachment>
+
+        {meta.status !== "saved" ? (
+          <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <form.AppField name={`${at}.title`}>
+                {(field) => (
+                  <field.TextField
+                    id={`${id}-title`}
+                    label={<>Título{forFile}</>}
+                    disabled={busy}
+                    placeholder={`p. ej. ${appWords().examples.imagingTitle}`}
+                    maxLength={200}
+                  />
+                )}
+              </form.AppField>
+              <form.AppField
+                name={`${at}.category`}
+                listeners={{
+                  // Otro tipo de archivo: el tipo de imagen elegido deja de valer si no es de esa categoría.
+                  onChange: ({ value }) => {
+                    const current = form.getFieldValue(`${at}.imageType`)
+                    if (current && !imageTypesFor(value).includes(current))
+                      form.setFieldValue(`${at}.imageType`, "")
+                  },
+                }}
+              >
+                {(field) => (
+                  <field.SelectField
+                    id={`${id}-category`}
+                    label={<>Categoría{forFile}</>}
+                    placeholder="Elige la categoría"
+                    options={UPLOAD_CATEGORIES.map((c) => ({ value: c, label: categoryLabel(c) }))}
+                  />
+                )}
+              </form.AppField>
+            </div>
+            {types.length > 0 && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <form.AppField name={`${at}.imageType`}>
+                  {(field) => (
+                    <field.SelectField
+                      id={`${id}-type`}
+                      label={<>Tipo de imagen{forFile}</>}
+                      placeholder="Elige el tipo"
+                      options={types.map((t) => ({ value: t, label: imageTypeLabel(t) ?? t }))}
+                    />
+                  )}
+                </form.AppField>
+                <form.AppField name={`${at}.capturedAt`}>
+                  {(field) => (
+                    <field.Control
+                      id={`${id}-taken`}
+                      label="Fecha de toma"
+                      description="Si queda vacía se usa la fecha de subida."
+                    >
+                      {(control) => (
+                        <DatePickerButton
+                          {...control.props}
+                          className="w-full"
+                          value={field.state.value}
+                          disabled={busy}
+                          max={regionToday()}
+                          emptyLabel="La de subida"
+                          onChange={(next) => field.handleChange(next)}
+                        />
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
+              </div>
+            )}
+
+            <details open={meta.expanded} onToggle={(e) => onToggle((e.currentTarget as HTMLDetailsElement).open)}>
+              <summary className="cursor-pointer text-xs font-medium text-muted-foreground">
+                {productUi().site
+                  ? "Extras: piezas, tratamiento, vínculos y etiquetas"
+                  : "Extras: tratamiento, vínculos y etiquetas"}
+                {withExtras ? " (con datos)" : ""}
+              </summary>
+              <div className="flex flex-col gap-2 pt-2">
+                {types.length > 0 && (
+                  <form.AppField name={`${at}.source`}>
+                    {(field) => (
+                      <field.TextField
+                        id={`${id}-source`}
+                        label="Origen (opcional)"
+                        maxLength={120}
+                        disabled={busy}
+                        placeholder={`p. ej. ${appWords().examples.imagingSource}`}
+                      />
+                    )}
+                  </form.AppField>
+                )}
+                <form.AppField name={`${at}.planItemId`}>
+                  {(field) => (
+                    <field.Control id={`${id}-plan`} label={<>Tratamiento (opcional){forFile}</>}>
+                      {(control) => (
+                        <>
+                          <Select
+                            items={Object.fromEntries(planItems.map((p) => [p.id, planItemLabel(p)] as const))}
+                            value={field.state.value}
+                            onValueChange={(v) => field.handleChange(v ?? "")}
+                          >
+                            <SelectTrigger
+                              id={control.id}
+                              aria-invalid={control.invalid || undefined}
+                              aria-describedby={control.describedBy}
+                              onBlur={control.onBlur}
+                            >
+                              <SelectValue placeholder="Sin tratamiento" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {planItems.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {planItemLabel(p)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {field.state.value && (
+                            <Button type="button" size="sm" variant="ghost" onClick={() => field.handleChange("")}>
+                              Quitar vínculo a tratamiento
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
+                {productUi().site ? (
+                  <form.AppField name={`${at}.teeth`}>
+                    {(field) => (
+                      <field.Group id={`${id}-teeth`} legend={`${productUi().site?.placesLabel} (opcional)`}>
+                        {(control) => (
+                          <PlacesField
+                            id={control.id}
+                            value={field.state.value}
+                            onChange={(teeth) => field.handleChange(teeth)}
+                            invalid={control.invalid}
+                            aria-describedby={control.describedBy}
+                            onBlur={control.onBlur}
+                          />
+                        )}
+                      </field.Group>
+                    )}
+                  </form.AppField>
+                ) : null}
+                <form.AppField name={`${at}.links`}>
+                  {(field) => (
+                    <LinksControl
+                      id={`${id}-links`}
+                      patientId={patientId}
+                      procedures={procedures}
+                      value={field.state.value}
+                      onChange={(next) => field.handleChange(next)}
+                    />
+                  )}
+                </form.AppField>
+                <form.AppField name={`${at}.tags`}>
+                  {(field) => (
+                    <field.Control
+                      id={`${id}-tags`}
+                      label={
+                        <>
+                          Etiquetas <TagsCount count={field.state.value.length} />
+                        </>
+                      }
+                      description={TAGS_INPUT_HELP}
+                    >
+                      {(control) => (
+                        <TagsInput
+                          id={control.id}
+                          value={field.state.value}
+                          onChange={(tags) => field.handleChange(tags)}
+                          suggestions={suggestions}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                        />
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
+              </div>
+            </details>
+
+            {(meta.status === "error" || meta.status === "unconfirmed") && meta.error && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="alert" className="min-w-0 flex-1 text-xs text-destructive">
+                  {meta.error}
+                </p>
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={onRetry}>
+                  {meta.status === "unconfirmed" ? "Verifiqué: reenviar" : "Reintentar"}
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Guardado en Documentos
+            {row.category ? ` como ${imageTypeLabel(row.imageType) ?? categoryLabel(row.category)}` : ""}.
+          </p>
+        )}
+      </li>
+    )
+  },
+})

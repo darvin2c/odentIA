@@ -1,15 +1,30 @@
-import { Badge, Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer, LoadingState, ViewTabs } from "@odentia/ui-patterns"
+import { Badge, Button } from "@odentia/ui"
+import { ConfirmDialog, FormDrawer, LoadingState, submitErrorMessage, useAppForm, useFormSurface, ViewTabs } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
-import { type FormEvent, useState } from "react"
+import { useEffect, useState } from "react"
+import { z } from "zod"
 import { GUIDANCE_KEY, type GuidanceItem, type GuidanceList } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { appWords } from "../../lib/product-words"
+
+/** Lo que se escribe aquí: una idea corta. */
+const GUIDANCE_CHARS = 600
+/** Lo que admite la API: una regla aprendida puede ser más larga y se edita aquí sin recortarla. */
+const GUIDANCE_MAX_CHARS = 2000
+
+/** Lo que admite `POST|PATCH /api/agent/learning/guidance`, con sus mismas palabras. */
+const guidanceSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, "Escribe qué debe saber el agente")
+    .max(GUIDANCE_MAX_CHARS, `Como mucho ${GUIDANCE_MAX_CHARS} caracteres`),
+})
 
 type Filter = "todas" | "escrita" | "aprendida"
 
@@ -178,13 +193,8 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
           }
         }}
         onConfirm={() => removing && remove.mutate(removing)}
-      >
-        {remove.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {mutationErrorMessage(remove.error) ?? "No pudimos borrarla."}
-          </p>
-        ) : null}
-      </ConfirmDialog>
+        error={remove.isError ? submitErrorMessage(remove.error) : null}
+      />
     </section>
   )
 }
@@ -200,57 +210,50 @@ function GuidanceDrawer({
   onSaved: () => void
 }) {
   const saved = target && target !== "nueva" ? target.body : ""
-  const [text, setText] = useState(saved)
-  const [openedFor, setOpenedFor] = useState<GuidanceItem | "nueva" | null>(null)
-  if (target !== openedFor) {
-    setOpenedFor(target)
-    setText(saved)
-  }
   const save = useMutation({
     retry: false,
     mutationFn: (body: string) =>
       target && target !== "nueva"
         ? apiFetch(`/api/agent/learning/guidance/${target.id}`, { method: "PATCH", body: JSON.stringify({ body }) })
         : apiFetch("/api/agent/learning/guidance", { method: "POST", body: JSON.stringify({ body }) }),
-    onSuccess: () => {
+  })
+  const form = useAppForm({
+    defaultValues: { body: saved },
+    validators: { onSubmit: guidanceSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value.body.trim())
       onSaved()
       onClose()
     },
   })
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (save.isPending || !text.trim()) return
-    save.mutate(text.trim())
-  }
+  // Al abrir otra línea (o «Agregar»), el borrador empieza con su texto.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al cambiar de línea, para no pisar lo que se está escribiendo.
+  useEffect(() => {
+    form.reset({ body: saved })
+  }, [target])
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open={target !== null}
-      onClose={() => {
-        save.reset()
-        onClose()
-      }}
+      onClose={onClose}
       title={target === "nueva" ? "Agregar a lo que debe saber" : "Editar"}
       description="Cómo quieres que atienda. Los datos concretos (precios, horarios, políticas) van en Conocimiento."
-      onSubmit={submit}
-      isSubmitting={save.isPending}
-      isDirty={text !== saved}
-      error={mutationErrorMessage(save.error)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
-      submitDisabled={!text.trim() || text === saved}
     >
-      <Field>
-        <FieldLabel htmlFor="lo-que-debe-saber-texto">Qué debe saber</FieldLabel>
-        <Textarea
-          id="lo-que-debe-saber-texto"
-          rows={4}
-          maxLength={600}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
-        />
-        <FieldDescription>Una idea por línea. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la base.</FieldDescription>
-      </Field>
+      <form.AppField name="body">
+        {(field) => (
+          <field.TextareaField
+            id="lo-que-debe-saber-texto"
+            label="Qué debe saber"
+            rows={4}
+            maxLength={GUIDANCE_CHARS}
+            placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
+            description={<>Una idea por línea. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la base.</>}
+          />
+        )}
+      </form.AppField>
     </FormDrawer>
   )
 }

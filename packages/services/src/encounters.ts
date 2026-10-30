@@ -1,5 +1,6 @@
 import {
   parseVitals,
+  vitalsErrors,
 } from "@odentia/clinical"
 import { type AssembledBudget, assembleEncounterBudget, readBillingModes, removeBudgetItems } from "./budgets.js"
 import type { Db } from "@odentia/db"
@@ -33,6 +34,7 @@ import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import {
   branchNotFound,
+  invalidField,
   isUniqueViolation,
   notFound,
   ServiceError,
@@ -234,7 +236,7 @@ function dedupeTeeth(site: ProductSite, teeth: number[]): number[] {
   if (!Array.isArray(teeth)) throw validation("teeth debe ser una lista")
   const out: number[] = []
   for (const t of teeth) {
-    if (site.code(t) === null) throw validation(site.invalid(t))
+    if (site.code(t) === null) throw invalidField("teeth", site.invalid(t))
     if (!out.includes(t)) out.push(t)
   }
   return out
@@ -255,7 +257,7 @@ function cleanText(value: string | null | undefined, field: string, max: number)
   if (value === undefined || value === null) return null
   const t = value.trim()
   if (!t) return null
-  if (t.length > max) throw validation(`${field} supera ${max} caracteres`)
+  if (t.length > max) throw invalidField(field, `Escribe como mucho ${max} caracteres.`)
   return t
 }
 
@@ -1010,7 +1012,15 @@ export async function updateEncounterDraft(
   }
   if (patch.vitals !== undefined) {
     const parsed = parseVitals(patch.vitals, hooks.vitals)
-    if (!parsed.ok) throw validation(parsed.error)
+    if (!parsed.ok) {
+      const bySign = vitalsErrors(patch.vitals as Record<string, unknown> | null, hooks.vitals)
+      throw validation(
+        parsed.error,
+        Object.keys(bySign).length > 0
+          ? Object.fromEntries(Object.entries(bySign).map(([key, message]) => [`vitals.${key}`, message]))
+          : { vitals: parsed.error },
+      )
+    }
     set.vitals = parsed.value
   }
   const [updated] = await tx
@@ -1091,7 +1101,8 @@ export async function addEncounterProcedure(
     TEXT_LIMITS.procedureDescription,
   )
   if (!serviceIdParam && !planItemIdParam && !freeDescription) {
-    throw validation(
+    throw invalidField(
+      "serviceId",
       "Selecciona un servicio del catálogo, un tratamiento del presupuesto o describe el acto libre",
     )
   }
@@ -1149,13 +1160,13 @@ export async function addEncounterProcedure(
       // Indicado con la pieza o la cara por definir: se define al hacerlo, con las
       // reglas de su ámbito, y queda también en el tratamiento. Lo que ya se dijo
       // al indicarlo (la pieza) no cambia.
-      if (Object.keys(given).length === 0) throw validation(pending.ask)
+      if (Object.keys(given).length === 0) throw invalidField("toothNumber", pending.ask)
       const [offer] = plan.serviceId
         ? await tx.select().from(serviceCatalog).where(and(eq(serviceCatalog.id, plan.serviceId), eq(serviceCatalog.organizationId, orgId))).limit(1)
         : []
       const asked = site.columns({ ...site.fields(planSite), ...given }, { scope: plan.scope!, surfaces: offer ? await surfaceLimits(tx, orgId, offer) : undefined })
       if (planSite.siteCode && asked.siteCode !== planSite.siteCode)
-        throw validation("El procedimiento conserva la pieza del tratamiento indicado")
+        throw invalidField("toothNumber", "El procedimiento conserva la pieza del tratamiento indicado")
       planSite = asked
       await tx
         .update(treatmentPlanItem)
@@ -1164,7 +1175,7 @@ export async function addEncounterProcedure(
     } else if (Object.keys(given).length > 0) {
       const asked = site.columns({ ...site.fields(planSite), ...given })
       if (!sameSite(asked, planSite))
-        throw validation("El procedimiento conserva el sitio del tratamiento indicado, sin cambios")
+        throw invalidField("toothNumber", "El procedimiento conserva el sitio del tratamiento indicado, sin cambios")
     }
     planScope = plan.scope
     planDiagnosis = plan.diagnosisCode
@@ -1209,16 +1220,21 @@ export async function addEncounterProcedure(
   }
   const quantity = input.quantity ?? 1
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99)
-    throw validation("La cantidad va de 1 a 99")
+    throw invalidField("quantity", "La cantidad va de 1 a 99")
   if (planItemIdParam && quantity !== 1)
-    throw validation("El tratamiento del plan se registra por sesión: la cantidad es 1")
+    throw invalidField("quantity", "El tratamiento del plan se registra por sesión: la cantidad es 1")
   // El cargo nace del acto: precio unitario × cantidad.
   if (priceCents !== null) priceCents *= quantity
-  if (!description)
-    throw validation("description es obligatoria (o selecciona un servicio del catálogo)")
+  if (!description) throw invalidField("description", "Describe el acto libre o elige un servicio del catálogo")
   if (description.length > TEXT_LIMITS.procedureDescription) {
-    throw validation(`description supera ${TEXT_LIMITS.procedureDescription} caracteres`)
+    throw invalidField("description", `Escribe como mucho ${TEXT_LIMITS.procedureDescription} caracteres.`)
   }
+  // Sin indicar, el acto lleva el diagnóstico de su tratamiento, con su lista.
+  // Se comprueba antes de escribir nada, para decir el rechazo junto al código.
+  const diagnosis =
+    input.diagnosisCode === undefined
+      ? { diagnosisSystem: planDiagnosis ? planDiagnosisSystem : null, diagnosisCode: planDiagnosis }
+      : await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem }, "diagnosisCode")
   // Tratamiento directo (un solo gesto): ejecutar un servicio sin indicación
   // previa crea la indicación implícita en el plan vigente, ya realizada y
   // aceptada en la misma atención.
@@ -1243,11 +1259,6 @@ export async function addEncounterProcedure(
         .where(eq(treatmentPlanItem.id, indicated.id))
     }
   }
-  // Sin indicar, el acto lleva el diagnóstico de su tratamiento, con su lista.
-  const diagnosis =
-    input.diagnosisCode === undefined
-      ? { diagnosisSystem: planDiagnosis ? planDiagnosisSystem : null, diagnosisCode: planDiagnosis }
-      : await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
   const [row] = await tx
     .insert(encounterProcedure)
     .values({
@@ -1604,13 +1615,10 @@ export async function finalizeEncounter(
   if (closing.consents.length > 0) {
     const reason = input.consentSkipReason?.trim() ?? ""
     if (!reason) {
-      throw new ServiceError(
-        "CONSENT_UNSIGNED",
-        409,
-        `Falta el consentimiento de ${closing.consents.map((need) => `«${need.title}»`).join(", ")}: fírmalo ahora o sigue sin él diciendo por qué`,
-      )
+      const message = `Falta el consentimiento de ${closing.consents.map((need) => `«${need.title}»`).join(", ")}: fírmalo ahora o sigue sin él diciendo por qué`
+      throw new ServiceError("CONSENT_UNSIGNED", 409, message, { consentSkipReason: message })
     }
-    if (reason.length > 2000) throw validation("El motivo admite hasta 2000 caracteres")
+    if (reason.length > 2000) throw invalidField("consentSkipReason", "El motivo admite hasta 2000 caracteres")
     consentSkipReason = reason
   }
   const signature = await requireProfessionalSignature(tx, orgId, actorUserId)
@@ -1618,11 +1626,11 @@ export async function finalizeEncounter(
   let endedAt = now
   if (input.endedAt) {
     endedAt = new Date(input.endedAt)
-    if (Number.isNaN(endedAt.getTime())) throw validation("endedAt debe ser una fecha ISO válida")
+    if (Number.isNaN(endedAt.getTime())) throw invalidField("endedAt", "Elige la hora de fin de la lista")
     if (endedAt < locked.startedAt)
-      throw validation("La hora de fin no puede ser anterior al inicio de la atención")
+      throw invalidField("endedAt", "La hora de fin no puede ser anterior al inicio de la atención")
     if (endedAt.getTime() > now.getTime() + 5 * 60_000)
-      throw validation("La hora de fin no puede estar en el futuro")
+      throw invalidField("endedAt", "La hora de fin no puede estar en el futuro")
   }
   const procedures = await tx
     .select()
@@ -1890,7 +1898,7 @@ export async function addEncounterAddendum(
     throw conflict("NOT_FINALIZED", "Solo se puede agregar una adenda a una atención finalizada")
   }
   const text = input.text?.trim() ?? ""
-  if (text.length < 1 || text.length > 4000) throw validation("text debe tener 1–4000 caracteres")
+  if (text.length < 1 || text.length > 4000) throw invalidField("text", "Escribe la adenda: hasta 4000 caracteres")
   const [row] = await tx
     .insert(clinicalNote)
     .values({
@@ -1913,7 +1921,7 @@ export async function addEncounterAddendum(
 function cleanReason(reason: string | null | undefined): string {
   const text = reason?.trim() ?? ""
   if (text.length < 1 || text.length > 2000)
-    throw validation("El motivo debe tener 1–2000 caracteres")
+    throw invalidField("reason", "Escribe el motivo: hasta 2000 caracteres")
   return text
 }
 

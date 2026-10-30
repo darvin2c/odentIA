@@ -43,6 +43,9 @@
 .wl-legal { margin: 0; font-size: 13px; color: var(--muted); }
 .wl-legal a { color: var(--ink); }
 .wl-error { margin: 0; padding: 10px 12px; border-radius: 12px; background: #fef3f2; color: #b42318; font-size: 14px; }
+/* El error de cada campo, bajo él; el borde rojo va en la caja que se ve (en el celular, la del prefijo). */
+.wl-field > input[aria-invalid="true"], .wl-field > select[aria-invalid="true"], .wl-phone:has(> input[aria-invalid="true"]) { box-shadow: inset 0 0 0 2px #d92d20; }
+.wl-field-error { margin: 0; font-size: 14px; font-weight: 500; color: #b42318; }
 .wl-submit { width: 100%; justify-content: center; }
 .wl-submit:disabled { opacity: .6; cursor: progress; }
 .wl-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 12px; font-size: 16px; line-height: 1.5; }

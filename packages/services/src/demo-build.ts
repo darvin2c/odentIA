@@ -100,15 +100,19 @@ export interface DemoRecipeRef {
 
 export function demoKindOf(product: ClinicalProduct, key: string): DemoKindRecipe {
   const kind = demoKindsFor(product).find((item) => item.key === key)
-  if (!kind)
-    throw new ServiceError("VALIDATION", 400, "Ese tipo de demo no existe para el producto")
+  if (!kind) {
+    const message = "Ese tipo de demo no existe para el producto"
+    throw new ServiceError("VALIDATION", 400, message, { kind: message })
+  }
   return kind
 }
 
 export function demoCountryOf(code: string): DemoCountry {
   const country = DEMO_COUNTRIES[code as DemoCountry["code"]]
-  if (!country)
-    throw new ServiceError("VALIDATION", 400, "Las demos son de Perú, Colombia o México")
+  if (!country) {
+    const message = "Las demos son de Perú, Colombia o México"
+    throw new ServiceError("VALIDATION", 400, message, { countryCode: message })
+  }
   return country
 }
 

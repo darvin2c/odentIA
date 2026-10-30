@@ -27,6 +27,7 @@ export function DictationSignDialog({
   open,
   session,
   signing,
+  error: closingError = null,
   children,
   onClose,
   onComplete,
@@ -35,6 +36,11 @@ export function DictationSignDialog({
   open: boolean
   session: DictationSession
   signing: boolean
+  /**
+   * Por qué no se pudo firmar (lo que no es de la colegiatura, que se dice en
+   * su campo): el diálogo sigue abierto con lo marcado.
+   */
+  error?: string | null
   /** Con quién se firma y la hora de fin: lo mismo que al firmar sin sugerencias. */
   children: ReactNode
   onClose: () => void
@@ -52,7 +58,10 @@ export function DictationSignDialog({
   const marked = items.filter((item) => confirmable(item) && !unmarked.includes(item.id)).map((item) => item.id)
   const Choices = productUi().dictation?.SuggestionChoices
   const busy = signing || session.confirmMany.isPending
-  const error = dictationErrorText(session.confirmMany.error, "No pude confirmar alguna. Revísala y vuelve a firmar.")
+  const confirmError = dictationErrorText(session.confirmMany.error, "No pude confirmar alguna. Revísala y vuelve a firmar.")
+  // La que no se pudo confirmar lleva el aviso en su fila; lo demás (la firma), al pie.
+  const failedId = confirmError ? (session.confirmManyFailed?.id ?? null) : null
+  const error = (failedId ? null : confirmError) ?? closingError
   return (
     <AlertDialog
       open={open}
@@ -82,13 +91,19 @@ export function DictationSignDialog({
                       : !can
                         ? (item.note ?? "Falta completarla para que entre.")
                         : null
+                const failed = item.id === failedId
                 return (
-                  <li key={item.id} className="flex flex-col gap-2 rounded-xl border p-3 text-sm">
+                  <li
+                    key={item.id}
+                    className={`flex flex-col gap-2 rounded-xl border p-3 text-sm ${failed ? "border-destructive" : ""}`}
+                  >
                     <div className="flex items-start gap-3">
                       <Checkbox
                         id={`firmar-${item.id}`}
                         checked={checked}
                         disabled={!can || busy}
+                        aria-invalid={failed || undefined}
+                        aria-describedby={failed ? `firmar-${item.id}-error` : undefined}
                         onCheckedChange={(value) =>
                           setUnmarked((current) => (value === true ? current.filter((id) => id !== item.id) : [...current, item.id]))
                         }
@@ -104,6 +119,11 @@ export function DictationSignDialog({
                         </span>
                         {can && item.note ? <span className="text-warning">{item.note}</span> : null}
                         {why ? <span className="text-warning">{why}</span> : null}
+                        {failed ? (
+                          <span id={`firmar-${item.id}-error`} role="alert" className="text-destructive">
+                            {confirmError}
+                          </span>
+                        ) : null}
                       </span>
                     </div>
                     {Choices && can ? <Choices session={session} item={item} busy={busy} /> : null}

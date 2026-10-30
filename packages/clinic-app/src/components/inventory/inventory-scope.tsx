@@ -33,7 +33,8 @@ export interface InventoryOpeners {
   productForm: (product?: ProductDetail) => void
   action: (kind: StockActionKind, preset?: { productId?: string; lotId?: string }) => void
   purchase: (preset?: PurchasePreset) => void
-  editPurchase: (order: PurchaseOrderView) => void
+  /** `missingPrices`: se abre para confirmarlo y le falta el precio a alguna fila; esas filas llegan marcadas. */
+  editPurchase: (order: PurchaseOrderView, options?: { missingPrices?: boolean }) => void
   receive: (orderId: string) => void
   paste: () => void
   /** Nuevo o editar proveedor; `onSaved` recibe el guardado (queda elegido en la compra). */

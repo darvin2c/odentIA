@@ -2,6 +2,7 @@
  * Selector buscable de un recurso dinámico de la agenda (profesional, unidad dental,
  * paciente). Las opciones llegan del consumidor; el componente no decide datos.
  * Las opciones estáticas (p.ej. estado) usan radios, no este combobox.
+ * No pinta etiqueta: la pone la pantalla (`FieldLabel htmlFor={id}` o `field.Control`).
  */
 import {
   Combobox,
@@ -10,7 +11,6 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-  FieldLabel,
 } from "@odentia/ui"
 import * as React from "react"
 
@@ -20,20 +20,14 @@ export interface ResourceSelectOption {
   detail?: string
 }
 
-export function ResourceSelect({
-  id,
-  label,
-  options,
-  value,
-  onChange,
-  onQueryChange,
-  empty,
-}: {
-  id: string
-  label: string
+export interface ResourceSelectProps {
+  /** Del campo de búsqueda, para `FieldLabel htmlFor`. */
+  id?: string
   options: ResourceSelectOption[]
   value: string
   onChange: (value: string) => void
+  /** Texto del campo vacío («Buscar profesional…»). */
+  placeholder?: string
   /** Opcional: avisa del texto de búsqueda para recargar opciones en servidor. */
   onQueryChange?: (query: string) => void
   /**
@@ -42,7 +36,23 @@ export function ResourceSelect({
    * salida (p. ej. registrar a quien se busca) tiene que ir dentro.
    */
   empty?: React.ReactNode
-}) {
+  invalid?: boolean
+  "aria-describedby"?: string
+  onBlur?: () => void
+}
+
+export function ResourceSelect({
+  id,
+  options,
+  value,
+  onChange,
+  placeholder,
+  onQueryChange,
+  empty,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
+}: ResourceSelectProps) {
   // Lo elegido se conserva aunque la búsqueda en servidor deje de devolverlo. Sin esto,
   // el campo se vacía, la búsqueda vuelve a traerlo y el campo se rellena, sin fin.
   const [picked, setPicked] = React.useState<ResourceSelectOption | null>(null)
@@ -53,34 +63,37 @@ export function ResourceSelect({
       ? [selected, ...options]
       : options
   return (
-    <div className="grid gap-2">
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Combobox
-        items={items}
-        value={selected}
-        isItemEqualToValue={(a, b) => a.id === b.id}
-        itemToStringLabel={(item) => item.label}
-        onValueChange={(item) => {
-          setPicked(item)
-          onChange(item?.id ?? "")
-        }}
-        onInputValueChange={(text) => onQueryChange?.(text)}
-      >
-        <ComboboxInput id={id} placeholder={`Buscar ${label.toLocaleLowerCase("es")}…`} />
-        <ComboboxContent>
-          <ComboboxEmpty>{empty ?? "Sin resultados."}</ComboboxEmpty>
-          <ComboboxList>
-            {(item: ResourceSelectOption) => (
-              <ComboboxItem key={item.id} value={item}>
-                <span className="grid">
-                  <span>{item.label}</span>
-                  <span className="text-xs text-muted-foreground">{item.detail}</span>
-                </span>
-              </ComboboxItem>
-            )}
-          </ComboboxList>
-        </ComboboxContent>
-      </Combobox>
-    </div>
+    <Combobox
+      items={items}
+      value={selected}
+      isItemEqualToValue={(a, b) => a.id === b.id}
+      itemToStringLabel={(item) => item.label}
+      onValueChange={(item) => {
+        setPicked(item)
+        onChange(item?.id ?? "")
+      }}
+      onInputValueChange={(text) => onQueryChange?.(text)}
+    >
+      <ComboboxInput
+        id={id}
+        placeholder={placeholder}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        onBlur={onBlur}
+      />
+      <ComboboxContent>
+        <ComboboxEmpty>{empty ?? "Sin resultados."}</ComboboxEmpty>
+        <ComboboxList>
+          {(item: ResourceSelectOption) => (
+            <ComboboxItem key={item.id} value={item}>
+              <span className="grid">
+                <span>{item.label}</span>
+                <span className="text-xs text-muted-foreground">{item.detail}</span>
+              </span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+      </ComboboxContent>
+    </Combobox>
   )
 }

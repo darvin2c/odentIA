@@ -84,14 +84,14 @@ const decisionsQuery = z.object({
 })
 
 const probarMessageInput = z.object({
-  text: z.string().trim().min(1).max(2000),
+  text: z.string().trim().min(1, "Escribe el mensaje del paciente.").max(2000, "Escribe como mucho 2000 caracteres."),
   /** Lo genera la pantalla: reenviar el mismo mensaje no lo duplica. */
   clientMessageId: z.string().uuid(),
 })
 
 const simulateInput = z.object({
-  conversationId: z.string().uuid(),
-  text: z.string().min(1).max(4000),
+  conversationId: z.string({ error: "Elige una conversación." }).uuid("Elige una conversación de la lista."),
+  text: z.string().min(1, "Escribe el mensaje del paciente.").max(4000, "Escribe como mucho 4000 caracteres."),
 })
 
   const app = new Hono()

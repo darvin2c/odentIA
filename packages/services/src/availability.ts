@@ -17,7 +17,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { serviceCatalog } from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, gte, inArray, isNull, lt, ne, or } from "drizzle-orm"
-import { branchNotFound, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, invalidField, roomNotFound, notFound, ServiceError, validation } from "./errors.js"
 import { NEUTRAL_TIMEZONE, roomWord } from "./locale.js"
 import { type AttendingRule, attendingRule } from "./specialties.js"
 
@@ -26,25 +26,21 @@ const FALLBACK_TZ = NEUTRAL_TIMEZONE
 const MAX_RANGE_DAYS = 62
 const MAX_SLOTS = 200
 
-function conflict(code: string, message: string): ServiceError {
-  return new ServiceError(code, 409, message)
-}
-
 function parseInstant(value: string, field: string): Date {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) throw validation(`${field} debe ser una fecha ISO válida`)
   return date
 }
 
-function assertWeekday(value: number): void {
+function assertWeekday(value: number, field: string): void {
   if (!Number.isInteger(value) || value < 0 || value > 6) {
-    throw validation("El día de semana debe estar entre 0 (domingo) y 6 (sábado)")
+    throw invalidField(field, "El día de semana debe estar entre 0 (domingo) y 6 (sábado)")
   }
 }
 
-function assertMinutes(value: number, field: string): void {
+function assertMinutes(value: number, label: string, field: string): void {
   if (!Number.isInteger(value) || value < 0 || value > 1440) {
-    throw validation(`${field} debe estar entre 0 y 1440 minutos`)
+    throw invalidField(field, `${label} debe estar entre 0 y 1440 minutos`)
   }
 }
 /** Zona válida o error explícito: nunca se asume un huso ante un valor inválido. */
@@ -169,7 +165,8 @@ async function requireProfessional(tx: Db, orgId: string, professionalUserId: st
   return membership
 }
 
-async function requireRoomInBranch(tx: Db, orgId: string, roomId: string, branchId: string) {
+/** `field`: el nombre del dato en el cuerpo, para que la pantalla lo diga en su campo. */
+async function requireRoomInBranch(tx: Db, orgId: string, roomId: string, branchId: string, field?: string) {
   const [row] = await tx
     .select({ id: scheduleRoom.id, name: scheduleRoom.name })
     .from(scheduleRoom)
@@ -182,7 +179,11 @@ async function requireRoomInBranch(tx: Db, orgId: string, roomId: string, branch
       ),
     )
     .limit(1)
-  if (!row) throw roomNotFound((await roomWord(tx, orgId)).one)
+  if (!row) {
+    const error = roomNotFound((await roomWord(tx, orgId)).one)
+    if (field) error.fields = { [field]: error.message }
+    throw error
+  }
   return row
 }
 
@@ -267,13 +268,17 @@ export async function setProfessionalSchedule(
   const resolved = await requireBranch(tx, orgId, input.branchId)
   await requireProfessional(tx, orgId, input.professionalUserId)
   const seen = new Set<string>()
-  for (const rule of input.rules) {
-    assertWeekday(rule.weekday)
-    assertMinutes(rule.startMin, "El inicio")
-    assertMinutes(rule.endMin, "El fin")
-    if (rule.endMin <= rule.startMin) throw validation("El fin del turno debe ser posterior al inicio")
+  // Cada rechazo lleva la ruta del turno en el cuerpo (`rules[3].endMin`): se dice en ese turno.
+  for (const [index, rule] of input.rules.entries()) {
+    const path = `rules[${index}]`
+    assertWeekday(rule.weekday, `${path}.weekday`)
+    assertMinutes(rule.startMin, "El inicio", `${path}.startMin`)
+    assertMinutes(rule.endMin, "El fin", `${path}.endMin`)
+    if (rule.endMin <= rule.startMin) {
+      throw invalidField(`${path}.endMin`, "El turno debe terminar después de empezar.")
+    }
     const key = `${rule.weekday}:${rule.startMin}:${rule.endMin}`
-    if (seen.has(key)) throw validation("Hay turnos duplicados en el horario")
+    if (seen.has(key)) throw invalidField(`${path}.endMin`, "Este turno está repetido ese día.")
     seen.add(key)
   }
   const scope = and(
@@ -384,9 +389,9 @@ export async function createScheduleBlock(
   await requireBranch(tx, orgId, input.branchId)
   const startsAt = parseInstant(input.startsAt, "startsAt")
   const endsAt = parseInstant(input.endsAt, "endsAt")
-  if (endsAt <= startsAt) throw validation("El bloqueo debe terminar después de iniciar")
+  if (endsAt <= startsAt) throw invalidField("endsAt", "El bloqueo debe terminar después de iniciar.")
   if (input.professionalUserId) await requireProfessional(tx, orgId, input.professionalUserId)
-  if (input.roomId) await requireRoomInBranch(tx, orgId, input.roomId, input.branchId)
+  if (input.roomId) await requireRoomInBranch(tx, orgId, input.roomId, input.branchId, "roomId")
   // Sin profesional ni unidad dental, el bloqueo cierra la sede completa.
   const kind = assertBlockKind(input.kind ?? "bloqueo")
   const [created] = await tx
@@ -512,7 +517,7 @@ export async function validateAvailability(
   orgId: string,
   check: AvailabilityCheck,
 ): Promise<void> {
-  if (check.endsAt <= check.startsAt) throw validation("La cita debe terminar después de iniciar")
+  if (check.endsAt <= check.startsAt) throw invalidField("endsAt", "La cita debe terminar después de iniciar")
   const resolved = await requireBranch(tx, orgId, check.branchId)
   await requireProfessional(tx, orgId, check.professionalUserId)
   await requireRoomInBranch(tx, orgId, check.roomId, check.branchId)
@@ -528,7 +533,7 @@ export async function validateAvailability(
       ),
     )
   if (rules.length === 0 && !check.allowOutsideSchedule) {
-    throw validation("El profesional no tiene horario configurado en esta sede")
+    throw invalidField("professionalUserId", "El profesional no tiene horario configurado en esta sede")
   }
   // Parte el intervalo por días locales y exige un turno que cubra cada tramo.
   let cursor = check.startsAt
@@ -547,7 +552,7 @@ export async function validateAvailability(
         endParts.minutes < rule.endMin,
     )
     if (!covered && !check.allowOutsideSchedule) {
-      throw validation("El horario del profesional no cubre ese momento en esta sede")
+      throw invalidField("startsAt", "El horario del profesional no cubre ese momento en esta sede")
     }
     if (segmentEnd >= check.endsAt) break
     cursor = segmentEnd
@@ -555,20 +560,45 @@ export async function validateAvailability(
   }
   const block = await overlappingBlocks(tx, orgId, check)
   if (block) {
-    throw conflict(
-      "SCHEDULE_BLOCKED",
-      block.kind === "ausencia"
-        ? "El profesional está ausente en ese horario"
-        : "La agenda está bloqueada en ese horario",
-    )
+    // Lo que se cerró dice qué dato cambiar: su profesional, su unidad o, si es la sede entera, la hora.
+    const message =
+      block.kind === "ausencia" ? "El profesional está ausente en ese horario" : "La agenda está bloqueada en ese horario"
+    const field = block.professionalUserId ? "professionalUserId" : block.roomId ? "roomId" : "startsAt"
+    throw new ServiceError("SCHEDULE_BLOCKED", 409, message, { [field]: message })
   }
   const clash = await overlappingAppointment(tx, orgId, check)
   if (clash) {
-    throw conflict(
-      "APPOINTMENT_CONFLICT",
-      `El profesional o la ${(await roomWord(tx, orgId)).one} ya están ocupados en ese horario`,
+    throw appointmentConflict(
+      clash.professionalUserId === check.professionalUserId ? "professionalUserId" : "roomId",
+      (await roomWord(tx, orgId)).one,
     )
   }
+}
+
+/**
+ * Dos citas a la misma hora: dice si chocó el profesional o la unidad, en su
+ * dato (`professionalUserId`/`roomId`), para que la pantalla marque ese campo.
+ */
+export function appointmentConflict(
+  who: "professionalUserId" | "roomId",
+  roomName: string,
+  when = "en ese horario",
+): ServiceError {
+  const message =
+    who === "professionalUserId"
+      ? `El profesional ya tiene otra cita ${when}`
+      : `La ${roomName} ya está ocupada ${when}`
+  return new ServiceError("APPOINTMENT_CONFLICT", 409, message, { [who]: message })
+}
+
+/** De qué recurso es la exclusión de la base que saltó (`appointment_no_overlap_room`…). */
+export function exclusionTarget(error: unknown): "professionalUserId" | "roomId" {
+  for (const item of [error, (error as { cause?: unknown } | null)?.cause]) {
+    const record = item as Record<string, unknown> | null | undefined
+    const name = record?.constraint_name ?? record?.constraint
+    if (typeof name === "string") return name.includes("room") ? "roomId" : "professionalUserId"
+  }
+  return "professionalUserId"
 }
 
 /* Huecos libres */

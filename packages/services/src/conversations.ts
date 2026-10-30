@@ -37,7 +37,7 @@ import {
 } from "./contacts.js"
 import { assertContactWritable, type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { CONVERSATION_VIEWS, type ConversationView, conversationViewSql, mineOrUnclaimedSql, personKeySql } from "./conversation-state.js"
 import { findOrgCountry } from "./locale.js"
 import { getPatientMissingData } from "./patient-registration.js"
@@ -2175,7 +2175,7 @@ export async function writeToPerson(
   let phone = identityId ? null : person.phone
   if (typedPhone) {
     phone = normalizePhone(typedPhone) ?? normalizePhone(typedPhone, await findOrgCountry(tx, orgId))
-    if (!phone) throw validation("Escribe el número de WhatsApp con el código de su país.")
+    if (!phone) throw invalidField("phone", "Escribe el número de WhatsApp con el código de su país.")
   }
   if (!identityId && phone) {
     const claimed = await claimWhatsAppNumber(tx, orgId, actorUserId, contactId, phone)

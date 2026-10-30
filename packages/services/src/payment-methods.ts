@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { organizationPaymentMethod } from "@odentia/db/schema/org-payments"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, max } from "drizzle-orm"
-import { notFound, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 
 export type PaymentMethodRow = typeof organizationPaymentMethod.$inferSelect
 
@@ -17,14 +17,15 @@ export function isCashLike(typeCode: string): boolean {
 
 function assertName(name: string | null | undefined): string {
   const value = name?.trim() ?? ""
-  if (!value || value.length > 120) throw validation("name debe tener 1–120 caracteres")
+  if (!value) throw invalidField("name", "Escribe el nombre del medio de pago")
+  if (value.length > 120) throw invalidField("name", "El nombre admite hasta 120 caracteres")
   return value
 }
 
 function assertTypeCode(typeCode: string | null | undefined): PaymentTypeCode {
   const value = (typeCode ?? "1").trim()
   if (!(PAYMENT_TYPE_CODES as readonly string[]).includes(value)) {
-    throw validation("typeCode inválido: usa la lista UN/CEFACT 4461 (10|48|30|68|20|1)")
+    throw invalidField("typeCode", "Elige el tipo del medio de pago de la lista")
   }
   return value as PaymentTypeCode
 }
@@ -32,7 +33,7 @@ function assertTypeCode(typeCode: string | null | undefined): PaymentTypeCode {
 function assertSortOrder(sortOrder: number | null | undefined): number {
   if (sortOrder === null || sortOrder === undefined) return 0
   if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > 9999) {
-    throw validation("sortOrder debe ser un entero entre 0 y 9999")
+    throw invalidField("sortOrder", "El orden debe ser un número entero entre 0 y 9999")
   }
   return sortOrder
 }
@@ -76,11 +77,16 @@ export async function listPaymentMethods(
     .orderBy(asc(organizationPaymentMethod.sortOrder), asc(organizationPaymentMethod.name))
 }
 
-/** Medio exigible para un cobro nuevo: existe y está activo. */
+/**
+ * Medio exigible para un cobro nuevo: existe y está activo. `field`: el nombre
+ * del medio en el cuerpo de la petición (`payments[1].paymentMethodId`), para
+ * que la pantalla diga el rechazo junto a él.
+ */
 export async function requirePaymentMethod(
   tx: Db,
   orgId: string,
   id: string,
+  field?: string,
 ): Promise<PaymentMethodRow> {
   const [row] = await tx
     .select()
@@ -92,8 +98,14 @@ export async function requirePaymentMethod(
       ),
     )
     .limit(1)
-  if (!row) throw notFound("Medio de pago")
-  if (!row.isActive) throw validation("El medio de pago no está activo")
+  if (!row) {
+    if (!field) throw notFound("Medio de pago")
+    throw new ServiceError("NOT_FOUND", 404, "Medio de pago no encontrado", { [field]: "Medio de pago no encontrado" })
+  }
+  if (!row.isActive) {
+    if (!field) throw validation("El medio de pago no está activo")
+    throw invalidField(field, "El medio de pago no está activo")
+  }
   return row
 }
 

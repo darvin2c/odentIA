@@ -1,18 +1,22 @@
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { ConfirmDialog, FlowDiagram } from "@odentia/ui-patterns"
+import { Badge, Button } from "@odentia/ui"
+import { ConfirmDialog, FlowDiagram, submitErrorMessage, submitForm, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { CircleAlert, CircleCheck } from "lucide-react"
 import { useEffect, useId, useState } from "react"
+import { z } from "zod"
 import { type AdminDraft, type AdminLineDetail, type AdminRequestResult, adminLineKey, refreshAdmin } from "../../lib/admin"
 import { ADMIN_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { adminFlowToDiagram } from "./admin-line"
 import { appWords } from "../../lib/product-words"
 
 /** Con el modelo caído el campo se desactiva y vuelve solo pasado este tiempo. */
 const RETRY_AFTER_MS = 30_000
+
+/** El pedido, con los mismos límites que `requestInput` de la API. */
+const requestSchema = z.object({ text: z.string().trim().min(4).max(600) })
 
 /** Quien escribe es el agente de recepción: el ejemplo dice su nombre en esta clínica. */
 const examples = (receptionName: string) => [
@@ -30,7 +34,6 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
   const uid = useId()
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
-  const [text, setText] = useState("")
   const [toDelete, setToDelete] = useState<string | null>(null)
   const [down, setDown] = useState(false)
   // Lo que no sabe hacer se puede enviar a odentIA como pedido: es la misma vía de la Ayuda.
@@ -48,7 +51,12 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
     retry: false,
     mutationFn: (request: string) =>
       apiFetch<{ data: AdminRequestResult }>("/api/agent/admin/request", { method: "POST", body: JSON.stringify({ text: request }) }),
-    onSuccess: ({ data }) => {
+  })
+  const form = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: requestSchema },
+    onSubmit: async ({ value, formApi }) => {
+      const { data } = await ask.mutateAsync(value.text.trim())
       setDown(data.unavailable)
       if (data.confirmDelete && data.key) {
         setToDelete(data.key)
@@ -56,11 +64,15 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
         return
       }
       if (!data.draft || !data.key) return
-      setText("")
+      formApi.reset()
       refreshAdmin(queryClient)
       onOpen(data.key)
     },
   })
+  const submit = useFormSubmit(form)
+  const submitError = useFormSubmitError(form)
+  const text = useStore(form.store, (state) => state.values.text)
+  const asking = useStore(form.store, (state) => state.isSubmitting)
   // Se reactiva solo: el modelo suele volver sin que nadie haga nada.
   useEffect(() => {
     if (!down) return
@@ -68,42 +80,44 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
     return () => clearTimeout(timer)
   }, [down])
   const answer = ask.data?.data
-  const ready = text.trim().length >= 4 && !ask.isPending && !down
   const unknown = !!answer && !answer.understood && !answer.unavailable
   return (
     <section aria-labelledby={`${uid}-titulo`} className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (ready) ask.mutate(text.trim())
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-pedido`} id={`${uid}-titulo`} className="font-heading text-base font-semibold">
-            Dile qué quieres que haga
-          </FieldLabel>
-          <FieldDescription>
-            Con tus palabras. Arma el cambio con lo que el sistema ya sabe hacer y te lo deja como borrador: nada se prende ni cambia hasta que tú lo
-            decidas. También puedes hacerlo todo con los interruptores de abajo.
-          </FieldDescription>
-          <Textarea
-            id={`${uid}-pedido`}
-            rows={2}
-            maxLength={600}
-            disabled={down || ask.isPending}
-            value={text}
-            placeholder={`Por ejemplo: cuando alguien cancele su cita, que ${receptionName} le ofrezca otra fecha`}
-            onChange={(event) => {
-              setText(event.target.value)
+      <form noValidate className="flex flex-col gap-3" onSubmit={submit}>
+        <form.AppField
+          name="text"
+          listeners={{
+            // Lo que se respondió era de lo escrito antes: al cambiarlo, deja de verse.
+            onChange: () => {
               if (ask.data || ask.isError) ask.reset()
               if (forward.data || forward.isError) forward.reset()
-            }}
-          />
-        </Field>
-        <Button type="submit" className="min-h-11 self-start sm:min-h-9" disabled={!ready}>
-          {ask.isPending ? "Leyendo tu pedido…" : "Armar el cambio"}
+            },
+          }}
+        >
+          {(field) => (
+            <field.TextareaField
+              id={`${uid}-pedido`}
+              label={
+                <span id={`${uid}-titulo`} className="font-heading text-base font-semibold">
+                  Dile qué quieres que haga
+                </span>
+              }
+              description="Con tus palabras. Arma el cambio con lo que el sistema ya sabe hacer y te lo deja como borrador: nada se prende ni cambia hasta que tú lo decidas. También puedes hacerlo todo con los interruptores de abajo."
+              rows={2}
+              maxLength={600}
+              disabled={down || asking}
+              placeholder={`Por ejemplo: cuando alguien cancele su cita, que ${receptionName} le ofrezca otra fecha`}
+            />
+          )}
+        </form.AppField>
+        <Button type="submit" className="min-h-11 self-start sm:min-h-9" disabled={down || asking}>
+          {asking ? "Leyendo tu pedido…" : "Armar el cambio"}
         </Button>
+        {submitError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {submitError}
+          </p>
+        ) : null}
         {text.trim().length === 0 && !down ? (
           <div className="flex min-w-0 flex-col gap-1.5">
             <p className="text-xs font-semibold text-muted-foreground">Por ejemplo</p>
@@ -114,7 +128,7 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
                 variant="outline"
                 size="sm"
                 className="h-auto min-h-11 max-w-full shrink justify-start self-start whitespace-normal py-1.5 text-left sm:min-h-8"
-                onClick={() => setText(example)}
+                onClick={() => form.setFieldValue("text", example)}
               >
                 {example}
               </Button>
@@ -122,18 +136,13 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
           </div>
         ) : null}
       </form>
-      {ask.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {mutationErrorMessage(ask.error)}
-        </p>
-      ) : null}
       {answer?.message ? (
         <div role="status" className="flex flex-col gap-2 rounded-xl bg-muted px-3.5 py-3 text-sm">
           <p>{answer.message}</p>
           {answer.unavailable ? (
             <div className="flex flex-wrap items-center gap-3">
-              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={ask.isPending} onClick={() => ask.mutate(text.trim())}>
-                {ask.isPending ? "Reintentando…" : "Reintentar"}
+              <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={asking} onClick={() => void submitForm(form)}>
+                {asking ? "Reintentando…" : "Reintentar"}
               </Button>
               <span className="text-muted-foreground">{down ? "El campo vuelve a activarse solo en medio minuto." : "Ya puedes volver a escribir."}</span>
             </div>
@@ -154,7 +163,7 @@ export function AdminRequest({ onOpen }: { onOpen: (key: string | undefined) => 
           ) : null}
           {forward.isError ? (
             <p role="alert" className="text-destructive">
-              {mutationErrorMessage(forward.error)}
+              {submitErrorMessage(forward.error)}
             </p>
           ) : null}
         </div>
@@ -187,14 +196,9 @@ function DeleteAdminLineDialog({ lineKey, name, onClose }: { lineKey: string; na
       onClose={() => {
         if (!remove.isPending) onClose()
       }}
+      error={remove.isError ? submitErrorMessage(remove.error) : null}
       onConfirm={() => remove.mutate()}
-    >
-      {remove.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {mutationErrorMessage(remove.error)}
-        </p>
-      ) : null}
-    </ConfirmDialog>
+    />
   )
 }
 
@@ -259,17 +263,28 @@ export function AdminDraftBlock({
       done()
     },
   })
-  const [note, setNote] = useState<string | null>(null)
   const saveNote = useMutation({
     retry: false,
     mutationFn: (taskNote: string) =>
       apiFetch<{ data: AdminLineDetail }>(`/api/agent/admin/lines/${line.key}/draft`, { method: "PATCH", body: JSON.stringify({ taskNote }) }),
-    onSuccess: (response) => {
-      queryClient.setQueryData(adminLineKey(line.key), response)
-      setNote(null)
+    onSuccess: (response) => queryClient.setQueryData(adminLineKey(line.key), response),
+  })
+  const noteMax = draft.taskNote?.max ?? 0
+  const noteForm = useAppForm({
+    defaultValues: { taskNote: draft.taskNote?.value ?? "" },
+    // El mismo tope que el servidor (`TASK_NOTE_CHARS`), que lo entrega con el borrador.
+    validators: {
+      onSubmit: z.object({ taskNote: z.string().trim().max(noteMax, `La indicación para la tarea admite hasta ${noteMax} caracteres.`) }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      const response = await saveNote.mutateAsync(value.taskNote.trim())
+      formApi.reset({ taskNote: response.data.draft?.taskNote?.value ?? "" })
     },
   })
-  const busy = apply.isPending || discard.isPending || saveNote.isPending
+  const submitNote = useFormSubmit(noteForm)
+  const noteError = useFormSubmitError(noteForm)
+  const noteSaving = useStore(noteForm.store, (state) => state.isSubmitting)
+  const busy = apply.isPending || discard.isPending || noteSaving
   const flow = adminFlowToDiagram(draft.flow)
   const words = ACTION[draft.action]
   const blocked = draft.action === "prender" && !adminOn
@@ -393,45 +408,42 @@ export function AdminDraftBlock({
       ) : null}
 
       {draft.taskNote && canWrite ? (
-        <form
-          className="flex flex-col gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (!saveNote.isPending) saveNote.mutate((note ?? draft.taskNote?.value ?? "").trim())
-          }}
-        >
-          <Field>
-            <FieldLabel htmlFor={`${uid}-indicacion`}>Lo que sí puedo: dejarlo como indicación en la tarea</FieldLabel>
-            <FieldDescription>
-              La lee la persona de {draft.taskNote.team} que reciba la tarea, para que lo haga ella. {receptionName} no lo dice ni lo ofrece.
-            </FieldDescription>
-            <Input
-              id={`${uid}-indicacion`}
-              maxLength={draft.taskNote.max}
-              value={note ?? draft.taskNote.value ?? ""}
-              placeholder="Por ejemplo: ofrecer 10 % si reprograma"
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </Field>
+        <form noValidate className="flex flex-col gap-2" onSubmit={submitNote}>
+          <noteForm.AppField name="taskNote">
+            {(field) => (
+              <field.TextField
+                id={`${uid}-indicacion`}
+                label="Lo que sí puedo: dejarlo como indicación en la tarea"
+                description={`La lee la persona de ${draft.taskNote?.team ?? ""} que reciba la tarea, para que lo haga ella. ${receptionName} no lo dice ni lo ofrece.`}
+                maxLength={draft.taskNote?.max}
+                placeholder="Por ejemplo: ofrecer 10 % si reprograma"
+              />
+            )}
+          </noteForm.AppField>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="submit"
-              variant="outline"
-              size="sm"
-              className="min-h-11 sm:min-h-8"
-              disabled={busy || (note ?? draft.taskNote.value ?? "").trim() === (draft.taskNote.value ?? "")}
-            >
-              {saveNote.isPending ? "Guardando…" : draft.taskNote.value ? "Cambiar la indicación" : "Sí, ponlo en la tarea"}
+            <Button type="submit" variant="outline" size="sm" className="min-h-11 sm:min-h-8" disabled={busy}>
+              {noteSaving ? "Guardando…" : draft.taskNote.value ? "Cambiar la indicación" : "Sí, ponlo en la tarea"}
             </Button>
             {draft.taskNote.value ? (
-              <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" disabled={busy} onClick={() => saveNote.mutate("")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-11 sm:min-h-8"
+                disabled={busy}
+                onClick={() => {
+                  // Quitarla es guardarla vacía: el campo queda como se guarda.
+                  noteForm.setFieldValue("taskNote", "")
+                  void submitForm(noteForm)
+                }}
+              >
                 Quitarla
               </Button>
             ) : null}
           </div>
-          {saveNote.isError ? (
+          {noteError ? (
             <p role="alert" className="text-sm text-destructive">
-              {mutationErrorMessage(saveNote.error)}
+              {noteError}
             </p>
           ) : null}
         </form>
@@ -452,7 +464,7 @@ export function AdminDraftBlock({
       )}
       {apply.isError || discard.isError ? (
         <p role="alert" className="text-sm text-destructive">
-          {mutationErrorMessage(apply.error ?? discard.error)}
+          {submitErrorMessage(apply.error ?? discard.error)}
         </p>
       ) : null}
     </section>

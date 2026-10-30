@@ -14,7 +14,7 @@ import {
   taxRateLabel,
 } from "@odentia/clinical"
 import { eq } from "drizzle-orm"
-import { validation } from "./errors.js"
+import { invalidField } from "./errors.js"
 
 /**
  * El impuesto de lo que cobra la clínica (ADR 0083). Las reglas son del país
@@ -77,37 +77,41 @@ export interface OrgTaxInput {
   productos?: TaxRate | null
 }
 
-/** Las columnas que se guardan: solo lo que difiere de lo del país; el resto queda nulo. */
+/**
+ * Las columnas que se guardan: solo lo que difiere de lo del país; el resto
+ * queda nulo. Cada rechazo nombra su dato como viaja en el cuerpo de
+ * «Datos de la clínica» (`taxes.servicios`…).
+ */
 export function taxColumnsFor(countryCode: string, input: OrgTaxInput) {
   const profile = taxProfileFor(countryCode)
   if (!profile) {
     if (input.legalForm || input.servicios || input.productos)
-      throw validation("odentIA aún no conoce el impuesto de ese país: no hay nada que cambiar")
+      throw invalidField("taxes", "odentIA aún no conoce el impuesto de ese país: no hay nada que cambiar")
     return { taxLegalForm: null, servicesTaxCategory: null, servicesTaxBps: null, productsTaxCategory: null, productsTaxBps: null }
   }
   let legalForm: string | null = null
   if (input.legalForm != null) {
     if (!profile.legalForms?.some((form) => form.key === input.legalForm))
-      throw validation("Esa forma de la clínica no es una de las de su país")
+      throw invalidField("taxes.legalForm", "Esa forma de la clínica no es una de las de su país")
     legalForm = input.legalForm
   }
   const defaults = defaultTaxRates(profile, legalForm)
-  const column = (rate: TaxRate | null | undefined, fallback: TaxRate) => {
+  const column = (scope: "servicios" | "productos", rate: TaxRate | null | undefined, fallback: TaxRate) => {
     if (!rate) return { category: null, bps: null }
     let checked: TaxRate
     try {
       checked = assertTaxRate(rate)
     } catch (error) {
-      throw validation(error instanceof Error ? error.message : "Tasa de impuesto inválida")
+      throw invalidField(`taxes.${scope}`, error instanceof Error ? error.message : "Tasa de impuesto inválida")
     }
     // Una opción sin impuesto tiene que ser una de la lista del país: no se inventan exenciones.
     if (checked.category !== "S" && !profile.choices.some((item) => item.category === checked.category))
-      throw validation(`«${taxRateLabel(profile, checked)}» no es una opción de su país`)
+      throw invalidField(`taxes.${scope}`, `«${taxRateLabel(profile, checked)}» no es una opción de su país`)
     const same = checked.category === fallback.category && checked.rateBps === fallback.rateBps
     return same ? { category: null, bps: null } : { category: checked.category, bps: checked.rateBps }
   }
-  const services = column(input.servicios, defaults.servicios)
-  const products = column(input.productos, defaults.productos)
+  const services = column("servicios", input.servicios, defaults.servicios)
+  const products = column("productos", input.productos, defaults.productos)
   return {
     taxLegalForm: legalForm,
     servicesTaxCategory: services.category,

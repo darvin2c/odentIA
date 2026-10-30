@@ -3,7 +3,6 @@ import {
   buttonVariants,
   cn,
   FieldLabel,
-  Input,
   RadioGroup,
   RadioGroupItem,
   toast,
@@ -22,13 +21,19 @@ import {
   statusSurfaceClass,
   statusTextClass,
   SubmitButton,
+  submitErrorMessage,
+  submitForm,
   timeRangeLabel,
+  useAppForm,
+  useFormSubmitError,
   zonedDateOf,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, MessageCircle } from "lucide-react"
 import * as React from "react"
+import { z } from "zod"
 import {
   type AgendaAppointment,
   type AgendaResources,
@@ -48,8 +53,8 @@ import { useAttendAppointment } from "../patient/new-encounter-button"
 import { WriteToPersonDialog } from "../write-to-person"
 import { useAppointmentArrival } from "./arrival"
 import { TestAppointmentDrawer } from "./test-appointment-drawer"
-import { dayShort, errorMessage, rangeSaid, whenSaid } from "./shared"
-import { useWhen, WhenFields } from "./when"
+import { dayShort, rangeSaid, whenSaid } from "./shared"
+import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
 import { PhoneWhatsAppNote } from "../person/phone-whatsapp"
 import { ServiceSelect } from "../service-select"
@@ -133,7 +138,8 @@ function RealAppointmentDrawer({
   onRebook: (patient: { id: string; name: string }) => void
 }) {
   const [mode, setMode] = React.useState<AppointmentDrawerMode | "edit">(initialMode)
-  const [error, setError] = React.useState("")
+  // El rechazo de una acción del cajón (confirmar, «No vino»); los formularios dicen el suyo.
+  const [actionError, setActionError] = React.useState("")
   const [writing, setWriting] = React.useState(false)
   const canMessage = usePermission("conversations.write")
   const canReadChats = usePermission("conversations.read")
@@ -170,37 +176,46 @@ function RealAppointmentDrawer({
     })
 
   // ----- Cancelar -----
-  const [cancelReason, setCancelReason] = React.useState<CancelReason>("paciente")
-  const [cancelNote, setCancelNote] = React.useState("")
-  const reasonId = React.useId()
-
   const setStatus = useMutation({
-    mutationFn: (status: AppointmentStatus) =>
+    mutationFn: (input: { status: AppointmentStatus; cancelReason?: CancelReason; cancelNote?: string }) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/status`, {
         method: "POST",
-        body: JSON.stringify(
-          status === "cancelada"
-            ? { status, cancelReason, cancelNote: cancelNote.trim() || undefined }
-            : { status },
-        ),
+        body: JSON.stringify(input),
       }),
     onSuccess: async (result) => {
       toast.success(STATUS_DONE[result.data.status], {
         description: result.data.notice?.queued ? "El agente le avisa y le ofrece otra fecha." : undefined,
       })
-      setError("")
+      setActionError("")
       await onChanged()
       if (result.data.status === "cancelada") {
         onClose()
       }
     },
-    onError: (cause) => {
-      const text = errorMessage(cause)
-      setError(text)
-      // En el diálogo de cancelar no hay dónde leer el error del panel.
-      if (mode === "cancel") toast.error(text)
+  })
+  /** Confirmar o «No vino»: si falla, se dice en el cajón. */
+  const changeStatus = (status: AppointmentStatus) =>
+    setStatus.mutate({ status }, { onError: (cause) => setActionError(submitErrorMessage(cause)) })
+
+  // El motivo de cancelar es un formulario: su error se dice en el diálogo, no detrás de él.
+  const cancelForm = useAppForm({
+    defaultValues: { cancelReason: "paciente" as CancelReason, cancelNote: "" },
+    validators: {
+      onSubmit: z.object({
+        cancelReason: z.enum(["paciente", "clinica", "otro"], { error: "Elige el motivo." }),
+        cancelNote: z.string().max(500, "Escribe la nota en 500 caracteres o menos."),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await setStatus.mutateAsync({
+        status: "cancelada",
+        cancelReason: value.cancelReason,
+        cancelNote: value.cancelNote.trim() || undefined,
+      })
     },
   })
+  const cancelError = useFormSubmitError(cancelForm)
+  const cancelling = useStore(cancelForm.store, (state) => state.isSubmitting)
 
   // ----- Reprogramar -----
   // El mismo «cuándo» de Nueva cita: se abre en el día y con el profesional de la cita.
@@ -236,72 +251,92 @@ function RealAppointmentDrawer({
     Date.parse(target.end) === Date.parse(appointment.endsAt)
   const targetSaid = target ? whenSaid(target.start, timeZone, today) : ""
   const move = useMutation({
-    mutationFn: () => {
-      if (!target) throw new Error("Elige una hora libre.")
-      // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
-      return apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/move`, {
+    // Sin unidad dental: la cita conserva la suya o pasa a una libre a la nueva hora.
+    mutationFn: (range: { start: string; end: string; columnId: string }) =>
+      apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}/move`, {
         method: "POST",
         body: JSON.stringify({
           expectedVersion: appointment.version,
-          startsAt: target.start,
-          endsAt: target.end,
-          professionalUserId: target.columnId,
+          startsAt: range.start,
+          endsAt: range.end,
+          professionalUserId: range.columnId,
         }),
-      })
-    },
-    onSuccess: async (result) => {
-      toast.success(
-        `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
-        { description: result.data.notice?.queued ? "El agente le avisa la nueva fecha." : undefined },
-      )
-      setError("")
-      setMode("view")
-      await onChanged()
-    },
-    onError: async (cause) => {
-      setError(errorMessage(cause))
-      // Si alguien tomó el hueco, lo libre se vuelve a pedir.
-      when.refetch()
-      await onChanged()
+      }),
+  })
+  const moveRoot = React.useRef<HTMLDivElement>(null)
+  const moveForm = useAppForm({
+    defaultValues: { when: EMPTY_WHEN },
+    onSubmit: async () => {
+      // El «cuándo» ya validó que hay una hora libre distinta de la de ahora.
+      if (!when.shown) return
+      try {
+        const result = await move.mutateAsync(when.shown)
+        toast.success(
+          `Cita de ${result.data.patientName} movida ${whenSaid(result.data.startsAt, timeZone, today)}`,
+          { description: result.data.notice?.queued ? "El agente le avisa la nueva fecha." : undefined },
+        )
+        setMode("view")
+        await onChanged()
+      } catch (cause) {
+        // Si alguien tomó el hueco, lo libre se vuelve a pedir.
+        when.refetch()
+        await onChanged()
+        throw cause
+      }
     },
   })
+  const moveError = useFormSubmitError(moveForm)
+  const movingNow = useStore(moveForm.store, (state) => state.isSubmitting)
 
   // ----- Editar detalles -----
-  const [draft, setDraft] = React.useState({
-    serviceId: appointment.serviceId ?? "",
-    roomId: appointment.roomId,
-    reason: appointment.reason ?? "",
+  const detailsOf = (item: AgendaAppointment) => ({
+    serviceId: item.serviceId ?? "",
+    roomId: item.roomId,
+    reason: item.reason ?? "",
   })
-  const dirty =
-    mode === "edit" &&
-    (draft.serviceId !== (appointment.serviceId ?? "") ||
-      draft.roomId !== appointment.roomId ||
-      draft.reason !== (appointment.reason ?? ""))
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (value: ReturnType<typeof detailsOf>) =>
       apiFetch<{ data: AgendaAppointment }>(`/api/appointments/${appointment.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           expectedVersion: appointment.version,
-          serviceId: draft.serviceId || null,
-          roomId: draft.roomId,
-          reason: draft.reason.trim() || null,
+          serviceId: value.serviceId || null,
+          roomId: value.roomId,
+          reason: value.reason.trim() || null,
         }),
       }),
-    onSuccess: async () => {
-      toast.success("Cita actualizada")
-      setError("")
-      setMode("view")
-      await onChanged()
-    },
-    onError: (cause) => setError(errorMessage(cause)),
   })
+  const editRoot = React.useRef<HTMLDivElement>(null)
+  const editForm = useAppForm({
+    defaultValues: detailsOf(appointment),
+    validators: {
+      onSubmit: z.object({
+        serviceId: z.string(),
+        roomId: z.string(),
+        reason: z.string().max(500, "Escribe el motivo en 500 caracteres o menos."),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      // Sin cambios no hay nada que guardar: se vuelve al detalle.
+      if (editForm.state.isDirty) {
+        await save.mutateAsync(value)
+        toast.success("Cita actualizada")
+        await onChanged()
+      }
+      setMode("view")
+    },
+  })
+  const editError = useFormSubmitError(editForm)
+  const savingDetails = useStore(editForm.store, (state) => state.isSubmitting)
+  const dirty = useStore(editForm.store, (state) => mode === "edit" && state.isDirty)
 
-  const busy = setStatus.isPending || move.isPending || save.isPending || arrival.isPending || attend.isPending
+  const busy = setStatus.isPending || movingNow || savingDetails || arrival.isPending || attend.isPending
   const back = () => {
-    setError("")
+    setActionError("")
+    moveForm.reset()
     setMode("view")
   }
+  const error = mode === "move" ? moveError : mode === "edit" ? editError : actionError || null
 
   const actions =
     mode === "move" ? (
@@ -310,9 +345,9 @@ function RealAppointmentDrawer({
           Volver
         </Button>
         <SubmitButton
-          disabled={!target || unmoved || when.state !== "free"}
-          pending={move.isPending}
-          onClick={() => move.mutate()}
+          disabled={busy}
+          pending={movingNow}
+          onClick={() => void submitForm(moveForm, { fieldMap: WHEN_FIELD_MAP, root: moveRoot.current })}
         >
           {!target || unmoved
             ? "Mover cita"
@@ -326,7 +361,11 @@ function RealAppointmentDrawer({
         <Button variant="outline" onClick={back}>
           Volver
         </Button>
-        <SubmitButton disabled={!dirty} pending={save.isPending} onClick={() => save.mutate()}>
+        <SubmitButton
+          disabled={busy}
+          pending={savingDetails}
+          onClick={() => void submitForm(editForm, { root: editRoot.current })}
+        >
           Guardar cambios
         </SubmitButton>
       </>
@@ -343,7 +382,14 @@ function RealAppointmentDrawer({
           </Button>
         ) : null}
         {appointment.status !== "cancelada" ? (
-          <Button variant="ghost" onClick={() => setMode("edit")}>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              // Se edita lo que la cita tiene ahora, no un borrador viejo.
+              editForm.reset(detailsOf(appointment))
+              setMode("edit")
+            }}
+          >
             Editar detalles
           </Button>
         ) : null}
@@ -359,42 +405,54 @@ function RealAppointmentDrawer({
         onClose={onClose}
         isDirty={dirty}
         isSubmitting={busy}
-        error={error || null}
+        error={error}
         actions={actions}
       >
         {mode === "move" ? (
-          <div className="grid gap-4">
-            <WhenFields when={when} />
+          <div ref={moveRoot} className="grid gap-4">
+            <WhenFields form={moveForm} fields="when" when={when} />
           </div>
         ) : mode === "edit" ? (
-          <div className="grid gap-4">
+          <div ref={editRoot} className="grid gap-4">
             {/* El de la cita se ve aunque no esté en la primera página del tarifario. */}
-            <ServiceSelect
-              id="cita-editar-servicio"
-              label="Servicio (opcional)"
-              value={draft.serviceId}
-              onChange={(service) => setDraft((current) => ({ ...current, serviceId: service?.id ?? "" }))}
-            />
-            <ResourceSelect
-              id="cita-editar-sillon"
-              label={upperFirst(appWords().room.one)}
-              options={resources.rooms.map((room) => ({ id: room.id, label: room.label }))}
-              value={draft.roomId}
-              onChange={(roomId) =>
-                setDraft((current) => ({ ...current, roomId: roomId || current.roomId }))
-              }
-            />
-            <div className="grid gap-2">
-              <FieldLabel htmlFor="cita-editar-motivo">Motivo (opcional)</FieldLabel>
-              <Input
-                id="cita-editar-motivo"
-                value={draft.reason}
-                maxLength={500}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, reason: event.target.value }))
-                }
-              />
-            </div>
+            <editForm.AppField name="serviceId">
+              {(field) => (
+                <field.Control id="cita-editar-servicio" label="Servicio (opcional)">
+                  {(control) => (
+                    <ServiceSelect
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      placeholder="Buscar servicio (opcional)…"
+                      value={field.state.value}
+                      onChange={(service) => field.handleChange(service?.id ?? "")}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </editForm.AppField>
+            <editForm.AppField name="roomId">
+              {(field) => (
+                <field.Control id="cita-editar-sillon" label={upperFirst(appWords().room.one)}>
+                  {(control) => (
+                    <ResourceSelect
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      placeholder={`Buscar ${appWords().room.one.toLocaleLowerCase("es")}…`}
+                      options={resources.rooms.map((room) => ({ id: room.id, label: room.label }))}
+                      value={field.state.value}
+                      onChange={(roomId) => field.handleChange(roomId || field.state.value)}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </editForm.AppField>
+            <editForm.AppField name="reason">
+              {(field) => <field.TextField id="cita-editar-motivo" label="Motivo (opcional)" maxLength={500} />}
+            </editForm.AppField>
           </div>
         ) : (
           <div className="grid gap-4">
@@ -442,10 +500,10 @@ function RealAppointmentDrawer({
                   className="h-11"
                   variant={isToday ? "outline" : "default"}
                   disabled={busy}
-                  pending={setStatus.isPending && setStatus.variables === "confirmada"}
-                  onClick={() => setStatus.mutate("confirmada")}
+                  pending={setStatus.isPending && setStatus.variables?.status === "confirmada"}
+                  onClick={() => changeStatus("confirmada")}
                 >
-                  {setStatus.isPending && setStatus.variables === "confirmada" ? null : (
+                  {setStatus.isPending && setStatus.variables?.status === "confirmada" ? null : (
                     <Check aria-hidden />
                   )}
                   Confirmar cita
@@ -463,8 +521,8 @@ function RealAppointmentDrawer({
                   variant="outline"
                   className="h-11 bg-card"
                   disabled={busy}
-                  pending={setStatus.isPending && setStatus.variables === "no_asistio"}
-                  onClick={() => setStatus.mutate("no_asistio")}
+                  pending={setStatus.isPending && setStatus.variables?.status === "no_asistio"}
+                  onClick={() => changeStatus("no_asistio")}
                 >
                   No vino
                 </SubmitButton>
@@ -629,41 +687,51 @@ function RealAppointmentDrawer({
         confirmLabel="Cancelar cita"
         cancelLabel="Volver"
         variant="destructive"
-        pending={setStatus.isPending}
+        pending={cancelling}
+        error={cancelError}
         onClose={() => (initialMode === "cancel" ? onClose() : setMode("view"))}
-        onConfirm={() => setStatus.mutate("cancelada")}
+        onConfirm={() => void submitForm(cancelForm)}
       >
         <div className="grid gap-3 text-left">
-          <div className="grid gap-2">
-            <span id={reasonId} className="text-sm font-medium">
-              Motivo
-            </span>
-            <RadioGroup
-              aria-labelledby={reasonId}
-              value={cancelReason}
-              onValueChange={(next) => setCancelReason(next as CancelReason)}
-            >
-              {CANCEL_REASONS.map((option) => (
-                <FieldLabel
-                  key={option.id}
-                  className={cn(
-                    "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
-                    cancelReason === option.id && "border-primary bg-primary-soft",
-                  )}
-                >
-                  <RadioGroupItem value={option.id} />
-                  {option.label}
-                </FieldLabel>
-              ))}
-            </RadioGroup>
-          </div>
-          <Input
-            aria-label="Nota, si hace falta"
-            placeholder="Nota, si hace falta"
-            maxLength={500}
-            value={cancelNote}
-            onChange={(event) => setCancelNote(event.target.value)}
-          />
+          <cancelForm.AppField name="cancelReason">
+            {(field) => (
+              <field.Group legend="Motivo">
+                {(control) => (
+                  <RadioGroup
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onValueChange={(next) => field.handleChange(next as CancelReason)}
+                  >
+                    {CANCEL_REASONS.map((option) => (
+                      <FieldLabel
+                        key={option.id}
+                        className={cn(
+                          "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
+                          field.state.value === option.id && "border-primary bg-primary-soft",
+                        )}
+                      >
+                        <RadioGroupItem value={option.id} />
+                        {option.label}
+                      </FieldLabel>
+                    ))}
+                  </RadioGroup>
+                )}
+              </field.Group>
+            )}
+          </cancelForm.AppField>
+          <cancelForm.AppField name="cancelNote">
+            {(field) => (
+              <field.TextField
+                label="Nota, si hace falta"
+                hideLabel
+                placeholder="Nota, si hace falta"
+                maxLength={500}
+              />
+            )}
+          </cancelForm.AppField>
         </div>
       </ConfirmDialog>
     </>

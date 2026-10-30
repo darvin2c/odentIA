@@ -53,6 +53,7 @@ import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import {
   branchNotFound,
+  invalidField,
   isUniqueViolation,
   notFound,
   purchaseOrderNotFound,
@@ -91,37 +92,45 @@ import type { WaitingInventory } from "./workspace-home.js"
 
 /* ---------------- validaciones ---------------- */
 
-function textRequired(value: string | null | undefined, field: string, max = 200): string {
+/**
+ * El rechazo de un dato: con `path` (su nombre en el cuerpo, `lines[2].quantity`)
+ * la pantalla lo dice junto a ese campo; sin él, junto a los botones.
+ */
+function invalid(message: string, path?: string): ServiceError {
+  return path ? invalidField(path, message) : validation(message)
+}
+
+function textRequired(value: string | null | undefined, field: string, max = 200, path?: string): string {
   const text = value?.trim() ?? ""
-  if (!text || text.length > max) throw validation(`${field} debe tener 1–${max} caracteres`)
+  if (!text || text.length > max) throw invalid(`${field} debe tener 1–${max} caracteres`, path)
   return text
 }
 
-function textOptional(value: string | null | undefined, field: string, max = 500): string | null {
+function textOptional(value: string | null | undefined, field: string, max = 500, path?: string): string | null {
   if (value == null) return null
   const text = value.trim()
   if (!text) return null
-  if (text.length > max) throw validation(`${field} admite hasta ${max} caracteres`)
+  if (text.length > max) throw invalid(`${field} admite hasta ${max} caracteres`, path)
   return text
 }
 
-function quantity(value: number, field = "La cantidad"): number {
+function quantity(value: number, field = "La cantidad", path?: string): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 1_000_000_000)
-    throw validation(`${field} debe ser un entero positivo`)
+    throw invalid(`${field} debe ser un entero positivo`, path)
   return value
 }
 
 /** Lo que hay, contado: un entero desde 0. */
-function counted(value: number, field = "Lo que hay"): number {
+function counted(value: number, field = "Lo que hay", path?: string): number {
   if (!Number.isSafeInteger(value) || value < 0 || value > 1_000_000_000)
-    throw validation(`${field} debe ser un número entero desde 0`)
+    throw invalid(`${field} debe ser un número entero desde 0`, path)
   return value
 }
 
 /** Importe en la unidad menor de la moneda; el tope es el de la columna (`integer`). */
-function cents(value: number, field = "El costo por unidad"): number {
-  if (!Number.isSafeInteger(value) || value < 0) throw validation(`${field} no es un importe válido`)
-  if (value > 2_147_483_647) throw validation(`${field} es demasiado alto`)
+function cents(value: number, field = "El costo por unidad", path?: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw invalid(`${field} no es un importe válido`, path)
+  if (value > 2_147_483_647) throw invalid(`${field} es demasiado alto`, path)
   return value
 }
 
@@ -153,16 +162,17 @@ function addDays(day: string, days: number): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10)
 }
 
-function dateOnly(value: string | null | undefined, field: string): string | null {
+function dateOnly(value: string | null | undefined, field: string, path?: string): string | null {
   if (value == null || value === "") return null
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw validation(`${field} debe ser AAAA-MM-DD`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw invalid(`${field} debe ser AAAA-MM-DD`, path)
   const time = Date.parse(`${value}T00:00:00Z`)
-  if (!Number.isFinite(time)) throw validation(`${field} no es una fecha válida`)
+  if (!Number.isFinite(time)) throw invalid(`${field} no es una fecha válida`, path)
   return value
 }
 
-function conflict(message: string): ServiceError {
-  return new ServiceError("CONFLICT", 409, message)
+/** Un conflicto con el estado actual; con `path`, del dato que hay que cambiar. */
+function conflict(message: string, path?: string): ServiceError {
+  return new ServiceError("CONFLICT", 409, message, path ? { [path]: message } : undefined)
 }
 
 /** Texto sin tildes ni mayúsculas, para comparar nombres. */
@@ -294,7 +304,7 @@ export interface SupplierInput {
  * hace único.
  */
 function assertSupplierDocument(docType: string | null, docNumber: string | null): void {
-  if (docNumber && !docType) throw validation("Indica el tipo de documento del proveedor junto con su número")
+  if (docNumber && !docType) throw invalidField("docType", "Indica el tipo de documento del proveedor junto con su número")
 }
 
 /**
@@ -304,19 +314,19 @@ function assertSupplierDocument(docType: string | null, docNumber: string | null
  * que llega; un tipo antiguo que nadie cambia se conserva.
  */
 async function supplierDocType(tx: Db, orgId: string, raw: string | null | undefined): Promise<string | null> {
-  const docType = textOptional(raw, "El tipo de documento", 20)?.toUpperCase() ?? null
+  const docType = textOptional(raw, "El tipo de documento", 20, "docType")?.toUpperCase() ?? null
   if (!docType) return null
   const allowed = supplierDocumentTypes(await orgClinicalProfile(tx, orgId))
   if (!(allowed as readonly string[]).includes(docType)) {
     const list = new Intl.ListFormat("es", { type: "disjunction" }).format(allowed.map(documentTypeLabel))
-    throw validation(`El tipo de documento del proveedor tiene que ser uno de la lista: ${list}`)
+    throw invalidField("docType", `El tipo de documento del proveedor tiene que ser uno de la lista: ${list}`)
   }
   return docType
 }
 
 export async function createSupplier(tx: Db, orgId: string, actorUserId: string, input: SupplierInput) {
-  const name = textRequired(input.name, "El nombre del proveedor")
-  const docNumber = textOptional(input.docNumber, "El documento", 50)
+  const name = textRequired(input.name, "El nombre del proveedor", 200, "name")
+  const docNumber = textOptional(input.docNumber, "El documento", 50, "docNumber")
   const docType = await supplierDocType(tx, orgId, input.docType)
   assertSupplierDocument(docType, docNumber)
   try {
@@ -327,16 +337,16 @@ export async function createSupplier(tx: Db, orgId: string, actorUserId: string,
         name,
         docType,
         docNumber,
-        email: textOptional(input.email, "El correo", 200),
-        phone: textOptional(input.phone, "El teléfono", 50),
-        address: textOptional(input.address, "La dirección"),
+        email: textOptional(input.email, "El correo", 200, "email"),
+        phone: textOptional(input.phone, "El teléfono", 50, "phone"),
+        address: textOptional(input.address, "La dirección", 500, "address"),
       })
       .returning()
     if (!row) throw new ServiceError("INTERNAL", 500, "No se pudo guardar el proveedor")
     await audit(tx, orgId, actorUserId, "supplier", row.id, "supplier.created")
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("Ya existe un proveedor con ese documento")
+    if (isUniqueViolation(e)) throw conflict("Ya existe un proveedor con ese documento", "docNumber")
     throw e
   }
 }
@@ -350,12 +360,12 @@ export async function updateSupplier(
 ) {
   const current = await requireSupplier(tx, orgId, id)
   const patch: Partial<typeof supplier.$inferInsert> = {}
-  if (input.name !== undefined) patch.name = textRequired(input.name, "El nombre del proveedor")
-  if (input.docNumber !== undefined) patch.docNumber = textOptional(input.docNumber, "El documento", 50)
+  if (input.name !== undefined) patch.name = textRequired(input.name, "El nombre del proveedor", 200, "name")
+  if (input.docNumber !== undefined) patch.docNumber = textOptional(input.docNumber, "El documento", 50, "docNumber")
   if (input.docType !== undefined) patch.docType = await supplierDocType(tx, orgId, input.docType)
-  if (input.email !== undefined) patch.email = textOptional(input.email, "El correo", 200)
-  if (input.phone !== undefined) patch.phone = textOptional(input.phone, "El teléfono", 50)
-  if (input.address !== undefined) patch.address = textOptional(input.address, "La dirección")
+  if (input.email !== undefined) patch.email = textOptional(input.email, "El correo", 200, "email")
+  if (input.phone !== undefined) patch.phone = textOptional(input.phone, "El teléfono", 50, "phone")
+  if (input.address !== undefined) patch.address = textOptional(input.address, "La dirección", 500, "address")
   assertSupplierDocument(
     patch.docType !== undefined ? patch.docType : current.docType,
     patch.docNumber !== undefined ? patch.docNumber : current.docNumber,
@@ -369,7 +379,7 @@ export async function updateSupplier(
     await audit(tx, orgId, actorUserId, "supplier", id, "supplier.updated")
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("Ya existe un proveedor con ese documento")
+    if (isUniqueViolation(e)) throw conflict("Ya existe un proveedor con ese documento", "docNumber")
     throw e
   }
 }
@@ -591,24 +601,25 @@ function unitOf(
   word: string | null | undefined,
   code: string | null | undefined,
   label: string,
+  path: string,
 ): { word: string; code: string | null } | null {
   if (code) {
     const listed = inventoryUnitByCode(code)
-    if (!listed) throw validation(`La unidad ${label} no está en la lista`)
+    if (!listed) throw invalidField(path, `La unidad ${label} no está en la lista`)
     if (word?.trim() && singularUnit(word) !== listed.word)
-      throw validation(`La unidad ${label} no coincide con la elegida en la lista`)
+      throw invalidField(path, `La unidad ${label} no coincide con la elegida en la lista`)
     return { word: listed.word, code: listed.code }
   }
   if (word == null || !word.trim()) return null
   const text = word.trim()
-  if (text.length > 60) throw validation(`La unidad ${label} admite hasta 60 caracteres`)
+  if (text.length > 60) throw invalidField(path, `La unidad ${label} admite hasta 60 caracteres`)
   const singular = singularUnit(text)
   return { word: singular, code: findInventoryUnit(singular)?.code ?? null }
 }
 
 function purchaseFactorOf(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1 || value > 100_000)
-    throw validation("Cuántas trae cada unidad de compra debe ser un número entero de 1 a 100000")
+    throw invalidField("purchaseFactor", "Cuántas trae cada unidad de compra debe ser un número entero de 1 a 100000")
   return value
 }
 
@@ -616,13 +627,13 @@ function purchaseFactorOf(value: number): number {
 function resolveProduct(input: Partial<ProductInput>, current: ProductRow | null, unitCurrency: string | null) {
   const usedInCare = input.usedInCare ?? current?.usedInCare ?? true
   const forSale = input.forSale ?? current?.forSale ?? false
-  if (!usedInCare && !forSale) throw validation("Marca si se usa en las atenciones, si se vende o las dos")
+  if (!usedInCare && !forSale) throw invalidField("usedInCare", "Marca si se usa en las atenciones, si se vende o las dos")
 
   let unit = current?.unit ?? "unidad"
   let unitCode = current?.unitCode ?? (current ? null : "C62")
   if (input.unit !== undefined || input.unitCode !== undefined) {
-    const resolved = unitOf(input.unit, input.unitCode, "de uso")
-    if (!resolved) throw validation("Escribe la unidad en que se usa")
+    const resolved = unitOf(input.unit, input.unitCode, "de uso", "unit")
+    if (!resolved) throw invalidField("unit", "Escribe la unidad en que se usa")
     unit = resolved.word
     unitCode = resolved.code
   }
@@ -631,7 +642,7 @@ function resolveProduct(input: Partial<ProductInput>, current: ProductRow | null
   let purchaseUnitCode = current?.purchaseUnitCode ?? null
   let purchaseFactor = current?.purchaseFactor ?? 1
   if (input.purchaseUnit !== undefined || input.purchaseUnitCode !== undefined) {
-    const resolved = unitOf(input.purchaseUnit, input.purchaseUnitCode, "de compra")
+    const resolved = unitOf(input.purchaseUnit, input.purchaseUnitCode, "de compra", "purchaseUnit")
     purchaseUnit = resolved?.word ?? null
     purchaseUnitCode = resolved?.code ?? null
   }
@@ -639,7 +650,9 @@ function resolveProduct(input: Partial<ProductInput>, current: ProductRow | null
   if (!purchaseUnit || purchaseUnit === unit) {
     // Se compra igual que se usa: cada una trae una.
     if (input.purchaseFactor !== undefined && input.purchaseFactor > 1)
-      throw validation(purchaseUnit ? "Si se compra igual que se usa, cada una trae 1" : "Escribe en qué unidad se compra")
+      throw purchaseUnit
+        ? invalidField("purchaseFactor", "Si se compra igual que se usa, cada una trae 1")
+        : invalidField("purchaseUnit", "Escribe en qué unidad se compra")
     purchaseUnit = null
     purchaseUnitCode = null
     purchaseFactor = 1
@@ -650,9 +663,9 @@ function resolveProduct(input: Partial<ProductInput>, current: ProductRow | null
   if (input.salePriceCents !== undefined) {
     if (input.salePriceCents === null) salePriceCents = null
     else {
-      if (!forSale) throw validation("El precio de venta es solo para lo que se vende")
-      salePriceCents = cents(input.salePriceCents, "El precio de venta")
-      if (!unitCurrency) throw validation("Configura la moneda de la clínica antes de ponerle precio de venta")
+      if (!forSale) throw invalidField("salePriceCents", "El precio de venta es solo para lo que se vende")
+      salePriceCents = cents(input.salePriceCents, "El precio de venta", "salePriceCents")
+      if (!unitCurrency) throw invalidField("salePriceCents", "Configura la moneda de la clínica antes de ponerle precio de venta")
       saleCurrency = unitCurrency
     }
   }
@@ -687,13 +700,13 @@ export function skuFromName(name: string): string {
 async function skuFor(tx: Db, orgId: string, written: string | null | undefined, name: string, ownId?: string): Promise<string> {
   const text = written?.trim() ?? ""
   if (text) {
-    if (text.length > 60) throw validation("El código admite hasta 60 caracteres")
+    if (text.length > 60) throw invalidField("sku", "El código admite hasta 60 caracteres")
     const [taken] = await tx
       .select({ id: product.id, name: product.name })
       .from(product)
       .where(and(eq(product.organizationId, orgId), eq(product.sku, text)))
       .limit(1)
-    if (taken && taken.id !== ownId) throw conflict(`Ese código ya lo usa «${taken.name}». Elige otro.`)
+    if (taken && taken.id !== ownId) throw conflict(`Ese código ya lo usa «${taken.name}». Elige otro.`, "sku")
     return text
   }
   const base = skuFromName(name)
@@ -707,10 +720,10 @@ async function skuFor(tx: Db, orgId: string, written: string | null | undefined,
 /** Pone el mínimo de cada sede indicada (sin fila, el mínimo es 0; nada se borra). */
 async function setMinimums(tx: Db, orgId: string, productId: string, minimums: ProductMinimumInput[]) {
   const seen = new Set<string>()
-  for (const item of minimums) {
-    if (seen.has(item.branchId)) throw validation("El mínimo de una sede va una sola vez")
+  for (const [index, item] of minimums.entries()) {
+    if (seen.has(item.branchId)) throw invalidField(`minimums[${index}].branchId`, "El mínimo de una sede va una sola vez")
     seen.add(item.branchId)
-    counted(item.minQuantity, "El mínimo")
+    counted(item.minQuantity, "El mínimo", `minimums[${index}].minQuantity`)
     await requireBranch(tx, orgId, item.branchId)
     await tx
       .insert(productMinimum)
@@ -742,7 +755,7 @@ export async function createProduct(
   actorUserId: string,
   input: ProductInput & { unitReview?: boolean },
 ) {
-  const name = textRequired(input.name, "El nombre del producto")
+  const name = textRequired(input.name, "El nombre del producto", 200, "name")
   const unitCurrency = input.salePriceCents != null ? await requireOrgCurrency(tx, orgId) : null
   const values = resolveProduct(input, null, unitCurrency)
   const sku = await skuFor(tx, orgId, input.sku, name)
@@ -756,7 +769,7 @@ export async function createProduct(
     await audit(tx, orgId, actorUserId, "product", row.id, "product.created")
     return { ...row, minimums: await minimumsOf(tx, orgId, row.id) }
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.")
+    if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")
     throw e
   }
 }
@@ -776,13 +789,14 @@ export async function updateProduct(
   input: Partial<ProductInput>,
 ) {
   const current = await requireProduct(tx, orgId, id)
-  const name = input.name !== undefined ? textRequired(input.name, "El nombre del producto") : current.name
+  const name = input.name !== undefined ? textRequired(input.name, "El nombre del producto", 200, "name") : current.name
   const unitCurrency = input.salePriceCents != null ? await requireOrgCurrency(tx, orgId) : null
   const values = resolveProduct(input, current, unitCurrency)
   const changesUnit = values.unit !== current.unit
   if (changesUnit && !current.unitReview && (await productHasHistory(tx, orgId, id)))
     throw conflict(
       `La unidad de uso no se puede cambiar: este producto ya tiene movimientos o compras en «${current.unit}». Si cambió la presentación, crea otro producto.`,
+      "unit",
     )
   // Vacío al editar, se queda el que tenía: el código no cambia solo.
   const sku = input.sku?.trim() ? await skuFor(tx, orgId, input.sku, name, id) : current.sku
@@ -798,7 +812,7 @@ export async function updateProduct(
     await audit(tx, orgId, actorUserId, "product", id, "product.updated")
     return { ...row, minimums: await minimumsOf(tx, orgId, id) }
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.")
+    if (isUniqueViolation(e)) throw conflict("Ese código ya lo usa otro producto. Elige otro.", "sku")
     throw e
   }
 }
@@ -1215,6 +1229,8 @@ export interface ImportRowInput {
   /** «Hay»: obligatorio. Llega tal cual se pegó. */
   onHand?: string | number | null
   minQuantity?: string | number | null
+  /** El número de la fila en la hoja pegada (desde 1), para nombrarla en los mensajes. */
+  line?: number | null
 }
 
 export type ImportRowStatus = "nuevo" | "existe" | "parecido" | "invalido"
@@ -1343,8 +1359,8 @@ function reviewRow(row: ImportRowInput, index: number, catalog: CatalogEntry[], 
   if (name.length > 200) return invalid("El nombre admite hasta 200 caracteres")
   const folded = fold(name)
   const repeated = seen.get(folded)
-  if (repeated !== undefined) return invalid(`Está repetido en la lista (fila ${repeated + 1})`)
-  seen.set(folded, index)
+  if (repeated !== undefined) return invalid(`Está repetido en la lista (fila ${repeated})`)
+  seen.set(folded, row.line ?? index + 1)
   const onHand = wholeFromSheet(row.onHand)
   if (onHand === null) return invalid("Falta lo que hay")
   if (Number.isNaN(onHand)) return invalid("«Hay» no es un número entero desde 0")
@@ -1419,7 +1435,11 @@ export async function importProducts(
   const seen = new Map<string, number>()
   const reviewed = rows.map((row, index) => {
     const result = reviewRow(row, index, catalog, seen)
-    if (result.status === "invalido") throw validation(`Fila ${index + 1}: ${result.reason}`)
+    // La fila se nombra como está en la hoja pegada, no por su lugar entre las enviadas.
+    if (result.status === "invalido") {
+      const reason = result.reason ?? "No sirve"
+      throw validation(`Fila ${row.line ?? index + 1}: ${reason}`, { [`rows[${index}]`]: reason })
+    }
     return result
   })
   const items: Array<{ index: number; productId: string; name: string; status: "creado" | "actualizado" | "sin_cambio" }> = []
@@ -1494,10 +1514,10 @@ export async function countStock(
   if (items.length > 2000) throw validation("Se cuentan hasta 2000 productos por vez")
   const sede = await requireBranch(tx, orgId, branchId)
   const seen = new Set<string>()
-  for (const item of items) {
-    if (seen.has(item.productId)) throw validation("Un producto va una sola vez en el conteo")
+  for (const [index, item] of items.entries()) {
+    if (seen.has(item.productId)) throw invalidField(`items[${index}].productId`, "Un producto va una sola vez en el conteo")
     seen.add(item.productId)
-    counted(item.counted)
+    counted(item.counted, "Lo que hay", `items[${index}].counted`)
   }
   const ids = [...seen]
   const products = await tx
@@ -1505,7 +1525,9 @@ export async function countStock(
     .from(product)
     .where(and(eq(product.organizationId, orgId), inArray(product.id, ids)))
   const byId = new Map(products.map((row) => [row.id, row]))
-  if (byId.size !== ids.length) throw notFound("Producto")
+  const missing = items.findIndex((item) => !byId.has(item.productId))
+  if (missing >= 0)
+    throw new ServiceError("NOT_FOUND", 404, "Producto no encontrado", { [`items[${missing}].productId`]: "Este producto ya no está en el inventario" })
   const before = await stockBySede(tx, orgId, { branchId: sede.id, productIds: ids })
   const changed: Array<{ productId: string; name: string; unit: string; before: number; after: number; delta: number }> = []
   let fresh = false
@@ -1602,10 +1624,10 @@ export const ADD_REASONS = { muestra: "Muestra o regalo", otro: "Otro" } as cons
 export type AddReason = keyof typeof ADD_REASONS
 
 function reasonText<T extends string>(words: Record<T, string>, reason: T, note: string | null | undefined): string {
-  if (!(reason in words)) throw validation("Elige el motivo")
-  const detail = textOptional(note, "El detalle", 500)
+  if (!(reason in words)) throw invalidField("reason", "Elige el motivo")
+  const detail = textOptional(note, "El detalle", 500, "note")
   if (reason === "otro") {
-    if (!detail) throw validation("Escribe el motivo")
+    if (!detail) throw invalidField("note", "Escribe el motivo")
     return `Otro: ${detail}`
   }
   return detail ? `${words[reason]} · ${detail}` : words[reason]
@@ -1623,7 +1645,7 @@ export async function adjustLot(
   input: { lotId: string; counted: number; reason: AdjustReason; note?: string | null; idempotencyKey: string },
 ) {
   const adjustKey = formKey(input.idempotencyKey, RETRY_KEY)
-  counted(input.counted, "Cuántos hay")
+  counted(input.counted, "Cuántos hay", "counted")
   const reason = reasonText(ADJUST_REASONS, input.reason, input.note)
   const result = await setLotQuantity(tx, orgId, {
     lotId: input.lotId,
@@ -1675,7 +1697,8 @@ async function lotInSede(tx: Db, orgId: string, lotId: string, productId: string
     select l.id, l.warehouse_id as "warehouseId", l.product_id as "productId" from product_lot l
     join warehouse w on w.organization_id = l.organization_id and w.id = l.warehouse_id
     where l.organization_id = ${orgId} and l.id = ${lotId} and w.branch_id = ${branchId}`)
-  if (!lot || lot.productId !== productId) throw notFound("Lote")
+  if (!lot || lot.productId !== productId)
+    throw new ServiceError("NOT_FOUND", 404, "Lote no encontrado", { lotId: "Ese lote ya no está en la sede: elige otro" })
   return lot
 }
 
@@ -1710,7 +1733,7 @@ export async function registerUse(
   now = new Date(),
 ) {
   const useKey = formKey(input.idempotencyKey, RETRY_KEY)
-  quantity(input.quantity)
+  quantity(input.quantity, "La cantidad", "quantity")
   const item = await requireProduct(tx, orgId, input.productId)
   const prefix = `uso:${useKey}`
   const prior = await replayOf(tx, orgId, prefix, item.id)
@@ -1727,10 +1750,10 @@ export async function registerUse(
       replayed: true,
     }
   }
-  if (!item.isActive) throw conflict("El producto está desactivado")
+  if (!item.isActive) throw conflict("El producto está desactivado", "productId")
   const sede = await requireBranch(tx, orgId, input.branchId)
   const { timezone, locale, today } = await todayOf(tx, orgId, now)
-  const reason = textOptional(input.note, "El detalle", 500) ?? "Uso fuera de una atención"
+  const reason = textOptional(input.note, "El detalle", 500, "note") ?? "Uso fuera de una atención"
   let patientId: string | null = null
   let encounterId: string | null = null
   if (input.patientId) {
@@ -1755,7 +1778,7 @@ export async function registerUse(
     movements.push(...result.movements)
   } else {
     const stock = await sedeLots(tx, orgId, sede.id, item.id, today)
-    if (stock.available < input.quantity) throw conflict(`No alcanza: en ${sede.name} hay ${words(stock.available)}.`)
+    if (stock.available < input.quantity) throw conflict(`No alcanza: en ${sede.name} hay ${words(stock.available)}.`, "quantity")
     let left = input.quantity
     for (const [step, row] of stock.warehouses.entries()) {
       if (left === 0) break
@@ -1798,11 +1821,11 @@ export async function transferStock(
   },
 ) {
   const transferKey = formKey(input.idempotencyKey, RETRY_KEY)
-  quantity(input.quantity)
+  quantity(input.quantity, "La cantidad", "quantity")
   const item = await requireProduct(tx, orgId, input.productId)
   const prefix = `traslado:${transferKey}`
   const from = await sedeOf(tx, orgId, input.fromBranchId)
-  if (input.fromBranchId === input.toBranchId) throw validation("Elige otra sede de destino")
+  if (input.fromBranchId === input.toBranchId) throw invalidField("toBranchId", "Elige otra sede de destino")
   const to = await requireBranch(tx, orgId, input.toBranchId)
   const prior = await replayOf(tx, orgId, prefix, item.id)
   if (prior) {
@@ -1811,13 +1834,13 @@ export async function transferStock(
       throw conflict("Esto ya se registró con otros datos. Cierra y vuelve a abrir para registrarlo de nuevo.")
     return { productId: item.id, from, to, quantity: moved, covered: 0, movements: prior, replayed: true }
   }
-  if (!item.isActive) throw conflict("El producto está desactivado")
+  if (!item.isActive) throw conflict("El producto está desactivado", "productId")
   const { locale } = await findOrgLocale(tx, orgId)
   // Lo vencido no se traslada: se da de baja donde está.
   const today = await clinicToday(tx, orgId)
   const words = unitWordsOf(item, locale)
   const dest = await defaultWarehouse(tx, orgId, to.id)
-  const reason = textOptional(input.note, "El detalle", 500) ?? `De ${from.name} a ${to.name}`
+  const reason = textOptional(input.note, "El detalle", 500, "note") ?? `De ${from.name} a ${to.name}`
   const base = { kind: "traslado" as const, reason, actorUserId }
   const movements: MovementRow[] = []
   let covered = 0
@@ -1837,7 +1860,7 @@ export async function transferStock(
     covered += result.covered
   } else {
     const stock = await sedeLots(tx, orgId, from.id, item.id, today)
-    if (stock.available < input.quantity) throw conflict(`No alcanza: en ${from.name} hay ${words(stock.available)}.`)
+    if (stock.available < input.quantity) throw conflict(`No alcanza: en ${from.name} hay ${words(stock.available)}.`, "quantity")
     let left = input.quantity
     for (const [step, row] of stock.warehouses.entries()) {
       if (left === 0) break
@@ -1882,17 +1905,18 @@ export async function addStock(
   },
 ) {
   const addKey = formKey(input.idempotencyKey, RETRY_KEY)
-  quantity(input.quantity)
+  quantity(input.quantity, "La cantidad", "quantity")
   const item = await requireProduct(tx, orgId, input.productId)
   const sede = await requireBranch(tx, orgId, input.branchId)
   const reason = reasonText(ADD_REASONS, input.reason, input.note)
-  const code = textOptional(input.lotCode, "El código de lote", 120) ?? NO_LOT_CODE
-  const expiresAt = dateOnly(input.expiresAt, "El vencimiento")
+  const code = textOptional(input.lotCode, "El código de lote", 120, "lotCode") ?? NO_LOT_CODE
+  const expiresAt = dateOnly(input.expiresAt, "El vencimiento", "expiresAt")
   const prefix = `agregado:${addKey}`
   const prior = await replayOf(tx, orgId, prefix, item.id)
-  if (!prior && !item.isActive) throw conflict("El producto está desactivado")
+  if (!prior && !item.isActive) throw conflict("El producto está desactivado", "productId")
   const main = await defaultWarehouse(tx, orgId, sede.id)
-  if (!prior) await assertLotExpiry(tx, orgId, { productId: item.id, warehouseId: main.id, code, expiresAt, productName: item.name })
+  if (!prior)
+    await assertLotExpiry(tx, orgId, { productId: item.id, warehouseId: main.id, code, expiresAt, productName: item.name, path: "lotCode" })
   const lot = await lotFor(tx, orgId, { productId: item.id, warehouseId: main.id, code, expiresAt, actorUserId })
   const result = await receiveIntoLot(tx, orgId, {
     lot,
@@ -1918,7 +1942,7 @@ export async function addStock(
 async function assertLotExpiry(
   tx: Db,
   orgId: string,
-  input: { productId: string; warehouseId: string; code: string; expiresAt: string | null; productName: string },
+  input: { productId: string; warehouseId: string; code: string; expiresAt: string | null; productName: string; path?: string },
 ) {
   if (!input.expiresAt) return
   const [lot] = await tx
@@ -1941,6 +1965,7 @@ async function assertLotExpiry(
     input.code
       ? `El lote ${input.code} de ${input.productName} ya existe y ${was}: ${ask}`
       : `Ya hay un lote sin código de ${input.productName} que ${was}: ${ask}`,
+    input.path,
   )
 }
 
@@ -1990,14 +2015,14 @@ export interface PurchaseOrderLineInput {
 async function destinationOf(tx: Db, orgId: string, input: { branchId?: string | null; warehouseId?: string | null }) {
   if (input.warehouseId) {
     const dest = await requireWarehouse(tx, orgId, input.warehouseId)
-    if (!dest.isActive) throw conflict("El almacén destino está desactivado")
+    if (!dest.isActive) throw conflict("El almacén destino está desactivado", "warehouseId")
     return dest
   }
   if (input.branchId) {
     const sede = await requireBranch(tx, orgId, input.branchId)
     return defaultWarehouse(tx, orgId, sede.id)
   }
-  throw validation("Elige la sede a la que llega la compra")
+  throw invalidField("branchId", "Elige la sede a la que llega la compra")
 }
 
 /** Revisa las líneas y les copia la unidad y el factor de compra del producto. */
@@ -2006,15 +2031,17 @@ async function lineValues(tx: Db, orgId: string, lines: PurchaseOrderLineInput[]
   if (lines.length > 200) throw validation("La orden admite hasta 200 líneas")
   const seen = new Set<string>()
   const out: Array<{ productId: string; quantity: number; unitCostCents: number; purchaseUnit: string | null; unitFactor: number; name: string }> = []
-  for (const line of lines) {
-    if (seen.has(line.productId)) throw validation("La orden no admite el mismo producto dos veces: suma sus cantidades en una fila")
+  for (const [index, line] of lines.entries()) {
+    const at = `lines[${index}]`
+    if (seen.has(line.productId))
+      throw invalidField(`${at}.productId`, "La orden no admite el mismo producto dos veces: suma sus cantidades en una fila")
     seen.add(line.productId)
     const item = await requireProduct(tx, orgId, line.productId)
-    if (!item.isActive) throw conflict(`El producto ${item.name} está desactivado`)
+    if (!item.isActive) throw conflict(`El producto ${item.name} está desactivado`, `${at}.productId`)
     out.push({
       productId: item.id,
-      quantity: quantity(line.quantity),
-      unitCostCents: cents(line.unitCostCents ?? 0),
+      quantity: quantity(line.quantity, "La cantidad", `${at}.quantity`),
+      unitCostCents: cents(line.unitCostCents ?? 0, "El costo por unidad", `${at}.unitCostCents`),
       purchaseUnit: item.purchaseUnit,
       unitFactor: item.purchaseFactor,
       name: item.name,
@@ -2048,15 +2075,18 @@ export async function createPurchaseOrder(
   if (!(PURCHASE_MODES as readonly string[]).includes(mode)) throw validation("Elige si la compra se pide o ya la tienes")
   const dest = await destinationOf(tx, orgId, input)
   const sup = await requireSupplier(tx, orgId, input.supplierId)
-  if (!sup.isActive) throw conflict("El proveedor está desactivado")
+  if (!sup.isActive) throw conflict("El proveedor está desactivado", "supplierId")
   const lines = await lineValues(tx, orgId, input.lines)
   if (mode === "ya_la_tengo")
     for (const [index, line] of input.lines.entries()) {
       if (!line.lots?.length) continue
-      const total = line.lots.reduce((sum, lot) => sum + quantity(lot.quantity, "Lo que llegó en cada lote"), 0)
+      const total = line.lots.reduce(
+        (sum, lot, at) => sum + quantity(lot.quantity, "Lo que llegó en cada lote", `lines[${index}].lots[${at}].quantity`),
+        0,
+      )
       const planned = lines[index]
       if (planned && total !== planned.quantity)
-        throw validation(`Los lotes de ${planned.name} suman ${total}: deben sumar lo que llegó (${planned.quantity})`)
+        throw invalidField(`lines[${index}].lots`, `Los lotes de ${planned.name} suman ${total}: deben sumar lo que llegó (${planned.quantity})`)
     }
   // Número sin saltos por clínica: el contador se bloquea al sumarle uno.
   const [counter] = await tx
@@ -2074,7 +2104,7 @@ export async function createPurchaseOrder(
       warehouseId: dest.id,
       status: mode === "borrador" ? "borrador" : "confirmada",
       currency: currency(input.currency ?? (await requireOrgCurrency(tx, orgId))),
-      notes: textOptional(input.notes, "Las notas", 2000),
+      notes: textOptional(input.notes, "Las notas", 2000, "notes"),
       createdBy: actorUserId,
     })
     .returning()
@@ -2130,11 +2160,11 @@ export async function updatePurchaseOrder(
   const patch: Partial<typeof purchaseOrder.$inferInsert> = {}
   if (input.supplierId !== undefined && input.supplierId !== order.supplierId) {
     const sup = await requireSupplier(tx, orgId, input.supplierId)
-    if (!sup.isActive) throw conflict("El proveedor está desactivado")
+    if (!sup.isActive) throw conflict("El proveedor está desactivado", "supplierId")
     patch.supplierId = sup.id
   }
   if (input.warehouseId || input.branchId) patch.warehouseId = (await destinationOf(tx, orgId, input)).id
-  if (input.notes !== undefined) patch.notes = textOptional(input.notes, "Las notas", 2000)
+  if (input.notes !== undefined) patch.notes = textOptional(input.notes, "Las notas", 2000, "notes")
   if (input.lines !== undefined) {
     const lines = await lineValues(tx, orgId, input.lines)
     const current = await orderLines(tx, orgId, id)
@@ -2474,6 +2504,7 @@ export async function cancelPurchaseOrder(
         "PURCHASE_HAS_PAYMENTS",
         409,
         "La orden ya tiene pagos: elige si se anulan o quedan a favor con el proveedor",
+        { payments: "Elige si los pagos se anulan o quedan a favor con el proveedor" },
       )
     if (input.payments === "anular") {
       const voidReason = input.reason?.trim() || "Se canceló la compra"
@@ -2599,14 +2630,18 @@ export async function receivePurchaseOrder(
   // La pone la pantalla al abrir la orden: sin ella no se distingue un reintento de otra entrega.
   const receptionKey = formKey(idempotencyKey, "No se pudo identificar esta recepción: vuelve a abrir la orden e inténtalo de nuevo")
   if (!lines?.length) throw validation("La recepción necesita al menos una línea")
-  const incoming = new Map<string, { parts: ReceptionLotInput[]; unitCostCents?: number }>()
-  for (const line of lines) {
-    if (incoming.has(line.productId)) throw validation("La recepción repite un producto: suma sus cantidades en una sola línea")
+  // `at` dice cómo se llama cada dato en el cuerpo: la pantalla lo marca en su fila (y en su lote).
+  const incoming = new Map<string, { parts: ReceptionLotInput[]; unitCostCents?: number; at: string; partAt: (n: number) => string }>()
+  for (const [index, line] of lines.entries()) {
+    const at = `lines[${index}]`
+    if (incoming.has(line.productId))
+      throw invalidField(`${at}.productId`, "La recepción repite un producto: suma sus cantidades en una sola línea")
     const parts = line.lots?.length
       ? line.lots
       : [{ quantity: line.quantity as number, lotCode: line.lotCode ?? null, expiresAt: line.expiresAt ?? null }]
-    if (parts.length > 50) throw validation("Un producto admite hasta 50 lotes por recepción")
-    incoming.set(line.productId, { parts, unitCostCents: line.unitCostCents })
+    if (parts.length > 50) throw invalidField(`${at}.lots`, "Un producto admite hasta 50 lotes por recepción")
+    const partAt = line.lots?.length ? (n: number) => `${at}.lots[${n}]` : () => at
+    incoming.set(line.productId, { parts, unitCostCents: line.unitCostCents, at, partAt })
   }
   // Serializa recepciones concurrentes de la misma orden, y el estado se lee ya
   // bloqueado: una orden que se canceló mientras tanto no recibe mercadería.
@@ -2658,16 +2693,19 @@ export async function receivePurchaseOrder(
     throw conflict("Confirma la orden antes de recibir la mercadería")
   for (const [productId, entry] of incoming) {
     const line = byProduct.get(productId)
-    if (!line) throw validation("La recepción incluye un producto que no está en la orden")
+    if (!line) throw invalidField(`${entry.at}.productId`, "La recepción incluye un producto que no está en la orden")
     let total = 0
-    for (const part of entry.parts) {
-      total += quantity(part.quantity, "La cantidad recibida")
-      dateOnly(part.expiresAt, "El vencimiento")
-      textOptional(part.lotCode, "El código de lote", 120)
+    for (const [n, part] of entry.parts.entries()) {
+      total += quantity(part.quantity, "La cantidad recibida", `${entry.partAt(n)}.quantity`)
+      dateOnly(part.expiresAt, "El vencimiento", `${entry.partAt(n)}.expiresAt`)
+      textOptional(part.lotCode, "El código de lote", 120, `${entry.partAt(n)}.lotCode`)
     }
-    if (line.receivedQuantity + total > line.quantity)
-      throw conflict(`La recepción supera lo pedido: de ese producto faltan ${line.quantity - line.receivedQuantity}`)
-    if (entry.unitCostCents !== undefined) cents(entry.unitCostCents, "El precio de la factura")
+    if (line.receivedQuantity + total > line.quantity) {
+      const item = await requireProduct(tx, orgId, productId)
+      const message = `La recepción supera lo pedido: de ${item.name} faltan ${line.quantity - line.receivedQuantity}`
+      throw conflict(message, entry.parts.length > 1 ? `${entry.at}.lots` : `${entry.partAt(0)}.quantity`)
+    }
+    if (entry.unitCostCents !== undefined) cents(entry.unitCostCents, "El precio de la factura", `${entry.at}.unitCostCents`)
   }
   let covered = 0
   for (const [productId, entry] of incoming) {
@@ -2686,7 +2724,14 @@ export async function receivePurchaseOrder(
       const code = part.lotCode?.trim() || label
       const expiresAt = dateOnly(part.expiresAt, "El vencimiento")
       const item = await requireProduct(tx, orgId, productId)
-      await assertLotExpiry(tx, orgId, { productId, warehouseId: order.warehouseId, code, expiresAt, productName: item.name })
+      await assertLotExpiry(tx, orgId, {
+        productId,
+        warehouseId: order.warehouseId,
+        code,
+        expiresAt,
+        productName: item.name,
+        path: `${entry.partAt(n)}.lotCode`,
+      })
       const lot = await lotFor(tx, orgId, {
         productId,
         warehouseId: order.warehouseId,

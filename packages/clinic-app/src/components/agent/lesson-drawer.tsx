@@ -1,8 +1,10 @@
-import { Badge, Button, Checkbox, cn, Field, FieldLabel, Input, ScrollArea, Textarea, useIsMobile } from "@odentia/ui"
-import { AgentMark, ConfirmDialog, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, Checkbox, cn, Field, FieldContent, FieldDescription, FieldLabel, ScrollArea, useIsMobile } from "@odentia/ui"
+import { AgentMark, ConfirmDialog, FormDrawer, SubmitButton, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, Undo2 } from "lucide-react"
 import { type FormEvent, type ReactNode, useEffect, useState } from "react"
+import { z } from "zod"
 import {
   agentName,
   impactSummary,
@@ -18,7 +20,6 @@ import {
 } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { SURFACE_ACTIONS } from "./correct-drawer"
 
 const KINDS: LessonKind[] = ["respuesta_oficial", "regla", "ejemplo"]
@@ -39,6 +40,14 @@ const WITHOUT_LABEL: Record<LessonKind, string> = {
 }
 const SECTION_TITLE = "text-xs font-bold tracking-wider text-muted-foreground uppercase"
 const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-knowledge", "agent-knowledge-basics"]
+
+/** Lo que admite `PATCH /api/agent/learning/lessons/:id`, con sus mismas palabras. */
+const lessonSchema = z.object({
+  title: z.string().trim().min(1, "El título es obligatorio").max(200, "El título admite hasta 200 caracteres"),
+  body: z.string().trim().min(1, "El texto es obligatorio").max(2000, "El texto admite hasta 2000 caracteres"),
+  kind: z.enum(["respuesta_oficial", "regla", "ejemplo"], { error: "Elige qué clase de lección es" }),
+})
+type LessonDraft = { title: string; body: string; kind: LessonKind }
 
 /** «hoy», «ayer», «el martes» (esta semana) o «el 3 de octubre». */
 function dayOf(iso: string, now = new Date()): string {
@@ -302,7 +311,7 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
     : approved
       ? `${approved} · ${usage.charAt(0).toLowerCase()}${usage.slice(1)}`
       : usage
-  const error = mutationErrorMessage(withdraw.error)
+  const error = withdraw.isError ? submitErrorMessage(withdraw.error) : null
 
   return (
     <ConfirmDialog
@@ -313,6 +322,7 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
       variant="default"
       pending={withdraw.isPending}
       confirmDisabled={!lesson || lesson.status !== "activa"}
+      error={error}
       onConfirm={() => withdraw.mutate()}
       onClose={close}
     >
@@ -333,28 +343,26 @@ export function WithdrawLessonDialog({ lessonId, onClose, onWithdrawn }: { lesso
               canRun={lesson.status === "activa"}
             />
             {hasCase ? (
-              <label htmlFor="leccion-retirar-caso" className="flex min-h-11 cursor-pointer items-start gap-2.5">
+              <Field orientation="horizontal" className="min-h-11">
                 <Checkbox
                   id="leccion-retirar-caso"
                   className="mt-0.5"
                   checked={withdrawCase}
+                  aria-describedby="leccion-retirar-caso-ayuda"
                   onCheckedChange={(value) => setWithdrawCase(value === true)}
                 />
-                <span>
-                  <span className="font-semibold">Retirar también su caso de prueba</span>
-                  <span className="block text-muted-foreground">Si lo dejas, seguirá esperando la respuesta de hoy.</span>
-                </span>
-              </label>
+                <FieldContent>
+                  <FieldLabel htmlFor="leccion-retirar-caso" className="font-semibold">
+                    Retirar también su caso de prueba
+                  </FieldLabel>
+                  <FieldDescription id="leccion-retirar-caso-ayuda">Si lo dejas, seguirá esperando la respuesta de hoy.</FieldDescription>
+                </FieldContent>
+              </Field>
             ) : null}
             <p className="flex items-start gap-2.5 rounded-xl bg-muted px-3.5 py-3">
               <Undo2 className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
               <span>Deja de usarla al instante. Queda en Retiradas con su historia y la puedes restaurar cuando quieras.</span>
             </p>
-            {error ? (
-              <p role="alert" className="text-destructive">
-                {error}
-              </p>
-            ) : null}
           </div>
         </ScrollArea>
       ) : null}
@@ -385,7 +393,6 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   const isMobile = useIsMobile()
   const [editing, setEditing] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
-  const [draft, setDraft] = useState<{ title: string; body: string; kind: LessonKind }>({ title: "", body: "", kind: "regla" })
 
   const query = useLesson(lessonId)
   const lesson = query.data?.data.lesson ?? null
@@ -393,7 +400,6 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al cambiar de lección o de estado, para no pisar lo que se está escribiendo.
   useEffect(() => {
     if (!lesson) return
-    setDraft({ title: lesson.title, body: lesson.body, kind: lesson.kind })
     setEditing(false)
   }, [lesson?.id, lesson?.status])
 
@@ -430,15 +436,30 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
     retry: false,
     mutationFn: (patch: Record<string, unknown>) =>
       apiFetch(`/api/agent/learning/lessons/${lessonId}`, { method: "PATCH", body: JSON.stringify(patch) }),
-    onSuccess: () => {
+  })
+  // «Guardarla como respuesta nueva»: una acción suelta, con su error junto a ella.
+  const detach = useMutation({
+    retry: false,
+    mutationFn: () =>
+      apiFetch(`/api/agent/learning/lessons/${lessonId}`, { method: "PATCH", body: JSON.stringify({ knowledgeEntryId: null }) }),
+    onSuccess: refresh,
+  })
+  const form = useAppForm({
+    defaultValues: { title: "", body: "", kind: "regla" } as LessonDraft,
+    validators: { onSubmit: lessonSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({ title: value.title.trim(), body: value.body.trim(), kind: value.kind })
       setEditing(false)
       refresh()
     },
   })
+  const surface = useFormSurface(form)
+  const draftKind = useStore(form.store, (state) => state.values.kind)
 
   function close() {
     act.reset()
     save.reset()
+    detach.reset()
     check.reset()
     setConflict(null)
     setWithdrawing(false)
@@ -448,16 +469,16 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   const proposed = lesson?.status === "propuesta"
   const active = lesson?.status === "activa"
   const withdrawn = lesson?.status === "retirada"
-  const dirty = Boolean(lesson) && editing && (draft.title !== lesson?.title || draft.body !== lesson?.body || draft.kind !== lesson?.kind)
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (!lesson || act.isPending || save.isPending) return
-    if (editing) save.mutate({ title: draft.title.trim(), body: draft.body.trim(), kind: draft.kind })
-    else if (proposed && lesson.kind === "regla") check.mutate()
+    if (!lesson || act.isPending) return
+    if (proposed && lesson.kind === "regla") check.mutate()
     else if (proposed) act.mutate({ action: "approve" })
     else if (withdrawn) act.mutate({ action: "restore" })
   }
+  // Lo que falló al aprobar o descartar se dice junto a esas acciones; con el diálogo de la regla contraria abierto, dentro de él.
+  const actionError = conflict === null && (act.isError || check.isError) ? submitErrorMessage(act.error ?? check.error) : null
 
   const title = !lesson
     ? "Lección"
@@ -478,49 +499,58 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
         open={lessonId !== null}
         onClose={close}
         title={title}
-        onSubmit={submit}
-        isSubmitting={act.isPending || save.isPending}
+        onSubmit={editing ? surface.onSubmit : submit}
+        isSubmitting={editing ? surface.isSubmitting : act.isPending}
         isLoading={query.isPending && lessonId !== null}
-        isDirty={dirty}
-        error={query.isError ? "No pudimos cargar la lección." : mutationErrorMessage(act.error ?? save.error ?? check.error)}
+        isDirty={editing && surface.isDirty}
+        error={query.isError ? "No pudimos cargar la lección." : editing ? surface.error : withdrawn ? actionError : null}
         submitLabel={editing ? "Guardar cambios" : "Restaurar"}
         cancelLabel={editing ? "Cancelar" : "Cerrar"}
         hideSubmit={!canWrite || !lesson || ownActions || lesson.status === "descartada"}
-        submitDisabled={editing && (!draft.title.trim() || !draft.body.trim())}
       >
         <div className="flex flex-col gap-5">
         {lesson ? (
           editing ? (
             <>
-              <fieldset className="flex flex-col gap-2">
-                <legend className="mb-1.5 text-sm font-semibold">Qué clase de lección es</legend>
-                <div className="flex flex-wrap gap-1.5">
-                  {KINDS.map((kind) => (
-                    <Button
-                      key={kind}
-                      type="button"
-                      size="sm"
-                      variant={draft.kind === kind ? "default" : "outline"}
-                      aria-pressed={draft.kind === kind}
-                      className="min-h-11 rounded-full sm:min-h-8"
-                      onClick={() => setDraft({ ...draft, kind })}
-                    >
-                      {LESSON_KIND_LABEL[kind]}
-                    </Button>
-                  ))}
-                </div>
-                <p className="text-sm text-muted-foreground">{SCOPE_WHY[draft.kind]}</p>
-              </fieldset>
-              <Field>
-                <FieldLabel htmlFor="leccion-titulo">Título</FieldLabel>
-                <Input id="leccion-titulo" maxLength={200} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="leccion-texto">
-                  {draft.kind === "regla" ? "La regla" : draft.kind === "ejemplo" ? "La respuesta de ejemplo" : "La respuesta oficial"}
-                </FieldLabel>
-                <Textarea id="leccion-texto" rows={6} maxLength={2000} value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
-              </Field>
+              <form.AppField name="kind">
+                {(field) => (
+                  <field.Group legend="Qué clase de lección es" description={SCOPE_WHY[draftKind]}>
+                    {(control) => (
+                      <div className="flex flex-wrap gap-1.5" aria-describedby={control.describedBy}>
+                        {KINDS.map((kind) => (
+                          <Button
+                            key={kind}
+                            type="button"
+                            size="sm"
+                            variant={field.state.value === kind ? "default" : "outline"}
+                            aria-pressed={field.state.value === kind}
+                            className="min-h-11 rounded-full sm:min-h-8"
+                            onClick={() => {
+                              field.handleChange(kind)
+                              field.handleBlur()
+                            }}
+                          >
+                            {LESSON_KIND_LABEL[kind]}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </field.Group>
+                )}
+              </form.AppField>
+              <form.AppField name="title">
+                {(field) => <field.TextField id="leccion-titulo" label="Título" maxLength={200} />}
+              </form.AppField>
+              <form.AppField name="body">
+                {(field) => (
+                  <field.TextareaField
+                    id="leccion-texto"
+                    label={draftKind === "regla" ? "La regla" : draftKind === "ejemplo" ? "La respuesta de ejemplo" : "La respuesta oficial"}
+                    rows={6}
+                    maxLength={2000}
+                  />
+                )}
+              </form.AppField>
             </>
           ) : (
             <>
@@ -560,16 +590,23 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
                   <BeforeAfter before={lesson.originalReply} after={lesson.body} beforeLabel="Respondió" afterLabel="Aprende" />
                 )}
                 {changesExisting && canWrite ? (
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto min-h-11 self-start p-0 text-left whitespace-normal sm:min-h-8"
-                    disabled={save.isPending}
-                    onClick={() => save.mutate({ knowledgeEntryId: null })}
-                  >
-                    Guardarla como respuesta nueva, sin cambiar la que ya existe
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto min-h-11 self-start p-0 text-left whitespace-normal sm:min-h-8"
+                      disabled={detach.isPending}
+                      onClick={() => detach.mutate()}
+                    >
+                      Guardarla como respuesta nueva, sin cambiar la que ya existe
+                    </Button>
+                    {detach.isError ? (
+                      <p role="alert" className="text-sm text-destructive">
+                        {submitErrorMessage(detach.error)}
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
               </Block>
 
@@ -609,12 +646,23 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
                     type="submit"
                     className="min-h-11 w-full"
                     pending={check.isPending || (act.isPending && act.variables?.action === "approve")}
-                    disabled={act.isPending || save.isPending || check.isPending}
+                    disabled={act.isPending || check.isPending}
                   >
                     Aprobar y activar
                   </SubmitButton>
                   <div className="grid grid-cols-2 gap-2">
-                    <Button type="button" variant="outline" className="min-h-11 sm:min-h-10" disabled={act.isPending} onClick={() => setEditing(true)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="min-h-11 sm:min-h-10"
+                      disabled={act.isPending}
+                      onClick={() => {
+                        act.reset()
+                        check.reset()
+                        form.reset({ title: lesson.title, body: lesson.body, kind: lesson.kind })
+                        setEditing(true)
+                      }}
+                    >
                       Editar el texto
                     </Button>
                     <Button
@@ -627,6 +675,11 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
                       Descartar
                     </Button>
                   </div>
+                  {actionError ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {actionError}
+                    </p>
+                  ) : null}
                   {isMobile ? null : (
                     <p className="text-center text-sm text-muted-foreground">Si después no te convence, la retiras y todo vuelve a como estaba.</p>
                   )}
@@ -652,8 +705,12 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
         confirmLabel="Reemplazar"
         variant="default"
         pending={act.isPending}
+        error={act.isError ? submitErrorMessage(act.error) : null}
         onClose={() => {
-          if (!act.isPending) setConflict(null)
+          if (!act.isPending) {
+            act.reset()
+            setConflict(null)
+          }
         }}
         onConfirm={() => conflict && act.mutate({ action: "approve", replaceId: conflict.id })}
       >
@@ -672,11 +729,6 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
             Descartar
           </Button>
         </div>
-        {act.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {mutationErrorMessage(act.error) ?? "No pudimos guardarlo."}
-          </p>
-        ) : null}
       </ConfirmDialog>
     </>
   )

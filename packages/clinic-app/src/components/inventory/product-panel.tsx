@@ -84,7 +84,10 @@ function ProductActions({ detail }: { detail: ProductDetail }) {
       toast.success(isActive ? `${detail.name} está activo otra vez.` : `${detail.name} quedó desactivado.`)
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
     },
-    onError: (error) => toast.error(inventoryErrorMessage(error)),
+    // Desactivar se confirma en un diálogo: el motivo se dice ahí, no detrás de él.
+    onError: (error, isActive) => {
+      if (isActive) toast.error(inventoryErrorMessage(error))
+    },
   })
   const active = detail.isActive
   const buttons: Array<{ key: string; label: string; onClick: () => void }> = []
@@ -142,7 +145,11 @@ function ProductActions({ detail }: { detail: ProductDetail }) {
         confirmLabel="Desactivar"
         cancelLabel="Volver"
         pending={activation.isPending}
-        onClose={() => setConfirming(false)}
+        error={activation.error && activation.variables === false ? inventoryErrorMessage(activation.error) : null}
+        onClose={() => {
+          setConfirming(false)
+          activation.reset()
+        }}
         onConfirm={() => activation.mutate(false)}
       />
     </div>

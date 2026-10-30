@@ -1,8 +1,10 @@
 import { Button, Field, FieldLabel, ScrollArea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, LoadingState, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
+import { z } from "zod"
+import { ApiError } from "../../lib/api"
 import { dayKey } from "../../lib/booking-days"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
@@ -197,18 +199,22 @@ export function ProfessionalSelect({ state, id, onChange }: { state: WeekSlotsSt
 
 /**
  * Los horarios libres de la semana que se mira. El botón que reserva o
- * cambia lo pone la página: este bloque solo deja elegir.
+ * cambia lo pone la página: este bloque solo deja elegir. Si falta elegir o
+ * el horario se ocupó, `error` lo dice dentro del bloque, sobre los horarios.
  */
 export function WeekSlotsGrid({
   state,
   chosen,
   onChoose,
   minutes,
+  error = null,
 }: {
   state: WeekSlotsState
   chosen: WeekSlot | null
   onChoose: (slot: WeekSlot | null) => void
   minutes: number | null
+  /** Lo que hay que corregir en la elección, con el id que la enlaza (`aria-describedby`). */
+  error?: { id: string; message: string } | null
 }) {
   const { timeZone, days, activeDay, week, withWhom, query } = state
   const morning = activeDay?.slots.filter((slot) => hourOf(slot.startsAt, timeZone) < 12) ?? []
@@ -245,7 +251,13 @@ export function WeekSlotsGrid({
     )
   }
   return (
-    <section aria-label="Horarios libres" className="flex min-w-0 flex-col gap-4 rounded-2xl border bg-card p-4">
+    <section
+      aria-label="Horarios libres"
+      aria-invalid={error ? true : undefined}
+      aria-describedby={error?.id}
+      tabIndex={error ? -1 : undefined}
+      className="flex min-w-0 flex-col gap-4 rounded-2xl border bg-card p-4"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <p className="font-semibold">{weekTitle}</p>
@@ -262,6 +274,11 @@ export function WeekSlotsGrid({
           </Button>
         </div>
       </div>
+      {error ? (
+        <p id={error.id} role="alert" className="text-sm font-medium text-destructive">
+          {error.message}
+        </p>
+      ) : null}
 
       {query.isPending ? (
         <LoadingState kind="indeterminate" message="Buscando horarios libres…" />
@@ -352,3 +369,45 @@ export function WeekSlotsGrid({
     </section>
   )
 }
+
+/**
+ * La semana de horarios como campo de `useAppForm` (`form.AppField name="slot"`):
+ * el valor es el horario elegido y su error («Elige un día y una hora», «Ese
+ * horario acaba de ocuparse») se dice dentro del bloque.
+ */
+export function WeekSlotsField({ state, minutes }: { state: WeekSlotsState; minutes: number | null }) {
+  const field = useFieldContext<WeekSlot | null>()
+  const { control, errors, errorId } = useFieldControl({ hasDescription: false })
+  return (
+    <WeekSlotsGrid
+      state={state}
+      chosen={field.state.value}
+      onChoose={(slot) => field.handleChange(slot)}
+      minutes={minutes}
+      error={control.invalid ? { id: errorId, message: errors.join(" ") } : null}
+    />
+  )
+}
+
+/** Lo que se dice cuando el horario elegido dejó de estar libre. */
+export const SLOT_TAKEN = "Ese horario acaba de ocuparse. Elige otro de la lista."
+
+/** Los rechazos de disponibilidad: otra cita, un bloqueo o sin unidad libre a esa hora. */
+const AVAILABILITY_CODES: Record<string, true> = { APPOINTMENT_CONFLICT: true, SCHEDULE_BLOCKED: true, NO_ROOM: true }
+
+/**
+ * El servidor rechazó el horario porque ya no está libre (y no por otra cosa,
+ * que se dice con sus palabras): se vuelve a pedir lo libre y se dice en el
+ * bloque de horarios. Devuelve el error para el campo `slot`, o el mismo si no lo es.
+ */
+export function slotTakenError(error: unknown): unknown {
+  if (!(error instanceof ApiError) || error.status !== 409 || !AVAILABILITY_CODES[error.shape.code ?? ""]) return error
+  return new ApiError(409, { ...error.shape, message: SLOT_TAKEN, fields: { slot: SLOT_TAKEN } })
+}
+
+/** Lo que el servidor dice del horario (`startsAt`, quién o dónde) va al bloque de horarios. */
+export const SLOT_FIELD_MAP = { startsAt: "slot", professionalUserId: "slot", roomId: "slot" } as const
+
+/** Elegir un horario es obligatorio: se dice dentro del bloque. */
+export const chosenSlotSchema = (message: string) =>
+  z.custom<WeekSlot | null>().refine((slot) => slot !== null, message)

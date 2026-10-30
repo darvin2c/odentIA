@@ -114,8 +114,10 @@ test("cancelar una compra pagada pide qué pasa con lo pagado; el servidor no la
   await page.getByRole("menuitem", { name: "Cancelar la compra" }).click()
   const dialog = page.getByRole("alertdialog", { name: `Cancelar ${label}` })
   await expect(dialog).toContainText("Esta compra ya tiene S/ 200.00 pagados")
-  // Sin elegir no se cancela.
-  await expect(dialog.getByRole("button", { name: "Cancelar la compra" })).toBeDisabled()
+  // Sin elegir no se cancela: el diálogo dice qué falta, junto a las opciones.
+  await dialog.getByRole("button", { name: "Cancelar la compra" }).click()
+  await expect(dialog).toContainText("Elige qué pasa con lo pagado.")
+  await expect(dialog).toBeVisible()
   await dialog.getByRole("radio", { name: /^Dejarlo a favor con Insumos de prueba/ }).check()
   await observe(page, info, "cancelar-pagada")
   await dialog.getByRole("button", { name: "Cancelar la compra" }).click()

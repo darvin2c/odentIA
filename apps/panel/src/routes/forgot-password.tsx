@@ -1,11 +1,11 @@
-import { Button, Field, FieldError, FieldGroup, FieldLabel, Input } from "@odentia/ui"
-import { AuthSplit, fieldErrorMessages, SubmitButton } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { Button, FieldGroup } from "@odentia/ui"
+import { AuthSplit, SubmitButton, submitErrorMessage, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { createFileRoute, Link, useSearch } from "@tanstack/react-router"
 import { MailCheck, TriangleAlert } from "lucide-react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { authClient } from "../lib/auth-client"
+import { AUTH_NETWORK, authError, authFormMessage } from "../lib/auth-error"
 import { AuthAlert, AuthLegal, RecoverAside } from "../lib/auth-screens"
 import { countdown } from "../lib/countdown"
 import { readRememberedUser } from "../lib/welcome"
@@ -21,19 +21,24 @@ export const Route = createFileRoute("/forgot-password")({
 
 const RESEND_SECONDS = 60
 
-/** Pide el enlace de acceso; el servidor responde igual exista o no la cuenta. */
-async function requestLink(email: string): Promise<string | null> {
-  try {
-    const { error } = await authClient.$fetch("/access-link/request", {
-      method: "POST",
-      body: { email, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+/**
+ * Pide el enlace de acceso; el servidor responde igual exista o no la cuenta.
+ * Si lo rechaza (formato del correo, demasiados envíos), lanza el error con el
+ * correo como su campo.
+ */
+async function requestLink(email: string): Promise<void> {
+  const { error } = await authClient.$fetch("/access-link/request", {
+    method: "POST",
+    body: { email, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone },
+  })
+  if (error)
+    throw authError(error, {
+      fields: { INVALID_EMAIL: "email", VALIDATION_ERROR: "email" },
+      messages: {
+        VALIDATION_ERROR: "Escribe un correo válido, como nombre@clinica.com",
+        "429": "Ya te enviamos varios enlaces. Espera unos minutos.",
+      },
     })
-    if (!error) return null
-    if (error.status === 429) return "Ya te enviamos varios enlaces. Espera unos minutos."
-    return error.message || "No pudimos enviarlo. Inténtalo de nuevo."
-  } catch {
-    return "No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo."
-  }
 }
 
 /**
@@ -45,10 +50,9 @@ async function requestLink(email: string): Promise<string | null> {
 function ForgotPasswordPage() {
   const { email: fromLogin, vencido } = useSearch({ from: "/forgot-password" })
   const [sentTo, setSentTo] = useState<string | null>(null)
-  const [problem, setProblem] = useState<string | null>(null)
   const expired = vencido === 1 && !sentTo
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { email: fromLogin ?? readRememberedUser()?.email ?? "" },
     validators: {
       onSubmit: z.object({
@@ -56,12 +60,12 @@ function ForgotPasswordPage() {
       }),
     },
     onSubmit: async ({ value }) => {
-      setProblem(null)
-      const message = await requestLink(value.email)
-      if (message) setProblem(message)
-      else setSentTo(value.email)
+      await requestLink(value.email)
+      setSentTo(value.email)
     },
   })
+  const onSubmit = useFormSubmit(form, { formMessage: authFormMessage })
+  const submitError = useFormSubmitError(form)
 
   if (sentTo) {
     return (
@@ -119,35 +123,20 @@ function ForgotPasswordPage() {
         </Link>
       }
     >
-      <form
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
+      <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
-          <form.Field name="email">
+          <form.AppField name="email">
             {(field) => (
-              <Field>
-                <FieldLabel htmlFor="email">Correo</FieldLabel>
-                <Input
-                  id="email"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="username"
-                  aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                  aria-describedby={field.state.meta.errors.length ? "email-error" : undefined}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError id="email-error">
-                  {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                </FieldError>
-              </Field>
+              <field.TextField
+                label="Correo"
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="username"
+              />
             )}
-          </form.Field>
-          {problem ? <AuthAlert>{problem}</AuthAlert> : null}
+          </form.AppField>
+          {submitError ? <AuthAlert>{submitError}</AuthAlert> : null}
           <form.Subscribe selector={(state) => state.isSubmitting}>
             {(isSubmitting) => (
               <SubmitButton type="submit" pending={isSubmitting} className="w-full">
@@ -164,7 +153,7 @@ function ForgotPasswordPage() {
 /** Reenviar espera 60 segundos; cambiar el correo vuelve con lo escrito. */
 function SentActions({ email, onChange }: { email: string; onChange: () => void }) {
   const [wait, setWait] = useState(RESEND_SECONDS)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<{ text: string; failed: boolean } | null>(null)
   const [sending, setSending] = useState(false)
   useEffect(() => {
     if (wait <= 0) return
@@ -181,10 +170,17 @@ function SentActions({ email, onChange }: { email: string; onChange: () => void 
           disabled={wait > 0 || sending}
           onClick={async () => {
             setSending(true)
-            const message = await requestLink(email)
-            setSending(false)
-            setNotice(message ?? "Te enviamos otro enlace. Solo sirve el último.")
-            setWait(RESEND_SECONDS)
+            setNotice(null)
+            try {
+              await requestLink(email)
+              setNotice({ text: "Te enviamos otro enlace. Solo sirve el último.", failed: false })
+              setWait(RESEND_SECONDS)
+            } catch (error) {
+              // Si falló, la cuenta atrás no se reinicia: se puede volver a pedir.
+              setNotice({ text: error instanceof TypeError ? AUTH_NETWORK : submitErrorMessage(error), failed: true })
+            } finally {
+              setSending(false)
+            }
           }}
         >
           {wait > 0 ? `Reenviar en ${countdown(wait)}` : "Reenviar"}
@@ -193,9 +189,10 @@ function SentActions({ email, onChange }: { email: string; onChange: () => void 
           Cambiar correo
         </Button>
       </div>
-      {notice ? (
+      {notice?.failed ? <AuthAlert>{notice.text}</AuthAlert> : null}
+      {notice && !notice.failed ? (
         <p role="status" className="text-sm text-muted-foreground">
-          {notice}
+          {notice.text}
         </p>
       ) : null}
       <p className="text-sm text-muted-foreground">

@@ -1,9 +1,8 @@
-import { FieldLabel, Input, toast } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { toast } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
-import * as React from "react"
+import { z } from "zod"
 import { apiFetch } from "../../lib/api"
-import { errorMessage } from "./shared"
 import { appWords, upperFirst } from "../../lib/product-words"
 
 /**
@@ -28,29 +27,46 @@ export function RoomForm({
   onClose: () => void
   onSaved: () => Promise<void>
 }) {
-  const initialName = room?.name ?? suggestedName
   const word = appWords().room
-  const [name, setName] = React.useState(initialName)
-  const [error, setError] = React.useState("")
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (name: string) =>
       room
         ? apiFetch(`/api/agenda/rooms/${room.id}`, {
             method: "PATCH",
-            body: JSON.stringify({ name: name.trim() }),
+            body: JSON.stringify({ name }),
           })
         : apiFetch("/api/agenda/rooms", {
             method: "POST",
-            body: JSON.stringify({ branchId, name: name.trim() }),
+            body: JSON.stringify({ branchId, name }),
           }),
-    onSuccess: async () => {
+  })
+  const form = useAppForm({
+    defaultValues: { name: room?.name ?? suggestedName },
+    validators: {
+      onSubmit: z.object({
+        name: z
+          .string()
+          .trim()
+          .min(1, `Escribe el nombre de la ${word.one}.`)
+          .max(120, "Escribe el nombre en 120 caracteres como mucho."),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const name = value.name.trim()
+      // Renombrar con el mismo nombre no cambia nada: se cierra sin llamar al servidor.
+      if (room && name === room.name) {
+        onClose()
+        return
+      }
+      await save.mutateAsync(name)
       toast.success(`${upperFirst(word.one)} ${room ? "guardada" : "añadida"}`)
       await onSaved()
     },
-    onError: (cause) => setError(errorMessage(cause)),
   })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open
       title={room ? `Renombrar ${room.name}` : `Nueva ${word.one}`}
       description={
@@ -59,27 +75,11 @@ export function RoomForm({
           : `Se añade a ${branchName}. Cada cita ocupa una ${word.one}.`
       }
       onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setError("")
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty={name !== initialName}
-      error={error || null}
-      submitDisabled={!name.trim() || (room !== undefined && name.trim() === room.name)}
       submitLabel={room ? "Guardar" : `Añadir ${word.one}`}
     >
-      <div className="grid gap-2">
-        <FieldLabel htmlFor="sillon-nombre">Nombre</FieldLabel>
-        <Input
-          id="sillon-nombre"
-          required
-          maxLength={120}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-        />
-      </div>
+      <form.AppField name="name">
+        {(field) => <field.TextField label="Nombre" id="sillon-nombre" maxLength={120} />}
+      </form.AppField>
     </FormDrawer>
   )
 }

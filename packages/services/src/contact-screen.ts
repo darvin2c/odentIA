@@ -11,7 +11,7 @@ import {
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 
 /**
  * Spam y bloqueados (issue 77, ADR 0054). Spam es sobre lo que alguien mandó:
@@ -282,11 +282,11 @@ export async function blockContact(
   input: { contactId: string; userId: string; reason: string; note: string },
 ): Promise<void> {
   if (!(BLOCK_REASONS as readonly string[]).includes(input.reason)) {
-    throw validation(`Motivo inválido (${BLOCK_REASONS.join("|")})`)
+    throw invalidField("reason", "Elige el motivo del bloqueo.")
   }
   const note = input.note.trim()
-  if (!note) throw validation("Escribe qué pasó")
-  if (note.length > BLOCK_NOTE_MAX) throw validation(`Lo que pasó admite hasta ${BLOCK_NOTE_MAX} caracteres`)
+  if (!note) throw invalidField("note", "Escribe qué pasó.")
+  if (note.length > BLOCK_NOTE_MAX) throw invalidField("note", `Escribe como mucho ${BLOCK_NOTE_MAX} caracteres.`)
   await tx.execute(sql`select 1 from contact where organization_id = ${orgId} and id = ${input.contactId} for update`)
   const facts = await contactScreenFacts(tx, orgId, input.contactId)
   if (facts.isPatient) {

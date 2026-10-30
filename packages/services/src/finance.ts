@@ -42,6 +42,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, type SQL, sq
 import {
   branchNotFound,
   isUniqueViolation,
+  invalidField,
   notFound,
   purchaseOrderNotFound,
   ServiceError,
@@ -64,9 +65,12 @@ function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
 }
 
-export function assertCents(value: number, field = "El importe"): number {
-  if (!Number.isSafeInteger(value) || value <= 0 || value > 2147483647)
-    throw validation(`${field} debe ser un importe entero mayor que cero`)
+/** `name`: el dato del cuerpo de la petición, para que el error se diga junto a él. */
+export function assertCents(value: number, field = "El importe", name?: string): number {
+  if (!Number.isSafeInteger(value) || value <= 0 || value > 2147483647) {
+    const message = `${field} debe ser un importe entero mayor que cero`
+    throw name ? invalidField(name, message) : validation(message)
+  }
   return value
 }
 
@@ -82,16 +86,19 @@ function reason(value: string): string {
   return text
 }
 
-function concept(value: string): string {
+function concept(value: string, name?: string): string {
   const text = value?.trim()
-  if (!text || text.length > 500) throw validation("El concepto debe tener 1–500 caracteres")
+  if (!text || text.length > 500) {
+    const message = "El concepto debe tener 1–500 caracteres"
+    throw name ? invalidField(name, message) : validation(message)
+  }
   return text
 }
 
-function instant(value: string): Date {
+function instant(value: string, name?: string): Date {
   const date = new Date(value)
   if (!/^\d{4}-\d{2}-\d{2}T/.test(value) || !Number.isFinite(date.getTime()))
-    throw validation("Fecha ISO inválida")
+    throw name ? invalidField(name, "Fecha ISO inválida") : validation("Fecha ISO inválida")
   return date
 }
 
@@ -425,9 +432,9 @@ export async function addShiftMovement(
   // Ingresar es un aporte y retirar es un retiro: no hay otra combinación.
   if ((input.kind === "aporte") !== (input.direction === "ingreso"))
     throw validation("Ingresar efectivo es un aporte y retirarlo es un retiro")
-  const amount = assertCents(input.amountCents)
+  const amount = assertCents(input.amountCents, "El importe", "amountCents")
   // El efectivo nunca queda negativo: el egreso no supera el contado actual.
-  if (input.direction === "egreso") await requireCashAvailable(tx, orgId, shift.id, amount)
+  if (input.direction === "egreso") await requireCashAvailable(tx, orgId, shift.id, amount, "amountCents")
   const [row] = await tx
     .insert(cashMovement)
     .values({
@@ -437,7 +444,7 @@ export async function addShiftMovement(
       kind: input.kind,
       amountCents: amount,
       currency: shift.currency,
-      concept: concept(input.concept),
+      concept: concept(input.concept, "concept"),
       createdBy: actorUserId,
     })
     .returning()
@@ -476,12 +483,15 @@ export async function addCashMovement(
 
 /**
  * El efectivo nunca queda negativo: un egreso exige contado suficiente en la
- * ventana (gasto, retiro, devolución y compensación por igual).
+ * ventana (gasto, retiro, devolución y compensación por igual). `field`: el
+ * importe en el cuerpo de la petición, para decir el error junto a él.
  */
-async function requireCashAvailable(tx: Db, orgId: string, shiftId: string, amountCents: number) {
+async function requireCashAvailable(tx: Db, orgId: string, shiftId: string, amountCents: number, field?: string) {
   const detail = await getShiftDetail(tx, orgId, shiftId)
-  if (amountCents > detail.esperadoCents)
-    throw conflict("INSUFFICIENT_CASH", "La caja no tiene efectivo suficiente para este egreso")
+  if (amountCents > detail.esperadoCents) {
+    const message = "La caja no tiene efectivo suficiente para este egreso"
+    throw new ServiceError("INSUFFICIENT_CASH", 409, message, field ? { [field]: message } : undefined)
+  }
 }
 
 export interface CashIncomeInput {
@@ -556,6 +566,8 @@ export interface CashEgresoInput {
    * voluntarios (gasto, retiro, devolución) nunca dejan la caja en negativo.
    */
   allowNegative?: boolean
+  /** El importe en el cuerpo de la petición (`amountCents`): el error de efectivo se dice junto a él. */
+  amountField?: string
 }
 
 /** Egreso de dominio (gasto de caja, devolución o compensación) en la ventana abierta. */
@@ -569,10 +581,10 @@ export async function recordCashEgreso(
   const shift = requireOpenShift(await lockShift(tx, orgId, shiftId))
   if (input.currency !== shift.currency)
     throw conflict("CURRENCY_MISMATCH", "El egreso es de otra moneda que la caja")
-  const amount = assertCents(input.amountCents)
+  const amount = assertCents(input.amountCents, "El importe", input.amountField)
   // Solo lo que sale del cajón exige efectivo: lo devuelto por otro medio no lo toca.
   const fromCash = isCashEgreso({ direction: "egreso", methodTypeCode: input.methodTypeCode ?? null })
-  if (fromCash && !input.allowNegative) await requireCashAvailable(tx, orgId, shift.id, amount)
+  if (fromCash && !input.allowNegative) await requireCashAvailable(tx, orgId, shift.id, amount, input.amountField)
   const [row] = await tx
     .insert(cashMovement)
     .values({
@@ -719,13 +731,20 @@ export async function closeShift(
   if (!locked) throw notFound("Turno de caja")
   if (locked.status === "cerrada") return locked
   if (!Number.isSafeInteger(input.countedCents) || input.countedCents < 0)
-    throw validation("El contado debe ser un importe entero mayor o igual a 0")
-  for (const [value, label] of [[input.retainedCents, "Lo que queda"], [input.deliveredCents, "Lo que se entrega"]] as const) {
+    throw invalidField("countedCents", "El contado debe ser un importe entero mayor o igual a 0")
+  for (const [value, label, name] of [
+    [input.retainedCents, "Lo que queda", "retainedCents"],
+    [input.deliveredCents, "Lo que se entrega", "deliveredCents"],
+  ] as const) {
     if (!Number.isSafeInteger(value) || value < 0)
-      throw validation(`${label} debe ser un importe entero mayor o igual a 0`)
+      throw invalidField(name, `${label} debe ser un importe entero mayor o igual a 0`)
   }
+  // La suma se dice en el importe que se pasa de lo contado (si ninguno, en lo que se entrega).
   if (input.retainedCents + input.deliveredCents !== input.countedCents)
-    throw validation("Lo que queda más lo que se entrega suma el contado")
+    throw invalidField(
+      input.retainedCents > input.countedCents ? "retainedCents" : "deliveredCents",
+      "Lo que queda más lo que se entrega suma el contado",
+    )
   const detail = await getShiftDetail(tx, orgId, shiftId)
   const closedAt = new Date()
   const difference = input.countedCents - detail.esperadoCents
@@ -917,12 +936,12 @@ export async function createExpense(
   const unit = input.currency ? currency(input.currency) : await lockOrgCurrency(tx, orgId)
   const category = input.category?.trim() || "Otros"
   if (!(EXPENSE_CATEGORIES as readonly string[]).includes(category))
-    throw validation("Tipo de gasto inválido")
+    throw invalidField("category", "Tipo de gasto inválido")
   if (link.purchaseOrderId && category !== PURCHASE_EXPENSE_CATEGORY)
-    throw validation("El pago de una compra es un gasto de Materiales")
+    throw invalidField("category", "El pago de una compra es un gasto de Materiales")
   const salesTax = input.salesTax === true
   if (salesTax && category !== SALES_TAX_EXPENSE_CATEGORY)
-    throw validation("El pago del impuesto de lo cobrado es un gasto de Impuestos")
+    throw invalidField("salesTax", "El pago del impuesto de lo cobrado es un gasto de Impuestos")
   // Comprobante libre según país (el catálogo fiscal llega con su módulo).
   const receiptKind = input.receiptKind?.trim() ? input.receiptKind.trim().slice(0, 60) : "ninguno"
   const shift = input.fromCash
@@ -934,11 +953,11 @@ export async function createExpense(
       organizationId: orgId,
       branchId: branchRow.id,
       shiftId: shift?.id ?? null,
-      concept: concept(input.concept),
+      concept: concept(input.concept, "concept"),
       category,
-      amountCents: assertCents(input.amountCents, "El gasto"),
+      amountCents: assertCents(input.amountCents, "El gasto", "amountCents"),
       currency: unit,
-      spentAt: input.spentAt ? instant(input.spentAt) : new Date(),
+      spentAt: input.spentAt ? instant(input.spentAt, "spentAt") : new Date(),
       receiptKind,
       receiptNumber: input.receiptNumber?.trim() || null,
       notes: input.notes?.trim() ? input.notes.trim().slice(0, 2000) : null,
@@ -954,6 +973,7 @@ export async function createExpense(
       currency: row.currency,
       concept: row.concept,
       expenseId: row.id,
+      amountField: "amountCents",
     })
   }
   await audit(tx, orgId, actorUserId, "expense", row.id, "finance.expense_created")
@@ -1266,32 +1286,41 @@ export interface PayPurchaseOrderInput {
  */
 export async function payPurchaseOrder(tx: Db, orgId: string, actorUserId: string, input: PayPurchaseOrderInput) {
   const order = await lockPurchaseOrder(tx, orgId, input.orderId)
-  if (order.status === "borrador") throw conflict("PURCHASE_NOT_CONFIRMED", "Confirma la orden antes de pagarla")
-  if (order.status === "cancelada") throw conflict("PURCHASE_CANCELLED", "La orden está cancelada: ya no se paga")
+  // Lo que es de la compra elegida se dice en `orderId` (la compra, en la pantalla que la elige).
+  const orderConflict = (code: string, message: string) => new ServiceError(code, 409, message, { orderId: message })
+  if (order.status === "borrador") throw orderConflict("PURCHASE_NOT_CONFIRMED", "Confirma la orden antes de pagarla")
+  if (order.status === "cancelada") throw orderConflict("PURCHASE_CANCELLED", "La orden está cancelada: ya no se paga")
   await lockSupplier(tx, orgId, order.supplierId)
   const amountCents = input.amountCents ?? 0
   const creditCents = input.creditCents ?? 0
   if (!Number.isSafeInteger(amountCents) || amountCents < 0 || amountCents > 2147483647)
-    throw validation("El pago debe ser un importe entero")
+    throw invalidField("amountCents", "El pago debe ser un importe entero")
   if (!Number.isSafeInteger(creditCents) || creditCents < 0 || creditCents > 2147483647)
-    throw validation("Lo que se usa a favor debe ser un importe entero")
-  if (amountCents + creditCents <= 0) throw validation("El pago debe ser mayor que cero")
+    throw invalidField("creditCents", "Lo que se usa a favor debe ser un importe entero")
+  if (amountCents + creditCents <= 0) throw invalidField("amountCents", "El pago debe ser mayor que cero")
   const [before] = await purchaseBalances(tx, orgId, { orderIds: [order.id] })
   if (!before) throw purchaseOrderNotFound()
   if (input.expectedPaidCents !== undefined && input.expectedPaidCents !== before.paidCents)
-    throw conflict(
+    throw orderConflict(
       "PURCHASE_PAID_CHANGED",
       "Esta compra tiene un pago nuevo desde que la abriste (puede ser este mismo, si se envió dos veces): vuelve a mirarla antes de pagar",
     )
   if (input.expectedDueCents !== undefined && input.expectedDueCents !== before.dueCents)
-    throw conflict("PURCHASE_DUE_CHANGED", "Lo que falta pagar de esta compra cambió mientras lo revisabas: vuelve a mirarlo")
+    throw orderConflict("PURCHASE_DUE_CHANGED", "Lo que falta pagar de esta compra cambió mientras lo revisabas: vuelve a mirarlo")
   if (creditCents > 0) {
     if (creditCents > (await creditWith(tx, orgId, order.supplierId, order.currency)))
-      throw conflict("SUPPLIER_CREDIT_SHORT", "No tienes tanto a favor con este proveedor")
+      throw new ServiceError("SUPPLIER_CREDIT_SHORT", 409, "No tienes tanto a favor con este proveedor", {
+        creditCents: "No tienes tanto a favor con este proveedor",
+      })
     // Una compra cerrada ya no espera lo que falta: vale lo que llegó.
     const worth = isClosedPurchase(before.status) ? before.receivedCents : before.orderedCents
     if (creditCents > Math.max(0, worth - before.paidCents))
-      throw conflict("SUPPLIER_CREDIT_TOO_MUCH", "Lo que usas a favor no puede pasar de lo que falta pagar de la orden")
+      throw new ServiceError(
+        "SUPPLIER_CREDIT_TOO_MUCH",
+        409,
+        "Lo que usas a favor no puede pasar de lo que falta pagar de la orden",
+        { creditCents: "Lo que usas a favor no puede pasar de lo que falta pagar de la orden" },
+      )
   }
   const label = purchaseOrderLabel(before.orderNumber)
   // Sin nada recibido por pagar y con algo aún por llegar, lo que se paga es un adelanto
@@ -1549,9 +1578,14 @@ export async function setCommissionRate(
   actorUserId: string,
   input: { professionalUserId: string; rateBps: number },
 ) {
-  await requireProfessional(tx, orgId, input.professionalUserId)
+  // La persona llega en el cuerpo: si no es de la clínica, se dice junto a ella.
+  await requireProfessional(tx, orgId, input.professionalUserId).catch((error: unknown) => {
+    if (error instanceof ServiceError && error.code === "NOT_FOUND")
+      throw new ServiceError("NOT_FOUND", 404, error.message, { professionalUserId: error.message })
+    throw error
+  })
   if (!Number.isInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10000)
-    throw validation("La tasa debe estar entre 0 y 10000 puntos básicos")
+    throw invalidField("rateBps", "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo.")
   const [existing] = await tx
     .select()
     .from(commissionRule)
@@ -2172,7 +2206,12 @@ export async function payMonthCommission(
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`commission:${orgId}:${input.professionalUserId}`}, 0))`,
   )
-  const branchRow = await requireBranch(tx, orgId, input.branchId)
+  // La sede llega en el cuerpo: si no existe, se dice junto a ella.
+  const branchRow = await requireBranch(tx, orgId, input.branchId).catch((error: unknown) => {
+    if (error instanceof ServiceError && error.code === "NOT_FOUND")
+      throw new ServiceError("NOT_FOUND", 404, error.message, { branchId: error.message })
+    throw error
+  })
   const view = await getMonthlyCommissions(tx, orgId, input)
   const fresh = view.lines.filter((line) => !line.settled)
   if (fresh.length === 0 && view.adjustments.length === 0)
@@ -2335,7 +2374,10 @@ export async function voidCommissionSettlement(
     .for("update")
   if (!current) throw notFound("Pago de comisión")
   if (current.voidedAt) throw conflict("SETTLEMENT_VOIDED", "Ese pago ya está anulado")
-  const voidReason = reason(input.reason)
+  const voidReason = input.reason?.trim() ?? ""
+  if (!voidReason) throw invalidField("reason", "Indica el motivo de la anulación.")
+  if (voidReason.length > 2000)
+    throw invalidField("reason", "Escribe el motivo en 2000 caracteres como máximo.")
   const [row] = await tx
     .update(commissionSettlement)
     .set({

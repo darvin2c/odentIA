@@ -14,7 +14,7 @@ import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
-import { runService } from "./helpers.js"
+import { runService, validationError } from "./helpers.js"
 
 export interface TeamTwoFactorDeps {
   ownerDb: Db
@@ -23,7 +23,13 @@ export interface TeamTwoFactorDeps {
 }
 
 const requiredInput = z.object({ required: z.boolean(), notify: z.boolean().optional() })
-const resetInput = z.object({ reason: z.string().trim().min(3, "Escribe el motivo").max(500) })
+const resetInput = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(3, "Escribe el motivo con al menos 3 caracteres.")
+    .max(500, "Escribe el motivo en 500 caracteres como mucho."),
+})
 
 /** Mi perfil abre el alta de la verificación con este parámetro. */
 export const TWO_FACTOR_PROFILE_PATH = "/profile?edit=two-factor"
@@ -46,7 +52,7 @@ export function createTeamTwoFactorRoute(deps: TeamTwoFactorDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo Administración cambia cómo entra el equipo"), 403)
     const parsed = requiredInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       const result = await setTeamTwoFactorRequired(deps.ownerDb, { orgId, actorUserId: userId, required: parsed.data.required })
       const notified = parsed.data.notify ? await notifyMissing(deps, orgId, result.missing) : 0
@@ -58,7 +64,7 @@ export function createTeamTwoFactorRoute(deps: TeamTwoFactorDeps) {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) return c.json(errorBody(c, "FORBIDDEN", "Solo Administración restablece la verificación"), 403)
     const parsed = resetInput.safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       await resetMemberTwoFactor(deps.ownerDb, {
         orgId,

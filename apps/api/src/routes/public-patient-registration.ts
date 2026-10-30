@@ -1,7 +1,7 @@
 import { registrationAnswersSchema } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { organization } from "@odentia/db/schema/auth"
-import { chatPrivacyNotice, findOrgLocale, getPublicPatientRegistration, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
+import { chatPrivacyNotice, findOrgLocale, getPublicPatientRegistration, issueFields, RegistrationHeld, registerPatient, ServiceError } from "@odentia/services"
 import { getConnInfo } from "@hono/node-server/conninfo"
 import { eq } from "drizzle-orm"
 import { type Context, Hono, type MiddlewareHandler } from "hono"
@@ -83,7 +83,8 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
   app.post("/:slug", async c => {
     const body = await c.req.json().catch(() => null)
     const parsed = submissionSchema.safeParse(body)
-    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Revisa los datos del formulario"), 400)
+    // El formato de lo escrito sí se dice por campo (no revela a nadie).
+    if (!parsed.success) return c.json(errorBody(c, "VALIDATION", "Revisa los datos del formulario", issueFields(parsed.error.issues)), 400)
     const org = c.get("registrationOrganization")
     try {
       const { token, entryPoint, ...input } = parsed.data
@@ -98,7 +99,7 @@ export function createPublicPatientRegistrationRoute(deps: { db: Db; remoteAddre
       }
       if (error instanceof ServiceError) {
         if (error.status === 404) return unavailable(c)
-        return c.json(errorBody(c, error.code, error.message), error.status)
+        return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
       }
       throw error
     }

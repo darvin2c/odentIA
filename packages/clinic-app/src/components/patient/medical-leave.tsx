@@ -1,20 +1,18 @@
 import { MEDICAL_LEAVE_MAX_DAYS, medicalLeaveWords } from "@odentia/clinical"
+import { Button, buttonVariants, FieldDescription, Input, toast } from "@odentia/ui"
 import {
-  Button,
-  buttonVariants,
-  Checkbox,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { DatePickerButton, FormDrawer, regionToday } from "@odentia/ui-patterns"
+  DatePickerButton,
+  FormDrawer,
+  regionToday,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useState } from "react"
-import { formatDate, mutationMessage } from "../../lib/clinical-journey"
+import { useState } from "react"
+import { z } from "zod"
+import { formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import {
   cancelMedicalLeaveApi,
@@ -26,6 +24,43 @@ import { HealthDocumentSendDrawer } from "./health-document-send"
 
 /** Las claves que se refrescan cuando cambia un descanso médico. */
 export const medicalLeaveKeys = (patientId: string) => [["medical-leaves", patientId]] as const
+
+/** Los días escritos, si son un número válido de días de descanso. */
+function leaveDays(value: string): number | null {
+  const count = Number(value)
+  return value !== "" && Number.isInteger(count) && count >= 1 && count <= MEDICAL_LEAVE_MAX_DAYS
+    ? count
+    : null
+}
+
+/** Los mismos límites que `POST /medical-leaves`. */
+const leaveSchema = z
+  .object({
+    startsOn: z.string().min(1, "Elige el primer día del descanso."),
+    days: z
+      .string()
+      .refine((value) => leaveDays(value) !== null, `Escribe los días de descanso: de 1 a ${MEDICAL_LEAVE_MAX_DAYS}.`),
+    notes: z.string().max(2000, "Las indicaciones tienen como mucho 2000 caracteres."),
+    showDiagnosis: z.boolean(),
+    diagnosisCode: z.string(),
+    diagnosisSystem: z.string().nullable(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.showDiagnosis && !value.diagnosisCode)
+      ctx.addIssue({
+        code: "custom",
+        path: ["diagnosisCode"],
+        message: "Elige el diagnóstico o desmarca que figure.",
+      })
+  })
+
+const reasonSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Indica el motivo de la anulación.")
+    .max(2000, "El motivo tiene como mucho 2000 caracteres."),
+})
 
 /**
  * Emitir un descanso médico (issue 229, decisión 8): desde qué día y cuántos,
@@ -55,119 +90,122 @@ export function NewMedicalLeaveDrawer({
   onClose: () => void
   onCreated: (leave: MedicalLeave) => void
 }) {
-  const uid = useId()
   const queryClient = useQueryClient()
-  const [startsOn, setStartsOn] = useState(() => defaultStartsOn ?? regionToday())
-  const [days, setDays] = useState(defaultDays ? String(defaultDays) : "")
-  const [notes, setNotes] = useState("")
-  const [showDiagnosis, setShowDiagnosis] = useState(false)
-  const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
-  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(
-    defaultDiagnosisSystem ?? null,
-  )
-  const [error, setError] = useState<string | null>(null)
-  const count = Number(days)
-  const validDays = Number.isInteger(count) && count >= 1 && count <= MEDICAL_LEAVE_MAX_DAYS
   const create = useMutation({
-    mutationFn: () =>
-      createMedicalLeaveApi(patientId, {
+    mutationFn: (body: Parameters<typeof createMedicalLeaveApi>[1]) =>
+      createMedicalLeaveApi(patientId, body),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      startsOn: defaultStartsOn ?? regionToday(),
+      days: defaultDays ? String(defaultDays) : "",
+      notes: "",
+      showDiagnosis: false,
+      diagnosisCode: defaultDiagnosisCode ?? "",
+      diagnosisSystem: defaultDiagnosisSystem ?? (null as string | null),
+    },
+    validators: { onSubmit: leaveSchema },
+    onSubmit: async ({ value }) => {
+      const withDiagnosis = value.showDiagnosis && value.diagnosisCode !== ""
+      const result = await create.mutateAsync({
         encounterId: encounterId ?? null,
-        startsOn,
-        days: count,
-        showDiagnosis,
-        diagnosisCode: showDiagnosis && diagnosisCode ? diagnosisCode : null,
-        diagnosisSystem: showDiagnosis && diagnosisCode ? diagnosisSystem : null,
-        notes: notes.trim() || null,
-      }),
-    onSuccess: (result) => {
+        startsOn: value.startsOn,
+        days: Number(value.days),
+        showDiagnosis: value.showDiagnosis,
+        diagnosisCode: withDiagnosis ? value.diagnosisCode : null,
+        diagnosisSystem: withDiagnosis ? value.diagnosisSystem : null,
+        notes: value.notes.trim() || null,
+      })
       toast.success("Descanso médico emitido.")
       for (const queryKey of medicalLeaveKeys(patientId))
         void queryClient.invalidateQueries({ queryKey })
       onCreated(result.data)
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const surface = useFormSurface(form)
+  const startsOn = useStore(form.store, (state) => state.values.startsOn)
+  const count = useStore(form.store, (state) => leaveDays(state.values.days))
+  const showDiagnosis = useStore(form.store, (state) => state.values.showDiagnosis)
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title="Emitir descanso médico"
       description="Queda firmado con tu perfil profesional. No se corrige: se anula con motivo."
-      error={open ? error : null}
-      isSubmitting={create.isPending}
       submitLabel="Emitir descanso médico"
       onClose={() => {
-        if (!create.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!validDays) {
-          setError(`Escribe los días de descanso: de 1 a ${MEDICAL_LEAVE_MAX_DAYS}.`)
-          return
-        }
-        if (showDiagnosis && !diagnosisCode) {
-          setError("Elige el diagnóstico o desmarca que figure.")
-          return
-        }
-        setError(null)
-        create.mutate()
+        if (!surface.isSubmitting) onClose()
       }}
     >
       <div className="flex flex-col gap-4">
         <div className="flex flex-wrap gap-4">
-          <Field className="w-auto">
-            <FieldLabel htmlFor={`${uid}-leave-start`}>Desde</FieldLabel>
-            <DatePickerButton
-              id={`${uid}-leave-start`}
-              className="w-56"
-              value={startsOn}
-              onChange={setStartsOn}
-            />
-          </Field>
-          <Field className="w-auto">
-            <FieldLabel htmlFor={`${uid}-leave-days`}>Días</FieldLabel>
-            <Input
-              id={`${uid}-leave-days`}
-              className="w-24"
-              inputMode="numeric"
-              maxLength={3}
-              value={days}
-              onChange={(event) => setDays(event.target.value.replace(/\D/g, ""))}
-            />
-          </Field>
+          <form.AppField name="startsOn">
+            {(field) => (
+              <field.Control label="Desde" className="w-auto">
+                {(control) => (
+                  <DatePickerButton
+                    {...control.props}
+                    className="w-56"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="days">
+            {(field) => (
+              <field.Control label="Días" className="w-auto">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    className="w-24"
+                    inputMode="numeric"
+                    maxLength={3}
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value.replace(/\D/g, ""))}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         </div>
-        {validDays && startsOn ? (
+        {count !== null && startsOn ? (
           <p className="text-sm text-muted-foreground">{medicalLeaveWords(startsOn, count)}.</p>
         ) : null}
-        <Field>
-          <FieldLabel htmlFor={`${uid}-leave-notes`}>Indicaciones (opcional)</FieldLabel>
-          <Textarea
-            id={`${uid}-leave-notes`}
-            maxLength={2000}
-            placeholder="Por ejemplo, reposo relativo, sin esfuerzo físico"
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        </Field>
-        <Field orientation="horizontal">
-          <Checkbox
-            id={`${uid}-leave-dx`}
-            checked={showDiagnosis}
-            onCheckedChange={(checked: boolean) => setShowDiagnosis(checked === true)}
-          />
-          <FieldLabel htmlFor={`${uid}-leave-dx`}>
-            La persona autoriza que el diagnóstico figure
-          </FieldLabel>
-        </Field>
+        <form.AppField name="notes">
+          {(field) => (
+            <field.TextareaField
+              label="Indicaciones (opcional)"
+              maxLength={2000}
+              placeholder="Por ejemplo, reposo relativo, sin esfuerzo físico"
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="showDiagnosis">
+          {(field) => <field.CheckboxField label="La persona autoriza que el diagnóstico figure" />}
+        </form.AppField>
         {showDiagnosis ? (
-          <DiagnosisSearch
-            label="Diagnóstico"
-            value={diagnosisCode}
-            system={diagnosisSystem}
-            onChange={(code, _description, system) => {
-              setDiagnosisCode(code)
-              setDiagnosisSystem(system)
-            }}
-          />
+          <form.AppField name="diagnosisCode">
+            {(field) => (
+              <field.Control label="Diagnóstico">
+                {(control) => (
+                  <DiagnosisSearch
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    system={form.getFieldValue("diagnosisSystem")}
+                    onChange={(code, _description, system) => {
+                      field.handleChange(code)
+                      form.setFieldValue("diagnosisSystem", system)
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : (
           <FieldDescription>
             Sin su autorización, el diagnóstico no va en la constancia ni se guarda en ella.
@@ -186,24 +224,25 @@ export function MedicalLeaveEntry({
   patientId: string
   leave: MedicalLeave
 }) {
-  const uid = useId()
   const canWrite = usePermission("clinical.write")
   const queryClient = useQueryClient()
   const [cancelling, setCancelling] = useState(false)
   const [sending, setSending] = useState(false)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const cancel = useMutation({
-    mutationFn: () => cancelMedicalLeaveApi(patientId, leave.id, { reason: reason.trim() }),
-    onSuccess: () => {
+    mutationFn: (reason: string) => cancelMedicalLeaveApi(patientId, leave.id, { reason }),
+  })
+  const cancelForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value }) => {
+      await cancel.mutateAsync(value.reason.trim())
       setCancelling(false)
-      setReason("")
-      setError(null)
+      cancelForm.reset()
       for (const queryKey of medicalLeaveKeys(patientId))
         void queryClient.invalidateQueries({ queryKey })
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const cancelSurface = useFormSurface(cancelForm)
   const issued = leave.status === "emitido"
   return (
     <div className="flex flex-col gap-3">
@@ -223,11 +262,6 @@ export function MedicalLeaveEntry({
           {leave.signerRegistration ? ` · ${leave.signerRegistration}` : ""}
         </p>
       ) : null}
-      {error && !cancelling ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
       {issued ? (
         <div className="flex flex-wrap gap-2">
           <Link
@@ -244,15 +278,7 @@ export function MedicalLeaveEntry({
             </Button>
           ) : null}
           {canWrite ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setError(null)
-                setCancelling(true)
-              }}
-            >
+            <Button type="button" size="sm" variant="outline" onClick={() => setCancelling(true)}>
               Anular descanso médico
             </Button>
           ) : null}
@@ -268,34 +294,19 @@ export function MedicalLeaveEntry({
         />
       ) : null}
       <FormDrawer
+        {...cancelSurface}
         dock={false}
         open={cancelling}
         title="Anular descanso médico"
         description="La constancia conserva su contenido original y el motivo de anulación."
-        error={cancelling ? error : null}
-        isSubmitting={cancel.isPending}
         submitLabel="Anular descanso médico"
         onClose={() => {
-          if (!cancel.isPending) setCancelling(false)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo de la anulación.")
-            return
-          }
-          cancel.mutate()
+          if (!cancelSurface.isSubmitting) setCancelling(false)
         }}
       >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-leave-cancel`}>Motivo de anulación</FieldLabel>
-          <Textarea
-            id={`${uid}-leave-cancel`}
-            maxLength={2000}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
+        <cancelForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo de anulación" maxLength={2000} />}
+        </cancelForm.AppField>
       </FormDrawer>
     </div>
   )

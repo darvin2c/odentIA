@@ -23,6 +23,7 @@ import {
   MOBILE_NAV_TRIGGER_CLASS,
   PageHeaderMenu,
   PersonAvatar,
+  submitErrorMessage,
   useHeaderUtilities,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -30,7 +31,7 @@ import { Link } from "@tanstack/react-router"
 import { MessageCircle, MoreHorizontal } from "lucide-react"
 import { useState } from "react"
 import { allergyName } from "../../lib/allergies"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { fetchResponsibilities } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { label } from "../../lib/glossary"
@@ -193,13 +194,7 @@ export function PersonHeader({
       void queryClient.invalidateQueries({ queryKey: ["people"] })
       if (patient) void queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
     },
-    onError: (mutationError: unknown) => {
-      setArchiveError(
-        mutationError instanceof ApiError
-          ? (mutationError.shape.message ?? "No se pudo actualizar.")
-          : "No se pudo actualizar.",
-      )
-    },
+    onError: (mutationError: unknown) => setArchiveError(submitErrorMessage(mutationError)),
   })
   const responsibilities = useQuery({
     queryKey: ["responsibilities", patient?.id ?? "none"],
@@ -447,11 +442,11 @@ export function PersonHeader({
           person.archived ? `Recuperar a ${person.displayName}` : `Archivar a ${person.displayName}`
         }
         description={
-          archiveError ??
-          (person.archived
+          person.archived
             ? "Vuelve entera: su página, su ficha y sus conversaciones quedan como estaban. Los enlaces de registro que se anularon al archivar no vuelven."
-            : "Se archiva entera: su ficha y sus conversaciones se conservan, pero deja de aparecer en las listas y no admite conversaciones, vínculos ni enlaces de registro nuevos. Se recupera desde esta misma página.")
+            : "Se archiva entera: su ficha y sus conversaciones se conservan, pero deja de aparecer en las listas y no admite conversaciones, vínculos ni enlaces de registro nuevos. Se recupera desde esta misma página."
         }
+        error={archiveError}
         confirmLabel={person.archived ? "Recuperar" : "Archivar"}
         variant={person.archived ? "default" : "destructive"}
         pending={archiveMutation.isPending}

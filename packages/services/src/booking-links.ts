@@ -22,7 +22,7 @@ import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { consentStatusOf } from "./message-permission.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { personalLinkToken } from "./personal-link-token.js"
-import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
+import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { createPatientRegistrationLink, getPatientRegistrationConfig, hasOwnRecord, registerPatient } from "./patient-registration.js"
 import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
@@ -1101,7 +1101,8 @@ export async function reserveBookingLink(
   if (!forTreatment) {
     if (link.row.booking && link.row.usedAt) throw new ServiceError("BOOKING_LINK_USED", 409, "Con este enlace ya se reservó una cita")
     if (!link.canBook) throw linkExpired()
-    if (link.row.branchId && link.row.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
+    if (link.row.branchId && link.row.branchId !== input.branchId)
+      throw invalidField("branchId", "Este enlace es para otra sede: elige esa sede.")
   }
   const patientId = link.patientId
   if (!patientId) throw new ServiceError("BOOKING_NEEDS_REGISTRATION", 409, "Antes de reservar necesitamos tus datos")

@@ -6,6 +6,7 @@
  * atención, «Plan y controles» e Inicio: una sola operación.
  */
 import { Button, toast } from "@odentia/ui"
+import { submitErrorMessage } from "@odentia/ui-patterns"
 import type { ComponentProps } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
@@ -16,7 +17,6 @@ import {
   sendBudgetApi,
 } from "../../../lib/budgets"
 import { usePermission } from "../../../lib/crm"
-import { mutationMessage } from "./budget-parts"
 
 /** Lo que dice el aviso cuando sale: «Enviado a Lucía por WhatsApp». */
 function sentText(result: SendBudgetResult): string {
@@ -78,7 +78,7 @@ export function BudgetSendButton({
       )
       onSent?.(result.data)
     },
-    onError: (err) => setError(mutationMessage(err)),
+    onError: (err) => setError(submitErrorMessage(err)),
   })
   if (!canSend) return null
   const data = preview.data?.data
@@ -111,7 +111,7 @@ export function BudgetSendButton({
       ) : null}
       {preview.isError ? (
         <span role="alert" className="text-xs text-destructive">
-          {mutationMessage(preview.error)}
+          {submitErrorMessage(preview.error)}
         </span>
       ) : null}
       {error ? (

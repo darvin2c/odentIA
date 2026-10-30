@@ -4,6 +4,9 @@ import {
   LoadingState,
   scheduleToneAt,
   SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
   useScheduleNow,
   zonedDateOf,
 } from "@odentia/ui-patterns"
@@ -17,7 +20,6 @@ import {
 import { apiFetch } from "../../lib/api"
 import {
   formatDateTime,
-  mutationMessage,
   type SchedulableControl,
   type ScheduleFollowUpBody,
   scheduleFollowUpApi,
@@ -26,7 +28,7 @@ import {
 import { usePermission } from "../../lib/crm"
 import type { ServiceCatalogItem } from "../../lib/services"
 import { rangeSaid, shortName, whenSaid } from "../agenda/shared"
-import { useWhen, WhenFields } from "../agenda/when"
+import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "../agenda/when"
 import { ServiceSelect } from "../service-select"
 
 /** Hasta cuándo se miran las citas en pie del paciente para ofrecer «Usar esa cita». */
@@ -118,9 +120,10 @@ function ScheduleForm({
   const timeZone = resources.timeZone
   const now = useScheduleNow()
   const today = zonedDateOf(now, timeZone)
+  // El servicio elegido, para la duración del bloque; el dato del formulario es su id.
   const [service, setService] = useState<ServiceCatalogItem | null>(null)
-  const serviceId = service?.id ?? ""
-  const [error, setError] = useState<string | null>(null)
+  // «Usar esa cita» es un botón por cita, no el formulario: su rechazo va junto a esa cita.
+  const [useError, setUseError] = useState<{ appointmentId: string; message: string } | null>(null)
   const toneOf = useMemo(() => {
     const index = new Map(resources.professionals.map((item, at) => [item.id, at]))
     return (id: string) => scheduleToneAt(index.get(id) ?? 0)
@@ -135,7 +138,7 @@ function ScheduleForm({
     // Se abre en el día en que toca el control, si aún no pasó.
     date: zonedDateOf(control.dueAt, timeZone),
     // Con servicio, la agenda ofrece solo a quien lo atiende (ADR 0039).
-    serviceId: serviceId || undefined,
+    serviceId: service?.id || undefined,
   })
   // Si ya tiene citas en pie, se ofrece usar una en vez de reservar otra.
   const [range] = useState(() => ({
@@ -177,41 +180,50 @@ function ScheduleForm({
       await invalidateAppointmentQueries(client)
       onClose()
     },
-    onError: (cause) => {
-      setError(mutationMessage(cause))
+    onError: () => {
       // Si alguien tomó el hueco, lo libre se vuelve a pedir.
       when.refetch()
       void client.invalidateQueries({ queryKey: ["follow-up-appointments", patientId] })
     },
   })
+  const form = useAppForm({
+    // El «cuándo» lo valida `WhenFields` con lo que ve en las horas.
+    defaultValues: { serviceId: "", when: EMPTY_WHEN },
+    onSubmit: async () => {
+      const target = when.shown
+      if (!target) return
+      setUseError(null)
+      // Sin unidad dental: la asigna la agenda, como en Nueva cita.
+      await schedule.mutateAsync({
+        appointment: {
+          branchId: resources.branchId,
+          professionalUserId: target.columnId,
+          serviceId: service?.id || undefined,
+          startsAt: target.start,
+          endsAt: target.end,
+        },
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    // La cita va dentro de `appointment` en el cuerpo: cada rechazo de la agenda, a su sitio del «cuándo».
+    fieldMap: (key) => {
+      const own = key.replace(/^appointment\./, "")
+      return own === "serviceId" ? "serviceId" : WHEN_FIELD_MAP[own]
+    },
+  })
   const target = when.shown
   return (
     <FormDrawer
+      {...surface}
       open
       title="Programar control"
       description={`${control.title} · ${resources.branchName}`}
-      error={error}
       isSubmitting={schedule.isPending}
       isDirty
-      submitDisabled={!target || when.state !== "free"}
       submitLabel={target ? `Reservar ${whenSaid(target.start, timeZone, today)}` : "Reservar cita"}
       onClose={() => {
         if (!schedule.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setError(null)
-        if (!target) return
-        // Sin unidad dental: la asigna la agenda, como en Nueva cita.
-        schedule.mutate({
-          appointment: {
-            branchId: resources.branchId,
-            professionalUserId: target.columnId,
-            serviceId: serviceId || undefined,
-            startsAt: target.start,
-            endsAt: target.end,
-          },
-        })
       }}
     >
       <div className="grid min-w-0 gap-4">
@@ -246,25 +258,48 @@ function ScheduleForm({
                 schedule.variables.appointmentId === item.id
               }
               onClick={() => {
-                setError(null)
-                schedule.mutate({ appointmentId: item.id })
+                setUseError(null)
+                schedule.mutate(
+                  { appointmentId: item.id },
+                  {
+                    onError: (cause) =>
+                      setUseError({ appointmentId: item.id, message: submitErrorMessage(cause) }),
+                  },
+                )
               }}
             >
               Usar esa cita
             </SubmitButton>
+            {useError?.appointmentId === item.id ? (
+              <p role="alert" className="w-full text-sm text-destructive">
+                {useError.message}
+              </p>
+            ) : null}
           </div>
         ))}
-        <ServiceSelect
-          id="control-servicio"
-          label="Servicio (opcional)"
-          value={serviceId}
-          onChange={(next) => {
-            setService(next)
-            // Con servicio, el bloque toma lo que dura el servicio.
-            when.resize(next?.durationMin ?? resources.defaultDurationMin)
-          }}
-        />
-        <WhenFields when={when} />
+        <form.AppField name="serviceId">
+          {(field) => (
+            <field.Control id="control-servicio" label="Servicio (opcional)">
+              {(fieldControl) => (
+                <ServiceSelect
+                  id={fieldControl.id}
+                  invalid={fieldControl.invalid}
+                  aria-describedby={fieldControl.describedBy}
+                  onBlur={fieldControl.onBlur}
+                  placeholder="Buscar servicio (opcional)…"
+                  value={field.state.value}
+                  onChange={(next) => {
+                    setService(next)
+                    field.handleChange(next?.id ?? "")
+                    // Con servicio, el bloque toma lo que dura el servicio.
+                    when.resize(next?.durationMin ?? resources.defaultDurationMin)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <WhenFields form={form} fields="when" when={when} />
         <p className="text-xs text-muted-foreground">
           Reservar no cierra el control: se cierra cuando se atiende a la persona.
         </p>

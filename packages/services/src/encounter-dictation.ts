@@ -39,7 +39,7 @@ import { listAvailableSlots, zonedTimeToUtc } from "./availability.js"
 import { findDiagnosisCode, orgDiagnosisSystem } from "./diagnosis-codes.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "./encounter-diagnoses.js"
 import { addEncounterProcedure, assertOpenDraft, lockEncounter, updateEncounterDraft, type UpdateEncounterDraftPatch, voidEncounterProcedure } from "./encounters.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { cancelFollowUp, createFollowUp } from "./follow-ups.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { findOrgLocale, formatOrgMoney, type OrgLocale, orgProduct } from "./locale.js"
@@ -733,7 +733,7 @@ async function revise(
   if (kind === "procedimiento") {
     if (typeof patch["serviceId"] === "string") {
       const chosen = services.find((service) => service.id === patch["serviceId"])
-      if (!chosen) throw validation("Esa prestación no está activa en tus servicios")
+      if (!chosen) throw invalidField("serviceId", "Esa prestación no está activa en tus servicios")
       payload = { ...payload, service: chosen.name }
     } else if (typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
       for (const key of [...MAIN_SERVICE_KEYS.filter((key) => key !== "service"), "planItemId", "acceptOnDo", "source"]) delete payload[key]
@@ -743,7 +743,7 @@ async function revise(
   if (kind === "plan" && typeof patch["serviceId"] === "string") {
     // Elegir la prestación a mano resuelve lo que el asistente no pudo ubicar.
     const chosen = services.find((service) => service.id === patch["serviceId"])
-    if (!chosen) throw validation("Esa prestación no está activa en tus servicios")
+    if (!chosen) throw invalidField("serviceId", "Esa prestación no está activa en tus servicios")
     const { candidates: _candidates, ...rest } = payload
     payload = { ...rest, service: chosen.name, serviceId: chosen.id, serviceName: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency, serviceScope: chosen.scope }
   } else if (kind === "plan" && typeof patch["service"] === "string" && patch["service"] !== current["service"]) {
@@ -1666,6 +1666,15 @@ export async function updateDictationSuggestion(
   const row = await lockSuggestion(tx, orgId, patientId, encounterId, id)
   const scope = await dictationScope(tx, orgId)
   const { data, meta } = splitMeta(row.payload)
+  // Lo corregido a mano que no pasa el esquema de la operación se dice en su campo, no como «No pude ubicar…».
+  const checked = operationAgentSchema(DICTATION_OPERATION[row.kind]).safeParse(
+    Object.fromEntries(Object.entries({ ...data, ...patch }).filter(([, value]) => value !== null && value !== "")),
+  )
+  if (!checked.success) {
+    const edited = Object.entries(issueFields(checked.error.issues)).filter(([key]) => (key.split(/[.[]/)[0] ?? "") in patch)
+    const error = fieldsError(Object.fromEntries(edited))
+    if (error) throw error
+  }
   const revised = await revise(tx, row.kind, data, patch, scope)
   if (!revised) throw validation("La sugerencia quedó vacía; descártala si no aplica")
   const ready = await withPatient(tx, orgId, patientId, encounterId, row.kind, revised, await patientChecks(tx, orgId, patientId, encounterId, row.id), scope)

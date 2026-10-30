@@ -1,9 +1,18 @@
-import { cn, FieldLabel, RadioGroup, RadioGroupItem, Textarea, toast } from "@odentia/ui"
-import { ConfirmDialog, SubmitButton } from "@odentia/ui-patterns"
+import { cn, FieldLabel, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useState } from "react"
+import { z } from "zod"
 import { useReceptionName } from "../lib/agent-names"
-import { ApiError, apiFetch } from "../lib/api"
+import { apiFetch } from "../lib/api"
 import {
   BLOCK_REASON_OPTIONS,
   blockedNoticeWords,
@@ -17,10 +26,6 @@ import type { ContactScreenView } from "../lib/crm"
  * conversación, el diálogo de «Bloquear a esta persona…» y sus acciones. El
  * servidor decide; la pantalla dice lo que pasó y refresca lo que lo muestra.
  */
-
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError && error.shape.message ? error.shape.message : fallback
-}
 
 function useRefreshScreens() {
   const queryClient = useQueryClient()
@@ -66,7 +71,7 @@ export function useContactScreenActions() {
       )
       refresh()
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo sacar de Spam. Inténtalo de nuevo.")),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const spam = useMutation({
     retry: false,
@@ -79,7 +84,7 @@ export function useContactScreenActions() {
       })
       refresh()
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo mandar a Spam. Inténtalo de nuevo.")),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const unblock = useMutation({
     retry: false,
@@ -88,20 +93,24 @@ export function useContactScreenActions() {
       toast.success(`${target.contactName} ya no está bloqueado. Puede volver a escribir.`)
       refresh()
     },
-    onError: (error) => toast.error(errorText(error, "No se pudo desbloquear. Inténtalo de nuevo.")),
   })
   return { spam, notSpam, unblock }
 }
 
-/** Confirmación de «Desbloquear» (tablero 5b): dice qué cambia y que queda anotado. */
+/**
+ * Confirmación de «Desbloquear» (tablero 5b): dice qué cambia y que queda
+ * anotado. Si falla, sigue abierta y dice por qué (`error`, el de la mutación).
+ */
 export function UnblockDialog({
   target,
   pending,
+  error,
   onClose,
   onConfirm,
 }: {
   target: Target | null
   pending: boolean
+  error: unknown
   onClose: () => void
   onConfirm: () => void
 }) {
@@ -114,6 +123,7 @@ export function UnblockDialog({
       confirmLabel="Desbloquear"
       variant="default"
       pending={pending}
+      error={error ? submitErrorMessage(error) : null}
       onClose={onClose}
       onConfirm={onConfirm}
     />
@@ -193,9 +203,13 @@ export function ContactScreenBanner({
         <UnblockDialog
           target={unblockTarget}
           pending={actions.unblock.isPending}
-          onClose={() => setUnblockTarget(null)}
+          error={actions.unblock.error}
+          onClose={() => {
+            actions.unblock.reset()
+            setUnblockTarget(null)
+          }}
           onConfirm={() => {
-            if (unblockTarget) actions.unblock.mutate(unblockTarget, { onSettled: () => setUnblockTarget(null) })
+            if (unblockTarget) actions.unblock.mutate(unblockTarget, { onSuccess: () => setUnblockTarget(null) })
           }}
         />
       </>
@@ -221,6 +235,12 @@ export function ContactScreenBanner({
   )
 }
 
+/** Lo mismo que pide `POST …/block`: el motivo y lo que pasó, los dos obligatorios. */
+const blockSchema = z.object({
+  reason: z.string().refine((value) => BLOCK_REASON_OPTIONS.some((option) => option.value === value), "Elige el motivo del bloqueo."),
+  note: z.string().trim().min(1, "Escribe qué pasó.").max(500, "Escribe como mucho 500 caracteres."),
+})
+
 /**
  * «Bloquear a esta persona…» (tablero 5b): advertencia clara, motivo y qué
  * pasó, los dos obligatorios. Es un diálogo de confirmación como el de anular
@@ -235,16 +255,6 @@ export function BlockPersonDialog({
 }) {
   const refresh = useRefreshScreens()
   const receptionName = useReceptionName()
-  const reasonId = useId()
-  const noteId = useId()
-  const [reason, setReason] = useState("")
-  const [note, setNote] = useState("")
-  useEffect(() => {
-    if (target) {
-      setReason("")
-      setNote("")
-    }
-  }, [target])
   const block = useMutation({
     retry: false,
     mutationFn: (input: Target & { reason: string; note: string }) =>
@@ -258,7 +268,19 @@ export function BlockPersonDialog({
       onClose()
     },
   })
-  const error = block.error ? errorText(block.error, "No se pudo bloquear. Inténtalo de nuevo.") : null
+  const form = useAppForm({
+    defaultValues: { reason: "", note: "" },
+    validators: { onSubmit: blockSchema },
+    onSubmit: async ({ value }) => {
+      if (target) await block.mutateAsync({ ...target, reason: value.reason, note: value.note.trim() })
+    },
+  })
+  const error = useFormSubmitError(form)
+  const submitting = useStore(form.store, (state) => state.isSubmitting)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se reinicia una vez por persona
+  useEffect(() => {
+    if (target) form.reset({ reason: "", note: "" })
+  }, [target])
   return (
     <ConfirmDialog
       open={target !== null}
@@ -266,54 +288,58 @@ export function BlockPersonDialog({
       description={`No podrá escribirle a la clínica por WhatsApp, y ${receptionName} no le responderá en ningún canal. Nadie del equipo podrá escribirle hasta que alguien lo desbloquee. Sus mensajes y su ficha se conservan: no se borra nada.`}
       confirmLabel="Bloquear"
       variant="destructive"
-      pending={block.isPending}
-      confirmDisabled={!reason || !note.trim()}
+      pending={submitting}
+      error={error}
       onClose={() => {
         block.reset()
         onClose()
       }}
       onConfirm={() => {
-        if (target) block.mutate({ ...target, reason, note: note.trim() })
+        void submitForm(form)
       }}
     >
       <div className="grid gap-3 text-left">
-        <div className="grid gap-2">
-          <span id={reasonId} className="text-sm font-medium">
-            Motivo
-          </span>
-          <RadioGroup aria-labelledby={reasonId} value={reason} onValueChange={(next) => setReason(String(next))}>
-            {BLOCK_REASON_OPTIONS.map((option) => (
-              <FieldLabel
-                key={option.value}
-                className={cn(
-                  "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
-                  reason === option.value && "border-destructive bg-danger-soft",
-                )}
-              >
-                <RadioGroupItem value={option.value} />
-                {option.label}
-              </FieldLabel>
-            ))}
-          </RadioGroup>
-        </div>
-        <div className="grid gap-1.5">
-          <label htmlFor={noteId} className="text-sm font-medium">
-            Qué pasó (obligatorio)
-          </label>
-          <Textarea
-            id={noteId}
-            maxLength={500}
-            rows={3}
-            placeholder="Por ejemplo: amenazó a recepción después de que le cobramos la consulta."
-            value={note}
-            onChange={(event) => setNote(event.target.value)}
-          />
-        </div>
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
+        <form.AppField name="reason">
+          {(field) => (
+            <field.Group legend="Motivo">
+              {(control) => (
+                <RadioGroup
+                  name={control.name}
+                  value={field.state.value}
+                  aria-invalid={control.invalid || undefined}
+                  aria-describedby={control.describedBy}
+                  onValueChange={(next) => {
+                    field.handleChange(next == null ? "" : String(next))
+                    field.handleBlur()
+                  }}
+                >
+                  {BLOCK_REASON_OPTIONS.map((option) => (
+                    <FieldLabel
+                      key={option.value}
+                      className={cn(
+                        "flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
+                        field.state.value === option.value && "border-destructive bg-danger-soft",
+                      )}
+                    >
+                      <RadioGroupItem value={option.value} aria-invalid={control.invalid || undefined} />
+                      {option.label}
+                    </FieldLabel>
+                  ))}
+                </RadioGroup>
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.AppField name="note">
+          {(field) => (
+            <field.TextareaField
+              label="Qué pasó (obligatorio)"
+              maxLength={500}
+              rows={3}
+              placeholder="Por ejemplo: amenazó a recepción después de que le cobramos la consulta."
+            />
+          )}
+        </form.AppField>
       </div>
     </ConfirmDialog>
   )

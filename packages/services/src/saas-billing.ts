@@ -32,7 +32,7 @@ import {
   storageUsageDay,
 } from "@odentia/db/schema/saas-billing"
 import { and, asc, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { sniffFileContent } from "./file-content.js"
 import { getOrgLocale, orgProduct } from "./locale.js"
 import { panelOrigin } from "./public-links.js"
@@ -68,7 +68,7 @@ function conflict(code: string, message: string): ServiceError {
 
 function currency(value: string): string {
   if (!/^[A-Z]{3}$/.test(value))
-    throw validation("La moneda debe ser un código ISO 4217 de tres letras")
+    throw invalidField("currency", "La moneda debe ser un código ISO 4217 de tres letras")
   return value
 }
 
@@ -432,14 +432,15 @@ function toPlanRow(row: typeof saasPlan.$inferSelect): SaasPlanRow {
   }
 }
 
-function micros(value: number | null | undefined, field: string): number | null {
+/** `key`: el nombre del dato en el cuerpo de la petición, para decir el error junto a su campo. */
+function micros(value: number | null | undefined, field: string, key: string): number | null {
   if (value === null || value === undefined) return null
-  if (!Number.isSafeInteger(value) || value < 0) throw validation(`${field} debe ser un importe válido`)
+  if (!Number.isSafeInteger(value) || value < 0) throw invalidField(key, `${field} debe ser un importe válido`)
   return value
 }
 
-function bps(value: number, field: string): number {
-  if (!Number.isInteger(value) || value < 0 || value > 9000) throw validation(`${field} debe estar entre 0 % y 90 %`)
+function bps(value: number, field: string, key: string): number {
+  if (!Number.isInteger(value) || value < 0 || value > 9000) throw invalidField(key, `${field} debe estar entre 0 % y 90 %`)
   return value
 }
 
@@ -447,29 +448,29 @@ function bps(value: number, field: string): number {
 function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$inferInsert> {
   const terms: Partial<typeof saasPlan.$inferInsert> = {}
   if (value.creditCents !== undefined) terms.creditCents = assertCents(value.creditCents, "El crédito", false)
-  if (value.conversationMicros !== undefined) terms.conversationMicros = micros(value.conversationMicros, "El precio de la conversación")
-  if (value.consultationMicros !== undefined) terms.consultationMicros = micros(value.consultationMicros, "El precio de la consulta")
-  if (value.recoveryMicros !== undefined) terms.recoveryMicros = micros(value.recoveryMicros, "El precio de la cita recuperada")
-  if (value.conversationInformMicros !== undefined) terms.conversationInformMicros = micros(value.conversationInformMicros, "El precio de la conversación que informa")
-  if (value.conversationAgendaMicros !== undefined) terms.conversationAgendaMicros = micros(value.conversationAgendaMicros, "El precio de la conversación cuya cita se dio")
-  if (value.consultationSimpleMicros !== undefined) terms.consultationSimpleMicros = micros(value.consultationSimpleMicros, "El precio de la consulta simple")
-  if (value.consultationStandardMicros !== undefined) terms.consultationStandardMicros = micros(value.consultationStandardMicros, "El precio de la consulta estándar")
-  if (value.argosPackMicros !== undefined) terms.argosPackMicros = micros(value.argosPackMicros, "El precio del paquete de preguntas")
-  if (value.storageGbMicros !== undefined) terms.storageGbMicros = micros(value.storageGbMicros, "El precio del GB extra")
-  if (value.argosIncludedQuestions !== undefined) terms.argosIncludedQuestions = count(value.argosIncludedQuestions, "Las preguntas incluidas", 0, 100_000)
-  if (value.argosPackQuestions !== undefined) terms.argosPackQuestions = count(value.argosPackQuestions, "Las preguntas de un paquete", 1, 10_000)
-  if (value.storageIncludedGb !== undefined) terms.storageIncludedGb = count(value.storageIncludedGb, "Los GB incluidos", 0, 100_000)
+  if (value.conversationMicros !== undefined) terms.conversationMicros = micros(value.conversationMicros, "El precio de la conversación", "conversationMicros")
+  if (value.consultationMicros !== undefined) terms.consultationMicros = micros(value.consultationMicros, "El precio de la consulta", "consultationMicros")
+  if (value.recoveryMicros !== undefined) terms.recoveryMicros = micros(value.recoveryMicros, "El precio de la cita recuperada", "recoveryMicros")
+  if (value.conversationInformMicros !== undefined) terms.conversationInformMicros = micros(value.conversationInformMicros, "El precio de la conversación que informa", "conversationInformMicros")
+  if (value.conversationAgendaMicros !== undefined) terms.conversationAgendaMicros = micros(value.conversationAgendaMicros, "El precio de la conversación cuya cita se dio", "conversationAgendaMicros")
+  if (value.consultationSimpleMicros !== undefined) terms.consultationSimpleMicros = micros(value.consultationSimpleMicros, "El precio de la consulta simple", "consultationSimpleMicros")
+  if (value.consultationStandardMicros !== undefined) terms.consultationStandardMicros = micros(value.consultationStandardMicros, "El precio de la consulta estándar", "consultationStandardMicros")
+  if (value.argosPackMicros !== undefined) terms.argosPackMicros = micros(value.argosPackMicros, "El precio del paquete de preguntas", "argosPackMicros")
+  if (value.storageGbMicros !== undefined) terms.storageGbMicros = micros(value.storageGbMicros, "El precio del GB extra", "storageGbMicros")
+  if (value.argosIncludedQuestions !== undefined) terms.argosIncludedQuestions = count(value.argosIncludedQuestions, "Las preguntas incluidas", 0, 100_000, "argosIncludedQuestions")
+  if (value.argosPackQuestions !== undefined) terms.argosPackQuestions = count(value.argosPackQuestions, "Las preguntas de un paquete", 1, 10_000, "argosPackQuestions")
+  if (value.storageIncludedGb !== undefined) terms.storageIncludedGb = count(value.storageIncludedGb, "Los GB incluidos", 0, 100_000, "storageIncludedGb")
   if (value.informMessageLimit !== undefined) {
     terms.informMessageLimit =
-      value.informMessageLimit === null ? null : count(value.informMessageLimit, "Los mensajes que cubre cada Informa", 1, 1000)
+      value.informMessageLimit === null ? null : count(value.informMessageLimit, "Los mensajes que cubre cada Informa", 1, 1000, "informMessageLimit")
   }
   if (value.fixedPriceTiers !== undefined) {
     const unknown = value.fixedPriceTiers.filter((tier) => !FIXED_PRICE_KEYS.includes(tier))
     if (unknown.length) throw validation(`No se puede fijar el precio de «${unknown[0]}»`)
     terms.fixedPriceTiers = [...new Set(value.fixedPriceTiers)]
   }
-  if (value.maxDiscountBps !== undefined) terms.maxDiscountBps = bps(value.maxDiscountBps, "El descuento máximo")
-  if (value.sellerDiscountBps !== undefined) terms.sellerDiscountBps = bps(value.sellerDiscountBps, "Lo que da el vendedor")
+  if (value.maxDiscountBps !== undefined) terms.maxDiscountBps = bps(value.maxDiscountBps, "El descuento máximo", "maxDiscountBps")
+  if (value.sellerDiscountBps !== undefined) terms.sellerDiscountBps = bps(value.sellerDiscountBps, "Lo que da el vendedor", "sellerDiscountBps")
   if (value.trialCreditCents !== undefined) terms.trialCreditCents = assertCents(value.trialCreditCents, "El saldo de prueba", false)
   if (value.trialMaxCreditCents !== undefined) terms.trialMaxCreditCents = assertCents(value.trialMaxCreditCents, "El saldo máximo de prueba", false)
   if (value.trialDays !== undefined) terms.trialDays = value.trialDays
@@ -477,12 +478,12 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
   if (value.isDefault !== undefined) terms.isDefault = value.isDefault
   if (value.showOnWeb !== undefined) terms.showOnWeb = value.showOnWeb
   if (value.seatLimit !== undefined) {
-    if (value.seatLimit !== null && (!Number.isInteger(value.seatLimit) || value.seatLimit < 1)) throw validation("Los lugares deben ser un número entero mayor que cero, o vacío")
+    if (value.seatLimit !== null && (!Number.isInteger(value.seatLimit) || value.seatLimit < 1)) throw invalidField("seatLimit", "Los lugares deben ser un número entero mayor que cero, o vacío")
     terms.seatLimit = value.seatLimit
   }
   if (value.guaranteeMonths !== undefined) {
     if (value.guaranteeMonths !== null && (!Number.isInteger(value.guaranteeMonths) || value.guaranteeMonths < 1 || value.guaranteeMonths > 120)) {
-      throw validation("Los meses garantizados deben estar entre 1 y 120, o vacío")
+      throw invalidField("guaranteeMonths", "Los meses garantizados deben estar entre 1 y 120, o vacío")
     }
     terms.guaranteeMonths = value.guaranteeMonths
   }
@@ -492,8 +493,8 @@ function actionTerms(value: Partial<SaasPlanInput>): Partial<typeof saasPlan.$in
 /** Lo que puede quedar sin descuento negociado (ADR 0085). */
 const FIXED_PRICE_KEYS = ["informa", "gestiona", "agenda", "simple", "estandar", "completa", "cita", "preguntas", "almacenamiento"]
 
-function count(value: number, field: string, min: number, max: number): number {
-  if (!Number.isInteger(value) || value < min || value > max) throw validation(`${field} deben estar entre ${min} y ${max}`)
+function count(value: number, field: string, min: number, max: number, key: string): number {
+  if (!Number.isInteger(value) || value < min || value > max) throw invalidField(key, `${field} deben estar entre ${min} y ${max}`)
   return value
 }
 
@@ -519,10 +520,10 @@ const PLAN_TERM_DEFAULTS = {
 
 /** Lo que la base no comprueba con un mensaje claro: límites coherentes y el precio mínimo. Antes de escribir. */
 function assertPlanTerms(plan: Pick<typeof saasPlan.$inferSelect, keyof typeof PLAN_TERM_DEFAULTS | "currency">): void {
-  if (plan.sellerDiscountBps > plan.maxDiscountBps) throw validation("El vendedor no puede dar más que el descuento máximo")
-  if (plan.trialDays < 1 || plan.trialDays > 365) throw validation("La prueba debe durar entre 1 y 365 días")
-  if (plan.trialMaxDays < plan.trialDays) throw validation("Los días máximos de prueba no pueden ser menos que los de siempre")
-  if (plan.trialMaxCreditCents < plan.trialCreditCents) throw validation("El saldo máximo de prueba no puede ser menor que el de siempre")
+  if (plan.sellerDiscountBps > plan.maxDiscountBps) throw invalidField("sellerDiscountBps", "El vendedor no puede dar más que el descuento máximo")
+  if (plan.trialDays < 1 || plan.trialDays > 365) throw invalidField("trialDays", "La prueba debe durar entre 1 y 365 días")
+  if (plan.trialMaxDays < plan.trialDays) throw invalidField("trialMaxDays", "Los días máximos de prueba no pueden ser menos que los de siempre")
+  if (plan.trialMaxCreditCents < plan.trialCreditCents) throw invalidField("trialMaxCreditCents", "El saldo máximo de prueba no puede ser menor que el de siempre")
   assertActionPricingFloor(plan)
 }
 
@@ -535,12 +536,23 @@ async function clearOtherDefaults(tx: Db, keepId: string | null, product: Clinic
     .where(keepId ? and(ofProduct, sql`${saasPlan.id} <> ${keepId}`) : ofProduct)
 }
 
+const PLAN_CODE_TAKEN = "Ya hay un plan con ese código"
+
+/** El código ya es de otro plan (`saas_plan_code_uidx`): 409 junto al campo, no un 500. */
+function planWriteError(error: unknown): unknown {
+  if (!isUniqueViolation(error)) return error
+  const onCodeIndex = (e: unknown): boolean =>
+    typeof e === "object" && e !== null && "constraint_name" in e && e.constraint_name === "saas_plan_code_uidx"
+  const cause = typeof error === "object" && error !== null && "cause" in error ? error.cause : undefined
+  return onCodeIndex(error) || onCodeIndex(cause) ? new ServiceError("PLAN_CODE_TAKEN", 409, PLAN_CODE_TAKEN, { code: PLAN_CODE_TAKEN }) : error
+}
+
 function planInput(value: SaasPlanInput): typeof saasPlan.$inferInsert {
   const code = value.code.trim()
   const name = value.name.trim()
-  if (!code || code.length > 80) throw validation("El código del plan debe tener 1–80 caracteres")
-  if (!name || name.length > 120) throw validation("El nombre del plan debe tener 1–120 caracteres")
-  if (value.product !== undefined && !isClinicalProduct(value.product)) throw validation("El producto del plan no es válido")
+  if (!code || code.length > 80) throw invalidField("code", "El código del plan debe tener 1–80 caracteres")
+  if (!name || name.length > 120) throw invalidField("name", "El nombre del plan debe tener 1–120 caracteres")
+  if (value.product !== undefined && !isClinicalProduct(value.product)) throw invalidField("product", "El producto del plan no es válido")
   return {
     code,
     name,
@@ -613,7 +625,13 @@ export async function createSaasPlan(
   const values = { ...planInput(input), ...actionTerms(input) }
   assertPlanTerms({ ...PLAN_TERM_DEFAULTS, ...values, currency: values.currency })
   if (input.isDefault) await clearOtherDefaults(tx, null, values.product as ClinicalProduct)
-  const [row] = await tx.insert(saasPlan).values(values).returning()
+  const [row] = await tx
+    .insert(saasPlan)
+    .values(values)
+    .returning()
+    .catch((error: unknown) => {
+      throw planWriteError(error)
+    })
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo crear el plan")
   return toPlanRow(row)
 }
@@ -627,13 +645,13 @@ export async function updateSaasPlan(
   const patch: Partial<typeof saasPlan.$inferInsert> = {}
   if (input.code !== undefined) {
     const code = input.code.trim()
-    if (!code || code.length > 80) throw validation("El código del plan debe tener 1–80 caracteres")
+    if (!code || code.length > 80) throw invalidField("code", "El código del plan debe tener 1–80 caracteres")
     patch.code = code
   }
   if (input.name !== undefined) {
     const name = input.name.trim()
     if (!name || name.length > 120)
-      throw validation("El nombre del plan debe tener 1–120 caracteres")
+      throw invalidField("name", "El nombre del plan debe tener 1–120 caracteres")
     patch.name = name
   }
   if (input.description !== undefined)
@@ -659,6 +677,9 @@ export async function updateSaasPlan(
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(saasPlan.id, planId))
     .returning()
+    .catch((error: unknown) => {
+      throw planWriteError(error)
+    })
   if (!row) throw notFound("Plan")
   void actorUserId
   return toPlanRow(row)
@@ -717,13 +738,15 @@ export async function upsertSaasPaymentMethod(
     instructions?: string | null
     isActive?: boolean
     sortOrder?: number
+    /** «Nuevo medio»: un código que ya existe no se sobrescribe, se rechaza. */
+    create?: boolean
   },
 ): Promise<SaasPaymentMethodRow> {
   const code = input.code.trim()
   const name = input.name.trim()
-  if (!code || code.length > 80) throw validation("El código del medio debe tener 1–80 caracteres")
+  if (!code || code.length > 80) throw invalidField("code", "El código del medio debe tener 1–80 caracteres")
   if (!name || name.length > 120)
-    throw validation("El nombre del medio debe tener 1–120 caracteres")
+    throw invalidField("name", "El nombre del medio debe tener 1–120 caracteres")
   const values = {
     code,
     name,
@@ -732,11 +755,14 @@ export async function upsertSaasPaymentMethod(
     sortOrder: input.sortOrder ?? 0,
     updatedAt: new Date(),
   }
-  const [row] = await tx
-    .insert(saasPaymentMethod)
-    .values(values)
-    .onConflictDoUpdate({ target: saasPaymentMethod.code, set: values })
-    .returning()
+  const insert = tx.insert(saasPaymentMethod).values(values)
+  const [row] = input.create
+    ? await insert.onConflictDoNothing({ target: saasPaymentMethod.code }).returning()
+    : await insert.onConflictDoUpdate({ target: saasPaymentMethod.code, set: values }).returning()
+  if (!row && input.create) {
+    const duplicate = "Ya hay un medio con ese código: usa otro."
+    throw new ServiceError("CONFLICT", 409, duplicate, { code: duplicate })
+  }
   if (!row) throw new ServiceError("INTERNAL", 409, "No se pudo guardar el medio de pago")
   void actorUserId
   return {
@@ -824,7 +850,8 @@ export async function getSaasSubscription(
 
 async function planByCode(tx: Db, code: string): Promise<SaasPlanRow> {
   const [row] = await tx.select().from(saasPlan).where(eq(saasPlan.code, code.trim())).limit(1)
-  if (!row || !row.isActive) throw notFound("Plan")
+  if (!row || !row.isActive)
+    throw new ServiceError("NOT_FOUND", 404, "Plan no encontrado", { planCode: "Ese plan no existe o está archivado: elige otro." })
   return toPlanRow(row)
 }
 
@@ -855,10 +882,16 @@ export async function startSaasTrial(
   let plan: SaasPlanRow | null = null
   const product = input.product ?? (await orgProduct(tx, orgId))
   if (input.planCode) {
-    plan = await planByCode(tx, input.planCode)
+    // Cada rechazo dice su dato con el nombre del alta (planCode, sellerId).
+    plan = await planByCode(tx, input.planCode).catch((error: unknown) => {
+      if (error instanceof ServiceError && error.code === "NOT_FOUND")
+        throw new ServiceError("NOT_FOUND", 404, "Plan no encontrado", { planCode: "Ese plan ya no está activo: elige otro." })
+      throw error
+    })
     // Una clínica entra con un plan de su producto (ADR 0093).
     if (plan.product !== product) {
-      throw validation(`${plan.name} es de ${productWords(plan.product).name}: esta clínica es de ${productWords(product).name}`)
+      const message = `${plan.name} es de ${productWords(plan.product).name}: esta clínica es de ${productWords(product).name}`
+      throw validation(message, { planCode: message })
     }
   }
   let sellerSnapshot: { id: string; rateBps: number; windowDays: number } | null = null
@@ -868,7 +901,8 @@ export async function startSaasTrial(
       .from(saasSeller)
       .where(eq(saasSeller.id, input.sellerId))
       .limit(1)
-    if (!seller) throw notFound("Vendedor")
+    if (!seller)
+      throw new ServiceError("NOT_FOUND", 404, "Vendedor no encontrado", { sellerId: "Esa vendedora ya no está: elige otra." })
     sellerSnapshot = { id: seller.id, rateBps: seller.rateBps, windowDays: seller.windowDays }
   }
   const existing = await getSaasSubscription(tx, orgId)
@@ -1559,7 +1593,7 @@ export async function createSaasCharge(
 ): Promise<SaasChargeRow> {
   const plan = await planByCode(tx, input.planCode)
   if (input.periodEnd <= input.periodStart)
-    throw validation("El período debe terminar después de empezar")
+    throw invalidField("periodEnd", "El período debe terminar después de empezar")
   const [row] = await tx
     .insert(saasCharge)
     .values({
@@ -1753,12 +1787,16 @@ export async function submitSaasReceipt(
       ),
     )
     .limit(1)
-  if (!charge) throw notFound("Cargo")
-  if (charge.status === "pagada") throw conflict("SAAS_CHARGE_PAID", "Ese cargo ya está pagado")
+  // Cada rechazo dice su dato con el nombre del formulario multipart (chargeId, methodCode, amountCents, file).
+  if (!charge) throw new ServiceError("NOT_FOUND", 404, "Cargo no encontrado", { chargeId: "Ese cargo ya no está: elige otro." })
+  if (charge.status === "pagada")
+    throw new ServiceError("SAAS_CHARGE_PAID", 409, "Ese cargo ya está pagado", { chargeId: "Ese cargo ya está pagado" })
   const amount = assertCents(input.amountCents, "El importe", true)
   const outstanding = charge.amountCents - charge.paidCents
   if (amount > outstanding)
-    throw validation(`El importe supera el saldo del cargo (${outstanding} en unidad menor)`)
+    throw validation("El importe supera el saldo pendiente del cargo", {
+      amountCents: "El importe supera el saldo pendiente del cargo",
+    })
   const [method] = await tx
     .select()
     .from(saasPaymentMethod)
@@ -1769,9 +1807,17 @@ export async function submitSaasReceipt(
       ),
     )
     .limit(1)
-  if (!method) throw notFound("Medio de pago")
+  if (!method)
+    throw new ServiceError("NOT_FOUND", 404, "Medio de pago no encontrado", {
+      methodCode: "Ese medio de pago ya no está disponible: elige otro.",
+    })
   // El contentType del cliente se comprueba contra los bytes (helper compartido).
-  const verified = await verifyReceiptBytes(input.receipt.bytes, input.receipt.contentType)
+  const verified = await verifyReceiptBytes(input.receipt.bytes, input.receipt.contentType).catch(
+    (error: unknown) => {
+      if (error instanceof ServiceError && error.status === 400) throw validation(error.message, { file: error.message })
+      throw error
+    },
+  )
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext('saas-cargo:' || ${orgId} || ':' || ${charge.id}))`,
   )
@@ -1800,9 +1846,11 @@ export async function submitSaasReceipt(
     )
     .limit(1)
   if (alreadyPending)
-    throw conflict(
+    throw new ServiceError(
       "SAAS_RECEIPT_PENDING",
+      409,
       "Ese cargo ya tiene un comprobante pendiente de confirmación",
+      { chargeId: "Ese cargo ya tiene un comprobante pendiente de confirmación" },
     )
   // Storage real, bucket privado: la URL firmada la entrega la ruta (nunca pública).
   const stored = await deps.storage.putAttachment({
@@ -2254,12 +2302,12 @@ export async function upsertSaasSeller(
 ): Promise<SaasSellerRow> {
   const displayName = input.displayName.trim()
   if (!displayName || displayName.length > 120)
-    throw validation("El nombre del vendedor debe tener 1–120 caracteres")
+    throw invalidField("displayName", "El nombre del vendedor debe tener 1–120 caracteres")
   if (!Number.isInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10000)
-    throw validation("El porcentaje debe estar entre 0 y 10000 puntos básicos")
+    throw invalidField("rateBps", "El porcentaje debe estar entre 0 y 100 %")
   const windowDays = input.windowDays ?? 90
   if (!Number.isInteger(windowDays) || windowDays < 0 || windowDays > 730)
-    throw validation("La ventana debe estar entre 0 y 730 días")
+    throw invalidField("windowDays", "La ventana debe estar entre 0 y 730 días")
   if (input.userId) {
     const [existing] = await tx
       .select()
@@ -2392,9 +2440,9 @@ export async function settleSaasCommissions(
 ): Promise<{ settlement: SaasSettlementRow; email: SaasSettlementEmail | null }> {
   const unit = currency(input.currency)
   if (!Number.isInteger(input.year) || input.year < 2000 || input.year > 2100)
-    throw validation("El año debe estar entre 2000 y 2100")
+    throw invalidField("year", "El año debe estar entre 2000 y 2100")
   if (!Number.isInteger(input.month) || input.month < 1 || input.month > 12)
-    throw validation("El mes debe estar entre 1 y 12")
+    throw invalidField("month", "El mes debe estar entre 1 y 12")
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`saas-settle:${input.sellerId}:${input.year}:${input.month}:${unit}`}, 0))`,
   )

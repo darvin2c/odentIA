@@ -1,49 +1,42 @@
 import {
   Button,
-  Field,
-  FieldDescription,
-  FieldError,
   FieldGroup,
-  FieldLabel,
-  Input,
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
   InputGroupText,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   toast,
 } from "@odentia/ui"
 import {
   CountrySelect,
   detectedTimeZone,
-  fieldErrorMessages,
+  focusFirstInvalid,
   isValidE164,
   normalizeCountry,
   PageHeader,
   PageShell,
-  PhoneInput,
   regionCountry,
   SubmitButton,
+  submitForm,
   TimeZoneSelect,
+  useAppForm,
+  useFormSubmitError,
   WizardSteps,
   zonesForCountry,
 } from "@odentia/ui-patterns"
-import { useForm, useStore } from "@tanstack/react-form"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../lib/api"
+import { ApiError, apiFetch } from "../lib/api"
 import { API_URL, authClient } from "../lib/auth-client"
+import { type AuthClientError, authError, authFailureOf, authFormMessage } from "../lib/auth-error"
+import { panelWords } from "../lib/brand"
 import { addressAlternatives, addressFromName, CLINIC_ADDRESS_PATTERN } from "../lib/clinic-address"
 import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
-import { panelWords } from "../lib/brand"
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ location }) => {
@@ -84,8 +77,10 @@ const personaSchema = z.object({
   lastName: z.string().min(1, "Ingresa tus apellidos"),
 })
 
+// Los máximos son los de la API (`PUT /api/org-profile`, `POST /api/branches`):
+// lo que no cabe se dice aquí, antes de enviar.
 const onboardingSchema = personaSchema.extend({
-  orgName: z.string().min(2, "Escribe el nombre de tu clínica"),
+  orgName: z.string().min(2, "Escribe el nombre de tu clínica").max(200, "Escribe como mucho 200 caracteres."),
   slug: z
     .string()
     .min(1, "Escribe la dirección de tu clínica")
@@ -94,43 +89,40 @@ const onboardingSchema = personaSchema.extend({
       (slug) => !RESERVED_SLUGS[slug],
       `Esa dirección está reservada para ${panelWords.name}. Elige otra.`,
     ),
-  legalName: z.string().min(2, "Razón social"),
-  fiscalDocNumber: z.string().max(20),
+  legalName: z
+    .string()
+    .min(2, "Escribe la razón social (al menos 2 caracteres)")
+    .max(200, "Escribe como mucho 200 caracteres."),
+  fiscalDocNumber: z.string().max(20, "El documento fiscal tiene como mucho 20 caracteres."),
   // El país define la máscara de los teléfonos y las zonas horarias sugeridas.
   countryCode: z.string().length(2, "Elige el país"),
   // ISO 4217: se propone según el país y se puede cambiar.
   currency: z.string().regex(/^[A-Z]{3}$/, "Elige la moneda con la que cobra la clínica"),
-  branchName: z.string().min(2, "Nombre de la sede"),
-  branchAddress: z.string(),
-  // Vacío = sin teléfono; si hay valor, tiene que ser un número real (E.164).
+  branchName: z
+    .string()
+    .min(2, "Escribe el nombre de la sede (al menos 2 caracteres)")
+    .max(120, "Escribe como mucho 120 caracteres."),
+  branchAddress: z.string().max(300, "Escribe como mucho 300 caracteres."),
+  // `null` = sin teléfono; si hay valor, tiene que ser un número real (E.164).
   branchPhone: z
     .string()
-    .refine((value) => value === "" || isValidE164(value), "Teléfono inválido"),
+    .nullable()
+    .refine((value) => value === null || isValidE164(value), "Teléfono inválido"),
   branchTimezone: z.string().min(1, "Elige la zona horaria"),
 })
+
+type OnboardingValues = z.infer<typeof onboardingSchema>
+type OnboardingField = keyof OnboardingValues
 
 const onboardingSubmitSchema = onboardingSchema.extend({
   orgName: z.string(),
   slug: z.string(),
 })
 /** Schema por campo; valida al salir de su paso y en el submit final. */
-const FIELD_SCHEMAS = {
-  firstName: personaSchema.shape.firstName,
-  lastName: personaSchema.shape.lastName,
-  orgName: onboardingSchema.shape.orgName,
-  slug: onboardingSchema.shape.slug,
-  legalName: onboardingSchema.shape.legalName,
-  fiscalDocNumber: onboardingSchema.shape.fiscalDocNumber,
-  countryCode: onboardingSchema.shape.countryCode,
-  currency: onboardingSchema.shape.currency,
-  branchName: onboardingSchema.shape.branchName,
-  branchAddress: onboardingSchema.shape.branchAddress,
-  branchPhone: onboardingSchema.shape.branchPhone,
-  branchTimezone: onboardingSchema.shape.branchTimezone,
-} as const
+const FIELD_SCHEMAS = onboardingSchema.shape
 
 /** Paso que posee cada campo: antes de ese paso el campo no se valida. */
-const FIELD_STEP: Record<keyof typeof FIELD_SCHEMAS, number> = {
+const FIELD_STEP: Record<OnboardingField, number> = {
   firstName: 0,
   lastName: 0,
   orgName: 1,
@@ -143,6 +135,42 @@ const FIELD_STEP: Record<keyof typeof FIELD_SCHEMAS, number> = {
   branchAddress: 3,
   branchPhone: 3,
   branchTimezone: 3,
+}
+
+/**
+ * Dónde se dice lo que señalan `PUT /api/org-profile` y `POST /api/branches`
+ * (dato del cuerpo → campo del asistente; los demás se llaman igual). La
+ * dirección de la sede es una sola línea: lo que el servidor diga de su
+ * ciudad, región o código postal se dice en ella.
+ */
+const SERVER_FIELDS: Record<string, OnboardingField> = {
+  tradeName: "orgName",
+  timezone: "branchTimezone",
+  name: "branchName",
+  addressLine1: "branchAddress",
+  city: "branchAddress",
+  district: "branchAddress",
+  region: "branchAddress",
+  postalCode: "branchAddress",
+  country: "branchAddress",
+  phone: "branchPhone",
+}
+
+/** Rechazos de `organization.create` que son de la dirección (`slug`). */
+const ADDRESS_ERRORS = {
+  RESERVED_SLUG: "slug",
+  ORGANIZATION_ALREADY_EXISTS: "slug",
+  ORGANIZATION_SLUG_ALREADY_TAKEN: "slug",
+}
+
+/** `updateUser` rechazado: lo conocido con su texto; lo demás, que no se guardó el nombre. */
+function nameSaveError(error: AuthClientError): ApiError {
+  const failure = authFailureOf(error)
+  if (failure.code) return authError(error)
+  return new ApiError(failure.status, {
+    message: "No pudimos guardar tu nombre. Inténtalo de nuevo en un momento.",
+    fields: failure.fields,
+  })
 }
 
 /** Si la dirección está libre: `false` solo cuando el servidor dice que está en uso. */
@@ -211,6 +239,12 @@ function OnboardingPage() {
   const [addressEdited, setAddressEdited] = useState(false)
   // Direcciones que el servidor dijo que están en uso: no dejan avanzar.
   const takenAddresses = useRef(new Set<string>())
+  // La clínica que este alta ya creó: si falló el perfil o la sede, el
+  // reintento solo guarda eso y nunca abre otra clínica. Su dirección ya no cambia.
+  const [createdSlug, setCreatedSlug] = useState<string | null>(null)
+  // Cada vez que el asistente lleva a un paso con errores, el foco va al primero.
+  const formRef = useRef<HTMLFormElement>(null)
+  const [focusRequest, setFocusRequest] = useState(0)
   // La organización activa apunta a la clínica invitada para que el perfil y
   // la sede se guarden en ella (el contexto la deduce de la sesión).
   useEffect(() => {
@@ -220,7 +254,7 @@ function OnboardingPage() {
   }, [skipOrg, continueOrgId])
   // El tipo sale del esquema: `branchPhone` es `string | null` y `countryCode`
   // es un ISO de 2 letras, no el literal del valor inicial.
-  const initialValues: z.infer<typeof onboardingSchema> = {
+  const initialValues: OnboardingValues = {
     firstName: splitName(sessionUser?.name ?? "").firstName,
     lastName: splitName(sessionUser?.name ?? "").lastName,
     orgName: "",
@@ -233,21 +267,14 @@ function OnboardingPage() {
     currency: "",
     branchName: "",
     branchAddress: "",
-    branchPhone: "",
+    branchPhone: null,
     // La clínica se configura desde su propio dispositivo: su zona es la de
     // partida; sin ella se elige en el último paso.
     branchTimezone: detectedTimeZone() ?? "",
   }
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: initialValues,
     validators: { onSubmit: onboardingSubmitSchema },
-    onSubmitInvalid: () => {
-      // Si algún paso previo quedó inválido, lleva al usuario al primero con errores.
-      const invalidStep = STEP_FIELDS.findIndex((fields) =>
-        fields.some((field) => (form.getFieldMeta(field)?.errors.length ?? 0) > 0),
-      )
-      if (invalidStep !== -1 && invalidStep !== step) goTo(skipOrg && invalidStep === 1 ? 2 : invalidStep)
-    },
     onSubmit: async ({ value }) => {
       const { error: nameError } = await authClient.updateUser({
         name: `${value.firstName} ${value.lastName}`.trim(),
@@ -255,69 +282,71 @@ function OnboardingPage() {
         lastName: value.lastName,
       })
       if (nameError) {
-        toast.error("No pudimos guardar tu nombre.")
-        return
+        // El nombre se corrige en su paso (si la cuenta no lo traía guardado).
+        if (!hasStoredName) goTo(0)
+        throw nameSaveError(nameError)
       }
       let slug = value.slug
-      if (!skipOrg) {
-        const { error: orgError } = await authClient.organization.create(
+      if (createdSlug) {
+        // Reintento: la clínica ya se creó en este alta; faltan su perfil y su sede.
+        slug = createdSlug
+      } else if (!skipOrg) {
+        const { data: org, error: orgError } = await authClient.organization.create(
           { name: value.orgName, slug: value.slug },
           founderToken ? { headers: { [FOUNDER_INVITATION_HEADER]: founderToken } } : undefined,
         )
         if (orgError) {
-          const code = (orgError as { code?: string }).code ?? ""
-          if (code.startsWith("INVITATION")) {
-            if (code === "INVITATION_INVALID") forgetInvitation()
-            toast.error(orgError.message ?? "Por ahora se abren clínicas solo con invitación.")
-            if (code === "INVITATION_REQUIRED" || code === "INVITATION_INVALID") await navigate({ to: "/" })
+          const { code, message } = authFailureOf(orgError)
+          if (code === "INVITATION_INVALID") forgetInvitation()
+          if (code === "INVITATION_REQUIRED" || code === "INVITATION_INVALID") {
+            // Sin una invitación que sirva no se abre la clínica aquí: se vuelve al inicio (como antes),
+            // y el aviso viaja en un toast porque este formulario deja de estar a la vista.
+            toast.error(message)
+            await navigate({ to: "/" })
             return
           }
-          goTo(1)
-          if (
-            code === "ORGANIZATION_ALREADY_EXISTS" ||
-            code === "ORGANIZATION_SLUG_ALREADY_TAKEN"
-          ) {
-            // Alguien la tomó entre la comprobación y el envío: se dice junto al campo.
+          if (code === "ORGANIZATION_ALREADY_EXISTS" || code === "ORGANIZATION_SLUG_ALREADY_TAKEN") {
+            // Alguien la tomó entre la comprobación y el envío: el campo lo dice
+            // y lo sigue diciendo al volver a «Continuar» hasta que cambie.
             takenAddresses.current.add(value.slug)
-            void validateStepField("slug")
             void queryClient.invalidateQueries({ queryKey: ["onboarding", "address", value.slug] })
-            return
           }
-          toast.error(orgError.message ?? "No se pudo crear tu clínica.")
-          return
+          // La dirección (reservada, en uso) va a su campo; la invitación, junto al botón.
+          throw authError(orgError, {
+            fields: ADDRESS_ERRORS,
+            messages: { RESERVED_SLUG: `Esa dirección está reservada para ${panelWords.name}. Elige otra.` },
+          })
         }
         forgetInvitation()
+        slug = org?.slug ?? value.slug
+        setCreatedSlug(slug)
       } else if (continueOrgId) {
         await authClient.organization.setActive({ organizationId: continueOrgId }).catch(() => {})
         const { data: orgs } = await authClient.organization.list()
         slug = orgs?.find((org) => org.id === continueOrgId)?.slug ?? ""
       }
-      try {
-        await apiFetch("/api/org-profile", {
-          method: "PUT",
-          body: JSON.stringify({
-            legalName: value.legalName,
-            // El nombre que se escribió es el nombre comercial: el que verán sus pacientes (decisión 19).
-            ...(!skipOrg && value.orgName.trim() ? { tradeName: value.orgName.trim() } : {}),
-            fiscalDocNumber: value.fiscalDocNumber || undefined,
-            countryCode: value.countryCode,
-            currency: value.currency,
-            timezone: value.branchTimezone,
-          }),
-        })
-        await apiFetch("/api/branches", {
-          method: "POST",
-          body: JSON.stringify({
-            name: value.branchName,
-            addressLine1: value.branchAddress || undefined,
-            phone: value.branchPhone || undefined,
-            timezone: value.branchTimezone,
-          }),
-        })
-      } catch (cause) {
-        toast.error(cause instanceof Error ? cause.message : "Error al guardar los datos.")
-        return
-      }
+      // Lo que rechacen se dice en su campo (`SERVER_FIELDS`) y el asistente vuelve a su paso.
+      await apiFetch("/api/org-profile", {
+        method: "PUT",
+        body: JSON.stringify({
+          legalName: value.legalName,
+          // El nombre que se escribió es el nombre comercial: el que verán sus pacientes (decisión 19).
+          ...(!skipOrg && value.orgName.trim() ? { tradeName: value.orgName.trim() } : {}),
+          fiscalDocNumber: value.fiscalDocNumber || undefined,
+          countryCode: value.countryCode,
+          currency: value.currency,
+          timezone: value.branchTimezone,
+        }),
+      })
+      await apiFetch("/api/branches", {
+        method: "POST",
+        body: JSON.stringify({
+          name: value.branchName,
+          addressLine1: value.branchAddress || undefined,
+          phone: value.branchPhone ?? undefined,
+          timezone: value.branchTimezone,
+        }),
+      })
       if (skipOrg) {
         // La clínica ya existía: el launcher decide a dónde seguir.
         await navigate({ to: "/" })
@@ -326,6 +355,7 @@ function OnboardingPage() {
       window.location.assign(tenantUrl(slug, "/home"))
     },
   })
+  const submitError = useFormSubmitError(form)
   // Alta reanudada: precarga lo que el alta asistida ya dejó (país, moneda,
   // razón social) para no repetirlo.
   useEffect(() => {
@@ -380,7 +410,7 @@ function OnboardingPage() {
     return () => clearTimeout(timer)
   }, [address])
   const addressCheckable =
-    !skipOrg && CLINIC_ADDRESS_PATTERN.test(checkedAddress) && !RESERVED_SLUGS[checkedAddress]
+    !skipOrg && !createdSlug && CLINIC_ADDRESS_PATTERN.test(checkedAddress) && !RESERVED_SLUGS[checkedAddress]
   const availability = useQuery({
     queryKey: ["onboarding", "address", checkedAddress],
     queryFn: () => checkAddress(checkedAddress),
@@ -396,13 +426,14 @@ function OnboardingPage() {
   const currencies = useMemo(() => {
     const names = new Intl.DisplayNames(["es"], { type: "currency" })
     return Intl.supportedValuesOf("currency").map((code) => ({
-      code,
+      value: code,
       label: `${code} — ${names.of(code) ?? code}`,
     }))
   }, [])
 
   // Precarga el nombre de la sesión cuando llega después del primer render y
   // salta el paso de perfil si la cuenta ya lo trae guardado.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega la sesión; el paso y lo visitado se leen en ese momento, no lo vuelven a disparar.
   useEffect(() => {
     if (!sessionUser) return
     if (!form.getFieldValue("firstName") && !form.getFieldValue("lastName")) {
@@ -413,8 +444,14 @@ function OnboardingPage() {
     if ((sessionUser.firstName || sessionUser.lastName) && step === 0 && !visited.includes(1)) {
       goTo(skipOrg ? 2 : 1)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionUser])
+
+  // El foco va al primer campo marcado del paso que se ve (los otros pasos están ocultos).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: enfoca solo al pedirlo; cambiar de paso no debe mover el foco.
+  useEffect(() => {
+    if (focusRequest === 0) return
+    focusFirstInvalid(formRef.current?.querySelector(`[data-step="${step}"]`) ?? null)
+  }, [focusRequest])
 
   function goTo(index: number) {
     setStep(index)
@@ -422,14 +459,16 @@ function OnboardingPage() {
   }
 
   /** Validador de campo activo solo desde su paso en adelante (nunca org en reanudada). */
-  function stepValidator(key: keyof typeof FIELD_SCHEMAS) {
+  function stepValidator(key: OnboardingField) {
     return {
-      onSubmit: ({ value }: { value: string }) => {
+      onSubmit: ({ value }: { value: unknown }) => {
         if (skipOrg && (key === "orgName" || key === "slug")) return undefined
+        // La clínica ya se creó: su dirección quedó fija.
+        if (createdSlug && key === "slug") return undefined
         if (step < FIELD_STEP[key]) return undefined
         const parsed = FIELD_SCHEMAS[key].safeParse(value)
         if (!parsed.success) return parsed.error.issues[0]?.message ?? undefined
-        if (key === "slug" && takenAddresses.current.has(value))
+        if (key === "slug" && typeof value === "string" && takenAddresses.current.has(value))
           return "Esa dirección ya está en uso. Elige otra."
         return undefined
       },
@@ -440,21 +479,44 @@ function OnboardingPage() {
    * Valida un campo del paso con su propio validador. `form.validateField`
    * correría además el esquema de todo el formulario y dejaría errores en los
    * campos de pasos que aún no se ven («Nombre de la sede» en rojo al llegar).
+   * Se marca como visitado para que el campo diga su error.
    */
-  function validateStepField(field: keyof typeof FIELD_SCHEMAS) {
+  function validateStepField(field: OnboardingField) {
     const instance = form.fieldInfo[field]?.instance
     if (!instance) return form.validateField(field, "submit")
-    if (!form.getFieldMeta(field)?.isTouched) form.setFieldMeta(field, (prev) => ({ ...prev, isTouched: true }))
+    form.setFieldMeta(field, (prev) => ({ ...prev, isTouched: true, isBlurred: true }))
     return instance.validate("submit", { skipFormValidation: true })
   }
 
-  /** Valida los campos del paso actual y avanza si pasan. */
+  /** Valida los campos del paso actual y avanza si pasan; si no, enfoca el primero que falla. */
   async function handleContinue() {
     const results = await Promise.all(
       STEP_FIELDS[step].map((field) => Promise.resolve(validateStepField(field))),
     )
-    if (results.some((errors) => errors.length > 0)) return
+    if (results.some((errors) => errors.length > 0)) {
+      setFocusRequest((count) => count + 1)
+      return
+    }
     goTo(step + 1 === 1 && skipOrg ? 2 : step + 1)
+  }
+
+  /**
+   * Envía todo. Lo que falle (el esquema o el servidor) queda en su campo y el
+   * asistente vuelve al primer paso con errores; lo demás se dice junto al botón.
+   */
+  async function finish() {
+    const ok = await submitForm(form, {
+      fieldMap: SERVER_FIELDS,
+      formMessage: authFormMessage,
+      root: formRef.current,
+    })
+    if (ok) return
+    const invalidStep = STEP_FIELDS.findIndex((fields) =>
+      fields.some((field) => (form.getFieldMeta(field)?.errors.length ?? 0) > 0),
+    )
+    if (invalidStep === -1) return
+    goTo(skipOrg && invalidStep === 1 ? 2 : invalidStep)
+    setFocusRequest((count) => count + 1)
   }
 
   /** Pasos visibles: en reanudada no se crea la organización; con nombre
@@ -481,306 +543,184 @@ function OnboardingPage() {
           className="mt-6"
         />
         <form
+          ref={formRef}
+          noValidate
           className="mt-8"
           onSubmit={(event) => {
             event.preventDefault()
             if (step < STEPS.length - 1) void handleContinue()
-            else void form.handleSubmit()
+            else void finish()
           }}
         >
           <FieldGroup className="gap-4">
-            <div className={step === 0 ? "flex flex-col gap-4" : "hidden"}>
-              <form.Field name="firstName" validators={stepValidator("firstName")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
-                    <Input
-                      id="firstName"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                      aria-describedby={
-                        field.state.meta.errors.length ? "firstName-error" : undefined
-                      }
-                      autoComplete="given-name"
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                    <FieldError id="firstName-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="lastName" validators={stepValidator("lastName")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
-                    <Input
-                      id="lastName"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                      aria-describedby={
-                        field.state.meta.errors.length ? "lastName-error" : undefined
-                      }
-                      autoComplete="family-name"
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                    <FieldError id="lastName-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
-                )}
-              </form.Field>
+            <div data-step={0} className={step === 0 ? "flex flex-col gap-4" : "hidden"}>
+              <form.AppField name="firstName" validators={stepValidator("firstName")}>
+                {(field) => <field.TextField id="firstName" label="Nombre" autoComplete="given-name" />}
+              </form.AppField>
+              <form.AppField name="lastName" validators={stepValidator("lastName")}>
+                {(field) => <field.TextField id="lastName" label="Apellidos" autoComplete="family-name" />}
+              </form.AppField>
             </div>
 
-            <div className={step === 1 && !skipOrg ? "flex flex-col gap-4" : "hidden"}>
-              <form.Field name="orgName" validators={stepValidator("orgName")}>
+            <div data-step={1} className={step === 1 && !skipOrg ? "flex flex-col gap-4" : "hidden"}>
+              <form.AppField
+                name="orgName"
+                validators={stepValidator("orgName")}
+                listeners={{
+                  onChange: ({ value }) => {
+                    if (!addressEdited && !createdSlug) form.setFieldValue("slug", addressFromName(value))
+                  },
+                }}
+              >
                 {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="orgName">Nombre de tu clínica</FieldLabel>
-                    <Input
-                      id="orgName"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                      aria-describedby={
-                        field.state.meta.errors.length
-                          ? "orgName-help orgName-error"
-                          : "orgName-help"
-                      }
-                      value={field.state.value}
-                      onChange={(event) => {
-                        field.handleChange(event.target.value)
-                        if (!addressEdited)
-                          form.setFieldValue("slug", addressFromName(event.target.value))
-                      }}
-                    />
-                    <FieldDescription id="orgName-help">
-                      El que verán tus pacientes.
-                    </FieldDescription>
-                    <FieldError id="orgName-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
+                  <field.TextField
+                    id="orgName"
+                    label="Nombre de tu clínica"
+                    description="El que verán tus pacientes."
+                  />
                 )}
-              </form.Field>
-              <form.Field name="slug" validators={stepValidator("slug")}>
-                {(field) => {
-                  const errors = fieldErrorMessages(field.state.meta.errors)
-                  return (
-                    <Field>
-                      <FieldLabel htmlFor="slug">Dirección de tu {panelWords.place.one} en {panelWords.name}</FieldLabel>
-                      <InputGroup>
-                        <InputGroupInput
-                          id="slug"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          aria-invalid={errors.length > 0 || undefined}
-                          aria-describedby={
-                            errors.length
-                              ? "slug-status slug-help slug-error"
-                              : "slug-status slug-help"
+              </form.AppField>
+              <form.AppField name="slug" validators={stepValidator("slug")}>
+                {(field) => (
+                  <field.Control
+                    id="slug"
+                    label={
+                      <>
+                        Dirección de tu {panelWords.place.one} en {panelWords.name}
+                      </>
+                    }
+                    description="Es la dirección de tu enlace de reservas. No se cambia después."
+                  >
+                    {(control) => (
+                      <>
+                        <InputGroup>
+                          <InputGroupInput
+                            {...control.props}
+                            aria-describedby={["slug-status", control.describedBy].filter(Boolean).join(" ")}
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            readOnly={createdSlug !== null}
+                            value={field.state.value}
+                            onChange={(event) => {
+                              const next = event.target.value.toLowerCase()
+                              // Borrarla entera devuelve la dirección al nombre.
+                              setAddressEdited(next !== "")
+                              field.handleChange(next)
+                            }}
+                          />
+                          <InputGroupAddon align="inline-end">
+                            <InputGroupText>.{BASE_DOMAIN}</InputGroupText>
+                          </InputGroupAddon>
+                        </InputGroup>
+                        <AddressStatus
+                          id="slug-status"
+                          address={field.state.value}
+                          invalid={control.invalid}
+                          checking={field.state.value !== checkedAddress || availability.isFetching}
+                          result={
+                            addressCheckable && checkedAddress === field.state.value
+                              ? availability.data
+                              : undefined
                           }
-                          value={field.state.value}
-                          onChange={(event) => {
-                            const next = event.target.value.toLowerCase()
-                            // Borrarla entera devuelve la dirección al nombre.
-                            setAddressEdited(next !== "")
-                            field.handleChange(next)
+                          failed={addressCheckable && availability.isError}
+                          onUse={(suggestion) => {
+                            setAddressEdited(true)
+                            field.handleChange(suggestion)
                           }}
                         />
-                        <InputGroupAddon align="inline-end">
-                          <InputGroupText>.{BASE_DOMAIN}</InputGroupText>
-                        </InputGroupAddon>
-                      </InputGroup>
-                      <AddressStatus
-                        id="slug-status"
-                        address={field.state.value}
-                        checking={field.state.value !== checkedAddress || availability.isFetching}
-                        result={
-                          addressCheckable && checkedAddress === field.state.value
-                            ? availability.data
-                            : undefined
-                        }
-                        failed={addressCheckable && availability.isError}
-                        onUse={(suggestion) => {
-                          setAddressEdited(true)
-                          field.handleChange(suggestion)
-                        }}
+                      </>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            </div>
+
+            <div data-step={2} className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
+              <form.AppField name="legalName" validators={stepValidator("legalName")}>
+                {(field) => <field.TextField id="legalName" label="Razón social" />}
+              </form.AppField>
+              <form.AppField name="fiscalDocNumber" validators={stepValidator("fiscalDocNumber")}>
+                {(field) => (
+                  <field.TextField id="fiscalDocNumber" label="Documento fiscal (opcional)" maxLength={20} />
+                )}
+              </form.AppField>
+              <form.AppField name="countryCode" validators={stepValidator("countryCode")}>
+                {(field) => (
+                  <field.Control
+                    id="countryCode"
+                    label="País"
+                    description="Define el formato de los teléfonos, la moneda y las zonas horarias que se sugieren."
+                  >
+                    {(control) => (
+                      <CountrySelect
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        onBlur={control.onBlur}
+                        value={normalizeCountry(field.state.value) ?? regionCountry()}
+                        onChange={(next) => field.handleChange(next)}
                       />
-                      <FieldDescription id="slug-help">
-                        Es la dirección de tu enlace de reservas. No se cambia después.
-                      </FieldDescription>
-                      <FieldError id="slug-error">{errors[0] ?? null}</FieldError>
-                    </Field>
-                  )
-                }}
-              </form.Field>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+              <form.AppField name="currency" validators={stepValidator("currency")}>
+                {(field) => (
+                  <field.SelectField
+                    id="currency"
+                    label="Moneda"
+                    description="Con ella se cobran y se muestran los importes. Se propone según el país."
+                    placeholder="Elige la moneda"
+                    options={currencies}
+                  />
+                )}
+              </form.AppField>
             </div>
 
-            <div className={step === 2 ? "flex flex-col gap-4" : "hidden"}>
-              <form.Field name="legalName" validators={stepValidator("legalName")}>
+            <div data-step={3} className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
+              <form.AppField name="branchName" validators={stepValidator("branchName")}>
+                {(field) => <field.TextField id="branchName" label="Nombre de la sede" />}
+              </form.AppField>
+              <form.AppField name="branchAddress" validators={stepValidator("branchAddress")}>
+                {(field) => <field.TextField id="branchAddress" label="Dirección (opcional)" />}
+              </form.AppField>
+              <form.AppField name="branchPhone" validators={stepValidator("branchPhone")}>
                 {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="legalName">Razón social</FieldLabel>
-                    <Input
-                      id="legalName"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                      aria-describedby={
-                        field.state.meta.errors.length ? "legalName-error" : undefined
-                      }
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                    <FieldError id="legalName-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
+                  <field.PhoneField
+                    id="branchPhone"
+                    label="Teléfono (opcional)"
+                    defaultCountry={normalizeCountry(country)}
+                  />
                 )}
-              </form.Field>
-              <form.Field name="fiscalDocNumber" validators={stepValidator("fiscalDocNumber")}>
+              </form.AppField>
+              <form.AppField name="branchTimezone" validators={stepValidator("branchTimezone")}>
                 {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="fiscalDocNumber">Documento fiscal (opcional)</FieldLabel>
-                    <Input
-                      id="fiscalDocNumber"
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="countryCode" validators={stepValidator("countryCode")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="countryCode">País</FieldLabel>
-                    <CountrySelect
-                      id="countryCode"
-                      value={normalizeCountry(field.state.value) ?? regionCountry()}
-                      onChange={(next) => field.handleChange(next)}
-                    />
-                    <FieldDescription>
-                      Define el formato de los teléfonos, la moneda y las zonas horarias que se sugieren.
-                    </FieldDescription>
-                    <FieldError>
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="currency" validators={stepValidator("currency")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="currency">Moneda</FieldLabel>
-                    <Select<string>
-                      value={field.state.value || null}
-                      onValueChange={(next) => {
-                        if (next) field.handleChange(next)
-                      }}
-                    >
-                      <SelectTrigger id="currency" className="w-full">
-                        <SelectValue placeholder="Elige la moneda">
-                          {(selected: string) =>
-                            currencies.find((item) => item.code === selected)?.label ?? selected
-                          }
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {currencies.map((item) => (
-                          <SelectItem key={item.code} value={item.code}>
-                            {item.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FieldDescription>
-                      Con ella se cobran y se muestran los importes. Se propone según el país.
-                    </FieldDescription>
-                    <FieldError>
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
-                )}
-              </form.Field>
-            </div>
-
-            <div className={step === 3 ? "flex flex-col gap-4" : "hidden"}>
-              <form.Field name="branchName" validators={stepValidator("branchName")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="branchName">Nombre de la sede</FieldLabel>
-                    <Input
-                      id="branchName"
-                      aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                      aria-describedby={
-                        field.state.meta.errors.length ? "branchName-error" : undefined
-                      }
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                    <FieldError id="branchName-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="branchAddress" validators={stepValidator("branchAddress")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="branchAddress">Dirección (opcional)</FieldLabel>
-                    <Input
-                      id="branchAddress"
-                      value={field.state.value}
-                      onChange={(event) => field.handleChange(event.target.value)}
-                    />
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="branchPhone" validators={stepValidator("branchPhone")}>
-                {(field) => {
-                  const errors = fieldErrorMessages(field.state.meta.errors)
-                  return (
-                    <Field>
-                      <FieldLabel htmlFor="branchPhone">Teléfono (opcional)</FieldLabel>
-                      <PhoneInput
-                        id="branchPhone"
-                        value={field.state.value || null}
-                        defaultCountry={normalizeCountry(country)}
-                        invalid={errors.length > 0}
-                        aria-describedby={errors.length ? "branchPhone-error" : undefined}
+                  <field.Control
+                    id="branchTimezone"
+                    label="Zona horaria"
+                    description="Con ella se interpretan la agenda, el historial y los documentos de la clínica."
+                  >
+                    {(control) => (
+                      <TimeZoneSelect
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        value={field.state.value}
+                        suggested={zonesForCountry(country)}
                         onChange={(next) => field.handleChange(next ?? "")}
                       />
-                      <FieldError id="branchPhone-error">{errors[0] ?? null}</FieldError>
-                    </Field>
-                  )
-                }}
-              </form.Field>
-              <form.Field name="branchTimezone" validators={stepValidator("branchTimezone")}>
-                {(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="branchTimezone">Zona horaria</FieldLabel>
-                    <TimeZoneSelect
-                      id="branchTimezone"
-                      invalid={field.state.meta.errors.length > 0}
-                      aria-describedby={
-                        field.state.meta.errors.length
-                          ? "branchTimezone-help branchTimezone-error"
-                          : "branchTimezone-help"
-                      }
-                      value={field.state.value}
-                      suggested={zonesForCountry(country)}
-                      onChange={(next) => field.handleChange(next ?? "")}
-                    />
-                    <FieldDescription id="branchTimezone-help">
-                      Con ella se interpretan la agenda, el historial y los documentos de la
-                      clínica.
-                    </FieldDescription>
-                    <FieldError id="branchTimezone-error">
-                      {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                    </FieldError>
-                  </Field>
+                    )}
+                  </field.Control>
                 )}
-              </form.Field>
+              </form.AppField>
             </div>
 
+            {submitError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {submitError}
+              </p>
+            ) : null}
             <div className="flex justify-between">
               {currentPosition > 0 ? (
                 <Button
@@ -797,7 +737,7 @@ function OnboardingPage() {
                 {(isSubmitting) => (
                   <SubmitButton type="submit" pending={isSubmitting}>
                     {step === STEPS.length - 1
-                      ? skipOrg
+                      ? skipOrg || createdSlug
                         ? "Terminar alta"
                         : "Crear organización"
                       : "Continuar"}
@@ -814,11 +754,13 @@ function OnboardingPage() {
 
 /**
  * Lo que se sabe de la dirección mientras se escribe: formato, reservada, si
- * está libre y, si no, una alternativa libre para usar con un clic.
+ * está libre y, si no, una alternativa libre para usar con un clic. Cuando el
+ * campo ya dice su error (`invalid`), aquí no se repite: solo queda la alternativa.
  */
 function AddressStatus({
   id,
   address,
+  invalid,
   checking,
   result,
   failed,
@@ -826,6 +768,7 @@ function AddressStatus({
 }: {
   id: string
   address: string
+  invalid: boolean
   checking: boolean
   result: AddressCheck | undefined
   failed: boolean
@@ -834,11 +777,11 @@ function AddressStatus({
   let content: ReactNode = null
   if (!address) content = null
   else if (!CLINIC_ADDRESS_PATTERN.test(address))
-    content = (
+    content = invalid ? null : (
       <span className="text-destructive">Usa solo letras sin tilde, números y guiones.</span>
     )
   else if (RESERVED_SLUGS[address])
-    content = (
+    content = invalid ? null : (
       <span className="text-destructive">«{address}» está reservada para {panelWords.name}. Elige otra.</span>
     )
   else if (checking)
@@ -858,7 +801,7 @@ function AddressStatus({
   else if (result)
     content = (
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-destructive">✕ Ya está en uso.</span>
+        {invalid ? null : <span className="text-destructive">✕ Ya está en uso.</span>}
         {result.suggestion ? (
           <Button
             type="button"
@@ -869,7 +812,7 @@ function AddressStatus({
           >
             Usar {result.suggestion}
           </Button>
-        ) : (
+        ) : invalid ? null : (
           <span className="text-muted-foreground">Prueba con otra.</span>
         )}
       </span>

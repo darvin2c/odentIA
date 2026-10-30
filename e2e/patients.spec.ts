@@ -339,8 +339,10 @@ test("paciente: ejecución de la sesión y cierre del tratamiento", async ({ own
   // Completar el tratamiento ocurre aquí, con la atención abierta.
   await page.getByRole("button", { name: "Completar", exact: true }).click()
   await expect(page.getByText(/Completado el/).first()).toBeVisible()
-  // Sin diagnóstico ni evolución la lista de cierre bloquea la firma.
-  await expect(page.getByRole("button", { name: "Finalizar y firmar", exact: true })).toBeDisabled()
+  // Sin evolución, «Finalizar y firmar» lleva a su bloque y la marca en su campo.
+  await page.getByRole("button", { name: "Finalizar y firmar", exact: true }).click()
+  await expect(page.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
+  await expect(page.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()
   const encounterId = page.url().split("/encounters/")[1]?.split(/[?#]/)[0] ?? ""
   const apiPath = `/api/patients/${ids.patientId}/encounters/${encounterId}`
   await call(page, "POST", `${apiPath}/diagnoses`, owner.org.slug, {

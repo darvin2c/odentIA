@@ -1,10 +1,23 @@
-import { Button, FieldLabel, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, ExpandableText, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { Button } from "@odentia/ui"
+import {
+  type ApiErrorShape,
+  EmptyState,
+  ErrorState,
+  ExpandableText,
+  LoadingState,
+  PageHeader,
+  PageShell,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { accountOrganizationsQuery } from "../../lib/account-organizations"
 import { API_URL } from "../../lib/auth-client"
 
@@ -58,6 +71,33 @@ type AccountCaseDetail = z.infer<typeof accountCaseDetail>
 const casesEnvelope = z.object({ data: z.array(accountCase) })
 const detailEnvelope = z.object({ data: accountCaseDetail })
 
+// Los mismos límites que `accessInput`, `messageInput` y `grantInput` de la API.
+const caseSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(3, "Cuenta qué pasa con al menos 3 caracteres.")
+    .max(500, "Escribe como mucho 500 caracteres."),
+  detail: z.string().max(500, "Escribe como mucho 500 caracteres."),
+})
+const replySchema = z.object({
+  body: z.string().trim().min(1, "Escribe tu respuesta.").max(4000, "Escribe como mucho 4000 caracteres."),
+})
+const DURATIONS = [
+  { value: "15", label: "15 minutos" },
+  { value: "30", label: "30 minutos" },
+  { value: "60", label: "1 hora" },
+]
+const grantSchema = z.object({ minutes: z.enum(["15", "30", "60"], { error: "Elige cuánto dura el acceso." }) })
+/** Igual que `SUPPORT_ATTACHMENT_MAX_BYTES` de la API. */
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+const attachmentSchema = z.object({
+  file: z
+    .instanceof(File, { error: "Elige un archivo." })
+    .refine((file) => file.size <= ATTACHMENT_MAX_BYTES, "El archivo no puede superar 10 MB"),
+})
+const ATTACHMENT_NOTICE_ID = "cuenta-adjunto-aviso"
+
 /**
  * Consentimiento de acceso diagnóstico con la organización ya acotada por
  * narrowing en el llamador: aquí `organizationId` es siempre un string.
@@ -76,7 +116,6 @@ function AccountGrantBox({
   const queryClient = useQueryClient()
   const organizations = useQuery(accountOrganizationsQuery)
   const role = organizations.data?.find((item) => item.organizationId === organizationId)?.role
-  const [minutes, setMinutes] = useState("30")
   const activeGrant = grants.find((item) => item.active) ?? null
 
   function invalidate() {
@@ -85,16 +124,23 @@ function AccountGrantBox({
   }
 
   const grant = useMutation({
-    mutationFn: () => {
-      const parsed = Number.parseInt(minutes, 10)
-      const value = Number.isInteger(parsed) && parsed >= 5 && parsed <= 60 ? parsed : 30
-      return apiFetch(`/api/account/support/cases/${caseId}/grants`, {
+    mutationFn: (minutes: number) =>
+      apiFetch(`/api/account/support/cases/${caseId}/grants`, {
         method: "POST",
-        body: JSON.stringify({ organizationId, minutes: value }),
-      })
-    },
+        body: JSON.stringify({ organizationId, minutes }),
+      }),
     onSuccess: invalidate,
   })
+  const grantForm = useAppForm({
+    defaultValues: { minutes: "30" },
+    validators: { onSubmit: grantSchema },
+    onSubmit: async ({ value }) => {
+      await grant.mutateAsync(Number(value.minutes))
+    },
+  })
+  const onGrant = useFormSubmit(grantForm)
+  const grantError = useFormSubmitError(grantForm)
+  const granting = useStore(grantForm.store, (state) => state.isSubmitting)
   const revoke = useMutation({
     mutationFn: (grantId: string) =>
       apiFetch(`/api/account/support/cases/${caseId}/grants/revoke`, {
@@ -124,47 +170,197 @@ function AccountGrantBox({
           >
             Revocar ahora
           </Button>
+          {revoke.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {submitErrorMessage(revoke.error)}
+            </p>
+          ) : null}
         </>
       ) : (
         <>
           <p className="text-muted-foreground">
             Solo quien es propietario o administra la clínica puede autorizarlo, máximo 1 hora.
           </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <FieldLabel htmlFor="cuenta-minutos">Duración</FieldLabel>
-            <Select
-              value={minutes}
-              items={{ 15: "15 minutos", 30: "30 minutos", 60: "1 hora" }}
-              onValueChange={(value) => setMinutes(value ?? "30")}
-            >
-              <SelectTrigger id="cuenta-minutos" className="w-44">
-                <SelectValue placeholder="30 minutos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="15">15 minutos</SelectItem>
-                <SelectItem value="30">30 minutos</SelectItem>
-                <SelectItem value="60">1 hora</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="min-h-11 sm:min-h-9"
-              disabled={grant.isPending}
-              onClick={() => grant.mutate()}
-            >
-              Autorizar acceso
-            </Button>
-          </div>
+          <form noValidate onSubmit={onGrant} className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <grantForm.AppField name="minutes">
+                {(field) => <field.SelectField id="cuenta-minutos" label="Duración" options={DURATIONS} className="w-44" />}
+              </grantForm.AppField>
+              <Button type="submit" variant="outline" size="sm" className="min-h-11 sm:min-h-9" disabled={granting}>
+                Autorizar acceso
+              </Button>
+            </div>
+            {grantError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {grantError}
+              </p>
+            ) : null}
+          </form>
         </>
       )}
-      {grant.isError || revoke.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          No se pudo cambiar el permiso. Solo un propietario o administrador puede autorizarlo.
-        </p>
-      ) : null}
     </div>
+  )
+}
+
+/**
+ * Lo que se hace con un caso abierto: responder y adjuntar; o reabrirlo si
+ * está resuelto. Va con `key` del caso: cada caso conserva su borrador de
+ * respuesta (`drafts`) y sus avisos no pasan a otro caso.
+ */
+function CaseComposer({
+  kase,
+  drafts,
+  onChanged,
+}: {
+  kase: AccountCaseDetail
+  drafts: Map<string, string>
+  onChanged: () => void
+}) {
+  const caseId = kase.id
+  const reopen = useMutation({
+    mutationFn: () => apiFetch(`/api/account/support/cases/${caseId}/reopen`, { method: "POST" }),
+    onSuccess: onChanged,
+  })
+
+  const sendReply = useMutation({
+    mutationFn: (body: string) =>
+      apiFetch(`/api/account/support/cases/${caseId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      }),
+    onSuccess: onChanged,
+  })
+  const replyForm = useAppForm({
+    defaultValues: { body: drafts.get(caseId) ?? "" },
+    validators: { onSubmit: replySchema },
+    onSubmit: async ({ value, formApi }) => {
+      await sendReply.mutateAsync(value.body.trim())
+      drafts.delete(caseId)
+      formApi.reset({ body: "" })
+    },
+  })
+  const onReply = useFormSubmit(replyForm)
+  const replyError = useFormSubmitError(replyForm)
+  const replying = useStore(replyForm.store, (state) => state.isSubmitting)
+
+  const fileRef = useRef<HTMLInputElement>(null)
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const body = new FormData()
+      body.append("file", file)
+      // Sin `apiFetch`: el cuerpo es multipart. El rechazo se lee igual (tamaño, tipo, caso resuelto).
+      const response = await fetch(`${API_URL}/api/account/support/cases/${caseId}/attachments`, {
+        method: "POST",
+        credentials: "include",
+        body,
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: ApiErrorShape } | null
+        throw new ApiError(response.status, payload?.error ?? {})
+      }
+    },
+    onSuccess: onChanged,
+  })
+  const attachForm = useAppForm({
+    defaultValues: { file: null as File | null },
+    validators: { onSubmit: attachmentSchema },
+    onSubmit: async ({ value, formApi }) => {
+      if (!value.file) return
+      await upload.mutateAsync(value.file)
+      formApi.reset()
+    },
+  })
+  const onAttach = useFormSubmit(attachForm)
+  const attachError = useFormSubmitError(attachForm)
+  const uploading = useStore(attachForm.store, (state) => state.isSubmitting)
+
+  if (kase.status === "resuelto") {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 self-start sm:min-h-9"
+          disabled={reopen.isPending}
+          onClick={() => reopen.mutate()}
+        >
+          Reabrir el caso
+        </Button>
+        {reopen.isError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {submitErrorMessage(reopen.error)}
+          </p>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <>
+      <form noValidate onSubmit={onReply} className="flex flex-col gap-2">
+        <replyForm.AppField name="body" listeners={{ onChange: ({ value }) => drafts.set(caseId, value) }}>
+          {(field) => <field.TextareaField id="cuenta-respuesta" label="Tu respuesta" rows={2} maxLength={4000} />}
+        </replyForm.AppField>
+        <Button type="submit" className="min-h-11 self-start sm:min-h-9" disabled={replying}>
+          Enviar
+        </Button>
+        {replyError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {replyError}
+          </p>
+        ) : null}
+      </form>
+      <form noValidate onSubmit={onAttach} className="flex flex-col gap-1.5">
+        <attachForm.AppField name="file">
+          {(field) => (
+            <field.Control id="cuenta-adjunto" label="Adjuntar archivo al caso" hideLabel>
+              {(control) => (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    ref={fileRef}
+                    id={control.id}
+                    name={control.name}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,application/pdf"
+                    className="hidden"
+                    onChange={(event) => {
+                      const input = event.currentTarget
+                      const file = input.files?.[0]
+                      input.value = ""
+                      if (!file) return
+                      // Elegir el archivo es enviarlo: se valida y sube sin otro botón.
+                      field.handleChange(file)
+                      input.form?.requestSubmit()
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 sm:min-h-9"
+                    disabled={uploading}
+                    aria-busy={uploading}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={
+                      [control.describedBy, attachError ? ATTACHMENT_NOTICE_ID : null].filter(Boolean).join(" ") ||
+                      undefined
+                    }
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    {uploading ? "Subiendo…" : "Adjuntar (JPG, PNG, WebP o PDF, máx. 10 MB)"}
+                  </Button>
+                </div>
+              )}
+            </field.Control>
+          )}
+        </attachForm.AppField>
+        {attachError ? (
+          <p id={ATTACHMENT_NOTICE_ID} role="alert" className="text-sm text-destructive">
+            {attachError}
+          </p>
+        ) : null}
+      </form>
+    </>
   )
 }
 
@@ -172,9 +368,8 @@ function AccountSupportPage() {
   const queryClient = useQueryClient()
   const linkedCase = Route.useSearch().caso ?? null
   const [selectedId, setSelectedId] = useState<string | null>(linkedCase)
-  const [question, setQuestion] = useState("")
-  const [detailText, setDetailText] = useState("")
-  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
+  /** Borradores de respuesta por caso: sobreviven a volver a la lista y abrir otro caso. */
+  const [replyDrafts] = useState(() => new Map<string, string>())
 
   const cases = useQuery({
     queryKey: ["account-support-cases"],
@@ -193,48 +388,24 @@ function AccountSupportPage() {
   }
 
   const create = useMutation({
-    mutationFn: () =>
-      apiFetch("/api/account/support/cases", {
-        method: "POST",
-        body: JSON.stringify({ question: question.trim(), detail: detailText.trim() === "" ? undefined : detailText.trim() }),
-      }),
-    onSuccess: () => {
-      setQuestion("")
-      setDetailText("")
-      invalidate()
-    },
-  })
-  const sendReply = useMutation({
-    mutationFn: (input: { id: string; body: string }) =>
-      apiFetch(`/api/account/support/cases/${input.id}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ body: input.body }),
-      }),
-    onSuccess: (_data, input) => {
-      setReplyDrafts((current) => ({ ...current, [input.id]: "" }))
-      invalidate()
-    },
-  })
-  const reopen = useMutation({
-    mutationFn: () => apiFetch(`/api/account/support/cases/${selectedId}/reopen`, { method: "POST" }),
+    mutationFn: (body: { question: string; detail?: string }) =>
+      apiFetch("/api/account/support/cases", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: invalidate,
   })
+  const createForm = useAppForm({
+    defaultValues: { question: "", detail: "" },
+    validators: { onSubmit: caseSchema },
+    onSubmit: async ({ value, formApi }) => {
+      const detailText = value.detail.trim()
+      await create.mutateAsync({ question: value.question.trim(), detail: detailText === "" ? undefined : detailText })
+      formApi.reset()
+    },
+  })
+  const onCreate = useFormSubmit(createForm)
+  const createError = useFormSubmitError(createForm)
+  const creating = useStore(createForm.store, (state) => state.isSubmitting)
   const markSeen = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/account/support/cases/${id}/seen`, { method: "POST" }),
-    onSuccess: invalidate,
-  })
-  const fileRef = useRef<HTMLInputElement>(null)
-  const upload = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData()
-      form.append("file", file)
-      const response = await fetch(`${API_URL}/api/account/support/cases/${selectedId}/attachments`, {
-        method: "POST",
-        credentials: "include",
-        body: form,
-      })
-      if (!response.ok) throw new Error("No se pudo subir el archivo.")
-    },
     onSuccess: invalidate,
   })
 
@@ -268,42 +439,37 @@ function AccountSupportPage() {
             <p className="text-sm text-muted-foreground">
               Cuéntalo aquí aunque no tengas organización abierta. Solo te pedimos lo necesario para ayudarte.
             </p>
-            <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor="cuenta-pregunta">
-              Qué pasa
-              <textarea
-                id="cuenta-pregunta"
-                rows={3}
-                maxLength={500}
-                className="min-h-11 rounded-md border bg-card px-2 py-1.5 font-normal"
-                value={question}
-                onChange={(event) => setQuestion(event.target.value)}
-                placeholder="Describe tu problema para entrar…"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor="cuenta-detalle">
-              Detalle (opcional)
-              <input
-                id="cuenta-detalle"
-                maxLength={500}
-                className="min-h-11 rounded-md border bg-card px-2 font-normal"
-                value={detailText}
-                onChange={(event) => setDetailText(event.target.value)}
-                placeholder="Código de error, correo, clínica…"
-              />
-            </label>
-            <Button
-              type="button"
-              className="min-h-11 self-start sm:min-h-9"
-              disabled={question.trim().length < 3 || create.isPending}
-              onClick={() => create.mutate()}
-            >
-              Enviar a soporte
-            </Button>
-            {create.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                No se pudo enviar. Vuelve a intentarlo.
-              </p>
-            ) : null}
+            <form noValidate onSubmit={onCreate} className="flex flex-col gap-2">
+              <createForm.AppField name="question">
+                {(field) => (
+                  <field.TextareaField
+                    id="cuenta-pregunta"
+                    label="Qué pasa"
+                    rows={3}
+                    maxLength={500}
+                    placeholder="Describe tu problema para entrar…"
+                  />
+                )}
+              </createForm.AppField>
+              <createForm.AppField name="detail">
+                {(field) => (
+                  <field.TextField
+                    id="cuenta-detalle"
+                    label="Detalle (opcional)"
+                    maxLength={500}
+                    placeholder="Código de error, correo, clínica…"
+                  />
+                )}
+              </createForm.AppField>
+              <Button type="submit" className="min-h-11 self-start sm:min-h-9" disabled={creating}>
+                Enviar a soporte
+              </Button>
+              {createError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {createError}
+                </p>
+              ) : null}
+            </form>
           </section>
 
           <section aria-label="Tus casos" className="flex flex-col gap-2">
@@ -407,80 +573,7 @@ function AccountSupportPage() {
                 </ul>
               ) : null}
 
-              {kase.status === "resuelto" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="min-h-11 self-start sm:min-h-9"
-                  disabled={reopen.isPending}
-                  onClick={() => reopen.mutate()}
-                >
-                  Reabrir el caso
-                </Button>
-              ) : (
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault()
-                    const body = (replyDrafts[kase.id] ?? "").trim()
-                    if (body.length > 0 && !sendReply.isPending) sendReply.mutate({ id: kase.id, body })
-                  }}
-                  className="flex flex-col gap-2"
-                >
-                  <label className="flex flex-col gap-1 text-sm font-semibold" htmlFor="cuenta-respuesta">
-                    Tu respuesta
-                    <textarea
-                      id="cuenta-respuesta"
-                      rows={2}
-                      maxLength={4000}
-                      className="min-h-11 rounded-md border bg-card px-2 py-1.5 font-normal"
-                      value={replyDrafts[kase.id] ?? ""}
-                      onChange={(event) => {
-                        const id = kase.id
-                        setReplyDrafts((current) => ({ ...current, [id]: event.target.value }))
-                      }}
-                    />
-                  </label>
-                  <Button
-                    type="submit"
-                    className="min-h-11 self-start sm:min-h-9"
-                    disabled={(replyDrafts[kase.id] ?? "").trim().length === 0 || sendReply.isPending}
-                  >
-                    Enviar
-                  </Button>
-                </form>
-              )}
-              {kase.status === "resuelto" ? null : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp,application/pdf"
-                    className="hidden"
-                    aria-label="Adjuntar archivo al caso"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0]
-                      if (file) upload.mutate(file)
-                      event.target.value = ""
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="min-h-11 sm:min-h-9"
-                    disabled={upload.isPending}
-                    aria-busy={upload.isPending}
-                    onClick={() => fileRef.current?.click()}
-                  >
-                    {upload.isPending ? "Subiendo…" : "Adjuntar (JPG, PNG, WebP o PDF, máx. 10 MB)"}
-                  </Button>
-                </div>
-              )}
-              {upload.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  No se pudo subir el archivo.
-                </p>
-              ) : null}
+              <CaseComposer key={kase.id} kase={kase} drafts={replyDrafts} onChanged={invalidate} />
 
               {kase.organizationId ? (
                 <AccountGrantBox

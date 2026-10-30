@@ -1,34 +1,46 @@
-import { Button, cn, ScrollArea, Spinner, Textarea } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, EmptyState, internationalText, LoadingState } from "@odentia/ui-patterns"
+import { Button, cn, ScrollArea, Spinner } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  DetailDrawer,
+  EmptyState,
+  internationalText,
+  LoadingState,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, X } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
+import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { timeAgo, useCan, type OpportunityListItem, type TaskItem } from "../../lib/crm"
+import { type OpportunityListItem, type TaskItem, timeAgo, useCan } from "../../lib/crm"
 import {
   activityKindLabel,
+  type CrmActivityItem,
+  type CrmNextAppointment,
+  createCrmNote,
   crmActivityQueryKey,
   crmContextQueryKey,
-  createCrmNote,
   fetchCrmActivityPage,
   fetchCrmContext,
   messagePermissionsSaid,
   nextAppointmentSaid,
-  type CrmActivityItem,
-  type CrmNextAppointment,
 } from "../../lib/crm-workspace"
-import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import { activeOrgLocale } from "../../lib/locale"
-import { useReceptionName, withReceptionName } from "../../lib/agent-names"
-import { usePerson } from "../../lib/people"
+import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import type { PatientFull } from "../../lib/patients"
-import { productUi } from "../../product/product-ui"
+import { usePerson } from "../../lib/people"
 import { amountFromCents } from "../../lib/workspace"
+import { productUi } from "../../product/product-ui"
+import { PersonMemoryDrawer } from "../agent/person-memory"
 import { CitasPanel } from "../patient/citas-panel"
 import { PersonData } from "../person/person-data"
-import { PersonMemoryDrawer } from "../agent/person-memory"
 import { dueWords, isOverdue } from "./crm-helpers"
 import { OpportunityDrawer } from "./opportunity-drawer"
 import { OpportunityPanel } from "./opportunity-panel"
@@ -461,7 +473,8 @@ function VentasSection({ contactId, conversationId }: { contactId: string; conve
   const completion = useCompleteTask(refresh)
   const opps = oppsQuery.data?.pages.flatMap((page) => page.data) ?? []
   const tasks: TaskItem[] = canReadTasks ? (context.data?.data.tasks ?? []) : []
-  const error = taskMutation.error instanceof ApiError ? (taskMutation.error.shape.message ?? "No se pudo actualizar la tarea") : completion.error
+  // Las acciones sueltas de la tarea dicen su fallo arriba, también sin red.
+  const error = taskMutation.error ? submitErrorMessage(taskMutation.error) : completion.error
   return (
     <>
       {error ? (
@@ -586,13 +599,40 @@ function VentasSection({ contactId, conversationId }: { contactId: string; conve
   )
 }
 
+/** El mismo límite que `POST /api/crm/contacts/:id/notes`. */
+const NOTE_MAX_LENGTH = 2000
+
+const noteSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, "Escribe la nota.")
+    .max(NOTE_MAX_LENGTH, `La nota admite hasta ${NOTE_MAX_LENGTH} caracteres.`),
+})
+
 /** Nota operativa y bitácora: lo demás que pasó con la persona. Lo que hizo el agente ya está en el hilo. */
 function NotasSection({ contactId, conversationId, onDirtyChange }: { contactId: string; conversationId: string; onDirtyChange: (dirty: boolean) => void }) {
   const can = useCan()
   const queryClient = useQueryClient()
-  const [note, setNote] = useState("")
   const [noteOk, setNoteOk] = useState(false)
-  const dirty = note.trim().length > 0
+  // El error de la nota lo dice su campo (o, si no es del campo, junto al botón).
+  const noteMutation = useMutation({
+    mutationFn: (body: string) => createCrmNote(contactId, { body, conversationId }),
+  })
+  const noteForm = useAppForm({
+    defaultValues: { body: "" },
+    validators: { onSubmit: noteSchema },
+    onSubmit: async ({ value }) => {
+      await noteMutation.mutateAsync(value.body.trim())
+      noteForm.reset({ body: "" })
+      setNoteOk(true)
+      void queryClient.invalidateQueries({ queryKey: ["crm-activity", contactId] })
+    },
+  })
+  const submitNote = useFormSubmit(noteForm)
+  const noteError = useFormSubmitError(noteForm)
+  const notePending = useStore(noteForm.store, (state) => state.isSubmitting)
+  const dirty = useStore(noteForm.store, (state) => state.values.body.trim().length > 0)
   useEffect(() => {
     onDirtyChange(dirty)
   }, [dirty, onDirtyChange])
@@ -603,56 +643,50 @@ function NotasSection({ contactId, conversationId, onDirtyChange }: { contactId:
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.nextCursor,
   })
-  const noteMutation = useMutation({
-    mutationFn: (body: string) => createCrmNote(contactId, { body, conversationId }),
-    onSuccess: () => {
-      setNote("")
-      setNoteOk(true)
-      void queryClient.invalidateQueries({ queryKey: ["crm-activity", contactId] })
-    },
-  })
   const activity = activityQuery.data?.pages.flatMap((page) => page.data) ?? []
   return (
     <>
       {can("crm.write") ? (
-        <div className="flex flex-col gap-2">
-          <Textarea
-            aria-label="Nota operativa"
-            rows={2}
-            placeholder="Registra un dato operativo del caso…"
-            value={note}
-            onChange={(e) => {
-              setNote(e.target.value)
-              setNoteOk(false)
-            }}
-          />
+        <form noValidate onSubmit={submitNote} className="flex flex-col gap-2">
+          <noteForm.AppField name="body" listeners={{ onChange: () => setNoteOk(false) }}>
+            {(field) => (
+              <field.TextareaField
+                label="Nota operativa"
+                hideLabel
+                rows={2}
+                maxLength={NOTE_MAX_LENGTH}
+                placeholder="Registra un dato operativo del caso…"
+              />
+            )}
+          </noteForm.AppField>
           {noteOk ? (
             <p className="text-xs text-success" role="status">
               Nota guardada en la bitácora.
             </p>
           ) : null}
-          {noteMutation.error instanceof ApiError ? (
+          {noteError ? (
             <p className="text-sm text-destructive" role="alert">
-              {noteMutation.error.shape.message ?? "No se pudo guardar la nota"}
+              {noteError}
             </p>
           ) : null}
-          {dirty && !noteMutation.isPending ? (
+          {dirty && !notePending ? (
             <p className="text-xs text-warning" role="status">
               Borrador sin guardar: cambiar de hilo o salir pedirá confirmación. Guárdalo o descártalo.
             </p>
           ) : null}
           <span className="flex flex-wrap gap-2">
-            <Button size="sm" className="min-h-11 w-fit sm:min-h-8" disabled={!dirty || noteMutation.isPending} onClick={() => noteMutation.mutate(note.trim())}>
-              {noteMutation.isPending ? <Spinner className="size-4" aria-hidden /> : null}
+            <Button type="submit" size="sm" className="min-h-11 w-fit sm:min-h-8" disabled={notePending}>
+              {notePending ? <Spinner className="size-4" aria-hidden /> : null}
               Guardar nota
             </Button>
-            {dirty && !noteMutation.isPending ? (
+            {dirty && !notePending ? (
               <Button
+                type="button"
                 variant="ghost"
                 size="sm"
                 className="min-h-11 w-fit sm:min-h-8"
                 onClick={() => {
-                  setNote("")
+                  noteForm.reset({ body: "" })
                   setNoteOk(false)
                 }}
               >
@@ -660,7 +694,7 @@ function NotasSection({ contactId, conversationId, onDirtyChange }: { contactId:
               </Button>
             ) : null}
           </span>
-        </div>
+        </form>
       ) : null}
       {activityQuery.isLoading && activity.length === 0 ? (
         <p className="text-xs text-muted-foreground">Cargando actividad…</p>

@@ -1,13 +1,13 @@
 import { Badge, Button } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, internationalText, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { Switch } from "@odentia/ui/components/switch"
+import { ConfirmDialog, EmptyState, ErrorState, internationalText, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CalendarCheck, ChevronLeft, FileDown } from "lucide-react"
 import { type ReactNode, useId, useState } from "react"
 import { AppointmentBlock } from "../../components/public/appointment-block"
-import { type BookingPick, ChooseAppointment } from "../../components/public/choose-appointment"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
+import { type BookingPick, ChooseAppointment } from "../../components/public/choose-appointment"
 import { LinkConsentStep, LinkQuestionnaireStep } from "../../components/public/link-steps"
 import { PersonalDataForm } from "../../components/public/personal-data-form"
 import { capital, longDay, timeLabel } from "../../components/public/week-slots"
@@ -18,9 +18,9 @@ import {
   cancelBooking,
   chooseLinkMessages,
   confirmBooking,
-  fetchBookingLink,
   downloadLinkCalendar,
   downloadLinkPaper,
+  fetchBookingLink,
   type MessageChoice,
   type PersonalLinkMessages,
   type PersonalLinkView,
@@ -576,6 +576,8 @@ function MessagesStep({
     },
   })
   const error = problemOf(save.error, "No pudimos guardar lo que elegiste.")
+  // El error se dice donde se tocó: en su interruptor, en «Volver a recibir» o en la confirmación de «ninguno».
+  const failed = save.isError ? save.variables : undefined
   return (
     <div className="flex flex-col gap-4">
       {current.nothing ? (
@@ -590,11 +592,18 @@ function MessagesStep({
           >
             {save.isPending ? "Guardando…" : "Volver a recibir mensajes"}
           </Button>
+          {failed?.tipo === "ninguno" && failed.recibir ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
         </div>
       ) : null}
       <ul className="flex flex-col divide-y rounded-2xl border bg-card">
         {MESSAGE_SWITCHES.map((item) => {
           const labelId = `${uid}-${item.purpose}`
+          const errorId = `${labelId}-error`
+          const itemError = failed?.tipo === item.purpose ? error : null
           const on = current[item.purpose]
           return (
             <li key={item.purpose} className="flex items-start gap-3 p-4">
@@ -603,6 +612,11 @@ function MessagesStep({
                   {item.title}
                 </p>
                 <p className="text-sm text-muted-foreground">{item.detail(clinicName)}</p>
+                {itemError ? (
+                  <p id={errorId} role="alert" className="text-sm text-destructive">
+                    {itemError}
+                  </p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-sm text-muted-foreground" aria-hidden>
@@ -610,6 +624,8 @@ function MessagesStep({
                 </span>
                 <Switch
                   aria-labelledby={labelId}
+                  aria-invalid={itemError ? true : undefined}
+                  aria-describedby={itemError ? errorId : undefined}
                   checked={on}
                   disabled={save.isPending}
                   onCheckedChange={(recibir: boolean) => save.mutate({ tipo: item.purpose, recibir })}
@@ -629,11 +645,6 @@ function MessagesStep({
           <span className="shrink-0 text-sm font-medium">{current.nothing ? "No" : "Siempre"}</span>
         </li>
       </ul>
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
       {!current.nothing ? (
         <Button
           type="button"
@@ -652,6 +663,7 @@ function MessagesStep({
         description="Tampoco te llegarán los avisos de tus citas y papeles. Si tu cita cambia, te llamaremos."
         confirmLabel="Sí, no quiero ninguno"
         pending={save.isPending}
+        error={failed?.tipo === "ninguno" && !failed.recibir ? error : null}
         onConfirm={() => save.mutate({ tipo: "ninguno", recibir: false })}
       />
     </div>

@@ -1,4 +1,4 @@
-import { validation } from "./errors.js"
+import { invalidField } from "./errors.js"
 
 /** Contenido real admitido en adjuntos: imágenes fijas y PDF, nada ejecutable ni texto con marcado. */
 export type SniffedFileKind = "jpeg" | "png" | "webp" | "pdf"
@@ -64,7 +64,8 @@ const SIGNATURES: {
 export function sniffFileContent(bytes: Uint8Array, claimedMime: string): SniffedFile {
   const found = SIGNATURES.find((signature) => signature.match(bytes))
   if (!found || found.mimeType !== claimedMime) {
-    throw validation("El archivo no es válido: se admite JPG, PNG, WebP o PDF reales")
+    // `file`: el nombre del campo multipart en todas las rutas que suben adjuntos.
+    throw invalidField("file", "El archivo no es válido: se admite JPG, PNG, WebP o PDF reales")
   }
   return { kind: found.kind, mimeType: found.mimeType, ext: found.ext }
 }

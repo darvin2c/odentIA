@@ -1,19 +1,16 @@
+import { FieldError, toast } from "@odentia/ui"
 import {
-  Field,
-  FieldLabel,
-  RadioGroup,
-  RadioGroupItem,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { ErrorState, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+  ErrorState,
+  FormDrawer,
+  LoadingState,
+  useAppForm,
+  useFieldControl,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import {
   CHANNEL_WORDS,
@@ -25,6 +22,28 @@ import {
 const RELATION_WORDS: Record<string, string> = {
   paciente: "la propia persona",
   representante_legal: "representante legal",
+}
+
+/** Los mismos límites que `POST /api/patients/:id/health-documents/send`. */
+const sendSchema = z.object({
+  recipientId: z.string(),
+  connectionId: z.string().min(1, { error: "Elige por dónde enviarlo." }),
+  message: z.string().max(500, { error: "El mensaje admite hasta 500 caracteres." }),
+})
+
+type SendValues = z.infer<typeof sendSchema>
+
+const EMPTY: SendValues = { recipientId: "", connectionId: "", message: "" }
+
+/** El canal único, dicho en una línea, con el error del servidor debajo si lo hay. */
+function SingleChannel({ text }: { text: string }) {
+  const { control, errors, errorId } = useFieldControl({ hasDescription: false })
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-sm">{text}</p>
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
+    </div>
+  )
 }
 
 /**
@@ -46,60 +65,69 @@ export function HealthDocumentSendDrawer({
   documentId: string
   onClose: () => void
 }): React.JSX.Element {
-  const ids = useId()
-  const [recipientId, setRecipientId] = useState<string | undefined>(undefined)
-  const [connectionId, setConnectionId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // A quién se le piden las opciones: lo cambia quien envía; sin elegir, el que propone el servidor.
+  const [asked, setAsked] = useState<string | undefined>(undefined)
   // Una clave por apertura: un doble clic o un reintento no lo envía dos veces.
   const [requestId] = useState(() => crypto.randomUUID())
   const options = useQuery({
-    queryKey: ["health-document-options", patientId, documentType, documentId, recipientId ?? ""],
-    queryFn: () =>
-      fetchHealthDocumentOptions(patientId, { documentType, documentId, recipientContactId: recipientId }),
+    queryKey: ["health-document-options", patientId, documentType, documentId, asked ?? ""],
+    queryFn: () => fetchHealthDocumentOptions(patientId, { documentType, documentId, recipientContactId: asked }),
     enabled: open,
   })
   const data = options.data?.data
   const usable = (data?.channels ?? []).filter((channel) => channel.usable)
-  const chosen = usable.find((c) => c.connectionId === connectionId) ?? data?.proposed ?? null
   const send = useMutation({
-    mutationFn: () =>
+    mutationFn: (value: SendValues) =>
       sendHealthDocument(patientId, {
         documentType,
         documentId,
-        recipientContactId: data?.recipient?.contactId ?? null,
-        connectionId: chosen!.connectionId,
-        message: (message ?? data?.message ?? "").trim() || null,
+        recipientContactId: value.recipientId || data?.recipient?.contactId || null,
+        connectionId: value.connectionId,
+        message: value.message.trim() || null,
         requestId,
       }),
-    onSuccess: (result) => {
+  })
+  const form = useAppForm({
+    defaultValues: EMPTY,
+    validators: { onSubmit: sendSchema },
+    onSubmit: async ({ value }) => {
+      const result = await send.mutateAsync(value)
       toast.success(
         `Va por ${CHANNEL_WORDS[result.data.channel] ?? result.data.channel} a ${result.data.recipientName}; queda en su conversación.`,
       )
       onClose()
     },
-    onError: (e) =>
-      setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo enviar") : "No se pudo enviar"),
   })
+  const surface = useFormSurface(form, { fieldMap: { recipientContactId: "recipientId" } })
+
+  // Lo que propone el servidor entra una vez por destinatario: un refresco no pisa lo escrito.
+  const seededFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!data) return
+    const recipientId = data.recipient?.contactId ?? ""
+    if (seededFor.current === recipientId) return
+    seededFor.current = recipientId
+    form.reset(
+      { recipientId, connectionId: data.proposed?.connectionId ?? "", message: data.message },
+      { keepDefaultValues: true },
+    )
+  }, [data, form])
+
+  const connectionId = useStore(form.store, (state) => state.values.connectionId)
+  const chosen = usable.find((c) => c.connectionId === connectionId) ?? data?.proposed ?? null
   const first = data?.recipient?.displayName.trim().split(/\s+/)[0]
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        if (!send.isPending) onClose()
+        if (!surface.isSubmitting) onClose()
       }}
       title={first ? `Enviar a ${first}` : "Enviar"}
       description={data?.document.label}
-      isSubmitting={send.isPending}
-      error={error}
       submitLabel="Enviar"
-      submitDisabled={!chosen || !data?.recipient}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!chosen || !data?.recipient) return
-        setError(null)
-        send.mutate()
-      }}
+      // Sin opciones cargadas o sin canal no hay nada que enviar; el motivo está a la vista.
+      submitDisabled={!data || Boolean(data.printOnly)}
     >
       {options.isPending ? (
         <LoadingState message="Buscando por dónde enviarlo…" />
@@ -115,31 +143,22 @@ export function HealthDocumentSendDrawer({
       ) : data ? (
         <div className="flex flex-col gap-4">
           {data.recipients.length > 1 ? (
-            <Field>
-              <FieldLabel htmlFor={`${ids}-to`}>A quién</FieldLabel>
-              <Select
-                items={Object.fromEntries(
-                  data.recipients.map((r) => [r.contactId, `${r.displayName} · ${RELATION_WORDS[r.relation] ?? r.relation}`]),
-                )}
-                value={data.recipient?.contactId ?? ""}
-                onValueChange={(value) => {
-                  setRecipientId(value ?? undefined)
-                  setConnectionId(null)
-                  setMessage(null)
-                }}
-              >
-                <SelectTrigger id={`${ids}-to`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {data.recipients.map((r) => (
-                    <SelectItem key={r.contactId} value={r.contactId}>
-                      {r.displayName} · {RELATION_WORDS[r.relation] ?? r.relation}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+            <form.AppField
+              name="recipientId"
+              listeners={{
+                onChange: ({ value }) => setAsked(value || undefined),
+              }}
+            >
+              {(field) => (
+                <field.SelectField
+                  label="A quién"
+                  options={data.recipients.map((r) => ({
+                    value: r.contactId,
+                    label: `${r.displayName} · ${RELATION_WORDS[r.relation] ?? r.relation}`,
+                  }))}
+                />
+              )}
+            </form.AppField>
           ) : data.recipient ? (
             <p className="text-sm">
               Para <strong>{data.recipient.displayName}</strong> ·{" "}
@@ -155,26 +174,23 @@ export function HealthDocumentSendDrawer({
             </p>
           ) : (
             <>
-              {usable.length > 1 ? (
-                <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-                  <legend className="mb-1 text-sm font-medium">Por dónde</legend>
-                  <RadioGroup
-                    value={chosen?.connectionId ?? ""}
-                    onValueChange={(value) => setConnectionId(String(value))}
-                  >
-                    {usable.map((channel) => (
-                      <label key={channel.connectionId} className="flex items-center gap-2 text-sm">
-                        <RadioGroupItem value={channel.connectionId} />
-                        {CHANNEL_WORDS[channel.channel] ?? channel.channel} · {channel.connectionName}
-                      </label>
-                    ))}
-                  </RadioGroup>
-                </fieldset>
-              ) : chosen ? (
-                <p className="text-sm">
-                  Por {CHANNEL_WORDS[chosen.channel] ?? chosen.channel} · {chosen.connectionName}
-                </p>
-              ) : null}
+              <form.AppField name="connectionId">
+                {(field) =>
+                  usable.length > 1 ? (
+                    <field.RadioGroupField
+                      legend="Por dónde"
+                      options={usable.map((channel) => ({
+                        value: channel.connectionId,
+                        label: `${CHANNEL_WORDS[channel.channel] ?? channel.channel} · ${channel.connectionName}`,
+                      }))}
+                    />
+                  ) : chosen ? (
+                    <SingleChannel
+                      text={`Por ${CHANNEL_WORDS[chosen.channel] ?? chosen.channel} · ${chosen.connectionName}`}
+                    />
+                  ) : null
+                }
+              </form.AppField>
               {(data.channels ?? [])
                 .filter((channel) => !channel.usable && channel.reason)
                 .map((channel) => (
@@ -182,16 +198,9 @@ export function HealthDocumentSendDrawer({
                     {CHANNEL_WORDS[channel.channel] ?? channel.channel}: {channel.reason}
                   </p>
                 ))}
-              <Field>
-                <FieldLabel htmlFor={`${ids}-message`}>Mensaje</FieldLabel>
-                <Textarea
-                  id={`${ids}-message`}
-                  rows={3}
-                  maxLength={500}
-                  value={message ?? data.message}
-                  onChange={(event) => setMessage(event.target.value)}
-                />
-              </Field>
+              <form.AppField name="message">
+                {(field) => <field.TextareaField label="Mensaje" rows={3} maxLength={500} />}
+              </form.AppField>
             </>
           )}
         </div>

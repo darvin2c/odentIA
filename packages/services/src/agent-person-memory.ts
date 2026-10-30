@@ -6,7 +6,7 @@ import { channelConnection, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNotNull, lt, ne, or } from "drizzle-orm"
 import { requireContact } from "./contacts.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { getOrgLocale, type OrgLocale } from "./locale.js"
 import { listPatientsByContact } from "./patients.js"
@@ -84,15 +84,12 @@ export interface PersonMemory {
 }
 
 function cleanFact(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) throw validation("Escribe el dato")
+  if (typeof value !== "string" || !value.trim()) throw invalidField("text", "Escribe el dato")
   const text = value.replace(/[ \t\r\n]+/g, " ").trim()
-  if (text.length > PERSON_FACT_CHARS) throw validation(`El dato admite hasta ${PERSON_FACT_CHARS} caracteres`)
+  if (text.length > PERSON_FACT_CHARS) throw invalidField("text", `El dato admite hasta ${PERSON_FACT_CHARS} caracteres`)
   if (looksClinical(text)) {
-    throw new ServiceError(
-      "PERSON_FACT_CLINICAL",
-      400,
-      "Eso parece información de salud: no se guarda en la memoria del agente. Su lugar es la historia clínica.",
-    )
+    const message = "Eso parece información de salud: no se guarda en la memoria del agente. Su lugar es la historia clínica."
+    throw new ServiceError("PERSON_FACT_CLINICAL", 400, message, { text: message })
   }
   return text
 }
@@ -162,7 +159,8 @@ export async function addPersonFact(
     if (existing) return existing
   }
   if (!replaced && active.length >= PERSON_FACT_LIMIT) {
-    throw new ServiceError("PERSON_FACT_LIMIT", 409, `La memoria guarda hasta ${PERSON_FACT_LIMIT} datos por persona; quita o reemplaza uno`)
+    const message = `La memoria guarda hasta ${PERSON_FACT_LIMIT} datos por persona; quita o reemplaza uno`
+    throw new ServiceError("PERSON_FACT_LIMIT", 409, message, { text: message })
   }
   let channel: string | null = null
   if (input.conversationId) {

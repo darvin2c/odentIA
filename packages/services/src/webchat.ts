@@ -21,7 +21,7 @@ import { getAgentConfig } from "./agentConfig.js"
 import { findClinicName } from "./automation-routing.js"
 import { createConnection, setConnectionStatus } from "./connections.js"
 import { updateContact } from "./contacts.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgCountry } from "./locale.js"
@@ -710,11 +710,13 @@ async function saveVisitorContact(
   if (known?.known) throw new ServiceError("WEBCHAT_CONTACT_KNOWN", 409, "Ya tenemos cómo avisarte.")
   const typedPhone = input.whatsapp?.trim() || null
   const typedEmail = input.email?.trim() || null
-  if (!typedPhone && !typedEmail) throw validation("Escribe tu WhatsApp o tu correo.")
+  // Cada error a su dato (`whatsapp`/`email` en el cuerpo); sin ninguno, el de los dos.
+  if (!typedPhone && !typedEmail) throw validation("Escribe tu WhatsApp o tu correo.", { whatsapp: "Escribe tu WhatsApp o tu correo." })
   const phone = typedPhone ? normalizePhone(typedPhone, (await findOrgCountry(tx, orgId)) ?? undefined) : null
-  if (typedPhone && !phone) throw validation("Escribe tu WhatsApp con el código de tu país, por ejemplo +51 987 654 321.")
+  if (typedPhone && !phone)
+    throw invalidField("whatsapp", "Escribe tu WhatsApp con el código de tu país, por ejemplo +51 987 654 321.")
   const email = typedEmail ? emailSchema.safeParse(typedEmail) : null
-  if (email && !email.success) throw validation("Revisa tu correo: falta algo, como la @.")
+  if (email && !email.success) throw invalidField("email", "Revisa tu correo: falta algo, como la @.")
   await updateContact(
     tx,
     orgId,
@@ -725,11 +727,9 @@ async function saveVisitorContact(
   // Lo que deja tiene que servir para avisarle: un número que ya es de otra persona no se usa, y se le pide otro.
   const routes = await webchatReplyRoutes(tx, orgId, conv.contactId)
   if (!routes.whatsapp && !routes.correo) {
-    throw validation(
-      typedEmail
-        ? "No podemos avisarte por ahí. Revisa tu correo o déjanos tu WhatsApp."
-        : "No podemos avisarte por ese WhatsApp. Déjanos otro número o tu correo.",
-    )
+    throw typedEmail
+      ? invalidField("email", "No podemos avisarte por ahí. Revisa tu correo o déjanos tu WhatsApp.")
+      : invalidField("whatsapp", "No podemos avisarte por ese WhatsApp. Déjanos otro número o tu correo.")
   }
   await tx.insert(auditEvent).values({
     organizationId: orgId,

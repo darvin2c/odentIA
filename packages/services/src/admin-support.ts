@@ -17,7 +17,7 @@ import { saasActionReview } from "@odentia/db/schema/saas-billing"
 import { and, asc, count, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { normalizeForSearch } from "./knowledge.js"
 import { enqueueSupportInboxNotice } from "./support-notices.js"
 
@@ -437,8 +437,8 @@ export async function replyToMySupportCase(
   body: unknown,
 ): Promise<SupportMessageItem> {
   const text = typeof body === "string" ? body.trim() : ""
-  if (text.length < 1) throw validation("Escribe tu respuesta")
-  if (text.length > 4000) throw validation("La respuesta no puede superar 4000 caracteres")
+  if (text.length < 1) throw invalidField("body", "Escribe tu respuesta.")
+  if (text.length > 4000) throw invalidField("body", "Escribe como mucho 4000 caracteres.")
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
   await requireCaseReader(tx, kase, orgId, userId)
@@ -591,7 +591,7 @@ export async function grantSupportAccess(
     minutesNumber < 5 ||
     minutesNumber > SUPPORT_GRANT_MAX_MINUTES
   ) {
-    throw validation(`El acceso se autoriza entre 5 y ${SUPPORT_GRANT_MAX_MINUTES} minutos`)
+    throw invalidField("minutes", `El acceso se autoriza entre 5 y ${SUPPORT_GRANT_MAX_MINUTES} minutos.`)
   }
   const [row] = await tx.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   const kase = requireCaseInOrg(row, orgId)
@@ -651,7 +651,7 @@ export async function createAccessSupportCase(
   input: { question: unknown; detail?: unknown; appVersion?: string | null },
 ): Promise<SupportCaseListItem> {
   if (typeof input.question !== "string" || input.question.trim().length < 3) {
-    throw validation("Describe tu problema para pedir ayuda")
+    throw invalidField("question", "Cuenta qué pasa con al menos 3 caracteres.")
   }
   const question = input.question.trim().slice(0, 500)
   const dedupeKey = dedupeKeyOf(question)
@@ -730,8 +730,8 @@ export async function replyToAccountSupportCase(
   body: unknown,
 ): Promise<SupportMessageItem> {
   const text = typeof body === "string" ? body.trim() : ""
-  if (text.length < 1) throw validation("Escribe tu respuesta")
-  if (text.length > 4000) throw validation("La respuesta no puede superar 4000 caracteres")
+  if (text.length < 1) throw invalidField("body", "Escribe tu respuesta.")
+  if (text.length > 4000) throw invalidField("body", "Escribe como mucho 4000 caracteres.")
   const [kase] = await db.select().from(supportCase).where(eq(supportCase.id, caseId)).limit(1)
   if (!kase || kase.openedBy !== userId) throw notFound("Caso")
   const reopening = kase.status === "resuelto"

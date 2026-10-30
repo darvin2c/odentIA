@@ -23,6 +23,7 @@ import {
   ScheduleResourceChips,
   SubmitButton,
   scheduleToneAt,
+  submitErrorMessage,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -32,7 +33,7 @@ import * as React from "react"
 import { AbsenceForm, type AbsenceScope } from "../../components/agenda/absence-form"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useWeeklySchedule, WeeklyScheduleFields } from "../../components/agenda/schedule-editor"
-import { errorMessage, shortName } from "../../components/agenda/shared"
+import { shortName } from "../../components/agenda/shared"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { useActiveBranch } from "../../lib/active-branch"
@@ -230,7 +231,7 @@ function AvailabilityPage() {
       await queryClient.invalidateQueries({ queryKey: ["agenda-resources"] })
       await queryClient.invalidateQueries({ queryKey: ["agenda-availability"] })
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   // Mientras se guarda se muestra lo elegido; si falla, vuelve lo que hay en el servidor.
   const regularMinutes =
@@ -246,7 +247,6 @@ function AvailabilityPage() {
       toast.success("Quitado: ese tramo vuelve a ofrecerse")
       await invalidateBlocks()
     },
-    onError: (error) => toast.error(errorMessage(error)),
   })
 
   const roomActiveMutation = useMutation({
@@ -262,7 +262,10 @@ function AvailabilityPage() {
       )
       await invalidateRooms()
     },
-    onError: (error) => toast.error(errorMessage(error)),
+    // Desactivar se confirma en un diálogo y su error se dice ahí; reactivar es una acción de fila.
+    onError: (error, { isActive }) => {
+      if (isActive) toast.error(submitErrorMessage(error))
+    },
   })
 
   if (!canRead) {
@@ -326,7 +329,7 @@ function AvailabilityPage() {
             <>
               <ScheduleResourceChips
                 wrap
-                label="Profesional"
+                aria-label="Profesional"
                 resources={professionals}
                 formatLabel={(item) => shortName(item.label)}
                 value={professionalId}
@@ -673,18 +676,25 @@ function AvailabilityPage() {
 
       <ConfirmDialog
         open={removal !== null}
-        onClose={() => setRemoval(null)}
+        onClose={() => {
+          setRemoval(null)
+          removeMutation.reset()
+        }}
         onConfirm={() => removal && removeMutation.mutate(removal.block)}
         title={removal?.title ?? ""}
         description={removal?.description ?? ""}
         confirmLabel="Quitar"
         variant="destructive"
         pending={removeMutation.isPending}
+        error={removeMutation.error ? submitErrorMessage(removeMutation.error) : null}
       />
 
       <ConfirmDialog
         open={deactivatingRoom !== null}
-        onClose={() => setDeactivatingRoom(null)}
+        onClose={() => {
+          setDeactivatingRoom(null)
+          roomActiveMutation.reset()
+        }}
         onConfirm={() =>
           deactivatingRoom &&
           roomActiveMutation.mutate({ room: deactivatingRoom, isActive: false })
@@ -696,6 +706,11 @@ function AvailabilityPage() {
         confirmLabel="Desactivar"
         variant="destructive"
         pending={roomActiveMutation.isPending}
+        error={
+          roomActiveMutation.error && roomActiveMutation.variables?.isActive === false
+            ? submitErrorMessage(roomActiveMutation.error)
+            : null
+        }
       />
     </div>
   )

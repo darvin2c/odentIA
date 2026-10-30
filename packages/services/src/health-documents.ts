@@ -21,7 +21,7 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { PDFDocument, StandardFonts } from "pdf-lib"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   deliverDocumentPdf,
   type DocumentChannelOption,
@@ -471,7 +471,7 @@ export async function sendHealthDocument(
   deps: SendDeps & { secretsKey?: Buffer },
 ): Promise<SendHealthDocumentResult> {
   const type = assertHealthType(input.documentType)
-  if (!input.connectionId) throw validation("Elige por dónde enviarlo")
+  if (!input.connectionId) throw invalidField("connectionId", "Elige por dónde enviarlo")
   const meta = await loadHealthMeta(tx, orgId, input.patientId, type, input.documentId)
   if (input.requestId) {
     await tx.execute(
@@ -512,15 +512,12 @@ export async function sendHealthDocument(
     ? recipients.find((r) => r.contactId === input.recipientContactId)
     : recipients.find((r) => r.isDefault)
   if (!recipient) {
-    throw new ServiceError(
-      "DOCUMENT_RECIPIENT_NOT_AUTHORIZED",
-      403,
-      "Un papel de salud solo se envía a la propia persona o a su representante legal",
-    )
+    const message = "Un papel de salud solo se envía a la propia persona o a su representante legal"
+    throw new ServiceError("DOCUMENT_RECIPIENT_NOT_AUTHORIZED", 403, message, { recipientContactId: message })
   }
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
-    throw validation("Un papel de salud se envía por WhatsApp o por correo")
+    throw invalidField("connectionId", "Un papel de salud se envía por WhatsApp o por correo")
   // Receta pasadas las 24 horas: «Su enlace» y la descarga en «Tus papeles» (decisión 8).
   if (type === "prescription" && conn.channel === "whatsapp" && deps.secretsKey) {
     const { channels } = await documentChannelsFor(tx, orgId, recipient)
@@ -563,7 +560,7 @@ export async function sendHealthDocument(
   }
   const rendered = await renderHealthDocumentPdf(tx, orgId, input.patientId, type, input.documentId, deps.storage)
   const message = input.message?.trim()
-  if (message && message.length > 500) throw validation("El mensaje admite hasta 500 caracteres")
+  if (message && message.length > 500) throw invalidField("message", "El mensaje admite hasta 500 caracteres")
   const person = await requirePatient(tx, orgId, input.patientId)
   const [profile] = await tx
     .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })

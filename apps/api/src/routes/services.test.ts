@@ -839,6 +839,9 @@ it("services: cada país ve su lista; las variantes de la CUPS solo en Colombia"
     body: JSON.stringify({ items: [{ kind: "template", templateId: variant, priceCents: 1000 }] }),
   })
   expect(refused.status).toBe(409)
+  // Se dice en su fila: el tratamiento elegido en `items[0]`.
+  const refusedBody = (await refused.json()) as { error: { fields?: Record<string, string> } }
+  expect(Object.keys(refusedBody.error.fields ?? {})).toEqual(["items[0].templateId"])
   // En Costa Rica el código de un servicio propio es opcional.
   const own = await buildApp("owner", "org_cr").request("/services", {
     method: "POST",

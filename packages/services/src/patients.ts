@@ -42,7 +42,10 @@ import { personSearchCondition } from "./person-search.js"
 import { decodeCursor } from "./cursors.js"
 import {
   branchNotFound,
+  fieldsError,
+  invalidField,
   isUniqueViolation,
+  issueFields,
   notFound,
   ServiceError,
   validation,
@@ -341,7 +344,8 @@ export async function createPatient(
   const { contacts = [], registeredBranchId, ...demographics } = input
   const countryCode = await findOrgCountry(tx, orgId)
   const errors = validateDemographics(demographics, await patientOrganizationToday(tx, orgId), countryCode)
-  if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
+  const failed = fieldsError(errors)
+  if (failed) throw failed
   const {
     emergencyContactName,
     emergencyContactPhone,
@@ -518,13 +522,14 @@ export async function declareEmergencyContact(
   return created.id
 }
 
-/** Ese documento ya es de otra persona: nunca se unen solas. */
+/**
+ * Ese documento ya es de otra persona: nunca se unen solas. Es del número de
+ * documento (`docNumber`): ahí lo dice el formulario.
+ */
 function duplicateDocument(docType: string | null | undefined, ownerName?: string): ServiceError {
   const label = docType === "DNI" ? "Ese DNI" : "Ese documento"
-  return conflict(
-    "DUPLICATE_DOCUMENT",
-    ownerName ? `${label} ya está en la página de ${ownerName}` : `${label} ya es de otra persona`,
-  )
+  const message = ownerName ? `${label} ya está en la página de ${ownerName}` : `${label} ya es de otra persona`
+  return new ServiceError("DUPLICATE_DOCUMENT", 409, message, { docNumber: message })
 }
 
 /**
@@ -870,17 +875,23 @@ export async function listPatientsByContact(tx: Db, orgId: string, contactId: st
 
 export async function setPatientContact(tx: Db, orgId: string, actorUserId: string, patientId: string, input: RegistrationContactInput): Promise<void> {
   const parsed = registrationContactInputSchema.safeParse(input)
-  if (!parsed.success) throw validation("Relación inválida")
+  if (!parsed.success) throw validation("Relación inválida", issueFields(parsed.error.issues))
   const link = parsed.data
   const [person] = await tx.select().from(contact).where(and(eq(contact.organizationId, orgId), eq(contact.id, link.contactId))).for("update")
   if (!person) throw notFound("Contacto")
-  if (!person.isActive) throw conflict("CONTACT_ARCHIVED", "Reactiva el contacto antes de vincularlo")
+  if (!person.isActive) {
+    // `contactId`: la persona elegida (va en la dirección; la pantalla lo dice en su selector).
+    const message = "Reactiva el contacto antes de vincularlo"
+    throw new ServiceError("CONTACT_ARCHIVED", 409, message, { contactId: message })
+  }
   const [record] = await tx.select({ id: patient.id }).from(patient).where(and(eq(patient.organizationId, orgId), eq(patient.id, patientId))).for("update")
   if (!record) throw notFound("Paciente")
   const currentPerson = await patientPersonId(tx, orgId, patientId)
   // La propia persona no se degrada a otro vínculo: es la identidad de la ficha.
-  if (currentPerson === link.contactId && link.relationship !== "self")
-    throw conflict("PATIENT_PERSON_REQUIRED", "Esta es la propia persona del paciente; su vínculo no se puede cambiar")
+  if (currentPerson === link.contactId && link.relationship !== "self") {
+    const message = "Esta es la propia persona del paciente; su vínculo no se puede cambiar"
+    throw new ServiceError("PATIENT_PERSON_REQUIRED", 409, message, { contactId: message })
+  }
   // Identificar al paciente con un contacto real sustituye a la persona creada
   // solo para la ficha; si esta ya tiene actividad, no se fusiona en silencio.
   if (link.relationship === "self" && currentPerson && currentPerson !== link.contactId) {
@@ -898,7 +909,7 @@ export async function setPatientContact(tx: Db, orgId: string, actorUserId: stri
     await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.person_replaced", entity: "patient", entityId: patientId, metadata: { fromContactId: currentPerson, toContactId: link.contactId } })
   }
   if (link.isEmergency && link.relationship === "self")
-    throw validation("La propia persona no es su contacto de emergencia: marca a alguien vinculado")
+    throw invalidField("isEmergency", "La propia persona no es su contacto de emergencia: marca a alguien vinculado")
   const [before] = await tx.select({ relationship: patientContact.relationship }).from(patientContact)
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, link.contactId)))
   try {
@@ -1068,7 +1079,8 @@ export async function updatePatient(
   const countryCode = await findOrgCountry(tx, orgId)
   // Lo guardado que no cambia no se vuelve a juzgar por el país de la clínica.
   const errors = validateDemographics({ ...demographics, ...demographicPatch }, await patientOrganizationToday(tx, orgId), countryCode, demographics)
-  if (Object.keys(errors).length) throw validation(Object.values(errors)[0]!)
+  const failedPatch = fieldsError(errors)
+  if (failedPatch) throw failedPatch
   if (patch.registeredBranchId !== undefined && patch.registeredBranchId !== null) {
     await assertTenantBranch(tx, orgId, patch.registeredBranchId)
   }
@@ -1102,9 +1114,11 @@ export async function updatePatient(
         )
         .limit(1)
       if (!representative)
-        throw conflict(
+        throw new ServiceError(
           "REPRESENTATIVE_REQUIRED",
+          409,
           "Con esa fecha es menor de edad: registra primero a su representante legal",
+          { birthDate: "Con esa fecha es menor de edad: registra primero a su representante legal" },
         )
     }
   }

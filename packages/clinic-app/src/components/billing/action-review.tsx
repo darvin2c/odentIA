@@ -5,11 +5,13 @@
  * condiciones comerciales (ADR 0074); lo demás lo revisa odentIA y se sigue en
  * Soporte. Lo decide el servidor: esta pantalla solo dice lo que puede pasar.
  */
-import { Checkbox, cn, FieldLabel, RadioGroup, RadioGroupItem, Textarea, toast } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { cn, FieldLabel, RadioGroup, RadioGroupItem, toast } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useEffect } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { businessDaysWords, type SaasTerms, useSaasTerms } from "../../lib/billing"
 import type { SaasActionKind } from "./consumption"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -75,6 +77,13 @@ const KIND_WORDS: Record<SaasActionKind, string> = {
 
 const NOTE_MAX = 1000
 
+// Los mismos límites que la ruta: el motivo es obligatorio y la nota tiene tope.
+const reviewSchema = z.object({
+  reason: z.custom<ReviewReason | "">((value) => typeof value === "string").refine((value) => value !== "", "Elige por qué no debió cobrarse."),
+  note: z.string().trim().max(NOTE_MAX, `Lo que cuentas admite hasta ${NOTE_MAX} caracteres.`),
+  allowRead: z.boolean(),
+})
+
 function day(iso: string): string {
   return new Intl.DateTimeFormat(activeOrgLocale(), { day: "numeric", month: "short", timeZone: activeOrgTimeZone() }).format(new Date(iso))
 }
@@ -105,21 +114,6 @@ export function ActionReviewDrawer({
 }) {
   const queryClient = useQueryClient()
   const terms = useSaasTerms().data
-  const reasonId = useId()
-  const noteId = useId()
-  const readId = useId()
-  const [reason, setReason] = useState<ReviewReason | "">("")
-  const [note, setNote] = useState("")
-  const [allowRead, setAllowRead] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    if (target) {
-      setReason("")
-      setNote("")
-      setAllowRead(false)
-      setError(null)
-    }
-  }, [target])
   const request = useMutation({
     mutationFn: (input: { actionId: string; reason: ReviewReason; note: string | null; allowRead: boolean }) =>
       apiFetch<{ data: { status: "pendiente" | "devuelta"; automatic: boolean; caseId: string | null } }>(
@@ -130,7 +124,18 @@ export function ActionReviewDrawer({
           body: JSON.stringify({ orgId: organizationId, reason: input.reason, note: input.note, allowRead: input.allowRead }),
         },
       ).then((res) => res.data),
-    onSuccess: (result) => {
+  })
+  const form = useAppForm({
+    defaultValues: { reason: "" as ReviewReason | "", note: "", allowRead: false },
+    validators: { onSubmit: reviewSchema },
+    onSubmit: async ({ value }) => {
+      if (!target || !value.reason) return
+      const result = await request.mutateAsync({
+        actionId: target.id,
+        reason: value.reason,
+        note: value.note.trim() || null,
+        allowRead: Boolean(target.conversationId) && value.allowRead,
+      })
       void queryClient.invalidateQueries({ queryKey: ["billing", organizationId] })
       toast.success(
         result.automatic
@@ -141,12 +146,18 @@ export function ActionReviewDrawer({
       )
       onClose()
     },
-    onError: (err) => setError(err instanceof ApiError && err.shape.message ? err.shape.message : "No se pudo pedir la revisión. Reintenta en un momento."),
   })
+  // Cada fila empieza en blanco.
+  useEffect(() => {
+    if (target) form.reset()
+  }, [target, form])
+  const surface = useFormSurface(form)
+  const reason = useStore(form.store, (state) => state.values.reason)
   const options = REASONS.filter((option) => !option.onlyConversation || target?.kind === "conversacion")
   const who = target?.personName ?? "Sin persona"
   return (
     <FormDrawer
+      {...surface}
       open={target !== null}
       onClose={onClose}
       title="Pedir revisión de este cobro"
@@ -155,67 +166,62 @@ export function ActionReviewDrawer({
           ? `${KIND_WORDS[target.kind]} con ${who} · ${day(target.occurredAt)}${target.priceMicros !== null ? ` · ${formatMicros(target.priceMicros, "USD")}` : ""}`
           : undefined
       }
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!target) return
-        if (!reason) {
-          setError("Elige por qué no debió cobrarse")
-          return
-        }
-        setError(null)
-        request.mutate({ actionId: target.id, reason, note: note.trim() || null, allowRead: Boolean(target.conversationId) && allowRead })
-      }}
-      isDirty={reason !== "" || note.trim() !== "" || allowRead}
-      isSubmitting={request.isPending}
-      error={error}
       submitLabel="Pedir revisión"
     >
-      <div className="grid gap-2">
-        <span id={reasonId} className="text-sm font-medium">
-          ¿Por qué no debió cobrarse?
-        </span>
-        <RadioGroup aria-labelledby={reasonId} value={reason} onValueChange={(next) => setReason(String(next) as ReviewReason)}>
-          {options.map((option) => (
-            <FieldLabel
-              key={option.value}
-              className={cn(
-                "flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-normal",
-                reason === option.value && "border-primary bg-primary/5",
-              )}
-            >
-              <RadioGroupItem value={option.value} className="mt-0.5" />
-              <span className="grid gap-0.5">
-                <span className="font-medium">{option.label}</span>
-                <span className="text-xs text-muted-foreground">{option.outcome(terms)}</span>
-              </span>
-            </FieldLabel>
-          ))}
-        </RadioGroup>
-      </div>
-      <div className="grid gap-1.5">
-        <label htmlFor={noteId} className="text-sm font-medium">
-          Cuéntanos qué pasó (opcional)
-        </label>
-        <Textarea
-          id={noteId}
-          maxLength={NOTE_MAX}
-          rows={3}
-          placeholder="Por ejemplo: le dio un horario del sábado que no tenemos."
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-        />
-      </div>
+      <form.AppField name="reason">
+        {(field) => (
+          <field.Group legend="¿Por qué no debió cobrarse?">
+            {(control) => (
+              <RadioGroup
+                name={control.name}
+                aria-invalid={control.invalid || undefined}
+                aria-describedby={control.describedBy}
+                value={field.state.value}
+                onValueChange={(next) => {
+                  field.handleChange(String(next) as ReviewReason)
+                  field.handleBlur()
+                }}
+              >
+                {options.map((option) => (
+                  <FieldLabel
+                    key={option.value}
+                    className={cn(
+                      "flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-normal",
+                      reason === option.value && "border-primary bg-primary/5",
+                    )}
+                  >
+                    <RadioGroupItem value={option.value} className="mt-0.5" aria-invalid={control.invalid || undefined} />
+                    <span className="grid gap-0.5">
+                      <span className="font-medium">{option.label}</span>
+                      <span className="text-xs text-muted-foreground">{option.outcome(terms)}</span>
+                    </span>
+                  </FieldLabel>
+                ))}
+              </RadioGroup>
+            )}
+          </field.Group>
+        )}
+      </form.AppField>
+      <form.AppField name="note">
+        {(field) => (
+          <field.TextareaField
+            label="Cuéntanos qué pasó (opcional)"
+            maxLength={NOTE_MAX}
+            rows={3}
+            placeholder="Por ejemplo: le dio un horario del sábado que no tenemos."
+          />
+        )}
+      </form.AppField>
       {target?.conversationId ? (
-        <div className="flex items-start gap-2.5 rounded-xl border p-3">
-          <Checkbox id={readId} checked={allowRead} onCheckedChange={(checked) => setAllowRead(checked === true)} className="mt-0.5" />
-          <label htmlFor={readId} className="grid gap-0.5 text-sm">
-            <span className="font-medium">Dejo que {appWords().name} lea esta conversación</span>
-            <span className="text-xs text-muted-foreground">
-              Solo esta, hasta que responda la revisión{terms ? ` y como mucho ${terms.reviewReadDays} ${terms.reviewReadDays === 1 ? "día" : "días"}` : ""}. Sin esto,
-              {appWords().name} solo ve lo que hizo el agente, sin los mensajes.
-            </span>
-          </label>
-        </div>
+        <form.AppField name="allowRead">
+          {(field) => (
+            <field.CheckboxField
+              className="items-start gap-2.5 rounded-xl border p-3"
+              label={`Dejo que ${appWords().name} lea esta conversación`}
+              description={`Solo esta, hasta que responda la revisión${terms ? ` y como mucho ${terms.reviewReadDays} ${terms.reviewReadDays === 1 ? "día" : "días"}` : ""}. Sin esto, ${appWords().name} solo ve lo que hizo el agente, sin los mensajes.`}
+            />
+          )}
+        </form.AppField>
       ) : null}
     </FormDrawer>
   )

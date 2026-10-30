@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { DetailDrawer, DetailSection, SubmitButton } from "@odentia/ui-patterns"
+import { DetailDrawer, DetailSection, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
 import { BookOpen, CalendarDays, CircleAlert, CircleCheck, GraduationCap, MessagesSquare, Notebook, Tag, UserRound } from "lucide-react"
 import type { ReactNode } from "react"
@@ -7,7 +7,6 @@ import { apiFetch } from "../../lib/api"
 import { ANSWER_CHECK_LABEL, type AnswerBasisItem, type AnswerTrace, agentName } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { activeOrgLocale } from "../../lib/locale"
-import { mutationErrorMessage } from "../../lib/query-error"
 
 const BASIS_ICON: Record<string, ReactNode> = {
   agenda: <CalendarDays aria-hidden />,
@@ -94,7 +93,7 @@ export function AnswerTraceDrawer({
   const lessons = trace.basis.filter((item) => item.kind === "leccion")
   const failed = trace.checks.filter((check) => !check.ok)
   const canReview = trace.outcome === "enviada" && (canMark || onCorrect !== undefined)
-  const okError = mutationErrorMessage(ok.error)
+  const okError = ok.error ? submitErrorMessage(ok.error) : null
   const close = () => {
     ok.reset()
     onClose()

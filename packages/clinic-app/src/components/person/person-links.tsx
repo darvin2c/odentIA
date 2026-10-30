@@ -1,15 +1,20 @@
 import { CONTACT_RELATIONSHIP_LABELS, type Kinship, KINSHIP_LABELS } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, Checkbox, Field, FieldLabel, Input } from "@odentia/ui"
+import { Badge, Button, buttonVariants } from "@odentia/ui"
 import {
   ConfirmDialog,
   FormDrawer,
   normalizeCountry,
-  PhoneInput,
   RowActions,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+  withFieldGroup,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
+import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
@@ -17,15 +22,19 @@ import { useOrgProfile } from "../../lib/org"
 import type { PatientContactLink, PatientFull } from "../../lib/patients"
 import { hcLabel } from "../../lib/patients"
 import { type PersonPage, RELATIONSHIP_WORDS } from "../../lib/people"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { NewPatientDrawer, type NewPatientTarget } from "../patient/new-patient-drawer"
 import { SummaryCard } from "../patient/resumen-tab"
 import { PersonLink } from "../person-link"
 import { PersonPicker, type PickedPerson } from "../person-picker"
-import { ChoiceSelect } from "../ui/choice-select"
+import { refineNewPerson } from "./new-person-schema"
 
 type Relationship = "guardian" | "family" | "other"
-const RELATIONSHIPS: Relationship[] = ["guardian", "family", "other"]
+const RELATIONSHIPS = ["guardian", "family", "other"] as const satisfies readonly Relationship[]
+const RELATIONSHIP_OPTIONS = RELATIONSHIPS.map((value) => ({ value, label: CONTACT_RELATIONSHIP_LABELS[value] }))
+const KINSHIP_OPTIONS = [
+  { value: "", label: "Sin indicar" },
+  ...Object.entries(KINSHIP_LABELS).map(([value, label]) => ({ value, label })),
+]
 
 const ENTRY_LABELS: Record<string, string> = {
   platform: "Registro en la clínica",
@@ -52,90 +61,81 @@ function useRefresh(person: PersonPage) {
   }
 }
 
-/** Relación y si recibe los avisos: lo mismo al vincular y al cambiar la relación. */
-function RelationFields({
-  relationship,
-  kinship,
-  detail,
-  preferred,
-  emergency,
-  onChange,
-  preferredLabel,
-}: {
-  relationship: Relationship
+/** La relación y si recibe los avisos, con los nombres del cuerpo de PUT `/api/patients/:id/contacts/:contactId`. */
+const RELATION_DEFAULTS = {
+  relationship: "family" as Relationship,
   /** Parentesco con HL7 v3 RoleCode; vacío si no se sabe. */
-  kinship: string
-  detail: string
-  preferred: boolean
-  /** Contacto de emergencia (decisión 25); sin él, la casilla no se muestra (a su cargo). */
-  emergency?: boolean
-  onChange: (next: {
-    relationship?: Relationship
-    kinship?: string
-    detail?: string
-    preferred?: boolean
-    emergency?: boolean
-  }) => void
-  preferredLabel: string
-}) {
-  return (
-    <>
-      <Field>
-        <FieldLabel htmlFor="link-relationship">Relación</FieldLabel>
-        <ChoiceSelect
-          id="link-relationship"
-          value={relationship}
-          onChange={(event) => onChange({ relationship: event.target.value as Relationship })}
-        >
-          {RELATIONSHIPS.map((value) => (
-            <option key={value} value={value}>
-              {CONTACT_RELATIONSHIP_LABELS[value]}
-            </option>
-          ))}
-        </ChoiceSelect>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="link-kinship">Parentesco (opcional)</FieldLabel>
-        <ChoiceSelect
-          id="link-kinship"
-          value={kinship}
-          onChange={(event) => onChange({ kinship: event.target.value })}
-        >
-          <option value="">Sin indicar</option>
-          {Object.entries(KINSHIP_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </ChoiceSelect>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="link-detail">Detalle (opcional)</FieldLabel>
-        <Input
-          id="link-detail"
-          value={detail}
-          maxLength={100}
-          onChange={(event) => onChange({ detail: event.target.value })}
-        />
-      </Field>
-      <label className="flex items-center gap-2 text-sm">
-        <Checkbox
-          checked={preferred}
-          onCheckedChange={(checked) => onChange({ preferred: checked === true })}
-        />
-        {preferredLabel}
-      </label>
-      {emergency !== undefined ? (
-        <label className="flex items-center gap-2 text-sm">
-          <Checkbox
-            checked={emergency}
-            onCheckedChange={(checked) => onChange({ emergency: checked === true })}
-          />
-          Contacto de emergencia
-        </label>
-      ) : null}
-    </>
-  )
+  kinship: "",
+  relationshipDetail: "",
+  isPreferred: false,
+  /** Contacto de emergencia (decisión 25); a su cargo no se pregunta. */
+  isEmergency: false,
+}
+type RelationValues = typeof RELATION_DEFAULTS
+const RELATION_FIELDS = {
+  relationship: "relationship",
+  kinship: "kinship",
+  relationshipDetail: "relationshipDetail",
+  isPreferred: "isPreferred",
+  isEmergency: "isEmergency",
+} as const
+const relationShape = {
+  relationship: z.enum(RELATIONSHIPS, "Elige la relación"),
+  kinship: z.string(),
+  relationshipDetail: z.string().trim().max(100),
+  isPreferred: z.boolean(),
+  isEmergency: z.boolean(),
+}
+
+/** El cuerpo del vínculo; la marca de emergencia solo si se preguntó. */
+function relationBody(value: RelationValues, withEmergency: boolean) {
+  return {
+    relationship: value.relationship,
+    ...(value.relationshipDetail.trim() ? { relationshipDetail: value.relationshipDetail.trim() } : {}),
+    kinship: value.kinship || null,
+    isPreferred: value.isPreferred,
+    ...(withEmergency ? { isEmergency: value.isEmergency } : {}),
+  }
+}
+
+/** Relación y si recibe los avisos: lo mismo al vincular y al cambiar la relación. */
+const RelationFields = withFieldGroup({
+  defaultValues: RELATION_DEFAULTS,
+  props: { preferredLabel: "", showEmergency: false },
+  render: function RelationFieldsRender({ group, preferredLabel, showEmergency }) {
+    return (
+      <>
+        <group.AppField name="relationship">
+          {(field) => <field.SelectField label="Relación" options={RELATIONSHIP_OPTIONS} />}
+        </group.AppField>
+        <group.AppField name="kinship">
+          {(field) => <field.SelectField label="Parentesco (opcional)" options={KINSHIP_OPTIONS} />}
+        </group.AppField>
+        <group.AppField name="relationshipDetail">
+          {(field) => <field.TextField label="Detalle (opcional)" maxLength={100} />}
+        </group.AppField>
+        <group.AppField name="isPreferred">
+          {(field) => <field.CheckboxField label={preferredLabel} />}
+        </group.AppField>
+        {showEmergency ? (
+          <group.AppField name="isEmergency">
+            {(field) => <field.CheckboxField label="Contacto de emergencia" />}
+          </group.AppField>
+        ) : null}
+      </>
+    )
+  },
+})
+
+const LINK_DEFAULTS = {
+  ...RELATION_DEFAULTS,
+  /** La persona (o el paciente, a su cargo) elegida en el buscador. */
+  picked: null as PickedPerson | null,
+  /** Crear a la persona en vez de buscarla. */
+  creating: false,
+  givenNames: "",
+  familyName: "",
+  phone: null as string | null,
 }
 
 /**
@@ -152,18 +152,6 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
   const countryCode = normalizeCountry(profile.data?.countryCode)
   const patientId = person.patient?.id ?? null
   const [linking, setLinking] = useState<"talker" | "charge" | null>(null)
-  const [picked, setPicked] = useState<PickedPerson | null>(null)
-  const [creating, setCreating] = useState(false)
-  const [newName, setNewName] = useState({
-    givenNames: "",
-    familyName: "",
-  })
-  const [newPhone, setNewPhone] = useState<string | null>(null)
-  const [relationship, setRelationship] = useState<Relationship>("family")
-  const [relationDetail, setRelationDetail] = useState("")
-  const [kinship, setKinship] = useState("")
-  const [preferred, setPreferred] = useState(false)
-  const [emergency, setEmergency] = useState(false)
   const [editing, setEditing] = useState<PatientContactLink | null>(null)
   const [unlinking, setUnlinking] = useState<{
     patientId: string
@@ -173,74 +161,80 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
   const [registering, setRegistering] = useState(false)
   const dependentTarget: NewPatientTarget = { kind: "dependent", person }
 
-  const resetForm = () => {
-    setPicked(null)
-    setCreating(false)
-    setNewName({ givenNames: "", familyName: "" })
-    setNewPhone(null)
-    setRelationship(linking === "charge" ? "guardian" : "family")
-    setRelationDetail("")
-    setKinship("")
-    setPreferred(false)
-    setEmergency(false)
-  }
-
-  const link = useMutation({
-    mutationFn: async () => {
+  const linkSchema = z
+    .object({
+      ...relationShape,
+      picked: z.custom<PickedPerson | null>(),
+      creating: z.boolean(),
+      givenNames: z.string().max(100),
+      familyName: z.string().max(200),
+      phone: z.string().nullable(),
+    })
+    .superRefine((value, ctx) => {
+      if (linking === "talker" && value.creating) refineNewPerson(value, ctx, countryCode)
+      else if (linking === "talker" && !value.picked)
+        ctx.addIssue({ code: "custom", path: ["picked"], message: "Elige a la persona" })
+      else if (linking === "charge" && !value.picked?.patientId)
+        ctx.addIssue({ code: "custom", path: ["picked"], message: "Elige al paciente" })
+    })
+  const linkForm = useAppForm({
+    defaultValues: LINK_DEFAULTS,
+    validators: { onSubmit: linkSchema },
+    onSubmit: async ({ value, formApi }) => {
       // Quien habla por la paciente: la persona elegida (o nueva) se vincula a su ficha.
       // A su cargo: esta persona se vincula a la ficha del paciente elegido.
-      let otherId = picked?.id ?? null
-      if (linking === "talker" && creating) {
+      let other = value.picked
+      if (linking === "talker" && value.creating) {
         const created = await apiFetch<{ data: { id: string } }>("/api/people", {
           method: "POST",
-          body: JSON.stringify({ ...newName, ...(newPhone ? { phone: newPhone } : {}) }),
+          body: JSON.stringify({
+            givenNames: value.givenNames.trim(),
+            familyName: value.familyName.trim(),
+            ...(value.phone ? { phone: value.phone } : {}),
+          }),
         })
-        otherId = created.data.id
-        setCreating(false)
-        setPicked({
-          id: otherId,
-          name: [newName.givenNames, newName.familyName].join(" ").trim(),
-        })
+        // Ya creada: si el vínculo falla, reintentar no la crea otra vez.
+        other = {
+          id: created.data.id,
+          name: [value.givenNames.trim(), value.familyName.trim()].join(" "),
+        }
+        formApi.setFieldValue("creating", false)
+        formApi.setFieldValue("picked", other)
       }
-      const targetPatient = linking === "talker" ? patientId : (picked?.patientId ?? null)
-      const contactId = linking === "talker" ? otherId : person.id
-      if (!targetPatient || !contactId) throw new Error("Elige a la persona")
+      const targetPatient = linking === "talker" ? patientId : (other?.patientId ?? null)
+      const contactId = linking === "talker" ? (other?.id ?? null) : person.id
+      if (!targetPatient || !contactId) return
       await apiFetch(`/api/patients/${targetPatient}/contacts/${contactId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          relationship,
-          ...(relationDetail.trim() ? { relationshipDetail: relationDetail.trim() } : {}),
-          kinship: kinship || null,
-          isPreferred: preferred,
-          // Quien habla por ella puede ser además su contacto de emergencia, en el mismo paso.
-          ...(linking === "talker" ? { isEmergency: emergency } : {}),
-        }),
+        // Quien habla por ella puede ser además su contacto de emergencia, en el mismo paso.
+        body: JSON.stringify(relationBody(value, linking === "talker")),
       })
-      return targetPatient
-    },
-    onSuccess: (targetPatient) => {
       refresh(targetPatient)
       setLinking(null)
-      resetForm()
     },
   })
-  const editRelation = useMutation({
-    mutationFn: () =>
-      apiFetch(`/api/patients/${patientId}/contacts/${editing?.contactId}`, {
+  // La persona que rechaza el vínculo (archivada, la propia del paciente) es la elegida.
+  const linkSurface = useFormSurface(linkForm, { fieldMap: { contactId: "picked" } })
+  const picked = useStore(linkForm.store, (state) => state.values.picked)
+  const creating = useStore(linkForm.store, (state) => state.values.creating)
+  const openLinking = (mode: "talker" | "charge") => {
+    linkForm.reset({ ...LINK_DEFAULTS, relationship: mode === "charge" ? "guardian" : "family" })
+    setLinking(mode)
+  }
+
+  const editForm = useAppForm({
+    defaultValues: RELATION_DEFAULTS,
+    validators: { onSubmit: z.object(relationShape) },
+    onSubmit: async ({ value }) => {
+      await apiFetch(`/api/patients/${patientId}/contacts/${editing?.contactId}`, {
         method: "PUT",
-        body: JSON.stringify({
-          relationship,
-          ...(relationDetail.trim() ? { relationshipDetail: relationDetail.trim() } : {}),
-          kinship: kinship || null,
-          isPreferred: preferred,
-          isEmergency: emergency,
-        }),
-      }),
-    onSuccess: () => {
+        body: JSON.stringify(relationBody(value, true)),
+      })
       refresh()
       setEditing(null)
     },
   })
+  const editSurface = useFormSurface(editForm)
   const unlink = useMutation({
     mutationFn: (input: { patientId: string; contactId: string }) =>
       apiFetch(`/api/patients/${input.patientId}/contacts/${input.contactId}`, {
@@ -254,15 +248,6 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
 
   const talkers = (detail?.contacts ?? []).filter((row) => row.relationship !== "self")
   const registration = detail?.registration ?? null
-  const canSubmitLink =
-    linking === "talker"
-      ? creating
-        ? Boolean(
-            newName.givenNames.trim() && newName.familyName.trim(),
-          )
-        : Boolean(picked)
-      : Boolean(picked?.patientId)
-
   return (
     <div className="flex min-w-0 flex-col gap-4">
       {patientId ? (
@@ -274,11 +259,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  link.reset()
-                  setLinking("talker")
-                  resetForm()
-                }}
+                onClick={() => openLinking("talker")}
               >
                 Vincular a una persona
               </Button>
@@ -317,14 +298,13 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                           key: "edit",
                           label: "Cambiar la relación",
                           onSelect: () => {
-                            editRelation.reset()
-                            setRelationship(
-                              row.relationship === "self" ? "family" : row.relationship,
-                            )
-                            setRelationDetail(row.relationshipDetail ?? "")
-                            setKinship(row.kinship ?? "")
-                            setPreferred(row.isPreferred)
-                            setEmergency(row.isEmergency)
+                            editForm.reset({
+                              relationship: row.relationship === "self" ? "family" : row.relationship,
+                              relationshipDetail: row.relationshipDetail ?? "",
+                              kinship: row.kinship ?? "",
+                              isPreferred: row.isPreferred,
+                              isEmergency: row.isEmergency,
+                            })
                             setEditing(row)
                           },
                         },
@@ -360,12 +340,7 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => {
-                  link.reset()
-                  setLinking("charge")
-                  resetForm()
-                  setRelationship("guardian")
-                }}
+                onClick={() => openLinking("charge")}
               >
                 Vincular a un paciente
               </Button>
@@ -465,9 +440,10 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
       ) : null}
 
       <FormDrawer
+        {...linkSurface}
         open={linking !== null}
         onClose={() => {
-          if (!link.isPending) setLinking(null)
+          if (!linkSurface.isSubmitting) setLinking(null)
         }}
         title={
           linking === "talker"
@@ -476,13 +452,6 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
         }
         description="Buscar no identifica a nadie: confirma que es la persona correcta antes de vincular."
         submitLabel="Vincular"
-        isSubmitting={link.isPending}
-        submitDisabled={!canSubmitLink}
-        error={link.error ? mutationErrorMessage(link.error) : null}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (canSubmitLink) link.mutate()
-        }}
       >
         <div className="flex flex-col gap-4">
           {linking === "talker" && creating ? (
@@ -490,64 +459,56 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
               <p className="text-sm font-medium">Persona nueva</p>
               <div className="grid gap-3 sm:grid-cols-2">
                 {/* Primero los nombres y después los apellidos, como en todo el registro. */}
-                <Field className="sm:col-span-2">
-                  <FieldLabel htmlFor="new-person-given">Nombres</FieldLabel>
-                  <Input
-                    id="new-person-given"
-                    maxLength={100}
-                    value={newName.givenNames}
-                    onChange={(event) =>
-                      setNewName((prev) => ({ ...prev, givenNames: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field className="sm:col-span-2">
-                  <FieldLabel htmlFor="new-person-family">Apellidos</FieldLabel>
-                  <Input
-                    id="new-person-family"
-                    maxLength={200}
-                    value={newName.familyName}
-                    onChange={(event) =>
-                      setNewName((prev) => ({ ...prev, familyName: event.target.value }))
-                    }
-                  />
-                </Field>
-                <Field className="sm:col-span-2">
-                  <FieldLabel htmlFor="new-person-phone">Teléfono</FieldLabel>
-                  <PhoneInput
-                    id="new-person-phone"
-                    value={newPhone}
-                    defaultCountry={countryCode}
-                    onChange={setNewPhone}
-                  />
-                </Field>
+                <linkForm.AppField name="givenNames">
+                  {(field) => <field.TextField label="Nombres" className="sm:col-span-2" maxLength={100} />}
+                </linkForm.AppField>
+                <linkForm.AppField name="familyName">
+                  {(field) => <field.TextField label="Apellidos" className="sm:col-span-2" maxLength={200} />}
+                </linkForm.AppField>
+                <linkForm.AppField name="phone">
+                  {(field) => (
+                    <field.PhoneField label="Teléfono" className="sm:col-span-2" defaultCountry={countryCode} />
+                  )}
+                </linkForm.AppField>
               </div>
               <Button
                 type="button"
                 variant="link"
                 size="sm"
                 className="self-start"
-                onClick={() => setCreating(false)}
+                onClick={() => linkForm.setFieldValue("creating", false)}
               >
                 Mejor buscarla
               </Button>
             </div>
           ) : (
             <>
-              <PersonPicker
-                label={linking === "talker" ? "Persona" : "Paciente"}
-                value={picked}
-                onChange={setPicked}
-                excludeId={person.id}
-                patientsOnly={linking === "charge"}
-              />
+              <linkForm.AppField name="picked">
+                {(field) => (
+                  <field.Control label={linking === "talker" ? "Persona" : "Paciente"}>
+                    {(control) => (
+                      <PersonPicker
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        onBlur={control.onBlur}
+                        label={linking === "talker" ? "Persona" : "Paciente"}
+                        value={field.state.value}
+                        onChange={field.handleChange}
+                        excludeId={person.id}
+                        patientsOnly={linking === "charge"}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </linkForm.AppField>
               {linking === "talker" && !picked ? (
                 <Button
                   type="button"
                   variant="link"
                   size="sm"
                   className="self-start"
-                  onClick={() => setCreating(true)}
+                  onClick={() => linkForm.setFieldValue("creating", true)}
                 >
                   No está: crear a la persona
                 </Button>
@@ -555,55 +516,32 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
             </>
           )}
           <RelationFields
-            relationship={relationship}
-            kinship={kinship}
-            detail={relationDetail}
-            preferred={preferred}
-            emergency={linking === "talker" ? emergency : undefined}
+            form={linkForm}
+            fields={RELATION_FIELDS}
+            showEmergency={linking === "talker"}
             preferredLabel={
               linking === "talker"
                 ? "Recibe los avisos de la paciente"
                 : `${person.displayName} recibe los avisos del paciente`
             }
-            onChange={(next) => {
-              if (next.relationship) setRelationship(next.relationship)
-              if (next.detail !== undefined) setRelationDetail(next.detail)
-              if (next.kinship !== undefined) setKinship(next.kinship)
-              if (next.preferred !== undefined) setPreferred(next.preferred)
-              if (next.emergency !== undefined) setEmergency(next.emergency)
-            }}
           />
         </div>
       </FormDrawer>
 
       <FormDrawer
+        {...editSurface}
         open={editing !== null}
         onClose={() => {
-          if (!editRelation.isPending) setEditing(null)
+          if (!editSurface.isSubmitting) setEditing(null)
         }}
         title={`Relación con ${editing?.displayName ?? ""}`}
         submitLabel="Guardar"
-        isSubmitting={editRelation.isPending}
-        error={editRelation.error ? mutationErrorMessage(editRelation.error) : null}
-        onSubmit={(event) => {
-          event.preventDefault()
-          editRelation.mutate()
-        }}
       >
         <RelationFields
-          relationship={relationship}
-          kinship={kinship}
-          detail={relationDetail}
-          preferred={preferred}
-          emergency={emergency}
+          form={editForm}
+          fields={RELATION_FIELDS}
+          showEmergency
           preferredLabel="Recibe los avisos de la paciente"
-          onChange={(next) => {
-            if (next.relationship) setRelationship(next.relationship)
-            if (next.detail !== undefined) setRelationDetail(next.detail)
-            if (next.kinship !== undefined) setKinship(next.kinship)
-            if (next.preferred !== undefined) setPreferred(next.preferred)
-            if (next.emergency !== undefined) setEmergency(next.emergency)
-          }}
         />
       </FormDrawer>
 
@@ -613,11 +551,8 @@ export function PersonLinks({ person, detail }: { person: PersonPage; detail?: P
           if (!unlink.isPending) setUnlinking(null)
         }}
         title={`Desvincular a ${unlinking?.name ?? ""}`}
-        description={
-          unlink.error
-            ? (mutationErrorMessage(unlink.error) ?? "No se pudo desvincular.")
-            : "Se retira el vínculo. Las dos personas, sus conversaciones y la ficha clínica se conservan, y queda registrado."
-        }
+        description="Se retira el vínculo. Las dos personas, sus conversaciones y la ficha clínica se conservan, y queda registrado."
+        error={unlink.error ? submitErrorMessage(unlink.error) : null}
         confirmLabel="Desvincular"
         pending={unlink.isPending}
         onConfirm={() => {

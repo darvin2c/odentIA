@@ -7,9 +7,19 @@ export interface ToothSelectorProps {
   value: number[]
   onChange: (value: number[]) => void
   disabled?: boolean
-  label?: string
   /** Una sola pieza (campo «pieza» de formularios): sin selección rápida. */
   single?: boolean
+  /** Va al campo «Escribir pieza FDI» (para `FieldLabel htmlFor`); los ids internos salen de él. */
+  id?: string
+  /** `aria-invalid` en el grupo y en el campo que se escribe. */
+  invalid?: boolean
+  /** La ayuda y el error de la pantalla; se une a las pistas internas. */
+  "aria-describedby"?: string
+  /** Nombre del grupo si la pantalla no lo envuelve en un `FieldSet` con leyenda. */
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  /** Al salir del grupo. */
+  onBlur?: () => void
 }
 
 type Dentition = "adulta" | "temporal"
@@ -44,17 +54,25 @@ function addAll(teeth: number[], add: readonly number[]): number[] {
  * Selector visual multi-pieza reutilizable sobre el OdontogramArch anatómico
  * existente (no recrea dibujos). MULTI por defecto: cada clic alterna la pieza
  * sin reemplazar la selección. Cambiar de dentición solo cambia la vista y
- * conserva las piezas ya seleccionadas.
+ * conserva las piezas ya seleccionadas. No pinta su etiqueta: la pantalla lo
+ * nombra (`FieldSet` + `FieldLegend` o `field.Group`).
  */
 export function ToothSelector({
   value,
   onChange,
   disabled = false,
-  label,
   single = false,
+  id,
+  invalid = false,
+  "aria-describedby": describedBy,
+  "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
+  onBlur,
 }: ToothSelectorProps) {
-  const groupId = useId()
-  const typedId = useId()
+  const generatedId = useId()
+  const typedId = id ?? generatedId
+  const typedErrorId = `${typedId}-error`
+  const statusId = `${typedId}-estado`
   const [typed, setTyped] = useState("")
   const [typedError, setTypedError] = useState<string | null>(null)
   const select = (tooth: number) => {
@@ -86,14 +104,23 @@ export function ToothSelector({
   const quadrants = quadrantOf(rows)
   const selectedHere = value.filter((t) => flat.includes(t))
 
-  const groupLabel = label ?? "Selección de piezas dentales"
-
   return (
-    <div role="group" aria-labelledby={groupId} className="flex min-w-0 flex-col gap-2">
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      aria-labelledby={labelledBy}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      onBlur={
+        onBlur
+          ? (event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
+      className="flex min-w-0 flex-col gap-2"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span id={groupId} className="text-sm font-medium">
-          {groupLabel}
-        </span>
         <div className="flex gap-1" role="group" aria-label="Dentición">
           {(["adulta", "temporal"] as const).map((d) => (
             <Button
@@ -133,7 +160,8 @@ export function ToothSelector({
           maxLength={2}
           value={typed}
           disabled={disabled}
-          aria-invalid={typedError ? true : undefined}
+          aria-invalid={typedError || invalid ? true : undefined}
+          aria-describedby={[describedBy, typedError ? typedErrorId : undefined, statusId].filter(Boolean).join(" ")}
           onChange={(event) => {
             setTyped(event.target.value.replace(/\D/g, ""))
             setTypedError(null)
@@ -149,7 +177,7 @@ export function ToothSelector({
           {single ? "Elegir" : "Agregar"}
         </Button>
         {typedError ? (
-          <span role="alert" className="text-xs text-destructive">
+          <span id={typedErrorId} role="alert" className="text-xs text-destructive">
             {typedError}
           </span>
         ) : null}
@@ -211,7 +239,7 @@ export function ToothSelector({
         </Button>
       </div>
 
-      <p aria-live="polite" className="text-xs text-muted-foreground">
+      <p id={statusId} aria-live="polite" className="text-xs text-muted-foreground">
         {value.length === 0
           ? "Sin piezas seleccionadas. Toca las piezas del odontograma o usa la selección rápida."
           : `${value.length} ${value.length === 1 ? "pieza seleccionada" : "piezas seleccionadas"}: ${[...value].sort((a, b) => a - b).join(", ")}`}

@@ -1,6 +1,6 @@
 import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
-import { type ClinicalProduct, TAX_CATEGORIES } from "@odentia/clinical"
+import { type ClinicalProduct, configureZodMessages, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
@@ -48,7 +48,7 @@ import { createFinanceRoute } from "./routes/finance.js"
 import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
 import { createInventoryRoute } from "./routes/inventory.js"
 import { createCommissionsRoute } from "./routes/commissions.js"
-import { runService } from "./routes/helpers.js"
+import { runService, validationError } from "./routes/helpers.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
@@ -130,6 +130,11 @@ export interface AppDeps {
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
 }
+
+// Lo que dice una regla sin mensaje propio, en el español de la interfaz: el
+// error de un dato se pinta junto a su campo (`fields`), nunca en inglés.
+configureZodMessages()
+
 // La dirección tiene la forma de la del paciente (issue 36); la valida el servicio según el país.
 const branchInput = z.object({
   name: z.string().min(1).max(120),
@@ -151,7 +156,7 @@ const branchPatch = branchInput.partial()
 const taxRateInput = z.object({ category: z.enum(TAX_CATEGORIES), rateBps: z.number().int().min(0).max(10_000) }).strict()
 
 const orgProfileInput = z.object({
-  legalName: z.string().min(1).max(200),
+  legalName: z.string().trim().min(1, "Escribe la razón social").max(200),
   // El nombre que ve la persona en todo (decisión 19): obligatorio; ausente, queda como estaba.
   tradeName: z.string().trim().min(1, "Escribe el nombre comercial: así te verán tus pacientes").max(200).optional(),
   fiscalDocType: z.string().max(20).nullish(),
@@ -180,9 +185,13 @@ const orgProfileInput = z.object({
 
 /** Lo que se imprime: se edita en «Medios de pago y ticket», aparte de los datos de la clínica. */
 const orgPrintingInput = z.object({
-  receiptWidth: z.enum(["58", "80"]),
-  sheetSize: z.enum(["A4", "Letter"]),
-  ticketFooter: z.string().trim().min(1, "Escribe la frase al pie del ticket").max(280),
+  receiptWidth: z.enum(["58", "80"], "Elige el ancho del ticket: 58 u 80 mm"),
+  sheetSize: z.enum(["A4", "Letter"], "Elige el tamaño de hoja: A4 o Carta"),
+  ticketFooter: z
+    .string()
+    .trim()
+    .min(1, "Escribe la frase al pie del ticket")
+    .max(280, "La frase al pie admite hasta 280 caracteres"),
 })
 
 type AuditRow = typeof auditEvent.$inferSelect
@@ -285,7 +294,7 @@ export function createApp(deps: AppDeps) {
   })
 
   app.onError((err, c) => {
-    if (err instanceof ServiceError) return c.json(errorBody(c, err.code, err.message), err.status)
+    if (err instanceof ServiceError) return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
     console.error(err)
     return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
   })
@@ -439,14 +448,14 @@ export function createApp(deps: AppDeps) {
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
     if (!(file instanceof File)) {
-      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
+      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo", { file: "Adjunta un archivo" }), 400)
     }
     const ext = AVATAR_MIME[file.type]
     if (!ext) {
-      return c.json(errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP"), 400)
+      return c.json(errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP", { file: "Solo se admiten PNG, JPG o WebP" }), 400)
     }
     if (file.size > AVATAR_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB"), 400)
+      return c.json(errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB", { file: "La imagen no puede superar 2 MB" }), 400)
     }
     const userId = (c as Context).get("userId") as string
     const previousImage = (c as Context).get("userImage") as string | null
@@ -469,9 +478,7 @@ export function createApp(deps: AppDeps) {
     const parsed = z
       .object({ countryCode: z.string().regex(/^[A-Za-z]{2}$/) })
       .safeParse(c.req.query())
-    if (!parsed.success) {
-      return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
-    }
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return c.json({ data: regionPresetForCountry(parsed.data.countryCode) })
   })
 
@@ -510,10 +517,6 @@ export function createApp(deps: AppDeps) {
     return requireSaasAccess(db, "operar")(c, next)
   })
 
-  function validationError(c: Context, issues: z.ZodIssue[]) {
-    return c.json(errorBody(c, "VALIDATION", issues[0]?.message ?? "Datos inválidos"), 400)
-  }
-
   guarded.get("/org-profile", async (c) => {
     const { orgId } = orgContextOf(c)
     const row = await withOrgContext(db, orgId, async (tx) => {
@@ -537,10 +540,11 @@ export function createApp(deps: AppDeps) {
     }
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
-    if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta la imagen del logo"), 400)
+    if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta la imagen del logo", { file: "Adjunta la imagen del logo" }), 400)
     const ext = CLINIC_LOGO_MIME_EXT[file.type]
-    if (!ext) return c.json(errorBody(c, "VALIDATION", "El logo debe ser PNG, JPG o WebP"), 400)
-    if (file.size > CLINIC_LOGO_MAX_BYTES) return c.json(errorBody(c, "VALIDATION", "El logo no puede superar 2 MB"), 400)
+    if (!ext) return c.json(errorBody(c, "VALIDATION", "El logo debe ser PNG, JPG o WebP", { file: "El logo debe ser PNG, JPG o WebP" }), 400)
+    if (file.size > CLINIC_LOGO_MAX_BYTES)
+      return c.json(errorBody(c, "VALIDATION", "El logo no puede superar 2 MB", { file: "El logo no puede superar 2 MB" }), 400)
     // Va a la carpeta de la clínica dentro del bucket público de imágenes.
     const { url } = await deps.storage.putAvatar({
       userId: clinicLogoFolder(orgId),
