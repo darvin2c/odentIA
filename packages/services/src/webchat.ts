@@ -25,6 +25,7 @@ import { notFound, ServiceError, validation } from "./errors.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgCountry } from "./locale.js"
+import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { clinicOriginOf } from "./public-links.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { webchatCanNotify, webchatReplyRoutes } from "./webchat-reply.js"
@@ -562,15 +563,17 @@ function masked(phone: string | null, email: string | null): VisitorPoll["contac
 /**
  * Lee la conversación de la sesión y marca `sent → delivered` lo que el
  * visitante acaba de recibir. Sin conversación aún: nada (su primer mensaje la
- * crea en la ingesta).
+ * crea en la ingesta). «Su enlace» va en los mensajes como referencia: aquí,
+ * como al enviar por cualquier canal, se le pone su token (ADR 0037).
  */
 export async function pollWebchatVisitor(
   tx: Db,
   orgId: string,
   connectionId: string,
   sessionId: string,
-  now: Date = new Date(),
+  options: { now?: Date; secretsKey?: Buffer } = {},
 ): Promise<VisitorPoll> {
+  const now = options.now ?? new Date()
   const conv = await sessionConversation(tx, orgId, connectionId, sessionId)
   if (!conv) return EMPTY_POLL
   const rows = await tx
@@ -601,7 +604,7 @@ export async function pollWebchatVisitor(
         key: hashKey(row.id),
         from: "clinica",
         author: row.senderKind === "agent" ? cfg.personaName : clinic,
-        text,
+        text: options.secretsKey ? resolvePersonalLinkRefs(text, options.secretsKey) : text,
         at: row.createdAt.toISOString(),
       })
     }

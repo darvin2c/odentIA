@@ -16,6 +16,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
 import { nextPatientNumber } from "./patients.js"
+import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { proposalPendingSql } from "./proposal-state.js"
 import { ensureClinicWebchatConnection } from "./webchat.js"
 
@@ -215,12 +216,18 @@ export async function probarSession(tx: Db, orgId: string, userId: string) {
 /** Sofi está atendiendo, como mucho este rato, el último mensaje del paciente. */
 const TYPING_MS = 90_000
 
+/**
+ * La prueba como la ve su persona de prueba. «Su enlace» va en los mensajes como referencia:
+ * aquí se le pone su token, como al enviar por un canal (ADR 0037 y 0094: el enlace de una
+ * prueba es de verdad, para su persona de prueba).
+ */
 export async function getProbar(
   tx: Db,
   orgId: string,
   userId: string,
-  now: Date = new Date(),
+  options: { now?: Date; secretsKey?: Buffer } = {},
 ): Promise<ProbarState> {
+  const now = options.now ?? new Date()
   const cfg = await getAgentConfig(tx, orgId)
   const empty: ProbarState = {
     conversationId: null,
@@ -264,7 +271,7 @@ export async function getProbar(
       messages.push({
         id: row.id,
         from: row.senderKind === "agent" ? "sofi" : "equipo",
-        text,
+        text: options.secretsKey ? resolvePersonalLinkRefs(text, options.secretsKey) : text,
         at: row.createdAt.toISOString(),
       })
   }
