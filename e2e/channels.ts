@@ -48,7 +48,7 @@ export async function simulateWhatsAppInbound(
   apiBase: string,
   connectionId: string,
   appSecret: string,
-  // Sin `from`, como manda Meta a quien oculta su número: solo su BSUID (`userId`, ADR 0108).
+  // Sin `from`, como manda Meta a quien oculta su número: solo su BSUID (`userId`, ADR 0110).
   input: { from?: string; userId?: string; name?: string; phoneNumberId: string; text: string; wamid: string },
 ): Promise<number> {
   const rawBody = JSON.stringify({

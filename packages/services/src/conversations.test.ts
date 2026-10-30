@@ -3,7 +3,8 @@ import { type InboundMessageJob, withOrgContext } from "@odentia/db"
 import { contactIdentity, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, eq, sql } from "drizzle-orm"
-import { expect, it } from "vitest"
+import postgres from "postgres"
+import { expect, it, vi } from "vitest"
 import { upsertAgentConfig } from "./agentConfig.js"
 import { createConnection } from "./connections.js"
 import { addContactIdentity, createContact, moveContactIdentity, updateContact } from "./contacts.js"
@@ -22,7 +23,7 @@ import {
 } from "./conversations.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
+import { appDb, container, ownerDb, retireWhatsApp, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
 setupTestDb()
@@ -1004,7 +1005,7 @@ async function makeWhatsAppConnection(orgId: string): Promise<string> {
   })
 }
 
-/** Un mensaje de WhatsApp: con su número o, sin él, con su BSUID como dirección (ADR 0108). */
+/** Un mensaje de WhatsApp: con su número o, sin él, con su BSUID como dirección (ADR 0110). */
 function waEvent(id: string, address: string, userId?: string): NormalizedInbound {
   return textEvent({
     externalEventId: id,
@@ -1022,6 +1023,26 @@ async function identitiesOf(contactId: string) {
     .where(eq(contactIdentity.contactId, contactId))
 }
 
+/** Los avisos que ve la aplicación (`org_events`) mientras entra un mensaje, como los escucha la API. */
+async function orgEventsWhile(run: () => Promise<unknown>): Promise<string[]> {
+  const kinds: string[] = []
+  const client = postgres(
+    `postgres://dentalagent:dentalagent@${container.getHost()}:${container.getMappedPort(5432)}/dentalagent`,
+    { max: 1 },
+  )
+  try {
+    await client.listen("org_events", (payload) => {
+      kinds.push((JSON.parse(payload) as { kind: string }).kind)
+    })
+    await run()
+    // Los avisos de una transacción llegan juntos: con el del mensaje ya están todos.
+    await vi.waitFor(() => expect(kinds).toContain("message.created"))
+  } finally {
+    await client.end()
+  }
+  return kinds
+}
+
 it("quien oculta su número entra por su BSUID y, cuando llega su número, sigue siendo la misma persona y el mismo hilo", async () => {
   const connId = await makeWhatsAppConnection("org_a")
   const bsuid = "PE.13491208655302741918"
@@ -1030,8 +1051,13 @@ it("quien oculta su número entra por su BSUID y, cuando llega su número, sigue
   expect(thread?.externalThreadId).toBe(`wa:${bsuid}`)
   expect(await identitiesOf(thread!.contactId)).toEqual([{ externalUserId: `wa:${bsuid}`, providerUserId: bsuid }])
 
-  // Después de responderle, Meta manda su número junto al BSUID: la identidad y el hilo pasan a su número.
-  const known = await ingest("org_a", connId, waEvent("wamid.b2", "wa:51911100001", bsuid))
+  // Después de responderle, Meta manda su número junto al BSUID: la identidad y el hilo pasan a su número,
+  // y la ficha abierta se entera.
+  let known = { conversationId: "" }
+  const events = await orgEventsWhile(async () => {
+    known = await ingest("org_a", connId, waEvent("wamid.b2", "wa:51911100001", bsuid))
+  })
+  expect(events).toContain("contact.updated")
   expect(known.conversationId).toBe(hidden.conversationId)
   const [moved] = await ownerDb.select().from(conversation).where(eq(conversation.id, hidden.conversationId))
   expect(moved?.externalThreadId).toBe("wa:51911100001")
@@ -1080,7 +1106,12 @@ it("si su ficha ya tenía su número como WhatsApp, queda una sola identidad con
   const blockedAt = new Date("2026-10-01T12:00:00Z")
   await ownerDb.update(contactIdentity).set({ providerBlockedAt: blockedAt, isPrimary: true }).where(eq(contactIdentity.providerUserId, one))
   await claim(person, "51911100003")
-  const known = await ingest("org_a", connId, waEvent("wamid.f2", "wa:51911100003", one))
+  let known = { conversationId: "" }
+  const events = await orgEventsWhile(async () => {
+    known = await ingest("org_a", connId, waEvent("wamid.f2", "wa:51911100003", one))
+  })
+  // La ficha abierta deja de mostrar la identidad que se unió.
+  expect(events).toContain("contact.updated")
   expect(known.conversationId).toBe(hidden.conversationId)
   expect((await contactOf(hidden.conversationId)).externalThreadId).toBe("wa:51911100003")
   expect(await identitiesOf(person)).toEqual([{ externalUserId: "wa:51911100003", providerUserId: one }])

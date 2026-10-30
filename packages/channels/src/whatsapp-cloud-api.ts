@@ -196,7 +196,7 @@ function waUserId(value: unknown): string | null {
 
 /**
  * La dirección de la persona: su número (`wa:51999…`) o, si Meta lo oculta, su
- * BSUID (`wa:PE.1349…`), con el que también se le responde (ADR 0108).
+ * BSUID (`wa:PE.1349…`), con el que también se le responde (ADR 0110).
  */
 function waAddress(phone: unknown, userId: unknown): string | null {
   const digits = waDigits(phone)
@@ -205,7 +205,7 @@ function waAddress(phone: unknown, userId: unknown): string | null {
   return id ? whatsappHiddenAddress(id) : null
 }
 
-/** La dirección de quien ocultó su número: su BSUID (ADR 0108). */
+/** La dirección de quien ocultó su número: su BSUID (ADR 0110). */
 export function whatsappHiddenAddress(userId: string): string {
   return `wa:${userId}`
 }
@@ -440,7 +440,7 @@ const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   130429: ACCOUNT_THROTTLE_WORDS,
   // «Pair rate limit»: demasiados mensajes seguidos a la misma persona.
   131056: "WhatsApp frenó el envío porque se le mandaron demasiados mensajes seguidos a esta persona. Envíalo de nuevo en unos minutos.",
-  // Lo que WhatsApp aún no deja enviar a quien oculta su número (ADR 0108).
+  // Lo que WhatsApp aún no deja enviar a quien oculta su número (ADR 0110).
   131062: "WhatsApp no deja enviar este tipo de mensaje a quien oculta su número.",
 }
 
@@ -562,7 +562,7 @@ export function buildBody(to: string, kind: OutboundMessage["kind"], replyTo?: s
 
 /**
  * A quién va: el número en `to` o, si la persona lo oculta, su BSUID en
- * `recipient` (ADR 0108). Meta usa `to` si llegan los dos.
+ * `recipient` (ADR 0110). Meta usa `to` si llegan los dos.
  */
 function recipientOf(to: string): { to: string } | { recipient: string } {
   return /^\d+$/.test(to) ? { to } : { recipient: to }
@@ -1217,7 +1217,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
    * Bloquear y desbloquear números (Block Users API): POST o DELETE en
    * `block_users`, que responde por número. El número viaja sin el prefijo
    * `wa:` del hilo; quien oculta su número va por su BSUID en `user_id`, y la
-   * respuesta lo devuelve igual en `input` (ADR 0108). Meta solo bloquea a quien
+   * respuesta lo devuelve igual en `input` (ADR 0110). Meta solo bloquea a quien
    * escribió en las últimas 24 horas.
    * https://developers.facebook.com/docs/whatsapp/cloud-api/block-users
    */

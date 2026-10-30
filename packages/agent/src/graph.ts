@@ -940,14 +940,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const prefetched = route?.path === "cambio_cita" || route?.path === "cita" ? await prefetchPatientSummary() : null
     // Cómo va la atención (ADR 0104): la indicación del turno dice lo que
     // falta y lo que ya se hizo no se vuelve a ordenar.
-    const progress = attentionProgress({
-      items,
-      startedAt,
-      state,
-      promotions: clinicData.promotions.map((promo) => promo.name),
-      name: givenName,
-      calls: { emergency: snapshot.emergencyNumber, clinic: snapshot.emergencyPhone },
-    })
+    const progress = attentionProgress({ items, startedAt, state, promotions: clinicData.promotions.map((promo) => promo.name), name: givenName })
     // `send_reply` pide de nuevo la respuesta que vuelve a «Entiendo…» o «anoté que…».
     toolCtx.formulas = progress.formulas
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
@@ -965,7 +958,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
             urgentFirst: agentTexts(toolCtx).urgentFirst,
             progress: { offered: progress.offered, pending: progress.pending, done: progress.done },
             again: toolCtx.topicAgain === true,
-            calledOut: { emergency: progress.calledOut.emergency > 0, clinic: progress.calledOut.clinic > 0 },
           }),
           toolCtx.routeHint,
           toolCtx.topicRaised

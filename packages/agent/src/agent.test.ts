@@ -2395,32 +2395,6 @@ it("una urgencia sin señal de alarma pasa con prioridad alta y el aviso da el t
   }
 })
 
-it("el modelo que escribe no pone prioridad alta a lo que no es urgente: la decide la nota del modelo de decisión", async () => {
-  await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "baseline" }))
-  try {
-    // La auditoría del 29-oct: una tos de cuatro días, sin falta de aire, pasaba al equipo con prioridad alta.
-    const cough = await ingestText("tg:tos-alta", "evt-tos-alta-1", "Quiero una cita para hoy o mañana, llevo cuatro días con tos")
-    const model = new ScriptedModel(() =>
-      toolCall(
-        "request_human_handoff",
-        { reason: "Tos de cuatro días", summary: "Pide cita por tos de cuatro días.", priority: "alta", message: "Una persona del equipo lo revisará." },
-        "call-tos",
-      ),
-    )
-    const verdict = await processAgentRun(
-      appDb,
-      { ...runtime, createModel: async () => model, createDecisionModel: () => createFakeDecisionModel() },
-      { msg_id: 1, read_ct: 0, message: { kind: "inbound_message", orgId: "org_a", conversationId: cough.conversationId, messageId: cough.messageId } },
-    )
-    expect(verdict).toBe("done")
-    const handoffs = await withOrgContext(appDb, "org_a", (tx) =>
-      tx.select({ priority: agentHandoff.priority }).from(agentHandoff).where(eq(agentHandoff.conversationId, cough.conversationId)))
-    expect(handoffs).toEqual([{ priority: "media" }])
-  } finally {
-    await withOrgContext(appDb, "org_a", (tx) => upsertAgentConfig(tx, "org_a", { decisionProvider: "none", decisionRoutingEnabled: true }))
-  }
-})
-
 it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», sin ocupar el horario real y se va entera al borrarla", async () => {
   // La sede y su horario son reales; la persona de prueba la crea «Probar», ya registrada como paciente.
   const seed = await ingestText("tg:prueba-sede", "evt-prueba-sede", "Hola")

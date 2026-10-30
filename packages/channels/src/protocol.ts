@@ -48,7 +48,7 @@ export interface NormalizedInbound {
    * El id que el proveedor le da a la persona para esta empresa y que llega
    * aunque oculte su número (WhatsApp: BSUID, `from_user_id`). Si lo oculta,
    * `externalThreadId` y `senderExternalId` lo llevan en lugar del número
-   * (`wa:PE.1349…`); con él se le responde igual (ADR 0108).
+   * (`wa:PE.1349…`); con él se le responde igual (ADR 0110).
    */
   senderUserId?: string
   senderDisplayName?: string

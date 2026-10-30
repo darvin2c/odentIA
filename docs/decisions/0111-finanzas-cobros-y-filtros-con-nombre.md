@@ -1,4 +1,4 @@
-# 0108 · Finanzas: Caja es el día, Cobros guarda todos los tickets y los filtros dicen su nombre
+# 0111 · Finanzas: Caja es el día, Cobros guarda todos los tickets y los filtros dicen su nombre
 
 - Fecha: 2026-10-30.
 - Estado: aceptada.

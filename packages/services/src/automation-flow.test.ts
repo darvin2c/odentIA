@@ -536,7 +536,7 @@ describe("por dónde le llega a cada persona", () => {
     expect(await noticesOf(c)).toHaveLength(0)
   })
 
-  it("si lo rechaza la cuenta de la clínica (clave vencida), no es del número de la persona ni deja su tarea (ADR 0108)", async () => {
+  it("si lo rechaza la cuenta de la clínica (clave vencida), no es del número de la persona ni deja su tarea (ADR 0110)", async () => {
     const c = await clinic()
     await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
     const one = await person(c, "Clave vencida", { consent: ["seguimiento", "novedades"], openWindow: true })

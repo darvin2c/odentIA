@@ -834,7 +834,7 @@ export async function findChannelIdentity(
 
 /**
  * Quien usa nombre de usuario en WhatsApp puede ocultar su número: llega con su
- * BSUID (`senderUserId`) y, sin número, su dirección es `wa:<BSUID>` (ADR 0108).
+ * BSUID (`senderUserId`) y, sin número, su dirección es `wa:<BSUID>` (ADR 0110).
  * Para que sus mensajes con número y sin él sean una sola persona y un solo hilo,
  * la identidad guarda su BSUID y se la busca también por él:
  * - Con identidad por su dirección: guarda su BSUID, o lo pone al día si cambió
@@ -903,6 +903,8 @@ export async function settleProviderUser<
     entityId: byUser.contactId,
     metadata: { channel },
   })
+  // Su ficha abierta pasa a mostrar el número sin esperar otro cambio.
+  await notifyContactChange(tx, orgId)
   return event
 }
 
@@ -943,6 +945,7 @@ async function foldHiddenIdentity(
     entityId: phone.contactId,
     metadata: { channel, folded: true },
   })
+  await notifyContactChange(tx, orgId)
 }
 
 /**

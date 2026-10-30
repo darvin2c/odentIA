@@ -262,7 +262,7 @@ export async function ingestInbound(
   }
 
   const channel = connection.channel
-  // Quien oculta su número entra por la dirección con la que ya se la conoce (ADR 0108).
+  // Quien oculta su número entra por la dirección con la que ya se la conoce (ADR 0110).
   const event = await settleProviderUser(tx, orgId, channel, job.event)
   // Coexistencia: lo que el equipo escribió desde la app del celular sale de la
   // clínica, y el historial al conectar ya pasó. Ninguno es la persona escribiendo ahora.
@@ -301,7 +301,7 @@ export async function ingestInbound(
       .insert(contact)
       .values({
         organizationId: orgId,
-        // Quien oculta su número y no tiene nombre de perfil no se llama por su BSUID (ADR 0108).
+        // Quien oculta su número y no tiene nombre de perfil no se llama por su BSUID (ADR 0110).
         displayName:
           event.senderDisplayName ??
           (event.senderUserId && event.senderExternalId === whatsappHiddenAddress(event.senderUserId)
@@ -1136,7 +1136,7 @@ export function conversationFilterConditions(orgId: string, input: ConversationF
             sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`,
             and(
               eq(channelConnection.channel, "whatsapp"),
-              // Solo un hilo con número: los dígitos de un BSUID no son un teléfono (ADR 0108).
+              // Solo un hilo con número: los dígitos de un BSUID no son un teléfono (ADR 0110).
               sql`${conversation.externalThreadId} ~ '^wa:[0-9]+$'`,
               sql`regexp_replace(${conversation.externalThreadId}, '[^0-9]', '', 'g') like ${`%${digits}%`}`,
             ),

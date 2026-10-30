@@ -586,7 +586,7 @@ it("bloquea y desbloquea números con la Block Users API y dice cuáles confirm�
   expect(meta.calls[2]?.method).toBe("DELETE")
 })
 
-it("a quien oculta su número se le bloquea por su BSUID, en `user_id` (ADR 0108)", async () => {
+it("a quien oculta su número se le bloquea por su BSUID, en `user_id` (ADR 0110)", async () => {
   const meta = fakeFetch({ json: { messaging_product: "whatsapp", block_users: { added_users: [{ input: BSUID, user_id: BSUID }] } } })
   const done = await whatsappCloudApiAdapter.setBlocked!(fx.config, { users: [`wa:${BSUID}`], blocked: true }, { fetch: meta.fetch })
   expect(done).toEqual({ done: [`wa:${BSUID}`], failed: [] })
@@ -726,7 +726,7 @@ it("la agenda del celular llega como contactos del canal, sin más", () => {
   ])
 })
 
-// Quien usa nombre de usuario puede ocultar su número: Meta manda su BSUID (ADR 0108).
+// Quien usa nombre de usuario puede ocultar su número: Meta manda su BSUID (ADR 0110).
 const BSUID = "PE.13491208655302741918"
 
 it("quien oculta su número entra con su BSUID como dirección, y su nombre sale del contacto por BSUID", () => {
