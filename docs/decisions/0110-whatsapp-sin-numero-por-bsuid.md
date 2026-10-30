@@ -1,4 +1,4 @@
-# 0108 · WhatsApp sin número: la persona por su BSUID
+# 0110 · WhatsApp sin número: la persona por su BSUID
 
 Fecha: 2026-10-30 · Estado: aceptada
 
@@ -18,7 +18,7 @@ Quien usa nombre de usuario en WhatsApp puede ocultar su número. Si la empresa 
 - **Nunca se unen identidades de dos fichas**, siguiendo la regla de siempre: lo decide el equipo con «Reasignar canal». Mientras tanto, cada mensaje entra por su dirección.
 - **Las conversaciones no se funden**: si la persona ya tenía una conversación por su número en esa conexión, la que tenía sin número queda como su historial, en la misma identidad, y lo nuevo llega a la del número. Sus mensajes no se mueven porque las citas y lo que hizo Sofi (derivaciones, propuestas, registros) están atados a su conversación.
 - **Un rechazo claro del proveedor no es ambiguo**: si WhatsApp, Messenger, Instagram o Telegram responden 4xx con su error, el mensaje no salió y queda `failed` con su motivo (`ProviderRejectedError`). Una caída de la red, un 5xx o una respuesta sin id siguen siendo `unknown` y no se reenvían. La Bandeja dice en palabras por qué no llegó (`deliveryNote`); el motivo de Meta en inglés no se muestra.
-- **Un límite de ritmo se reintenta** (`ProviderThrottledError`: en WhatsApp 4, 80007, 130429 y 131056; en Messenger e Instagram 4, 17, 32, 613, 80001, 80002 y 80006; en Telegram 429): no salió, así que reintentarlo no lo duplica. El mensaje sigue en cola y vuelve a intentarse a los 1, 2, 4 y 8 minutos; al quinto intento queda `failed`. Mientras espera, otro mensaje de la conversación puede salir antes. Si al final no salió, la conciliación lo trata como no entregado y deja la tarea de llamarle, porque no hay nada que arreglar en la conexión.
+- **Un límite de ritmo se reintenta** (`ProviderThrottledError`: en WhatsApp 4, 80007, 130429 y 131056; en Messenger e Instagram 4, 17, 32, 613, 80001, 80002 y 80006; en Telegram 429): no salió, así que reintentarlo no lo duplica. El mensaje sigue en cola y vuelve a intentarse a los 1, 2, 4 y 8 minutos; al quinto intento queda `failed`. Los mensajes de una conversación salen en orden: mientras uno anterior sigue en cola, el siguiente lo espera y vuelve a la cola a los 30 segundos sin gastar sus intentos. Solo espera a los de la última media hora, para que uno trabado no frene la conversación. Si al final no salió, la conciliación lo trata como no entregado y deja la tarea de llamarle, porque no hay nada que arreglar en la conexión.
 - **Bloquear a quien oculta su número** usa su BSUID en `user_id` de la Block Users API, como indica Meta.
 
 ## Alternativas descartadas

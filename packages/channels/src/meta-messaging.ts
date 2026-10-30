@@ -266,11 +266,10 @@ function graphError(status: number, json: unknown): string {
  */
 const GRAPH_THROTTLE_CODES = new Set([4, 17, 32, 613, 80001, 80002, 80006])
 
-/** El código del `error` de una respuesta del Graph: null si lo trae sin código, undefined si no trae su error. */
-function graphErrorCode(json: unknown): number | null | undefined {
-  if (!json || typeof json !== "object" || !("error" in json) || !json.error || typeof json.error !== "object") return undefined
-  const code = (json.error as { code?: unknown }).code
-  return typeof code === "number" ? code : null
+/** El `error` de una respuesta del Graph, si lo trae. */
+function graphErrorOf(json: unknown): { code?: unknown } | undefined {
+  if (!json || typeof json !== "object" || !("error" in json)) return undefined
+  return json.error && typeof json.error === "object" ? json.error : undefined
 }
 
 function sentMessageId(json: unknown): string | null {
@@ -338,9 +337,9 @@ async function sendViaGraph(
     const detail = `${label} send falló: ${graphError(status, json)}`
     // Meta contestó con su error: no lo aceptó. Un 5xx o una respuesta sin id
     // no dicen si salió, y se tratan como ambiguos.
-    const code = graphErrorCode(json)
-    if (status >= 400 && status < 500 && code !== undefined) {
-      if (code !== null && GRAPH_THROTTLE_CODES.has(code)) throw new ProviderThrottledError(detail)
+    const error = graphErrorOf(json)
+    if (status >= 400 && status < 500 && error) {
+      if (typeof error.code === "number" && GRAPH_THROTTLE_CODES.has(error.code)) throw new ProviderThrottledError(detail)
       throw new ProviderRejectedError(detail)
     }
     throw new Error(detail)

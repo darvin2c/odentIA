@@ -500,7 +500,7 @@ export const contactIdentity = pgTable(
     /**
      * El id que el proveedor le da a la persona y que llega aunque oculte su
      * número (WhatsApp: BSUID). Une sus mensajes con número y sin él a esta
-     * misma identidad (ADR 0108). Nulo mientras no llegue.
+     * misma identidad (ADR 0110). Nulo mientras no llegue.
      */
     providerUserId: text("provider_user_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

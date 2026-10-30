@@ -4,7 +4,7 @@ import { message } from "@odentia/db/schema/crm"
 import { closeConversationWith, createConnection, ingestInbound, personalLinkRef, personalLinkToken, sendOutbound } from "@odentia/services"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { processOutbound, throttledDelaySeconds } from "./outbound.js"
+import { consumeOutbound, processOutbound, throttledDelaySeconds, WAITING_DELAY_SECONDS } from "./outbound.js"
 import { appDb, KEY, ownerDb, setupTestDb, storageStub, tgConnId } from "./test-setup.js"
 
 setupTestDb()
@@ -272,7 +272,7 @@ async function queuedWhatsApp(address: string): Promise<string> {
   return sent.id
 }
 
-it("a quien oculta su número se le responde por su BSUID (ADR 0108)", async () => {
+it("a quien oculta su número se le responde por su BSUID (ADR 0110)", async () => {
   const messageId = await queuedWhatsApp("wa:PE.13491208655302741918")
   const seen: unknown[] = []
   const live = {
@@ -330,6 +330,79 @@ it("un límite de ritmo de Meta deja el mensaje en cola para reintentarlo más t
   expect(row?.error).toContain("demasiados mensajes seguidos a esta persona")
   expect(calls).toBe(2)
   expect([1, 2, 3, 4, 9].map(throttledDelaySeconds)).toEqual([60, 120, 240, 480, 900])
+})
+
+/** Otro mensaje de Sofi en cola, en la misma conversación que `messageId`. */
+async function queuedAfter(messageId: string, text: string): Promise<string> {
+  const [first] = await ownerDb.select({ conversationId: message.conversationId }).from(message).where(eq(message.id, messageId))
+  const sent = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId: first!.conversationId, senderKind: "agent", content: { type: "text", text } }),
+  )
+  return sent.id
+}
+
+/** El trabajo de la cola que lleva ese mensaje y cuántos segundos falta para que se vea. */
+async function queueJob(messageId: string) {
+  const rows = (await ownerDb.execute(
+    sql`select msg_id, read_ct, extract(epoch from vt - now())::float as wait from pgmq.q_outbound_messages where message->>'messageId' = ${messageId}`,
+  )) as unknown as { msg_id: number; read_ct: number; wait: number }[]
+  return rows.map((row) => ({ msgId: Number(row.msg_id), readCt: Number(row.read_ct), wait: Number(row.wait) }))
+}
+
+it("los mensajes de una conversación salen en orden: el siguiente espera al que frenó un límite de ritmo", async () => {
+  const first = await queuedWhatsApp("wa:51911100011")
+  const second = await queuedAfter(first, "Y también este")
+  const sentTexts: string[] = []
+  const live = (throttle: boolean) => ({
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async (_url: unknown, init?: { body?: unknown }) => {
+      if (throttle) return new Response(JSON.stringify({ error: { message: "(#131056) Pair rate limit hit", code: 131056 } }), { status: 400 })
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as { text?: { body?: string } }) : {}
+      sentTexts.push(body.text?.body ?? "")
+      return new Response(JSON.stringify({ messages: [{ id: `wamid.${Math.random()}` }] }), { status: 200 })
+    }) as typeof fetch,
+  })
+  expect(await processOutbound(appDb, live(true), outJob(first, 1))).toBe("throttled")
+  // El segundo no se adelanta: espera sin llamar al proveedor.
+  expect(await processOutbound(appDb, live(false), outJob(second, 1))).toBe("waiting")
+  expect(sentTexts).toEqual([])
+  expect((await messageState(second))?.status).toBe("queued")
+  expect(await processOutbound(appDb, live(false), outJob(first, 2))).toBe("done")
+  expect(await processOutbound(appDb, live(false), outJob(second, 2))).toBe("done")
+  expect(sentTexts).toEqual(["Tengo estos horarios", "Y también este"])
+
+  // Uno de hace más de media hora que sigue en cola no frena la conversación.
+  const stuck = await queuedAfter(first, "Trabado")
+  const after = await queuedAfter(first, "Después")
+  await ownerDb.update(message).set({ createdAt: sql`now() - interval '31 minutes'` }).where(eq(message.id, stuck))
+  expect(await processOutbound(appDb, live(false), outJob(after))).toBe("done")
+  expect(sentTexts.at(-1)).toBe("Después")
+})
+
+it("la cola espera lo que corresponde: el frenado, 1 minuto la primera vez; el que espera a otro vuelve a los 30 segundos sin gastar sus entregas", async () => {
+  const first = await queuedWhatsApp("wa:51911100012")
+  const second = await queuedAfter(first, "Y también este")
+  const throttled = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => new Response(JSON.stringify({ error: { message: "(#131056) Pair rate limit hit", code: 131056 } }), { status: 400 })) as typeof fetch,
+  }
+  const [firstJob] = await queueJob(first)
+  await consumeOutbound(appDb, throttled, { msg_id: firstJob!.msgId, read_ct: 1, message: { orgId: "org_a", messageId: first } })
+  const [firstAfter] = await queueJob(first)
+  expect(firstAfter?.msgId).toBe(firstJob!.msgId)
+  expect(firstAfter?.wait).toBeGreaterThan(55)
+  expect(firstAfter?.wait).toBeLessThanOrEqual(60)
+
+  const [secondJob] = await queueJob(second)
+  await consumeOutbound(appDb, throttled, { msg_id: secondJob!.msgId, read_ct: 4, message: { orgId: "org_a", messageId: second } })
+  const secondAfter = await queueJob(second)
+  expect(secondAfter).toHaveLength(1)
+  expect(secondAfter[0]?.msgId).not.toBe(secondJob!.msgId)
+  expect(secondAfter[0]?.readCt).toBe(0)
+  expect(secondAfter[0]?.wait).toBeGreaterThan(WAITING_DELAY_SECONDS - 5)
+  expect(secondAfter[0]?.wait).toBeLessThanOrEqual(WAITING_DELAY_SECONDS)
 })
 
 it("«Su enlace» se guarda como referencia y sale con su token: el token solo existe al entregarlo", async () => {
