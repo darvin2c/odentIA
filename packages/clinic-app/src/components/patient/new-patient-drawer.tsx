@@ -82,6 +82,11 @@ const WHO_OPTIONS: ReadonlyArray<{ value: WhoCompletes; label: string }> = [
   { value: "paciente", label: "Él, en su celular" },
   { value: "equipo", label: "Yo, ahora" },
 ]
+/** Lo que respondió de novedades y promociones, en persona: «Sí, aceptó» primero. */
+const PROMOTION_OPTIONS: ReadonlyArray<{ value: "si" | "no"; label: string }> = [
+  { value: "si", label: "Sí, aceptó" },
+  { value: "no", label: "No aceptó" },
+]
 
 interface Draft {
   givenNames: string
@@ -96,6 +101,8 @@ interface Draft {
   guardianDocType: IdentityDocType | ""
   guardianDocNumber: string
   privacy: boolean
+  /** Novedades y promociones: se le pregunta siempre; vacío mientras no responda. */
+  promotions: "" | "si" | "no"
 }
 
 const EMPTY: Draft = {
@@ -109,6 +116,7 @@ const EMPTY: Draft = {
   guardianDocType: "",
   guardianDocNumber: "",
   privacy: false,
+  promotions: "",
 }
 
 interface Created {
@@ -196,6 +204,8 @@ export function NewPatientDrawer({
   const [error, setError] = useState<string | null>(null)
   const [showNotice, setShowNotice] = useState(false)
   const [created, setCreated] = useState<Created | null>(null)
+  // No se pudo anotar lo que dijo de sus mensajes: se dice al terminar, sin deshacer el registro.
+  const [permissionNote, setPermissionNote] = useState<string | null>(null)
   const submission = useRef(crypto.randomUUID())
 
   // Cada vez que se abre empieza de cero, con lo que ya se sabe. Solo al
@@ -212,6 +222,7 @@ export function NewPatientDrawer({
     setError(null)
     setShowNotice(false)
     setCreated(null)
+    setPermissionNote(null)
     submission.current = crypto.randomUUID()
   }, [open])
 
@@ -369,6 +380,24 @@ export function NewPatientDrawer({
       })
     },
     onSuccess: async (result) => {
+      // Se anota en su persona, como en Datos › Mensajes y en la Agenda, diciendo que lo dijo en persona:
+      // los mensajes de sus citas (se le informó) y su respuesta a novedades y promociones.
+      setPermissionNote(null)
+      try {
+        const personId =
+          result.data.personId ??
+          picked?.id ??
+          (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${result.data.id}`)).data.personId
+        const permission = (tipo: "recordatorio" | "novedades", recibir: boolean) =>
+          apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
+            method: "POST",
+            body: JSON.stringify({ tipo, recibir, source: "presencial" }),
+          })
+        await permission("recordatorio", true)
+        if (draft.promotions) await permission("novedades", draft.promotions === "si")
+      } catch {
+        setPermissionNote("No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes.")
+      }
       setCreated(result.data)
       setStage("done")
       toast.success(`${result.data.displayName} ya es paciente`)
@@ -398,6 +427,7 @@ export function NewPatientDrawer({
       found.relation = `Elige qué es ${guardian?.displayName.split(" ")[0] ?? "esta persona"} para él o ella`
     if (needsGuardianDoc && !draft.guardianDocNumber.trim())
       found.guardianDoc = "Hace falta el documento de quien lo representa"
+    if (!draft.promotions) found.promotions = "Pregúntale y elige una opción"
     if (Object.keys(found).length === 0 && config.data) {
       // La misma regla que aplica el servidor, para decirlo junto al campo.
       const { answers } = answersFrom(draft)
@@ -416,7 +446,11 @@ export function NewPatientDrawer({
       }
     }
     setErrors(found)
-    if (Object.keys(found).length > 0) return
+    if (Object.keys(found).length > 0) {
+      // Lo que no es un campo escrito recibe el foco por su grupo de botones.
+      if (Object.keys(found).length === 1 && found.promotions) document.querySelector<HTMLElement>("#np-promotions button")?.focus()
+      return
+    }
     register.mutate()
   }
 
@@ -437,6 +471,8 @@ export function NewPatientDrawer({
   }
 
   const name = draft.givenNames.trim() || "esta persona"
+  const tradeName = orgProfile.data?.tradeName?.trim()
+  const promotionsQuestion = `¿Acepta recibir novedades y promociones${tradeName ? ` de ${tradeName}` : ""} por WhatsApp?`
   const title =
     stage === "done" && created
       ? `${created.displayName} ya es paciente`
@@ -688,7 +724,7 @@ export function NewPatientDrawer({
                 checked={draft.privacy}
                 onCheckedChange={(checked) => set({ privacy: checked === true })}
               />
-              <span>Le informé cómo usamos sus datos.</span>
+              <span>Le informé cómo usamos sus datos y que le escribiremos por WhatsApp sobre sus citas.</span>
             </label>
             {config.data?.data.privacyNotice.trim() ? (
               <div className="ps-6">
@@ -709,9 +745,28 @@ export function NewPatientDrawer({
               </div>
             ) : null}
           </div>
+
+          <Field data-invalid={errors.promotions ? true : undefined}>
+            <FieldLabel>{promotionsQuestion}</FieldLabel>
+            <div id="np-promotions">
+              <ChoiceButtons
+                label={promotionsQuestion}
+                columns={2}
+                value={draft.promotions || null}
+                options={PROMOTION_OPTIONS}
+                onChange={(promotions) => set({ promotions }, "promotions")}
+              />
+            </div>
+            {errors.promotions ? <FieldError>{errors.promotions}</FieldError> : null}
+          </Field>
         </div>
       ) : null}
 
+      {stage === "done" && permissionNote ? (
+        <p role="status" className="mb-4 rounded-xl bg-warning-soft p-3 text-sm text-warning">
+          {permissionNote}
+        </p>
+      ) : null}
       {stage === "done" && created ? (
         <DoneStage
           created={created}

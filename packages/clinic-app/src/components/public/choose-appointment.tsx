@@ -1,5 +1,6 @@
+import { clinicalProfileFor } from "@odentia/clinical"
 import { Button, cn, ScrollArea } from "@odentia/ui"
-import { EmptyState, ErrorState, PersonAvatar, SubmitButton } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, LoadingState, PersonAvatar, SubmitButton } from "@odentia/ui-patterns"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CalendarX, Check, ChevronLeft, ChevronRight, MapPin, Users } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
@@ -10,24 +11,42 @@ import {
   type BookingLinkBranch,
   type BookingProfessional,
   type BookingProfessionals,
+  type BookingYou,
   changeBooking,
+  chooseLinkMessages,
   fetchBookingProfessionals,
   fetchBookingSlots,
   type PersonalLinkView,
   reserveBooking,
 } from "../../lib/booking-link"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { type BookingDataDraft, BookingDataForm, emptyBookingDataDraft } from "../booking-data-form"
+import {
+  type BookingDataDraft,
+  BookingDataForm,
+  checkYou,
+  emptyBookingDataDraft,
+  emptyYouDraft,
+  focusFirstYouError,
+  PromotionsQuestion,
+  type YouDraft,
+  type YouErrors,
+  youFieldsOf,
+  youInput,
+  youPromotionsId,
+  YouReview,
+} from "../booking-data-form"
 import { capital, hourOf, longDay, timeLabel, type WeekSlot } from "./week-slots"
 
 /**
  * Elegir la cita en «Su enlace» (ADR 0037), en tres pantallas como mucho: la
  * sede (solo si hay más de una y el enlace no la fija), con quién y cuándo
- * (profesional, día y hora en una misma pantalla) y «Revisa y reserva», que a
- * quien aún no es paciente le pide ahí sus datos esenciales. Sirve para
- * reservar (el enlace del agente), cambiar su cita y agendar lo que aceptó de
- * su presupuesto. Solo muestra lo que el servidor entrega libre: quién
- * atiende, su próximo horario y las horas de cada día; nunca calcula
+ * (profesional, día y hora en una misma pantalla) y «Revisa y reserva», el
+ * único formulario: a quien aún no es paciente le pide ahí lo que la clínica
+ * necesita (con lo que ya sabemos escrito) y a quien ya lo es, lo que le falta;
+ * a los dos, lo que aún no aceptó o respondió. Todo se guarda con la cita.
+ * Sirve para reservar (el enlace del agente), cambiar su cita y agendar lo que
+ * aceptó de su presupuesto. Solo muestra lo que el servidor entrega libre:
+ * quién atiende, su próximo horario y las horas de cada día; nunca calcula
  * disponibilidad.
  */
 type Mode = "reservar" | "cambiar" | "tratamiento"
@@ -93,6 +112,22 @@ function rangeWords(days: string[], timeZone: string): string {
   return from.month === to.month ? `${from.number} – ${to.number} ${to.month}` : `${from.number} ${from.month} – ${to.number} ${to.month}`
 }
 
+/**
+ * La hora que ya eligió en el chat y trae la dirección del enlace (`sede`,
+ * `con`, `hora`). La página no decide si está libre: solo la busca entre los
+ * horarios que entrega el servidor.
+ */
+export interface BookingPick {
+  branchId: string
+  professionalUserId: string
+  startsAt: string
+}
+
+/** «La hora que elegiste (…) acaba de ocuparse…»: lo mismo si se ocupó al reservar o antes de abrir el enlace. */
+function takenNotice(startsAt: string, timeZone: string): string {
+  return `La hora que elegiste (${whenWords(startsAt, timeZone)}) acaba de ocuparse. Elige otra; lo demás sigue igual.`
+}
+
 /** La sede de la cita o del enlace; la de una cita que se cambia puede no estar entre las que se ofrecen. */
 function branchOf(view: PersonalLinkView, branchId: string | null, current: BookingAppointment | null): BookingLinkBranch | undefined {
   const listed = view.branches.find((item) => item.id === branchId)
@@ -114,6 +149,7 @@ export function ChooseAppointment({
   mode,
   current,
   planItems,
+  pick,
   onBack,
   onDone,
 }: {
@@ -123,6 +159,8 @@ export function ChooseAppointment({
   mode: Mode
   current: BookingAppointment | null
   planItems?: Array<{ planItemId: string; title: string }>
+  /** Al reservar: la hora que ya eligió en el chat, si el enlace la trae. */
+  pick?: BookingPick | null
   /** Volver a lo pendiente; sin él (el enlace del agente) no hay a dónde volver. */
   onBack: (() => void) | null
   onDone: (appointment: BookingAppointment) => void
@@ -132,19 +170,38 @@ export function ChooseAppointment({
   const fixedBranchId = changing ? (current?.branchId ?? null) : mode === "reservar" ? (view.booking?.branchId ?? null) : null
   const branchStep = fixedBranchId === null && view.branches.length > 1
   const steps: Step[] = branchStep ? ["sede", "cuando", "revisa"] : ["cuando", "revisa"]
-  const [shownStep, setStep] = useState<Step>(steps[0] ?? "cuando")
+  // La hora del chat vale solo al reservar y en una sede que el enlace ofrece.
+  const [initialPick] = useState<{ pick: BookingPick; timeZone: string } | null>(() => {
+    const branch = pick && mode === "reservar" && (fixedBranchId === null || fixedBranchId === pick.branchId) ? view.branches.find((item) => item.id === pick.branchId) : undefined
+    return pick && branch ? { pick, timeZone: branch.timeZone } : null
+  })
+  // Mientras se busca la hora del chat entre los horarios libres.
+  const [pendingPick, setPendingPick] = useState(initialPick)
+  const [shownStep, setStep] = useState<Step>(initialPick ? "cuando" : (steps[0] ?? "cuando"))
   // Si una pantalla deja de tener sentido (la sede, al llegar con una sola), se sigue con la que corresponde.
   const step: Step = steps.includes(shownStep) ? shownStep : (steps[0] ?? "cuando")
-  const [branchId, setBranchId] = useState<string | null>(fixedBranchId ?? (view.branches.length === 1 ? (view.branches[0]?.id ?? null) : null))
+  const [branchId, setBranchId] = useState<string | null>(
+    initialPick?.pick.branchId ?? fixedBranchId ?? (view.branches.length === 1 ? (view.branches[0]?.id ?? null) : null),
+  )
   // Lo elegido: se conserva al volver atrás; cambiar la sede o con quién borra lo que deja de valer.
-  const [who, setWho] = useState<string | null>(null)
-  const [windowStart, setWindowStart] = useState<string | null>(null)
-  const [day, setDay] = useState<string | null>(null)
+  const [who, setWho] = useState<string | null>(initialPick?.pick.professionalUserId ?? null)
+  const [windowStart, setWindowStart] = useState<string | null>(() => {
+    if (!initialPick) return null
+    const chosen = dayKey(initialPick.pick.startsAt, initialPick.timeZone)
+    const today = dayKey(new Date(), initialPick.timeZone)
+    return chosen < today ? today : chosen
+  })
+  const [day, setDay] = useState<string | null>(initialPick ? dayKey(initialPick.pick.startsAt, initialPick.timeZone) : null)
   const [slot, setSlot] = useState<WeekSlot | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [jumped, setJumped] = useState<string | null>(null)
   const [registered, setRegistered] = useState(false)
   const [dataDraft, setDataDraft] = useState<BookingDataDraft>(emptyBookingDataDraft)
+  // Quien ya es paciente: lo que le falta y lo que acepta, también al cambiar o agendar (novedades).
+  const [youDraft, setYouDraft] = useState<YouDraft>(emptyYouDraft)
+  const [youErrors, setYouErrors] = useState<YouErrors>({})
+  // Su respuesta a novedades ya se guardó (al cambiar o agendar): no se vuelve a enviar si la hora falla.
+  const [promotionsSaved, setPromotionsSaved] = useState(false)
   const [submissionId] = useState(() => crypto.randomUUID())
   // Una hora redonda y fija mientras la página está abierta: así lo pedido al servidor no cambia en cada pintado.
   const [now] = useState(() => {
@@ -196,7 +253,40 @@ export function ChooseAppointment({
   const effectiveDay = day && byDay.has(day) ? day : (shownDays.find((item) => byDay.has(item)) ?? null)
   const hours = effectiveDay ? (byDay.get(effectiveDay) ?? []) : []
 
+  // La hora del chat: si está entre los horarios libres de esa persona, queda elegida y se pasa a revisar;
+  // si ya no, se elige otra con esa misma persona y el aviso de siempre.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se resuelve una sola vez, cuando llegan los horarios.
+  useEffect(() => {
+    if (!pendingPick) return
+    if (professionals.isError || slots.isError || branchId === null) {
+      setPendingPick(null)
+      return
+    }
+    if (!professionals.isSuccess || !slots.isSuccess) return
+    const { pick: chosen } = pendingPick
+    const found = slots.data.slots.find(
+      (item) => item.professionalUserId === chosen.professionalUserId && Date.parse(item.startsAt) === Date.parse(chosen.startsAt),
+    )
+    setPendingPick(null)
+    if (found) {
+      setSlot(found)
+      setStep("revisa")
+      return
+    }
+    setNotice(takenNotice(chosen.startsAt, timeZone))
+    // Con esa persona si aún tiene horarios, desde su próximo día libre.
+    if (!choosable.some((person) => person.id === chosen.professionalUserId)) setWho(null)
+    setWindowStart(null)
+    setDay(null)
+  }, [pendingPick, professionals.isSuccess, professionals.isError, slots.isSuccess, slots.isError])
+  const resolvingPick = pendingPick !== null
+
   const needsData = mode === "reservar" && !!view.booking?.needsRegistration && !registered
+  // Quien ya es paciente al reservar: lo que este paso sabe pedir de lo que le falta.
+  const profile = clinicalProfileFor(view.countryCode)
+  const youFields = mode === "reservar" ? youFieldsOf(view.data?.missing ?? []) : []
+  const asksYou = mode === "reservar" && !needsData && !registered && view.you !== null
+  const asksPromotions = !needsData && !!view.pending?.promotions && !promotionsSaved
   const serviceName =
     mode === "cambiar"
       ? (current?.serviceName ?? "Consulta")
@@ -229,7 +319,12 @@ export function ChooseAppointment({
   }
   const act = useMutation({
     retry: false,
-    mutationFn: (chosen: WeekSlot) => {
+    mutationFn: async ({ chosen, you, promotions }: { chosen: WeekSlot; you?: BookingYou; promotions?: boolean }) => {
+      // Al cambiar o agendar, su respuesta a novedades se guarda antes, por «Tus mensajes».
+      if (promotions !== undefined) {
+        await chooseLinkMessages(slug, token, { tipo: "novedades", recibir: promotions })
+        setPromotionsSaved(true)
+      }
       const where = { startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }
       if (changing) return changeBooking(slug, { token, ...where })
       return reserveBooking(slug, {
@@ -237,18 +332,47 @@ export function ChooseAppointment({
         branchId: branchId ?? "",
         ...where,
         ...(mode === "tratamiento" && planItems ? { planItemIds: planItems.map((item) => item.planItemId) } : {}),
+        ...(you ? { you } : {}),
       })
     },
     onSuccess: (result) => onDone(result.data),
-    onError: (error, chosen) => {
+    onError: (error, { chosen }) => {
       if (!slotTaken(error)) return
-      // La hora se ocupó mientras elegía: vuelve a elegir con las horas al día, y lo demás sigue igual.
-      setNotice(`La hora que elegiste (${whenWords(chosen.startsAt, timeZone)}) acaba de ocuparse. Elige otra; lo demás sigue igual.`)
+      // La hora se ocupó mientras elegía: vuelve a elegir con las horas al día, y lo demás (lo escrito también) sigue igual.
+      setNotice(takenNotice(chosen.startsAt, timeZone))
       setSlot(null)
       refreshAvailability()
       goTo("cuando")
     },
   })
+  /** «Reservar mi cita», «Reservar» o «Cambiar mi cita»: lo que falta se dice junto al campo, sin enviar. */
+  const confirm = () => {
+    if (!slot || act.isPending) return
+    if (asksYou) {
+      const found = checkYou(youDraft, youFields, view.pending, profile)
+      setYouErrors(found)
+      if (focusFirstYouError(found)) return
+      act.mutate({ chosen: slot, you: youInput(youDraft, youFields, view.pending, profile) })
+      return
+    }
+    if (asksPromotions && youDraft.promotions === null) {
+      const found: YouErrors = { promotions: "Elige una opción" }
+      setYouErrors(found)
+      focusFirstYouError(found)
+      return
+    }
+    act.mutate({ chosen: slot, ...(asksPromotions && youDraft.promotions !== null ? { promotions: youDraft.promotions } : {}) })
+  }
+  const changeYou = (patch: Partial<YouDraft>, ...cleared: Array<keyof YouErrors>) => {
+    setYouDraft((previous) => ({ ...previous, ...patch }))
+    if (cleared.some((key) => youErrors[key])) {
+      setYouErrors((previous) => {
+        const next = { ...previous }
+        for (const key of cleared) delete next[key]
+        return next
+      })
+    }
+  }
   const actionError =
     act.error && !slotTaken(act.error)
       ? act.error instanceof ApiError
@@ -304,9 +428,9 @@ export function ChooseAppointment({
           ? { label: changing ? "Conservar mi cita" : "Atrás", run: onBack }
           : null
   const continueLabel = slot ? `Continuar · ${dayWords(slot.startsAt, timeZone)}, ${timeLabel(slot.startsAt, timeZone)}` : "Elige una hora"
-  const reserveLabel = changing ? "Cambiar mi cita" : "Reservar"
+  const reserveLabel = changing ? "Cambiar mi cita" : mode === "reservar" ? "Reservar mi cita" : "Reservar"
   // En el teléfono el botón que avanza queda fijo abajo: el contenido deja ese espacio.
-  const fixedBar = (step === "cuando" && professionals.isSuccess && data?.first) || (step === "revisa" && !needsData)
+  const fixedBar = !resolvingPick && ((step === "cuando" && professionals.isSuccess && data?.first) || (step === "revisa" && !needsData))
 
   const summaryRows = (
     <SummaryRows
@@ -394,7 +518,9 @@ export function ChooseAppointment({
         </section>
       ) : null}
 
-      {step === "cuando" ? (
+      {step === "cuando" && resolvingPick ? <LoadingState kind="indeterminate" message="Buscando el horario que elegiste…" /> : null}
+
+      {step === "cuando" && !resolvingPick ? (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
           <section className="flex min-w-0 flex-col gap-5 lg:rounded-2xl lg:border lg:bg-card lg:p-6">
             <h2 ref={stepTitle} tabIndex={-1} className="sr-only">
@@ -503,34 +629,53 @@ export function ChooseAppointment({
             onChange={() => goTo("cuando")}
           />
           {needsData ? (
-            <>
-              <div className="flex flex-col gap-1">
-                <h3 className="font-semibold">Tus datos</h3>
-                <p className="text-sm text-muted-foreground">Es tu primera cita con nosotros. Solo pedimos lo necesario para reservarla; lo demás lo completas cuando vengas.</p>
-              </div>
-              <BookingDataForm
-                slug={slug}
-                token={token}
-                submissionId={submissionId}
-                draft={dataDraft}
-                onDraftChange={setDataDraft}
-                reserving={act.isPending}
-                onRegistered={() => {
-                  setRegistered(true)
-                  void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token] })
-                  act.mutate(slot)
-                }}
-              />
-            </>
+            <BookingDataForm
+              slug={slug}
+              token={token}
+              clinicName={view.clinicName}
+              submissionId={submissionId}
+              draft={dataDraft}
+              onDraftChange={setDataDraft}
+              reserving={act.isPending}
+              onRegistered={() => {
+                setRegistered(true)
+                void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token] })
+                act.mutate({ chosen: slot })
+              }}
+            />
+          ) : asksYou && view.you ? (
+            <YouReview
+              you={view.you}
+              fields={youFields}
+              pending={view.pending}
+              draft={youDraft}
+              errors={youErrors}
+              onChange={changeYou}
+              profile={profile}
+              today={today}
+              countryCode={view.countryCode}
+              clinicName={view.clinicName}
+              slug={slug}
+            />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              {mode === "reservar" || mode === "tratamiento"
-                ? `${view.patientFirstName ? `Para ${view.patientFirstName}. ` : ""}Ya tenemos tus datos: no te pedimos nada más. `
-                : changing
-                  ? "Es la misma cita en otro horario: no se crea otra. "
-                  : ""}
-              Te avisaremos por WhatsApp sobre tus citas.{changing ? "" : " Podrás cambiarla o cancelarla desde este mismo enlace."}
-            </p>
+            <>
+              <p className="text-sm text-muted-foreground">
+                {changing
+                  ? "Es la misma cita en otro horario: no se crea otra. Te escribiremos por WhatsApp sobre tu cita."
+                  : mode === "tratamiento"
+                    ? "Es lo que aceptaste de tu presupuesto. Ya tenemos tus datos: no te pedimos nada más. Podrás cambiarla o cancelarla desde este mismo enlace."
+                    : "Ya tenemos tus datos: no te pedimos nada más. Te escribiremos por WhatsApp sobre esta cita: la confirmación, los recordatorios y los cambios."}
+              </p>
+              {asksPromotions ? (
+                <PromotionsQuestion
+                  id={youPromotionsId}
+                  clinicName={view.clinicName}
+                  value={youDraft.promotions}
+                  error={youErrors.promotions}
+                  onChange={(promotions) => changeYou({ promotions }, "promotions")}
+                />
+              ) : null}
+            </>
           )}
           {actionError ? (
             <p role="alert" className="text-sm text-destructive">
@@ -539,7 +684,7 @@ export function ChooseAppointment({
           ) : null}
           {!needsData ? (
             <div className="hidden gap-3 lg:flex">
-              <SubmitButton type="button" className="min-h-12 flex-1 text-base" pending={act.isPending} onClick={() => act.mutate(slot)}>
+              <SubmitButton type="button" className="min-h-12 flex-1 text-base" pending={act.isPending} onClick={confirm}>
                 {reserveLabel}
               </SubmitButton>
               {changing && onBack ? (
@@ -561,7 +706,7 @@ export function ChooseAppointment({
             </Button>
           ) : slot ? (
             <>
-              <SubmitButton type="button" className="min-h-12 w-full text-base" pending={act.isPending} onClick={() => act.mutate(slot)}>
+              <SubmitButton type="button" className="min-h-12 w-full text-base" pending={act.isPending} onClick={confirm}>
                 {reserveLabel}
               </SubmitButton>
               {changing && onBack ? (

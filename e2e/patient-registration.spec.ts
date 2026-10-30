@@ -630,7 +630,7 @@ test("vista previa de configuración no crea pacientes", async ({ createOwner })
   expect(await call<unknown[]>(page, "GET", "/api/patients", org.slug)).toEqual([])
 })
 
-test("reserva por enlace: quien recién se contacta elige su hora, deja sus datos esenciales en una pantalla y queda reservado", async ({
+test("reserva por enlace: quien recién se contacta elige su hora, deja en una pantalla lo que la clínica necesita y queda reservado", async ({
   owner,
   browser,
   nextEventId,
@@ -668,82 +668,101 @@ test("reserva por enlace: quien recién se contacta elige su hora, deja sus dato
   const { context, page: anon } = await anonymousPage(browser, { width: 390, height: 844 })
   try {
     await gotoHydrated(anon, tenant(org.slug, `/reserva?token=${token}`))
-    await expect(anon.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
-    // Tres pasos: elegir, sus datos y listo.
-    await expect(anon.getByText(/paso 1 de 3/)).toBeVisible()
-    // La semana siguiente siempre tiene horarios: la de hoy depende del día y la hora en que corre la prueba.
-    await anon.getByRole("button", { name: "Semana siguiente", exact: true }).click()
+    await expect(anon.getByRole("heading", { level: 1, name: "Reserva tu cita" })).toBeVisible()
+    // Una sola sede: dos pasos, con quién y cuándo, y revisar (sus datos van ahí mismo).
+    await expect(anon.getByText(/Paso 1 de 2 · Con quién y cuándo/)).toBeVisible()
+    // Los 7 días siguientes siempre tienen horarios: los de hoy dependen de la hora en que corre la prueba.
+    await anon.getByRole("button", { name: "Los 7 días siguientes", exact: true }).click()
     await anon.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
-    await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
+    await anon.getByRole("button", { name: /^Continuar · / }).click()
 
+    await expect(anon.getByRole("heading", { name: "Revisa y reserva" })).toBeVisible()
+    await expect(anon.getByText(/Paso 2 de 2 · Revisa y reserva/)).toBeVisible()
     await expect(anon.getByRole("heading", { name: "Tus datos" })).toBeVisible()
-    await expect(anon.getByText(/paso 2 de 3/)).toBeVisible()
-    await expect(anon.getByRole("button", { name: "Cambiar horario" })).toBeVisible()
+    await expect(anon.getByText("Revisa lo que ya tenemos y completa lo que falta.")).toBeVisible()
+    const changeSlot = anon.getByRole("button", { name: "Cambiar con quién, el día o la hora" })
+    await expect(changeSlot).toBeVisible()
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
-    // Una sola pantalla: sin los pasos del registro completo ni lo que se completa en la clínica.
+    // Una sola pantalla, sin los pasos del registro completo: lo que la clínica necesita, también la fecha de nacimiento.
     await expect(anon.getByRole("button", { name: "Siguiente", exact: true })).toHaveCount(0)
-    await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(0)
-    // Escribe por Telegram: no se le supone un celular ni se dice que es «el número desde el que nos escribes».
+    await expect(anon.getByLabel("Fecha de nacimiento")).toBeVisible()
+    // Escribe por Telegram: no se le supone un celular.
     const phone = anon.getByLabel("Celular", { exact: true })
     await expect(phone).toHaveValue("")
-    await expect(anon.getByText(/número desde el que nos escribes/)).toHaveCount(0)
+    await expect(anon.getByText("Te escribiremos por WhatsApp a este número sobre tu cita: la confirmación, los recordatorios y los cambios.")).toBeVisible()
+    // Nunca respondió lo de novedades: se pregunta sin nada marcado.
+    await expect(anon.getByRole("radio", { name: "Sí, quiero" })).not.toBeChecked()
+    await expect(anon.getByRole("radio", { name: "No, gracias" })).not.toBeChecked()
     const submit = anon.getByRole("button", { name: "Reservar mi cita" })
     await expect(submit).toBeInViewport()
     await info.attach("reserva-tus-datos", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
 
     // Errores por campo, y lo escrito se conserva.
     await anon.getByLabel("Nombres", { exact: true }).fill("Carla")
+    await anon.getByLabel("Apellidos", { exact: true }).fill("")
     await anon.getByLabel("Número", { exact: true }).fill("123")
     await submit.click()
     await expect(anon.getByText("Escribe tus apellidos")).toBeVisible()
     await expect(anon.getByText("El DNI tiene 8 números; faltan 5")).toBeVisible()
+    await expect(anon.getByText("Escribe tu fecha de nacimiento")).toBeVisible()
     await expect(anon.getByText("Escribe un celular para avisarte de tu cita")).toBeVisible()
-    await expect(anon.getByText("Para reservar necesitamos que aceptes el uso de estos datos")).toBeVisible()
+    await expect(anon.getByText("Elige una opción")).toBeVisible()
+    await expect(anon.getByText("Para reservar necesitamos que aceptes el aviso de privacidad")).toBeVisible()
     await expect(anon.getByLabel("Nombres", { exact: true })).toHaveValue("Carla")
     await expect(anon.getByLabel("Apellidos", { exact: true })).toBeFocused()
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await info.attach("reserva-tus-datos-errores", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
 
-    // Para otra persona pide, en la misma pantalla, solo lo que el registro exige de ella.
+    // Para otra persona pide, en la misma pantalla, lo mismo de la persona que se atiende.
     await anon.getByRole("radio", { name: "Para otra persona" }).click()
-    await expect(anon.getByRole("group", { name: "La persona que se va a atender" })).toBeVisible()
-    await expect(anon.getByLabel("Fecha de nacimiento")).toBeVisible()
+    const other = anon.getByRole("group", { name: "La persona que se va a atender" })
+    await expect(other).toBeVisible()
+    await expect(other.getByLabel("Fecha de nacimiento")).toBeVisible()
+    await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(1)
     expect(await anon.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
     await info.attach("reserva-tus-datos-otra-persona", { body: await anon.screenshot({ fullPage: true }), contentType: "image/png" })
     await anon.getByRole("radio", { name: "Para mí" }).click()
-    await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(0)
+    await expect(other).toHaveCount(0)
+    await expect(anon.getByLabel("Fecha de nacimiento")).toHaveCount(1)
 
     await anon.getByLabel("Apellidos", { exact: true }).fill("Núñez Prado")
     await anon.getByLabel("Número", { exact: true }).fill(docFromId(nextEventId()))
+    await anon.getByLabel("Fecha de nacimiento").fill(writtenDate("1992-07-19"))
     await phone.fill(maskedPhone(phoneFromId(nextEventId())))
+    await anon.getByRole("radio", { name: "No, gracias" }).click()
     // El aviso de privacidad es el del registro de la clínica.
     await anon.getByRole("button", { name: "Ver el aviso de privacidad" }).click()
     await expect(anon.getByRole("dialog", { name: "Aviso de privacidad" }).getByText(PRIVACY)).toBeVisible()
     await anon.keyboard.press("Escape")
-    await anon.getByRole("checkbox", { name: /Acepto que la clínica use estos datos/ }).click()
+    await anon.getByRole("checkbox", { name: /^Acepto el aviso de privacidad de / }).click()
     // Volver a cambiar de horario no borra lo escrito.
-    await anon.getByRole("button", { name: "Cambiar horario" }).click()
-    await anon.getByRole("button", { name: "Continuar con mis datos" }).click()
+    await changeSlot.click()
+    await anon.getByRole("button", { name: /^Continuar · / }).click()
     await expect(anon.getByLabel("Apellidos", { exact: true })).toHaveValue("Núñez Prado")
+    await expect(anon.getByRole("radio", { name: "No, gracias" })).toBeChecked()
+    await expect(anon.getByText("Tus datos y tu cita se guardan al tocar «Reservar mi cita».")).toBeVisible()
     await anon.getByRole("button", { name: "Reservar mi cita" }).click()
 
-    // Con sus datos guardados, la página reserva el horario que ya había elegido.
+    // Con sus datos guardados, la página reserva el horario que ya había elegido; no le queda nada por completar.
     await expect(anon.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible({ timeout: 20_000 })
+    await expect(anon.getByRole("region", { name: "Tu cita" })).toContainText("Confirmada")
+    await expect(anon.getByRole("region", { name: "Tus datos" })).toHaveCount(0)
     await info.attach("reserva-nuevo-lista", { body: await anon.screenshot({ fullPage: false }), contentType: "image/png" })
   } finally {
     await context.close()
   }
 
-  // La ficha la creó el registro, vinculada a esa persona, y la cita quedó en la agenda con su origen.
+  // La ficha la creó el registro, vinculada a esa persona, y la cita quedó en la agenda con su origen, confirmada.
   const rows = await fixtureDb.select().from(appointment).where(eq(appointment.conversationId, conversation.id))
-  expect(rows.map((row) => [row.status, row.source])).toEqual([["programada", "enlace"]])
+  expect(rows.map((row) => [row.status, row.source])).toEqual([["confirmada", "enlace"]])
   const linked = await fixtureDb.select({ patientId: patientContact.patientId, relationship: patientContact.relationship }).from(patientContact).where(eq(patientContact.contactId, conversation.contact.id))
   expect(linked).toEqual([{ patientId: rows[0]!.patientId, relationship: "self" }])
 
-  // Recepción ve en su página que quedó con lo esencial: faltan datos para atenderla.
+  // Recepción ve en su página que quedó con lo que la clínica necesita: nada por completar después.
   const detail = await getPatientDetail(page, org.slug, rows[0]!.patientId)
-  expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: null, identityNeedsReview: false })
+  expect(detail.patient).toMatchObject({ displayName: "Carla Núñez Prado", birthDate: "1992-07-19", identityNeedsReview: false })
   await gotoHydrated(page, tenant(org.slug, `/patients/${rows[0]!.patientId}`))
-  await expect(page.getByText("Faltan datos para atenderla").first()).toBeVisible()
-  await info.attach("reserva-ficha-incompleta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
+  await expect(page.getByText("Carla Núñez Prado").first()).toBeVisible()
+  await expect(page.getByText("Faltan datos para atenderla")).toHaveCount(0)
+  await info.attach("reserva-ficha-completa", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 })

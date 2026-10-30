@@ -1,12 +1,12 @@
 import { Badge, Button } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, PageShell } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, internationalText, LoadingState, PageShell } from "@odentia/ui-patterns"
 import { Switch } from "@odentia/ui/components/switch"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { CalendarCheck, ChevronLeft, FileDown } from "lucide-react"
-import { useId, useState } from "react"
+import { type ReactNode, useId, useState } from "react"
 import { AppointmentBlock } from "../../components/public/appointment-block"
-import { ChooseAppointment } from "../../components/public/choose-appointment"
+import { type BookingPick, ChooseAppointment } from "../../components/public/choose-appointment"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
 import { LinkConsentStep, LinkQuestionnaireStep } from "../../components/public/link-steps"
 import { PersonalDataForm } from "../../components/public/personal-data-form"
@@ -39,12 +39,33 @@ import { formatPortalMoney } from "../../lib/portal"
  * entero cuando no le queda nada pendiente.
  *
  * El enlace que envía el agente para reservar lleva directo a elegir la cita
- * (`ChooseAppointment`): con quién, el día y la hora en una pantalla y, si aún
- * no es paciente, sus datos al revisar.
+ * (`ChooseAppointment`): con quién, el día y la hora en una pantalla y, al
+ * revisar, sus datos (los de quien aún no es paciente, o lo que le falta a
+ * quien ya lo es). Si ya eligió la hora en el chat, el enlace la trae (`sede`,
+ * `con`, `hora`). Cada enlace abre lo que dice su mensaje: reservar, sus datos
+ * o, con `#mensajes`, sus mensajes.
  */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Un instante ISO 8601 con su zona (`2026-11-03T09:00:00-05:00`). */
+const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/
+
+/** La hora que eligió en el chat: las tres partes juntas y bien escritas, o nada. */
+function pickOf(search: { sede?: string; con?: string; hora?: string }): BookingPick | null {
+  const { sede, con } = search
+  // Un «+» de la zona sin codificar llega como espacio.
+  const hora = search.hora?.replace(/ (\d{2}:\d{2})$/, "+$1")
+  if (!sede || !con || !hora || !UUID.test(sede) || con.length > 200 || !INSTANT.test(hora) || Number.isNaN(Date.parse(hora))) return null
+  return { branchId: sede, professionalUserId: con, startsAt: hora }
+}
+
+const text = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined)
+
 export const Route = createFileRoute("/reserva")({
-  validateSearch: (search: Record<string, unknown>) => ({
+  validateSearch: (search: Record<string, unknown>): { token?: string; sede?: string; con?: string; hora?: string } => ({
     token: typeof search.token === "string" ? search.token : undefined,
+    sede: text(search.sede),
+    con: text(search.con),
+    hora: text(search.hora),
   }),
   head: () => ({
     meta: [
@@ -82,14 +103,18 @@ function problemOf(error: unknown, fallback: string): string | null {
 }
 
 function PersonalLinkPage() {
-  const { token } = Route.useSearch()
+  const search = Route.useSearch()
+  const { token } = search
+  // La hora que eligió en el chat se lee al abrir: después manda lo que elija aquí.
+  const [pick] = useState(() => pickOf(search))
   const queryClient = useQueryClient()
   const slug = orgSlugFromHostname(requestHostname())
   const ready = typeof window !== "undefined" && slug !== null && token !== undefined
   const viewKey = ["booking-link", slug, token ?? null]
+  const fetchView = () => fetchBookingLink(slug ?? "", token ?? "")
   const viewQuery = useQuery({
     queryKey: viewKey,
-    queryFn: () => fetchBookingLink(slug ?? "", token ?? ""),
+    queryFn: fetchView,
     enabled: ready,
     retry: false,
   })
@@ -97,8 +122,10 @@ function PersonalLinkPage() {
   // Página pública, sin layout de organización: el formato regional y el país
   // de la clínica llegan con el enlace y se fijan antes de pintar fechas y horas.
   if (view) setOrgLocale(view.locale, undefined, view.countryCode)
-  const [screen, setScreen] = useState<Screen>(() =>
-    typeof window !== "undefined" && window.location.hash === "#mensajes" ? { kind: "mensajes" } : { kind: "pendiente" },
+  // Lo que se está haciendo en la página. `null` hasta que llega el enlace: entonces se abre lo que dice su
+  // mensaje. «Elegir mis mensajes» (el pie del correo) lleva `#mensajes` y abre siempre «Tus mensajes».
+  const [chosenScreen, setScreen] = useState<Screen | null>(() =>
+    typeof window !== "undefined" && window.location.hash === "#mensajes" ? { kind: "mensajes" } : null,
   )
   // La cita recién reservada o cambiada, mientras la vista se actualiza.
   const [booked, setBooked] = useState<BookingAppointment | null>(null)
@@ -106,6 +133,8 @@ function PersonalLinkPage() {
   const [didSomething, setDidSomething] = useState(false)
   // Lo que acaba de pasar con su cita: el título lo dice en vez del saludo.
   const [news, setNews] = useState<"reservada" | "cambiada" | "cancelada" | "confirmada" | null>(null)
+  // Recién reservada: se espera la vista al día para abrir lo que sigue.
+  const [landing, setLanding] = useState(false)
   const refresh = () => {
     setDidSomething(true)
     void queryClient.invalidateQueries({ queryKey: viewKey })
@@ -114,6 +143,23 @@ function PersonalLinkPage() {
     setScreen({ kind: "pendiente" })
     refresh()
     window.scrollTo({ top: 0 })
+  }
+  /** Después de reservar: si aún falta algo de sus datos, directo a «Tus datos»; si no, «Tu cita quedó reservada». */
+  const land = async (result: BookingAppointment) => {
+    setBooked(result)
+    setNews("reservada")
+    setDidSomething(true)
+    setLanding(true)
+    try {
+      const fresh = await queryClient.fetchQuery({ queryKey: viewKey, queryFn: fetchView, staleTime: 0 })
+      const missing = fresh.data.status === "abierto" ? (fresh.data.data?.missing.length ?? 0) : 0
+      setScreen(missing > 0 ? { kind: "datos" } : { kind: "pendiente" })
+    } catch {
+      setScreen({ kind: "pendiente" })
+    } finally {
+      setLanding(false)
+      window.scrollTo({ top: 0 })
+    }
   }
 
   const cancel = useMutation({
@@ -136,10 +182,10 @@ function PersonalLinkPage() {
   })
 
   if (!ready && typeof window !== "undefined") return <Expired />
-  if (viewQuery.isPending) {
+  if (viewQuery.isPending || landing) {
     return (
       <PageShell maxWidth="md">
-        <LoadingState kind="indeterminate" message="Abriendo tu enlace…" />
+        <LoadingState kind="indeterminate" message={landing ? "Abriendo tu cita…" : "Abriendo tu enlace…"} />
       </PageShell>
     )
   }
@@ -176,23 +222,53 @@ function PersonalLinkPage() {
     return <Expired />
   }
 
-  // El enlace del agente para reservar: directo a elegir día y hora.
-  if (view.booking && !appointment) {
+  const missing = view.data?.missing ?? []
+  const offersBooking = !!view.booking && !appointment
+  // Al abrir: reservar si el enlace lo ofrece; si no, «Tus datos» si le falta algo; si no, el resumen.
+  const opened: Screen = !offersBooking && missing.length > 0 ? { kind: "datos" } : { kind: "pendiente" }
+  if (chosenScreen === null) setScreen(opened)
+  const screen = chosenScreen ?? opened
+  const activeAppointment = appointment && !appointment.cancelled ? appointment : null
+  // El mismo nombre para volver desde cada pantalla.
+  const backLabel = activeAppointment ? "Ver mi cita" : "Lo pendiente"
+
+  const one = (title: string, body: ReactNode, subtitle?: string | null) => (
+    <PageShell maxWidth="md">
+      <div className="flex flex-col gap-4">
+        <header className="flex flex-col gap-1">
+          <p className="text-sm font-semibold text-muted-foreground">{view.clinicName}</p>
+          <h1 className="text-xl font-semibold">{title}</h1>
+          {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+        </header>
+        <Button type="button" variant="link" className="h-auto min-h-11 self-start p-0" onClick={back}>
+          <ChevronLeft className="size-4" aria-hidden />
+          {backLabel}
+        </Button>
+        {body}
+      </div>
+    </PageShell>
+  )
+
+  if (screen.kind === "mensajes") {
+    if (!view.messages) {
+      return one(
+        "Tus mensajes",
+        <EmptyState
+          title="Desde este enlace no se eligen los mensajes"
+          description="Los elige quien los recibe. Si eres tú, escríbenos por el chat."
+          actionLabel={backLabel}
+          onAction={back}
+        />,
+      )
+    }
+    return one(`Tus mensajes · ${view.clinicName}`, <MessagesStep slug={slug} token={token} messages={view.messages} onChanged={refresh} />)
+  }
+
+  // El enlace del agente para reservar: directo a elegir día y hora (o a revisar, si ya la eligió en el chat).
+  if (offersBooking) {
     return (
       <PageShell>
-        <ChooseAppointment
-          view={view}
-          slug={slug}
-          token={token}
-          mode="reservar"
-          current={null}
-          onBack={null}
-          onDone={(result) => {
-            setBooked(result)
-            setNews("reservada")
-            refresh()
-          }}
-        />
+        <ChooseAppointment view={view} slug={slug} token={token} mode="reservar" current={null} pick={pick} onBack={null} onDone={(result) => void land(result)} />
       </PageShell>
     )
   }
@@ -210,8 +286,12 @@ function PersonalLinkPage() {
           planItems={screen.kind === "agendar" ? screen.items : screen.planItems}
           onBack={back}
           onDone={(result) => {
+            if (mode !== "cambiar") {
+              void land(result)
+              return
+            }
             setBooked(result)
-            setNews(mode === "cambiar" ? "cambiada" : "reservada")
+            setNews("cambiada")
             back()
           }}
         />
@@ -219,37 +299,38 @@ function PersonalLinkPage() {
     )
   }
 
-  const one = (title: string, body: React.ReactNode) => (
-    <PageShell maxWidth="md">
-      <div className="flex flex-col gap-4">
-        <Button type="button" variant="link" className="h-auto min-h-11 self-start p-0" onClick={back}>
-          <ChevronLeft className="size-4" aria-hidden />
-          Lo pendiente
-        </Button>
-        <header className="flex flex-col gap-1">
-          <p className="text-sm font-semibold text-muted-foreground">{view.clinicName}</p>
-          <h1 className="text-xl font-semibold">{title}</h1>
-        </header>
-        {body}
-      </div>
-    </PageShell>
-  )
-
   if (screen.kind === "datos") {
-    const withHealth = view.data?.health ? " y su salud" : ""
-    const line = appointment && !appointment.cancelled ? `Te esperamos el ${longDay(appointment.startsAt, appointment.timeZone).toLowerCase()} a las ${timeLabel(appointment.startsAt, appointment.timeZone)}.` : null
+    const healthOnly = missing.length === 0 && !!view.data?.health
+    const withHealth = view.data?.health && !healthOnly
+    const title = view.patientFirstName
+      ? healthOnly
+        ? `La salud de ${view.patientFirstName}`
+        : `Los datos de ${view.patientFirstName}${withHealth ? " y su salud" : ""}`
+      : healthOnly
+        ? "Tu salud"
+        : withHealth
+          ? "Tus datos y tu salud"
+          : "Tus datos"
+    const when = activeAppointment
+      ? `${longDay(activeAppointment.startsAt, activeAppointment.timeZone).toLowerCase()}, ${timeLabel(activeAppointment.startsAt, activeAppointment.timeZone)}`
+      : null
+    const line = activeAppointment
+      ? `Te esperamos el ${longDay(activeAppointment.startsAt, activeAppointment.timeZone).toLowerCase()} a las ${timeLabel(activeAppointment.startsAt, activeAppointment.timeZone)}.`
+      : null
     return one(
-      view.patientFirstName ? `Los datos de ${view.patientFirstName}${withHealth}` : view.data?.health ? "Tus datos y tu salud" : "Tus datos",
+      title,
       <PersonalDataForm
         slug={slug}
         token={token}
         clinicName={view.clinicName}
         appointmentLine={line}
+        backLabel={backLabel}
         onDone={() => {
           refresh()
           back()
         }}
       />,
+      when ? `Para ${view.patientFirstName ? "la" : "tu"} cita del ${when}` : null,
     )
   }
   if (screen.kind === "consentimiento") {
@@ -258,23 +339,9 @@ function PersonalLinkPage() {
   if (screen.kind === "cuestionario") {
     return one("Antes de tu cita", <LinkQuestionnaireStep slug={slug} token={token} onBack={back} />)
   }
-  if (screen.kind === "mensajes") {
-    if (!view.messages) {
-      return one(
-        "Tus mensajes",
-        <EmptyState
-          title="Desde este enlace no se eligen los mensajes"
-          description="Los elige quien los recibe. Si eres tú, escríbenos por el chat."
-          actionLabel="Volver a lo pendiente"
-          onAction={back}
-        />,
-      )
-    }
-    return one(`Tus mensajes · ${view.clinicName}`, <MessagesStep slug={slug} token={token} messages={view.messages} onChanged={refresh} />)
-  }
   if (screen.kind === "presupuesto") {
     const budget = view.budgets.find((item) => item.id === screen.budgetId)
-    if (!budget) return one("Tu presupuesto", <EmptyState title="Este presupuesto ya está respondido" description="Gracias. Lo demás sigue en lo pendiente." actionLabel="Volver a lo pendiente" onAction={back} />)
+    if (!budget) return one("Tu presupuesto", <EmptyState title="Este presupuesto ya está respondido" description="Gracias. Lo demás sigue en lo pendiente." actionLabel={backLabel} onAction={back} />)
     return one(
       `Tu presupuesto · ${view.clinicName}`,
       <BudgetStep
@@ -282,6 +349,7 @@ function PersonalLinkPage() {
         token={token}
         budgetId={budget.id}
         budget={budget}
+        backLabel={backLabel}
         onAnswered={(toSchedule) => {
           refresh()
           setScreen(toSchedule.length > 0 ? { kind: "agendar", items: toSchedule } : { kind: "pendiente" })
@@ -291,7 +359,6 @@ function PersonalLinkPage() {
   }
 
   // Lo pendiente: una tarjeta por cosa.
-  const missing = view.data?.missing ?? []
   const cancelError = problemOf(cancel.error, "No pudimos cancelar la cita.")
   const confirmError = problemOf(confirm.error, "No pudimos confirmar la cita.")
   return (
@@ -299,16 +366,17 @@ function PersonalLinkPage() {
       <header className="mb-6 flex flex-col gap-1">
         <p className="text-sm font-semibold text-muted-foreground">{view.clinicName}</p>
         <h1 className="text-xl font-semibold">{news ? `Tu cita quedó ${news}` : view.firstName ? `Hola, ${view.firstName}` : "Hola"}</h1>
+        {news === "reservada" ? <p className="text-sm text-muted-foreground">Te lo confirmamos también por el chat.</p> : null}
         {view.patientFirstName ? <p className="text-sm text-muted-foreground">Lo pendiente de {view.patientFirstName}.</p> : null}
       </header>
       <div className="flex flex-col gap-4">
-        {appointment && !appointment.cancelled ? (
+        {activeAppointment ? (
           <AppointmentBlock
             title="Tu cita"
-            appointment={appointment}
+            appointment={activeAppointment}
             onAddToCalendar={() => downloadLinkCalendar(slug, token)}
-            canChange={appointment.canChange}
-            canConfirm={appointment.canConfirm}
+            canChange={activeAppointment.canChange}
+            canConfirm={activeAppointment.canConfirm}
             confirming={confirm.isPending}
             cancelling={cancel.isPending}
             error={cancelError ?? confirmError}
@@ -334,6 +402,15 @@ function PersonalLinkPage() {
             badge={missing.length === 1 ? "Falta 1" : `Faltan ${missing.length}`}
             text={`${capital(missing.map((item) => item.label.toLowerCase()).join(", "))}${view.data?.health ? "; y si tienes alergias, alguna enfermedad o tomas medicamentos" : ""}.`}
             action="Completar"
+            onAction={() => setScreen({ kind: "datos" })}
+          />
+        ) : view.data?.health ? (
+          // Solo queda su salud: opcional, ayuda a quien la atiende.
+          <Block
+            title={view.patientFirstName ? `La salud de ${view.patientFirstName}` : "Tu salud"}
+            badge="Opcional"
+            text="Si tienes alergias, alguna enfermedad o tomas medicamentos, cuéntanoslo antes de venir."
+            action="Responder"
             onAction={() => setScreen({ kind: "datos" })}
           />
         ) : null}
@@ -370,13 +447,9 @@ function PersonalLinkPage() {
         {view.messages ? (
           <section aria-label="Tus mensajes" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
             <h2 className="font-semibold">Tus mensajes</h2>
-            <p className="text-sm">
-              {view.messages.nothing
-                ? "Pediste no recibir ningún mensaje de la clínica."
-                : "Elige qué mensajes quieres recibir de la clínica."}
-            </p>
+            <p className="text-sm">{messagesSummary(view.messages, view.clinicName, view.you?.phone ?? null, view.pending ? !view.pending.promotions : null)}</p>
             <Button type="button" variant="outline" className="min-h-11 self-start" onClick={() => setScreen({ kind: "mensajes" })}>
-              Elegir mis mensajes
+              Cambiar mis mensajes
             </Button>
           </section>
         ) : null}
@@ -384,6 +457,19 @@ function PersonalLinkPage() {
       </div>
     </PageShell>
   )
+}
+
+/**
+ * Lo que eligió de «Tus mensajes», dicho corto: los mensajes de sus citas y su
+ * respuesta a novedades (nada si nunca respondió o no se sabe).
+ */
+function messagesSummary(messages: PersonalLinkMessages, clinicName: string, phone: string | null, promotionsAnswered: boolean | null): string {
+  if (messages.nothing) return `Pediste no recibir ningún mensaje de ${clinicName}.`
+  const parts: string[] = []
+  if (messages.recordatorio) parts.push(`Te escribimos por WhatsApp${phone ? ` al ${internationalText(phone)}` : ""} sobre tus citas.`)
+  if (messages.novedades) parts.push("Novedades y promociones: sí.")
+  else if (promotionsAnswered) parts.push("Novedades y promociones: no.")
+  return parts.length > 0 ? parts.join(" ") : `Elige qué mensajes quieres recibir de ${clinicName}.`
 }
 
 function Block({ title, badge, text, action, onAction }: { title: string; badge: string; text: string; action: string; onAction: () => void }) {
@@ -593,7 +679,7 @@ function BookedOnly({ view, appointment, slug, token }: { view: PersonalLinkView
           onConfirm={() => {}}
         />
         <p className="text-sm text-muted-foreground">
-          Te lo confirmamos también por el chat. Te avisaremos por WhatsApp sobre tus citas. Ya puedes volver a la conversación.
+          Te lo confirmamos también por el chat. Te escribiremos por WhatsApp sobre tu cita: los recordatorios y los cambios. Ya puedes volver a la conversación.
         </p>
       </div>
     </PageShell>
@@ -606,12 +692,15 @@ function BudgetStep({
   token,
   budgetId,
   budget,
+  backLabel,
   onAnswered,
 }: {
   slug: string
   token: string
   budgetId: string
   budget: PersonalLinkView["budgets"][number]
+  /** El nombre de volver, el mismo de toda la página. */
+  backLabel: string
   onAnswered: (toSchedule: Array<{ planItemId: string; title: string }>) => void
 }) {
   const [answered, setAnswered] = useState<Array<{ planItemId: string; title: string }> | null>(null)
@@ -627,7 +716,7 @@ function BudgetStep({
           <p className="text-lg font-semibold">Gracias, recibimos tu respuesta</p>
           <p className="text-sm">Si cambias de opinión, escríbenos por el chat.</p>
           <Button type="button" variant="outline" className="mt-2 min-h-11" onClick={() => onAnswered([])}>
-            Volver a lo pendiente
+            {backLabel}
           </Button>
         </div>
       )
