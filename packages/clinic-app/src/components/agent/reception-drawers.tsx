@@ -1,18 +1,52 @@
-import { Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { Input } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type FormEvent, useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import type { AgentFunction } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { CLOSE_AFTER_HOURS_MAX, CLOSE_AFTER_HOURS_MIN, closeAfterHoursIssue } from "../../lib/conversation-state"
 import type { AgentConfig } from "../../lib/crm"
-import { sameDraft } from "../../lib/page-draft-guard"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { appWords } from "../../lib/product-words"
 
+/** Los topes de `putInput` de `/api/agent/config`, con las mismas palabras. */
+const NOTE_MAX = 300
+const KEYWORDS_MAX = 30
+const KEYWORD_LENGTH_MAX = 60
+const KEYWORDS_TOO_MANY = `Escribe como mucho ${KEYWORDS_MAX} palabras clave.`
+const KEYWORD_TOO_LONG = `Cada palabra clave puede tener como mucho ${KEYWORD_LENGTH_MAX} caracteres.`
+
+const noteSchema = z.object({ note: z.string().max(NOTE_MAX) })
+
+/** Las palabras clave tal como se guardan: separadas por coma, sin vacías. */
+function splitKeywords(text: string): string[] {
+  return text
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+/** Solo se valida lo que el cajón enseña: lo oculto no se envía. */
+function limitsSchema(keywords: boolean, close: boolean) {
+  return z
+    .object({ keywords: z.string(), closeAfterHours: z.string() })
+    .superRefine((value, ctx) => {
+      if (keywords) {
+        const list = splitKeywords(value.keywords)
+        const long = list.find((item) => item.length > KEYWORD_LENGTH_MAX)
+        if (list.length > KEYWORDS_MAX) ctx.addIssue({ code: "custom", path: ["keywords"], message: KEYWORDS_TOO_MANY })
+        else if (long) ctx.addIssue({ code: "custom", path: ["keywords"], message: `«${long.slice(0, 20)}…»: ${KEYWORD_TOO_LONG}` })
+      }
+      if (close) {
+        const issue = closeAfterHoursIssue(value.closeAfterHours)
+        if (issue) ctx.addIssue({ code: "custom", path: ["closeAfterHours"], message: issue })
+      }
+    })
+}
+
 /** Guarda una parte de la configuración y refresca lo que la muestra. */
-function useSaveConfig(onSaved: () => void) {
+function useSaveConfig() {
   const queryClient = useQueryClient()
   return useMutation({
     retry: false,
@@ -21,7 +55,6 @@ function useSaveConfig(onSaved: () => void) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
       void queryClient.invalidateQueries({ queryKey: ["agent-overview"] })
-      onSaved()
     },
   })
 }
@@ -37,51 +70,54 @@ export function FunctionNoteDrawer({
   config: AgentConfig
   onClose: () => void
 }) {
+  const save = useSaveConfig()
+  const form = useAppForm({
+    defaultValues: { note: "" },
+    validators: { onSubmit: noteSchema },
+    onSubmit: async ({ value }) => {
+      if (!fn) return
+      const next = { ...config.functionNotes }
+      if (value.note.trim()) next[fn.id] = value.note.trim()
+      else delete next[fn.id]
+      await save.mutateAsync({ functionNotes: next })
+      onClose()
+    },
+  })
+  // Al abrir se parte de lo guardado; un refresco con el cajón abierto no pisa lo escrito.
   const saved = fn ? (config.functionNotes[fn.id] ?? "") : ""
-  const [note, setNote] = useState(saved)
+  const latest = useRef(saved)
+  latest.current = saved
   useEffect(() => {
-    if (fn) setNote(saved)
-  }, [fn, saved])
-  const save = useSaveConfig(onClose)
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (!fn || save.isPending) return
-    const next = { ...config.functionNotes }
-    if (note.trim()) next[fn.id] = note.trim()
-    else delete next[fn.id]
-    save.mutate({ functionNotes: next })
-  }
+    if (fn) form.reset({ note: latest.current })
+  }, [fn, form])
+  // La API señala la nota por su función (`functionNotes.<id>`).
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => (key.startsWith("functionNotes") ? "note" : undefined),
+  })
 
   return (
     <FormDrawer
+      {...surface}
       open={fn !== null}
-      onClose={() => {
-        save.reset()
-        onClose()
-      }}
+      onClose={onClose}
       title={fn ? `Indicación para «${fn.label}»` : "Indicación"}
       description={`Una nota corta sobre cómo quieres que haga esto. No reemplaza lo que fija ${appWords().name}.`}
-      onSubmit={submit}
-      isSubmitting={save.isPending}
-      isDirty={note !== saved}
-      error={mutationErrorMessage(save.error)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
     >
       <div className="flex flex-col gap-5">
-      <Field>
-        <FieldLabel htmlFor="funcion-indicacion">Indicación</FieldLabel>
-        <Textarea
-          id="funcion-indicacion"
-          rows={4}
-          maxLength={300}
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder="Ofrece primero las mañanas; las tardes se llenan rápido."
-        />
-        <FieldDescription>Hasta 300 caracteres. Déjala vacía para quitarla.</FieldDescription>
-      </Field>
+        <form.AppField name="note">
+          {(field) => (
+            <field.TextareaField
+              id="funcion-indicacion"
+              label="Indicación"
+              rows={4}
+              maxLength={NOTE_MAX}
+              placeholder="Ofrece primero las mañanas; las tardes se llenan rápido."
+              description="Hasta 300 caracteres. Déjala vacía para quitarla."
+            />
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
@@ -136,41 +172,34 @@ export function LimitsDrawer({
     if (section) setShown(section)
   }, [section])
   const has = (part: Exclude<LimitsSection, "todo">) => shown === "todo" || shown === part
-  const [draft, setDraft] = useState<LimitsDraft>(() => toLimits(config))
-  const [baseline, setBaseline] = useState<LimitsDraft>(() => toLimits(config))
+  const save = useSaveConfig()
+  const form = useAppForm({
+    defaultValues: toLimits(config),
+    validators: { onSubmit: limitsSchema(has("pasa"), has("cierre")) },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({
+        ...(has("pasa") ? { handoffKeywords: splitKeywords(value.keywords) } : {}),
+        ...(has("cierre") ? { closeAfterHours: Number(value.closeAfterHours.trim()) } : {}),
+      })
+      onClose()
+    },
+  })
+  // Al abrir se parte de lo guardado; un refresco con el cajón abierto no pisa lo escrito.
+  const latest = useRef(config)
+  latest.current = config
   useEffect(() => {
-    if (!open) return
-    const saved = toLimits(config)
-    setDraft(saved)
-    setBaseline(saved)
-  }, [open, config])
-  const save = useSaveConfig(onClose)
-
-  const issue = has("cierre") ? closeAfterHoursIssue(draft.closeAfterHours) : null
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (issue || save.isPending) return
-    save.mutate({
-      ...(has("pasa")
-        ? {
-            handoffKeywords: draft.keywords
-              .split(",")
-              .map((item) => item.trim())
-              .filter(Boolean),
-          }
-        : {}),
-      ...(has("cierre") ? { closeAfterHours: Number(draft.closeAfterHours.trim()) } : {}),
-    })
-  }
+    if (open) form.reset(toLimits(latest.current))
+  }, [open, form])
+  // La API señala la lista entera o una palabra (`handoffKeywords[3]`): las dos van al mismo campo.
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => (key.startsWith("handoffKeywords") ? "keywords" : undefined),
+  })
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
-      onClose={() => {
-        save.reset()
-        onClose()
-      }}
+      onClose={onClose}
       title={limitsTitle(shown, receptionName)}
       description={
         shown === "pasa"
@@ -179,55 +208,50 @@ export function LimitsDrawer({
             ? `Si el paciente deja de responder, ${receptionName} se despide y cierra la conversación. Si vuelve a escribir, se abre otra vez.`
             : "Cuándo pasa a una persona y cuándo cierra la conversación."
       }
-      onSubmit={submit}
-      isSubmitting={save.isPending}
-      isDirty={!sameDraft(draft, baseline)}
-      error={mutationErrorMessage(save.error)}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
-      submitDisabled={issue !== null}
     >
       <div className="flex flex-col gap-5">
       {has("pasa") ? (
-      <Field>
-        <FieldLabel htmlFor="limites-temas">Pasa siempre a una persona si mencionan</FieldLabel>
-        <Input
-          id="limites-temas"
-          value={draft.keywords}
-          onChange={(event) => setDraft({ ...draft, keywords: event.target.value })}
-          placeholder="queja, reclamo, urgencia"
-        />
-        <FieldDescription>Palabras separadas por coma. Además pasa el caso cuando duda o se lo piden.</FieldDescription>
-      </Field>
+        <form.AppField name="keywords">
+          {(field) => (
+            <field.TextField
+              id="limites-temas"
+              label="Pasa siempre a una persona si mencionan"
+              placeholder="queja, reclamo, urgencia"
+              description="Palabras separadas por coma. Además pasa el caso cuando duda o se lo piden."
+            />
+          )}
+        </form.AppField>
       ) : null}
 
       {has("cierre") ? (
-      <Field>
-        <FieldLabel htmlFor="limites-cierre">Cerrar la conversación si el paciente no responde</FieldLabel>
-        <div className="flex items-center gap-2">
-          <Input
-            id="limites-cierre"
-            type="number"
-            inputMode="numeric"
-            min={CLOSE_AFTER_HOURS_MIN}
-            max={CLOSE_AFTER_HOURS_MAX}
-            step={1}
-            className="w-24"
-            aria-describedby="limites-cierre-ayuda"
-            value={draft.closeAfterHours}
-            onChange={(event) => setDraft({ ...draft, closeAfterHours: event.target.value })}
-          />
-          <span className="text-sm text-muted-foreground">horas</span>
-        </div>
-        <FieldDescription id="limites-cierre-ayuda">
-          Entre 6 y 23 horas. Antes de cerrar, {receptionName} se despide dentro del horario de recontacto. Más de 23 no se puede: WhatsApp ya no deja escribirle.
-        </FieldDescription>
-      </Field>
-      ) : null}
-      {issue ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {issue}
-        </p>
+        <form.AppField name="closeAfterHours">
+          {(field) => (
+            <field.Control
+              id="limites-cierre"
+              label="Cerrar la conversación si el paciente no responde"
+              description={`Entre 6 y 23 horas. Antes de cerrar, ${receptionName} se despide dentro del horario de recontacto. Más de 23 no se puede: WhatsApp ya no deja escribirle.`}
+            >
+              {(control) => (
+                <div className="flex items-center gap-2">
+                  <Input
+                    {...control.props}
+                    type="number"
+                    inputMode="numeric"
+                    min={CLOSE_AFTER_HOURS_MIN}
+                    max={CLOSE_AFTER_HOURS_MAX}
+                    step={1}
+                    className="w-24"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                  <span className="text-sm text-muted-foreground">horas</span>
+                </div>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       ) : null}
       </div>
     </FormDrawer>

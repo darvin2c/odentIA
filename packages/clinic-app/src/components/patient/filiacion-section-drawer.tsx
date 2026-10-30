@@ -1,4 +1,5 @@
 import {
+  demographicsSchema,
   documentTypeProfile,
   EDUCATION_LEVEL_LABELS,
   KINSHIP_LABELS,
@@ -6,9 +7,18 @@ import {
   type MissingPersonDatum,
   REFERRAL_KIND_LABELS,
   SEX_LABELS,
+  validateDemographics,
 } from "@odentia/clinical"
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
-import { BirthDateInput, FormDrawer, normalizeCountry, PhoneInput } from "@odentia/ui-patterns"
+import { Badge, Button } from "@odentia/ui"
+import {
+  BirthDateInput,
+  FormDrawer,
+  normalizeCountry,
+  regionToday,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useMemo, useState } from "react"
@@ -29,6 +39,7 @@ import { filiationGapsText, type Patient } from "../../lib/patients"
 import { AddressStreetField } from "../address/address-street-field"
 import { SearchSelect } from "../settings/search-select"
 import { ChoiceSelect } from "../ui/choice-select"
+import { placeErrors } from "./form-errors"
 import { PersonalLinkActions } from "./send-personal-link"
 import { attendWord } from "../../lib/patient-overview"
 
@@ -204,6 +215,16 @@ const PERSON_FIELD_KEYS = new Set<string>([
 /** Las secciones que se editan en una persona que aún no es paciente. */
 export const PERSON_SECTIONS: FiliacionSectionKey[] = ["identidad", "contacto"]
 
+/**
+ * El campo que corresponde a un dato que la regla o el servidor señalan con
+ * otro nombre: el nombre completo se arma con los apellidos y el régimen del
+ * seguro se elige en «Seguro».
+ */
+const FIELD_OF_ERROR: Record<string, string> = {
+  displayName: "familyName",
+  insuranceScheme: "insuranceType",
+}
+
 function initialValues(source: Partial<Record<string, unknown>>, fields: SectionField[]): Record<string, string> {
   return Object.fromEntries(
     fields.map((f) => {
@@ -226,11 +247,9 @@ function OpenDuplicate({ docType, docNumber }: { docType: string; docNumber: str
   const match = found.data?.data.find((row) => row.reason === "document")
   if (!match) return null
   return (
-    <p className="text-sm sm:col-span-2">
-      <Link to="/patients/$patientId" params={{ patientId: match.id }} className="font-medium underline">
-        Abrir la página de {match.displayName}
-      </Link>
-    </p>
+    <Link to="/patients/$patientId" params={{ patientId: match.id }} className="font-medium underline">
+      Abrir la página de {match.displayName}
+    </Link>
   )
 }
 
@@ -278,8 +297,94 @@ export function FiliacionSectionDrawer({
     : null
   const sectionFields = (completing ? all.filter((field) => wanted?.has(field.key)) : sections[section].fields)
     .filter((field) => patient || PERSON_FIELD_KEYS.has(field.key))
-  const [values, setValues] = useState(() => initialValues(source, sectionFields))
   const original = initialValues(source, sectionFields)
+  // Guardar confirma los apellidos: los que se ven al guardar quedan revisados.
+  const confirmsNames = Boolean(patient?.identityNeedsReview) && (completing || section === "identidad")
+  // El documento repetido: además del error en el número, el enlace a quien ya lo tiene.
+  const [duplicateOf, setDuplicateOf] = useState<{ docType: string; docNumber: string } | null>(null)
+
+  /** Solo lo que cambió, como lo recibe el servidor. */
+  function patchOf(values: Record<string, string | null>): Record<string, unknown> {
+    const patch: Record<string, unknown> = {}
+    for (const f of sectionFields) {
+      if ((values[f.key] ?? "") === (original[f.key] ?? "")) continue
+      const value = values[f.key]?.trim() ? values[f.key]!.trim() : null
+      if (f.type.kind === "insurance") Object.assign(patch, insuranceFromChoice(profile, value ?? ""))
+      else patch[f.key] = value
+    }
+    // Salir de «Otro» borra también lo que dijo: con el texto guardado, el
+    // servidor volvería a ponerlo como «Otro».
+    if (patch.referralKind !== undefined && patch.referralKind !== "otro") patch.referralSource = null
+    // Si cambia el tipo a uno que fija su país, el país lo pone el servidor.
+    if (patch.docType !== undefined && !documentCountryChosen(profile, values.docType || null)) delete patch.docCountry
+    // El documento nacional sin país elegido es del país de la clínica (el
+    // servidor hace lo mismo); el pasaporte y el extranjero piden elegirlo.
+    if (
+      (patch.docNumber || patch.docType) &&
+      documentTypeProfile(profile, values.docType || null)?.issuer.kind === "any" &&
+      !values.docCountry &&
+      profile.country
+    )
+      patch.docCountry = profile.country
+    return patch
+  }
+
+  /**
+   * La regla de la ficha (`validateDemographics`), la misma del servidor, sobre
+   * lo guardado más lo que cambió: lo guardado que no cambia no se vuelve a
+   * juzgar por el país de la clínica.
+   */
+  function patchErrors(patch: Record<string, unknown>): Record<string, string> {
+    const stored = Object.fromEntries(
+      Object.keys(demographicsSchema.shape).map((key) => [key, source[key] ?? null]),
+    )
+    const errors = validateDemographics({ ...stored, ...patch }, regionToday(), profile.country, stored)
+    const found: Record<string, string> = {}
+    for (const [key, message] of Object.entries(errors)) found[FIELD_OF_ERROR[key] ?? key] ??= message
+    return found
+  }
+
+  const save = useMutation({
+    mutationFn: (patch: Record<string, unknown>) => {
+      if (!patient)
+        return apiFetch(`/api/people/${person.id}/identity`, {
+          method: "PATCH",
+          body: JSON.stringify(patch),
+        })
+      return apiFetch(`/api/patients/${patient.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(confirmsNames ? { ...patch, identityConfirmed: true } : patch),
+      })
+    },
+  })
+
+  const form = useAppForm({
+    defaultValues: original as Record<string, string | null>,
+    validators: {
+      onSubmit: ({ value, formApi }) => placeErrors(formApi, patchErrors(patchOf(value))),
+    },
+    onSubmit: async ({ value }) => {
+      const patch = patchOf(value)
+      if (Object.keys(patch).length === 0 && !confirmsNames) {
+        onClose()
+        return
+      }
+      setDuplicateOf(null)
+      try {
+        await save.mutateAsync(patch)
+      } catch (error) {
+        if (error instanceof ApiError && error.shape.code === "DUPLICATE_DOCUMENT" && value.docType && value.docNumber)
+          setDuplicateOf({ docType: value.docType, docNumber: value.docNumber.trim() })
+        throw error
+      }
+      if (patient) await queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
+      await queryClient.invalidateQueries({ queryKey: ["person"] })
+      await queryClient.invalidateQueries({ queryKey: ["people"] })
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: FIELD_OF_ERROR })
+  const values = useStore(form.store, (state) => state.values)
   // El país emisor solo se elige cuando el tipo lo permite (el DNI lo emite el
   // Perú); «¿Cuál?», solo con «Otro» (el servidor vacía el texto de lo demás).
   const fields = sectionFields.filter(
@@ -287,57 +392,6 @@ export function FiliacionSectionDrawer({
       (field.key !== "docCountry" || documentCountryChosen(profile, values.docType || null)) &&
       (field.key !== "referralSource" || values.referralKind === "otro"),
   )
-  const changed = sectionFields.filter((f) => (values[f.key] ?? "") !== (original[f.key] ?? ""))
-  const set = (key: string, value: string) => setValues((prev) => ({ ...prev, [key]: value }))
-  // Guardar confirma los apellidos: los que se ven al guardar quedan revisados.
-  const confirmsNames = Boolean(patient?.identityNeedsReview) && (completing || section === "identidad")
-  const save = useMutation({
-    mutationFn: () => {
-      const patch: Record<string, unknown> = {}
-      for (const f of changed) {
-        const value = values[f.key]?.trim() ? values[f.key]!.trim() : null
-        if (f.type.kind === "insurance") Object.assign(patch, insuranceFromChoice(profile, value ?? ""))
-        else patch[f.key] = value
-      }
-      // Salir de «Otro» borra también lo que dijo: con el texto guardado, el
-      // servidor volvería a ponerlo como «Otro».
-      if (patch.referralKind !== undefined && patch.referralKind !== "otro") patch.referralSource = null
-      // Si cambia el tipo a uno que fija su país, el país lo pone el servidor.
-      if (patch.docType !== undefined && !documentCountryChosen(profile, values.docType || null)) delete patch.docCountry
-      // El documento nacional sin país elegido es del país de la clínica (el
-      // servidor hace lo mismo); el pasaporte y el extranjero piden elegirlo.
-      if (
-        (patch.docNumber || patch.docType) &&
-        documentTypeProfile(profile, values.docType || null)?.issuer.kind === "any" &&
-        !values.docCountry &&
-        profile.country
-      )
-        patch.docCountry = profile.country
-      if (!patient)
-        return apiFetch(`/api/people/${person.id}/identity`, {
-          method: "PATCH",
-          body: JSON.stringify(patch),
-        })
-      if (confirmsNames) patch.identityConfirmed = true
-      return apiFetch(`/api/patients/${patient.id}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      })
-    },
-    onSuccess: async () => {
-      if (patient) await queryClient.invalidateQueries({ queryKey: ["patient", patient.id] })
-      await queryClient.invalidateQueries({ queryKey: ["person"] })
-      await queryClient.invalidateQueries({ queryKey: ["people"] })
-      onClose()
-    },
-  })
-  const duplicate = save.error instanceof ApiError && save.error.shape.code === "DUPLICATE_DOCUMENT"
-  const message =
-    save.error instanceof ApiError
-      ? (save.error.shape.message ?? "No se pudo guardar.")
-      : save.error
-        ? "No se pudo guardar."
-        : null
   const name = patient?.givenNames ?? person?.givenNames ?? patient?.displayName ?? person?.displayName ?? ""
   const title = completing ? `Completar datos de ${name}` : `Editar ${sections[section].title.toLowerCase()}`
   const description = completing
@@ -347,21 +401,11 @@ export function FiliacionSectionDrawer({
   const namesInView = completing && !wanted?.has("givenNames") && !wanted?.has("familyName")
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title={title}
       description={description}
       onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (changed.length === 0 && !confirmsNames) {
-          onClose()
-          return
-        }
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty={changed.length > 0}
-      error={message}
       submitLabel="Guardar"
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -392,74 +436,102 @@ export function FiliacionSectionDrawer({
             ))}
           </dl>
         ) : null}
-        {fields.map((field) => {
-          const id = `${uid}-${field.key}`
-          const value = values[field.key] ?? ""
-          const t = field.type
+        {fields.map((item) => {
+          const id = `${uid}-${item.key}`
+          const t = item.type
           // El teléfono lleva el país al lado: en media columna el número quedaba en 38 px.
           const wide = (t.kind === "text" && t.wide) || t.kind === "insurance" || t.kind === "street" || t.kind === "phone"
+          const className = wide ? "sm:col-span-2" : undefined
+          // Bajo el número repetido, el enlace a la página de quien ya lo tiene.
+          const hint =
+            item.key === "docNumber" && duplicateOf && (values.docNumber ?? "").trim() === duplicateOf.docNumber ? (
+              <OpenDuplicate docType={duplicateOf.docType} docNumber={duplicateOf.docNumber} />
+            ) : (
+              item.hint
+            )
           return (
-            <Field key={field.key} className={wide ? "sm:col-span-2" : undefined}>
-              <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
-              {t.kind === "select" || t.kind === "insurance" ? (
-                <ChoiceSelect id={id} value={value} onChange={(event) => set(field.key, event.target.value)}>
-                  <option value="">No registrado</option>
-                  {(t.kind === "insurance" ? insuranceChoices(profile) : t.options).map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </ChoiceSelect>
-              ) : t.kind === "street" ? (
-                <AddressStreetField
-                  id={id}
-                  value={value}
-                  maxLength={t.max}
-                  source={patientAddressSource}
-                  placeholder="Escribe la calle; te sugerimos la dirección completa"
-                  pickedHint="Lo llenó la sugerencia; puedes corregirlo. Agrega el dpto. o interior en la calle."
-                  onChange={(next) => set(field.key, next)}
-                  onPick={(pick) => {
-                    set("addressCity", pick.city ?? "")
-                    if (profile.address.districtLabel) set("addressDistrict", pick.district ?? "")
-                    set("addressRegion", pick.region ?? "")
-                    if (profile.address.postalCode) set("addressPostalCode", pick.postalCode ?? "")
-                    if (pick.country) set("addressCountry", pick.country)
-                  }}
-                />
-              ) : t.kind === "country" ? (
-                <SearchSelect
-                  id={id}
-                  label={field.label}
-                  placeholder="Buscar país…"
-                  value={value}
-                  options={countries}
-                  onChange={(next) => set(field.key, next)}
-                />
-              ) : t.kind === "phone" ? (
-                <PhoneInput
-                  id={id}
-                  value={value || null}
-                  defaultCountry={countryCode}
-                  onChange={(next) => set(field.key, next ?? "")}
-                />
-              ) : t.kind === "date" ? (
-                <BirthDateInput id={id} value={value} onChange={(next) => set(field.key, next)} />
-              ) : (
-                <Input
-                  id={id}
-                  maxLength={t.max}
-                  value={value}
-                  onChange={(event) => set(field.key, event.target.value)}
-                />
-              )}
-              {field.hint ? <FieldDescription>{field.hint}</FieldDescription> : null}
-            </Field>
+            <form.AppField key={item.key} name={item.key}>
+              {(field) =>
+                t.kind === "phone" ? (
+                  <field.PhoneField label={item.label} id={id} className={className} description={hint} defaultCountry={countryCode} />
+                ) : t.kind === "text" ? (
+                  <field.TextField label={item.label} id={id} className={className} description={hint} maxLength={t.max} />
+                ) : (
+                  <field.Control label={item.label} id={id} className={className} description={hint}>
+                    {(control) => {
+                      const value = field.state.value ?? ""
+                      if (t.kind === "select" || t.kind === "insurance")
+                        return (
+                          <ChoiceSelect
+                            id={control.id}
+                            name={control.name}
+                            aria-invalid={control.invalid || undefined}
+                            aria-describedby={control.describedBy}
+                            onBlur={control.onBlur}
+                            value={value}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                          >
+                            <option value="">No registrado</option>
+                            {(t.kind === "insurance" ? insuranceChoices(profile) : t.options).map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </ChoiceSelect>
+                        )
+                      if (t.kind === "street")
+                        return (
+                          <AddressStreetField
+                            id={control.id}
+                            invalid={control.invalid}
+                            aria-describedby={control.describedBy}
+                            onBlur={control.onBlur}
+                            value={value}
+                            maxLength={t.max}
+                            source={patientAddressSource}
+                            placeholder="Escribe la calle; te sugerimos la dirección completa"
+                            pickedHint="Lo llenó la sugerencia; puedes corregirlo. Agrega el dpto. o interior en la calle."
+                            onChange={(next) => field.handleChange(next)}
+                            onPick={(pick) => {
+                              form.setFieldValue("addressCity", pick.city ?? "")
+                              if (profile.address.districtLabel) form.setFieldValue("addressDistrict", pick.district ?? "")
+                              form.setFieldValue("addressRegion", pick.region ?? "")
+                              if (profile.address.postalCode) form.setFieldValue("addressPostalCode", pick.postalCode ?? "")
+                              if (pick.country) form.setFieldValue("addressCountry", pick.country)
+                            }}
+                          />
+                        )
+                      if (t.kind === "country")
+                        return (
+                          <SearchSelect
+                            id={control.id}
+                            label={item.label}
+                            placeholder="Buscar país…"
+                            value={value}
+                            options={countries}
+                            invalid={control.invalid}
+                            aria-describedby={control.describedBy}
+                            onChange={(next) => field.handleChange(next)}
+                          />
+                        )
+                      return (
+                        <BirthDateInput
+                          id={control.id}
+                          name={control.name}
+                          value={value}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          onChange={(next) => field.handleChange(next)}
+                        />
+                      )
+                    }}
+                  </field.Control>
+                )
+              }
+            </form.AppField>
           )
         })}
-        {duplicate && values.docType && values.docNumber ? (
-          <OpenDuplicate docType={values.docType} docNumber={values.docNumber.trim()} />
-        ) : null}
         {completing && fields.length === 0 ? (
           <p className="text-sm text-muted-foreground sm:col-span-2">No le falta nada para {attendWord(patient?.sex ?? person?.sex)}.</p>
         ) : null}

@@ -36,16 +36,32 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
  */
 const createInput = z
   .object({
-    kind: z.enum(DATA_REQUEST_KINDS),
-    requesterContactId: z.uuid(),
-    channel: z.enum(DATA_REQUEST_CHANNELS),
-    requestedOn: z.iso.date().nullish(),
-    said: z.string().max(1000).nullish(),
+    kind: z.enum(DATA_REQUEST_KINDS, "Elige qué pide"),
+    requesterContactId: z.uuid("Elige quién lo pide"),
+    channel: z.enum(DATA_REQUEST_CHANNELS, "Elige por dónde llegó"),
+    requestedOn: z.iso.date("Cuándo lo pidió: fecha inválida").nullish(),
+    said: z.string().max(1000, "Lo que dijo admite hasta 1000 caracteres").nullish(),
   })
   .strict()
-const verifyInput = z.object({ how: z.enum(DATA_REQUEST_VERIFICATIONS) }).strict()
-const respondInput = z.object({ resolution: z.string().min(1).max(1000) }).strict()
-const denyInput = z.object({ reason: z.string().min(1).max(1000) }).strict()
+const verifyInput = z.object({ how: z.enum(DATA_REQUEST_VERIFICATIONS, "Elige cómo comprobaste que es ella") }).strict()
+const respondInput = z
+  .object({
+    resolution: z
+      .string()
+      .trim()
+      .min(1, "Escribe qué se entregó o qué se hizo")
+      .max(1000, "La respuesta admite hasta 1000 caracteres"),
+  })
+  .strict()
+const denyInput = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, "Escribe por qué se deniega")
+      .max(1000, "El motivo admite hasta 1000 caracteres"),
+  })
+  .strict()
 const sendInput = z.object({ connectionId: z.uuid() }).strict()
 
 export function createPatientDataRequestsRoute(deps: CrmDeps) {

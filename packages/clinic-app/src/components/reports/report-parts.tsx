@@ -5,10 +5,9 @@
  * con palabras y flecha, no solo con color.
  */
 import { Button, cn, toast } from "@odentia/ui"
-import { Sparkline, SubmitButton } from "@odentia/ui-patterns"
+import { Sparkline, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp, Download } from "lucide-react"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { type ReactNode, useId } from "react"
 import type { Comparison } from "../../lib/reports"
 
@@ -150,7 +149,7 @@ export function SummaryFigure({
  * filas y columnas; el archivo lo arma el servidor.
  */
 export function DownloadButton({ onDownload, label = "Descargar" }: { onDownload: () => Promise<void>; label?: string }) {
-  const download = useMutation({ retry: false, mutationFn: onDownload, onError: (error) => toast.error(mutationErrorMessage(error)) })
+  const download = useMutation({ retry: false, mutationFn: onDownload, onError: (error) => toast.error(submitErrorMessage(error)) })
   return (
     <SubmitButton type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-8" pending={download.isPending} onClick={() => download.mutate()}>
       <Download aria-hidden />

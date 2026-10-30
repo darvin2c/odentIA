@@ -313,7 +313,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   // «Ver la línea» lleva a Agente: quien administra puede abrirla.
   await expect(panel.getByRole("link", { name: "Ver la línea", exact: true })).toHaveAttribute("href", /\/agent\/administrador\?linea=recordatorio_cita$/)
 
-  // --- Editar: cada dato se ve como su nombre entre corchetes; las comprobaciones son las del servidor ---
+  // --- Editar: cada dato se ve como su nombre entre corchetes; las comprobaciones del servidor se dicen en su campo ---
   await panel.getByRole("button", { name: "Editar el texto", exact: true }).click()
   const editor = surface(page, { name: "Editar «Recordar la cita»", exact: true })
   const text = editor.getByLabel("Texto", { exact: true })
@@ -323,19 +323,23 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await expect(editor).toContainText("Al guardar, WhatsApp lo revisa de nuevo")
   await expect(editor).toContainText("Mientras tanto sigue saliendo el texto actual.")
   const original = await text.inputValue()
-  const checks = editor.getByRole("status", { name: "Comprobaciones del texto" })
-  await expect(checks).toContainText("Bien: están los tres datos.")
   const send = editor.getByRole("button", { name: "Enviar a revisión", exact: true })
-  // Sin cambios no hay nada que enviar.
-  await expect(send).toBeDisabled()
-  // Quitar un dato lo dice con la frase del servidor y no deja enviarlo.
+  // Sin cambios no hay nada que enviar: el servidor lo dice junto al texto.
+  await send.click()
+  await expect(text).toHaveAttribute("aria-invalid", "true")
+  await expect(editor).toContainText("Ese es el texto que ya tiene.")
+  // Quitar un dato lo dice con la frase del servidor, junto al texto, y no lo envía.
   await text.fill(original.replace("[Clínica y sede]", "la clínica"))
-  await expect(checks).toContainText("Falta el dato «Clínica y sede».")
-  await expect(send).toBeDisabled()
+  await expect(text).not.toHaveAttribute("aria-invalid", "true")
+  await send.click()
+  await expect(text).toHaveAttribute("aria-invalid", "true")
+  await expect(editor).toContainText("Falta el dato «Clínica y sede».")
   // «Poner…» lo devuelve donde está el cursor.
   await editor.getByRole("button", { name: "Poner «Clínica y sede»", exact: true }).click()
   await expect(text).toBeFocused()
   await expect(text).toHaveValue(/\[Clínica y sede\]/)
+  // Escribir (o poner el dato) borra el error del campo.
+  await expect(text).not.toHaveAttribute("aria-invalid", "true")
   // Cancelar con cambios pregunta antes y, si se desiste, el borrador sigue ahí.
   await editor.getByRole("button", { name: "Cancelar", exact: true }).click()
   const leave = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
@@ -345,7 +349,6 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
 
   const changed = original.replace("Te recordamos", "Le recordamos")
   await text.fill(changed)
-  await expect(checks).toContainText("Bien: están los tres datos.")
   await expect(editor.getByRole("region", { name: "Así le llegará" })).toContainText("Le recordamos")
   await send.click()
 
@@ -384,7 +387,6 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   ])
   await ownText.pressSequentially(". Tu trabajo ya llegó a la clínica. Escríbenos y coordinamos tu cita.")
   await creator.getByLabel("Botón de respuesta (opcional)", { exact: true }).fill("Quiero mi cita")
-  await expect(creator.getByRole("status", { name: "Comprobaciones del texto" })).toContainText("Bien:")
   await creator.getByRole("button", { name: "Enviar a revisión", exact: true }).click()
 
   const own = byTeam.getByRole("listitem").filter({ hasText: "Tu trabajo ya está listo" })

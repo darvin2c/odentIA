@@ -55,31 +55,55 @@ export function validateLeavesFinding(
   leaves: unknown,
   options: { scope: string | null | undefined; strictVariants: boolean },
 ): string[] {
-  if (typeof leaves !== "object" || leaves === null || Array.isArray(leaves))
-    return ["Elige de la lista qué deja el servicio en la pieza."]
+  return leavesFindingIssues(leaves, options).map((issue) => issue.message)
+}
+
+/** Un error de «Deja en la pieza» con su dato: el hallazgo o su variante. */
+export interface LeavesFindingIssue {
+  field: "condition" | "variant"
+  message: string
+}
+
+/** Lo mismo que `validateLeavesFinding`, cada error con su dato. */
+export function leavesFindingIssues(
+  leaves: unknown,
+  options: { scope: string | null | undefined; strictVariants: boolean },
+): LeavesFindingIssue[] {
+  const choose: LeavesFindingIssue = {
+    field: "condition",
+    message: "Elige de la lista qué deja el servicio en la pieza.",
+  }
+  if (typeof leaves !== "object" || leaves === null || Array.isArray(leaves)) return [choose]
   const { condition, variant, ...rest } = leaves as Record<string, unknown>
-  if (Object.keys(rest).length > 0) return ["Lo que deja en la pieza solo lleva el hallazgo y su variante."]
-  if (!isTreatmentResultCondition(condition))
-    return ["Elige de la lista qué deja el servicio en la pieza."]
+  if (Object.keys(rest).length > 0)
+    return [{ field: "condition", message: "Lo que deja en la pieza solo lleva el hallazgo y su variante." }]
+  if (!isTreatmentResultCondition(condition)) return [choose]
   const def = findingDefinition(condition)
-  if (!def) return ["Elige de la lista qué deja el servicio en la pieza."]
-  const errors: string[] = []
+  if (!def) return [choose]
+  const issues: LeavesFindingIssue[] = []
   const name = def.variantName ?? "Variante"
   if (variant !== undefined && variant !== null && variant !== "") {
     if (!def.variants?.some((item) => item.value === variant))
-      errors.push(
-        def.variants
+      issues.push({
+        field: "variant",
+        message: def.variants
           ? `«${name}» no corresponde a «${def.label}»: elígela de la lista.`
           : `«${def.label}» no lleva variante.`,
-      )
+      })
   } else if (options.strictVariants && def.variants && condition !== "missing_tooth") {
-    errors.push(`Falta «${name}»: en Perú se registra con su sigla.`)
+    issues.push({ field: "variant", message: `Falta «${name}»: en Perú se registra con su sigla.` })
   }
   if (def.scope === "surface" && options.scope !== "surfaces")
-    errors.push(`«${def.label}» se dibuja en las caras de la pieza: el servicio debe ser por superficies.`)
+    issues.push({
+      field: "condition",
+      message: `«${def.label}» se dibuja en las caras de la pieza: el servicio debe ser por superficies.`,
+    })
   else if (def.scope !== "surface" && options.scope !== "tooth" && options.scope !== "surfaces")
-    errors.push(`«${def.label}» queda en una pieza: el servicio debe ser por pieza o por superficies.`)
-  return errors
+    issues.push({
+      field: "condition",
+      message: `«${def.label}» queda en una pieza: el servicio debe ser por pieza o por superficies.`,
+    })
+  return issues
 }
 
 /** Dónde se hizo el tratamiento: su pieza y, si es por superficies, sus caras. */

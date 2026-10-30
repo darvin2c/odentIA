@@ -1,13 +1,23 @@
-import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, Field, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { ConfirmDialog, ErrorState, PageHeader } from "@odentia/ui-patterns"
+import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, toast } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  ErrorState,
+  PageHeader,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { CheckCircle2, ChevronRight, Copy, Globe, ShieldAlert } from "lucide-react"
 import { useEffect, useState } from "react"
+import { z } from "zod"
 import { ChoiceButtons } from "../../components/choice-buttons"
 import { IntegrationsCrumbWithText } from "../../components/integrations/integrations-crumb"
 import { SettingsNoAccess } from "../../components/settings/no-access"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/integrations/webchat")({
@@ -90,7 +100,7 @@ function WebchatSettingsPage() {
     if (data) queryClient.setQueryData(key, data)
     else void queryClient.invalidateQueries({ queryKey: key })
   }
-  const failed = (cause: unknown) => toast.error(cause instanceof ApiError && cause.shape.message ? cause.shape.message : "No se pudo guardar. Inténtalo de nuevo.")
+  const failed = (cause: unknown) => toast.error(submitErrorMessage(cause))
 
   const [confirmOff, setConfirmOff] = useState(false)
   const status = useMutation({
@@ -285,29 +295,55 @@ function Install({ chat, clinicName }: { chat: ClinicWebchat; clinicName: string
   )
 }
 
+const NOTIFY_URL_CHARS = 500
+
+/** Lo mismo que comprueba la ruta: el aviso al sitio va a una dirección https. */
+const advancedSchema = z.object({
+  color: z.string(),
+  greeting: z.string().max(500, "El saludo admite hasta 500 caracteres"),
+  notifyUrl: z
+    .string()
+    .trim()
+    .max(NOTIFY_URL_CHARS, `La dirección del aviso admite hasta ${NOTIFY_URL_CHARS} caracteres`)
+    .refine((value) => {
+      if (value === "") return true
+      try {
+        return new URL(value).protocol === "https:"
+      } catch {
+        return false
+      }
+    }, "La dirección del aviso al sitio debe empezar con https://"),
+})
+
 /** «Opciones avanzadas»: color, saludo, aviso al sitio y el código. Un formulario con su «Guardar». */
 function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { data: ClinicWebchat }) => void }) {
-  const [color, setColor] = useState(chat.color)
-  const [greeting, setGreeting] = useState(chat.greeting)
-  const [notifyUrl, setNotifyUrl] = useState(chat.notifyUrl ?? "")
   const [code, setCode] = useState<string | null>(null)
   const [rotating, setRotating] = useState(false)
   const save = useMutation({
-    mutationFn: () =>
-      apiFetch<{ data: ClinicWebchat }>("/api/channels/webchat", {
-        method: "PATCH",
-        body: JSON.stringify({ color, greeting: greeting.trim() || null, notifyUrl: notifyUrl.trim() || null }),
-      }),
-    onSuccess: (data) => {
+    mutationFn: (body: { color: string; greeting: string | null; notifyUrl: string | null }) =>
+      apiFetch<{ data: ClinicWebchat }>("/api/channels/webchat", { method: "PATCH", body: JSON.stringify(body) }),
+  })
+  const form = useAppForm({
+    defaultValues: { color: chat.color, greeting: chat.greeting, notifyUrl: chat.notifyUrl ?? "" },
+    validators: { onSubmit: advancedSchema },
+    onSubmit: async ({ value }) => {
+      const data = await save.mutateAsync({
+        color: value.color,
+        greeting: value.greeting.trim() || null,
+        notifyUrl: value.notifyUrl.trim() || null,
+      })
       onSaved(data)
+      form.reset(value)
       toast.success("Guardado. Tu sitio lo muestra sin volver a pegar la línea.")
     },
-    onError: (cause) => toast.error(cause instanceof ApiError && cause.shape.message ? cause.shape.message : "No se pudo guardar."),
   })
+  const onSubmit = useFormSubmit(form)
+  const submitError = useFormSubmitError(form)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const reveal = useMutation({
     mutationFn: () => apiFetch<{ data: { code: string } }>("/api/channels/webchat/code"),
     onSuccess: (data) => setCode(data.data.code),
-    onError: (cause) => toast.error(cause instanceof ApiError && cause.shape.message ? cause.shape.message : "No se pudo mostrar el código."),
+    onError: (cause) => toast.error(submitErrorMessage(cause)),
   })
   const rotate = useMutation({
     mutationFn: () => apiFetch<{ data: ClinicWebchat }>("/api/channels/webchat/rotate", { method: "POST", body: "{}" }),
@@ -317,7 +353,7 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
       setCode(null)
       toast.success("Código nuevo. Quien ya conversaba sigue en su conversación.")
     },
-    onError: (cause) => toast.error(cause instanceof ApiError && cause.shape.message ? cause.shape.message : "No se pudo generar el código nuevo."),
+    onError: (cause) => toast.error(submitErrorMessage(cause)),
   })
   return (
     <Collapsible>
@@ -326,27 +362,46 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
         Opciones avanzadas
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <form
-          className="mt-3 flex flex-col gap-4 rounded-xl border bg-card p-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            save.mutate()
-          }}
-        >
-          <Field>
-            <FieldLabel>Color del chat</FieldLabel>
-            <ChoiceButtons label="Color del chat" value={color} options={COLORS} onChange={setColor} tone="primary" />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="chat-saludo">Saludo</FieldLabel>
-            <Textarea id="chat-saludo" rows={2} maxLength={500} value={greeting} onChange={(event) => setGreeting(event.target.value)} />
-            <p className="text-xs text-muted-foreground">Es la primera burbuja del chat. Vacío, dice «Hola, ¿en qué podemos ayudarte?».</p>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="chat-aviso">Aviso a tu sitio (opcional)</FieldLabel>
-            <Input id="chat-aviso" inputMode="url" placeholder="https://tu-sitio.com/avisos-del-chat" value={notifyUrl} onChange={(event) => setNotifyUrl(event.target.value)} />
-            <p className="text-xs text-muted-foreground">Si tu sitio quiere saber cada respuesta, recibe un aviso firmado con el código de abajo. La mayoría no lo necesita.</p>
-          </Field>
+        <form noValidate className="mt-3 flex flex-col gap-4 rounded-xl border bg-card p-4" onSubmit={onSubmit}>
+          <form.AppField name="color">
+            {(field) => (
+              <field.Group legend="Color del chat">
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    options={COLORS}
+                    onChange={(next) => field.handleChange(next)}
+                    tone="primary"
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          <form.AppField name="greeting">
+            {(field) => (
+              <field.TextareaField
+                label="Saludo"
+                rows={2}
+                maxLength={500}
+                description="Es la primera burbuja del chat. Vacío, dice «Hola, ¿en qué podemos ayudarte?»."
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="notifyUrl">
+            {(field) => (
+              <field.TextField
+                label="Aviso a tu sitio (opcional)"
+                inputMode="url"
+                maxLength={NOTIFY_URL_CHARS}
+                placeholder="https://tu-sitio.com/avisos-del-chat"
+                description="Si tu sitio quiere saber cada respuesta, recibe un aviso firmado con el código de abajo. La mayoría no lo necesita."
+              />
+            )}
+          </form.AppField>
           <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3 text-sm">
             <span className="font-semibold">Código para comprobar los avisos</span>
             {code ? <code className="break-all rounded bg-background px-2 py-1 font-mono text-xs">{code}</code> : null}
@@ -361,9 +416,14 @@ function Advanced({ chat, onSaved }: { chat: ClinicWebchat; onSaved: (data: { da
               </Button>
             </span>
           </div>
-          <div>
-            <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Guardando…" : "Guardar"}
+          <div className="flex flex-col gap-2">
+            {submitError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {submitError}
+              </p>
+            ) : null}
+            <Button type="submit" className="self-start" disabled={isSubmitting}>
+              {isSubmitting ? "Guardando…" : "Guardar"}
             </Button>
           </div>
         </form>
@@ -414,7 +474,7 @@ function Preview({ chatId }: { chatId: string }) {
           Vista previa
         </h2>
         <ChoiceButtons
-          label="Tamaño de la vista previa"
+          aria-label="Tamaño de la vista previa"
           value={size}
           options={[
             { value: "computadora", label: "Computadora" },

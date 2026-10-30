@@ -34,7 +34,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { NOTICE_PURPOSE } from "./automation-messages.js"
 import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
 import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { mayWriteFirst, permitsMessage } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
 import { budgetStateText } from "@odentia/clinical"
@@ -647,15 +647,16 @@ function cleanMessage(value: string | undefined): string | null {
   if (value === undefined) return null
   const text = value.trim()
   if (!text) return null
-  if (text.length > 500) throw validation("El mensaje admite hasta 500 caracteres")
-  if (/[\r]/.test(text)) throw validation("El mensaje no admite saltos de línea especiales")
+  if (text.length > 500) throw invalidField("message", "El mensaje admite hasta 500 caracteres")
+  if (/[\r]/.test(text)) throw invalidField("message", "El mensaje no admite saltos de línea especiales")
   return text
 }
 
-function assertEmail(value: string): string {
+/** `field`: cómo se llama el correo en el cuerpo de la petición. */
+function assertEmail(value: string, field: string): string {
   const email = value.trim().toLowerCase()
   if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    throw validation("El correo no tiene un formato válido")
+    throw invalidField(field, "El correo no tiene un formato válido")
   return email
 }
 
@@ -682,7 +683,7 @@ async function ensureEmailIdentity(
   recipient: EmailRecipient,
 ): Promise<typeof contactIdentity.$inferSelect> {
   const email = recipient.email?.trim().toLowerCase()
-  if (!email || !email.includes("@")) throw validation("La persona no tiene correo registrado")
+  if (!email || !email.includes("@")) throw invalidField("connectionId", "La persona no tiene correo registrado")
   const externalUserId = `mail:${email}`
   await lockChannelIdentity(tx, orgId, "email", externalUserId)
   const existing = await findChannelIdentity(tx, orgId, "email", externalUserId)
@@ -816,7 +817,7 @@ async function resolveConversation(
   if (conn.channel === "email") return openEmailThread(tx, orgId, actorUserId, recipient, conn, exactAddress)
   if (conn.channel === "whatsapp") {
     const phone = recipient.phone?.trim()
-    if (!phone) throw validation("La persona no tiene teléfono registrado")
+    if (!phone) throw invalidField("connectionId", "La persona no tiene teléfono registrado")
     const normalized = normalizeChannelIdentity("whatsapp", phone)
     const identity = await findChannelIdentity(tx, orgId, "whatsapp", normalized.externalUserId)
     if (!identity || identity.contactId !== recipient.contactId) {
@@ -868,12 +869,14 @@ export async function requireDocumentConnection(
     .limit(1)
   if (!conn) throw notFound("Conexión")
   if (conn.status !== "active") {
-    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada: elige otra o conéctala de nuevo")
+    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada: elige otra o conéctala de nuevo", {
+      connectionId: "Conexión desactivada: elige otra o conéctala de nuevo",
+    })
   }
   const adapter = channelAdapters[conn.provider as keyof typeof channelAdapters]
   if (!adapter) throw new ServiceError("PROVIDER_NOT_REGISTERED", 409, `Proveedor no registrado: ${conn.provider}`)
   if (!adapter.capabilities.media) {
-    throw validation("Esa conexión no admite adjuntos: elige otro canal")
+    throw invalidField("connectionId", "Esa conexión no admite adjuntos: elige otro canal")
   }
   return { id: conn.id, channel: conn.channel, provider: conn.provider, displayName: conn.displayName }
 }
@@ -906,7 +909,7 @@ export async function deliverDocumentPdf(
   if (input.pdf.byteLength > 20 * 1024 * 1024) throw validation("El documento supera 20 MB: no se puede adjuntar")
   let conversationId = input.conversationId
   if (!conversationId) {
-    if (!input.conn) throw validation("Elige el canal de envío")
+    if (!input.conn) throw invalidField("connectionId", "Elige el canal de envío")
     if (!actorUserId) throw validation("Sin conversación elegida, el envío lo hace una persona del equipo")
     conversationId = (
       await resolveConversation(tx, orgId, actorUserId, input.recipient, input.conn, input.exactAddress ?? false)
@@ -921,7 +924,7 @@ export async function deliverDocumentPdf(
     .limit(1)
   const via = windowOpen(thread?.lastInboundAt) ? "respuesta" : "otra"
   if (!(await permitsMessage(tx, orgId, input.recipient.contactId, { purpose: "avisos", initiative: "equipo", via }))) {
-    throw new ServiceError("DOCUMENT_OPTED_OUT", 409, DOCUMENT_OPTED_OUT)
+    throw new ServiceError("DOCUMENT_OPTED_OUT", 409, DOCUMENT_OPTED_OUT, { recipientContactId: DOCUMENT_OPTED_OUT })
   }
   const ref = await deps.storage.putAttachment({
     orgId,
@@ -953,7 +956,7 @@ export async function sendFinancialDocument(
   deps: SendDeps,
 ): Promise<SendFinancialDocumentResult> {
   const documentType = assertDocumentType(input.documentType)
-  if (!input.connectionId) throw validation("Elige el canal de envío")
+  if (!input.connectionId) throw invalidField("connectionId", "Elige el canal de envío")
   const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, input.patientId, documentType, input.documentId)
   if (input.requestId) {
     // Mismo intento = un solo envío: se serializa por clave y se devuelve lo ya hecho.
@@ -994,13 +997,13 @@ export async function sendFinancialDocument(
   }
   const registered = await requireAuthorizedRecipient(tx, orgId, input.patientId, input.recipientContactId, preferContactId, documentType)
   // Otro correo: lo decide quien envía, de forma explícita, y queda registrado.
-  const otherEmail = input.otherEmail?.trim() ? assertEmail(input.otherEmail) : null
+  const otherEmail = input.otherEmail?.trim() ? assertEmail(input.otherEmail, "otherEmail") : null
   if (otherEmail && !input.confirmOtherEmail)
-    throw validation("Confirma que la persona pidió recibirlo en ese correo")
+    throw invalidField("confirmOtherEmail", "Confirma que la persona pidió recibirlo en ese correo")
   const recipient: DocumentRecipient = otherEmail ? { ...registered, email: otherEmail } : registered
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (otherEmail && conn.channel !== "email")
-    throw validation("Otro correo solo se puede usar enviando por correo")
+    throw invalidField("connectionId", "Otro correo solo se puede usar enviando por correo")
 
   let filename: string
   let subject: string
@@ -1256,7 +1259,7 @@ export async function saveRecipientEmail(
   input: { recipientContactId: string; email: string },
 ): Promise<DocumentRecipient> {
   const recipient = await requireAuthorizedRecipient(tx, orgId, patientId, input.recipientContactId)
-  const email = assertEmail(input.email)
+  const email = assertEmail(input.email, "email")
   await updateContact(tx, orgId, recipient.contactId, { email }, { userId: actorUserId })
   return { ...recipient, email }
 }

@@ -195,7 +195,7 @@ describe("recursos y días", () => {
     const onChange = vi.fn()
     render(
       <ScheduleResourceChips
-        label="Profesionales"
+        aria-label="Profesionales"
         resources={AGENDA_PROFESSIONALS.slice(0, 3)}
         value="luis"
         allLabel="Todos"

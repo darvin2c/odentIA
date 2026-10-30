@@ -13,20 +13,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Field,
-  FieldLabel,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useId, useRef, useState } from "react"
-import { ApiError } from "@odentia/clinic-app/lib/api"
+import { z } from "zod"
 import { usePermission } from "@odentia/clinic-app/lib/crm"
 import { fetchMyProfessionalProfile, registrationLabel } from "@odentia/clinic-app/lib/encounters"
 import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
@@ -41,6 +33,25 @@ const MANUAL_OPTIONS: Record<ManualOdontogramPurpose, string> = {
   personal: SIGNED_ODONTOGRAM_PURPOSE_LABELS.personal,
   reentry: `${SIGNED_ODONTOGRAM_PURPOSE_LABELS.reentry} tras culminar el plan`,
 }
+
+const PURPOSE_OPTIONS = MANUAL_SIGNED_ODONTOGRAM_PURPOSES.map((value) => ({
+  value,
+  label: MANUAL_OPTIONS[value],
+}))
+
+/** Los mismos límites que `POST /odontogram/assessments`. */
+const signSchema = z.object({
+  purpose: z
+    .string()
+    .refine(
+      (value) => (MANUAL_SIGNED_ODONTOGRAM_PURPOSES as readonly string[]).includes(value),
+      "Elige para qué se firma.",
+    ),
+  observations: z.string().trim().max(4000, "Escribe como mucho 4000 caracteres."),
+  specifications: z.string().trim().max(4000, "Escribe como mucho 4000 caracteres."),
+})
+
+const EMPTY_SIGN = { purpose: "", observations: "", specifications: "" }
 
 /** «15 oct», con el año si no es el de hoy; en el formato y la zona de la clínica. */
 function shortDate(iso: string): string {
@@ -89,12 +100,7 @@ export function SignedOdontograms({
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [viewing, setViewing] = useState<OdontogramAssessment | null>(null)
-  const [purpose, setPurpose] = useState<ManualOdontogramPurpose | "">("")
-  const [observations, setObservations] = useState("")
-  const [specifications, setSpecifications] = useState("")
   const [profileOpen, setProfileOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const query = useQuery({
     queryKey: ["odontogram-assessments", patientId],
     queryFn: () => fetchSignedOdontograms(patientId),
@@ -105,45 +111,27 @@ export function SignedOdontograms({
     queryFn: fetchMyProfessionalProfile,
     enabled: open,
   })
+  const form = useAppForm({
+    defaultValues: EMPTY_SIGN,
+    validators: { onSubmit: signSchema },
+    onSubmit: async ({ value }) => {
+      await signOdontogramApi(patientId, {
+        purpose: value.purpose as ManualOdontogramPurpose,
+        observations: value.observations.trim(),
+        specifications: value.specifications.trim(),
+      })
+      await queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
+      form.reset(EMPTY_SIGN)
+      setOpen(false)
+    },
+  })
+  const surface = useFormSurface(form)
   if (!official?.signedOdontogram) return null
   const assessments = query.data?.data ?? []
   const profile = profileQuery.data?.data ?? null
   const signerRegistration = profile ? registrationLabel(profile) : null
   const reviewCount = history.filter((entry) => entry.needsReview && entry.status !== "voided").length
   const canSign = !readOnly && canWrite
-
-  async function save(event: React.FormEvent) {
-    event.preventDefault()
-    if (pending || disabled || !canSign) return
-    if (!purpose) {
-      setError("Elige para qué se firma.")
-      return
-    }
-    setPending(true)
-    setError(null)
-    try {
-      await signOdontogramApi(patientId, {
-        purpose,
-        observations: observations.trim(),
-        specifications: specifications.trim(),
-      })
-      await queryClient.invalidateQueries({ queryKey: ["odontogram-assessments", patientId] })
-      setOpen(false)
-      setPurpose("")
-      setObservations("")
-      setSpecifications("")
-    } catch (cause) {
-      setError(
-        cause instanceof ApiError && cause.shape.message
-          ? cause.shape.message
-          : cause instanceof Error
-            ? cause.message
-            : "No se pudo firmar el odontograma.",
-      )
-    } finally {
-      setPending(false)
-    }
-  }
 
   return (
     <section className="flex min-w-0 flex-col gap-3 rounded-lg border p-4 sm:p-6" aria-labelledby={`${id}-title`}>
@@ -160,9 +148,9 @@ export function SignedOdontograms({
         {canSign ? (
           <Button
             variant="outline"
-            disabled={disabled || pending}
+            disabled={disabled || surface.isSubmitting}
             onClick={() => {
-              setError(null)
+              form.reset(EMPTY_SIGN)
               setOpen(true)
             }}
           >
@@ -207,16 +195,15 @@ export function SignedOdontograms({
       )}
 
       <FormDrawer
+        {...surface}
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          if (!surface.isSubmitting) setOpen(false)
+        }}
         title="Firmar odontograma"
         description="Para un pedido judicial o de la persona, o al reingresar tras culminar el plan. Se conservan los hallazgos de hoy y tu firma; lo que se corrija después no altera este documento."
-        onSubmit={save}
-        isDirty={purpose !== "" || observations !== "" || specifications !== ""}
-        isSubmitting={pending}
-        error={error}
         submitLabel="Firmar odontograma"
-        submitDisabled={disabled || reviewCount > 0 || !signerRegistration || !purpose}
+        submitDisabled={disabled || reviewCount > 0 || !signerRegistration}
       >
         <div className="flex flex-col gap-4">
           {reviewCount > 0 && (
@@ -225,51 +212,39 @@ export function SignedOdontograms({
               datos faltantes.
             </p>
           )}
-          <Field>
-            <FieldLabel htmlFor={`${id}-purpose`}>Para qué se firma</FieldLabel>
-            <Select
-              value={purpose}
-              items={MANUAL_OPTIONS}
-              onValueChange={(value) => {
-                if (value && (MANUAL_SIGNED_ODONTOGRAM_PURPOSES as readonly string[]).includes(value))
-                  setPurpose(value as ManualOdontogramPurpose)
-              }}
-              disabled={pending}
-            >
-              <SelectTrigger id={`${id}-purpose`}>
-                <SelectValue placeholder="Elige…" />
-              </SelectTrigger>
-              <SelectContent>
-                {MANUAL_SIGNED_ODONTOGRAM_PURPOSES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {MANUAL_OPTIONS[value]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${id}-observations`}>Observaciones (opcional)</FieldLabel>
-            <Textarea
-              id={`${id}-observations`}
-              value={observations}
-              onChange={(event) => setObservations(event.target.value)}
-              maxLength={4000}
-              disabled={pending}
-              placeholder="Hallazgos no contemplados en la nomenclatura."
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${id}-specifications`}>Especificaciones (opcional)</FieldLabel>
-            <Textarea
-              id={`${id}-specifications`}
-              value={specifications}
-              onChange={(event) => setSpecifications(event.target.value)}
-              maxLength={4000}
-              disabled={pending}
-              placeholder="Clasificaciones utilizadas u otros detalles."
-            />
-          </Field>
+          <form.AppField name="purpose">
+            {(field) => (
+              <field.SelectField
+                id={`${id}-purpose`}
+                label="Para qué se firma"
+                options={PURPOSE_OPTIONS}
+                placeholder="Elige…"
+                disabled={surface.isSubmitting}
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="observations">
+            {(field) => (
+              <field.TextareaField
+                id={`${id}-observations`}
+                label="Observaciones (opcional)"
+                maxLength={4000}
+                disabled={surface.isSubmitting}
+                placeholder="Hallazgos no contemplados en la nomenclatura."
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="specifications">
+            {(field) => (
+              <field.TextareaField
+                id={`${id}-specifications`}
+                label="Especificaciones (opcional)"
+                maxLength={4000}
+                disabled={surface.isSubmitting}
+                placeholder="Clasificaciones utilizadas u otros detalles."
+              />
+            )}
+          </form.AppField>
           {profileQuery.isPending ? (
             <p className="text-sm text-muted-foreground">Cargando tu perfil profesional…</p>
           ) : profileQuery.isError ? (

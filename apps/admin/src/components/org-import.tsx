@@ -1,9 +1,9 @@
 import { Badge, Button, Skeleton } from "@odentia/ui"
-import { ConfirmDialog, common } from "@odentia/ui-patterns"
+import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useRef, useState } from "react"
 import { z } from "zod"
-import { ApiError, api } from "../lib/api"
+import { api } from "../lib/api"
 
 /**
  * «Cargar datos» de una clínica (ADR 0104): se elige el plan que preparó la
@@ -54,8 +54,6 @@ type Stage =
   | { kind: "loading" | "stopped" | "failed" | "done"; fileName: string; plan: unknown; preview: Preview; next: number; total: number; loaded: Loaded; error?: string }
 
 const count = new Intl.NumberFormat("es-PE")
-const messageOf = (error: unknown) =>
-  error instanceof ApiError ? (error.shape.message ?? common.errors.generic) : common.errors.generic
 /** Cuántas filas de cada lista se muestran: el resto está en el informe de la skill. */
 const SHOWN = 50
 
@@ -76,7 +74,7 @@ export function OrgImport({ organizationId, organizationName }: { organizationId
       )
       setStage({ kind: "checked", fileName, plan, preview })
     } catch (failure) {
-      setError(messageOf(failure))
+      setError(submitErrorMessage(failure))
       setStage({ kind: "idle" })
     }
   }
@@ -110,7 +108,7 @@ export function OrgImport({ organizationId, organizationName }: { organizationId
         loaded.errores += batch.done.errores
         loaded.failed.push(...batch.failed)
       } catch (failure) {
-        setStage({ ...from, kind: "failed", next, total, loaded, error: messageOf(failure) })
+        setStage({ ...from, kind: "failed", next, total, loaded, error: submitErrorMessage(failure) })
         return
       }
       if (stop.current && next < total) {

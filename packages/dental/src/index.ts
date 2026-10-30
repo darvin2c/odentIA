@@ -15,6 +15,7 @@ export * from "./cbct-demo.js"
 export * from "./country.js"
 export * from "./site.js"
 export * from "./diagnoses.js"
+export * from "./interview.js"
 export type {
   FindingColorKind,
   FindingDefinition,

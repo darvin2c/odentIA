@@ -12,7 +12,6 @@ import {
   Button,
   Field,
   FieldDescription,
-  FieldError,
   FieldLabel,
   FieldLegend,
   FieldSet,
@@ -22,7 +21,8 @@ import {
   Skeleton,
   toast,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
@@ -33,7 +33,7 @@ import {
   fetchEncounterMaterials,
   type FinalizedMaterials,
 } from "../../lib/encounters"
-import { financeErrorMessage } from "../../lib/finance"
+import { financeFormMessage } from "../../lib/finance"
 import { activeOrgLocale } from "../../lib/locale"
 import {
   discountedMaterialsWords,
@@ -265,9 +265,20 @@ interface CorrectionRow {
   unit: string
   /** Lo que está registrado ahora (0 si el producto no estaba). */
   recorded: number
-  text: string
+  /** Lo escrito en «¿cuánto se usó?». */
+  quantity: string
   /** Agregado en este formulario: se puede quitar antes de guardar. */
   added: boolean
+}
+
+/** Lo que falta o sobra en lo escrito de una fila; `null` si está bien. */
+function rowQuantityError(row: CorrectionRow, locale: string): string | null {
+  const quantity = parseWholeQuantity(row.quantity, locale)
+  if (row.quantity.trim() === "") return "Escribe cuánto se usó; 0 si no se usó."
+  if (quantity === null) return "Escribe un número entero, sin decimales."
+  if (quantity > MATERIAL_QUANTITY_MAX) return `Va de 0 a ${formatWholeQuantity(MATERIAL_QUANTITY_MAX, locale)}.`
+  if (row.added && quantity === 0) return "Escribe cuánto se usó, o quítalo de la lista."
+  return null
 }
 
 /**
@@ -301,103 +312,67 @@ function EncounterMaterialsDrawer({
 }) {
   const uid = useId()
   const queryClient = useQueryClient()
-  const [rows, setRows] = useState<CorrectionRow[]>([])
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
   const [picking, setPicking] = useState(false)
   const idempotencyKey = useRef("")
   const currentRef = useRef(current)
   currentRef.current = current
+  // La fila que se estaba guardando cuando el servidor rechazó: su error va ahí.
+  const failedRow = useRef<number | null>(null)
+  const progress = useRef({ done: 0, total: 0 })
 
-  // Al abrir: lo registrado como punto de partida y una clave nueva. Lo que
-  // llegue después del servidor no pisa lo que se está escribiendo.
-  useEffect(() => {
-    if (!open) return
-    idempotencyKey.current = crypto.randomUUID()
-    setRows(
-      currentRef.current.items.map((item) => ({
-        productId: item.productId,
-        name: item.name,
-        unit: item.unit,
-        recorded: item.quantity,
-        text: formatWholeQuantity(item.quantity, locale),
-        added: false,
-      })),
-    )
-    setErrors({})
-    setError(null)
-    setPicking(false)
-  }, [open, locale])
-
-  const dirty = rows.some(
-    (row) => row.added || parseWholeQuantity(row.text, locale) !== row.recorded,
-  )
-  const patchRow = (productId: string, text: string) => {
-    setRows((previous) =>
-      previous.map((row) => (row.productId === productId ? { ...row, text } : row)),
-    )
-    setErrors((previous) => {
-      const rest = { ...previous }
-      delete rest[productId]
-      return rest
-    })
-    setError(null)
-  }
-
-  const submit = async () => {
-    const nextErrors: Record<string, string> = {}
-    const changes: Array<{ row: CorrectionRow; quantity: number }> = []
-    for (const row of rows) {
-      const quantity = parseWholeQuantity(row.text, locale)
-      if (row.text.trim() === "")
-        nextErrors[row.productId] = "Escribe cuánto se usó; 0 si no se usó."
-      else if (quantity === null)
-        nextErrors[row.productId] = "Escribe un número entero, sin decimales."
-      else if (quantity > MATERIAL_QUANTITY_MAX)
-        nextErrors[row.productId] =
-          `Va de 0 a ${formatWholeQuantity(MATERIAL_QUANTITY_MAX, locale)}.`
-      else if (row.added && quantity === 0)
-        nextErrors[row.productId] = "Escribe cuánto se usó, o quítalo de la lista."
-      else if (quantity !== row.recorded) changes.push({ row, quantity })
-    }
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length > 0) return
-    if (changes.length === 0) {
-      setError("No cambiaste ninguna cantidad.")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    let last: EncounterMaterials | null = null
-    let done = 0
-    try {
-      for (const { row, quantity } of changes) {
-        const result = await correctEncounterMaterialApi(patientId, encounterId, {
-          productId: row.productId,
-          quantity,
-          idempotencyKey: idempotencyKey.current,
+  const form = useAppForm({
+    defaultValues: { rows: [] as CorrectionRow[] },
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        value.rows.forEach((row, index) => {
+          const message = rowQuantityError(row, locale)
+          if (message) fields[`rows[${index}].quantity`] = message
         })
-        last = {
-          branch: result.data.branch,
-          items: result.data.items,
-          canCorrect: result.data.canCorrect,
-          canAddProducts: result.data.canAddProducts,
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const changes: Array<{ index: number; row: CorrectionRow; quantity: number }> = []
+      value.rows.forEach((row, index) => {
+        const quantity = parseWholeQuantity(row.quantity, locale)
+        if (quantity !== null && quantity !== row.recorded) changes.push({ index, row, quantity })
+      })
+      failedRow.current = null
+      progress.current = { done: 0, total: changes.length }
+      if (changes.length === 0) throw new Error("No cambiaste ninguna cantidad.")
+      let last: EncounterMaterials | null = null
+      try {
+        for (const { index, row, quantity } of changes) {
+          failedRow.current = index
+          const result = await correctEncounterMaterialApi(patientId, encounterId, {
+            productId: row.productId,
+            quantity,
+            idempotencyKey: idempotencyKey.current,
+          })
+          failedRow.current = null
+          last = {
+            branch: result.data.branch,
+            items: result.data.items,
+            canCorrect: result.data.canCorrect,
+            canAddProducts: result.data.canAddProducts,
+          }
+          progress.current.done += 1
+          // Lo guardado pasa a ser el punto de partida: si otro falla, este no se reenvía.
+          form.setFieldValue(`rows[${index}]`, {
+            ...row,
+            recorded: quantity,
+            added: false,
+            quantity: formatWholeQuantity(quantity, locale),
+          })
         }
-        done += 1
-        // Lo guardado pasa a ser el punto de partida: si otro falla, este no se reenvía.
-        setRows((previous) =>
-          previous.map((item) =>
-            item.productId === row.productId
-              ? {
-                  ...item,
-                  recorded: quantity,
-                  added: false,
-                  text: formatWholeQuantity(quantity, locale),
-                }
-              : item,
-          ),
-        )
+      } catch (err) {
+        if (last) {
+          queryClient.setQueryData(materialsKey(patientId, encounterId), { data: last })
+          onSaved?.()
+        }
+        void queryClient.invalidateQueries({ queryKey: materialsKey(patientId, encounterId) })
+        throw err
       }
       if (last) queryClient.setQueryData(materialsKey(patientId, encounterId), { data: last })
       void queryClient.invalidateQueries({ queryKey: ["inventory"] })
@@ -413,18 +388,41 @@ function EncounterMaterialsDrawer({
       )
       onSaved?.()
       onClose()
-    } catch (err) {
-      if (last) {
-        queryClient.setQueryData(materialsKey(patientId, encounterId), { data: last })
-        onSaved?.()
-      }
-      void queryClient.invalidateQueries({ queryKey: materialsKey(patientId, encounterId) })
-      const message = financeErrorMessage(err)
-      setError(done > 0 ? `Se guardaron ${done} de ${changes.length}. ${message}` : message)
-    } finally {
-      setSaving(false)
-    }
-  }
+    },
+  })
+  const surface = useFormSurface(form, {
+    // Cada producto se guarda por separado: lo que el servidor dice del dato
+    // (cantidad o producto) es de la fila que falló.
+    fieldMap: () => (failedRow.current === null ? undefined : `rows[${failedRow.current}].quantity`),
+    formMessage: (err) => {
+      const { done, total } = progress.current
+      const own = financeFormMessage(err)
+      if (done === 0) return own
+      return `Se guardaron ${done} de ${total}. ${own ?? submitErrorMessage(err)}`
+    },
+  })
+  const saving = surface.isSubmitting
+
+  // Al abrir: lo registrado como punto de partida y una clave nueva. Lo que
+  // llegue después del servidor no pisa lo que se está escribiendo.
+  useEffect(() => {
+    if (!open) return
+    idempotencyKey.current = crypto.randomUUID()
+    form.reset({
+      rows: currentRef.current.items.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        unit: item.unit,
+        recorded: item.quantity,
+        quantity: formatWholeQuantity(item.quantity, locale),
+        added: false,
+      })),
+    })
+    setPicking(false)
+  }, [open, locale, form])
+
+  const rows = useStore(form.store, (state) => state.values.rows)
+  const dirty = rows.some((row) => row.added || parseWholeQuantity(row.quantity, locale) !== row.recorded)
 
   return (
     <FormDrawer
@@ -436,16 +434,11 @@ function EncounterMaterialsDrawer({
           ? `Lo que se corrige sale o vuelve a ${current.branch.name}, con un ajuste unido a esta atención. Lo firmado no cambia.`
           : "Queda un ajuste unido a esta atención. Lo firmado no cambia."
       }
-      error={error}
+      {...surface}
       isDirty={dirty}
-      isSubmitting={saving}
       submitLabel="Guardar"
       onClose={() => {
         if (!saving) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        void submit()
       }}
     >
       <div className="flex flex-col gap-5">
@@ -459,81 +452,84 @@ function EncounterMaterialsDrawer({
               No hay materiales registrados. Agrega lo que se usó.
             </p>
           ) : null}
-          {rows.map((row) => {
-            const inputId = `${uid}-${row.productId}`
-            const rowError = errors[row.productId] ?? null
-            const typed = parseWholeQuantity(row.text, locale)
-            return (
-              <Field key={row.productId} data-invalid={rowError ? true : undefined}>
-                <FieldLabel htmlFor={inputId}>
-                  {row.name}
-                  <span className="sr-only">, en {unitFor(2, row.unit)}</span>
-                </FieldLabel>
-                <div className="flex items-center gap-2">
-                  <InputGroup className="max-w-48">
-                    <InputGroupInput
-                      id={inputId}
-                      inputMode="numeric"
-                      autoComplete="off"
-                      className="tabular-nums"
-                      value={row.text}
-                      disabled={saving}
-                      aria-invalid={rowError ? true : undefined}
-                      aria-describedby={`${inputId}-ayuda`}
-                      onChange={(event) => patchRow(row.productId, event.target.value)}
-                    />
-                    <InputGroupAddon align="inline-end">
-                      {unitFor(typed ?? 2, row.unit)}
-                    </InputGroupAddon>
-                  </InputGroup>
-                  {row.added ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Quitar ${row.name}`}
-                      disabled={saving}
-                      onClick={() =>
-                        setRows((previous) =>
-                          previous.filter((item) => item.productId !== row.productId),
-                        )
-                      }
-                    >
-                      <X aria-hidden />
-                    </Button>
-                  ) : null}
-                </div>
-                <FieldDescription id={`${inputId}-ayuda`}>
-                  {row.added
-                    ? "No estaba registrado en esta atención."
-                    : `Registrado: ${quantityWords(row.recorded, row.unit, locale)}.`}
-                </FieldDescription>
-                {rowError ? <FieldError>{rowError}</FieldError> : null}
-              </Field>
-            )
-          })}
+          <form.AppField name="rows" mode="array">
+            {(rowsField) =>
+              rowsField.state.value.map((row, index) => (
+                <form.AppField key={row.productId} name={`rows[${index}].quantity`}>
+                  {(field) => {
+                    const typed = parseWholeQuantity(field.state.value, locale)
+                    return (
+                      <field.Control
+                        id={`${uid}-${row.productId}`}
+                        label={
+                          <>
+                            {row.name}
+                            <span className="sr-only">, en {unitFor(2, row.unit)}</span>
+                          </>
+                        }
+                        description={
+                          row.added
+                            ? "No estaba registrado en esta atención."
+                            : `Registrado: ${quantityWords(row.recorded, row.unit, locale)}.`
+                        }
+                      >
+                        {(control) => (
+                          <div className="flex items-center gap-2">
+                            <InputGroup className="max-w-48">
+                              <InputGroupInput
+                                {...control.props}
+                                inputMode="numeric"
+                                autoComplete="off"
+                                className="tabular-nums"
+                                value={field.state.value}
+                                disabled={saving}
+                                onChange={(event) => field.handleChange(event.target.value)}
+                              />
+                              <InputGroupAddon align="inline-end">
+                                {unitFor(typed ?? 2, row.unit)}
+                              </InputGroupAddon>
+                            </InputGroup>
+                            {row.added ? (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                aria-label={`Quitar ${row.name}`}
+                                disabled={saving}
+                                onClick={() => rowsField.removeValue(index)}
+                              >
+                                <X aria-hidden />
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
+                      </field.Control>
+                    )
+                  }}
+                </form.AppField>
+              ))
+            }
+          </form.AppField>
         </FieldSet>
         {canAddProducts ? (
           picking ? (
             <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
               <Field>
+                <FieldLabel htmlFor={`${uid}-otro-producto`}>Producto</FieldLabel>
                 <MaterialProductPicker
                   id={`${uid}-otro-producto`}
                   label="Producto"
+                  aria-describedby={`${uid}-otro-producto-ayuda`}
                   excludeIds={rows.map((row) => row.productId)}
                   onPick={(product) => {
-                    setRows((previous) => [
-                      ...previous,
-                      { ...product, recorded: 0, text: "1", added: true },
-                    ])
+                    form.pushFieldValue("rows", { ...product, recorded: 0, quantity: "1", added: true })
                     setPicking(false)
-                    setError(null)
                     requestAnimationFrame(() =>
                       document.getElementById(`${uid}-${product.productId}`)?.focus(),
                     )
                   }}
                 />
-                <FieldDescription>
+                <FieldDescription id={`${uid}-otro-producto-ayuda`}>
                   Solo los productos que se usan en las atenciones.
                 </FieldDescription>
               </Field>

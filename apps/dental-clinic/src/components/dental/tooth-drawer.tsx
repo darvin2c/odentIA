@@ -5,12 +5,15 @@ import {
 import {
   surfaceLabel as clinicalSurfaceLabel,
   type FindingDetails,
+  type FindingField,
+  type FindingDefinition,
   type FindingInput,
+  type FindingScope,
   findingDefinition,
+  findingIssues,
   surfacesForTooth,
   toothNameOf,
   toothTypeOf,
-  validateFinding,
 } from "@odentia/dental"
 import {
   Badge,
@@ -18,18 +21,13 @@ import {
   Checkbox,
   Field,
   FieldLabel,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
 } from "@odentia/ui"
-import { FormDrawer, FormPanel } from "@odentia/ui-patterns"
+import { FormDrawer, FormPanel, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { ApiError, apiFetch } from "@odentia/clinic-app/lib/api"
+import { z } from "zod"
+import { apiFetch } from "@odentia/clinic-app/lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "@odentia/clinic-app/lib/budgets"
 import { timeAgo, usePermission } from "@odentia/clinic-app/lib/crm"
 import { useOrgProfile } from "@odentia/clinic-app/lib/org"
@@ -52,15 +50,17 @@ const OPEN_PLAN_STATUSES: readonly string[] = ["pendiente", "programado", "en_cu
 /** Cabecera compacta: evita un título gigante cuando se seleccionan muchas piezas. */
 const MAX_HEAD_TEETH = 8
 
-const QUALITY_LABELS: Record<string, string> = {
-  good: "Buen estado",
-  poor: "Mal estado",
-}
+const QUALITY_OPTIONS = [
+  { value: "good", label: "Buen estado" },
+  { value: "poor", label: "Mal estado" },
+]
 
-const DIRECTION_LABELS: Record<string, string> = {
-  clockwise: "Horaria",
-  counterclockwise: "Antihoraria",
-}
+const DIRECTION_OPTIONS = [
+  { value: "clockwise", label: "Horaria" },
+  { value: "counterclockwise", label: "Antihoraria" },
+]
+
+const DIAGNOSIS_TYPE_OPTIONS = Object.entries(DIAGNOSIS_TYPE_LABELS).map(([value, label]) => ({ value, label }))
 
 /** Posiciones normativas de ubicación anormal (coexisten M/D/V/P/L). */
 const ABNORMAL_POSITIONS: readonly string[] = ["mesial", "distal", "buccal", "palatal", "lingual"]
@@ -74,6 +74,204 @@ const SPECIFICATION_HINTS: Record<string, string> = {
 
 /** Lo que se planifica desde la pieza es de la pieza o de sus caras. */
 const TOOTH_SCOPES: readonly string[] = ["tooth", "surfaces"]
+
+/** El borrador del hallazgo: todo arranca vacío, sin valores clínicos inventados. */
+interface FindingDraft {
+  condition: string
+  variant: string
+  quality: string
+  direction: string
+  /** Lo escrito: se valida al registrar y se dice la causa (0, 2,5, «abc»). */
+  grade: string
+  positions: string[]
+  surfaces: string[]
+  abutments: number[]
+  drawing: number[][][]
+  /** Evidencia observada: solo lo marcado explícitamente por el clínico. */
+  clinicallyObserved: boolean
+  specifications: string
+  observations: string
+  note: string
+  /** Diagnóstico de la atención: el que propone el hallazgo (o se elige) con su tipo. */
+  diagnosisCode: string
+  diagnosisSystem: string | null
+  diagnosisDescription: string
+  diagnosisType: string
+  /** Tratamiento: va al plan abierto de la persona, que nace con el primero (ADR 0034). */
+  treatService: ServiceCatalogItem | null
+  treatDetail: string
+}
+
+/** Lo que depende del hallazgo elegido: se vacía al cambiarlo. */
+const EMPTY_DETAILS = {
+  variant: "",
+  quality: "",
+  direction: "",
+  grade: "",
+  positions: [],
+  surfaces: [],
+  abutments: [],
+  drawing: [],
+  clinicallyObserved: false,
+  specifications: "",
+  observations: "",
+} satisfies Partial<FindingDraft>
+
+const EMPTY_DRAFT: FindingDraft = {
+  ...EMPTY_DETAILS,
+  condition: "",
+  note: "",
+  diagnosisCode: "",
+  diagnosisSystem: null,
+  diagnosisDescription: "",
+  diagnosisType: "",
+  treatService: null,
+  treatDetail: "",
+}
+
+/** Qué pide el hallazgo elegido: la misma regla decide qué campos se ven y en cuál se dice cada error. */
+interface FindingLayout {
+  def: FindingDefinition | undefined
+  scope: FindingScope | undefined
+  isGroup: boolean
+  showVariant: boolean
+  showQuality: boolean
+  showSurfaces: boolean
+  showDrawing: boolean
+  showAbutments: boolean
+  showDirection: boolean
+  showGrade: boolean
+  showPositions: boolean
+  showObservations: boolean
+  showEvidence: boolean
+  showSpecifications: boolean
+}
+
+function findingLayout(
+  draft: Pick<FindingDraft, "condition" | "specifications">,
+  multi: boolean,
+  hasSurfaces: boolean,
+): FindingLayout {
+  const { condition } = draft
+  const def = condition ? findingDefinition(condition) : undefined
+  const scope = def?.scope
+  return {
+    def,
+    scope,
+    isGroup: scope === "pair" || scope === "span" || scope === "arch",
+    showVariant: !!def?.variants?.length,
+    showQuality: def?.color === "quality",
+    showSurfaces: scope === "surface" && !multi && hasSurfaces,
+    showDrawing: !!def && (!!def.requiresDrawing || scope === "surface"),
+    showAbutments: condition === "fixed_partial_denture",
+    showDirection: condition === "rotation",
+    showGrade: condition === "pathological_mobility",
+    showPositions: condition === "abnormal_position",
+    showObservations: condition === "clinical_observation",
+    showEvidence: !!def?.requiresEvidence,
+    showSpecifications: !!(SPECIFICATION_HINTS[condition] || def?.code === "temporary_crown" || draft.specifications),
+  }
+}
+
+/** La lista con `item` puesto o quitado (caras, posiciones, pilares). */
+function toggled<T>(list: readonly T[], item: T): T[] {
+  return list.includes(item) ? list.filter((value) => value !== item) : [...list, item]
+}
+
+/** Lo escrito en «Grado de movilidad» como número («2,5» también), o null si no es un número. */
+function writtenGrade(text: string): number | null {
+  const trimmed = text.trim().replace(",", ".")
+  if (!trimmed) return null
+  const value = Number(trimmed)
+  return Number.isFinite(value) ? value : null
+}
+
+/**
+ * Detalle del borrador con solo propiedades pertinentes al hallazgo actual:
+ * la misma construcción alimenta la vista previa, la validación y el POST,
+ * así lo que se ve es lo que se guarda. Nada stale de otro hallazgo viaja.
+ */
+function draftDetailsOf(draft: FindingDraft, layout: FindingLayout, teeth: readonly number[]): FindingDetails {
+  const { def, scope, isGroup } = layout
+  const details: FindingDetails = {}
+  if (!def) return details
+  if (def.variants?.length && draft.variant) details.variant = draft.variant
+  if (def.color === "quality" && (draft.quality === "good" || draft.quality === "poor")) details.quality = draft.quality
+  if (draft.condition === "rotation" && (draft.direction === "clockwise" || draft.direction === "counterclockwise"))
+    details.direction = draft.direction
+  if (draft.condition === "pathological_mobility") {
+    const grade = writtenGrade(draft.grade)
+    if (grade !== null) details.grade = grade
+  }
+  if (draft.condition === "abnormal_position" && draft.positions.length > 0) details.positions = [...draft.positions]
+  if (isGroup && teeth.length > 0) details.relatedTeeth = [...teeth]
+  if (scope === "span" && draft.abutments.length > 0) details.abutmentTeeth = [...draft.abutments]
+  if (draft.clinicallyObserved) details.clinicallyObserved = true
+  if (draft.drawing.length > 0) details.drawing = draft.drawing
+  if (draft.specifications.trim()) details.specifications = draft.specifications.trim()
+  if (draft.observations.trim()) details.observations = draft.observations.trim()
+  return details
+}
+
+/** El campo de la pantalla donde se dice un error del hallazgo; null si no está a la vista. */
+function draftFieldOf(field: FindingField, layout: FindingLayout): keyof FindingDraft | null {
+  switch (field) {
+    case "details.variant":
+      return layout.showVariant ? "variant" : null
+    case "details.quality":
+      return layout.showQuality ? "quality" : null
+    case "details.direction":
+      return layout.showDirection ? "direction" : null
+    case "details.grade":
+      return layout.showGrade ? "grade" : null
+    case "details.positions":
+      return layout.showPositions ? "positions" : null
+    case "details.abutmentTeeth":
+      return layout.showAbutments ? "abutments" : null
+    case "details.clinicallyObserved":
+      return layout.showEvidence ? "clinicallyObserved" : null
+    case "details.drawing":
+      return layout.showDrawing ? "drawing" : null
+    case "surfaces":
+      return layout.showSurfaces ? "surfaces" : layout.showDrawing ? "drawing" : null
+    case "details.specifications":
+      return layout.showSpecifications ? "specifications" : null
+    case "details.observations":
+      return layout.showObservations ? "observations" : "note"
+    case "note":
+      return "note"
+    default:
+      return null
+  }
+}
+
+/** Cómo se llama en la pantalla cada dato que el servidor señala en `/odontogram/findings`. */
+const SERVER_FIELDS: Record<string, string> = {
+  "details.variant": "variant",
+  "details.quality": "quality",
+  "details.grade": "grade",
+  "details.direction": "direction",
+  "details.positions": "positions",
+  "details.abutmentTeeth": "abutments",
+  "details.clinicallyObserved": "clinicallyObserved",
+  "details.drawing": "drawing",
+  "details.specifications": "specifications",
+  "details.observations": "observations",
+  "diagnosis.diagnosisCode": "diagnosisCode",
+  "diagnosis.diagnosisType": "diagnosisType",
+  "treatment.serviceId": "treatService",
+  "treatment.detail": "treatDetail",
+}
+
+const voidSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe el motivo de la anulación.")
+    .max(500, "Escribe el motivo en 500 caracteres como mucho."),
+})
+
+const EMPTY_VOID = { reason: "" }
 
 /**
  * Etiqueta original del registro migrado, disponible en `legacyData` (objeto
@@ -101,11 +299,39 @@ interface DocsQueryState {
   isError: boolean
 }
 
-function mutationMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) {
-    if (err.shape.message) return err.shape.message
-  }
-  return err instanceof Error ? err.message : fallback
+/** Una casilla de un grupo (pilares, posiciones, caras), unida al error del grupo. */
+function GroupCheckbox({
+  id,
+  label,
+  checked,
+  disabled,
+  invalid,
+  describedBy,
+  onToggle,
+}: {
+  id: string
+  label: string
+  checked: boolean
+  disabled: boolean
+  invalid: boolean
+  describedBy: string | undefined
+  onToggle: () => void
+}) {
+  return (
+    <Field orientation="horizontal" className="min-h-11 rounded-md border p-2">
+      <Checkbox
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        onCheckedChange={onToggle}
+      />
+      <FieldLabel htmlFor={id} className="font-normal">
+        {label}
+      </FieldLabel>
+    </Field>
+  )
 }
 
 /**
@@ -174,122 +400,148 @@ export function ToothDrawer({
 
   const [choosingFinding, setChoosingFinding] = useState(true)
   const [savedMessage, setSavedMessage] = useState("")
-
-  // Borrador del hallazgo: todo arranca vacío, sin valores clínicos inventados.
-  const [condition, setCondition] = useState("")
-  const [variant, setVariant] = useState("")
-  const [quality, setQuality] = useState("")
-  const [direction, setDirection] = useState("")
-  const [grade, setGrade] = useState("")
-  const [positions, setPositions] = useState<string[]>([])
-  const [surfaces, setSurfaces] = useState<string[]>([])
-  const [abutments, setAbutments] = useState<number[]>([])
-  const [drawing, setDrawing] = useState<number[][][]>([])
   const [freehand, setFreehand] = useState(false)
-  // Evidencia observada: solo lo marcado explícitamente por el clínico.
-  const [clinicallyObserved, setClinicallyObserved] = useState(false)
-  const [specifications, setSpecifications] = useState("")
-  const [observations, setObservations] = useState("")
-  const [note, setNote] = useState("")
-  // Diagnóstico de la atención: el que propone el hallazgo (o se elige) con su tipo.
-  const [diagnosisCode, setDiagnosisCode] = useState("")
-  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(null)
-  const [diagnosisDescription, setDiagnosisDescription] = useState("")
-  const [diagnosisType, setDiagnosisType] = useState("")
-  // Tratamiento: va al plan abierto de la persona, que nace con el primero (ADR 0034).
-  const [treatService, setTreatService] = useState<ServiceCatalogItem | null>(null)
-  const [treatDetail, setTreatDetail] = useState("")
-  const [pending, setPending] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-  const [formErrors, setFormErrors] = useState<string[]>([])
-
   const [voiding, setVoiding] = useState<{ id: string; label: string } | null>(null)
-  const [voidReason, setVoidReason] = useState("")
-  const [voidPending, setVoidPending] = useState(false)
-  const [voidError, setVoidError] = useState<string | null>(null)
-
-  const busy = pending || voidPending
-  const fieldDisabled = !canMutate || disabled || busy
-
-  const def = condition ? findingDefinition(condition) : undefined
-  const scope = def?.scope
-  const isGroup = scope === "pair" || scope === "span" || scope === "arch"
-  const showSurfaces = scope === "surface" && !multi && allowedSurfaces.length > 0
-  const showDrawing = !!def && (!!def.requiresDrawing || scope === "surface")
-  const showAbutments = condition === "fixed_partial_denture"
-  const showDirection = condition === "rotation"
-  const showGrade = condition === "pathological_mobility"
-  const showPositions = condition === "abnormal_position"
-  const showObservations = condition === "clinical_observation"
 
   /**
-   * Detalle del borrador con solo propiedades pertinentes al hallazgo actual:
-   * la misma construcción alimenta la vista previa y el POST, así lo que se
-   * ve es lo que se guarda. Nada stale de otro hallazgo viaja al servidor.
+   * La misma regla del país que aplica el servidor, antes de enviar: cada
+   * error en su campo y, si no tiene campo a la vista, junto a los botones
+   * con su pieza.
    */
-  const draftDetails = useMemo<FindingDetails>(() => {
-    const details: FindingDetails = {}
-    if (!def) return details
-    if (def.variants?.length && variant) details.variant = variant
-    if (def.color === "quality" && (quality === "good" || quality === "poor"))
-      details.quality = quality
-    if (
-      condition === "rotation" &&
-      (direction === "clockwise" || direction === "counterclockwise")
-    ) {
-      details.direction = direction
+  const validateDraft = (value: FindingDraft) => {
+    const layout = findingLayout(value, multi, allowedSurfaces.length > 0)
+    if (!layout.def) return { form: "Selecciona el hallazgo a registrar.", fields: {} }
+    const fields: Partial<Record<keyof FindingDraft, string>> = {}
+    // La evidencia observada solo vale marcada explícitamente por el clínico.
+    if (layout.def.requiresEvidence && !value.clinicallyObserved)
+      fields.clinicallyObserved = "Confirma que observaste clínicamente este hallazgo antes de registrarlo."
+    if (layout.showGrade && value.grade.trim() && writtenGrade(value.grade) === null)
+      fields.grade = "Escribe el grado con un número entero: 1, 2, 3…"
+    if (value.diagnosisCode.trim() && !value.diagnosisType)
+      fields.diagnosisType = "Elige el tipo del diagnóstico: presuntivo o definitivo."
+    if (value.treatService && !TOOTH_SCOPES.includes(value.treatService.scope ?? ""))
+      fields.treatService = `«${value.treatService.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles».`
+    const own = new Set(Object.keys(fields))
+    const general = new Set<string>()
+    const details = draftDetailsOf(value, layout, teeth)
+    const targets = layout.isGroup ? teeth.slice(0, 1) : [...teeth]
+    for (const toothNumber of targets) {
+      const input: FindingInput = { toothNumber, condition: value.condition, details, note: value.note.trim() || null }
+      if (layout.showSurfaces && value.surfaces.length > 0) input.surfaces = [...value.surfaces]
+      for (const issue of findingIssues(input, { strictVariants: official?.strictVariants ?? false })) {
+        const name = draftFieldOf(issue.field, layout)
+        if (!name) {
+          general.add(`Pieza ${toothNumber}: ${issue.message}`)
+          continue
+        }
+        if (own.has(name)) continue
+        const message = targets.length > 1 ? `Pieza ${toothNumber}: ${issue.message}` : issue.message
+        const said = fields[name]
+        fields[name] = !said ? message : said.includes(message) ? said : `${said} ${message}`
+      }
     }
-    if (condition === "pathological_mobility") {
-      const parsed = Number(grade)
-      if (Number.isInteger(parsed) && parsed >= 1) details.grade = parsed
-    }
-    if (condition === "abnormal_position" && positions.length > 0)
-      details.positions = [...positions]
-    if (isGroup && teeth.length > 0) details.relatedTeeth = [...teeth]
-    if (scope === "span" && abutments.length > 0) details.abutmentTeeth = [...abutments]
-    if (clinicallyObserved) details.clinicallyObserved = true
-    if (drawing.length > 0) details.drawing = drawing
-    if (specifications.trim()) details.specifications = specifications.trim()
-    if (observations.trim()) details.observations = observations.trim()
-    return details
-  }, [
-    def,
-    variant,
-    quality,
-    condition,
-    direction,
-    grade,
-    positions,
-    isGroup,
-    teeth,
-    scope,
-    abutments,
-    drawing,
-    clinicallyObserved,
-    specifications,
-    observations,
-  ])
+    if (general.size === 0 && Object.keys(fields).length === 0) return undefined
+    return { form: general.size > 0 ? [...general].join(" ") : undefined, fields }
+  }
 
-  const draftDirty =
-    condition !== "" ||
-    variant !== "" ||
-    quality !== "" ||
-    direction !== "" ||
-    grade !== "" ||
-    positions.length > 0 ||
-    surfaces.length > 0 ||
-    abutments.length > 0 ||
-    drawing.length > 0 ||
-    clinicallyObserved ||
-    specifications !== "" ||
-    observations !== "" ||
-    diagnosisCode !== "" ||
-    diagnosisType !== "" ||
-    note !== "" ||
-    treatService !== null ||
-    treatDetail !== ""
+  const form = useAppForm({
+    defaultValues: EMPTY_DRAFT,
+    validators: { onSubmit: ({ value }) => validateDraft(value) },
+    onSubmit: async ({ value }) => {
+      const layout = findingLayout(value, multi, allowedSurfaces.length > 0)
+      const details = draftDetailsOf(value, layout, teeth)
+      const code = value.diagnosisCode.trim()
+      onPendingChange?.(true)
+      try {
+        await beforeWrite?.()
+        await apiFetch(`/api/patients/${patientId}/odontogram/findings`, {
+          method: "POST",
+          body: JSON.stringify({
+            encounterId,
+            toothNumbers: teeth,
+            condition: value.condition,
+            // Las caras solo se registran con una sola pieza.
+            surfaces: !layout.isGroup && !multi && layout.scope === "surface" ? value.surfaces : [],
+            ...(Object.keys(details).length > 0 ? { details } : {}),
+            note: value.note.trim() || null,
+            diagnosis: code
+              ? { diagnosisCode: code, diagnosisSystem: value.diagnosisSystem, diagnosisType: value.diagnosisType }
+              : null,
+            treatment: value.treatService
+              ? { serviceId: value.treatService.id, detail: value.treatDetail.trim() || null }
+              : null,
+          }),
+        })
+        const planned = value.treatService !== null
+        form.reset(EMPTY_DRAFT)
+        setFreehand(false)
+        await onChanged()
+        await Promise.all(
+          [
+            "plan-items",
+            "treatment-plans",
+            "treatment-plan",
+            "budgets",
+            "budget",
+            "patient-summary",
+            "plan-next",
+            "encounter",
+            "encounter-closing",
+          ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+        )
+        setChoosingFinding(true)
+        setSavedMessage(
+          planned ? "Hallazgo registrado y tratamiento agregado al plan." : "Hallazgo registrado en el odontograma.",
+        )
+      } finally {
+        onPendingChange?.(false)
+      }
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS })
+  const draft = useStore(form.store, (state) => state.values)
 
-  const draftWords = draftDirty && def ? findingWords(official, { condition, details: draftDetails }) : null
+  const voidForm = useAppForm({
+    defaultValues: EMPTY_VOID,
+    validators: { onSubmit: voidSchema },
+    onSubmit: async ({ value }) => {
+      if (!voiding) return
+      onPendingChange?.(true)
+      try {
+        await beforeWrite?.()
+        await apiFetch(`/api/patients/${patientId}/odontogram/entries/${voiding.id}/void`, {
+          method: "POST",
+          body: JSON.stringify({ reason: value.reason.trim() }),
+        })
+        setVoiding(null)
+        voidForm.reset(EMPTY_VOID)
+        await onChanged()
+      } finally {
+        onPendingChange?.(false)
+      }
+    },
+  })
+  const voidSurface = useFormSurface(voidForm)
+
+  const busy = surface.isSubmitting || voidSurface.isSubmitting
+  const fieldDisabled = !canMutate || disabled || busy
+
+  const { condition, drawing, surfaces } = draft
+  const layout = findingLayout(draft, multi, allowedSurfaces.length > 0)
+  const { def, scope, isGroup, showSurfaces, showDrawing, showAbutments, showDirection, showGrade, showPositions } =
+    layout
+  const draftDetails = draftDetailsOf(draft, layout, teeth)
+  // La vista previa no dibuja un grado que no vale (0, 2,5): ese se dice en su campo.
+  const { grade: draftGrade, ...detailsWithoutGrade } = draftDetails
+  const previewDetails =
+    draftGrade === undefined || (Number.isInteger(draftGrade) && draftGrade >= 1) ? draftDetails : detailsWithoutGrade
+
+  const draftDirty = (Object.keys(EMPTY_DRAFT) as Array<keyof FindingDraft>).some((key) => {
+    const value = draft[key]
+    return Array.isArray(value) ? value.length > 0 : value !== EMPTY_DRAFT[key]
+  })
+
+  const draftWords = draftDirty && def ? findingWords(official, { condition, details: previewDetails }) : null
 
   /**
    * Vista previa viva: el borrador viaja con superficies normativas en inglés
@@ -302,68 +554,28 @@ export function ToothDrawer({
     const base = entriesOf(toothNumber)
     if (!canMutate || !draftDirty || !def || !teeth.includes(toothNumber)) return base
     const draftSurfaces = !multi && scope === "surface" && surfaces.length > 0 ? surfaces : [null]
-    const draft: OdontogramEntry = {
+    const entry: OdontogramEntry = {
       id: `draft-${toothNumber}`,
       toothNumber,
       condition,
       surface: null,
       status: "recorded",
-      details: draftDetails,
+      details: previewDetails,
     }
     return [
       ...base,
       ...draftSurfaces.map((surface) => ({
-        ...draft,
+        ...entry,
         id: `draft-${toothNumber}-${surface ?? "whole"}`,
         surface,
       })),
     ]
   }
   const toggleSurface = (surface: string) => {
-    setSurfaces((prev) =>
-      prev.includes(surface) ? prev.filter((s) => s !== surface) : [...prev, surface],
-    )
+    form.setFieldValue("surfaces", (prev) => toggled(prev, surface))
   }
-
-  const togglePosition = (position: string) => {
-    setPositions((prev) =>
-      prev.includes(position) ? prev.filter((p) => p !== position) : [...prev, position],
-    )
-  }
-
-  const toggleAbutment = (toothNumber: number) => {
-    setAbutments((prev) =>
-      prev.includes(toothNumber) ? prev.filter((t) => t !== toothNumber) : [...prev, toothNumber],
-    )
-  }
-
-  const resetDetails = () => {
-    setFreehand(false)
-    setVariant("")
-    setQuality("")
-    setDirection("")
-    setGrade("")
-    setPositions([])
-    setSurfaces([])
-    setAbutments([])
-    setDrawing([])
-    setClinicallyObserved(false)
-    setSpecifications("")
-    setObservations("")
-    setFormErrors([])
-    setFormError(null)
-  }
-
-  const resetDraft = () => {
-    resetDetails()
-    setCondition("")
-    setDiagnosisCode("")
-    setDiagnosisSystem(null)
-    setDiagnosisDescription("")
-    setDiagnosisType("")
-    setNote("")
-    setTreatService(null)
-    setTreatDetail("")
+  const setDrawing = (next: number[][][]) => {
+    form.setFieldValue("drawing", next)
   }
 
   const selectCondition = (value: string | null | undefined) => {
@@ -371,9 +583,9 @@ export function ToothDrawer({
       setChoosingFinding(false)
       return
     }
-    // El detalle depende del hallazgo: nada de otra definición sobrevive.
-    resetDetails()
-    setCondition(value ?? "")
+    // El detalle depende del hallazgo: nada de otra definición sobrevive, ni sus errores.
+    setFreehand(false)
+    form.reset({ ...form.state.values, ...EMPTY_DETAILS, condition: value ?? "" }, { keepDefaultValues: true })
     setChoosingFinding(false)
     setSavedMessage("")
   }
@@ -409,122 +621,10 @@ export function ToothDrawer({
       : "El registro se aplicará a cada pieza seleccionada."
     : undefined
 
-  const submitFinding = async () => {
-    if (!canMutate || disabled || busy || teeth.length === 0 || !encounterId) return
-    setFormError(null)
-    setFormErrors([])
-    if (!def) {
-      setFormErrors(["Selecciona el hallazgo a registrar."])
-      return
-    }
-    // La evidencia observada solo vale marcada explícitamente por el clínico.
-    if (def.requiresEvidence && !clinicallyObserved) {
-      setFormErrors(["Confirma que observaste clínicamente este hallazgo antes de registrarlo."])
-      return
-    }
-    const code = diagnosisCode.trim()
-    if (code && !diagnosisType) {
-      setFormErrors(["Elige el tipo del diagnóstico: presuntivo o definitivo."])
-      return
-    }
-    if (treatService && !TOOTH_SCOPES.includes(treatService.scope ?? "")) {
-      setFormErrors([
-        `«${treatService.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles».`,
-      ])
-      return
-    }
-    // La misma regla del país que aplica el servidor, antes de enviar.
-    const targets = isGroup ? [teeth[0]!] : [...teeth]
-    const failures: string[] = []
-    for (const toothNumber of targets) {
-      const input: FindingInput = { toothNumber, condition, details: draftDetails }
-      if (!isGroup && !multi && scope === "surface" && surfaces.length > 0) input.surfaces = [...surfaces]
-      for (const message of validateFinding(input, { strictVariants: official?.strictVariants ?? false })) {
-        failures.push(targets.length > 1 ? `Pieza ${toothNumber}: ${message}` : message)
-      }
-    }
-    if (failures.length > 0) {
-      setFormErrors(failures)
-      return
-    }
-    setPending(true)
-    onPendingChange?.(true)
-    try {
-      await beforeWrite?.()
-      await apiFetch(`/api/patients/${patientId}/odontogram/findings`, {
-        method: "POST",
-        body: JSON.stringify({
-          encounterId,
-          toothNumbers: teeth,
-          condition,
-          // Las caras solo se registran con una sola pieza.
-          surfaces: !isGroup && !multi && scope === "surface" ? surfaces : [],
-          ...(Object.keys(draftDetails).length > 0 ? { details: draftDetails } : {}),
-          note: note.trim() || null,
-          diagnosis: code ? { diagnosisCode: code, diagnosisSystem, diagnosisType } : null,
-          treatment: treatService ? { serviceId: treatService.id, detail: treatDetail.trim() || null } : null,
-        }),
-      })
-      const planned = treatService !== null
-      resetDraft()
-      await onChanged()
-      await Promise.all(
-        [
-          "plan-items",
-          "treatment-plans",
-          "treatment-plan",
-          "budgets",
-          "budget",
-          "patient-summary",
-          "plan-next",
-          "encounter",
-          "encounter-closing",
-        ].map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
-      )
-      setChoosingFinding(true)
-      setSavedMessage(
-        planned ? "Hallazgo registrado y tratamiento agregado al plan." : "Hallazgo registrado en el odontograma.",
-      )
-    } catch (err) {
-      setFormError(mutationMessage(err, "No se pudo registrar el hallazgo."))
-    } finally {
-      setPending(false)
-      onPendingChange?.(false)
-    }
-  }
-
   const cancelVoid = () => {
-    if (!voidPending) {
+    if (!voidSurface.isSubmitting) {
       setVoiding(null)
-      setVoidReason("")
-      setVoidError(null)
-    }
-  }
-
-  const confirmVoid = async () => {
-    if (!voiding || !canMutate || disabled || busy) return
-    const reason = voidReason.trim()
-    if (!reason) {
-      setVoidError("El motivo de la anulación es obligatorio.")
-      return
-    }
-    setVoidPending(true)
-    onPendingChange?.(true)
-    setVoidError(null)
-    try {
-      await beforeWrite?.()
-      await apiFetch(`/api/patients/${patientId}/odontogram/entries/${voiding.id}/void`, {
-        method: "POST",
-        body: JSON.stringify({ reason }),
-      })
-      setVoiding(null)
-      setVoidReason("")
-      await onChanged()
-    } catch (err) {
-      setVoidError(mutationMessage(err, "No se pudo anular la entrada."))
-    } finally {
-      setVoidPending(false)
-      onPendingChange?.(false)
+      voidForm.reset(EMPTY_VOID)
     }
   }
 
@@ -541,7 +641,6 @@ export function ToothDrawer({
   useEffect(() => {
     if (!choosingFinding) detailHeading.current?.focus()
   }, [choosingFinding, condition])
-  const activeError = formError ?? (formErrors.length ? formErrors.join(" ") : null)
   const faceEditing = canMutate && !disabled && !busy && !multi && scope === "surface" && !freehand
   // El trazo se dibuja sobre la vista previa con el Renderer (contrato final):
   // una sola pieza, sin puentes. El borrador lo controla este drawer.
@@ -632,13 +731,17 @@ export function ToothDrawer({
       </div>
     )
 
-  const submitLabel = treatService
+  const submitLabel = draft.treatService
     ? "Registrar y agregar al plan"
     : `Registrar hallazgo${multi && !isGroup ? ` (${teeth.length})` : ""}`
+  // Mientras se elige el hallazgo no hay nada que registrar: Enter en el buscador no envía.
   const submit = (event: React.FormEvent): void => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (!choosingFinding) void submitFinding()
+    if (choosingFinding || !canMutate || disabled || busy || teeth.length === 0) {
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    surface.onSubmit(event)
   }
   const headerContent = historical ? (
     <div className="flex flex-wrap items-center gap-2 pt-2">
@@ -658,12 +761,11 @@ export function ToothDrawer({
           docsQuery={docsQuery}
           encounterId={encounterId}
           canMutate={canMutate && !disabled && !busy}
-          voidPending={voidPending}
+          voidPending={voidSurface.isSubmitting}
           defaultOpen
           onVoid={(id, label) => {
+            voidForm.reset(EMPTY_VOID)
             setVoiding({ id, label })
-            setVoidReason("")
-            setVoidError(null)
           }}
         />
       ))}
@@ -724,104 +826,66 @@ export function ToothDrawer({
           </section>
 
           {def?.variants?.length ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-variant`}>{variantFieldLabel(official, condition)}</FieldLabel>
-              <Select
-                value={variant}
-                items={Object.fromEntries(
-                  def.variants.map((v) => [
-                    v.value,
-                    official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label,
-                  ]),
-                )}
-                onValueChange={(v) => setVariant(v ?? "")}
-              >
-                <SelectTrigger
-                  className="min-h-11"
+            <form.AppField name="variant">
+              {(field) => (
+                <field.SelectField
                   id={`${uid}-variant`}
-                  aria-label={variantFieldLabel(official, condition)}
+                  label={variantFieldLabel(official, condition)}
+                  options={(def.variants ?? []).map((v) => ({
+                    value: v.value,
+                    label: official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label,
+                  }))}
+                  placeholder="Elige…"
                   disabled={fieldDisabled}
-                >
-                  <SelectValue placeholder="Elige…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {def.variants.map((v) => (
-                    <SelectItem key={v.value} value={v.value}>
-                      {official && v.abbreviation ? `${v.label} · ${v.abbreviation}` : v.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+                  triggerClassName="min-h-11"
+                />
+              )}
+            </form.AppField>
           ) : null}
 
           {def?.color === "quality" ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-quality`}>Estado</FieldLabel>
-              <Select
-                value={quality}
-                items={QUALITY_LABELS}
-                onValueChange={(v) => setQuality(v ?? "")}
-              >
-                <SelectTrigger
-                  className="min-h-11"
+            <form.AppField name="quality">
+              {(field) => (
+                <field.SelectField
                   id={`${uid}-quality`}
-                  aria-label="Estado"
+                  label="Estado"
+                  options={QUALITY_OPTIONS}
+                  placeholder="Elige el estado…"
                   disabled={fieldDisabled}
-                >
-                  <SelectValue placeholder="Elige el estado…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(QUALITY_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+                  triggerClassName="min-h-11"
+                />
+              )}
+            </form.AppField>
           ) : null}
 
           {showDirection && (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-direction`}>Dirección de rotación</FieldLabel>
-              <Select
-                value={direction}
-                items={DIRECTION_LABELS}
-                onValueChange={(v) => setDirection(v ?? "")}
-              >
-                <SelectTrigger
-                  className="min-h-11"
+            <form.AppField name="direction">
+              {(field) => (
+                <field.SelectField
                   id={`${uid}-direction`}
-                  aria-label="Dirección de rotación"
+                  label="Dirección de rotación"
+                  options={DIRECTION_OPTIONS}
+                  placeholder="Selecciona la dirección…"
                   disabled={fieldDisabled}
-                >
-                  <SelectValue placeholder="Selecciona la dirección…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Object.entries(DIRECTION_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+                  triggerClassName="min-h-11"
+                />
+              )}
+            </form.AppField>
           )}
 
           {showGrade && (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-grade`}>Grado de movilidad</FieldLabel>
-              <Input
-                id={`${uid}-grade`}
-                value={grade}
-                onChange={(e) => setGrade(e.currentTarget.value)}
-                placeholder="1, 2, 3…"
-                inputMode="numeric"
-                disabled={fieldDisabled}
-              />
-              <p className="text-xs text-muted-foreground">Solo grados patológicos (nunca M0).</p>
-            </Field>
+            <form.AppField name="grade">
+              {(field) => (
+                <field.TextField
+                  id={`${uid}-grade`}
+                  label="Grado de movilidad"
+                  description="Solo grados patológicos (nunca M0)."
+                  placeholder="1, 2, 3…"
+                  inputMode="numeric"
+                  disabled={fieldDisabled}
+                />
+              )}
+            </form.AppField>
           )}
 
           {isGroup && (
@@ -833,52 +897,63 @@ export function ToothDrawer({
           )}
 
           {showAbutments && (
-            <fieldset className="flex flex-col gap-2 sm:col-span-2">
-              <legend className="text-xs font-medium">Piezas pilar del tramo</legend>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {teeth.map((toothNumber) => (
-                  <label
-                    key={toothNumber}
-                    htmlFor={`${uid}-abutment-${toothNumber}`}
-                    className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-                  >
-                    <Checkbox
-                      id={`${uid}-abutment-${toothNumber}`}
-                      checked={abutments.includes(toothNumber)}
-                      disabled={fieldDisabled}
-                      onCheckedChange={() => toggleAbutment(toothNumber)}
-                    />
-                    Pieza {toothNumber}
-                  </label>
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Marca las piezas pilar del tramo (puentes sobre pilares).
-              </p>
-            </fieldset>
+            <form.AppField name="abutments">
+              {(field) => (
+                <field.Group
+                  legend="Piezas pilar del tramo"
+                  description="Marca las piezas pilar del tramo (puentes sobre pilares)."
+                  className="flex flex-col gap-2 sm:col-span-2"
+                >
+                  {(control) => (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {teeth.map((toothNumber) => (
+                        <GroupCheckbox
+                          key={toothNumber}
+                          id={`${uid}-abutment-${toothNumber}`}
+                          label={`Pieza ${toothNumber}`}
+                          checked={field.state.value.includes(toothNumber)}
+                          disabled={fieldDisabled}
+                          invalid={control.invalid}
+                          describedBy={control.describedBy}
+                          onToggle={() => {
+                            field.handleChange(toggled(field.state.value, toothNumber))
+                            field.handleBlur()
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
           )}
 
           {showPositions && (
-            <fieldset className="flex flex-col gap-2 sm:col-span-2">
-              <legend className="text-xs font-medium">Posiciones (coexisten M/D/V/P/L)</legend>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {ABNORMAL_POSITIONS.map((position) => (
-                  <label
-                    key={position}
-                    htmlFor={`${uid}-position-${position}`}
-                    className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-                  >
-                    <Checkbox
-                      id={`${uid}-position-${position}`}
-                      checked={positions.includes(position)}
-                      disabled={fieldDisabled}
-                      onCheckedChange={() => togglePosition(position)}
-                    />
-                    {clinicalSurfaceLabel(position)}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+            <form.AppField name="positions">
+              {(field) => (
+                <field.Group legend="Posiciones (coexisten M/D/V/P/L)" className="flex flex-col gap-2 sm:col-span-2">
+                  {(control) => (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {ABNORMAL_POSITIONS.map((position) => (
+                        <GroupCheckbox
+                          key={position}
+                          id={`${uid}-position-${position}`}
+                          label={clinicalSurfaceLabel(position)}
+                          checked={field.state.value.includes(position)}
+                          disabled={fieldDisabled}
+                          invalid={control.invalid}
+                          describedBy={control.describedBy}
+                          onToggle={() => {
+                            field.handleChange(toggled(field.state.value, position))
+                            field.handleBlur()
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
           )}
 
           <div className="sm:col-span-2">
@@ -888,97 +963,98 @@ export function ToothDrawer({
                 superficies se replica a las {teeth.length} piezas.
               </p>
             ) : showSurfaces ? (
-              <fieldset className="flex flex-col gap-2">
-                <legend className="text-xs font-medium">
-                  Superficies comprometidas (o traza la forma observada)
-                </legend>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                  {allowedSurfaces.map((s) => (
-                    <label
-                      key={s}
-                      htmlFor={`${uid}-surface-${s}`}
-                      className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-                    >
-                      <Checkbox
-                        id={`${uid}-surface-${s}`}
-                        checked={surfaces.includes(s)}
-                        disabled={fieldDisabled}
-                        onCheckedChange={() => toggleSurface(s)}
-                      />
-                      {clinicalSurfaceLabel(s)}
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
+              <form.AppField name="surfaces">
+                {(field) => (
+                  <field.Group legend="Superficies comprometidas (o traza la forma observada)" className="flex flex-col gap-2">
+                    {(control) => (
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {allowedSurfaces.map((s) => (
+                          <GroupCheckbox
+                            key={s}
+                            id={`${uid}-surface-${s}`}
+                            label={clinicalSurfaceLabel(s)}
+                            checked={field.state.value.includes(s)}
+                            disabled={fieldDisabled}
+                            invalid={control.invalid}
+                            describedBy={control.describedBy}
+                            onToggle={() => {
+                              field.handleChange(toggled(field.state.value, s))
+                              field.handleBlur()
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </field.Group>
+                )}
+              </form.AppField>
             ) : null}
           </div>
 
           {showDrawing && (
-            <div className="flex flex-col gap-2 sm:col-span-2">
-              <span className="text-xs font-medium">
-                Registro gráfico{def?.requiresDrawing ? " (obligatorio)" : ""}
-              </span>
-              {multi ? (
-                <p className="text-xs text-muted-foreground">
-                  Selecciona una sola pieza para dibujar el trazo sobre su vista previa.
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  Dibuja el trazo observado sobre la vista previa de la pieza
-                  {drawing.length > 0
-                    ? ` (${drawing.length} ${drawing.length === 1 ? "trazo" : "trazos"}).`
-                    : "."}
-                </p>
+            <form.AppField name="drawing">
+              {(field) => (
+                <field.Group
+                  legend={`Registro gráfico${def?.requiresDrawing ? " (obligatorio)" : ""}`}
+                  description={
+                    multi
+                      ? "Selecciona una sola pieza para dibujar el trazo sobre su vista previa."
+                      : `Dibuja el trazo observado sobre la vista previa de la pieza${
+                          field.state.value.length > 0
+                            ? ` (${field.state.value.length} ${field.state.value.length === 1 ? "trazo" : "trazos"}).`
+                            : "."
+                        }`
+                  }
+                  className="flex flex-col gap-2 sm:col-span-2"
+                >
+                  {() => null}
+                </field.Group>
               )}
-            </div>
+            </form.AppField>
           )}
 
           {def?.requiresEvidence && (
-            <div className="sm:col-span-2">
-              <label
-                htmlFor={`${uid}-observed`}
-                className="flex min-h-11 items-center gap-2 rounded-md border p-2 text-sm"
-              >
-                <Checkbox
+            <form.AppField name="clinicallyObserved">
+              {(field) => (
+                <field.CheckboxField
                   id={`${uid}-observed`}
-                  checked={clinicallyObserved}
+                  label="Observé clínicamente este hallazgo (obligatorio)"
                   disabled={fieldDisabled}
-                  onCheckedChange={() => setClinicallyObserved((prev) => !prev)}
+                  className="min-h-11 rounded-md border p-2 sm:col-span-2"
                 />
-                Observé clínicamente este hallazgo (obligatorio)
-              </label>
-            </div>
-          )}
-
-          {(SPECIFICATION_HINTS[condition] || def?.code === "temporary_crown" || specifications) && (
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-specifications`}>Especificaciones</FieldLabel>
-              <Textarea
-                id={`${uid}-specifications`}
-                value={specifications}
-                disabled={fieldDisabled}
-                maxLength={2000}
-                placeholder="Material, clasificación u otra especificación…"
-                onChange={(event) => setSpecifications(event.target.value)}
-              />
-              {SPECIFICATION_HINTS[condition] && (
-                <p className="text-xs text-muted-foreground">{SPECIFICATION_HINTS[condition]}</p>
               )}
-            </Field>
+            </form.AppField>
           )}
 
-          {showObservations && (
-            <Field className="sm:col-span-2">
-              <FieldLabel htmlFor={`${uid}-observations`}>Observaciones</FieldLabel>
-              <Textarea
-                id={`${uid}-observations`}
-                value={observations}
-                disabled={fieldDisabled}
-                maxLength={2000}
-                placeholder="Observación clínica de la pieza…"
-                onChange={(event) => setObservations(event.target.value)}
-              />
-            </Field>
+          {layout.showSpecifications && (
+            <form.AppField name="specifications">
+              {(field) => (
+                <field.TextareaField
+                  id={`${uid}-specifications`}
+                  label="Especificaciones"
+                  description={SPECIFICATION_HINTS[condition] || undefined}
+                  disabled={fieldDisabled}
+                  maxLength={2000}
+                  placeholder="Material, clasificación u otra especificación…"
+                  className="sm:col-span-2"
+                />
+              )}
+            </form.AppField>
+          )}
+
+          {layout.showObservations && (
+            <form.AppField name="observations">
+              {(field) => (
+                <field.TextareaField
+                  id={`${uid}-observations`}
+                  label="Observaciones"
+                  disabled={fieldDisabled}
+                  maxLength={2000}
+                  placeholder="Observación clínica de la pieza…"
+                  className="sm:col-span-2"
+                />
+              )}
+            </form.AppField>
           )}
 
           <section
@@ -986,64 +1062,78 @@ export function ToothDrawer({
             className="flex flex-col gap-3 border-t pt-4 sm:col-span-2"
           >
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
-              <div>
-                <DiagnosisPicker
-                  patientId={patientId}
-                  encounterId={null}
-                  finding={condition ? { condition, variant: variant || null, toothNumber: tooth ?? null } : null}
-                  value={diagnosisCode}
-                  system={diagnosisSystem}
-                  disabled={fieldDisabled}
-                  onChange={(choice) => {
-                    setDiagnosisCode(choice.code)
-                    setDiagnosisSystem(choice.code ? choice.system : null)
-                    setDiagnosisDescription(choice.code ? choice.description : "")
-                  }}
-                />
-                {diagnosisDescription && (
-                  <p className="mt-1 text-xs text-muted-foreground">{diagnosisDescription}</p>
+              <form.AppField name="diagnosisCode">
+                {(field) => (
+                  <field.Group legend="Diagnóstico" className="min-w-0 gap-1">
+                    {(control) => (
+                      <>
+                        <DiagnosisPicker
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          patientId={patientId}
+                          encounterId={null}
+                          finding={
+                            condition ? { condition, variant: draft.variant || null, toothNumber: tooth ?? null } : null
+                          }
+                          value={field.state.value}
+                          system={draft.diagnosisSystem}
+                          disabled={fieldDisabled}
+                          onChange={(choice) => {
+                            field.handleChange(choice.code)
+                            form.setFieldValue("diagnosisSystem", choice.code ? choice.system : null)
+                            form.setFieldValue("diagnosisDescription", choice.code ? choice.description : "")
+                          }}
+                        />
+                        {draft.diagnosisDescription && (
+                          <p className="mt-1 text-xs text-muted-foreground">{draft.diagnosisDescription}</p>
+                        )}
+                      </>
+                    )}
+                  </field.Group>
                 )}
-              </div>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-dx-type`}>Tipo</FieldLabel>
-                <Select
-                  value={diagnosisType}
-                  items={DIAGNOSIS_TYPE_LABELS}
-                  onValueChange={(v) => setDiagnosisType(v ?? "")}
-                >
-                  <SelectTrigger
-                    className="min-h-11"
+              </form.AppField>
+              <form.AppField name="diagnosisType">
+                {(field) => (
+                  <field.SelectField
                     id={`${uid}-dx-type`}
-                    disabled={fieldDisabled || !diagnosisCode}
-                  >
-                    <SelectValue placeholder="Elige…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(DIAGNOSIS_TYPE_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+                    label="Tipo"
+                    options={DIAGNOSIS_TYPE_OPTIONS}
+                    placeholder="Elige…"
+                    disabled={fieldDisabled || !draft.diagnosisCode}
+                    triggerClassName="min-h-11"
+                  />
+                )}
+              </form.AppField>
             </div>
             <p className="text-xs text-muted-foreground">Cuenta como diagnóstico de esta atención</p>
           </section>
 
           <section aria-label="Tratamiento" className="flex flex-col gap-3 border-t pt-4 sm:col-span-2">
-            <ServicePicker
-              value={treatService?.id ?? ""}
-              label="Tratamiento"
-              onChange={(service) => setTreatService(service)}
-              disabled={fieldDisabled}
-            />
-            {treatService ? (
+            <form.AppField name="treatService">
+              {(field) => (
+                <field.Control id={`${uid}-treat-service`} label="Tratamiento">
+                  {(control) => (
+                    <ServicePicker
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      value={field.state.value?.id ?? ""}
+                      onChange={(service) => field.handleChange(service)}
+                      disabled={fieldDisabled}
+                    />
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
+            {draft.treatService ? (
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm" aria-live="polite">
                 <span>
-                  {treatService.name}
+                  {draft.treatService.name}
                   {orgLocale
-                    ? ` · ${formatMoney(treatService.priceCents, treatService.currency, orgLocale)}`
+                    ? ` · ${formatMoney(draft.treatService.priceCents, draft.treatService.currency, orgLocale)}`
                     : ""}
                   {multi && !isGroup ? ` × ${teeth.length} piezas` : ""}
                 </span>
@@ -1053,8 +1143,8 @@ export function ToothDrawer({
                   variant="ghost"
                   disabled={fieldDisabled}
                   onClick={() => {
-                    setTreatService(null)
-                    setTreatDetail("")
+                    form.setFieldValue("treatService", null)
+                    form.setFieldValue("treatDetail", "")
                   }}
                 >
                   Quitar
@@ -1062,39 +1152,40 @@ export function ToothDrawer({
               </div>
             ) : null}
             <p className="text-xs text-muted-foreground">
-              {treatService
+              {draft.treatService
                 ? hasOpenPlan
                   ? "Se agrega a su plan, que ya está abierto"
                   : "Abre su plan con este tratamiento"
                 : "Opcional: lo que propones hacer va al plan, aparte de lo observado"}
             </p>
-            {treatService ? (
-              <Field>
-                <FieldLabel htmlFor={`${uid}-treat-detail`}>Detalle (opcional)</FieldLabel>
-                <Textarea
-                  id={`${uid}-treat-detail`}
-                  value={treatDetail}
-                  onChange={(e) => setTreatDetail(e.currentTarget.value)}
-                  rows={2}
-                  maxLength={4000}
-                  disabled={fieldDisabled}
-                />
-              </Field>
+            {draft.treatService ? (
+              <form.AppField name="treatDetail">
+                {(field) => (
+                  <field.TextareaField
+                    id={`${uid}-treat-detail`}
+                    label="Detalle (opcional)"
+                    rows={2}
+                    maxLength={4000}
+                    disabled={fieldDisabled}
+                  />
+                )}
+              </form.AppField>
             ) : null}
           </section>
 
-          <Field className="sm:col-span-2">
-            <FieldLabel htmlFor={`${uid}-note`}>Nota (opcional)</FieldLabel>
-            <Textarea
-              id={`${uid}-note`}
-              value={note}
-              disabled={fieldDisabled}
-              maxLength={500}
-              rows={2}
-              placeholder="Detalle clínico del hallazgo…"
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </Field>
+          <form.AppField name="note">
+            {(field) => (
+              <field.TextareaField
+                id={`${uid}-note`}
+                label="Nota (opcional)"
+                disabled={fieldDisabled}
+                maxLength={500}
+                rows={2}
+                placeholder="Detalle clínico del hallazgo…"
+                className="sm:col-span-2"
+              />
+            )}
+          </form.AppField>
         </div>
       )}
       {contextFirst ? null : (
@@ -1112,6 +1203,7 @@ export function ToothDrawer({
     <>
       {inline ? (
         <FormPanel
+          {...surface}
           onClose={handleClose}
           title={title}
           description={description}
@@ -1120,7 +1212,6 @@ export function ToothDrawer({
           onSubmit={submit}
           isDirty={isDirty}
           isSubmitting={busy}
-          error={activeError}
           submitLabel={submitLabel}
           cancelLabel="Cerrar"
           submitDisabled={fieldDisabled || teeth.length === 0}
@@ -1129,6 +1220,7 @@ export function ToothDrawer({
         </FormPanel>
       ) : (
         <FormDrawer
+          {...surface}
           open={open && voiding === null}
           onClose={handleClose}
           title={title}
@@ -1139,7 +1231,6 @@ export function ToothDrawer({
           onSubmit={submit}
           isDirty={isDirty}
           isSubmitting={busy}
-          error={activeError}
           submitLabel={submitLabel}
           cancelLabel="Cerrar"
           submitDisabled={fieldDisabled || teeth.length === 0}
@@ -1148,6 +1239,7 @@ export function ToothDrawer({
         </FormDrawer>
       )}
       <FormDrawer
+        {...voidSurface}
         dock={false}
         open={open && voiding !== null}
         onClose={cancelVoid}
@@ -1157,33 +1249,22 @@ export function ToothDrawer({
             ? `Anulación de ${voiding.label}. El registro original y el motivo permanecerán en el historial.`
             : undefined
         }
-        onSubmit={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          void confirmVoid()
-        }}
-        isDirty={voidReason !== ""}
-        isSubmitting={voidPending}
-        error={voidError}
         submitLabel="Confirmar anulación"
         cancelLabel="Volver al registro"
         submitDisabled={!canMutate || disabled}
       >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-void-reason`}>
-            Motivo de la anulación (obligatorio)
-          </FieldLabel>
-          <Textarea
-            id={`${uid}-void-reason`}
-            value={voidReason}
-            onChange={(event) => setVoidReason(event.target.value)}
-            placeholder="Ej. Registro duplicado, pieza equivocada…"
-            rows={4}
-            maxLength={500}
-            required
-            disabled={voidPending}
-          />
-        </Field>
+        <voidForm.AppField name="reason">
+          {(field) => (
+            <field.TextareaField
+              id={`${uid}-void-reason`}
+              label="Motivo de la anulación (obligatorio)"
+              placeholder="Ej. Registro duplicado, pieza equivocada…"
+              rows={4}
+              maxLength={500}
+              disabled={voidSurface.isSubmitting}
+            />
+          )}
+        </voidForm.AppField>
       </FormDrawer>
     </>
   )

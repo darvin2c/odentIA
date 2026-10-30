@@ -28,7 +28,7 @@ import {
   periodontalDentition,
   proposePeriodontalClassification,
   summarizePeriodontal,
-  validatePeriodontalClassification,
+  periodontalClassificationIssues,
   validatePeriodontalTooth,
 } from "@odentia/dental"
 import type { Db } from "@odentia/db"
@@ -41,7 +41,7 @@ import { insertOdontogramFinding, orgStrictVariants, voidOdontogramEntry } from 
 import { findDiagnosisCode, orgDiagnosisSystem } from "../diagnosis-codes.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
 import { assertOpenDraft, lockEncounter } from "../encounters.js"
-import { notFound, ServiceError, validation } from "../errors.js"
+import { fieldsError, notFound, ServiceError, validation } from "../errors.js"
 import { findOrgLocale } from "../locale.js"
 import { requirePatient } from "../patients.js"
 
@@ -423,8 +423,9 @@ export async function savePeriodontalTooth(
   if (!chart.expectedTeeth.includes(input.toothNumber)) {
     throw validation(`La pieza ${input.toothNumber} no se sondea: el odontograma de esta atención la tiene ausente`)
   }
+  // La pieza se guarda sola mientras se sigue sondeando: el error dice cuál es.
   const errors = validatePeriodontalTooth(input, { implant: chart.implantTeeth.includes(input.toothNumber) })
-  if (errors.length) throw validation(errors.join("; "))
+  if (errors.length) throw validation(`Pieza ${input.toothNumber}: ${errors.join("; ")}`)
   const record = normalizePeriodontalTooth(input)
   const values = {
     skipped: record.skipped,
@@ -474,12 +475,16 @@ export async function classifyPeriodontalChart(
   const person = await requirePatient(tx, orgId, patientId)
   const chart = await requireChart(tx, orgId, patientId, chartId, true)
   await requireWritable(tx, orgId, actorUserId, chart)
-  const errors = validatePeriodontalClassification(input)
-  for (const implant of input.implants ?? []) {
-    if (!chart.implantTeeth.includes(implant.toothNumber)) errors.push(`La pieza ${implant.toothNumber} no es un implante`)
-    if (!(PERI_IMPLANT_CONDITIONS as readonly string[]).includes(implant.condition)) errors.push("Estado periimplantario inválido")
+  const fields: Record<string, string> = {}
+  for (const issue of periodontalClassificationIssues(input)) fields[issue.field] ??= issue.message
+  for (const [index, implant] of (input.implants ?? []).entries()) {
+    if (!chart.implantTeeth.includes(implant.toothNumber))
+      fields[`implants[${index}].toothNumber`] ??= `La pieza ${implant.toothNumber} no es un implante`
+    if (!(PERI_IMPLANT_CONDITIONS as readonly string[]).includes(implant.condition))
+      fields[`implants[${index}].condition`] ??= `Implante ${implant.toothNumber}: elige su estado de la lista`
   }
-  if (errors.length) throw validation(errors.join("; "))
+  const invalid = fieldsError(fields)
+  if (invalid) throw invalid
   const periodontitis = input.diagnosis === "periodontitis"
   const [updated] = await tx
     .update(periodontalChart)

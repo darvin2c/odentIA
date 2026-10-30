@@ -1,15 +1,9 @@
 import { Button } from "@odentia/ui"
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
 import { useState } from "react"
-import { ApiError } from "../../lib/api"
 import { type ConsentDocument, confirmLinkSignedConsent, sendConsentByLink } from "../../lib/clinical-forms"
 import { formatDate } from "../../lib/clinical-journey"
-
-function problemOf(error: unknown): string | null {
-  if (!error) return null
-  return error instanceof ApiError ? (error.shape.message ?? "No se pudo completar.") : "No se pudo completar. Revisa tu conexión."
-}
 
 /** Lo que dice el consentimiento sobre «Su enlace»: enviado, firmado por la persona o nada. */
 export function consentLinkWords(document: Pick<ConsentDocument, "status" | "linkSentAt" | "personSignedAt">): string | null {
@@ -50,7 +44,8 @@ export function ConsentLinkActions({
     },
   })
   if (document.status !== "pendiente") return null
-  const error = problemOf(send.error) ?? problemOf(confirm.error)
+  const failure = send.error ?? confirm.error
+  const error = failure ? submitErrorMessage(failure) : null
   return (
     <>
       {document.personSignedAt ? (
@@ -70,7 +65,8 @@ export function ConsentLinkActions({
       <ConfirmDialog
         open={asking}
         title="Enviar para firmar"
-        description={`«${document.titleSnapshot}» aparece en «Su enlace»: lo lee, escribe su documento y firma desde su teléfono. Después lo confirmas tú antes de empezar.${error ? ` ${error}` : ""}`}
+        description={`«${document.titleSnapshot}» aparece en «Su enlace»: lo lee, escribe su documento y firma desde su teléfono. Después lo confirmas tú antes de empezar.`}
+        error={send.error ? submitErrorMessage(send.error) : null}
         confirmLabel="Enviar"
         variant="default"
         pending={send.isPending}

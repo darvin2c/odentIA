@@ -1,13 +1,31 @@
 import { MAX_TAG_LENGTH, MAX_TAGS, normalizeTags } from "@odentia/clinical"
-import { Badge, Button, Field, FieldError, FieldLabel, Input } from "@odentia/ui"
+import { Badge, Button, Input } from "@odentia/ui"
 import { X } from "lucide-react"
-import { useId, useRef, useState } from "react"
+import { type FocusEvent, useId, useState } from "react"
 
 export interface TagsInputProps {
   value: string[]
   onChange: (tags: string[]) => void
   disabled?: boolean
   suggestions?: string[]
+  /** Va al campo de escritura (para `FieldLabel htmlFor`). */
+  id?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  /** Al salir del campo entero (escritura, chips y sugerencias). */
+  onBlur?: () => void
+}
+
+/** La ayuda del campo: la pantalla la muestra como su descripción. */
+export const TAGS_INPUT_HELP = `Máx. ${MAX_TAGS} etiquetas de hasta ${MAX_TAG_LENGTH} caracteres. Espacios, guiones y guiones bajos se unifican (“Tag 1”, “tag-1” y “tag_1” son la misma).`
+
+/** El contador «(3/20)» que acompaña a la etiqueta «Etiquetas» de la pantalla. */
+export function TagsCount({ count }: { count: number }) {
+  return (
+    <span className="font-normal text-muted-foreground">
+      ({count}/{MAX_TAGS})
+    </span>
+  )
 }
 
 function canonicalTag(raw: string): string | null {
@@ -19,13 +37,26 @@ function canonicalTag(raw: string): string | null {
 }
 
 /**
- * Campo de etiquetas compartido: chips removibles, contador 20/40, sugerencias
- * de etiquetas existentes. Los duplicados canónicos no se crean.
+ * Campo de etiquetas compartido: chips removibles, sugerencias de etiquetas
+ * existentes. Los duplicados canónicos no se crean. No pinta su etiqueta ni su
+ * ayuda: la pantalla lo nombra (`FieldLabel htmlFor={id}` con `TagsCount`) y
+ * muestra `TAGS_INPUT_HELP`.
  */
-export function TagsInput({ value, onChange, disabled = false, suggestions = [] }: TagsInputProps) {
-  const inputId = useId()
-  const inputRef = useRef<HTMLInputElement>(null)
+export function TagsInput({
+  value,
+  onChange,
+  disabled = false,
+  suggestions = [],
+  id: idProp,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
+}: TagsInputProps) {
+  const fallbackId = useId()
+  const inputId = idProp ?? fallbackId
+  const hintId = `${inputId}-aviso`
   const [draft, setDraft] = useState("")
+  // Aviso informativo (duplicado o etiqueta no admitida): no es error del campo.
   const [hint, setHint] = useState<string | null>(null)
 
   const commit = (raw: string) => {
@@ -34,13 +65,11 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
       const next = normalizeTags([...value, raw])
       const duplicate = next.length === value.length
       onChange(next)
-      inputRef.current?.setCustomValidity("")
       setDraft("")
       setHint(duplicate ? "La etiqueta ya estaba agregada; no se ha duplicado." : null)
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : "Etiqueta inválida"
-      inputRef.current?.setCustomValidity(message)
       setHint(message)
       return false
     }
@@ -58,14 +87,15 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
     .filter((canon) => !draftCanon || canon.includes(draftCanon))
     .slice(0, 8)
 
+  // `onBlur` solo al salir del campo entero, no al pasar a «Agregar» o a un chip.
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!onBlur || event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    onBlur()
+  }
+
   return (
-    <Field>
-      <FieldLabel htmlFor={inputId}>
-        Etiquetas{" "}
-        <span className="font-normal text-muted-foreground">
-          ({value.length}/{MAX_TAGS})
-        </span>
-      </FieldLabel>
+    // biome-ignore lint/a11y/noStaticElementInteractions: solo escucha cuándo el foco sale de lo que tiene dentro, para dar el campo por visitado.
+    <div className="flex flex-col gap-3" onBlur={handleBlur}>
       {value.length > 0 && (
         <ul className="flex flex-wrap gap-1.5" aria-label="Etiquetas agregadas">
           {value.map((tag) => (
@@ -91,12 +121,10 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
       <div className="flex gap-2">
         <Input
           id={inputId}
-          ref={inputRef}
           value={draft}
           disabled={disabled || value.length >= MAX_TAGS}
           onChange={(e) => {
             setDraft(e.currentTarget.value)
-            inputRef.current?.setCustomValidity("")
             setHint(null)
           }}
           onKeyDown={(e) => {
@@ -112,7 +140,8 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
           }}
           placeholder="Escribe y pulsa Enter"
           maxLength={200}
-          aria-describedby={`${inputId}-guia`}
+          aria-invalid={invalid || undefined}
+          aria-describedby={[describedBy, hint ? hintId : undefined].filter(Boolean).join(" ") || undefined}
         />
         <Button
           type="button"
@@ -141,14 +170,9 @@ export function TagsInput({ value, onChange, disabled = false, suggestions = [] 
           ))}
         </div>
       )}
-      {hint ? (
-        <FieldError>{hint}</FieldError>
-      ) : (
-        <p id={`${inputId}-guia`} className="text-xs text-muted-foreground">
-          Máx. {MAX_TAGS} etiquetas de hasta {MAX_TAG_LENGTH} caracteres. Espacios, guiones y
-          guiones bajos se unifican (“Tag 1”, “tag-1” y “tag_1” son la misma).
-        </p>
-      )}
-    </Field>
+      <p id={hintId} aria-live="polite" className="text-xs text-muted-foreground empty:hidden">
+        {hint}
+      </p>
+    </div>
   )
 }

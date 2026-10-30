@@ -10,17 +10,18 @@
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
 import { documentText, formatMoney, ticketFooterLines, ticketUntaxedNote } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, cn, Field, FieldLabel, Skeleton, Textarea } from "@odentia/ui"
-import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, Skeleton } from "@odentia/ui"
+import { FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, CreditCard, Printer } from "lucide-react"
-import { useId, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
+import { z } from "zod"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { apiFetchBytes } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useActiveBranch } from "../../lib/active-branch"
-import { financeErrorMessage } from "../../lib/finance"
+import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
   dayInTimezone,
@@ -38,6 +39,15 @@ import { ReturnDrawer } from "./return-drawer"
 
 /** Tarjeta (UN/CEFACT 4461): anular o devolver se hace también en su terminal. */
 const CARD_TYPE_CODE = "48"
+const MAX_VOID_REASON = 2000
+
+const voidSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe el motivo de la anulación.")
+    .max(MAX_VOID_REASON, `Escribe el motivo en ${MAX_VOID_REASON} caracteres como mucho.`),
+})
 
 export function ticketDisplayNumber(number: number): string {
   return String(number).padStart(6, "0")
@@ -159,12 +169,9 @@ export function TicketView({
   /** Recién cobrado: si el comprobante salió solo por correo o qué hacer (decisión 20 v2). */
   receipt?: CollectReceipt | null
 }): React.JSX.Element {
-  const uid = useId()
   const canWrite = usePermission("finance.write")
   const canAdmin = usePermission("finance.admin")
   const [voidOpen, setVoidOpen] = useState(false)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [printing, setPrinting] = useState(false)
   const [printError, setPrintError] = useState<string | null>(null)
   // Anulación hecha en esta pantalla: se guarda con el ticket al que pertenece.
@@ -259,22 +266,28 @@ export function TicketView({
     : null
 
   const voidMutation = useMutation({
-    mutationFn: () => voidTicketApi(ticket.patientId, ticket.id, reason.trim()),
-    onSuccess: (result) => {
+    mutationFn: (reason: string) => voidTicketApi(ticket.patientId, ticket.id, reason),
+    onSuccess: (result, reason) => {
       setVoidedHere({
         ticketId: ticket.id,
-        reason: reason.trim(),
+        reason,
         reopenedCents: result.data.reopenedCents ?? 0,
         returnedProducts: result.data.returnedProducts ?? [],
       })
       setVoidOpen(false)
-      setReason("")
-      setError(null)
       onChanged()
     },
-    // El servidor decide: tras un cierre responde que solo administración anula.
-    onError: (err) => setError(financeErrorMessage(err)),
   })
+  // El motivo va en su campo; lo que decide el servidor (anulado, con
+  // devoluciones, tras un cierre solo administración) se dice junto a los botones.
+  const voidForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: voidSchema },
+    onSubmit: async ({ value }) => {
+      await voidMutation.mutateAsync(value.reason.trim())
+    },
+  })
+  const voidSurface = useFormSurface(voidForm, { formMessage: financeFormMessage })
 
   const print = async () => {
     if (printing) return
@@ -552,8 +565,7 @@ export function TicketView({
                 variant="ghost"
                 className="min-h-10 text-destructive hover:text-destructive"
                 onClick={() => {
-                  setReason("")
-                  setError(null)
+                  voidForm.reset()
                   setVoidOpen(true)
                 }}
               >
@@ -565,6 +577,7 @@ export function TicketView({
       ) : null}
 
       <FormDrawer
+        {...voidSurface}
         dock={false}
         open={voidOpen}
         title="Anular ticket"
@@ -576,23 +589,10 @@ export function TicketView({
             </p>
           </div>
         }
-        error={error}
-        isSubmitting={voidMutation.isPending}
         submitLabel="Anular ticket"
         cancelLabel="No anular"
         onClose={() => {
-          if (!voidMutation.isPending) {
-            setVoidOpen(false)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Escribe el motivo de la anulación.")
-            return
-          }
-          voidMutation.mutate()
+          if (!voidSurface.isSubmitting) setVoidOpen(false)
         }}
       >
         <div className="flex flex-col gap-5">
@@ -669,16 +669,9 @@ export function TicketView({
           <p className="text-sm text-muted-foreground">
             Anular es para un error al cobrar. Si el paciente devuelve algo o pide su dinero, usa «Devolver».
           </p>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-motivo`}>Motivo</FieldLabel>
-            <Textarea
-              id={`${uid}-motivo`}
-              rows={3}
-              maxLength={2000}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
+          <voidForm.AppField name="reason">
+            {(field) => <field.TextareaField label="Motivo" rows={3} maxLength={MAX_VOID_REASON} />}
+          </voidForm.AppField>
           <p role="note" className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
             {closedAfter
               ? "La caja ya se cerró después de este cobro. Lo anulas como administración: ese cierre no cambia."

@@ -234,13 +234,15 @@ test("agente: Límites guarda cuántas horas espera antes de cerrar por silencio
   await expect(hours).toHaveValue("22")
   await expect(form).toContainText("Entre 6 y 23 horas. Antes de cerrar, Sofi se despide dentro del horario de recontacto.")
   const save = form.getByRole("button", { name: "Guardar" })
+  // Lo que no vale se dice en el campo al guardar, y el cajón sigue abierto.
   for (const wrong of ["5", "24"]) {
     await hours.fill(wrong)
-    await expect(save).toBeDisabled()
+    await save.click()
     await expect(form.getByText("Escribe un número de horas entre 6 y 23.")).toBeVisible()
+    await expect(hours).toHaveAttribute("aria-invalid", "true")
   }
   await hours.fill("12")
-  await expect(save).toBeEnabled()
+  await expect(form.getByText("Escribe un número de horas entre 6 y 23.")).toHaveCount(0)
   await info.attach("limites-cierre", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await save.click()
   await expect(form).toBeHidden()

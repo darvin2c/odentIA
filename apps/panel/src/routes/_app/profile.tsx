@@ -1,39 +1,33 @@
-import {
-  Badge,
-  Button,
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  Input,
-  Separator,
-  Skeleton,
-  toast,
-} from "@odentia/ui"
+import { Badge, Button, FieldGroup, Separator, Skeleton, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   common,
   ErrorState,
   FormDrawer,
-  fieldErrorMessages,
   ImageAdjust,
   type ImageAdjustValue,
   PageHeader,
   PageShell,
+  PASSWORD_MIN_LENGTH,
   PersonAvatar,
   renderAdjustedImage,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+  usePasswordRequirements,
 } from "@odentia/ui-patterns"
-import { useForm, useStore } from "@tanstack/react-form"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Monitor, Smartphone } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
-import { apiFetch } from "../../lib/api"
+import { ApiError, apiFetch } from "../../lib/api"
 import { API_URL, authClient } from "../../lib/auth-client"
+import { AUTH_NETWORK, authError, authErrorMessage, authFormMessage } from "../../lib/auth-error"
 import { tenantUrl } from "../../lib/host"
 import { panelWords } from "../../lib/brand"
- import { parseUserAgent, relativeTime } from "../../lib/user-agent"
+import { parseUserAgent, relativeTime } from "../../lib/user-agent"
 import { safeNext } from "../../lib/safe-next"
 import {
   TWO_FACTOR_EDITS,
@@ -63,15 +57,20 @@ export const Route = createFileRoute("/_app/profile")({
 
 const appRouteApi = getRouteApi("/_app")
 
+// `/update-user` no pone límites al nombre ni a los apellidos (packages/auth).
 const profileSchema = z.object({
   firstName: z.string().trim().min(1, "Ingresa tu nombre"),
   lastName: z.string().trim().min(1, "Ingresa tus apellidos"),
 })
 
+// Los mismos límites que Better Auth (8 a 128 caracteres).
 const passwordSchema = z
   .object({
     currentPassword: z.string().min(1, "Ingresa tu contraseña actual"),
-    newPassword: z.string().min(8, "Mínimo 8 caracteres"),
+    newPassword: z
+      .string()
+      .min(PASSWORD_MIN_LENGTH, `Mínimo ${PASSWORD_MIN_LENGTH} caracteres`)
+      .max(128, "Usa como mucho 128 caracteres."),
     confirmPassword: z.string().min(1, "Confirma tu nueva contraseña"),
   })
   .refine((value) => value.confirmPassword === value.newPassword, {
@@ -80,30 +79,33 @@ const passwordSchema = z
   })
 
 const emailSchema = z.object({
-  email: z.string().email("Correo inválido"),
+  email: z.string().trim().email("Correo inválido"),
+})
+
+/** Lo que no sea de un campo, dicho para una acción suelta: sin red, que no hubo conexión. */
+function actionErrorMessage(error: unknown): string {
+  return authFormMessage(error) ?? submitErrorMessage(error)
+}
+
+/** Sin imagen no hay foto que guardar: se dice junto a «Ajustar imagen». */
+const photoSchema = z.object({
+  file: z.custom<ImageAdjustValue | null>((value) => value !== null, "Elige una imagen y encuádrala."),
 })
 
 /**
  * La foto de Mi perfil con «Ajustar imagen» (tablero 6): se encuadra y se sube
  * ya recortada. «Cancelar» deja la anterior; guardar la pone en la cuenta y
- * desde ahí la ven la barra lateral de cada clínica y este perfil.
+ * desde ahí la ven la barra lateral de cada clínica y este perfil. El dato se
+ * llama `file`, como en el cuerpo de la subida: lo que rechace el servidor
+ * (formato, peso) se dice junto a la imagen.
  */
 function ProfilePhotoDrawer({ open, name, onClose }: { open: boolean; name: string; onClose: () => void }) {
-  const [value, setValue] = useState<ImageAdjustValue | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const close = () => {
-    if (saving) return
-    setValue(null)
-    setError(null)
-    onClose()
-  }
-  async function save() {
-    if (!value) return
-    setSaving(true)
-    setError(null)
-    try {
-      const { blob, ext } = await renderAdjustedImage(value)
+  const form = useAppForm({
+    defaultValues: { file: null as ImageAdjustValue | null },
+    validators: { onSubmit: photoSchema },
+    onSubmit: async ({ value }) => {
+      if (!value.file) return
+      const { blob, ext } = await renderAdjustedImage(value.file)
       const formData = new FormData()
       formData.append("file", blob, `avatar.${ext}`)
       const res = await fetch(`${API_URL}/api/uploads/avatar`, {
@@ -112,42 +114,53 @@ function ProfilePhotoDrawer({ open, name, onClose }: { open: boolean; name: stri
         body: formData,
       })
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
-        setError(body?.error?.message ?? common.errors.generic)
-        return
+        const body = (await res.json().catch(() => null)) as { error?: ApiError["shape"] } | null
+        throw new ApiError(res.status, body?.error ?? {})
       }
       const { data } = (await res.json()) as { data: { url: string } }
       const { error: updateError } = await authClient.updateUser({ image: data.url })
-      if (updateError) {
-        setError(common.errors.generic)
-        return
-      }
-      setValue(null)
+      if (updateError) throw authError(updateError)
+      form.reset()
       toast.success("Foto actualizada")
       onClose()
-    } catch {
-      setError(common.errors.generic)
-    } finally {
-      setSaving(false)
-    }
-  }
+    },
+  })
+  const surface = useFormSurface(form, { formMessage: authFormMessage })
+  const saving = useStore(form.store, (state) => state.isSubmitting)
   return (
     <FormDrawer
+      {...surface}
       open={open}
-      onClose={close}
+      onClose={() => {
+        form.reset()
+        onClose()
+      }}
       title="Tu foto"
       description="Elige un archivo, arrástralo o toma la foto, y encuádrala antes de guardar."
-      onSubmit={(event) => {
-        event.preventDefault()
-        void save()
-      }}
-      isDirty={value !== null}
-      isSubmitting={saving}
-      submitDisabled={!value}
       submitLabel="Guardar"
-      error={error}
     >
-      {open ? <ImageAdjust shape="person" name={name} disabled={saving} onChange={setValue} /> : null}
+      {open ? (
+        <form.AppField name="file">
+          {(field) => (
+            <field.Group legend={<span className="sr-only">Tu foto</span>}>
+              {(control) => (
+                <ImageAdjust
+                  shape="person"
+                  name={name}
+                  disabled={saving}
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onChange={(next) => {
+                    field.handleChange(next)
+                    if (next) field.handleBlur()
+                  }}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+      ) : null}
     </FormDrawer>
   )
 }
@@ -175,14 +188,7 @@ function ProfilePage() {
         avatarUrl: session.image,
       }
 
-  const [profileError, setProfileError] = useState<string | null>(null)
-  const [passwordError, setPasswordError] = useState<string | null>(null)
-  const [emailError, setEmailError] = useState<string | null>(null)
-
   function closeDrawer() {
-    setProfileError(null)
-    setPasswordError(null)
-    setEmailError(null)
     void navigate({ to: "/profile", search: {}, replace: true })
   }
 
@@ -191,13 +197,18 @@ function ProfilePage() {
 
   async function handleRemovePhoto() {
     setRemoving(true)
-    const { error: updateError } = await authClient.updateUser({ image: null })
-    setRemoving(false)
-    if (updateError) {
-      toast.error(common.errors.generic)
-      return
+    try {
+      const { error: updateError } = await authClient.updateUser({ image: null })
+      if (updateError) {
+        toast.error(authErrorMessage(updateError))
+        return
+      }
+      toast.success("Foto quitada")
+    } catch {
+      toast.error(AUTH_NETWORK)
+    } finally {
+      setRemoving(false)
     }
-    toast.success("Foto quitada")
   }
 
   const avatar = (
@@ -295,16 +306,9 @@ function ProfilePage() {
         open={edit === "profile"}
         initialFirstName={user.firstName}
         initialLastName={user.lastName}
-        error={profileError}
-        onError={setProfileError}
         onClose={closeDrawer}
       />
-      <ChangePasswordDrawer
-        open={edit === "password"}
-        error={passwordError}
-        onError={setPasswordError}
-        onClose={closeDrawer}
-      />
+      <ChangePasswordDrawer open={edit === "password"} onClose={closeDrawer} />
       <TwoFactorSetupDrawer
         open={edit === "two-factor"}
         email={user.email}
@@ -319,14 +323,7 @@ function ProfilePage() {
       <TwoFactorPhoneDrawer open={edit === "two-factor-phone"} status={twoFactor.data} onClose={closeDrawer} />
       <TwoFactorCodesDrawer open={edit === "two-factor-codes"} email={user.email} status={twoFactor.data} onClose={closeDrawer} />
       <TwoFactorOffDrawer open={edit === "two-factor-off"} status={twoFactor.data} onClose={closeDrawer} />
-      <ChangeEmailDrawer
-        key={user.email}
-        open={edit === "email"}
-        currentEmail={user.email}
-        error={emailError}
-        onError={setEmailError}
-        onClose={closeDrawer}
-      />
+      <ChangeEmailDrawer key={user.email} open={edit === "email"} currentEmail={user.email} onClose={closeDrawer} />
     </PageShell>
   )
 }
@@ -351,16 +348,19 @@ function SessionsCard() {
     if (!revokeTarget) return
     setRevokePending(true)
     try {
-      if (revokeTarget.kind === "one") {
-        await authClient.revokeSession({ token: revokeTarget.token })
-      } else {
-        await authClient.revokeOtherSessions()
+      const { error } =
+        revokeTarget.kind === "one"
+          ? await authClient.revokeSession({ token: revokeTarget.token })
+          : await authClient.revokeOtherSessions()
+      if (error) {
+        toast.error(authErrorMessage(error))
+        return
       }
       await queryClient.invalidateQueries({ queryKey: ["sessions"] })
       toast.success(revokeTarget.kind === "one" ? "Sesión cerrada" : "Otras sesiones cerradas")
       setRevokeTarget(null)
     } catch {
-      toast.error(common.errors.generic)
+      toast.error(AUTH_NETWORK)
     } finally {
       setRevokePending(false)
     }
@@ -462,180 +462,100 @@ function EditProfileDrawer({
   open,
   initialFirstName,
   initialLastName,
-  error,
-  onError,
   onClose,
 }: {
   open: boolean
   initialFirstName: string
   initialLastName: string
-  error: string | null
-  onError: (error: string | null) => void
   onClose: () => void
 }) {
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { firstName: initialFirstName, lastName: initialLastName },
     validators: { onSubmit: profileSchema },
     onSubmit: async ({ value }) => {
-      const { error: updateError } = await authClient.updateUser({
-        name: `${value.firstName} ${value.lastName}`.trim(),
-        firstName: value.firstName,
-        lastName: value.lastName,
-      })
-      if (updateError) {
-        onError(common.errors.generic)
-        return
-      }
+      const firstName = value.firstName.trim()
+      const lastName = value.lastName.trim()
+      const { error } = await authClient.updateUser({ name: `${firstName} ${lastName}`.trim(), firstName, lastName })
+      if (error) throw authError(error)
       toast.success("Perfil actualizado")
       onClose()
     },
   })
-  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
-  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const close = () => {
+    form.reset()
+    onClose()
+  }
 
   return (
     <FormDrawer
+      {...useFormSurface(form, { formMessage: authFormMessage })}
       open={open}
       title="Editar perfil"
-      onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        onError(null)
-        void form.handleSubmit()
-      }}
-      isDirty={isDirty}
-      isSubmitting={isSubmitting}
-      error={error}
+      onClose={close}
     >
       <FieldGroup>
-        <form.Field name="firstName">
-          {(field) => (
-            <Field>
-              <FieldLabel htmlFor="profile-first-name">Nombre</FieldLabel>
-              <Input
-                id="profile-first-name"
-                type="text"
-                autoComplete="given-name"
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-            </Field>
-          )}
-        </form.Field>
-        <form.Field name="lastName">
-          {(field) => (
-            <Field>
-              <FieldLabel htmlFor="profile-last-name">Apellidos</FieldLabel>
-              <Input
-                id="profile-last-name"
-                type="text"
-                autoComplete="family-name"
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-            </Field>
-          )}
-        </form.Field>
+        <form.AppField name="firstName">
+          {(field) => <field.TextField id="profile-first-name" label="Nombre" type="text" autoComplete="given-name" />}
+        </form.AppField>
+        <form.AppField name="lastName">
+          {(field) => <field.TextField id="profile-last-name" label="Apellidos" type="text" autoComplete="family-name" />}
+        </form.AppField>
       </FieldGroup>
     </FormDrawer>
   )
 }
 
-function ChangePasswordDrawer({
-  open,
-  error,
-  onError,
-  onClose,
-}: {
-  open: boolean
-  error: string | null
-  onError: (error: string | null) => void
-  onClose: () => void
-}) {
-  const form = useForm({
+function ChangePasswordDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const form = useAppForm({
     defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
     validators: { onSubmit: passwordSchema },
     onSubmit: async ({ value }) => {
-      const { error: changeError } = await authClient.changePassword({
+      const { error } = await authClient.changePassword({
         currentPassword: value.currentPassword,
         newPassword: value.newPassword,
         revokeOtherSessions: true,
       })
-      if (changeError) {
-        onError(
-          "No se pudo cambiar la contraseña. Verifica tu contraseña actual e inténtalo de nuevo.",
-        )
-        return
-      }
+      // Una cuenta que solo entra con Google (`CREDENTIAL_ACCOUNT_NOT_FOUND`) no tiene
+      // campo que corregir: se explica junto al botón.
+      if (error)
+        throw authError(error, {
+          fields: {
+            INVALID_PASSWORD: "currentPassword",
+            PASSWORD_TOO_SHORT: "newPassword",
+            PASSWORD_TOO_LONG: "newPassword",
+            PASSWORD_COMPROMISED: "newPassword",
+          },
+        })
       toast.success("Contraseña actualizada")
-      onClose()
+      close()
     },
   })
-  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
-  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const newPassword = useStore(form.store, (state) => state.values.newPassword)
+  const { requirements } = usePasswordRequirements(newPassword)
+  const close = () => {
+    form.reset()
+    onClose()
+  }
 
   return (
     <FormDrawer
+      {...useFormSurface(form, { formMessage: authFormMessage })}
       open={open}
       title="Cambiar contraseña"
-      onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        onError(null)
-        void form.handleSubmit()
-      }}
-      isDirty={isDirty}
-      isSubmitting={isSubmitting}
-      error={error}
+      onClose={close}
     >
       <FieldGroup>
-        <form.Field name="currentPassword">
+        <form.AppField name="currentPassword">
+          {(field) => <field.PasswordField id="password-current" label="Contraseña actual" autoComplete="current-password" />}
+        </form.AppField>
+        <form.AppField name="newPassword">
           {(field) => (
-            <Field>
-              <FieldLabel htmlFor="password-current">Contraseña actual</FieldLabel>
-              <Input
-                id="password-current"
-                type="password"
-                autoComplete="current-password"
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-            </Field>
+            <field.PasswordField id="password-new" label="Nueva contraseña" autoComplete="new-password" requirements={requirements} />
           )}
-        </form.Field>
-        <form.Field name="newPassword">
-          {(field) => (
-            <Field>
-              <FieldLabel htmlFor="password-new">Nueva contraseña</FieldLabel>
-              <Input
-                id="password-new"
-                type="password"
-                autoComplete="new-password"
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-            </Field>
-          )}
-        </form.Field>
-        <form.Field name="confirmPassword">
-          {(field) => (
-            <Field>
-              <FieldLabel htmlFor="password-confirm">Confirma la nueva contraseña</FieldLabel>
-              <Input
-                id="password-confirm"
-                type="password"
-                autoComplete="new-password"
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-              <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-            </Field>
-          )}
-        </form.Field>
+        </form.AppField>
+        <form.AppField name="confirmPassword">
+          {(field) => <field.PasswordField id="password-confirm" label="Confirma la nueva contraseña" autoComplete="new-password" />}
+        </form.AppField>
       </FieldGroup>
     </FormDrawer>
   )
@@ -644,17 +564,13 @@ function ChangePasswordDrawer({
 function ChangeEmailDrawer({
   open,
   currentEmail,
-  error,
-  onError,
   onClose,
 }: {
   open: boolean
   currentEmail: string
-  error: string | null
-  onError: (error: string | null) => void
   onClose: () => void
 }) {
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { email: "" },
     validators: {
       onSubmit: emailSchema.refine(
@@ -666,54 +582,32 @@ function ChangeEmailDrawer({
       ),
     },
     onSubmit: async ({ value }) => {
-      const { error: changeError } = await authClient.changeEmail({
-        newEmail: value.email,
+      // Un correo que ya tiene cuenta no da error (Better Auth no revela qué cuentas
+      // existen); lo único atribuible es el formato del correo.
+      const { error } = await authClient.changeEmail({
+        newEmail: value.email.trim(),
         callbackURL: `${window.location.origin}/profile`,
       })
-      if (changeError) {
-        onError(
-          changeError.message?.includes("exist")
-            ? "Ese correo ya está en uso."
-            : common.errors.generic,
-        )
-        return
-      }
+      if (error) throw authError(error, { fields: { INVALID_EMAIL: "email" } })
       toast.success("Te enviamos un correo de confirmación a tu dirección actual")
       onClose()
     },
   })
-  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
-  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const close = () => {
+    form.reset()
+    onClose()
+  }
 
   return (
     <FormDrawer
+      {...useFormSurface(form, { formMessage: authFormMessage })}
       open={open}
       title="Cambiar correo"
-      onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        onError(null)
-        void form.handleSubmit()
-      }}
-      isDirty={isDirty}
-      isSubmitting={isSubmitting}
-      error={error}
+      onClose={close}
     >
-      <form.Field name="email">
-        {(field) => (
-          <Field>
-            <FieldLabel htmlFor="profile-email">Nuevo correo</FieldLabel>
-            <Input
-              id="profile-email"
-              type="email"
-              autoComplete="email"
-              value={field.state.value}
-              onChange={(event) => field.handleChange(event.target.value)}
-            />
-            <FieldError>{fieldErrorMessages(field.state.meta.errors)[0] ?? null}</FieldError>
-          </Field>
-        )}
-      </form.Field>
+      <form.AppField name="email">
+        {(field) => <field.TextField id="profile-email" label="Nuevo correo" type="email" autoComplete="email" />}
+      </form.AppField>
     </FormDrawer>
   )
 }
@@ -750,6 +644,7 @@ function MyClinicsCard() {
   const navigate = useNavigate()
   const [leaveTarget, setLeaveTarget] = useState<{ id: string; name: string } | null>(null)
   const [leaving, setLeaving] = useState(false)
+  const [leaveError, setLeaveError] = useState<string | null>(null)
   const orgsQuery = useQuery({
     queryKey: ["account-organizations"],
     queryFn: async () => accountOrgsSchema.parse(await apiFetch<unknown>("/api/account/organizations")),
@@ -758,6 +653,7 @@ function MyClinicsCard() {
   async function handleLeave() {
     if (!leaveTarget) return
     setLeaving(true)
+    setLeaveError(null)
     try {
       await apiFetch("/api/account/organizations/" + encodeURIComponent(leaveTarget.id) + "/leave", {
         method: "POST",
@@ -765,8 +661,9 @@ function MyClinicsCard() {
       await queryClient.invalidateQueries({ queryKey: ["account-organizations"] })
       toast.success("Saliste de la clínica")
       setLeaveTarget(null)
-    } catch {
-      toast.error(common.errors.generic)
+    } catch (error) {
+      // Única propietaria (409), sin permiso (403)…: dentro del diálogo, no detrás.
+      setLeaveError(actionErrorMessage(error))
     } finally {
       setLeaving(false)
     }
@@ -862,8 +759,12 @@ function MyClinicsCard() {
         confirmLabel="Salir"
         variant="destructive"
         pending={leaving}
+        error={leaveError}
         onConfirm={() => void handleLeave()}
-        onClose={() => setLeaveTarget(null)}
+        onClose={() => {
+          setLeaveTarget(null)
+          setLeaveError(null)
+        }}
       />
     </div>
   )
@@ -917,21 +818,26 @@ function CloseAccountCard() {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function handleClose() {
     setPending(true)
+    setError(null)
     try {
       await apiFetch("/api/account/close", {
         method: "POST",
         body: JSON.stringify({ confirm: true }),
       })
-      await authClient.signOut()
-      await navigate({ to: "/login" })
-    } catch {
-      toast.error(common.errors.generic)
-    } finally {
+    } catch (failure) {
+      // Única propietaria de una clínica (409), cuenta bloqueada (403): dentro del diálogo.
+      setError(actionErrorMessage(failure))
       setPending(false)
+      return
     }
+    // La cuenta ya está cerrada: a la entrada aunque cerrar la sesión falle por la red.
+    await authClient.signOut().catch(() => undefined)
+    setPending(false)
+    await navigate({ to: "/login" })
   }
 
   return (
@@ -955,8 +861,12 @@ function CloseAccountCard() {
         confirmLabel="Cerrar cuenta"
         variant="destructive"
         pending={pending}
+        error={error}
         onConfirm={() => void handleClose()}
-        onClose={() => setOpen(false)}
+        onClose={() => {
+          setOpen(false)
+          setError(null)
+        }}
       />
     </div>
   )

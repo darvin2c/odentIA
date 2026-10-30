@@ -34,7 +34,7 @@ import {
   requireContact,
 } from "./contacts.js"
 import { type ContactScreenView, getContactScreenView } from "./contact-screen.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { productHooks } from "./products.js"
 import { personSearchCondition } from "./person-search.js"
@@ -956,8 +956,8 @@ export async function updatePersonIdentity(
     countryCode,
     stored,
   )
-  const first = Object.values(errors)[0]
-  if (first) throw validation(first)
+  const failed = fieldsError(errors)
+  if (failed) throw failed
   const set: Partial<typeof contact.$inferInsert> = { updatedAt: new Date() }
   for (const key of keys) {
     if (key === "phone") set.phone = (await cleanContactPhone(tx, orgId, merged.phone)) ?? null
@@ -1054,7 +1054,7 @@ export async function createPerson(
   const familyName = clean(input.familyName)
   const composed = [givenNames, familyName].filter(Boolean).join(" ")
   const displayName = composed || clean(input.displayName)
-  if (!displayName) throw validation("Indica el nombre de la persona")
+  if (!displayName) throw invalidField("givenNames", "Escribe los nombres")
   const countryCode = await findOrgCountry(tx, orgId)
   const errors = validateDemographics(
     {
@@ -1072,8 +1072,8 @@ export async function createPerson(
     await patientOrganizationToday(tx, orgId),
     countryCode,
   )
-  const first = Object.values(errors)[0]
-  if (first) throw validation(first)
+  const failed = fieldsError(errors)
+  if (failed) throw failed
   const docNumber = clean(input.docNumber)
   const doc = docNumber
     ? {
@@ -1102,8 +1102,10 @@ export async function createPerson(
       actor,
     )
   } catch (error) {
-    if (isUniqueViolation(error))
-      throw new ServiceError("DUPLICATE_DOCUMENT", 409, "Ese documento ya es de otra persona")
+    if (isUniqueViolation(error)) {
+      const message = "Ese documento ya es de otra persona"
+      throw new ServiceError("DUPLICATE_DOCUMENT", 409, message, { docNumber: message })
+    }
     throw error
   }
   return { id: created.id }

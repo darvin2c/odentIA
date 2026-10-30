@@ -18,7 +18,7 @@ async function openBooking(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Nueva cita" }).click()
   await expect(
     page
-      .getByRole("region", { name: /^Horas del/ })
+      .getByRole("group", { name: /^Horas del/ })
       .getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / }),
   ).toBeVisible()
 }
@@ -208,7 +208,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await openBooking(page)
   await page.getByLabel("Paciente", { exact: true }).fill("Mica")
   await page.getByRole("option", { name: /Micaela Ríos/ }).click()
-  const hours = page.getByRole("region", { name: /^Horas del/ })
+  const hours = page.getByRole("group", { name: /^Horas del/ })
   await expect(hours).toBeVisible()
   // Con el día casi acabado no cabe una cita entera: se pasa a la semana siguiente.
   if (lima(new Date().toISOString()).hour >= 18) {
@@ -263,7 +263,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   // está la cita y el bloque ya viene puesto en el hueco que le sigue.
   const booked = await appointmentOf()
   await page.getByRole("button", { name: "Reprogramar" }).click()
-  const moveHours = page.getByRole("region", { name: /^Horas del/ })
+  const moveHours = page.getByRole("group", { name: /^Horas del/ })
   await expect(moveHours.getByText(/^Ahora está aquí, \d\d:\d\d$/)).toBeVisible()
   await expect(moveHours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })).toBeVisible()
   // Ni duración ni lista de profesionales: eso ya estaba decidido.
@@ -660,7 +660,7 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await expect(promotions.getByRole("button", { name: "Sí, aceptó por teléfono" })).toHaveAttribute("aria-pressed", "false")
   // Una semana después el día entero está libre, sea la hora que sea hoy.
   await page.getByRole("button", { name: "Semana siguiente" }).click()
-  const hours = page.getByRole("region", { name: /^Horas del/ })
+  const hours = page.getByRole("group", { name: /^Horas del/ })
   const block = hours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })
   // El bloque toma la duración regular recién configurada.
   await expect(block).toHaveAccessibleName(/^De 09:00 a 09:30 con /)
@@ -704,7 +704,10 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   // Encima de su propia cita no deja reservar.
   await block.press("ArrowUp")
   await expect(page.getByText(/ya está ocupado/)).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ })).toBeDisabled()
+  // Reservar ahí no envía nada: lo dice junto a las horas y marca el bloque.
+  await page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
+  await expect(page.getByRole("alert").filter({ hasText: /ya está ocupado/ })).toBeVisible()
+  await expect(block).toHaveAttribute("aria-invalid", "true")
   // Antes de que abra, sí: como urgencia.
   for (let step = 0; step < 5; step++) await block.press("ArrowUp")
   await expect(block).toHaveAccessibleName(/^De 08:00 a 08:30 con /)

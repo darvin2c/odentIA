@@ -7,7 +7,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
   toast,
 } from "@odentia/ui"
 import {
@@ -26,7 +25,13 @@ import {
   PageShell,
   SearchInput,
   SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
@@ -70,6 +75,14 @@ const DOCUMENT_LABEL: Record<string, string> = {
   PASAPORTE: "Pasaporte",
 }
 const RESPONSE_LIMIT = 3000
+/** La respuesta, con los mismos límites que `consumerComplaintResponseSchema` del servidor. */
+const responseSchema = z.object({
+  response: z
+    .string()
+    .trim()
+    .min(10, "Escribe al menos 10 caracteres.")
+    .max(RESPONSE_LIMIT, `Usa como máximo ${RESPONSE_LIMIT} caracteres en la respuesta`),
+})
 
 const timeline = z.object({
   dueDate: z.string(),
@@ -361,7 +374,7 @@ function ComplaintsPage() {
         </>
       )}
 
-      {search.hoja ? <ComplaintDrawer id={search.hoja} onClose={() => open(undefined)} /> : null}
+      {search.hoja ? <ComplaintDrawer key={search.hoja} id={search.hoja} onClose={() => open(undefined)} /> : null}
     </PageShell>
   )
 }
@@ -408,9 +421,9 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     queryKey: ["admin", "complaint", id],
     queryFn: async () => detailPayload.parse(await api(`/api/admin/consumer-complaints/${id}`)),
   })
-  const [draft, setDraft] = React.useState(() => readDraft(id))
   const [confirming, setConfirming] = React.useState(false)
-  React.useEffect(() => setDraft(readDraft(id)), [id])
+  /** «Enviar respuesta…» valida y pide confirmar; solo la confirmación envía. */
+  const confirmed = React.useRef(false)
 
   const refresh = (sheet: Detail) => {
     queryClient.setQueryData(["admin", "complaint", id], sheet)
@@ -428,17 +441,42 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       ),
     onSuccess: (sheet) => {
       writeDraft(id, "")
-      setDraft("")
-      setConfirming(false)
       refresh(sheet)
       if (sheet.responseEmailSent) toast.success(`Respuesta enviada a ${sheet.email}`)
     },
     onError: (error) => {
-      setConfirming(false)
       // Otra persona respondió antes: se muestra su respuesta y el texto queda en el borrador.
       if (error instanceof ApiError && error.status === 409) void detail.refetch()
     },
   })
+  const form = useAppForm({
+    defaultValues: { response: readDraft(id) },
+    validators: { onSubmit: responseSchema },
+    onSubmit: async ({ value, formApi }) => {
+      if (!confirmed.current) {
+        setConfirming(true)
+        return
+      }
+      confirmed.current = false
+      try {
+        await respond.mutateAsync(value.response.trim())
+        formApi.reset({ response: "" })
+      } finally {
+        // Si falla, el diálogo se cierra para que el motivo se vea junto a la respuesta.
+        setConfirming(false)
+      }
+    },
+  })
+  const submitOptions = {
+    formMessage: (error: unknown) =>
+      error instanceof ApiError && error.status === 409
+        ? `${error.message}. Tu texto sigue aquí por si lo necesitas.`
+        : null,
+  }
+  const onSubmit = useFormSubmit(form, submitOptions)
+  const submitError = useFormSubmitError(form)
+  const draft = useStore(form.store, (state) => state.values.response)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const resend = useMutation({
     mutationFn: async () =>
       detailPayload.parse(
@@ -452,7 +490,6 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
 
   const sheet = detail.data
   const firstName = sheet?.consumerName.split(" ")[0] ?? ""
-  const tooShort = draft.trim().length < 10
 
   return (
     <DetailDrawer
@@ -460,7 +497,7 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
       size="lg"
       onClose={onClose}
       isDirty={sheet?.status === "recibido" && draft.trim().length > 0}
-      isSubmitting={respond.isPending}
+      isSubmitting={isSubmitting}
       title={sheet ? `Hoja N.º ${sheet.number}` : "Hoja de reclamación"}
       isLoading={detail.isPending}
       error={detail.isError ? "No pude abrir la hoja. Cierra y vuelve a intentarlo." : null}
@@ -559,52 +596,45 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 )}
                 {resend.isError ? (
                   <p role="alert" className="text-sm text-destructive">
-                    {resend.error instanceof Error ? resend.error.message : "No se pudo reenviar."}
+                    {submitErrorMessage(resend.error)}
                   </p>
                 ) : null}
               </div>
             </DetailSection>
           ) : (
             <DetailSection title="4 · Nuestra respuesta">
-              <div className="flex flex-col gap-2">
-                <FieldLabel htmlFor="libro-respuesta">Qué hicimos y qué le respondemos</FieldLabel>
-                <p className="text-sm text-muted-foreground" id="libro-respuesta-ayuda">
-                  Escríbele a {firstName} directamente. Le llega por correo junto con su hoja completa
-                  y queda en el libro.
-                </p>
-                <Textarea
-                  id="libro-respuesta"
-                  aria-describedby="libro-respuesta-ayuda"
-                  rows={8}
-                  maxLength={RESPONSE_LIMIT}
-                  value={draft}
-                  onChange={(event) => {
-                    setDraft(event.target.value)
-                    writeDraft(id, event.target.value)
-                  }}
-                />
+              <form noValidate onSubmit={onSubmit} className="flex flex-col gap-2">
+                <form.AppField name="response" listeners={{ onChange: ({ value }) => writeDraft(id, value) }}>
+                  {(field) => (
+                    <field.TextareaField
+                      id="libro-respuesta"
+                      label="Qué hicimos y qué le respondemos"
+                      description={`Escríbele a ${firstName} directamente. Le llega por correo junto con su hoja completa y queda en el libro.`}
+                      rows={8}
+                      maxLength={RESPONSE_LIMIT}
+                    />
+                  )}
+                </form.AppField>
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>{draft ? "Borrador guardado en este equipo" : ""}</span>
                   <span aria-live="polite">
                     {draft.length} / {RESPONSE_LIMIT}
                   </span>
                 </div>
-                {respond.isError ? (
+                {submitError ? (
                   <p role="alert" className="text-sm text-destructive">
-                    {respond.error instanceof ApiError && respond.error.status === 409
-                      ? `${respond.error.message}. Tu texto sigue aquí por si lo necesitas.`
-                      : "No se guardó la respuesta y no se envió nada. Tu texto sigue en el formulario."}
+                    {submitError}
                   </p>
                 ) : null}
                 <div className="mt-1 flex flex-wrap items-center gap-3">
-                  <Button type="button" disabled={tooShort} onClick={() => setConfirming(true)}>
+                  <Button type="submit" disabled={isSubmitting}>
                     Enviar respuesta…
                   </Button>
                   <span className="text-sm text-muted-foreground">
-                    {tooShort ? "Escribe al menos 10 caracteres." : "Te pedimos confirmar antes de enviar."}
+                    Al menos 10 caracteres. Te pedimos confirmar antes de enviar.
                   </span>
                 </div>
-              </div>
+              </form>
             </DetailSection>
           )}
 
@@ -615,9 +645,15 @@ function ComplaintDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             confirmLabel="Enviar respuesta"
             variant="default"
             cancelLabel="Seguir revisando"
-            pending={respond.isPending}
-            onConfirm={() => respond.mutate(draft.trim())}
-            onClose={() => setConfirming(false)}
+            pending={isSubmitting}
+            onConfirm={() => {
+              confirmed.current = true
+              void submitForm(form, submitOptions)
+            }}
+            onClose={() => {
+              confirmed.current = false
+              setConfirming(false)
+            }}
           >
             <p className="line-clamp-4 whitespace-pre-wrap rounded-lg bg-muted px-3 py-2.5 text-sm">
               {draft.trim()}

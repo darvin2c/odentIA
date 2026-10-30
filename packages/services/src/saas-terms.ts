@@ -5,7 +5,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { saasNegotiation, saasNotice, saasPlan, saasSeller, saasSubscription } from "@odentia/db/schema/saas-billing"
 import { and, desc, eq, sql } from "drizzle-orm"
 import type { AdminActor } from "./admin-core.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { formatMoney } from "@odentia/clinical"
 import { findOrgLocale, orgProduct } from "./locale.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
@@ -80,16 +80,14 @@ export async function setSaasDiscount(
   input: { discountBps: number; discountEndsAt?: Date | null; note?: string | null },
   now = new Date(),
 ): Promise<NegotiationOutcome> {
-  if (!Number.isInteger(input.discountBps) || input.discountBps < 0) throw validation("El descuento debe ser un porcentaje válido")
+  if (!Number.isInteger(input.discountBps) || input.discountBps < 0) throw invalidField("discountBps", "El descuento debe ser un porcentaje válido")
   const endsAt = input.discountBps > 0 ? (input.discountEndsAt ?? null) : null
-  if (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt.getTime() <= now.getTime())) throw validation("El vencimiento tiene que ser una fecha futura")
+  if (endsAt && (Number.isNaN(endsAt.getTime()) || endsAt.getTime() <= now.getTime()))
+    throw invalidField("discountEndsAt", "El vencimiento tiene que ser una fecha futura")
   const { plan } = await subscriptionAndPlan(tx, orgId)
   if (input.discountBps > plan.maxDiscountBps) {
-    throw new ServiceError(
-      "SAAS_PRICE_BELOW_FLOOR",
-      409,
-      `El descuento máximo es ${plan.maxDiscountBps / 100} %: con más, los precios quedarían bajo el precio mínimo`,
-    )
+    const message = `El descuento máximo es ${plan.maxDiscountBps / 100} %: con más, los precios quedarían bajo el precio mínimo`
+    throw new ServiceError("SAAS_PRICE_BELOW_FLOOR", 409, message, { discountBps: message })
   }
   if (actor.role !== "admin" && input.discountBps > plan.sellerDiscountBps) {
     return requestApproval(tx, orgId, actor, { kind: "descuento", discountBps: input.discountBps, discountEndsAt: endsAt, note: input.note ?? null })
@@ -114,11 +112,19 @@ export async function setSaasTrialTerms(
   orgId: string,
   input: { trialCreditCents: number; trialDays: number; note?: string | null },
 ): Promise<NegotiationOutcome> {
-  if (!Number.isSafeInteger(input.trialCreditCents) || input.trialCreditCents < 0) throw validation("El saldo de prueba debe ser un importe válido")
-  if (!Number.isInteger(input.trialDays) || input.trialDays < 1) throw validation("La prueba debe durar al menos un día")
+  if (!Number.isSafeInteger(input.trialCreditCents) || input.trialCreditCents < 0)
+    throw invalidField("trialCreditCents", "El saldo de prueba debe ser un importe válido")
+  if (!Number.isInteger(input.trialDays) || input.trialDays < 1) throw invalidField("trialDays", "La prueba debe durar al menos un día")
   const { sub, plan } = await subscriptionAndPlan(tx, orgId)
-  if (input.trialCreditCents > plan.trialMaxCreditCents || input.trialDays > plan.trialMaxDays) {
-    throw validation(`La prueba puede llegar como mucho a ${formatMoney(plan.trialMaxCreditCents, plan.currency, "es")} y ${plan.trialMaxDays} días`)
+  const creditAbove = input.trialCreditCents > plan.trialMaxCreditCents
+  const daysAbove = input.trialDays > plan.trialMaxDays
+  if (creditAbove || daysAbove) {
+    const message = `La prueba puede llegar como mucho a ${formatMoney(plan.trialMaxCreditCents, plan.currency, "es")} y ${plan.trialMaxDays} días`
+    // El tope se dice en el dato que lo pasa (o en los dos).
+    throw validation(message, {
+      ...(creditAbove ? { trialCreditCents: message } : {}),
+      ...(daysAbove ? { trialDays: message } : {}),
+    })
   }
   const aboveDefault = input.trialCreditCents > plan.trialCreditCents || input.trialDays > plan.trialDays
   if (aboveDefault && actor.role !== "admin") {
@@ -232,7 +238,8 @@ export async function saasSellerOf(tx: Db, orgId: string): Promise<{ id: string;
  * límite de los agentes (ADR 0085).
  */
 export async function setSaasSpendCap(tx: Db, orgId: string, actorUserId: string, capCents: number | null): Promise<void> {
-  if (capCents !== null && (!Number.isSafeInteger(capCents) || capCents < 0)) throw validation("El presupuesto debe ser un importe válido")
+  if (capCents !== null && (!Number.isSafeInteger(capCents) || capCents < 0))
+    throw invalidField("capCents", "El presupuesto debe ser un importe válido")
   const [row] = await tx
     .update(saasSubscription)
     .set({ spendCapCents: capCents, updatedAt: new Date() })

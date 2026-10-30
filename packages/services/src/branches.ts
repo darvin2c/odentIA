@@ -9,7 +9,7 @@ import {
 import type { Db } from "@odentia/db"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { fieldsError, invalidField, notFound, ServiceError } from "./errors.js"
 import { findOrgCountry } from "./locale.js"
 import { clinicOriginOf } from "./public-links.js"
 
@@ -107,6 +107,9 @@ export interface BranchInput {
 
 const ADDRESS_KEYS = ["addressLine1", "city", "district", "region", "postalCode", "country"] as const
 
+/** El campo de la dirección en el cuerpo de la sede (`BranchInput`). */
+const BRANCH_ADDRESS_FIELD: Record<string, string> = { line: "addressLine1" }
+
 function toPostal(value: Partial<BranchInput>): PostalAddress {
   return {
     line: value.addressLine1,
@@ -135,8 +138,8 @@ async function branchAddress(
     ...Object.fromEntries(Object.entries(toPostal(next)).filter(([, value]) => value !== undefined)),
   }
   const errors = postalAddressErrors(profile, merged, previous ? toPostal(previous) : undefined)
-  const first = Object.values(errors)[0]
-  if (first) throw validation(first)
+  const failed = fieldsError(errors, (key) => BRANCH_ADDRESS_FIELD[key] ?? key)
+  if (failed) throw failed
   const address = normalizePostalAddress(profile, merged)
   return {
     addressLine1: address.line,
@@ -150,7 +153,7 @@ async function branchAddress(
 
 function cleanName(name: string): string {
   const text = name.trim()
-  if (!text || text.length > 120) throw validation("Escribe el nombre de la sede (hasta 120 caracteres)")
+  if (!text || text.length > 120) throw invalidField("name", "Escribe el nombre de la sede (hasta 120 caracteres)")
   return text
 }
 

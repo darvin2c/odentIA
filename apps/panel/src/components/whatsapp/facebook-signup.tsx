@@ -3,14 +3,18 @@ import {
   AlertDescription,
   AlertTitle,
   Button,
-  cn,
+  Field,
+  FieldContent,
+  FieldDescription,
   FieldLabel,
+  FieldTitle,
   RadioGroup,
   RadioGroupItem,
 } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import { SubmitButton, useAppForm, useFormSubmit } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
-import { useCallback, useEffect, useId, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { fromFacebook, readSessionEvent, type SessionEvent } from "../../lib/whatsapp-signup-events"
 
@@ -144,6 +148,10 @@ const NUMBER_SOURCES: ReadonlyArray<{ value: NumberSource; label: string; hint: 
   },
 ]
 
+const sourceSchema = z.object({
+  source: z.enum(["business-app", "new"], { error: "Elige si el número ya tiene WhatsApp para abrir la ventana de Meta." }),
+})
+
 interface Problem {
   title: string
   text: string
@@ -191,8 +199,16 @@ export function FacebookSignup({
   const { appId, configId, graphVersion } = config
   const [phase, setPhase] = useState<Phase>("idle")
   const [problem, setProblem] = useState<Problem | null>(null)
-  const [source, setSource] = useState<NumberSource | null>(null)
-  const sourceLabelId = useId()
+  // La elección se valida al pulsar: sin ella, el grupo dice qué falta. Con ella, la
+  // ventana se abre dentro del mismo clic: el esquema es síncrono y solo encadena microtareas.
+  const form = useAppForm({
+    defaultValues: { source: "" as NumberSource | "" },
+    validators: { onSubmit: sourceSchema },
+    onSubmit: ({ value }) => {
+      if (value.source) start(value.source)
+    },
+  })
+  const onSubmit = useFormSubmit(form)
   /** Un intento a la vez: lo que llegue de una ventana anterior se ignora. */
   const attempt = useRef(0)
   const session = useRef<{
@@ -360,9 +376,7 @@ export function FacebookSignup({
     )
   }
 
-  function start() {
-    if (!source) return
-    const from = source
+  function start(from: NumberSource) {
     setProblem(null)
     const loaded = (window as FacebookWindow).FB
     // Ya cargado: la ventana se abre dentro del mismo clic, que es lo que el navegador permite sin reparos.
@@ -399,42 +413,48 @@ export function FacebookSignup({
             : ""
 
   return (
-    <div className="flex flex-col gap-3">
-      <p id={sourceLabelId} className="text-sm font-medium">
-        ¿El número de la clínica ya tiene WhatsApp?
-      </p>
-      <RadioGroup
-        aria-labelledby={sourceLabelId}
-        value={source}
-        onValueChange={(next) => {
-          setSource(next as NumberSource)
-          if (phase === "ready") setPhase("idle")
-        }}
-        disabled={busy}
-      >
-        {NUMBER_SOURCES.map((option) => (
-          <FieldLabel
-            key={option.value}
-            className={cn(
-              "flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm font-normal",
-              source === option.value && "border-primary bg-primary-soft",
+    <form noValidate onSubmit={onSubmit} className="flex flex-col gap-3">
+      <form.AppField name="source">
+        {(field) => (
+          <field.Group legend="¿El número de la clínica ya tiene WhatsApp?">
+            {(control) => (
+              <RadioGroup
+                name={control.name}
+                value={field.state.value}
+                aria-invalid={control.invalid || undefined}
+                aria-describedby={control.describedBy}
+                onValueChange={(next) => {
+                  field.handleChange(next as NumberSource)
+                  field.handleBlur()
+                  if (phase === "ready") setPhase("idle")
+                }}
+                disabled={busy}
+              >
+                {NUMBER_SOURCES.map((option) => {
+                  const optionId = `${control.id}-${option.value}`
+                  return (
+                    <FieldLabel
+                      key={option.value}
+                      htmlFor={optionId}
+                      className="rounded-xl text-sm font-normal has-data-checked:border-primary has-data-checked:bg-primary-soft"
+                    >
+                      <Field orientation="horizontal">
+                        <RadioGroupItem id={optionId} value={option.value} aria-invalid={control.invalid || undefined} />
+                        <FieldContent>
+                          <FieldTitle>{option.label}</FieldTitle>
+                          <FieldDescription>{option.hint}</FieldDescription>
+                        </FieldContent>
+                      </Field>
+                    </FieldLabel>
+                  )
+                })}
+              </RadioGroup>
             )}
-          >
-            <RadioGroupItem value={option.value} className="mt-0.5" />
-            <span className="flex flex-col gap-1">
-              <span className="font-medium">{option.label}</span>
-              <span className="text-muted-foreground">{option.hint}</span>
-            </span>
-          </FieldLabel>
-        ))}
-      </RadioGroup>
+          </field.Group>
+        )}
+      </form.AppField>
       <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton
-          pending={busy}
-          disabled={!source}
-          onClick={start}
-          className="min-h-11 sm:min-h-9"
-        >
+        <SubmitButton type="submit" pending={busy} className="min-h-11 sm:min-h-9">
           {problem ? "Volver a intentar" : "Abrir la ventana de Meta"}
         </SubmitButton>
         {phase === "window" ? (
@@ -462,6 +482,6 @@ export function FacebookSignup({
           <AlertDescription>{problem.text}</AlertDescription>
         </Alert>
       ) : null}
-    </div>
+    </form>
   )
 }

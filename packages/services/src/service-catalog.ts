@@ -16,7 +16,7 @@ import {
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, eq, getTableColumns, inArray, isNotNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { librarySpecialtyIds, requireOrgSpecialtyId } from "./specialties.js"
 import { isCatalogKind } from "./product-catalog.js"
 import {
@@ -32,8 +32,23 @@ import {
 import { orgClinicalProfile, orgProduct, orgProfileRequired } from "./locale.js"
 import { currentCatalogRelease, currentProcedureCode, serviceCoding, templateCodingIn, usedByProduct } from "./procedure-codings.js"
 
-function conflict(code: string, message: string): ServiceError {
-  return new ServiceError(code, 409, message)
+function conflict(code: string, message: string, fields?: Record<string, string>): ServiceError {
+  return new ServiceError(code, 409, message, fields)
+}
+
+/**
+ * Un rechazo de otro módulo sobre un dato del cuerpo (la especialidad, por
+ * ejemplo) que no dice su campo: se dice junto a `field`.
+ */
+async function onField<T>(field: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === "VALIDATION" && !error.fields) {
+      throw invalidField(field, error.message)
+    }
+    throw error
+  }
 }
 
 /** El servicio con lo que deja en la pieza, que vive en lo dental (ADR 0079). */
@@ -86,15 +101,17 @@ function normalizeCode(code: string | null | undefined): string | null {
   if (code === null || code === undefined) return null
   const value = code.trim().toUpperCase()
   if (!value) return null
-  if (value.length > 40 || /[\u0000-\u001f\u007f]/.test(value)) {
-    throw validation("code debe tener 1–40 caracteres sin controles")
+  if (value.length > 40) throw invalidField("code", "Escribe como mucho 40 caracteres.")
+  if (/[\u0000-\u001f\u007f]/.test(value)) {
+    throw invalidField("code", "El código interno no admite saltos de línea ni tabulaciones.")
   }
   return value
 }
 
 function assertName(name: string | null | undefined): string {
   const value = name?.trim() ?? ""
-  if (!value || value.length > 200) throw validation("name debe tener 1–200 caracteres")
+  if (!value) throw invalidField("name", "Escribe el nombre del servicio.")
+  if (value.length > 200) throw invalidField("name", "Escribe como mucho 200 caracteres.")
   return value
 }
 
@@ -107,8 +124,8 @@ async function assertKind(tx: Db, orgId: string, kind: string | null | undefined
 
 /** La especialidad de la clínica para un servicio propio: obligatoria. */
 async function assertServiceSpecialty(tx: Db, orgId: string, specialtyId: string | null | undefined): Promise<string> {
-  if (!specialtyId) throw validation("Elige la especialidad del servicio")
-  return requireOrgSpecialtyId(tx, orgId, specialtyId)
+  if (!specialtyId) throw invalidField("specialtyId", "Elige la especialidad del servicio")
+  return onField("specialtyId", () => requireOrgSpecialtyId(tx, orgId, specialtyId))
 }
 
 export const BILLING_MODES = ["treatment", "session"] as const
@@ -122,7 +139,7 @@ export type BillingMode = (typeof BILLING_MODES)[number]
 export function assertBillingMode(mode: string | null | undefined): BillingMode {
   const value = (mode ?? "treatment").trim().toLowerCase()
   if (value !== "treatment" && value !== "session") {
-    throw validation("billingMode inválido: treatment|session")
+    throw invalidField("billingMode", "Elige cómo se cobra: por tratamiento o por sesión")
   }
   return value
 }
@@ -131,7 +148,7 @@ export function assertBillingMode(mode: string | null | undefined): BillingMode 
 export function assertPriceDisclosure(value: string | null | undefined): PriceDisclosure {
   const v = (value ?? "evaluacion").trim()
   if (!(PRICE_DISCLOSURES as readonly string[]).includes(v)) {
-    throw validation("Cómo dice el precio: exacto, desde o evaluacion")
+    throw invalidField("priceDisclosure", "Elige cómo dice el precio: exacto, desde o solo con evaluación")
   }
   return v as PriceDisclosure
 }
@@ -147,10 +164,16 @@ async function assertEvaluationService(
   selfId: string | null,
 ): Promise<string | null> {
   if (!evaluationServiceId) return null
-  if (evaluationServiceId === selfId) throw validation("Un servicio no puede ser su propia evaluación")
-  const evaluation = await requireService(tx, orgId, evaluationServiceId)
+  const field = "evaluationServiceId"
+  if (evaluationServiceId === selfId) throw invalidField(field, "Un servicio no puede ser su propia evaluación")
+  const evaluation = await requireService(tx, orgId, evaluationServiceId).catch((error: unknown) => {
+    if (error instanceof ServiceError && error.code === "NOT_FOUND") {
+      throw invalidField(field, "Esa evaluación ya no está en el tarifario: elige otra")
+    }
+    throw error
+  })
   if (!evaluation.isActive) {
-    throw validation("La evaluación debe ser un servicio activo")
+    throw invalidField(field, "La evaluación debe ser un servicio activo")
   }
   return evaluation.id
 }
@@ -159,7 +182,7 @@ async function assertEvaluationService(
 async function assertScope(tx: Db, orgId: string, scope: string | null | undefined): Promise<string> {
   const value = (scope ?? "").trim().toLowerCase()
   const { scopes } = (await productHooks(tx, orgId)).site
-  if (!scopes.includes(value)) throw validation(`scope inválido: ${scopes.join("|")}`)
+  if (!scopes.includes(value)) throw invalidField("scope", "Elige dónde se hace el servicio")
   return value
 }
 
@@ -168,24 +191,24 @@ async function assertScope(tx: Db, orgId: string, scope: string | null | undefin
  */
 function assertPrice(priceCents: number | null | undefined): number {
   if (priceCents === null || priceCents === undefined) {
-    throw validation("priceCents es obligatorio (0 si no tiene costo)")
+    throw invalidField("priceCents", "Indica el precio (usa 0 si va incluido sin costo)")
   }
   if (!Number.isInteger(priceCents) || priceCents < 0 || priceCents > 2147483647) {
-    throw validation("priceCents debe ser un entero >= 0")
+    throw invalidField("priceCents", "El precio no es un importe válido: va de 0 en adelante y sin pasar del tope")
   }
   return priceCents
 }
 
 function assertCurrency(currency: string): string {
   if (!/^[A-Z]{3}$/.test(currency))
-    throw validation("currency debe ser ISO-4217 de 3 letras mayúsculas")
+    throw invalidField("currency", "La moneda va con su código de 3 letras (PEN, USD…)")
   return currency
 }
 
 function assertDuration(durationMin: number | null | undefined): number | null {
   if (durationMin === null || durationMin === undefined) return null
   if (!Number.isInteger(durationMin) || durationMin <= 0 || durationMin > 1440) {
-    throw validation("durationMin debe ser un entero entre 1 y 1440")
+    throw invalidField("durationMin", "Duración: minutos enteros entre 1 y 1440")
   }
   return durationMin
 }
@@ -246,16 +269,16 @@ async function assertOwnCode(
   const value = code?.trim().toUpperCase() || null
   if (code === undefined && !options.creating) return undefined
   if (!list) {
-    if (value) throw validation("En tu país los servicios no llevan código oficial")
+    if (value) throw invalidField("officialCode", "En tu país los servicios no llevan código oficial")
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
   if (!value) {
-    if (list.required) throw validation(`Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
+    if (list.required) throw invalidField("officialCode", `Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
     return { procedureSystem: null, procedureCode: null, procedureVersion: null }
   }
   // Solo los códigos que usa el producto de la clínica: la lista está completa (ADR 0079).
   const coding = await currentProcedureCode(tx, list.system, value, await orgProduct(tx, orgId))
-  if (!coding) throw validation(`«${value}» no es un ${list.codeName} vigente`)
+  if (!coding) throw invalidField("officialCode", `«${value}» no es un ${list.codeName} vigente`)
   return { procedureSystem: coding.system, procedureCode: coding.code, procedureVersion: coding.version }
 }
 
@@ -693,13 +716,13 @@ export async function createService(
   if (input.templateId) {
     const tpl = await requireTemplate(tx, orgId, input.templateId)
     await assertTemplateUsable(tx, list, tpl)
-    if (input.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
+    if (input.officialCode) throw invalidField("officialCode", "Un servicio de la biblioteca toma el código de su tratamiento")
     const name = input.name?.trim() ? assertName(input.name) : tpl.name
     const specialtyId = input.specialtyId
-      ? await requireOrgSpecialtyId(tx, orgId, input.specialtyId)
+      ? await onField("specialtyId", () => requireOrgSpecialtyId(tx, orgId, input.specialtyId as string))
       : ((await librarySpecialtyIds(tx, orgId, [tpl.kind])).get(tpl.kind) ?? null)
     if (input.scope !== undefined && input.scope !== null && input.scope !== tpl.scope) {
-      throw validation("scope debe coincidir con la plantilla (derivado, no editable)")
+      throw invalidField("scope", "Dónde se hace viene de la biblioteca: no se cambia")
     }
     values = {
       organizationId: orgId,
@@ -720,7 +743,7 @@ export async function createService(
     leaves =
       input.leavesFinding === undefined
         ? libraryServiceFinding(tpl)
-        : await checkServiceFinding(tx, orgId, input.leavesFinding, tpl.scope)
+        : await checkServiceFinding(tx, orgId, input.leavesFinding, tpl.scope, "leavesFinding")
   } else {
     const scope = await assertScope(tx, orgId, input.scope)
     values = {
@@ -740,7 +763,7 @@ export async function createService(
       ...(await assertOwnCode(tx, orgId, list, input.officialCode, { creating: true })),
       isActive: input.isActive ?? true,
     }
-    leaves = await checkServiceFinding(tx, orgId, input.leavesFinding, scope)
+    leaves = await checkServiceFinding(tx, orgId, input.leavesFinding, scope, "leavesFinding")
   }
   let row: ServiceRow
   try {
@@ -749,7 +772,8 @@ export async function createService(
     row = { ...created, leavesFinding: leaves }
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
-    throw conflict("DUPLICATE_CODE", "Ya existe una prestación con ese código interno")
+    const message = "Ya existe una prestación con ese código interno"
+    throw conflict("DUPLICATE_CODE", message, { code: message })
   }
   await saveServiceFinding(tx, row, leaves)
   await audit(tx, orgId, actorUserId, "catalog.service_created", row.id, {
@@ -807,9 +831,10 @@ export async function updateService(
           : current.specialtyId
       const scope = patch.scope !== undefined ? await assertScope(tx, orgId, patch.scope) : current.scope
       if (!specialtyId || !scope) {
-        throw validation(
-          "Para independizar la oferta envía su definición completa (nombre, especialidad y ámbito)",
-        )
+        throw validation("Para independizar la oferta envía su definición completa (nombre, especialidad y ámbito)", {
+          ...(specialtyId ? {} : { specialtyId: "Elige la especialidad del servicio" }),
+          ...(scope ? {} : { scope: "Elige dónde se hace el servicio" }),
+        })
       }
       set.templateId = null
       set.source = "custom"
@@ -835,7 +860,7 @@ export async function updateService(
     } else {
       const tpl = await requireTemplate(tx, orgId, patch.templateId)
       await assertTemplateUsable(tx, list, tpl)
-      if (patch.officialCode) throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
+      if (patch.officialCode) throw invalidField("officialCode", "Un servicio de la biblioteca toma el código de su tratamiento")
       // Vincular la biblioteca trae lo que su tratamiento deja en la pieza y su código.
       if (patch.leavesFinding === undefined) {
         leaves = libraryServiceFinding(tpl)
@@ -845,7 +870,7 @@ export async function updateService(
       set.procedureCode = null
       set.procedureVersion = null
       if (patch.scope !== undefined && patch.scope !== tpl.scope) {
-        throw validation("scope debe coincidir con la plantilla (derivado, no editable)")
+        throw invalidField("scope", "Dónde se hace viene de la biblioteca: no se cambia")
       }
       set.templateId = tpl.id
       set.source = "template"
@@ -860,7 +885,7 @@ export async function updateService(
     }
   } else if (current.source === "template") {
     if (patch.scope !== undefined) {
-      throw validation("scope se deriva de la plantilla; para independizar envía templateId:null")
+      throw invalidField("scope", "Dónde se hace viene de la biblioteca: no se cambia")
     }
   }
   if (patch.templateId === undefined && patch.specialtyId !== undefined) {
@@ -881,7 +906,7 @@ export async function updateService(
   }
   if (patch.officialCode !== undefined && patch.templateId === undefined) {
     if ((set.source ?? current.source) === "template") {
-      throw validation("Un servicio de la biblioteca toma el código de su tratamiento")
+      throw invalidField("officialCode", "Un servicio de la biblioteca toma el código de su tratamiento")
     }
     Object.assign(set, await assertOwnCode(tx, orgId, list, patch.officialCode, { creating: false }))
     fields.push("officialCode")
@@ -920,22 +945,23 @@ export async function updateService(
       orgId,
       patch.leavesFinding,
       (set.scope ?? current.scope) as string | null,
+      "leavesFinding",
     )
     fields.push("leavesFinding")
   } else if (set.scope !== undefined && leaves === undefined && current.leavesFinding) {
-    // Cambiar dónde se hace no deja un dibujo que ya no encaja.
-    await checkServiceFinding(tx, orgId, current.leavesFinding, set.scope)
+    // Cambiar dónde se hace no deja un dibujo que ya no encaja: lo que se cambió es el ámbito.
+    await onField("scope", () => checkServiceFinding(tx, orgId, current.leavesFinding, set.scope))
   }
 
   const resolvedScope = (set.scope ?? current.scope) as string | null
-  if (!resolvedScope) throw validation("Elige dónde se hace el servicio")
+  if (!resolvedScope) throw invalidField("scope", "Elige dónde se hace el servicio")
   if (fields.length === 0) throw validation("Sin cambios: patch vacío")
   // Donde la lista es obligatoria, un servicio propio no se guarda sin su código
   // (ADR 0069), tampoco si se edita otra cosa: p. ej. uno que dejó de ser «Heredada».
   const finalTemplateId = set.templateId !== undefined ? set.templateId : current.templateId
   const finalCode = set.procedureCode !== undefined ? set.procedureCode : current.procedureCode
   if (list?.required && !finalTemplateId && !finalCode) {
-    throw validation(`Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
+    throw invalidField("officialCode", `Elige el ${list.codeName} del servicio: en tu país es obligatorio`)
   }
 
   let updated: ServiceRow | undefined
@@ -948,7 +974,8 @@ export async function updateService(
     updated = row && { ...row, leavesFinding: leaves !== undefined ? leaves : current.leavesFinding }
   } catch (e) {
     if (!isUniqueViolation(e)) throw e
-    throw conflict("DUPLICATE_CODE", "Ya existe una prestación con ese código interno")
+    const message = "Ya existe una prestación con ese código interno"
+    throw conflict("DUPLICATE_CODE", message, { code: message })
   }
   if (!updated) throw notFound("Servicio del catálogo")
   if (leaves !== undefined) await saveServiceFinding(tx, updated, leaves)
@@ -972,40 +999,85 @@ export interface FromTemplateItem {
 }
 
 /**
+ * Lo que falla en una fila del lote se dice en esa fila: los datos que señala
+ * el error pasan a nombrarse dentro de ella (`priceCents` →
+ * `items[2].priceCents`) y, si no señala ninguno, se dice en `field` de la
+ * fila (el tratamiento elegido, por ejemplo).
+ */
+async function atItem<T>(path: string, run: () => T | Promise<T>, field?: string): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    if (!(error instanceof ServiceError)) throw error
+    const own = Object.entries(error.fields ?? {})
+    const fields =
+      own.length > 0
+        ? Object.fromEntries(own.map(([key, text]) => [`${path}.${key}`, text]))
+        : field
+          ? { [`${path}.${field}`]: error.message }
+          : undefined
+    throw new ServiceError(error.code, error.status, error.message, fields)
+  }
+}
+
+/**
  * Carga rápida del tarifario en una pantalla: se eligen prestaciones de la
  * biblioteca con su nombre, su precio y cómo se cobran, y quedan activas en el
  * mismo acto. Sin alta diferida: no se crean ofertas inactivas con tarifa 0.
  * El nombre es el comercial de la clínica; el código oficial no se altera.
  * Serializa en la fila de organización para evitar duplicados concurrentes.
+ * Cada rechazo de una fila lleva su dato con el nombre que tiene en el cuerpo
+ * (`itemPath`, por defecto `items[i]`).
  */
 export async function fromTemplates(
   tx: Db,
   orgId: string,
   actorUserId: string,
   items: FromTemplateItem[],
-  options: { priceDisclosure?: string | null } = {},
+  options: { priceDisclosure?: string | null; itemPath?: (index: number) => string } = {},
 ): Promise<FromTemplatesResult> {
   const priceDisclosure = assertPriceDisclosure(options.priceDisclosure)
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
-    throw validation("items debe tener entre 1 y 100 prestaciones con su precio")
+    throw validation("Elige entre 1 y 100 tratamientos de la biblioteca, cada uno con su precio")
   }
+  const itemPath = options.itemPath ?? ((index: number) => `items[${index}]`)
   const ids = items.map((item) => item.templateId)
-  if (new Set(ids).size !== ids.length) {
-    throw validation("templateId no debe repetirse")
+  const repeated = ids.findIndex((id, index) => ids.indexOf(id) !== index)
+  if (repeated >= 0) {
+    const message = "Este tratamiento ya está en la lista: va una sola vez"
+    throw validation(message, { [`${itemPath(repeated)}.templateId`]: message })
   }
   await tx.execute(sql`select "id" from "organization" where "id" = ${orgId} for update`)
   const templates = await tx
     .select(templateRowColumns())
     .from(treatmentTemplate)
     .where(and(inArray(treatmentTemplate.id, ids), await ofOrgProduct(tx, orgId)))
-  if (templates.length !== ids.length) throw notFound("Prestación de la biblioteca")
-  const list = await orgServiceList(tx, orgId)
-  for (const tpl of templates) {
-    if (!tpl.isActive)
-      throw conflict("TEMPLATE_INACTIVE", "La prestación de la biblioteca ya no está vigente")
-    await assertTemplateUsable(tx, list, tpl)
-  }
   const byId = new Map(templates.map((tpl) => [tpl.id, tpl]))
+  const missing = ids.flatMap((id, index) => (byId.has(id) ? [] : [index]))
+  if (missing.length > 0) {
+    const message = "Este tratamiento ya no está en la biblioteca"
+    throw new ServiceError(
+      "NOT_FOUND",
+      404,
+      "Prestación de la biblioteca no encontrada",
+      Object.fromEntries(missing.map((index) => [`${itemPath(index)}.templateId`, message])),
+    )
+  }
+  const list = await orgServiceList(tx, orgId)
+  const inactive = ids.flatMap((id, index) => (byId.get(id)?.isActive ? [] : [index]))
+  if (inactive.length > 0) {
+    const message = "La prestación de la biblioteca ya no está vigente"
+    throw new ServiceError(
+      "TEMPLATE_INACTIVE",
+      409,
+      message,
+      Object.fromEntries(inactive.map((index) => [`${itemPath(index)}.templateId`, message])),
+    )
+  }
+  for (const [index, id] of ids.entries()) {
+    const tpl = byId.get(id)
+    if (tpl) await atItem(itemPath(index), () => assertTemplateUsable(tx, list, tpl), "templateId")
+  }
   const owned = await tx
     .select(serviceRowColumns())
     .from(serviceCatalog)
@@ -1026,10 +1098,16 @@ export async function fromTemplates(
     templates.map((tpl) => tpl.kind),
   )
   const created: ServiceRow[] = []
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     if (ownedIds.has(item.templateId)) continue
     const tpl = byId.get(item.templateId)
     if (!tpl) throw notFound("Prestación de la biblioteca")
+    const checked = await atItem(itemPath(index), () => ({
+      name: item.name?.trim() ? assertName(item.name) : tpl.name,
+      priceCents: assertPrice(item.priceCents),
+      durationMin: assertDuration(item.durationMin),
+      billingMode: assertBillingMode(item.billingMode),
+    }))
     const [row] = await tx
       .insert(serviceCatalog)
       .values({
@@ -1037,13 +1115,13 @@ export async function fromTemplates(
         templateId: tpl.id,
         source: "template",
         code: null,
-        name: item.name?.trim() ? assertName(item.name) : tpl.name,
+        name: checked.name,
         specialtyId: specialtyOf.get(tpl.kind) ?? null,
         scope: tpl.scope,
-        priceCents: assertPrice(item.priceCents),
+        priceCents: checked.priceCents,
         currency,
-        durationMin: assertDuration(item.durationMin),
-        billingMode: assertBillingMode(item.billingMode),
+        durationMin: checked.durationMin,
+        billingMode: checked.billingMode,
         priceDisclosure,
         isActive: true,
       })
@@ -1105,32 +1183,43 @@ export async function quickAddServices(
   options: { priceDisclosure?: string | null } = {},
 ): Promise<FromTemplatesResult> {
   if (!Array.isArray(items) || items.length < 1 || items.length > 100) {
-    throw validation("items debe tener entre 1 y 100 servicios con su precio")
+    throw validation("Elige entre 1 y 100 servicios, cada uno con su precio")
   }
+  // Es de todo el lote (`priceDisclosure`), no de una fila: se revisa antes.
+  assertPriceDisclosure(options.priceDisclosure)
+  // Cada rechazo se dice en su fila, con el índice que tiene en el cuerpo.
   const fromLibrary: FromTemplateItem[] = []
-  const custom: CustomServiceItem[] = []
-  for (const item of items) {
-    if (item.kind === "template") fromLibrary.push(item)
-    else custom.push(item)
+  const libraryIndex: number[] = []
+  const custom: Array<{ index: number; item: CustomServiceItem }> = []
+  for (const [index, item] of items.entries()) {
+    if (item.kind === "template") {
+      fromLibrary.push(item)
+      libraryIndex.push(index)
+    } else custom.push({ index, item })
   }
   const result: FromTemplatesResult =
     fromLibrary.length > 0
-      ? await fromTemplates(tx, orgId, actorUserId, fromLibrary, options)
+      ? await fromTemplates(tx, orgId, actorUserId, fromLibrary, {
+          priceDisclosure: options.priceDisclosure,
+          itemPath: (index) => `items[${libraryIndex[index]}]`,
+        })
       : { created: [], existing: [] }
-  for (const item of custom) {
+  for (const { index, item } of custom) {
     result.created.push(
-      await createService(tx, orgId, actorUserId, {
-        name: item.name,
-        specialtyId: item.specialtyId,
-        scope: item.scope,
-        priceCents: item.priceCents,
-        billingMode: item.billingMode,
-        durationMin: item.durationMin,
-        priceDisclosure: options.priceDisclosure,
-        leavesFinding: item.leavesFinding ?? null,
-        officialCode: item.officialCode ?? null,
-        isActive: true,
-      }),
+      await atItem(`items[${index}]`, () =>
+        createService(tx, orgId, actorUserId, {
+          name: item.name,
+          specialtyId: item.specialtyId,
+          scope: item.scope,
+          priceCents: item.priceCents,
+          billingMode: item.billingMode,
+          durationMin: item.durationMin,
+          priceDisclosure: options.priceDisclosure,
+          leavesFinding: item.leavesFinding ?? null,
+          officialCode: item.officialCode ?? null,
+          isActive: true,
+        }),
+      ),
     )
   }
   return result

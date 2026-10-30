@@ -66,23 +66,14 @@ export function PlaceSelect({
 /**
  * Los lugares de algo (un documento, una imagen, un campo de formulario), si el
  * producto registra dónde (odentIA: las piezas). Si no, no hay nada que elegir.
+ * No pinta etiqueta: la pantalla lo nombra con `site.placesLabel`.
  */
-export function PlacesField({
-  optional,
-  label,
-  ...props
-}: Omit<PlacesPickerProps, "label"> & { label?: string; optional?: boolean }) {
+export function PlacesField(props: PlacesPickerProps) {
   const site = productUi().site
-  if (!site) return null
-  return (
-    <site.PlacesPicker
-      {...props}
-      label={label ?? `${site.placesLabel}${optional ? " (opcional)" : ""}`}
-    />
-  )
+  return site ? <site.PlacesPicker {...props} /> : null
 }
 
-/** Un lugar con sus partes (el diagnóstico, el procedimiento), si el producto registra dónde. */
+/** Un lugar con sus partes (el diagnóstico, el procedimiento), si el producto registra dónde. Sin etiqueta propia. */
 export function SiteField(props: SitePickerProps) {
   const site = productUi().site
   return site ? <site.SitePicker {...props} /> : null

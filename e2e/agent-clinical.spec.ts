@@ -128,7 +128,17 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // «Finalizar y firmar» queda fijo al pie de la atención (fase 3, paso 2B), fuera del bloque de cierre.
   const signButton = page.getByRole("button", { name: "Finalizar y firmar", exact: true })
   await expect(closing).toContainText("Diagnóstico: hay uno sugerido, sin confirmar")
-  await expect(signButton).toBeDisabled()
+  // Lo que falta no apaga «Finalizar y firmar» (ADR 0113, como en patients.spec): sin abrir el cierre,
+  // lleva a lo primero que falta (la evolución, sugerida pero sin confirmar) y lo marca en su campo.
+  await expect(page.getByText("Faltan 2 para cerrar: diagnóstico y evolución")).toBeVisible()
+  await expect(signButton).toBeEnabled()
+  await signButton.click()
+  const missingPanel = page.getByRole("complementary", { name: "Panel lateral" }).getByRole("region", { name: "Evolución, pronóstico e indicaciones" })
+  await expect(missingPanel.getByLabel("Evolución", { exact: true })).toHaveAttribute("aria-invalid", "true")
+  await expect(missingPanel.getByText("Escribe la evolución: es obligatoria para cerrar")).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Finalizar y firmar" })).toHaveCount(0)
+  await missingPanel.getByRole("button", { name: "Cerrar" }).click()
+  await expect(missingPanel).toHaveCount(0)
   // Nada entra a la historia hasta que lo confirmes.
   const detail = () => call<{ encounter: { reason: string | null; evolution: string | null; status: string }; diagnoses: Array<{ diagnosisCode: string; toothNumber: number | null }> }>(page, "GET", `${apiPath}/encounters/${encounter.id}`, org.slug)
   expect((await detail()).diagnoses).toEqual([])

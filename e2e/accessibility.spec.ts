@@ -263,8 +263,11 @@ for (const viewport of [
       const dialog = page.getByRole(surfaceRole, { name: "Nuevo contacto", exact: true })
       await expect(dialog).toBeVisible()
       await audit(page, info, "nuevo-contacto")
-      // Sin nombre no se crea: el botón espera a que esté.
-      await expect(dialog.getByRole("button", { name: "Crear y abrir su página", exact: true })).toBeDisabled()
+      // Sin nombre no se crea: al pulsar, cada campo dice qué falta y el foco va al primero.
+      await dialog.getByRole("button", { name: "Crear y abrir su página", exact: true }).click()
+      await expect(dialog.getByLabel("Nombres", { exact: true })).toBeFocused()
+      await expect(dialog.getByLabel("Nombres", { exact: true })).toHaveAttribute("aria-invalid", "true")
+      await expect(dialog.getByText("Escribe los apellidos", { exact: true })).toBeVisible()
       await dialog.getByLabel("Apellidos", { exact: true }).fill("Accesible")
       await dialog.getByLabel("Nombres", { exact: true }).fill("Paciente")
       await audit(page, info, "nuevo-contacto-lleno")

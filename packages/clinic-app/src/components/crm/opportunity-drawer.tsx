@@ -10,18 +10,17 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-  Field,
-  FieldDescription,
-  FieldLabel,
   Input,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { type FieldControl, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
+import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronDown, X } from "lucide-react"
-import { useEffect, useId, useMemo, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { budgetStatusLabel } from "../../lib/budgets"
 import { channelLabel } from "../../lib/channels"
 import { type ContactFull, type OpportunityDetail, type Pipeline, useOrgMembers, usePermission } from "../../lib/crm"
@@ -50,9 +49,84 @@ interface BudgetOption {
 /** Recepción: la oportunidad sin responsable es suya hasta que alguien la toma. */
 const RECEPTION = ""
 
-function mutationMessage(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return err.shape.message ?? err.message ?? fallback
-  return err instanceof Error ? err.message : fallback
+type ServicePick = { id: string; name: string; priceCents: number; currency: string }
+
+interface OpportunityValues {
+  person: PickedPerson | null
+  patientId: string
+  title: string
+  service: ServicePick | null
+  amount: string
+  interest: string
+  assignee: string
+  budgetId: string
+  pipelineId: string
+}
+
+const EMPTY_VALUES: OpportunityValues = {
+  person: null,
+  patientId: "",
+  title: "",
+  service: null,
+  amount: "",
+  interest: "",
+  assignee: RECEPTION,
+  budgetId: "",
+  pipelineId: "",
+}
+
+/** Lo que la validación necesita de la pantalla: si la persona se elige aquí y con qué moneda se anota el valor. */
+interface OpportunityRules {
+  needsPerson: boolean
+  currency: string
+  locale: string
+}
+
+/** Los datos dentro de «Más datos»: con un error ahí, el desplegable se abre. */
+const MORE_FIELDS = ["amount", "interest", "assignee", "budgetId"] as const
+
+/** El nombre del dato en el cuerpo de la petición → su campo en pantalla. */
+const SERVER_FIELDS: Record<string, string> = {
+  contactId: "person",
+  serviceId: "service",
+  amountCents: "amount",
+  interestText: "interest",
+  assignedUserId: "assignee",
+}
+
+function opportunitySchema(rules: () => OpportunityRules) {
+  return z
+    .object({
+      person: z.custom<PickedPerson | null>(),
+      patientId: z.string(),
+      title: z
+        .string()
+        .trim()
+        .min(1, "Escribe qué le interesa: el tratamiento, el precio o la evaluación.")
+        .max(200, "Escribe como mucho 200 caracteres."),
+      service: z.custom<ServicePick | null>(),
+      amount: z.string(),
+      interest: z.string().max(500, "Escribe como mucho 500 caracteres."),
+      assignee: z.string(),
+      budgetId: z.string(),
+      pipelineId: z.string(),
+    })
+    .superRefine((value, ctx) => {
+      const { needsPerson, currency, locale } = rules()
+      if (needsPerson && !value.person) {
+        ctx.addIssue({ code: "custom", path: ["person"], message: "Elige a la persona interesada." })
+      }
+      if (value.service || !value.amount.trim()) return
+      if (!currency) {
+        ctx.addIssue({ code: "custom", path: ["amount"], message: "Configura la moneda de la clínica para anotar un valor." })
+        return
+      }
+      try {
+        parseMoney(value.amount.trim(), currency, locale)
+      } catch (error) {
+        ctx.addIssue({ code: "custom", path: ["amount"], message: error instanceof Error ? error.message : "Importe inválido" })
+      }
+    })
 }
 
 function amountInputText(amountCents: number, currency: string, locale: string): string {
@@ -72,7 +146,6 @@ function amountInputText(amountCents: number, currency: string, locale: string):
  * reabrirla se hace desde la oportunidad, con la única forma de cerrar.
  */
 export function OpportunityDrawer({ open, contactId, conversationId, opportunityId, onClose, onSaved }: OpportunityDrawerProps) {
-  const ids = useId()
   const queryClient = useQueryClient()
   const members = useOrgMembers()
   const canWrite = usePermission("crm.write")
@@ -93,51 +166,96 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
     enabled: open && !isEdit,
   })
   const pipelines = pipelinesQuery.data?.data ?? []
-
-  const [person, setPerson] = useState<PickedPerson | null>(null)
-  const [patientId, setPatientId] = useState("")
-  const [title, setTitle] = useState("")
-  const [titleTouched, setTitleTouched] = useState(false)
-  const [service, setService] = useState<{ id: string; name: string; priceCents: number; currency: string } | null>(null)
-  const [amount, setAmount] = useState("")
-  const [interest, setInterest] = useState("")
-  const [assignee, setAssignee] = useState(RECEPTION)
-  const [budgetId, setBudgetId] = useState("")
-  const [pipelineId, setPipelineId] = useState("")
-  const [formError, setFormError] = useState<string | null>(null)
   const draftReady = !isEdit || (!!detail && !profile.isPending)
+
+  function invalidate() {
+    for (const key of ["opportunities", "opportunity", "pipeline-cards", "pipeline-list", "opportunity-summary", "contact-opportunities", "contact", "crm-context", "tasks"]) {
+      void queryClient.invalidateQueries({ queryKey: [key] })
+    }
+  }
+
+  const save = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      isEdit
+        ? apiFetch<{ data: OpportunityDetail }>(`/api/opportunities/${opportunityId as string}`, {
+            method: "PATCH",
+            body: JSON.stringify(body),
+          })
+        : apiFetch<{ data: OpportunityDetail }>("/api/opportunities", { method: "POST", body: JSON.stringify(body) }),
+  })
+
+  // La validación lee la pantalla del momento (persona fija o no, moneda de la clínica).
+  const rules = useRef<OpportunityRules>({ needsPerson: false, currency: "", locale: "" })
+  rules.current = { needsPerson: !contactId && !isEdit, currency: orgCurrency, locale: moneyLocale }
+  const schema = useMemo(() => opportunitySchema(() => rules.current), [])
+
+  const form = useAppForm({
+    defaultValues: EMPTY_VALUES,
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const amountCents =
+        !value.service && value.amount.trim() ? parseMoney(value.amount.trim(), orgCurrency, moneyLocale) : null
+      const body: Record<string, unknown> = {
+        title: value.title.trim(),
+        serviceId: value.service?.id ?? null,
+        interestText: value.interest.trim() || null,
+        assignedUserId: value.assignee || null,
+        patientId: value.patientId || null,
+        ...(value.service ? {} : { amountCents }),
+      }
+      const result = await save.mutateAsync(
+        isEdit
+          ? { ...body, budgetId: value.budgetId || null }
+          : {
+              ...body,
+              contactId: contactId ?? value.person?.id,
+              conversationId: conversationId ?? null,
+              ...(value.pipelineId ? { pipelineId: value.pipelineId } : {}),
+            },
+      )
+      invalidate()
+      onSaved?.(result.data)
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS })
+
+  // «Más datos»: cerrado al crear; un error ahí (del cliente o del servidor) lo abre para que se vea.
+  const [moreOpen, setMoreOpen] = useState(isEdit)
+  const moreInvalid = useStore(form.store, (state) =>
+    MORE_FIELDS.some((name) => (state.fieldMeta[name]?.errors.length ?? 0) > 0),
+  )
+  useEffect(() => {
+    if (moreInvalid) setMoreOpen(true)
+  }, [moreInvalid])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir o al llegar el detalle; después el borrador es de quien escribe
   useEffect(() => {
     if (!open || !draftReady) return
     if (detail) {
-      setPerson({ id: detail.contactId, name: detail.contactName, phone: detail.contactPhone })
-      setPatientId(detail.patientId ?? "")
-      setTitle(detail.title)
-      setService(
-        detail.serviceId && detail.serviceName
-          ? { id: detail.serviceId, name: detail.serviceName, priceCents: detail.amountCents ?? 0, currency: detail.currency }
-          : null,
-      )
-      setAmount(!detail.serviceId && detail.amountCents !== null ? amountInputText(detail.amountCents, detail.currency, moneyLocale) : "")
-      setInterest(detail.interestText ?? "")
-      setAssignee(detail.assignedUserId ?? RECEPTION)
-      setBudgetId(detail.budgetId ?? "")
+      form.reset({
+        person: { id: detail.contactId, name: detail.contactName, phone: detail.contactPhone },
+        patientId: detail.patientId ?? "",
+        title: detail.title,
+        service:
+          detail.serviceId && detail.serviceName
+            ? { id: detail.serviceId, name: detail.serviceName, priceCents: detail.amountCents ?? 0, currency: detail.currency }
+            : null,
+        amount: !detail.serviceId && detail.amountCents !== null ? amountInputText(detail.amountCents, detail.currency, moneyLocale) : "",
+        interest: detail.interestText ?? "",
+        assignee: detail.assignedUserId ?? RECEPTION,
+        budgetId: detail.budgetId ?? "",
+        pipelineId: "",
+      })
     } else if (!isEdit) {
-      setPerson(null)
-      setPatientId("")
-      setTitle("")
-      setService(null)
-      setAmount("")
-      setInterest("")
-      setAssignee(RECEPTION)
-      setBudgetId("")
-      setPipelineId("")
+      form.reset(EMPTY_VALUES)
     }
-    setTitleTouched(false)
-    setFormError(null)
-    save.reset()
+    setMoreOpen(isEdit)
   }, [open, opportunityId, detail?.id, draftReady])
+
+  const person = useStore(form.store, (state) => state.values.person)
+  const patientId = useStore(form.store, (state) => state.values.patientId)
+  const service = useStore(form.store, (state) => state.values.service)
 
   // Con el contacto fijo (Bandeja, ficha) la persona viene dada.
   const fixedContactQuery = useQuery({
@@ -162,53 +280,6 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
     retry: false,
   })
 
-  function invalidate() {
-    for (const key of ["opportunities", "opportunity", "pipeline-cards", "pipeline-list", "opportunity-summary", "contact-opportunities", "contact", "crm-context", "tasks"]) {
-      void queryClient.invalidateQueries({ queryKey: [key] })
-    }
-  }
-
-  const save = useMutation({
-    mutationFn: () => {
-      if (!effectiveContactId) throw new Error("Elige a la persona interesada.")
-      if (!title.trim()) throw new Error("Escribe qué le interesa: el tratamiento, el precio o la evaluación.")
-      let amountCents: number | null = null
-      if (!service && amount.trim()) {
-        if (!orgCurrency) throw new Error("Configura la moneda de la clínica para anotar un valor.")
-        amountCents = parseMoney(amount.trim(), orgCurrency, moneyLocale)
-      }
-      const body: Record<string, unknown> = {
-        title: title.trim(),
-        serviceId: service?.id ?? null,
-        interestText: interest.trim() || null,
-        assignedUserId: assignee || null,
-        patientId: patientId || null,
-        ...(service ? {} : { amountCents }),
-      }
-      if (isEdit) {
-        return apiFetch<{ data: OpportunityDetail }>(`/api/opportunities/${opportunityId as string}`, {
-          method: "PATCH",
-          body: JSON.stringify({ ...body, budgetId: budgetId || null }),
-        })
-      }
-      return apiFetch<{ data: OpportunityDetail }>("/api/opportunities", {
-        method: "POST",
-        body: JSON.stringify({
-          ...body,
-          contactId: effectiveContactId,
-          conversationId: conversationId ?? null,
-          ...(pipelineId ? { pipelineId } : {}),
-        }),
-      })
-    },
-    onSuccess: (result) => {
-      invalidate()
-      onSaved?.(result.data)
-      onClose()
-    },
-    onError: (err) => setFormError(mutationMessage(err, "No se pudo guardar la oportunidad.")),
-  })
-
   const isClosed = detail !== null && detail.status !== "open"
   const readOnly = !canWrite || isClosed
   const originId = conversationId ?? detail?.conversationId ?? null
@@ -218,9 +289,10 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        if (!save.isPending) onClose()
+        if (!surface.isSubmitting) onClose()
       }}
       title={isEdit ? "Editar oportunidad" : "Nueva oportunidad"}
       description={
@@ -232,15 +304,9 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
               ? undefined
               : "Un interés concreto de la persona. Nace en «Interesado» y avanza sola cuando agenda o recibe un presupuesto."
       }
-      onSubmit={(event) => {
-        event.preventDefault()
-        setFormError(null)
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
       isLoading={isEdit && !draftReady && !detailQuery.isError}
-      isDirty={!isEdit ? title.trim() !== "" || person !== null : false}
-      error={formError ?? (detailQuery.isError ? "No se pudo cargar la oportunidad." : null)}
+      isDirty={!isEdit && surface.isDirty}
+      error={surface.error ?? (detailQuery.isError ? "No se pudo cargar la oportunidad." : null)}
       submitLabel={isEdit ? "Guardar" : "Crear"}
       cancelLabel="Cancelar"
       hideSubmit={readOnly}
@@ -252,64 +318,84 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
             <span className="font-medium">{fixedName ?? person?.name ?? "—"}</span>
           </p>
         ) : (
-          <PersonPicker
-            label="Persona interesada"
-            value={person}
-            onChange={(next) => {
-              setPerson(next)
-              setPatientId("")
-              setBudgetId("")
-            }}
-          />
+          <form.AppField name="person">
+            {(field) => (
+              <field.Control label="Persona interesada">
+                {(control) => (
+                  <PersonPicker
+                    id={control.id}
+                    label="Persona interesada"
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      form.setFieldValue("patientId", "")
+                      form.setFieldValue("budgetId", "")
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         )}
 
         {effectiveContactId && linkedPatients.length > 0 ? (
-          <Field>
-            <FieldLabel htmlFor={`${ids}-paciente`}>Para quién es</FieldLabel>
-            <ChoiceSelect
-              id={`${ids}-paciente`}
-              value={patientId}
-              disabled={readOnly}
-              onChange={(event) => {
-                setPatientId(event.target.value)
-                setBudgetId("")
-              }}
-            >
-              <option value="">Sin paciente todavía</option>
-              {linkedPatients.map((linked) => (
-                <option key={linked.id} value={linked.id}>
-                  {linked.displayName}
-                  {linked.isActive ? "" : " · archivado"}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
+          <form.AppField name="patientId">
+            {(field) => (
+              <field.Control label="Para quién es">
+                {(control) => (
+                  <ChoiceSelect
+                    {...control.props}
+                    value={field.state.value}
+                    disabled={readOnly}
+                    onChange={(event) => {
+                      field.handleChange(event.target.value)
+                      form.setFieldValue("budgetId", "")
+                    }}
+                  >
+                    <option value="">Sin paciente todavía</option>
+                    {linkedPatients.map((linked) => (
+                      <option key={linked.id} value={linked.id}>
+                        {linked.displayName}
+                        {linked.isActive ? "" : " · archivado"}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : null}
 
-        <Field>
-          <FieldLabel htmlFor={`${ids}-titulo`}>Qué le interesa</FieldLabel>
-          <Input
-            id={`${ids}-titulo`}
-            value={title}
-            maxLength={200}
-            required
-            disabled={readOnly}
-            placeholder={appWords().examples.treatment}
-            onChange={(event) => {
-              setTitle(event.target.value)
-              setTitleTouched(true)
-            }}
-          />
-        </Field>
+        <form.AppField name="title">
+          {(field) => (
+            <field.TextField label="Qué le interesa" maxLength={200} disabled={readOnly} placeholder={appWords().examples.treatment} />
+          )}
+        </form.AppField>
 
-        <ServiceSearch
-          value={service}
-          disabled={readOnly}
-          onChange={(next) => {
-            setService(next)
-            if (next && (!titleTouched || !title.trim())) setTitle(next.name)
-          }}
-        />
+        <form.AppField name="service">
+          {(field) => (
+            <field.Control
+              label={field.state.value ? "Servicio" : "Servicio (opcional)"}
+              description={field.state.value ? undefined : "Con servicio, el valor sale de su precio."}
+            >
+              {(control) => (
+                <ServiceSearch
+                  control={control}
+                  value={field.state.value}
+                  disabled={readOnly}
+                  onChange={(next) => {
+                    field.handleChange(next)
+                    const title = form.getFieldValue("title")
+                    if (next && (!form.getFieldMeta("title")?.isDirty || !title.trim())) form.setFieldValue("title", next.name)
+                  }}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
         {service ? (
           <p className="text-sm text-muted-foreground">
             Valor: <span className="font-medium text-foreground">{servicePrice ?? "…"}</span> · de la lista de precios
@@ -317,20 +403,25 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
         ) : null}
 
         {!isEdit && pipelines.length > 1 ? (
-          <Field>
-            <FieldLabel htmlFor={`${ids}-embudo`}>Embudo</FieldLabel>
-            <ChoiceSelect id={`${ids}-embudo`} value={pipelineId} onChange={(event) => setPipelineId(event.target.value)}>
-              <option value="">El principal</option>
-              {pipelines.map((pipe) => (
-                <option key={pipe.id} value={pipe.id}>
-                  {pipe.name}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
+          <form.AppField name="pipelineId">
+            {(field) => (
+              <field.Control label="Embudo">
+                {(control) => (
+                  <ChoiceSelect {...control.props} value={field.state.value} onChange={(event) => field.handleChange(event.target.value)}>
+                    <option value="">El principal</option>
+                    {pipelines.map((pipe) => (
+                      <option key={pipe.id} value={pipe.id}>
+                        {pipe.name}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : null}
 
-        <Collapsible className="flex flex-col gap-3" defaultOpen={isEdit}>
+        <Collapsible className="flex flex-col gap-3" open={moreOpen} onOpenChange={setMoreOpen}>
           <CollapsibleTrigger
             render={
               <Button type="button" variant="link" className="group h-auto min-h-11 self-start p-0 sm:min-h-8">
@@ -339,70 +430,94 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
               </Button>
             }
           />
-          <CollapsibleContent className="flex flex-col gap-4">
+          {/* Montado aunque esté cerrado: lo que el servidor diga de estos datos cae en su campo. */}
+          <CollapsibleContent keepMounted className="flex flex-col gap-4">
             {!service ? (
-              <Field>
-                <FieldLabel htmlFor={`${ids}-valor`}>Valor estimado{orgCurrency ? ` (${orgCurrency})` : ""}</FieldLabel>
-                <Input
-                  id={`${ids}-valor`}
-                  value={amount}
-                  inputMode="decimal"
-                  disabled={readOnly}
-                  placeholder={orgCurrency ? amountInputText(0, orgCurrency, moneyLocale) : undefined}
-                  onChange={(event) => setAmount(event.target.value)}
-                />
-                <FieldDescription>Con un servicio de la lista de precios, el valor es su precio.</FieldDescription>
-              </Field>
-            ) : null}
-            <Field>
-              <FieldLabel htmlFor={`${ids}-interes`}>Lo que pidió, en sus palabras</FieldLabel>
-              <Input
-                id={`${ids}-interes`}
-                value={interest}
-                maxLength={500}
-                disabled={readOnly}
-                placeholder="Preguntó cuánto cuesta y si hay cuotas"
-                onChange={(event) => setInterest(event.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${ids}-responsable`}>Quién la lleva</FieldLabel>
-              <ChoiceSelect id={`${ids}-responsable`} value={assignee} disabled={readOnly} onChange={(event) => setAssignee(event.target.value)}>
-                <option value={RECEPTION}>Recepción (nadie la tomó)</option>
-                {members.map((item) => (
-                  <option key={item.userId} value={item.userId}>
-                    {item.user.name}
-                  </option>
-                ))}
-              </ChoiceSelect>
-            </Field>
-            {isEdit && patientId ? (
-              <Field>
-                <FieldLabel htmlFor={`${ids}-presupuesto`}>Presupuesto</FieldLabel>
-                {budgetQuery.isError ? (
-                  <p role="alert" className="text-sm text-destructive">
-                    No se pudieron cargar sus presupuestos.{" "}
-                    <Button type="button" variant="link" size="sm" onClick={() => void budgetQuery.refetch()}>
-                      Reintentar
-                    </Button>
-                  </p>
-                ) : (
-                  <ChoiceSelect
-                    id={`${ids}-presupuesto`}
-                    value={budgetId}
-                    disabled={readOnly || budgetQuery.isPending}
-                    onChange={(event) => setBudgetId(event.target.value)}
+              <form.AppField name="amount">
+                {(field) => (
+                  <field.Control
+                    label={`Valor estimado${orgCurrency ? ` (${orgCurrency})` : ""}`}
+                    description="Con un servicio de la lista de precios, el valor es su precio."
                   >
-                    <option value="">Sin presupuesto</option>
-                    {(budgetQuery.data?.data ?? []).map((budget) => (
-                      <option key={budget.id} value={budget.id}>
-                        {budget.title} · {budgetStatusLabel(budget.status)}
-                      </option>
-                    ))}
-                  </ChoiceSelect>
+                    {(control) => (
+                      <Input
+                        {...control.props}
+                        value={field.state.value}
+                        inputMode="decimal"
+                        disabled={readOnly}
+                        placeholder={orgCurrency ? amountInputText(0, orgCurrency, moneyLocale) : undefined}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                    )}
+                  </field.Control>
                 )}
-                <FieldDescription>Al presentar un presupuesto se une solo a la oportunidad del mismo tratamiento.</FieldDescription>
-              </Field>
+              </form.AppField>
+            ) : null}
+            <form.AppField name="interest">
+              {(field) => (
+                <field.TextField
+                  label="Lo que pidió, en sus palabras"
+                  maxLength={500}
+                  disabled={readOnly}
+                  placeholder="Preguntó cuánto cuesta y si hay cuotas"
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="assignee">
+              {(field) => (
+                <field.Control label="Quién la lleva">
+                  {(control) => (
+                    <ChoiceSelect
+                      {...control.props}
+                      value={field.state.value}
+                      disabled={readOnly}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    >
+                      <option value={RECEPTION}>Recepción (nadie la tomó)</option>
+                      {members.map((item) => (
+                        <option key={item.userId} value={item.userId}>
+                          {item.user.name}
+                        </option>
+                      ))}
+                    </ChoiceSelect>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
+            {isEdit && patientId ? (
+              <form.AppField name="budgetId">
+                {(field) => (
+                  <field.Control
+                    label="Presupuesto"
+                    description="Al presentar un presupuesto se une solo a la oportunidad del mismo tratamiento."
+                  >
+                    {(control) =>
+                      budgetQuery.isError ? (
+                        <p role="alert" className="text-sm text-destructive">
+                          No se pudieron cargar sus presupuestos.{" "}
+                          <Button type="button" variant="link" size="sm" onClick={() => void budgetQuery.refetch()}>
+                            Reintentar
+                          </Button>
+                        </p>
+                      ) : (
+                        <ChoiceSelect
+                          {...control.props}
+                          value={field.state.value}
+                          disabled={readOnly || budgetQuery.isPending}
+                          onChange={(event) => field.handleChange(event.target.value)}
+                        >
+                          <option value="">Sin presupuesto</option>
+                          {(budgetQuery.data?.data ?? []).map((budget) => (
+                            <option key={budget.id} value={budget.id}>
+                              {budget.title} · {budgetStatusLabel(budget.status)}
+                            </option>
+                          ))}
+                        </ChoiceSelect>
+                      )
+                    }
+                  </field.Control>
+                )}
+              </form.AppField>
             ) : null}
           </CollapsibleContent>
         </Collapsible>
@@ -420,19 +535,21 @@ export function OpportunityDrawer({ open, contactId, conversationId, opportunity
   )
 }
 
-type ServicePick = { id: string; name: string; priceCents: number; currency: string }
-
-/** El servicio de la lista de precios, buscado en el servidor por su nombre. */
+/**
+ * El servicio de la lista de precios, buscado en el servidor por su nombre. La
+ * etiqueta, la ayuda y el error los pone el campo (`control`).
+ */
 function ServiceSearch({
+  control,
   value,
   onChange,
   disabled,
 }: {
+  control: FieldControl
   value: ServicePick | null
   onChange: (service: ServicePick | null) => void
   disabled: boolean
 }) {
-  const id = useId()
   const [query, setQuery] = useState("")
   const [debounced, setDebounced] = useState("")
   const [open, setOpen] = useState(false)
@@ -460,66 +577,79 @@ function ServiceSearch({
   )
   if (value) {
     return (
-      <Field>
-        <FieldLabel>Servicio</FieldLabel>
-        <div className="flex min-h-11 items-center justify-between gap-2 rounded-md border px-3 py-1.5">
-          <span className="truncate font-medium">{value.name}</span>
-          {!disabled ? (
-            <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)} aria-label={`Quitar el servicio ${value.name}`}>
-              <X aria-hidden />
-              Quitar
-            </Button>
-          ) : null}
-        </div>
-      </Field>
+      <div
+        id={control.id}
+        aria-invalid={control.invalid || undefined}
+        aria-describedby={control.describedBy}
+        className="flex min-h-11 items-center justify-between gap-2 rounded-md border px-3 py-1.5 aria-invalid:border-destructive"
+      >
+        <span className="truncate font-medium">{value.name}</span>
+        {!disabled ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange(null)}
+            onBlur={control.onBlur}
+            aria-label={`Quitar el servicio ${value.name}`}
+          >
+            <X aria-hidden />
+            Quitar
+          </Button>
+        ) : null}
+      </div>
     )
   }
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>Servicio (opcional)</FieldLabel>
-      <Combobox
-        items={items}
-        filter={null}
+    <Combobox
+      items={items}
+      filter={null}
+      disabled={disabled}
+      open={open && !disabled}
+      onOpenChange={setOpen}
+      value={null}
+      isItemEqualToValue={(a: ServicePick, b: ServicePick) => a.id === b.id}
+      itemToStringValue={(item: ServicePick) => item.id}
+      itemToStringLabel={(item: ServicePick) => item.name}
+      inputValue={query}
+      onInputValueChange={(next, details) => {
+        if (details.reason === "input-change") {
+          setQuery(next)
+          setOpen(true)
+        } else if (details.reason === "input-clear" || details.reason === "clear-press") {
+          setQuery("")
+        }
+      }}
+      onValueChange={(item: ServicePick | null) => {
+        if (item) {
+          onChange(item)
+          setQuery("")
+          setOpen(false)
+        }
+      }}
+    >
+      <ComboboxInput
+        id={control.id}
+        aria-invalid={control.invalid || undefined}
+        aria-describedby={control.describedBy}
+        onBlur={control.onBlur}
         disabled={disabled}
-        open={open && !disabled}
-        onOpenChange={setOpen}
-        value={null}
-        isItemEqualToValue={(a: ServicePick, b: ServicePick) => a.id === b.id}
-        itemToStringValue={(item: ServicePick) => item.id}
-        itemToStringLabel={(item: ServicePick) => item.name}
-        inputValue={query}
-        onInputValueChange={(next, details) => {
-          if (details.reason === "input-change") {
-            setQuery(next)
-            setOpen(true)
-          } else if (details.reason === "input-clear" || details.reason === "clear-press") {
-            setQuery("")
-          }
-        }}
-        onValueChange={(item: ServicePick | null) => {
-          if (item) {
-            onChange(item)
-            setQuery("")
-            setOpen(false)
-          }
-        }}
-      >
-        <ComboboxInput id={id} disabled={disabled} placeholder="Buscar en la lista de precios" triggerLabel="Mostrar servicios" />
-        <ComboboxContent aria-label="Servicios">
-          <ComboboxList aria-label="Servicios">
-            {(item: ServicePick) => (
-              <ComboboxItem key={item.id} value={item} className="flex items-center justify-between gap-3">
-                <span>{item.name}</span>
-                <span className="text-muted-foreground tabular-nums">
-                  {profile.data?.locale ? formatMoney(item.priceCents, item.currency, profile.data.locale) : ""}
-                </span>
-              </ComboboxItem>
-            )}
-          </ComboboxList>
-          <ComboboxEmpty>{services.isFetching ? "Buscando…" : "Ningún servicio con ese nombre."}</ComboboxEmpty>
-        </ComboboxContent>
-      </Combobox>
-      <FieldDescription>Con servicio, el valor sale de su precio.</FieldDescription>
-    </Field>
+        placeholder="Buscar en la lista de precios"
+        triggerLabel="Mostrar servicios"
+      />
+      <ComboboxContent aria-label="Servicios">
+        <ComboboxList aria-label="Servicios">
+          {(item: ServicePick) => (
+            <ComboboxItem key={item.id} value={item} className="flex items-center justify-between gap-3">
+              <span>{item.name}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {profile.data?.locale ? formatMoney(item.priceCents, item.currency, profile.data.locale) : ""}
+              </span>
+            </ComboboxItem>
+          )}
+        </ComboboxList>
+        <ComboboxEmpty>{services.isFetching ? "Buscando…" : "Ningún servicio con ese nombre."}</ComboboxEmpty>
+      </ComboboxContent>
+    </Combobox>
   )
 }

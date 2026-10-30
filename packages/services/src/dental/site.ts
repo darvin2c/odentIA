@@ -13,7 +13,7 @@ import {
 } from "@odentia/dental"
 import { and, eq, type SQL, sql } from "drizzle-orm"
 import type { AnyPgColumn } from "drizzle-orm/pg-core"
-import { validation } from "../errors.js"
+import { invalidField, validation } from "../errors.js"
 import type { ProductSite } from "../product-hooks.js"
 
 /**
@@ -76,9 +76,9 @@ export function siteCodesColumns(teeth: readonly number[]): { siteSystem: string
 function cleanSurfaces(surfaces: unknown, toothNumber: number | null): string[] {
   const list = [...new Set((Array.isArray(surfaces) ? surfaces : []).map((s) => String(s).trim()).filter(Boolean))]
   if (list.length === 0) return []
-  if (toothNumber === null) throw validation("Las superficies exigen una pieza")
+  if (toothNumber === null) throw invalidField("toothNumber", "Las superficies exigen una pieza")
   const allowed = new Set<string>(surfacesForTooth(toothNumber))
-  for (const surface of list) if (!allowed.has(surface)) throw validation(`Superficie inválida para la pieza ${toothNumber}`)
+  for (const surface of list) if (!allowed.has(surface)) throw invalidField("surfaces", `Superficie inválida para la pieza ${toothNumber}`)
   return list.sort()
 }
 
@@ -109,20 +109,28 @@ export const dentalProductSite: ProductSite = {
       const pendingSurfaces = rules.pending && rules.scope === "surfaces" && toothNumber !== null && !hasSurfaces
       if (pendingTooth) return siteColumns({ toothNumber: null, surfaces: [], quadrant: null, arch: null })
       if (pendingSurfaces) {
-        if (!isValidTooth(toothNumber)) throw validation(`Pieza FDI inválida: ${input.toothNumber}`)
+        if (!isValidTooth(toothNumber)) throw invalidField("toothNumber", `Pieza FDI inválida: ${input.toothNumber}`)
         if (quadrant !== null || arch !== null) throw validation("La prestación por caras no lleva cuadrante ni arcada")
         return siteColumns({ toothNumber, surfaces: [], quadrant: null, arch: null })
       }
       try {
         assertTreatmentSite(rules.scope, site, rules.surfaces)
       } catch (e) {
-        throw validation(e instanceof Error ? e.message : "Sitio clínico inválido")
+        const message = e instanceof Error ? e.message : "Sitio clínico inválido"
+        // Cada ámbito pide un dato: el error va junto a él (las caras, aparte de la pieza).
+        const field =
+          rules.scope === "quadrant" ? "quadrant"
+          : rules.scope === "arch" ? "arch"
+          : rules.scope === "general" ? null
+          : rules.scope === "surfaces" && /superficie/i.test(message) ? "surfaces"
+          : "toothNumber"
+        throw field ? invalidField(field, message) : validation(message)
       }
       return siteColumns({ toothNumber, surfaces: site.surfaces ?? [], quadrant, arch })
     }
-    if (toothNumber !== null && !isValidTooth(toothNumber)) throw validation(`Pieza FDI inválida: ${input.toothNumber}`)
-    if (quadrant !== null && !(Number.isInteger(quadrant) && quadrant >= 1 && quadrant <= 8)) throw validation("Cuadrante inválido")
-    if (arch !== null && arch !== "upper" && arch !== "lower") throw validation("Arcada inválida")
+    if (toothNumber !== null && !isValidTooth(toothNumber)) throw invalidField("toothNumber", `Pieza FDI inválida: ${input.toothNumber}`)
+    if (quadrant !== null && !(Number.isInteger(quadrant) && quadrant >= 1 && quadrant <= 8)) throw invalidField("quadrant", "Cuadrante inválido")
+    if (arch !== null && arch !== "upper" && arch !== "lower") throw invalidField("arch", "Arcada inválida")
     return siteColumns({ toothNumber, surfaces: cleanSurfaces(input.surfaces, toothNumber), quadrant, arch })
   },
   code(value) {

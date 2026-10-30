@@ -21,30 +21,40 @@ import { checkOrgModel, orgModelCheck } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
+/** Mensajes con las mismas palabras que los cajones de la base y de los límites. */
+const HOURS_RANGE = "Escribe un número de horas entre 6 y 23."
+
 const putInput = z.object({
   enabled: z.boolean().optional(),
   decisionProvider: z.enum(["none", "baseline", "jev"]).optional(),
-  handoffKeywords: z.array(z.string().max(60)).max(30).optional(),
+  handoffKeywords: z
+    .array(z.string().max(60, "Cada palabra clave puede tener como mucho 60 caracteres."))
+    .max(30, "Escribe como mucho 30 palabras clave.")
+    .optional(),
   maxTurns: z.number().int().min(1).max(50).optional(),
   replyCheckEnabled: z.boolean().optional(),
   decisionRoutingEnabled: z.boolean().optional(),
   clinicalAssistantEnabled: z.boolean().optional(),
-  personaName: z.string().max(40).nullable().optional(),
+  personaName: z.string().max(40, "El nombre puede tener como mucho 40 caracteres.").nullable().optional(),
   treatment: z.enum(["tu", "usted"]).nullable().optional(),
   tone: z.enum(["cercano", "neutro", "formal"]).optional(),
   emojis: z.enum(["no", "pocos"]).optional(),
-  about: z.string().max(600).optional(),
+  about: z.string().max(600, "Escribe como mucho 600 caracteres.").optional(),
   disabledFunctions: z.array(z.string().max(40)).max(20).optional(),
-  functionNotes: z.record(z.string().max(40), z.string().max(300)).optional(),
+  functionNotes: z.record(z.string().max(40), z.string().max(300, "Escribe como mucho 300 caracteres.")).optional(),
   /** Horas de silencio tras las que el agente se despide y cierra (ADR 0024). */
-  closeAfterHours: z.number().int().min(6).max(23).optional(),
+  closeAfterHours: z.number({ error: HOURS_RANGE }).int(HOURS_RANGE).min(6, HOURS_RANGE).max(23, HOURS_RANGE).optional(),
 })
 
-/** Por día (0 = domingo), sus tramos en minutos locales; la forma y los cruces los valida el servicio. */
+/**
+ * Por día (0 = domingo), sus tramos en minutos locales. La ruta solo exige los
+ * siete días: el tope por día, cada tramo y los cruces los valida el servicio,
+ * que señala el día (`week[d]`) o el tramo (`week[d][i]`) con su mensaje.
+ */
 const writingHoursInput = z.object({
   week: z
-    .array(z.array(z.tuple([z.number().int().min(0).max(1440), z.number().int().min(0).max(1440)])).max(4))
-    .length(7),
+    .array(z.array(z.unknown(), "Cada día del horario es una lista de tramos."), "El horario de recontacto va por los siete días de la semana.")
+    .length(7, "El horario de recontacto va por los siete días de la semana."),
 })
 
 export interface AgentRouteDeps extends CrmDeps {

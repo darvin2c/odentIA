@@ -4,6 +4,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  FieldError,
   Skeleton,
 } from "@odentia/ui"
 import {
@@ -25,7 +26,9 @@ import {
   scheduleRangeState,
   type ScheduleRangeValue,
   ScheduleResourceChips,
+  useFieldControl,
   weekDates,
+  withFieldGroup,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
@@ -321,155 +324,249 @@ export function useWhen(input: WhenInput): WhenState {
   }
 }
 
+/** El «cuándo» en el formulario que lo usa (bajo `when`): los datos se llaman como en el cuerpo. */
+export interface WhenValues {
+  startsAt: string
+  professionalUserId: string
+}
+
+export const EMPTY_WHEN: WhenValues = { startsAt: "", professionalUserId: "" }
+
+/**
+ * Dónde cae cada rechazo de reservar o mover: la hora, o quien atiende. La
+ * unidad dental la pone la agenda con el hueco, así que su choque se dice
+ * junto a la hora (el mensaje nombra la unidad).
+ */
+export const WHEN_FIELD_MAP: Record<string, string> = {
+  startsAt: "when.startsAt",
+  endsAt: "when.startsAt",
+  roomId: "when.startsAt",
+  professionalUserId: "when.professionalUserId",
+}
+
+/** Lo que impide enviar el hueco elegido, dicho junto a las horas; nada si se puede. */
+function slotProblem(when: WhenState): string | undefined {
+  const { shown, state, professional } = when
+  const moving = when.input.moving
+  if (!shown) return moving ? "Elige la nueva hora: toca un hueco libre." : "Elige la hora: toca un hueco libre."
+  if (state === "taken") return `A esa hora ${professional?.label ?? "el profesional"} ya está ocupado. Mueve el bloque a una zona blanca.`
+  if (!moving) return undefined
+  // Al reprogramar no hay urgencia: fuera del horario no se mueve.
+  if (state === "outside") {
+    return `Esa hora queda fuera del horario de ${professional?.label ?? "su profesional"}: ahí no se puede mover la cita.`
+  }
+  if (
+    shown.columnId === moving.professionalUserId &&
+    Date.parse(shown.start) === Date.parse(moving.startsAt) &&
+    Date.parse(shown.end) === Date.parse(moving.endsAt)
+  ) {
+    return "La cita ya está a esa hora. Mueve el bloque a la nueva hora."
+  }
+  return undefined
+}
+
 /**
  * Los campos del «cuándo»: profesional, días de la semana, horas libres y lo
  * elegido en una línea. Al reprogramar, el profesional y la duración ya están
  * decididos: solo se elige día y hora, y cambiar de profesional queda a un toque.
+ *
+ * Va en el formulario que reserva o mueve (`fields="when"`): lo elegido se
+ * copia a `when.startsAt` y `when.professionalUserId`, y lo que diga el
+ * servidor de la hora, la unidad o el profesional se dice en su sitio
+ * (`WHEN_FIELD_MAP`).
  */
-export function WhenFields({ when }: { when: WhenState }) {
-  const { timeZone, today, now, duration } = when.input
-  const { date, week, shown, state, professional } = when
+export const WhenFields = withFieldGroup({
+  defaultValues: EMPTY_WHEN,
+  props: {} as { when: WhenState },
+  render: function WhenFieldsRender({ group, when }) {
+    const start = when.shown?.start ?? ""
+    const columnId = when.shown?.columnId ?? ""
+    // Lo elegido pasa al formulario sin contar como cambio: al cambiarlo se borra lo que dijo el servidor.
+    React.useEffect(() => {
+      group.setFieldValue("startsAt", start, { dontUpdateMeta: true })
+      group.setFieldValue("professionalUserId", columnId, { dontUpdateMeta: true })
+    }, [group, start, columnId])
+    const problem = slotProblem(when)
+    return (
+      <>
+        <group.AppField name="professionalUserId">{() => <WhenProfessional when={when} />}</group.AppField>
+        <group.AppField name="startsAt" validators={{ onSubmit: () => problem }}>
+          {() => <WhenSlot when={when} />}
+        </group.AppField>
+      </>
+    )
+  },
+})
+
+/** Quién atiende: las fichas del equipo o, al reprogramar, el de la cita con «Cambiar». */
+function WhenProfessional({ when }: { when: WhenState }) {
+  const { control, errors, errorId } = useFieldControl({ hasDescription: false })
   const moving = when.input.moving != null
   const [changing, setChanging] = React.useState(false)
   const current = when.team.find((item) => item.id === when.input.moving?.professionalUserId)
-  return (
-    <>
-      {moving && !changing ? (
-        <div className="flex flex-wrap items-center gap-x-2">
-          <span className="min-w-0 flex-1 text-sm">
-            <span className="text-muted-foreground">Con </span>
-            <span className="font-semibold">{current?.label ?? "su profesional"}</span>
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-mr-2.5 text-primary"
-            onClick={() => setChanging(true)}
-          >
-            Cambiar de profesional
-          </Button>
-        </div>
-      ) : (
-        <div className="grid gap-2">
-          <span className="text-sm font-medium">Profesional</span>
-          <ScheduleResourceChips
-            wrap
-            label="Profesional"
-            resources={when.team}
-            formatLabel={(item) => shortName(item.label)}
-            value={when.professionalFilter && when.team.some((item) => item.id === when.professionalFilter) ? when.professionalFilter : null}
-            allLabel="Cualquiera"
-            onChange={when.pickProfessional}
-          />
-        </div>
-      )}
-
-      <div className="grid gap-2">
-        <div className="flex items-center gap-2">
-          <span className="flex-1 text-sm font-medium">Cuándo</span>
-          <DatePickerButton
-            size="sm"
-            align="end"
-            min={today}
-            value={date}
-            onChange={when.goToDate}
-            aria-label="Ir a otra fecha"
-          >
-            <CalendarDays aria-hidden />
-            <span className="first-letter:uppercase">
-              {formatMonthLong(date)}
-            </span>
-          </DatePickerButton>
-        </div>
-        <ScheduleDayStrip
-          dates={week.slice(0, 6).includes(date) ? week.slice(0, 6) : week}
-          value={date}
-          today={today}
-          onChange={when.goToDate}
-          onPrevious={() => when.goToDate(addDays(date, -7) < today ? today : addDays(date, -7))}
-          onNext={() => when.goToDate(addDays(date, 7))}
-        />
-        {!when.ready && !when.failed ? (
-          <Skeleton className="h-56 w-full rounded-2xl" />
-        ) : when.team.length === 0 && when.ready ? (
-          <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
-            Ningún profesional tiene horario en esta sede. Sin horario no se puede reservar.
-          </p>
-        ) : (
-          <ScheduleRangePicker
-            label={`Horas del ${formatDateLong(date).toLocaleLowerCase("es")}`}
-            lanes={when.lanes}
-            date={date}
-            timeZone={timeZone}
-            free={when.free}
-            open={when.open}
-            value={shown}
-            onChange={when.choose}
-            defaultMinutes={duration}
-            resizable={!moving}
-            marker={when.marker}
-            now={now}
-          />
-        )}
-        {shown ? (
-          <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 text-sm">
-              <span className="font-bold">
-                {rangeSaid(shown.start, shown.end, timeZone, today)}
-              </span>{" "}
-              <span className="text-muted-foreground">con {professional?.label}</span>
-            </span>
-            {moving ? null : (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label={`Dura ${formatSpan(when.chosenMinutes)}. Cambiar la duración`}
-                    />
-                  }
-                >
-                  {formatSpan(when.chosenMinutes)}
-                  <ChevronDown aria-hidden />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {DURATIONS.map((minutes) => (
-                    <DropdownMenuItem key={minutes} onClick={() => when.resize(minutes)}>
-                      {formatSpan(minutes)}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-        ) : when.loading ? (
-          <DataRefreshMarker message="Buscando horas libres…" />
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {moving
-              ? "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
-              : "No queda nada libre este día. Prueba otro día u otro profesional."}
-          </p>
-        )}
-        {state === "taken" ? (
-          <p role="alert" className="text-sm text-destructive">
-            A esa hora {professional?.label} ya está ocupado. Mueve el bloque a una zona blanca.
-          </p>
-        ) : state === "outside" ? (
-          <p className="text-sm text-warning">
-            Esa hora queda fuera del horario de {professional?.label}.
-          </p>
-        ) : null}
-        {when.failed ? (
-          <p role="alert" className="text-sm text-destructive">
-            No se pudo consultar la disponibilidad.{" "}
-            <Button type="button" variant="outline" size="sm" onClick={when.refetch}>
-              Reintentar
-            </Button>
-          </p>
-        ) : null}
+  const error = control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null
+  return moving && !changing ? (
+    <div className="grid gap-1">
+      <div className="flex flex-wrap items-center gap-x-2">
+        <span id={control.id} className="min-w-0 flex-1 text-sm" aria-describedby={control.describedBy}>
+          <span className="text-muted-foreground">Con </span>
+          <span className="font-semibold">{current?.label ?? "su profesional"}</span>
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-mr-2.5 text-primary"
+          aria-invalid={control.invalid || undefined}
+          aria-describedby={control.describedBy}
+          onClick={() => setChanging(true)}
+        >
+          Cambiar de profesional
+        </Button>
       </div>
-    </>
+      {error}
+    </div>
+  ) : (
+    <div className="grid gap-2">
+      <span className="text-sm font-medium">Profesional</span>
+      <ScheduleResourceChips
+        wrap
+        aria-label="Profesional"
+        id={control.id}
+        invalid={control.invalid}
+        aria-describedby={control.describedBy}
+        onBlur={control.onBlur}
+        resources={when.team}
+        formatLabel={(item) => shortName(item.label)}
+        value={when.professionalFilter && when.team.some((item) => item.id === when.professionalFilter) ? when.professionalFilter : null}
+        allLabel="Cualquiera"
+        onChange={when.pickProfessional}
+      />
+      {error}
+    </div>
+  )
+}
+
+/** El día y las horas: el bloque sobre lo libre, lo elegido en una línea y por qué no vale. */
+function WhenSlot({ when }: { when: WhenState }) {
+  const { control, errors, errorId } = useFieldControl({ hasDescription: false })
+  const { timeZone, today, now, duration } = when.input
+  const { date, week, shown, state, professional } = when
+  const moving = when.input.moving != null
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center gap-2">
+        <span className="flex-1 text-sm font-medium">Cuándo</span>
+        <DatePickerButton
+          size="sm"
+          align="end"
+          min={today}
+          value={date}
+          onChange={when.goToDate}
+          aria-label="Ir a otra fecha"
+        >
+          <CalendarDays aria-hidden />
+          <span className="first-letter:uppercase">
+            {formatMonthLong(date)}
+          </span>
+        </DatePickerButton>
+      </div>
+      <ScheduleDayStrip
+        dates={week.slice(0, 6).includes(date) ? week.slice(0, 6) : week}
+        value={date}
+        today={today}
+        onChange={when.goToDate}
+        onPrevious={() => when.goToDate(addDays(date, -7) < today ? today : addDays(date, -7))}
+        onNext={() => when.goToDate(addDays(date, 7))}
+      />
+      {!when.ready && !when.failed ? (
+        <Skeleton className="h-56 w-full rounded-2xl" />
+      ) : when.team.length === 0 && when.ready ? (
+        <p className="rounded-xl border border-dashed p-3 text-sm text-muted-foreground">
+          Ningún profesional tiene horario en esta sede. Sin horario no se puede reservar.
+        </p>
+      ) : (
+        <ScheduleRangePicker
+          aria-label={`Horas del ${formatDateLong(date).toLocaleLowerCase("es")}`}
+          id={control.id}
+          invalid={control.invalid}
+          aria-describedby={control.describedBy}
+          onBlur={control.onBlur}
+          lanes={when.lanes}
+          date={date}
+          timeZone={timeZone}
+          free={when.free}
+          open={when.open}
+          value={shown}
+          onChange={when.choose}
+          defaultMinutes={duration}
+          resizable={!moving}
+          marker={when.marker}
+          now={now}
+        />
+      )}
+      {shown ? (
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 text-sm">
+            <span className="font-bold">
+              {rangeSaid(shown.start, shown.end, timeZone, today)}
+            </span>{" "}
+            <span className="text-muted-foreground">con {professional?.label}</span>
+          </span>
+          {moving ? null : (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Dura ${formatSpan(when.chosenMinutes)}. Cambiar la duración`}
+                  />
+                }
+              >
+                {formatSpan(when.chosenMinutes)}
+                <ChevronDown aria-hidden />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {DURATIONS.map((minutes) => (
+                  <DropdownMenuItem key={minutes} onClick={() => when.resize(minutes)}>
+                    {formatSpan(minutes)}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      ) : when.loading ? (
+        <DataRefreshMarker message="Buscando horas libres…" />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {moving
+            ? "Ese día no queda un hueco donde quepa la cita. Prueba otro día."
+            : "No queda nada libre este día. Prueba otro día u otro profesional."}
+        </p>
+      )}
+      {/* Tras enviar, lo que impide reservar o mover se dice aquí una sola vez, unido a las horas. */}
+      {control.invalid ? (
+        <FieldError id={errorId} errors={errors.map((message) => ({ message }))} />
+      ) : state === "taken" ? (
+        <p role="alert" className="text-sm text-destructive">
+          A esa hora {professional?.label} ya está ocupado. Mueve el bloque a una zona blanca.
+        </p>
+      ) : state === "outside" ? (
+        <p role="status" className="text-sm text-warning">
+          {moving
+            ? `Esa hora queda fuera del horario de ${professional?.label}: ahí no se puede mover la cita.`
+            : `Esa hora queda fuera del horario de ${professional?.label}.`}
+        </p>
+      ) : null}
+      {when.failed ? (
+        <p role="alert" className="text-sm text-destructive">
+          No se pudo consultar la disponibilidad.{" "}
+          <Button type="button" variant="outline" size="sm" onClick={when.refetch}>
+            Reintentar
+          </Button>
+        </p>
+      ) : null}
+    </div>
   )
 }

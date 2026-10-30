@@ -68,9 +68,17 @@ const userQuery = pageQuery.extend({
 })
 
 const assistedInput = z.object({
-  orgName: z.string().trim().min(2).max(120),
-  slug: z.string().trim().min(2).max(63),
-  email: z.string().trim().email().max(320),
+  orgName: z
+    .string()
+    .trim()
+    .min(2, "Escribe el nombre de la clínica")
+    .max(120, "Escribe como mucho 120 caracteres"),
+  slug: z
+    .string()
+    .trim()
+    .min(2, "Escribe al menos 2 caracteres")
+    .max(63, "Escribe como mucho 63 caracteres"),
+  email: z.string().trim().email("Correo inválido").max(320, "Escribe como mucho 320 caracteres"),
   countryCode: z.string().trim().length(2),
   currency: z.string().trim().length(3).optional(),
   timezone: z.string().trim().max(60).optional(),
@@ -82,11 +90,21 @@ const assistedInput = z.object({
 })
 
 const blockInput = z.object({
-  reason: z.string().trim().min(10).max(500),
+  reason: z
+    .string()
+    .trim()
+    .min(10, "Escribe al menos 10 caracteres")
+    .max(500, "Escribe como mucho 500 caracteres"),
   expiresAt: z.iso.datetime({ offset: true }).optional(),
 })
 
-const closeInput = z.object({ reason: z.string().trim().min(10).max(500) })
+const closeInput = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(10, "Escribe al menos 10 caracteres")
+    .max(500, "Escribe como mucho 500 caracteres"),
+})
 
 const revokeInput = z.object({ token: z.string().min(1).max(500).optional() })
 
@@ -99,7 +117,7 @@ const evidenceInput = z.object({
 })
 
 const recoveryOpenInput = z.object({
-  email: z.string().trim().email().max(320),
+  email: z.string().trim().email("Correo inválido").max(320, "Escribe como mucho 320 caracteres"),
   kind: z.enum(["acceso", "propiedad"]),
   evidence: evidenceInput,
 })
@@ -484,10 +502,14 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     if (denied) return denied
     const parsed = z
       .object({
-        discountBps: z.number().int().min(0).max(9000),
+        discountBps: z
+          .number("Escribe el descuento en porcentaje")
+          .int("Escribe el descuento con hasta dos decimales")
+          .min(0, "El descuento no puede ser negativo")
+          .max(9000, "El descuento es como mucho 90 %"),
         /** Último instante del descuento (issue 168); null o ausente = no vence. */
-        discountEndsAt: z.iso.datetime({ offset: true }).nullish(),
-        note: z.string().max(500).nullish(),
+        discountEndsAt: z.iso.datetime({ offset: true, message: "Elige una fecha de vencimiento válida" }).nullish(),
+        note: z.string().max(500, "Escribe la nota en 500 caracteres como mucho").nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -504,9 +526,17 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     if (denied) return denied
     const parsed = z
       .object({
-        trialCreditCents: z.number().int().min(0).max(100_000_000),
-        trialDays: z.number().int().min(1).max(365),
-        note: z.string().max(500).nullish(),
+        trialCreditCents: z
+          .number("Escribe el saldo de regalo")
+          .int("Escribe el saldo con hasta dos decimales")
+          .min(0, "El saldo de regalo no puede ser negativo")
+          .max(100_000_000, "El saldo de regalo es demasiado alto"),
+        trialDays: z
+          .number("Escribe los días de prueba")
+          .int("Escribe los días como un número entero")
+          .min(1, "La prueba debe durar al menos un día")
+          .max(365, "La prueba dura como mucho 365 días"),
+        note: z.string().max(500, "Escribe la nota en 500 caracteres como mucho").nullish(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -519,7 +549,7 @@ export function createAdminOrganizationsRoute(deps: AdminOrganizationsDeps) {
     const denied = forbidUnlessManager(c, actor)
     if (denied) return denied
     const parsed = z
-      .object({ cycle: z.enum(["mensual", "quincenal"]) })
+      .object({ cycle: z.enum(["mensual", "quincenal"], "Elige cada cuánto se factura") })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)

@@ -2,17 +2,19 @@ import {
   type AccountRemovalReason,
   type ChannelAdapter,
   type ChannelProvider,
+  ConnectionRejectedError,
+  type ConnectionRejectedPart,
   channelAdapters,
   type ProviderAccount,
   setTelegramWebhook,
 } from "@odentia/channels"
 import type { Db } from "@odentia/db"
 import {
-  channelConnection,
   type ConnectionHealth,
   type ConnectionMetaRemoval,
   type ConnectionOwnApp,
   type ConnectionSignup,
+  channelConnection,
   conversation,
 } from "@odentia/db/schema/crm"
 import { and, asc, eq, max } from "drizzle-orm"
@@ -28,7 +30,7 @@ import {
   requestMissingTemplates,
   settleMessageTexts,
 } from "./clinic-messages.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { decryptConfig, encryptJson } from "./secrets.js"
 import { checkOwnAppKeys, freshOwnApp, type OwnAppKeysChecked, settleOwnApp } from "./whatsapp-own-app.js"
 import { settleWorkspaceNotifications } from "./workspace.js"
@@ -236,11 +238,22 @@ const KNOWN_PROVIDER_CHANNELS: Record<string, string> = {
 /**
  * Canales que se conectan escribiendo sus datos (los demás entran con la
  * cuenta del proveedor): qué datos pide cada uno, cómo se llama la conexión si
- * nadie le pone nombre y qué decir cuando el proveedor no los acepta.
+ * nadie le pone nombre y qué decir cuando el proveedor no los acepta. `token`
+ * e `id` son la clave y el identificador de la cuenta en `config`: cuando el
+ * proveedor dice cuál rechazó, el error va a ese dato (`tokenRejected`,
+ * `idRejected`); si no lo dice, `rejected`, sin dato.
  */
 const MANUAL_PROVIDERS: Record<
   string,
-  { label: string; fields: [string, string][]; rejected: string }
+  {
+    label: string
+    fields: [string, string][]
+    rejected: string
+    token: string
+    tokenRejected: string
+    id: string
+    idRejected: string
+  }
 > = {
   whatsapp_cloud_api: {
     label: "WhatsApp",
@@ -252,11 +265,23 @@ const MANUAL_PROVIDERS: Record<
     ],
     rejected:
       "WhatsApp no aceptó esos datos: la clave no sirve o venció, o el identificador del número no es de esa cuenta. Copia la clave de nuevo; debe ser la permanente, no la temporal de 24 horas.",
+    token: "accessToken",
+    tokenRejected:
+      "WhatsApp no aceptó esta clave: no sirve o venció. Cópiala de nuevo; debe ser la permanente, no la temporal de 24 horas.",
+    id: "phoneNumberId",
+    idRejected:
+      "WhatsApp no encuentra este número con esa clave: revisa el identificador del número (no es el número de teléfono) y que la clave sea de la misma cuenta.",
   },
   telegram_bot_api: {
     label: "Telegram",
     fields: [["botToken", "la clave del bot"]],
     rejected:
+      "Telegram no aceptó esa clave. Cópiala de nuevo: te la da @BotFather al crear el bot.",
+    token: "botToken",
+    tokenRejected:
+      "Telegram no aceptó esa clave. Cópiala de nuevo: te la da @BotFather al crear el bot.",
+    id: "botToken",
+    idRejected:
       "Telegram no aceptó esa clave. Cópiala de nuevo: te la da @BotFather al crear el bot.",
   },
   messenger: {
@@ -268,6 +293,11 @@ const MANUAL_PROVIDERS: Record<
     ],
     rejected:
       "Facebook no aceptó esos datos: la clave no sirve o no es de esa página. Cópiala de nuevo.",
+    token: "pageAccessToken",
+    tokenRejected: "Facebook no aceptó esta clave: no sirve o venció. Cópiala de nuevo.",
+    id: "pageId",
+    idRejected:
+      "Facebook no encuentra esta página con esa clave: revisa el identificador de la página y que la clave sea de esa página.",
   },
   instagram: {
     label: "Instagram",
@@ -278,7 +308,27 @@ const MANUAL_PROVIDERS: Record<
     ],
     rejected:
       "Instagram no aceptó esos datos: la clave no sirve o no es de esa cuenta. Cópiala de nuevo.",
+    token: "accessToken",
+    tokenRejected: "Instagram no aceptó esta clave: no sirve o venció. Cópiala de nuevo.",
+    id: "instagramId",
+    idRejected:
+      "Instagram no encuentra esta cuenta con esa clave: revisa el identificador de la cuenta y que la clave sea de esa cuenta.",
   },
+}
+
+/** Al cambiar la clave el identificador no se escribe: si la clave nueva no lo ve, es de otra cuenta. */
+const KEY_OF_OTHER_ACCOUNT =
+  "Esa clave es de otra cuenta. Para conectar otra cuenta crea una conexión nueva; aquí va la clave de la que ya está conectada."
+
+/** El nombre de un dato de la conexión en el cuerpo de la petición (`config.accessToken`). */
+function configField(key: string): string {
+  return `config.${key}`
+}
+
+/** Una cuenta ya conectada es del identificador que se escribió (si el canal lo pide). */
+function accountField(provider: string, message: string): Record<string, string> | undefined {
+  const manual = MANUAL_PROVIDERS[provider]
+  return manual && manual.id !== manual.token ? { [configField(manual.id)]: message } : undefined
 }
 
 /**
@@ -325,7 +375,7 @@ function assertChannelMatches(provider: string, channel: string): void {
 function assertFields(fields: [string, string][], config: Record<string, unknown>): void {
   for (const [field, words] of fields) {
     const value = config[field]
-    if (typeof value !== "string" || !value.trim()) throw validation(`Falta ${words}.`)
+    if (typeof value !== "string" || !value.trim()) throw invalidField(configField(field), `Falta ${words}.`)
   }
 }
 
@@ -410,6 +460,12 @@ export interface ConnectionChecked extends ConnectionPublic {
   templates: ConnectionMessagesReport | null
 }
 
+/**
+ * Pregunta al proveedor por los datos de la conexión. Si los rechaza y dice
+ * cuál (la clave o el identificador), el error va a ese dato; si no respondió,
+ * se dice que no respondió (no que los datos estén mal). `sent`: los datos que
+ * se escribieron ahora (al cambiar la clave, solo las claves).
+ */
 async function checkWithProvider(
   adapter: ChannelAdapter,
   provider: string,
@@ -417,19 +473,47 @@ async function checkWithProvider(
   deps: ConnectionDeps,
   /** Hecha con «Conectar con Facebook»: no hay una clave que copiar de nuevo. */
   signup = false,
+  sent: Record<string, unknown> = config,
 ) {
   try {
     return await adapter.validateConnection(config, { fetch: deps.fetch })
-  } catch {
+  } catch (error) {
+    const manual = MANUAL_PROVIDERS[provider]
+    if (error instanceof ConnectionRejectedError) {
+      if (signup) throw new ServiceError("CONNECTION_REJECTED", 400, SIGNUP_REJECTED)
+      throw rejectedData(provider, error.part, sent)
+    }
+    if (manual) {
+      throw new ServiceError(
+        "PROVIDER_UNAVAILABLE",
+        502,
+        `${manual.label} no respondió al comprobar los datos. Vuelve a intentarlo en un momento.`,
+      )
+    }
     throw new ServiceError(
       "CONNECTION_REJECTED",
       400,
-      signup
-        ? SIGNUP_REJECTED
-        : (MANUAL_PROVIDERS[provider]?.rejected ??
-          "El proveedor no aceptó esos datos: revísalos y vuelve a intentar."),
+      signup ? SIGNUP_REJECTED : "El proveedor no aceptó esos datos: revísalos y vuelve a intentar.",
     )
   }
+}
+
+/** El rechazo del proveedor en el dato que lo causó, si lo dijo y se escribió ahora. */
+function rejectedData(
+  provider: string,
+  part: ConnectionRejectedPart | null,
+  sent: Record<string, unknown>,
+): ServiceError {
+  const manual = MANUAL_PROVIDERS[provider]
+  if (!manual) return new ServiceError("CONNECTION_REJECTED", 400, "El proveedor no aceptó esos datos: revísalos y vuelve a intentar.")
+  if (!part) return new ServiceError("CONNECTION_REJECTED", 400, manual.rejected)
+  if (part === "id" && !(manual.id in sent)) {
+    return new ServiceError("CONNECTION_REJECTED", 400, KEY_OF_OTHER_ACCOUNT, {
+      [configField(manual.token)]: KEY_OF_OTHER_ACCOUNT,
+    })
+  }
+  const [field, message] = part === "token" ? [manual.token, manual.tokenRejected] : [manual.id, manual.idRejected]
+  return new ServiceError("CONNECTION_REJECTED", 400, message, { [configField(field)]: message })
 }
 
 /**
@@ -500,7 +584,7 @@ async function registerTelegramWebhook(
     )
   } catch (error) {
     throw new ServiceError(
-      "CONNECTION_REJECTED",
+      "TELEGRAM_WEBHOOK_REJECTED",
       502,
       `Telegram no aceptó la dirección de avisos de odentIA: ${error instanceof Error ? error.message : "sin detalle"}`,
     )
@@ -698,13 +782,10 @@ export async function createConnection(
       )
       .limit(1)
     if (same) {
-      throw new ServiceError(
-        "CONNECTION_EXISTS",
-        409,
-        same.signup
-          ? `Esa cuenta ya está conectada como «${same.displayName}». Ábrela y vuelve a conectarla con Facebook en vez de crear otra conexión.`
-          : `Esa cuenta ya está conectada como «${same.displayName}». Ábrela y cámbiale la clave en vez de crear otra conexión.`,
-      )
+      const message = same.signup
+        ? `Esa cuenta ya está conectada como «${same.displayName}». Ábrela y vuelve a conectarla con Facebook en vez de crear otra conexión.`
+        : `Esa cuenta ya está conectada como «${same.displayName}». Ábrela y cámbiale la clave en vez de crear otra conexión.`
+      throw new ServiceError("CONNECTION_EXISTS", 409, message, accountField(input.provider, message))
     }
   }
   if (input.channel === "whatsapp") await assertSingleWhatsApp(tx, orgId)
@@ -744,11 +825,8 @@ export async function createConnection(
     )
   } catch (error) {
     if (!isUniqueViolation(error)) throw error
-    throw new ServiceError(
-      "CONNECTION_EXISTS",
-      409,
-      "Esa cuenta ya está conectada en otra clínica de odentIA.",
-    )
+    const message = "Esa cuenta ya está conectada en otra clínica de odentIA."
+    throw new ServiceError("CONNECTION_EXISTS", 409, message, accountField(input.provider, message))
   }
   if (!created) throw new Error("No se pudo crear la conexión")
   if (origin) {
@@ -937,6 +1015,9 @@ async function recheckOwnApp(
  * «Volver a comprobar» y «Registrar el número» de una conexión con la app
  * propia: revisa de nuevo las claves y hace en Meta lo que falte; con `pin`,
  * registra el número con el PIN que escribió la clínica (se guarda cifrado).
+ * Lo que Meta respondió se guarda aunque no registre, así que un PIN rechazado
+ * no es un error de la petición: `problemField: "pin"` dice que el problema es
+ * el PIN escrito, para decirlo junto a él.
  */
 export async function retryOwnApp(
   tx: Db,
@@ -945,14 +1026,14 @@ export async function retryOwnApp(
   secretsKey: Buffer,
   input: { pin?: string },
   deps: ConnectionDeps,
-): Promise<ConnectionPublic & { problem: string | null }> {
+): Promise<ConnectionPublic & { problem: string | null; problemField: "pin" | null }> {
   const { row, config } = await getConnectionSecrets(tx, orgId, id, secretsKey)
   if (row.provider !== "whatsapp_cloud_api" || row.signup) {
     throw validation("Solo una conexión de WhatsApp hecha con la app propia de la clínica se comprueba así.")
   }
-  if (input.pin !== undefined && !/^\d{6}$/.test(input.pin)) throw validation("El PIN tiene 6 dígitos.")
+  if (input.pin !== undefined && !/^\d{6}$/.test(input.pin)) throw invalidField("pin", "El PIN tiene 6 dígitos.")
   if (deps.validateExternal === false) {
-    return { ...toPublic(row), problem: "En este entorno no se llama a Meta: no se puede comprobar." }
+    return { ...toPublic(row), problem: "En este entorno no se llama a Meta: no se puede comprobar.", problemField: null }
   }
   const problem = await recheckOwnApp(tx, row, config, secretsKey, deps, input.pin)
   const [current] = await tx
@@ -960,7 +1041,9 @@ export async function retryOwnApp(
     .from(channelConnection)
     .where(and(eq(channelConnection.id, id), eq(channelConnection.organizationId, orgId)))
     .limit(1)
-  return { ...toPublic(current ?? row), problem }
+  // Meta sigue pidiendo el PIN después de probar el escrito: es ese PIN el que no sirve.
+  const wrongPin = input.pin !== undefined && problem !== null && current?.ownApp?.pinNeeded === true && !current.ownApp.registeredAt
+  return { ...toPublic(current ?? row), problem, problemField: wrongPin ? "pin" : null }
 }
 
 /**
@@ -1017,11 +1100,10 @@ export async function changeConnectionCredentials(
     externalId = origin.checked.externalId
     account = origin.checked.account ?? null
   } else if (deps.validateExternal !== false) {
-    const checked = await checkWithProvider(adapter, row.provider, config, deps)
+    const checked = await checkWithProvider(adapter, row.provider, config, deps, false, input.config)
     if (row.externalId && checked.externalId !== row.externalId) {
-      throw validation(
-        "Esa clave es de otra cuenta. Para conectar otra cuenta crea una conexión nueva; aquí va la clave de la que ya está conectada.",
-      )
+      const manual = MANUAL_PROVIDERS[row.provider]
+      throw manual ? invalidField(configField(manual.token), KEY_OF_OTHER_ACCOUNT) : validation(KEY_OF_OTHER_ACCOUNT)
     }
     externalId = checked.externalId
     account = checked.account ?? null

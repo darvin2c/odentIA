@@ -98,10 +98,8 @@ export function createContactsRoute(deps: CrmDeps) {
       try {
         tags = normalizeTags(parsed.data.tags)
       } catch (e) {
-        return c.json(
-          errorBody(c, "VALIDATION", e instanceof Error ? e.message : "Etiquetas inválidas"),
-          400,
-        )
+        const message = e instanceof Error ? e.message : "Etiquetas inválidas"
+        return c.json(errorBody(c, "VALIDATION", message, { tags: message }), 400)
       }
     }
     return runService(c, 201, () =>
@@ -133,10 +131,8 @@ export function createContactsRoute(deps: CrmDeps) {
       try {
         tags = normalizeTags(parsed.data.tags)
       } catch (e) {
-        return c.json(
-          errorBody(c, "VALIDATION", e instanceof Error ? e.message : "Etiquetas inválidas"),
-          400,
-        )
+        const message = e instanceof Error ? e.message : "Etiquetas inválidas"
+        return c.json(errorBody(c, "VALIDATION", message, { tags: message }), 400)
       }
     }
     return runService(c, 200, () =>
@@ -147,8 +143,11 @@ export function createContactsRoute(deps: CrmDeps) {
   })
 
   const identityInput = z.object({
-    channel: z.enum(["whatsapp", "telegram", "messenger", "instagram"]),
-    externalUserId: z.string().min(1).max(100),
+    channel: z.enum(["whatsapp", "telegram", "messenger", "instagram"], "Elige el canal"),
+    externalUserId: z
+      .string()
+      .min(1, "Escribe el número de la cuenta")
+      .max(100, "El número de la cuenta tiene como mucho 100 caracteres"),
   })
 
   app.post("/:id/identities", async (c) => {
@@ -169,8 +168,8 @@ export function createContactsRoute(deps: CrmDeps) {
   })
 
   const moveInput = z.object({
-    toContactId: z.string().uuid(),
-    reason: z.string().min(1).max(500),
+    toContactId: z.string().uuid("Elige a quién pasa la cuenta"),
+    reason: z.string().trim().min(1, "Escribe por qué pasa la cuenta").max(500),
   })
 
   app.post("/:id/identities/:identityId/move", async (c) => {

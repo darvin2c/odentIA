@@ -7,7 +7,6 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
   toast,
 } from "@odentia/ui"
 import {
@@ -26,7 +25,13 @@ import {
   PageShell,
   SearchInput,
   SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords, upperFirst } from "@odentia/clinical"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
@@ -37,6 +42,12 @@ import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { countByProduct, matchesProduct, type ProductChoice, ProductFilter, ProductMark } from "../../components/product"
 import { webUrl } from "../../lib/host"
+
+/** La nota y el motivo de descartar, con los mismos límites que la ruta. */
+const noteSchema = z.object({ note: z.string().max(2000, "La nota puede tener como máximo 2000 caracteres") })
+const discardSchema = z.object({
+  reason: z.string().trim().min(1, "Escribe por qué se descarta").max(500, "Usa como máximo 500 caracteres"),
+})
 
 type StatusFilter = "por_revisar" | "invitada" | "entro" | "descartada" | "todas"
 
@@ -420,12 +431,8 @@ function RequestDrawer({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  // Sin tocar, la nota es la guardada (aunque la lista llegue después de abrir el cajón).
-  const [edited, setNote] = React.useState<string | null>(null)
-  const note = edited ?? item?.note ?? ""
   const [confirmInvite, setConfirmInvite] = React.useState(false)
   const [discarding, setDiscarding] = React.useState(false)
-  const [reason, setReason] = React.useState("")
   const [lastLink, setLastLink] = React.useState<string | null>(null)
 
   const refresh = () => {
@@ -433,13 +440,33 @@ function RequestDrawer({
     void queryClient.invalidateQueries({ queryKey: ["admin", "overview"] })
   }
   const saveNote = useMutation({
-    mutationFn: async () =>
-      api(`/api/admin/waitlist/${item?.id}/note`, { method: "PUT", body: JSON.stringify({ note: note.trim() || null }) }),
+    mutationFn: async (note: string | null) =>
+      api(`/api/admin/waitlist/${item?.id}/note`, { method: "PUT", body: JSON.stringify({ note }) }),
     onSuccess: () => {
       refresh()
       toast.success("Nota guardada")
     },
   })
+  const noteForm = useAppForm({
+    defaultValues: { note: item?.note ?? "" },
+    validators: { onSubmit: noteSchema },
+    onSubmit: async ({ value, formApi }) => {
+      const note = value.note.trim()
+      await saveNote.mutateAsync(note || null)
+      formApi.reset({ note })
+    },
+  })
+  // La nota guardada llega con la lista (puede ser después de abrir el cajón): se toma una vez, sin pisar lo escrito.
+  const noteLoaded = React.useRef(item !== null)
+  React.useEffect(() => {
+    if (noteLoaded.current || !item) return
+    noteLoaded.current = true
+    if (!noteForm.state.isDirty) noteForm.reset({ note: item.note ?? "" })
+  }, [item, noteForm])
+  const onNoteSubmit = useFormSubmit(noteForm)
+  const noteError = useFormSubmitError(noteForm)
+  const noteSaving = useStore(noteForm.store, (state) => state.isSubmitting)
+  const note = useStore(noteForm.store, (state) => state.values.note)
   const invite = useMutation({
     mutationFn: async (send: boolean) =>
       invitePayload.parse(await api(`/api/admin/waitlist/${item?.id}/invite`, { method: "POST", body: JSON.stringify({ send }) })),
@@ -461,15 +488,24 @@ function RequestDrawer({
     onError: () => setConfirmInvite(false),
   })
   const discard = useMutation({
-    mutationFn: async () => api(`/api/admin/waitlist/${item?.id}/discard`, { method: "POST", body: JSON.stringify({ reason: reason.trim() }) }),
-    onSuccess: () => {
+    mutationFn: async (reason: string) =>
+      api(`/api/admin/waitlist/${item?.id}/discard`, { method: "POST", body: JSON.stringify({ reason }) }),
+  })
+  const discardForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: discardSchema },
+    onSubmit: async ({ value, formApi }) => {
+      await discard.mutateAsync(value.reason.trim())
+      formApi.reset()
       setDiscarding(false)
-      setReason("")
       refresh()
       onClose()
       toast.success("Solicitud descartada")
     },
   })
+  const discardError = useFormSubmitError(discardForm)
+  const discardPending = useStore(discardForm.store, (state) => state.isSubmitting)
+  const reason = useStore(discardForm.store, (state) => state.values.reason)
 
   const now = new Date()
   const seatsFull = seats?.limit !== null && seats !== null && seats.used >= (seats.limit ?? Number.POSITIVE_INFINITY)
@@ -484,7 +520,7 @@ function RequestDrawer({
       size="lg"
       onClose={onClose}
       isDirty={noteDirty || reason.trim().length > 0}
-      isSubmitting={invite.isPending || discard.isPending}
+      isSubmitting={invite.isPending || discardPending}
       title={item?.clinicName ?? "Solicitud"}
       isLoading={isLoading}
       error={!isLoading && !item ? "No encuentro esa solicitud en esta lista. Cambia el estado o búscala por nombre." : null}
@@ -533,22 +569,21 @@ function RequestDrawer({
           </DetailSection>
 
           <DetailSection title="Nota del equipo">
-            <div className="flex flex-col gap-2">
-              <FieldLabel htmlFor="espera-nota" className="sr-only">
-                Nota del equipo
-              </FieldLabel>
-              <Textarea id="espera-nota" rows={3} maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} />
+            <form noValidate onSubmit={onNoteSubmit} className="flex flex-col gap-2">
+              <noteForm.AppField name="note">
+                {(field) => <field.TextareaField id="espera-nota" label="Nota del equipo" hideLabel rows={3} maxLength={2000} />}
+              </noteForm.AppField>
               <div>
-                <SubmitButton variant="outline" size="sm" pending={saveNote.isPending} disabled={!noteDirty} onClick={() => saveNote.mutate()}>
+                <SubmitButton type="submit" variant="outline" size="sm" pending={noteSaving}>
                   Guardar nota
                 </SubmitButton>
               </div>
-              {saveNote.isError ? (
+              {noteError ? (
                 <p role="alert" className="text-sm text-destructive">
-                  No se guardó la nota. Tu texto sigue aquí.
+                  {noteError}
                 </p>
               ) : null}
-            </div>
+            </form>
           </DetailSection>
 
           {item.status === "entro" ? (
@@ -615,7 +650,7 @@ function RequestDrawer({
                 ) : null}
                 {invite.isError ? (
                   <p role="alert" className="text-sm text-destructive">
-                    {invite.error instanceof ApiError ? invite.error.message : "No se pudo invitar. Inténtalo de nuevo."}
+                    {submitErrorMessage(invite.error)}
                   </p>
                 ) : null}
               </div>
@@ -641,20 +676,17 @@ function RequestDrawer({
             description="Sale de la lista y, si tenía una invitación, deja de servir. No se le avisa."
             confirmLabel="Descartar"
             cancelLabel="Volver"
-            pending={discard.isPending}
-            confirmDisabled={reason.trim().length === 0}
-            onConfirm={() => discard.mutate()}
-            onClose={() => setDiscarding(false)}
+            pending={discardPending}
+            error={discardError}
+            onConfirm={() => void submitForm(discardForm)}
+            onClose={() => {
+              discardForm.reset()
+              setDiscarding(false)
+            }}
           >
-            <div className="flex flex-col gap-1.5">
-              <FieldLabel htmlFor="espera-motivo">Motivo</FieldLabel>
-              <Textarea id="espera-motivo" rows={3} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} />
-              {discard.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {discard.error instanceof ApiError ? discard.error.message : "No se pudo descartar."}
-                </p>
-              ) : null}
-            </div>
+            <discardForm.AppField name="reason">
+              {(field) => <field.TextareaField id="espera-motivo" label="Motivo (obligatorio)" rows={3} maxLength={500} />}
+            </discardForm.AppField>
           </ConfirmDialog>
         </div>
       ) : null}

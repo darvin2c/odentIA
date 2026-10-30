@@ -11,7 +11,7 @@ import {
 import { promotion, promotionServicePrice } from "@odentia/db/schema/promotions"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 
 /**
  * Promociones (fases 4–5): nombre, vigencia, precio por servicio (fijo o
@@ -76,7 +76,7 @@ function conflict(code: string, message: string): ServiceError {
 
 function assertName(name: string | null | undefined): string {
   const value = name?.trim() ?? ""
-  if (!value || value.length > 120) throw validation("name debe tener 1–120 caracteres")
+  if (!value || value.length > 120) throw invalidField("name", "Ponle un nombre de hasta 120 caracteres")
   return value
 }
 
@@ -124,8 +124,12 @@ async function audit(
   })
 }
 
-/** Servicio del tarifario de la org, activo; trae tarifa y moneda de referencia. */
-async function requireCatalogService(tx: Db, orgId: string, serviceId: string) {
+/**
+ * Servicio del tarifario de la org, activo; trae tarifa y moneda de referencia.
+ * `field` es la fila en el cuerpo (`items[2].serviceId`): el error se dice en ella.
+ * Sin `field` (cotizar con la promoción) el error no es de ningún dato del cuerpo.
+ */
+async function requireCatalogService(tx: Db, orgId: string, serviceId: string, field?: string) {
   const [row] = await tx
     .select({
       id: serviceCatalog.id,
@@ -137,8 +141,16 @@ async function requireCatalogService(tx: Db, orgId: string, serviceId: string) {
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
     .limit(1)
-  if (!row) throw notFound("Servicio")
-  if (!row.isActive) throw conflict("SERVICE_INACTIVE", "El servicio no está activo")
+  if (!row) {
+    if (!field) throw notFound("Servicio")
+    const message = "Este servicio ya no está en el tarifario: quítalo de la promoción"
+    throw new ServiceError("NOT_FOUND", 404, message, { [field]: message })
+  }
+  if (!row.isActive) {
+    if (!field) throw conflict("SERVICE_INACTIVE", "El servicio no está activo")
+    const message = `«${row.name}» no está activo: actívalo en el tarifario o quítalo de la promoción`
+    throw new ServiceError("SERVICE_INACTIVE", 409, message, { [field]: message })
+  }
   return row
 }
 async function withItems(
@@ -198,7 +210,7 @@ export async function createPromotion(
   const name = assertName(input.name)
   const startsAt = assertInstant(input.startsAt, "startsAt")
   const endsAt = input.endsAt === undefined || input.endsAt === null ? null : assertInstant(input.endsAt, "endsAt")
-  if (endsAt && endsAt < startsAt) throw validation("endsAt no puede ser anterior a startsAt")
+  if (endsAt && endsAt < startsAt) throw invalidField("endsAt", "No puede terminar antes de empezar")
   const conditions = assertConditions(input.conditions)
   const items = assertItems(input.items, true)
   // Lock de serie: evita duplicar nombres en altas concurrentes.
@@ -212,8 +224,8 @@ export async function createPromotion(
     .values({ organizationId: orgId, name, startsAt, endsAt, conditions, createdBy: actorUserId })
     .returning()
   if (!row) throw new Error("No se pudo crear la promoción")
-  for (const item of items) {
-    const service = await requireCatalogService(tx, orgId, item.serviceId)
+  for (const [index, item] of items.entries()) {
+    const service = await requireCatalogService(tx, orgId, item.serviceId, `items[${index}].serviceId`)
     await tx.insert(promotionServicePrice).values({
       organizationId: orgId,
       promotionId: row.id,
@@ -264,7 +276,7 @@ export async function updatePromotion(
       (endsAt?.getTime() ?? null) !== (current.endsAt?.getTime() ?? null)
     if (ended && moved)
       throw conflict("PROMOTION_ENDED", "La promoción ya terminó: crea una nueva con sus fechas")
-    if (endsAt && endsAt < startsAt) throw validation("endsAt no puede ser anterior a startsAt")
+    if (endsAt && endsAt < startsAt) throw invalidField("endsAt", "No puede terminar antes de empezar")
     set.startsAt = startsAt
     set.endsAt = endsAt
     fields.push("dates")
@@ -303,8 +315,8 @@ export async function updatePromotion(
         ),
       )
     const wanted = new Set(items.map((item) => item.serviceId))
-    for (const item of items) {
-      const service = await requireCatalogService(tx, orgId, item.serviceId)
+    for (const [index, item] of items.entries()) {
+      const service = await requireCatalogService(tx, orgId, item.serviceId, `items[${index}].serviceId`)
       await tx
         .insert(promotionServicePrice)
         .values({

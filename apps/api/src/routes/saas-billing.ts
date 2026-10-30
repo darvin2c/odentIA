@@ -141,7 +141,7 @@ function forbid(c: Context, message = "No tienes acceso a facturación") {
 }
 
 const cents = z.number().int().min(0).max(2147483647)
-const currency = z.string().regex(/^[A-Z]{3}$/)
+const currency = z.string().regex(/^[A-Z]{3}$/, "Elige la moneda (código de tres letras, como PEN o USD)")
 const isoDateTime = z.iso.datetime({ offset: true })
 const tierPrices = {
   conversationInformMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
@@ -151,10 +151,12 @@ const tierPrices = {
   argosPackMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
   storageGbMicros: z.number().int().min(0).max(1_000_000_000).nullish(),
 }
+/** Un entero del plan con un solo mensaje, el del campo, para cualquier fallo (vacío, decimales o fuera de rango). */
+const planInt = (min: number, max: number, message: string) => z.number({ error: message }).int(message).min(min, message).max(max, message)
 const planInput = z
   .object({
-    code: z.string().trim().min(1).max(80),
-    name: z.string().trim().min(1).max(120),
+    code: z.string().trim().min(1, "Escribe el código del plan").max(80, "Escribe como mucho 80 caracteres"),
+    name: z.string().trim().min(1, "Escribe el nombre del plan").max(120, "Escribe como mucho 120 caracteres"),
     // El producto del plan (ADR 0093): se elige al crearlo; al editar, solo puede repetirse.
     product: z.enum(CLINICAL_PRODUCTS).optional(),
     description: z.string().max(2000).nullish(),
@@ -169,21 +171,21 @@ const planInput = z
     // Por tipo, preguntas a Argos y almacenamiento (ADR 0085).
     ...tierPrices,
     // Mensajes de la persona que cubre cada Informa, en sombra (ADR 0105); null = sin tope.
-    informMessageLimit: z.number().int().min(1).max(1000).nullish(),
-    argosIncludedQuestions: z.number().int().min(0).max(100_000).optional(),
-    argosPackQuestions: z.number().int().min(1).max(10_000).optional(),
-    storageIncludedGb: z.number().int().min(0).max(100_000).optional(),
+    informMessageLimit: planInt(1, 1000, "Escribe de 1 a 1000 mensajes, o déjalo vacío para no poner tope").nullish(),
+    argosIncludedQuestions: planInt(0, 100_000, "Escribe un número entero de 0 a 100000").optional(),
+    argosPackQuestions: planInt(1, 10_000, "Escribe un número entero de 1 a 10000").optional(),
+    storageIncludedGb: planInt(0, 100_000, "Escribe un número entero de 0 a 100000").optional(),
     fixedPriceTiers: z.array(z.string()).max(20).optional(),
-    maxDiscountBps: z.number().int().min(0).max(9000).optional(),
-    sellerDiscountBps: z.number().int().min(0).max(9000).optional(),
+    maxDiscountBps: planInt(0, 9000, "Escribe un porcentaje de 0 a 90").optional(),
+    sellerDiscountBps: planInt(0, 9000, "Escribe un porcentaje de 0 a 90").optional(),
     trialCreditCents: cents.optional(),
-    trialDays: z.number().int().min(1).max(365).optional(),
+    trialDays: planInt(1, 365, "Escribe de 1 a 365 días").optional(),
     trialMaxCreditCents: cents.optional(),
-    trialMaxDays: z.number().int().min(1).max(365).optional(),
+    trialMaxDays: planInt(1, 365, "Escribe de 1 a 365 días").optional(),
     isDefault: z.boolean().optional(),
     showOnWeb: z.boolean().optional(),
-    seatLimit: z.number().int().min(1).max(100000).nullish(),
-    guaranteeMonths: z.number().int().min(1).max(120).nullish(),
+    seatLimit: planInt(1, 100000, "Escribe un número entero mayor que cero, o déjalo vacío").nullish(),
+    guaranteeMonths: planInt(1, 120, "Escribe de 1 a 120 meses, o déjalo vacío").nullish(),
   })
   .strict()
 
@@ -301,7 +303,7 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const actor = requireAdmin(c)
     if (!actor) return forbid(c, "Solo administración asigna planes")
     const parsed = z
-      .object({ planCode: z.string().trim().min(1).max(80) })
+      .object({ planCode: z.string().trim().min(1, "Elige el plan").max(80, "Elige un plan de la lista") })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -546,11 +548,13 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     if (!actor) return forbid(c, "Solo administración configura medios de pago")
     const parsed = z
       .object({
-        code: z.string().trim().min(1).max(80),
-        name: z.string().trim().min(1).max(120),
-        instructions: z.string().max(2000).nullish(),
+        code: z.string().trim().min(1, "Escribe el código del medio").max(80, "Escribe el código en 80 caracteres como mucho"),
+        name: z.string().trim().min(1, "Escribe el nombre del medio").max(120, "Escribe el nombre en 120 caracteres como mucho"),
+        instructions: z.string().max(2000, "Escribe las instrucciones en 2000 caracteres como mucho").nullish(),
         isActive: z.boolean().optional(),
         sortOrder: z.number().int().min(0).max(100000).optional(),
+        // «Nuevo medio»: un código ya existente se rechaza (409) en vez de sobrescribirse.
+        create: z.boolean().optional(),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -574,9 +578,9 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const parsed = z
       .object({
         organizationId: z.string().min(1),
-        planCode: z.string().trim().min(1).max(80),
-        periodStart: isoDateTime,
-        periodEnd: isoDateTime,
+        planCode: z.string().trim().min(1, "Elige el plan").max(80, "Elige un plan de la lista"),
+        periodStart: z.iso.datetime({ offset: true, error: "Elige el inicio del período" }),
+        periodEnd: z.iso.datetime({ offset: true, error: "Elige el fin del período" }),
         dueAt: isoDateTime.optional(),
       })
       .strict()
@@ -657,7 +661,10 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const actor = requireAdmin(c)
     if (!actor) return forbid(c, "Solo administración reversa pagos")
     const parsed = z
-      .object({ organizationId: z.string().min(1), reason: z.string().trim().min(1).max(2000) })
+      .object({
+        organizationId: z.string().min(1),
+        reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "Escribe el motivo en 2000 caracteres como mucho"),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -688,7 +695,10 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const actor = requireAdmin(c)
     if (!actor) return forbid(c, "Solo administración devuelve pagos")
     const parsed = z
-      .object({ organizationId: z.string().min(1), reason: z.string().trim().min(1).max(2000) })
+      .object({
+        organizationId: z.string().min(1),
+        reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "Escribe el motivo en 2000 caracteres como mucho"),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -733,34 +743,38 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const notes = field("notes")
     const paidAtRaw = field("paidAt")
     const file: unknown = form.get("file")
-    if (
-      !organizationId ||
-      !chargeId ||
-      !methodCode ||
-      !amountRaw ||
-      !idempotencyKey ||
-      !(file instanceof File)
-    ) {
-      return c.json(errorBody(c, "VALIDATION", "Faltan datos del pago"), 400)
+    // Cada dato que falta se dice en su campo (nombres del multipart).
+    const missing: Record<string, string> = {}
+    if (!organizationId) missing.organizationId = "Elige la clínica"
+    if (!chargeId) missing.chargeId = "Elige el cargo"
+    if (!methodCode) missing.methodCode = "Elige el medio usado"
+    if (!amountRaw) missing.amountCents = "Escribe el importe"
+    if (!(file instanceof File)) missing.file = "Adjunta el comprobante recibido"
+    if (!organizationId || !chargeId || !methodCode || !amountRaw || !idempotencyKey || !(file instanceof File)) {
+      return c.json(errorBody(c, "VALIDATION", "Faltan datos del pago", missing), 400)
     }
     const amountCents = Number(amountRaw)
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
-      return c.json(errorBody(c, "VALIDATION", "El importe debe ser un entero mayor que cero"), 400)
+      const message = "El importe debe ser un entero mayor que cero"
+      return c.json(errorBody(c, "VALIDATION", message, { amountCents: message }), 400)
     }
     let paidAt: Date | undefined
     if (paidAtRaw) {
       const parsed = new Date(paidAtRaw)
       if (!Number.isFinite(parsed.getTime())) {
-        return c.json(errorBody(c, "VALIDATION", "Fecha de pago inválida"), 400)
+        const message = "Elige la fecha de pago"
+        return c.json(errorBody(c, "VALIDATION", message, { paidAt: message }), 400)
       }
       paidAt = parsed
     }
     const validMime: readonly string[] = RECEIPT_UPLOAD_MIME
     if (!validMime.includes(file.type)) {
-      return c.json(errorBody(c, "VALIDATION", "El comprobante debe ser PNG, JPG, WebP o PDF"), 400)
+      const message = "El comprobante debe ser PNG, JPG, WebP o PDF"
+      return c.json(errorBody(c, "VALIDATION", message, { file: message }), 400)
     }
     if (file.size > RECEIPT_UPLOAD_MAX_BYTES || file.size === 0) {
-      return c.json(errorBody(c, "VALIDATION", "El comprobante debe pesar entre 1 B y 10 MB"), 400)
+      const message = "El comprobante debe pesar entre 1 B y 10 MB"
+      return c.json(errorBody(c, "VALIDATION", message, { file: message }), 400)
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
     return runStaffWrite(
@@ -816,9 +830,18 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const parsed = z
       .object({
         userId: z.string().min(1).nullish(),
-        displayName: z.string().trim().min(1).max(120),
-        rateBps: z.number().int().min(0).max(10000),
-        windowDays: z.number().int().min(0).max(730).optional(),
+        displayName: z.string().trim().min(1, "Escribe el nombre del vendedor").max(120, "Escribe el nombre en 120 caracteres como mucho"),
+        rateBps: z
+          .number({ error: "Escribe el porcentaje" })
+          .int("El porcentaje admite hasta dos decimales")
+          .min(0, "El porcentaje debe estar entre 0 y 100 %")
+          .max(10000, "El porcentaje debe estar entre 0 y 100 %"),
+        windowDays: z
+          .number({ error: "Escribe la ventana en días" })
+          .int("Escribe la ventana en días enteros")
+          .min(0, "La ventana debe estar entre 0 y 730 días")
+          .max(730, "La ventana debe estar entre 0 y 730 días")
+          .optional(),
         isActive: z.boolean().optional(),
       })
       .strict()
@@ -863,9 +886,17 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     if (!actor) return forbid(c, "Solo administración liquida comisiones")
     const parsed = z
       .object({
-        sellerId: z.string().min(1),
-        year: z.number().int().min(2000).max(2100),
-        month: z.number().int().min(1).max(12),
+        sellerId: z.string().min(1, "Elige el vendedor"),
+        year: z
+          .number({ error: "Escribe el año" })
+          .int("Escribe el año con cuatro cifras")
+          .min(2000, "El año debe estar entre 2000 y 2100")
+          .max(2100, "El año debe estar entre 2000 y 2100"),
+        month: z
+          .number({ error: "Escribe el mes" })
+          .int("Escribe el mes con un número del 1 al 12")
+          .min(1, "El mes debe estar entre 1 y 12")
+          .max(12, "El mes debe estar entre 1 y 12"),
         currency,
         notes: z.string().max(2000).nullish(),
       })
@@ -934,7 +965,7 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
       return c.json({ data: result.settlement }, 201)
     } catch (e) {
       if (e instanceof ServiceError) {
-        return c.json(errorBody(c, e.code, e.message), e.status)
+        return c.json(errorBody(c, e.code, e.message, e.fields), e.status)
       }
       throw e
     }
@@ -944,7 +975,7 @@ export function createSaasBillingRoute(deps: SaasBillingAdminDeps) {
     const actor = requireAdmin(c)
     if (!actor) return forbid(c, "Solo administración anula liquidaciones")
     const parsed = z
-      .object({ reason: z.string().trim().min(1).max(2000) })
+      .object({ reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "Escribe el motivo en 2000 caracteres como mucho") })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -1120,7 +1151,15 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
   // C5: el presupuesto del mes, por encima del crédito (ADR 0085).
   app.post("/spend-cap", async (c) => {
     const parsed = z
-      .object({ orgId: z.string().min(1), capCents: cents.nullable() })
+      .object({
+        orgId: z.string().min(1),
+        capCents: z
+          .number("El presupuesto debe ser un importe válido")
+          .int("El presupuesto debe ser un importe válido")
+          .min(0, "El presupuesto no puede ser negativo")
+          .max(2147483647, "El presupuesto es demasiado alto")
+          .nullable(),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -1218,8 +1257,8 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const parsed = z
       .object({
         orgId: z.string().min(1),
-        reason: z.enum(SAAS_REVIEW_REASONS),
-        note: z.string().max(1000).nullable().optional(),
+        reason: z.enum(SAAS_REVIEW_REASONS, "Elige por qué no debió cobrarse"),
+        note: z.string().max(1000, "Lo que cuentas admite hasta 1000 caracteres").nullable().optional(),
         allowRead: z.boolean().optional(),
       })
       .strict()
@@ -1327,26 +1366,31 @@ export function createAccountBillingRoute(deps: SaasBillingAccountDeps) {
     const idempotencyKey = field("idempotencyKey")
     const notes = field("notes")
     const file: unknown = form.get("file")
-    if (
-      !orgId ||
-      !chargeId ||
-      !methodCode ||
-      !amountRaw ||
-      !idempotencyKey ||
-      !(file instanceof File)
-    ) {
+    if (!orgId || !idempotencyKey) {
       return c.json(errorBody(c, "VALIDATION", "Faltan datos del comprobante"), 400)
+    }
+    // Lo que falta, junto a su campo (con el nombre del formulario multipart).
+    const missing: Record<string, string> = {}
+    if (!chargeId) missing.chargeId = "Elige el cargo"
+    if (!methodCode) missing.methodCode = "Elige el medio usado"
+    if (!amountRaw) missing.amountCents = "Escribe el importe"
+    if (!(file instanceof File)) missing.file = "Adjunta el comprobante"
+    if (!chargeId || !methodCode || !amountRaw || !(file instanceof File)) {
+      return c.json(errorBody(c, "VALIDATION", "Faltan datos del comprobante", missing), 400)
     }
     const amountCents = Number(amountRaw)
     if (!Number.isInteger(amountCents) || amountCents <= 0) {
-      return c.json(errorBody(c, "VALIDATION", "El importe debe ser un entero mayor que cero"), 400)
+      const message = "El importe debe ser un entero mayor que cero"
+      return c.json(errorBody(c, "VALIDATION", message, { amountCents: message }), 400)
     }
     const validMime: readonly string[] = RECEIPT_UPLOAD_MIME
     if (!validMime.includes(file.type)) {
-      return c.json(errorBody(c, "VALIDATION", "El comprobante debe ser PNG, JPG, WebP o PDF"), 400)
+      const message = "El comprobante debe ser PNG, JPG, WebP o PDF"
+      return c.json(errorBody(c, "VALIDATION", message, { file: message }), 400)
     }
     if (file.size > RECEIPT_UPLOAD_MAX_BYTES || file.size === 0) {
-      return c.json(errorBody(c, "VALIDATION", "El comprobante debe pesar entre 1 B y 10 MB"), 400)
+      const message = "El comprobante debe pesar entre 1 B y 10 MB"
+      return c.json(errorBody(c, "VALIDATION", message, { file: message }), 400)
     }
     const membership = await accountMember(deps, c, orgId)
     if (!membership)

@@ -77,11 +77,13 @@ test("etapas de venta y campos de contacto: se editan al lado, con palabras y si
     options: ["Redes sociales", "Recomendación", "Pasó por la clínica"],
   })
 
-  // Dos campos no se llaman igual: el servidor lo dice y lo escrito se conserva.
+  // Dos campos no se llaman igual: el servidor lo dice junto al Nombre y lo escrito se conserva.
   await page.getByRole("button", { name: "Nuevo campo", exact: true }).click()
   await newField.getByLabel("Nombre", { exact: true }).fill("origen")
   await newField.getByRole("button", { name: "Guardar", exact: true }).click()
-  await expect(newField.getByRole("alert").filter({ hasText: "Ya hay un campo con ese nombre" })).toBeVisible()
-  await expect(newField.getByLabel("Nombre", { exact: true })).toHaveValue("origen")
+  const takenName = newField.getByLabel("Nombre", { exact: true })
+  await expect(takenName).toHaveAttribute("aria-invalid", "true")
+  await expect(takenName).toHaveAccessibleDescription(/Ya hay un campo con ese nombre/)
+  await expect(takenName).toHaveValue("origen")
   expect(await fields()).toHaveLength(1)
 })

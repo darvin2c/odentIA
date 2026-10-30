@@ -1,20 +1,22 @@
 import { AGENTS, type DayEvent } from "@odentia/brand-scene"
-import { Checkbox, Field, FieldError, FieldGroup, FieldLabel, Input, Separator } from "@odentia/ui"
+import { FieldGroup, Separator } from "@odentia/ui"
 import {
   AuthAside,
   AuthSplit,
-  fieldErrorMessages,
-  PasswordInput,
+  type PasswordRequirement,
   SubmitButton,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
   usePasswordRequirements,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Check } from "lucide-react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { API_URL, authClient } from "../lib/auth-client"
+import { authError, authFailureOf, authFormMessage } from "../lib/auth-error"
 import { AuthAlert, AuthLegal } from "../lib/auth-screens"
 import { creditText } from "../lib/credit"
 import { invitationQuery, moneyText, rememberInvitation } from "../lib/founders"
@@ -54,7 +56,8 @@ const registration = z.object({
   firstName: z.string().trim().min(1, "Escribe tu nombre"),
   lastName: z.string().trim().min(1, "Escribe tus apellidos"),
   email: z.string().email("Escribe un correo válido, como nombre@clinica.com"),
-  password: z.string().min(8, "Usa al menos 8 caracteres"),
+  // Los mismos límites que Better Auth (8 a 128).
+  password: z.string().min(8, "Usa al menos 8 caracteres").max(128, "Usa como mucho 128 caracteres"),
   terms: z.literal(true, { error: "Acepta los documentos para crear tu cuenta" }),
 })
 
@@ -93,13 +96,10 @@ function RegisterPage() {
       ? `/onboarding?invitacion=${encodeURIComponent(founderToken)}`
       : "/"
   const [work, setWork] = useState<DayEvent | null>(null)
-  const [problem, setProblem] = useState<{
-    field: "email" | "password" | "form"
-    text: string
-    reload?: boolean
-  } | null>(null)
+  // Documentos que cambiaron o no cargaron: el aviso junto al botón ofrece recargar.
+  const [reload, setReload] = useState(false)
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: {
       firstName: "",
       lastName: "",
@@ -109,15 +109,12 @@ function RegisterPage() {
     },
     validators: { onSubmit: registration },
     onSubmit: async ({ value }) => {
-      setProblem(null)
+      setReload(false)
       if (!info.data) {
-        setProblem({
-          field: "form",
-          text: "No pudimos cargar los documentos. Recarga la página.",
-          reload: true,
-        })
-        return
+        setReload(true)
+        throw new Error("No pudimos cargar los documentos. Recarga la página.")
       }
+      // Un correo ya registrado no da error (Better Auth no revela qué cuentas existen): se sigue igual.
       const { error } = await authClient.signUp.email({
         name: `${value.firstName.trim()} ${value.lastName.trim()}`.trim(),
         firstName: value.firstName.trim(),
@@ -130,18 +127,15 @@ function RegisterPage() {
         callbackURL: `${window.location.origin}${nextPath}`,
       })
       if (error) {
-        const code = error.code ?? ""
-        if (code.startsWith("USER_ALREADY_EXISTS")) setProblem({ field: "email", text: "exists" })
-        else if (code === "PASSWORD_COMPROMISED" || code === "PASSWORD_TOO_SHORT")
-          setProblem({ field: "password", text: error.message ?? "Elige otra contraseña." })
-        else if (code === "TERMS_OUTDATED")
-          setProblem({ field: "form", text: error.message ?? "", reload: true })
-        else
-          setProblem({
-            field: "form",
-            text: error.message ?? "No pudimos crear la cuenta. Inténtalo de nuevo.",
-          })
-        return
+        if (authFailureOf(error).code === "TERMS_OUTDATED") setReload(true)
+        throw authError(error, {
+          fields: {
+            INVALID_EMAIL: "email",
+            PASSWORD_TOO_SHORT: "password",
+            PASSWORD_TOO_LONG: "password",
+            PASSWORD_COMPROMISED: "password",
+          },
+        })
       }
       await navigate(
         invitationId
@@ -150,6 +144,8 @@ function RegisterPage() {
       )
     },
   })
+  const onSubmit = useFormSubmit(form, { formMessage: authFormMessage })
+  const submitError = useFormSubmitError(form)
 
   // La invitación trae su correo: se escribe solo y no se cambia (vale para ese correo).
   useEffect(() => {
@@ -231,177 +227,92 @@ function RegisterPage() {
           <Separator className="flex-1" aria-hidden />
         </div>
       </div>
-      <form
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
+      <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <form.Field name="firstName">
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="firstName">Nombre</FieldLabel>
-                  <Input
-                    id="firstName"
-                    aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                    aria-describedby={
-                      field.state.meta.errors.length ? "firstName-error" : undefined
-                    }
-                    autoComplete="given-name"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError id="firstName-error">
-                    {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                  </FieldError>
-                </Field>
-              )}
-            </form.Field>
-            <form.Field name="lastName">
-              {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="lastName">Apellidos</FieldLabel>
-                  <Input
-                    id="lastName"
-                    aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                    aria-describedby={field.state.meta.errors.length ? "lastName-error" : undefined}
-                    autoComplete="family-name"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError id="lastName-error">
-                    {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                  </FieldError>
-                </Field>
-              )}
-            </form.Field>
+            <form.AppField name="firstName">
+              {(field) => <field.TextField label="Nombre" id="firstName" autoComplete="given-name" />}
+            </form.AppField>
+            <form.AppField name="lastName">
+              {(field) => <field.TextField label="Apellidos" id="lastName" autoComplete="family-name" />}
+            </form.AppField>
           </div>
-          <form.Field name="email">
-            {(field) => {
-              const exists = problem?.field === "email"
-              return (
-                <Field>
-                  <FieldLabel htmlFor="email">Correo</FieldLabel>
-                  <Input
-                    id="email"
-                    aria-invalid={field.state.meta.errors.length > 0 || exists || undefined}
-                    aria-describedby={
-                      field.state.meta.errors.length || exists ? "email-error" : undefined
-                    }
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    readOnly={Boolean(founder)}
-                    value={field.state.value}
-                    onChange={(event) => {
-                      field.handleChange(event.target.value)
-                      if (exists) setProblem(null)
-                    }}
-                  />
-                  {founder ? <p className="text-xs text-muted-foreground">Es el correo de tu invitación.</p> : null}
-                  <FieldError id="email-error">
-                    {exists ? (
-                      <>
-                        Ya hay una cuenta con este correo.{" "}
-                        <Link to="/login" className="underline">
-                          Entra
-                        </Link>{" "}
-                        o{" "}
-                        <Link
-                          to="/forgot-password"
-                          search={{ email: field.state.value }}
-                          className="underline"
-                        >
-                          recupera tu contraseña
-                        </Link>
-                        .
-                      </>
-                    ) : (
-                      (fieldErrorMessages(field.state.meta.errors)[0] ?? null)
-                    )}
-                  </FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="password">
+          <form.AppField name="email">
             {(field) => (
-              <NewPasswordField
-                value={field.state.value}
-                onChange={(v) => {
-                  field.handleChange(v)
-                  if (problem?.field === "password") setProblem(null)
-                }}
-                error={
-                  problem?.field === "password"
-                    ? problem.text
-                    : fieldErrorMessages(field.state.meta.errors)[0]
+              <field.TextField
+                label="Correo"
+                id="email"
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                readOnly={Boolean(founder)}
+                description={founder ? "Es el correo de tu invitación." : undefined}
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="password">
+            {(field) => (
+              <WithPasswordRequirements password={field.state.value}>
+                {(requirements) => (
+                  <field.PasswordField
+                    label="Contraseña"
+                    id="password"
+                    autoComplete="new-password"
+                    requirements={requirements}
+                  />
+                )}
+              </WithPasswordRequirements>
+            )}
+          </form.AppField>
+          <form.AppField name="terms">
+            {(field) => (
+              <field.CheckboxField
+                id="terms"
+                className="text-muted-foreground"
+                label={
+                  <span className="font-normal">
+                    Acepto los{" "}
+                    <a
+                      href={webUrl("/terminos")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-foreground underline"
+                    >
+                      Términos del servicio
+                    </a>
+                    {invitationId ? " y el " : ", el "}
+                    <a
+                      href={webUrl("/privacidad")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-foreground underline"
+                    >
+                      Aviso de privacidad
+                    </a>
+                    {invitationId ? null : (
+                      <>
+                        {" "}
+                        y el{" "}
+                        <a
+                          href={webUrl("/encargo-de-tratamiento")}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-foreground underline"
+                        >
+                          Contrato de encargo de tratamiento
+                        </a>
+                      </>
+                    )}
+                    .
+                  </span>
                 }
               />
             )}
-          </form.Field>
-          <form.Field name="terms">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <div className="flex items-start gap-2.5 text-sm text-muted-foreground">
-                    <Checkbox
-                      id="terms"
-                      className="mt-0.5"
-                      checked={field.state.value}
-                      aria-invalid={error ? true : undefined}
-                      aria-describedby={error ? "terms-error" : undefined}
-                      onCheckedChange={(checked) => field.handleChange(checked === true)}
-                    />
-                    <label htmlFor="terms">
-                      Acepto los{" "}
-                      <a
-                        href={webUrl("/terminos")}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-foreground underline"
-                      >
-                        Términos del servicio
-                      </a>
-                      {invitationId ? " y el " : ", el "}
-                      <a
-                        href={webUrl("/privacidad")}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-foreground underline"
-                      >
-                        Aviso de privacidad
-                      </a>
-                      {invitationId ? null : (
-                        <>
-                          {" "}
-                          y el{" "}
-                          <a
-                            href={webUrl("/encargo-de-tratamiento")}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-foreground underline"
-                          >
-                            Contrato de encargo de tratamiento
-                          </a>
-                        </>
-                      )}
-                      .
-                    </label>
-                  </div>
-                  <FieldError id="terms-error">{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          {problem?.field === "form" ? (
+          </form.AppField>
+          {submitError ? (
             <AuthAlert>
-              {problem.text}{" "}
-              {problem.reload ? (
+              {submitError}{" "}
+              {reload ? (
                 <button
                   type="button"
                   className="font-semibold underline"
@@ -474,29 +385,14 @@ function AgentWork({ work }: { work: DayEvent }) {
   )
 }
 
-function NewPasswordField({
-  value,
-  onChange,
-  error,
+/** Los requisitos de la contraseña nueva (largo y filtraciones) mientras se escribe. */
+function WithPasswordRequirements({
+  password,
+  children,
 }: {
-  value: string
-  onChange: (value: string) => void
-  error?: string | undefined
+  password: string
+  children: (requirements: PasswordRequirement[]) => React.ReactNode
 }) {
-  const { requirements } = usePasswordRequirements(value)
-  return (
-    <Field>
-      <FieldLabel htmlFor="password">Contraseña</FieldLabel>
-      <PasswordInput
-        id="password"
-        value={value}
-        onChange={onChange}
-        autoComplete="new-password"
-        invalid={!!error}
-        describedBy={error ? "password-error" : undefined}
-        requirements={requirements}
-      />
-      <FieldError id="password-error">{error ?? null}</FieldError>
-    </Field>
-  )
+  const { requirements } = usePasswordRequirements(password)
+  return <>{children(requirements)}</>
 }

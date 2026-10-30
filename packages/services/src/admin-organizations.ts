@@ -18,7 +18,7 @@ import { and, desc, eq, gte, ilike, inArray, lt, or, sql } from "drizzle-orm"
 import { z } from "zod"
 import type { AdminActor } from "./admin-core.js"
 import { writeAdminAudit } from "./admin-core.js"
-import { ServiceError } from "./errors.js"
+import { invalidField, isUniqueViolation, issueFields, ServiceError } from "./errors.js"
 
 /**
  * Administración de organizaciones y usuarios.
@@ -759,15 +759,21 @@ export async function createAssistedOrganization(
 ): Promise<AssistedOrganizationResult> {
   const staff = requireStaff(actor)
   const parsed = assistedInputSchema.safeParse(raw)
-  if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "Datos inválidos")
+  if (!parsed.success) {
+    const message = parsed.error.issues[0]?.message ?? "Datos inválidos"
+    throw new ServiceError("VALIDATION", 400, message, issueFields(parsed.error.issues))
+  }
   const input = parsed.data
-  if (RESERVED_ORG_SLUGS[input.slug]) throw invalid("Ese subdominio está reservado")
+  if (RESERVED_ORG_SLUGS[input.slug]) throw invalidField("slug", "Ese subdominio está reservado")
   const [slugTaken] = await tx
     .select({ id: organization.id })
     .from(organization)
     .where(eq(organization.slug, input.slug))
     .limit(1)
-  if (slugTaken) throw conflict("Ese subdominio ya está en uso")
+  if (slugTaken) {
+    const message = "Ese subdominio ya está en uso"
+    throw new ServiceError("CONFLICT", 409, message, { slug: message })
+  }
 
   const organizationId = randomUUID()
   const now = new Date()
@@ -786,12 +792,20 @@ export async function createAssistedOrganization(
     currency: input.currency,
     timezone: input.timezone,
   })
-  await tx.insert(organization).values({
-    id: organizationId,
-    name: input.orgName,
-    slug: input.slug,
-    createdAt: now,
-  })
+  await tx
+    .insert(organization)
+    .values({
+      id: organizationId,
+      name: input.orgName,
+      slug: input.slug,
+      createdAt: now,
+    })
+    .catch((error: unknown) => {
+      // Otra alta tomó el subdominio entre la comprobación y el insert.
+      if (!isUniqueViolation(error)) throw error
+      const message = "Ese subdominio ya está en uso"
+      throw new ServiceError("CONFLICT", 409, message, { slug: message })
+    })
   await tx.insert(orgProfile).values({
     organizationId,
     product: input.product ?? "dental",
@@ -1161,7 +1175,7 @@ export async function setGlobalBlock(
 ): Promise<void> {
   const staff = requireAdmin(actor)
   const parsed = reasonSchema.safeParse(args.reason)
-  if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "Motivo inválido")
+  if (!parsed.success) throw invalidField("reason", parsed.error.issues[0]?.message ?? "Motivo inválido")
   const [exists] = await tx
     .select({ id: user.id })
     .from(user)
@@ -1259,7 +1273,7 @@ export async function closeAccountByAdmin(
 ): Promise<void> {
   const staff = requireAdmin(actor)
   const parsed = reasonSchema.safeParse(args.reason)
-  if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "Motivo inválido")
+  if (!parsed.success) throw invalidField("reason", parsed.error.issues[0]?.message ?? "Motivo inválido")
   const [exists] = await tx
     .select({ id: user.id })
     .from(user)
@@ -1615,7 +1629,9 @@ export async function openRecoveryCase(
 ): Promise<RecoveryCaseDetail> {
   const staff = requireStaff(actor)
   const parsed = openCaseSchema.safeParse(raw)
-  if (!parsed.success) throw invalid(parsed.error.issues[0]?.message ?? "Datos inválidos")
+  if (!parsed.success) {
+    throw new ServiceError("VALIDATION", 400, parsed.error.issues[0]?.message ?? "Datos inválidos", issueFields(parsed.error.issues))
+  }
   const [subject] = await tx
     .select({ id: user.id })
     .from(user)

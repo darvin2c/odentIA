@@ -268,14 +268,23 @@ export interface SignatureRegistration {
   registrationNumber: string
 }
 
-/** Lo que pide el servidor para firmar (`requireProfessionalSignature`): título, colegio y número. */
-export function signatureRegistrationError(values: SignatureRegistration): string | null {
-  if (!values.professionalTitle.trim()) return "Escribe tu título profesional"
-  if (!values.registrationBody.trim()) return "Escribe tu colegio profesional"
-  if (!values.registrationNumber.trim()) return "Escribe tu número de colegiatura"
-  if (!/^[A-Za-z0-9-]{1,20}$/.test(values.registrationNumber.trim()))
-    return "La colegiatura lleva solo letras, números y guiones (hasta 20)"
-  return null
+/**
+ * Lo que pide el servidor para firmar (`requireProfessionalSignature`): título,
+ * colegio y número. Cada falta va en su campo; vacío: se puede firmar.
+ */
+export function signatureRegistrationErrors(
+  values: SignatureRegistration,
+): Partial<Record<keyof SignatureRegistration, string>> {
+  const errors: Partial<Record<keyof SignatureRegistration, string>> = {}
+  if (!values.professionalTitle.trim()) errors.professionalTitle = "Escribe tu título profesional"
+  const body = values.registrationBody.trim()
+  if (!body) errors.registrationBody = "Escribe tu colegio profesional"
+  else if (body.length > 40) errors.registrationBody = "El colegio profesional admite hasta 40 caracteres"
+  const number = values.registrationNumber.trim()
+  if (!number) errors.registrationNumber = "Escribe tu número de colegiatura"
+  else if (!/^[A-Za-z0-9-]{1,20}$/.test(number))
+    errors.registrationNumber = "La colegiatura lleva solo letras, números y guiones (hasta 20)"
+  return errors
 }
 
 /** Colegio y número («<colegio> <número>») o null si falta la colegiatura. */

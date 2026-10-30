@@ -186,6 +186,10 @@ export function useDictationSession({
   const [unused, setUnused] = useState<UnusedDictation>(NOTHING_UNUSED)
   const [demo, setDemo] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  // La sugerencia en la que se detuvo «Confirmar las N listas», para decir cuál falló.
+  const [confirmReadyFailed, setConfirmReadyFailed] = useState<DictationSuggestion | null>(null)
+  // La marcada en la que se detuvo «Firmar con N marcadas»: el aviso de la firma dice cuál.
+  const [confirmManyFailed, setConfirmManyFailed] = useState<DictationSuggestion | null>(null)
 
   const recognition = useRef<SpeechLike | null>(null)
   const wanted = useRef(false)
@@ -455,11 +459,17 @@ export function useDictationSession({
     retry: false,
     mutationFn: async () => {
       const done: DictationSuggestion[] = []
+      let current: DictationSuggestion | null = null
+      setConfirmReadyFailed(null)
       try {
         for (const item of suggestions.filter(confirmable)) {
+          current = item
           await apiFetch(`${base}/${item.id}/confirm`, { method: "POST" })
           done.push(item)
         }
+      } catch (error) {
+        setConfirmReadyFailed(current)
+        throw error
       } finally {
         // Las que sí entraron se reflejan aunque una posterior falle.
         for (const item of done) onApplied(item)
@@ -474,8 +484,11 @@ export function useDictationSession({
     retry: false,
     mutationFn: async (ids: string[]) => {
       const done: DictationSuggestion[] = []
+      let current: DictationSuggestion | null = null
+      setConfirmManyFailed(null)
       try {
         for (const item of suggestions.filter((candidate) => ids.includes(candidate.id) && confirmable(candidate))) {
+          current = item
           const response = await apiFetch<{ data?: DictationSuggestion } | undefined>(`${base}/${item.id}/confirm`, { method: "POST" })
           // Un hueco que se ocupó no se reserva: se firma después de elegir el que quedó.
           if (response?.data && response.data.status !== "confirmada") {
@@ -483,6 +496,9 @@ export function useDictationSession({
           }
           done.push(item)
         }
+      } catch (error) {
+        setConfirmManyFailed(current)
+        throw error
       } finally {
         for (const item of done) onApplied(item)
       }
@@ -519,6 +535,8 @@ export function useDictationSession({
   const dictating = mode !== "off"
   return {
     enabled,
+    confirmReadyFailed,
+    confirmManyFailed,
     base,
     suggestions,
     /** Quitadas por voz, a la vista en su bloque con «Deshacer». No cuentan como pendientes. */

@@ -1,7 +1,9 @@
-import { Button, cn, Field, FieldDescription, FieldLabel, Textarea, useIsMobile } from "@odentia/ui"
-import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Button, cn, useIsMobile } from "@odentia/ui"
+import { FormDrawer, SubmitButton, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type FormEvent, useEffect, useState } from "react"
+import { useEffect } from "react"
+import { z } from "zod"
 import {
   ANSWER_CHECK_LABEL,
   type AnswerBasisItem,
@@ -13,7 +15,27 @@ import {
 } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
-import { mutationErrorMessage } from "../../lib/query-error"
+
+const CORRECTED_REPLY_CHARS = 2000
+
+/**
+ * Lo que pide `POST /api/agent/learning/corrections`, con sus mismas palabras.
+ * «No debió responder» no necesita una respuesta alternativa: la regla es pasar el caso.
+ */
+const correctionSchema = z
+  .object({ failure: z.custom<CorrectionFailure | "">((value) => typeof value === "string"), correctedReply: z.string() })
+  .superRefine((value, ctx) => {
+    if (!FAILURE_OPTIONS.some((option) => option.value === value.failure)) {
+      ctx.addIssue({ code: "custom", path: ["failure"], message: "Elige qué falló" })
+    }
+    const text = value.correctedReply.trim()
+    if (!text && value.failure !== "no_debio_responder") {
+      ctx.addIssue({ code: "custom", path: ["correctedReply"], message: "Escribe cómo debió responder" })
+    }
+    if (text.length > CORRECTED_REPLY_CHARS) {
+      ctx.addIssue({ code: "custom", path: ["correctedReply"], message: `La respuesta admite hasta ${CORRECTED_REPLY_CHARS} caracteres` })
+    }
+  })
 
 /** La respuesta que se corrige: una entrada de «Por revisar» o una respuesta marcada desde la Bandeja. */
 export interface CorrectionTarget {
@@ -62,34 +84,40 @@ export function CorrectDrawer({
   const isMobile = useIsMobile()
   const receptionName = useReceptionName()
   const who = target?.agent ? agentName(target.agent, receptionName) : null
-  const [failure, setFailure] = useState<CorrectionFailure | null>(null)
-  const [text, setText] = useState("")
-  useEffect(() => {
-    if (!target) return
-    setFailure(null)
-    setText(target.teamReply ?? "")
-  }, [target])
-
-  const refresh = () => {
-    for (const key of ["agent-learning", "agent-overview"]) void queryClient.invalidateQueries({ queryKey: [key] })
-  }
   const correct = useMutation({
     retry: false,
-    mutationFn: () =>
+    mutationFn: (input: { failure: CorrectionFailure; correctedReply: string }) =>
       apiFetch<{ data: LessonItem }>("/api/agent/learning/corrections", {
         method: "POST",
         body: JSON.stringify({
           ...(target?.reviewItemId ? { reviewItemId: target.reviewItemId } : { traceId: target?.traceId }),
-          failure,
-          ...(text.trim() ? { correctedReply: text.trim() } : {}),
+          failure: input.failure,
+          ...(input.correctedReply ? { correctedReply: input.correctedReply } : {}),
         }),
       }),
-    onSuccess: (response) => {
+  })
+  const form = useAppForm({
+    defaultValues: { failure: "" as CorrectionFailure | "", correctedReply: "" },
+    validators: { onSubmit: correctionSchema },
+    onSubmit: async ({ value }) => {
+      const response = await correct.mutateAsync({ failure: value.failure as CorrectionFailure, correctedReply: value.correctedReply.trim() })
       refresh()
       onCorrected?.(response.data)
       onClose()
     },
   })
+  useEffect(() => {
+    if (!target) return
+    form.reset({ failure: "", correctedReply: target.teamReply ?? "" })
+  }, [target, form])
+  // El error del envío no va arriba del cajón: se dice junto a «Enviar corrección».
+  const { error: submitError, ...surface } = useFormSurface(form)
+  const failure = useStore(form.store, (state) => state.values.failure)
+  const text = useStore(form.store, (state) => state.values.correctedReply)
+
+  const refresh = () => {
+    for (const key of ["agent-learning", "agent-overview"]) void queryClient.invalidateQueries({ queryKey: [key] })
+  }
   const markOk = useMutation({
     retry: false,
     mutationFn: () => apiFetch(`/api/agent/learning/review/${target?.reviewItemId}/ok`, { method: "POST" }),
@@ -101,18 +129,15 @@ export function CorrectDrawer({
 
   // «No debió responder» no necesita una respuesta alternativa: la regla es pasar el caso.
   const needsText = failure !== "no_debio_responder"
-  const ready = failure !== null && (!needsText || text.trim().length > 0)
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (ready && !correct.isPending) correct.mutate()
-  }
+  // Lo que falló al enviar o al darla por buena, junto a esas acciones (el pie propio).
+  const actionError = submitError ?? (markOk.isError ? submitErrorMessage(markOk.error) : null)
 
   const data = target?.basis.filter((item) => item.kind !== "leccion") ?? []
   const lessons = target?.basis.filter((item) => item.kind === "leccion") ?? []
 
   return (
     <FormDrawer
+      {...surface}
       open={target !== null}
       onClose={() => {
         correct.reset()
@@ -125,10 +150,6 @@ export function CorrectDrawer({
           <p className="font-heading text-lg leading-snug font-semibold text-foreground">{target.question || "Respuesta del agente"}</p>
         ) : undefined
       }
-      onSubmit={submit}
-      isSubmitting={correct.isPending}
-      isDirty={failure !== null || text !== (target?.teamReply ?? "")}
-      error={mutationErrorMessage(correct.error ?? markOk.error)}
       cancelLabel="Cancelar"
       hideSubmit
     >
@@ -195,55 +216,64 @@ export function CorrectDrawer({
             </section>
           ) : null}
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-2 text-sm font-bold">¿Qué falló?</legend>
-            <div className={isMobile ? "grid grid-cols-2 gap-1.5" : "flex flex-wrap gap-1.5"}>
-              {FAILURE_OPTIONS.map((option, index) => {
-                const selected = failure === option.value
-                return (
-                  <Button
-                    key={option.value}
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    aria-pressed={selected}
-                    className={cn(
-                      "min-h-11 sm:min-h-9",
-                      isMobile ? "rounded-xl" : "rounded-full",
-                      // Número impar de opciones: la última ocupa la fila entera en teléfono.
-                      isMobile && index === FAILURE_OPTIONS.length - 1 && FAILURE_OPTIONS.length % 2 === 1 ? "col-span-2" : "",
-                      selected ? "border-primary bg-primary-soft font-bold text-primary-soft-foreground ring-1 ring-primary hover:bg-primary-soft" : "",
-                    )}
-                    onClick={() => setFailure(option.value)}
-                  >
-                    {option.label}
-                  </Button>
-                )
-              })}
-            </div>
-          </fieldset>
+          <form.AppField name="failure">
+            {(field) => (
+              <field.Group legend="¿Qué falló?">
+                {(control) => (
+                  <div className={isMobile ? "grid grid-cols-2 gap-1.5" : "flex flex-wrap gap-1.5"} aria-describedby={control.describedBy}>
+                    {FAILURE_OPTIONS.map((option, index) => {
+                      const selected = field.state.value === option.value
+                      return (
+                        <Button
+                          key={option.value}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          aria-pressed={selected}
+                          className={cn(
+                            "min-h-11 sm:min-h-9",
+                            isMobile ? "rounded-xl" : "rounded-full",
+                            // Número impar de opciones: la última ocupa la fila entera en teléfono.
+                            isMobile && index === FAILURE_OPTIONS.length - 1 && FAILURE_OPTIONS.length % 2 === 1 ? "col-span-2" : "",
+                            selected ? "border-primary bg-primary-soft font-bold text-primary-soft-foreground ring-1 ring-primary hover:bg-primary-soft" : "",
+                          )}
+                          onClick={() => {
+                            field.handleChange(option.value)
+                            field.handleBlur()
+                          }}
+                        >
+                          {option.label}
+                        </Button>
+                      )
+                    })}
+                  </div>
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
 
-          <Field>
-            <FieldLabel htmlFor="corregir-respuesta" className="font-bold">
-              {needsText ? "¿Cómo debió responder?" : "¿Qué debió hacer? (opcional)"}
-            </FieldLabel>
-            <Textarea
-              id="corregir-respuesta"
-              rows={isMobile ? 3 : 4}
-              maxLength={2000}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder={needsText ? "Escribe la respuesta correcta." : "Si lo dejas vacío, la regla será pasar el caso a una persona."}
-            />
-            {target.teamReply && text === target.teamReply ? (
-              <FieldDescription>Puse lo que respondió tu equipo. Cámbialo si quieres.</FieldDescription>
-            ) : null}
-          </Field>
+          <form.AppField name="correctedReply">
+            {(field) => (
+              <field.TextareaField
+                id="corregir-respuesta"
+                label={<span className="font-bold">{needsText ? "¿Cómo debió responder?" : "¿Qué debió hacer? (opcional)"}</span>}
+                description={target.teamReply && text === target.teamReply ? "Puse lo que respondió tu equipo. Cámbialo si quieres." : undefined}
+                rows={isMobile ? 3 : 4}
+                maxLength={CORRECTED_REPLY_CHARS}
+                placeholder={needsText ? "Escribe la respuesta correcta." : "Si lo dejas vacío, la regla será pasar el caso a una persona."}
+              />
+            )}
+          </form.AppField>
 
           <div className={SURFACE_ACTIONS}>
-            <SubmitButton type="submit" className="min-h-11 w-full" pending={correct.isPending} disabled={!ready || markOk.isPending}>
+            <SubmitButton type="submit" className="min-h-11 w-full" pending={surface.isSubmitting} disabled={markOk.isPending}>
               Enviar corrección
             </SubmitButton>
+            {actionError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {actionError}
+              </p>
+            ) : null}
             {isMobile ? null : (
               <>
                 {target.reviewItemId ? (
@@ -251,7 +281,7 @@ export function CorrectDrawer({
                     type="button"
                     variant="ghost"
                     className="min-h-10 w-full"
-                    disabled={markOk.isPending || correct.isPending}
+                    disabled={markOk.isPending || surface.isSubmitting}
                     onClick={() => markOk.mutate()}
                   >
                     Estuvo bien, quitar de la lista

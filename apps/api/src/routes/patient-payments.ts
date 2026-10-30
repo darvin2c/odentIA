@@ -12,7 +12,15 @@ function forbid(c: Context) {
 }
 
 const cents = z.number().int().positive().max(2147483647)
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({
+    reason: z
+      .string({ error: "Escribe el motivo" })
+      .trim()
+      .min(1, { error: "Escribe el motivo" })
+      .max(2000, { error: "Escribe el motivo en 2000 caracteres como mucho" }),
+  })
+  .strict()
 const collectInput = z.object({
   branchId: z.uuid(),
   payerContactId: z.uuid().nullish(),
@@ -43,8 +51,18 @@ const chargeInput = z.object({
     .nullish(),
   /** Clave del formulario de la venta: un reintento no vende dos veces. */
   requestId: z.uuid({ error: "No se pudo identificar esta venta: cierra el cobro y vuelve a abrirlo" }).nullish(),
-  description: z.string().trim().min(1).max(2000).nullish(),
-  amountCents: cents.nullish(),
+  description: z
+    .string({ error: "Escribe qué es lo que se cobra" })
+    .trim()
+    .min(1, { error: "Escribe qué es lo que se cobra" })
+    .max(2000, { error: "Escribe el concepto en 2000 caracteres como mucho" })
+    .nullish(),
+  amountCents: z
+    .number({ error: "Escribe el importe" })
+    .int({ error: "El importe no es válido" })
+    .positive({ error: "Escribe un importe mayor que cero" })
+    .max(2147483647, { error: "El importe es demasiado grande" })
+    .nullish(),
   currency: z.string().regex(/^[A-Z]{3}$/).nullish(),
   notes: z.string().max(4000).nullish(),
 }).strict()
@@ -60,7 +78,7 @@ const refundInput = z.object({
   branchId: z.uuid(),
   amountCents: cents,
   paymentMethodId: z.uuid().nullish(),
-  reason: z.string().trim().min(1).max(2000),
+  reason: z.string().trim().min(1, { error: "Escribe el motivo de la devolución" }).max(2000),
   currency: z.string().regex(/^[A-Z]{3}$/).optional(),
 }).strict()
 // «Devolver» desde un ticket (ADR 0068): qué devuelve, cómo se le paga y por qué.
@@ -74,7 +92,11 @@ const returnInput = z.object({
   }).strict()).min(1, { error: "Elige qué devuelve" }).max(50),
   /** Con qué medio se le paga; null = queda a favor en su cuenta. */
   paymentMethodId: z.uuid().nullable(),
-  reason: z.string().trim().min(1, { error: "Escribe el motivo de la devolución" }).max(2000),
+  reason: z
+    .string({ error: "Escribe el motivo de la devolución" })
+    .trim()
+    .min(1, { error: "Escribe el motivo de la devolución" })
+    .max(2000, { error: "Escribe el motivo en 2000 caracteres como mucho" }),
   requestId: z.uuid(),
 }).strict()
 export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">) {
@@ -177,8 +199,17 @@ export function createPatientPaymentsRoute(deps: Pick<CrmDeps, "db" | "storage">
         : !body.budgetItemId && (!body.description || !body.amountCents)
           ? "Indica el concepto y el importe, o la línea aceptada"
           : null
-    if (problem)
-      return validationError(c, [{ code: "custom", path: [], message: problem, input: body } as never])
+    if (problem) {
+      // Un concepto manual sin descripción o sin importe: cada falta junto a su dato.
+      const manual = !body.productId && !body.budgetItemId && body.quantity == null && body.requestId == null
+      const issues = manual
+        ? [
+            ...(!body.description ? [{ path: ["description"], message: "Escribe qué es lo que se cobra" }] : []),
+            ...(!body.amountCents ? [{ path: ["amountCents"], message: "Escribe el importe" }] : []),
+          ]
+        : [{ path: [], message: problem }]
+      return validationError(c, issues.map((issue) => ({ code: "custom", input: body, ...issue })) as never)
+    }
     return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
       createCharge(tx, orgId, userId, params.data.id, {
         branchId: body.branchId ?? undefined,

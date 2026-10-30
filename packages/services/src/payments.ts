@@ -22,7 +22,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { user } from "@odentia/db/schema/auth"
 import { and, asc, desc, eq, inArray, isNull, or, type SQL, type SQLWrapper, sql } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { orgProfileRequired } from "./locale.js"
 import {
   ensureOpenShift,
@@ -86,8 +86,9 @@ function sum(rows: ReadonlyArray<{ amountCents: number }>): number {
   }
   return total
 }
-function conflict(code: string, message: string) {
-  return new ServiceError(code, 409, message)
+/** `field`: el dato del cuerpo al que se refiere el conflicto (se dice junto a él). */
+function conflict(code: string, message: string, field?: string) {
+  return new ServiceError(code, 409, message, field ? { [field]: message } : undefined)
 }
 // Serializa aplicaciones, anulaciones y devoluciones del paciente para impedir sobregiros.
 async function lockAccount(tx: Db, orgId: string, patientId: string) {
@@ -190,7 +191,7 @@ export async function createCharge(
       throw validation("El importe y el concepto de un producto salen de su precio de venta: corrígelos después con motivo")
     const quantity = input.quantity ?? 1
     if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 9999)
-      throw validation("La cantidad va de 1 a 9999")
+      throw invalidField("quantity", "La cantidad va de 1 a 9999")
     if (!branchId) throw validation("Elige la sede del cobro: el producto sale de su almacén")
     const [item] = await tx
       .select({
@@ -204,12 +205,13 @@ export async function createCharge(
       .from(product)
       .where(and(eq(product.organizationId, orgId), eq(product.id, input.productId)))
       .limit(1)
-    if (!item) throw notFound("Producto")
-    if (!item.isActive) throw conflict("PRODUCT_INACTIVE", `«${item.name}» está desactivado: no se puede vender`)
+    if (!item) throw new ServiceError("NOT_FOUND", 404, "Producto no encontrado", { productId: "Producto no encontrado" })
+    if (!item.isActive)
+      throw conflict("PRODUCT_INACTIVE", `«${item.name}» está desactivado: no se puede vender`, "productId")
     if (!item.forSale)
-      throw conflict("PRODUCT_NOT_FOR_SALE", `«${item.name}» no se vende: márcalo así en Inventario para cobrarlo`)
+      throw conflict("PRODUCT_NOT_FOR_SALE", `«${item.name}» no se vende: márcalo así en Inventario para cobrarlo`, "productId")
     if (item.salePriceCents === null || item.salePriceCents <= 0 || !item.saleCurrency)
-      throw conflict("PRODUCT_WITHOUT_PRICE", `«${item.name}» no tiene precio de venta: ponlo en Inventario para cobrarlo`)
+      throw conflict("PRODUCT_WITHOUT_PRICE", `«${item.name}» no tiene precio de venta: ponlo en Inventario para cobrarlo`, "productId")
     if (input.currency && input.currency !== item.saleCurrency)
       throw conflict("CURRENCY_MISMATCH", "La moneda no coincide con el precio de venta del producto")
     const requestKey = input.requestKey?.trim() ?? ""
@@ -409,9 +411,9 @@ export async function createCharge(
     if (!item) throw notFound("Tratamiento")
   }
   if (!description || description.length > 2000)
-    throw validation("La descripción debe tener 1–2000 caracteres")
+    throw invalidField("description", "La descripción debe tener 1–2000 caracteres")
   if (amountCents === undefined || !unit)
-    throw validation("El importe y la moneda son obligatorios")
+    throw invalidField("amountCents", "El importe y la moneda son obligatorios")
   // El impuesto que vale hoy queda en el concepto (ADR 0083): cambiarlo después no lo toca.
   const tax = chargeTaxOf(await orgTaxes(tx, orgId), Boolean(sale))
   const [row] = await tx
@@ -683,7 +685,7 @@ export async function updateCharge(
   if (input.amountCents !== undefined) patch.amountCents = assertPositiveCents(input.amountCents)
   if (input.description !== undefined) {
     const text = input.description.trim()
-    if (!text || text.length > 2000) throw validation("La descripción debe tener 1–2000 caracteres")
+    if (!text || text.length > 2000) throw invalidField("description", "La descripción debe tener 1–2000 caracteres")
     patch.description = text
   }
   // Motivo: lo escribe la persona o lo da la promoción aplicada.
@@ -696,7 +698,7 @@ export async function updateCharge(
       throw conflict("CURRENCY_MISMATCH", "La promoción usa otra moneda")
     // Con «desde», bajar del mínimo anunciado sí exige un motivo propio.
     if (snapshot.mode === "from" && snapshot.floorCents != null && snapshot.priceCents < snapshot.floorCents && !reasonText)
-      throw validation("El precio queda por debajo del mínimo de la promoción: indica el motivo")
+      throw invalidField("reason", "El precio queda por debajo del mínimo de la promoción: indica el motivo")
     reasonText ??= `Promoción «${snapshot.promotionName}»`
     if (snapshot.priceCents === 0) {
       // Una promoción sin costo no deja nada que cobrar: el concepto se retira
@@ -744,7 +746,7 @@ export async function updateCharge(
     const { sourcePriceCents } = await chargeServiceId(tx, orgId, current)
     if (patch.amountCents === undefined) {
       if (sourcePriceCents == null || sourcePriceCents <= 0)
-        throw validation("Indica el importe del concepto sin la promoción")
+        throw invalidField("amountCents", "Indica el importe del concepto sin la promoción")
       patch.amountCents = sourcePriceCents
     }
     patch.promotionId = null
@@ -753,7 +755,7 @@ export async function updateCharge(
   }
   if (patch.amountCents === undefined && patch.description === undefined)
     throw validation("Indique el nuevo importe, la nueva descripción o una promoción")
-  if (!reasonText) throw validation("El motivo del cambio es obligatorio")
+  if (!reasonText) throw invalidField("reason", "El motivo del cambio es obligatorio")
   patch.editReason = reasonText
   const [row] = await tx
     .update(patientCharge)
@@ -1086,13 +1088,13 @@ export async function collectCharge(
   }
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   if (input.payerContactId)
-    await requireLinkedActiveContact(tx, orgId, patientId, input.payerContactId)
+    await requireLinkedActiveContact(tx, orgId, patientId, input.payerContactId, "payerContactId")
   if (input.advanceCents !== undefined && input.chargeIds?.length)
     throw validation("El adelanto no se combina con conceptos")
   const methods = []
-  for (const item of input.payments ?? []) {
+  for (const [index, item] of (input.payments ?? []).entries()) {
     const amount = assertPositiveCents(item.amountCents)
-    const method = await requirePaymentMethod(tx, orgId, item.paymentMethodId)
+    const method = await requirePaymentMethod(tx, orgId, item.paymentMethodId, `payments[${index}].paymentMethodId`)
     methods.push({
       paymentMethodId: method.id,
       name: method.name,
@@ -1108,7 +1110,7 @@ export async function collectCharge(
   if (input.advanceCents !== undefined) {
     const advance = assertPositiveCents(input.advanceCents)
     if (advance !== totalNew)
-      throw validation("El adelanto coincide con la suma de los medios")
+      throw invalidField("advanceCents", "El adelanto coincide con la suma de los medios")
     targets = []
   } else if (input.chargeIds?.length) {
     // Sin repetidos: el mismo concepto dos veces se cobraría dos veces.
@@ -1127,28 +1129,28 @@ export async function collectCharge(
     const byId: Record<string, (typeof selected)[number]> = {}
     for (const charge of selected) byId[charge.id] = charge
     const missing = [...wanted].filter((id) => !byId[id])
-    if (missing.length) throw notFound("Cargo")
+    if (missing.length) throw new ServiceError("NOT_FOUND", 404, "Cargo no encontrado", { chargeIds: "Cargo no encontrado" })
     // Siempre lo más antiguo primero: el orden en que se marcaron no decide.
     const picked = selected.filter((charge) => wanted.has(charge.id))
     if (picked.some((c) => c.currency !== unit))
-      throw conflict("CURRENCY_MISMATCH", "Los conceptos son de otra moneda que la clínica")
+      throw conflict("CURRENCY_MISMATCH", "Los conceptos son de otra moneda que la clínica", "chargeIds")
     const applied = await liveAppliedByCharge(tx, orgId, patientId)
     targets = picked
       .map((charge) => ({ charge, outstanding: charge.amountCents - (applied[charge.id] ?? 0) }))
       .filter((t) => t.outstanding > 0)
-    if (!targets.length) throw conflict("NOTHING_DUE", "Los conceptos ya están cobrados")
+    if (!targets.length) throw conflict("NOTHING_DUE", "Los conceptos ya están cobrados", "chargeIds")
   } else {
     targets = await outstandingCharges(tx, orgId, patientId, unit)
-    if (!targets.length) throw conflict("NOTHING_DUE", "El paciente no tiene conceptos por cobrar")
+    if (!targets.length) throw conflict("NOTHING_DUE", "El paciente no tiene conceptos por cobrar", "chargeIds")
   }
   const cashTotal = sum(methods.filter((m) => isCashLike(m.typeCode)))
   let cashReceived: number | null = null
   let change: number | null = null
   if (input.cashReceivedCents !== undefined) {
-    if (cashTotal <= 0) throw validation("Lo recibido solo aplica con medio en efectivo")
+    if (cashTotal <= 0) throw invalidField("cashReceivedCents", "Lo recibido solo aplica con medio en efectivo")
     cashReceived = assertPositiveCents(input.cashReceivedCents)
     if (cashReceived < cashTotal)
-      throw validation("Lo recibido no cubre la parte en efectivo")
+      throw invalidField("cashReceivedCents", "Lo recibido no cubre la parte en efectivo")
     change = cashReceived - cashTotal
   }
   const need = sum(targets.map((t) => ({ amountCents: t.outstanding })))
@@ -1441,7 +1443,7 @@ export async function voidTicket(
     )
   if (!ticket) throw notFound("Ticket")
   if (ticket.voidedAt) throw conflict("TICKET_VOIDED", "El ticket ya está anulado")
-  const voidReason = reason(input.reason)
+  const voidReason = withField("reason", () => reason(input.reason))
   const payments = await tx
     .select()
     .from(patientPayment)
@@ -1635,17 +1637,19 @@ export async function refundCredit(
 ) {
   const orgUnit = await lockOrgCurrency(tx, orgId)
   await lockAccount(tx, orgId, patientId)
-  const amount = assertPositiveCents(input.amountCents)
+  const amount = withField("amountCents", () => assertPositiveCents(input.amountCents))
   const branchRow = await requireBranch(tx, orgId, input.branchId)
   const unit = input.currency ?? orgUnit
   const credit = await availableCredit(tx, orgId, patientId, unit)
   const total = sum(credit.map((c) => ({ amountCents: c.available })))
-  if (amount > total)
-    throw conflict("INSUFFICIENT_CREDIT", "Solo se devuelve lo que está a favor")
+  if (amount > total) {
+    const message = "Solo se devuelve lo que está a favor"
+    throw new ServiceError("INSUFFICIENT_CREDIT", 409, message, { amountCents: message })
+  }
   let methodName = "Efectivo"
   let methodTypeCode: string | null = CASH_TYPE_CODE
   if (input.paymentMethodId) {
-    const method = await requirePaymentMethod(tx, orgId, input.paymentMethodId)
+    const method = await requirePaymentMethod(tx, orgId, input.paymentMethodId, "paymentMethodId")
     methodName = method.name
     methodTypeCode = method.typeCode
   }
@@ -2013,6 +2017,28 @@ export interface ReturnTicketInput {
   requestId: string
 }
 
+/** El rechazo de un paso sin dato propio, dicho junto al dato del cuerpo que lo causó. */
+function fieldedError(field: string, error: unknown): unknown {
+  if (error instanceof ServiceError && !error.fields) error.fields = { [field]: error.message }
+  return error
+}
+
+function withField<T>(field: string, run: () => T): T {
+  try {
+    return run()
+  } catch (error) {
+    throw fieldedError(field, error)
+  }
+}
+
+async function withFieldAsync<T>(field: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    throw fieldedError(field, error)
+  }
+}
+
 /**
  * Devuelve parte o todo lo que pagó un ticket (ADR 0068). La venta del ticket
  * queda en pie: cada concepto se anula y lo reemplaza otro con lo que queda,
@@ -2065,34 +2091,46 @@ export async function returnFromTicket(
   if (!ticket) throw notFound("Ticket")
   if (ticket.voidedAt) throw conflict("TICKET_VOIDED", "El ticket está anulado: no hay nada que devolver")
   const branchRow = await requireBranch(tx, orgId, input.branchId)
-  const reasonText = reason(input.reason)
-  if (!input.lines.length) throw validation("Elige qué devuelve")
+  const reasonText = withField("reason", () => reason(input.reason))
+  if (!input.lines.length) throw invalidField("lines", "Elige qué devuelve")
   if (new Set(input.lines.map((line) => line.chargeId)).size !== input.lines.length)
     throw validation("Cada concepto va una sola vez")
   const available = new Map((await ticketReturnLines(tx, orgId, patientId, ticket)).map((line) => [line.chargeId, line]))
-  const plan = input.lines.map((line) => {
+  const plan = input.lines.map((line, index) => {
+    // Cada rechazo de una línea va a su fila, con el nombre que tiene en el cuerpo.
+    const row = `lines[${index}]`
     const found = available.get(line.chargeId)
-    if (!found) throw conflict("NOT_IN_TICKET", "Ese concepto no es de este ticket o ya cambió: vuelve a abrir la devolución")
-    if (found.blockedReason) throw conflict("NOT_RETURNABLE", found.blockedReason)
+    if (!found) {
+      const message = "Ese concepto no es de este ticket o ya cambió: vuelve a abrir la devolución"
+      throw new ServiceError("NOT_IN_TICKET", 409, message, { [`${row}.chargeId`]: message })
+    }
+    if (found.blockedReason)
+      throw new ServiceError("NOT_RETURNABLE", 409, found.blockedReason, { [`${row}.chargeId`]: found.blockedReason })
     if (found.kind === "producto") {
-      if (line.amountCents !== undefined) throw validation("Lo que se devuelve de un producto sale de la cantidad")
+      if (line.amountCents !== undefined)
+        throw invalidField(`${row}.amountCents`, "Lo que se devuelve de un producto sale de la cantidad")
       const sold = found.quantity ?? 1
       const quantity = line.quantity ?? 0
       if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > sold)
-        throw validation(`De «${found.productName}» se devuelven de 1 a ${sold}`)
+        throw invalidField(`${row}.quantity`, `De «${found.productName}» se devuelven de 1 a ${sold}`)
       // Todo, o la parte proporcional: el último que se devuelva lleva el redondeo.
       const amountCents = quantity === sold ? found.amountCents : Math.round((found.amountCents * quantity) / sold)
       return { line: found, quantity, amountCents, backToStock: line.backToStock ?? true }
     }
     if (line.quantity !== undefined || line.backToStock !== undefined)
-      throw validation("De un servicio se devuelve un importe")
-    const amountCents = assertPositiveCents(line.amountCents ?? 0)
-    if (amountCents > found.paidCents)
-      throw conflict("RETURN_EXCEEDS_PAID", `De «${found.description}» no se devuelve más de lo que pagó este ticket`)
+      throw invalidField(`${row}.quantity`, "De un servicio se devuelve un importe")
+    const amountCents = withField(`${row}.amountCents`, () => assertPositiveCents(line.amountCents ?? 0))
+    if (amountCents > found.paidCents) {
+      const message = `De «${found.description}» no se devuelve más de lo que pagó este ticket`
+      throw new ServiceError("RETURN_EXCEEDS_PAID", 409, message, { [`${row}.amountCents`]: message })
+    }
     return { line: found, quantity: null, amountCents, backToStock: null }
   })
   const total = sum(plan.map((item) => ({ amountCents: item.amountCents })))
-  const method = input.paymentMethodId ? await requirePaymentMethod(tx, orgId, input.paymentMethodId) : null
+  const paymentMethodId = input.paymentMethodId
+  const method = paymentMethodId
+    ? await withFieldAsync("paymentMethodId", () => requirePaymentMethod(tx, orgId, paymentMethodId))
+    : null
   const number = await nextReturnNumber(tx, orgId)
   const label = `Devolución ${sixDigits(number)}`
   const [person] = await tx
@@ -2290,14 +2328,17 @@ export async function returnFromTicket(
       await audit(tx, orgId, actorUserId, "patient_payment_refund", refund.id, "payment.refunded", { returnId: row.id })
     }
     const shift = await ensureOpenShift(tx, orgId, actorUserId, branchRow.id, ticket.currency)
-    await recordCashEgreso(tx, orgId, actorUserId, shift.id, {
-      kind: "devolucion",
-      amountCents: total,
-      currency: ticket.currency,
-      methodName: method.name,
-      methodTypeCode: method.typeCode,
-      concept: `${label} · Ticket ${sixDigits(ticket.ticketNumber)}`,
-    })
+    // Sin efectivo para devolver: se dice junto al medio elegido.
+    await withFieldAsync("paymentMethodId", () =>
+      recordCashEgreso(tx, orgId, actorUserId, shift.id, {
+        kind: "devolucion",
+        amountCents: total,
+        currency: ticket.currency,
+        methodName: method.name,
+        methodTypeCode: method.typeCode,
+        concept: `${label} · Ticket ${sixDigits(ticket.ticketNumber)}`,
+      }),
+    )
   }
   await audit(tx, orgId, actorUserId, "payment_return", row.id, "return.created", {
     patientId,

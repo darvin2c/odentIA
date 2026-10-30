@@ -5,7 +5,7 @@ import type {
   OutboundMessage,
   WebhookParseResult,
 } from "./protocol.js"
-import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
+import { ConnectionRejectedError, ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 
 export interface TelegramBotConfig {
   botToken: string
@@ -350,7 +350,9 @@ export const telegramBotApiAdapter: ChannelAdapter = {
     const cfg = getConfig(config)
     const res = await deps.fetch(`https://api.telegram.org/bot${cfg.botToken}/getMe`)
     const json: unknown = await res.json().catch(() => null)
-    if (!res.ok) throw new Error("Telegram getMe falló: token inválido")
+    if (res.status >= 500) throw new Error(`Telegram no respondió al comprobar el bot: ${res.status}`)
+    const refused = json !== null && typeof json === "object" && "ok" in json && json.ok === false
+    if (!res.ok || refused) throw new ConnectionRejectedError("Telegram getMe falló: token inválido", "token")
     const info = getMeInfo(json)
     return {
       externalId: String(info.id),

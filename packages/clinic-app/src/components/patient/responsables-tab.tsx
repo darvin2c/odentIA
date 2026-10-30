@@ -9,16 +9,17 @@
  * historia.
  */
 
-import { Badge, Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { DatePickerButton, EmptyState, FormDrawer, zonedDateOf } from "@odentia/ui-patterns"
+import { Badge, Button } from "@odentia/ui"
+import { DatePickerButton, EmptyState, FormDrawer, useAppForm, useFormSurface, zonedDateOf } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useState } from "react"
+import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import {
   fetchResponsibilities,
   formatDate,
   grantResponsibilityApi,
-  mutationMessage,
   RESPONSIBILITY_KIND_LABELS,
   RESPONSIBILITY_KINDS,
   type ResponsibilityKind,
@@ -28,9 +29,29 @@ import { activeOrgTimeZone } from "../../lib/locale"
 import { usePermission } from "../../lib/crm"
 import type { PatientDocument, PatientFull } from "../../lib/patients"
 import { type PickedPerson, PersonPicker } from "../person-picker"
-import { ChoiceSelect } from "../ui/choice-select"
 
 const MAX_TEXT = 2000
+
+const KIND_OPTIONS = RESPONSIBILITY_KINDS.map((value) => ({ value, label: RESPONSIBILITY_KIND_LABELS[value] }))
+
+/** Lo que exige `grantResponsibility`, dicho en su campo antes de enviar. */
+const grantSchema = z
+  .object({
+    person: z.custom<PickedPerson | null>((value) => value !== null, "Elige a la persona."),
+    kind: z.enum(RESPONSIBILITY_KINDS, "Elige la responsabilidad"),
+    startsAt: z.string().min(1, "Elige desde cuándo está vigente"),
+    endsAt: z.string(),
+    evidenceDocumentId: z.string(),
+    notes: z.string().max(MAX_TEXT),
+  })
+  .superRefine((value, ctx) => {
+    if (value.endsAt && value.endsAt < value.startsAt)
+      ctx.addIssue({ code: "custom", path: ["endsAt"], message: "La fecha final no puede preceder a la inicial." })
+  })
+
+const revokeSchema = z.object({
+  reason: z.string().trim().min(1, "Indica el motivo de la revocación.").max(MAX_TEXT),
+})
 
 /**
  * Hoy en la zona de la clínica, como lo cuenta el servidor al decir si una
@@ -42,7 +63,6 @@ function todayIso(): string {
 }
 
 export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX.Element {
-  const uid = useId()
   const canWrite = usePermission("patients.write")
   const canRead = usePermission("patients.read")
   const canDocuments = usePermission("clinical.read")
@@ -64,15 +84,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   })
 
   const [grantOpen, setGrantOpen] = useState(false)
-  const [chosen, setChosen] = useState<PickedPerson | null>(null)
-  const [kind, setKind] = useState<ResponsibilityKind>("representante_legal")
-  const [startsAt, setStartsAt] = useState(todayIso())
-  const [endsAt, setEndsAt] = useState("")
-  const [evidenceDocumentId, setEvidenceDocumentId] = useState("")
-  const [notes, setNotes] = useState("")
   const [revoking, setRevoking] = useState<string | null>(null)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["responsibilities", patientId] })
@@ -80,8 +92,8 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
   }
 
   const grantMutation = useMutation({
-    mutationFn: async () => {
-      const contactId = chosen?.id ?? ""
+    mutationFn: async (value: z.infer<typeof grantSchema>) => {
+      const contactId = value.person?.id ?? ""
       // Quien aún no está vinculado al paciente se vincula en el mismo paso.
       if (!contacts.some((link) => link.contactId === contactId)) {
         await apiFetch(`/api/patients/${patientId}/contacts/${contactId}`, {
@@ -96,31 +108,46 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
       }
       return grantResponsibilityApi(patientId, {
         contactId,
-        kind,
-        startsAt,
-        endsAt: endsAt || null,
-        evidenceDocumentId: evidenceDocumentId || null,
-        notes: notes.trim() || null,
+        kind: value.kind,
+        startsAt: value.startsAt,
+        endsAt: value.endsAt || null,
+        evidenceDocumentId: value.evidenceDocumentId || null,
+        notes: value.notes.trim() || null,
       })
     },
-    onSuccess: () => {
+  })
+  const grantForm = useAppForm({
+    defaultValues: {
+      person: null as PickedPerson | null,
+      kind: "representante_legal" as ResponsibilityKind,
+      startsAt: todayIso(),
+      endsAt: "",
+      evidenceDocumentId: "",
+      notes: "",
+    },
+    validators: { onSubmit: grantSchema },
+    onSubmit: async ({ value }) => {
+      await grantMutation.mutateAsync(value)
       setGrantOpen(false)
-      setNotes("")
-      setError(null)
       invalidate()
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  // La persona se elige con el buscador: lo que el servidor dice de `contactId` va en él.
+  const grantSurface = useFormSurface(grantForm, { fieldMap: { contactId: "person" } })
+  const startsAt = useStore(grantForm.store, (state) => state.values.startsAt)
   const revokeMutation = useMutation({
-    mutationFn: () => revokeResponsibilityApi(patientId, revoking ?? "", { reason: reason.trim() }),
-    onSuccess: () => {
+    mutationFn: (reason: string) => revokeResponsibilityApi(patientId, revoking ?? "", { reason }),
+  })
+  const revokeForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: revokeSchema },
+    onSubmit: async ({ value }) => {
+      await revokeMutation.mutateAsync(value.reason.trim())
       setRevoking(null)
-      setReason("")
-      setError(null)
       invalidate()
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const revokeSurface = useFormSurface(revokeForm)
 
   const rows = list.data?.data ?? []
   const contacts = patient.data?.data.contacts ?? []
@@ -141,9 +168,15 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
             type="button"
             size="sm"
             onClick={() => {
-              setError(null)
               const first = contacts.find((link) => link.relationship !== "self")
-              setChosen(first ? { id: first.contactId, name: first.displayName } : null)
+              grantForm.reset({
+                person: first ? { id: first.contactId, name: first.displayName } : null,
+                kind: "representante_legal",
+                startsAt: todayIso(),
+                endsAt: "",
+                evidenceDocumentId: "",
+                notes: "",
+              })
               setGrantOpen(true)
             }}
           >
@@ -194,7 +227,7 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      setError(null)
+                      revokeForm.reset()
                       setRevoking(row.id)
                     }}
                   >
@@ -207,138 +240,106 @@ export function ResponsablesTab({ patientId }: { patientId: string }): React.JSX
         </ul>
       )}
 
-      {error && !grantOpen && revoking == null ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-
       <FormDrawer
+        {...grantSurface}
         open={grantOpen}
         title="Asignar responsabilidad"
         description="La responsabilidad queda vigente desde la fecha indicada y solo puede sustituirse revocándola antes."
-        error={grantOpen ? error : null}
-        isSubmitting={grantMutation.isPending}
         submitLabel="Asignar"
         onClose={() => {
-          if (!grantMutation.isPending) setGrantOpen(false)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!chosen) {
-            setError("Elige a la persona.")
-            return
-          }
-          if (endsAt && endsAt < startsAt) {
-            setError("La fecha final no puede preceder a la inicial.")
-            return
-          }
-          grantMutation.mutate()
+          if (!grantSurface.isSubmitting) setGrantOpen(false)
         }}
       >
         <div className="flex flex-col gap-4">
-          <PersonPicker
-            label="Persona"
-            value={chosen}
-            onChange={setChosen}
-            excludeId={contacts.find((link) => link.relationship === "self")?.contactId}
-            description="Si aún no está vinculada al paciente, se vincula al asignarle el rol."
-          />
-          <Field>
-            <FieldLabel htmlFor={`${uid}-resp-kind`}>Responsabilidad</FieldLabel>
-            <ChoiceSelect
-              id={`${uid}-resp-kind`}
-              className="w-full"
-              value={kind}
-              onChange={(event) => setKind(event.target.value as ResponsibilityKind)}
-            >
-              {RESPONSIBILITY_KINDS.map((value) => (
-                <option key={value} value={value}>
-                  {RESPONSIBILITY_KIND_LABELS[value]}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-resp-start`}>Vigente desde</FieldLabel>
-            <DatePickerButton
-              id={`${uid}-resp-start`}
-              className="w-56"
-              value={startsAt}
-              onChange={(next) => {
-                setStartsAt(next)
-                if (endsAt && endsAt < next) setEndsAt(next)
-              }}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-resp-end`}>Vigente hasta</FieldLabel>
-            <DatePickerButton
-              id={`${uid}-resp-end`}
-              className="w-56"
-              value={endsAt}
-              min={startsAt}
-              emptyLabel="Sin fecha final"
-              onChange={setEndsAt}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-resp-evidence`}>Documento de respaldo</FieldLabel>
-            <ChoiceSelect
-              id={`${uid}-resp-evidence`}
-              className="w-full"
-              value={evidenceDocumentId}
-              onChange={(event) => setEvidenceDocumentId(event.target.value)}
-            >
-              <option value="">Sin documento</option>
-              {evidence.map((document) => (
-                <option key={document.id} value={document.id}>
-                  {document.label}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-resp-notes`}>Notas</FieldLabel>
-            <Textarea
-              id={`${uid}-resp-notes`}
-              maxLength={MAX_TEXT}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-            />
-          </Field>
+          <grantForm.AppField name="person">
+            {(field) => (
+              <field.Control
+                label="Persona"
+                description="Si aún no está vinculada al paciente, se vincula al asignarle el rol."
+              >
+                {(control) => (
+                  <PersonPicker
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    label="Persona"
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    excludeId={contacts.find((link) => link.relationship === "self")?.contactId}
+                  />
+                )}
+              </field.Control>
+            )}
+          </grantForm.AppField>
+          <grantForm.AppField name="kind">
+            {(field) => <field.SelectField label="Responsabilidad" options={KIND_OPTIONS} />}
+          </grantForm.AppField>
+          <grantForm.AppField name="startsAt">
+            {(field) => (
+              <field.Control label="Vigente desde">
+                {(control) => (
+                  <DatePickerButton
+                    {...control.props}
+                    className="w-56"
+                    value={field.state.value}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      const endsAt = grantForm.getFieldValue("endsAt")
+                      if (endsAt && endsAt < next) grantForm.setFieldValue("endsAt", next)
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </grantForm.AppField>
+          <grantForm.AppField name="endsAt">
+            {(field) => (
+              <field.Control label="Vigente hasta">
+                {(control) => (
+                  <DatePickerButton
+                    {...control.props}
+                    className="w-56"
+                    value={field.state.value}
+                    min={startsAt}
+                    emptyLabel="Sin fecha final"
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </grantForm.AppField>
+          <grantForm.AppField name="evidenceDocumentId">
+            {(field) => (
+              <field.SelectField
+                label="Documento de respaldo"
+                options={[
+                  { value: "", label: "Sin documento" },
+                  ...evidence.map((document) => ({ value: document.id, label: document.label })),
+                ]}
+              />
+            )}
+          </grantForm.AppField>
+          <grantForm.AppField name="notes">
+            {(field) => <field.TextareaField label="Notas" maxLength={MAX_TEXT} />}
+          </grantForm.AppField>
         </div>
       </FormDrawer>
 
       <FormDrawer
+        {...revokeSurface}
         dock={false}
         open={revoking != null}
         title="Revocar responsabilidad"
         description="El rol deja de estar vigente y se conserva en la historia con su motivo."
-        error={revoking != null ? error : null}
-        isSubmitting={revokeMutation.isPending}
         submitLabel="Revocar"
         onClose={() => {
-          if (!revokeMutation.isPending) setRevoking(null)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo de la revocación.")
-            return
-          }
-          revokeMutation.mutate()
+          if (!revokeSurface.isSubmitting) setRevoking(null)
         }}
       >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-resp-reason`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${uid}-resp-reason`}
-            maxLength={MAX_TEXT}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
+        <revokeForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo" maxLength={MAX_TEXT} />}
+        </revokeForm.AppField>
       </FormDrawer>
     </div>
   )

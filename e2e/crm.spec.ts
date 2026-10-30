@@ -434,7 +434,9 @@ test("crm ventas: un «hola» no crea oportunidad; mover una no mueve las otras;
   await page.getByRole("button", { name: "Acciones de Control preventivo", exact: true }).click()
   await page.getByRole("menuitem", { name: "Perdida", exact: true }).click()
   const closing = page.getByRole("alertdialog", { name: "Perdida: Control preventivo" })
-  await expect(closing.getByRole("button", { name: "Marcar perdida" })).toBeDisabled()
+  // Sin motivo no se deshabilita: al confirmar, el motivo dice qué falta.
+  await closing.getByRole("button", { name: "Marcar perdida" }).click()
+  await expect(closing.getByText("Elige por qué se perdió.")).toBeVisible()
   await closing.getByRole("radio", { name: "Precio" }).check()
   await closing.getByRole("button", { name: "Marcar perdida" }).click()
   await expect(closing).toBeHidden()

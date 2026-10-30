@@ -204,6 +204,7 @@ export function ConsumptionCard({
   onChangeCap,
   onAutoPack,
   autoPackPending = false,
+  autoPackError = null,
 }: {
   data: Consumption
   exempt?: boolean
@@ -212,6 +213,8 @@ export function ConsumptionCard({
   /** «Sumar solas» las preguntas a Argos; ausente si quien mira no lo administra. */
   onAutoPack?: (on: boolean) => void
   autoPackPending?: boolean
+  /** Por qué no se guardó «Sumar solas» (se dice junto al interruptor). */
+  autoPackError?: string | null
 }) {
   const receptionName = useReceptionName()
   const currency = data.currency ?? "USD"
@@ -404,10 +407,23 @@ export function ConsumptionCard({
                 }
               />
               {onAutoPack ? (
-                <label className="flex items-center gap-2 text-xs">
-                  <Switch checked={argos.autoPack} disabled={autoPackPending} onCheckedChange={(on: boolean) => onAutoPack(on)} aria-label="Sumar preguntas solas" />
-                  Sumar {argos.packQuestions} solas al acabarse, sin preguntar
-                </label>
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2 text-xs">
+                    <Switch
+                      checked={argos.autoPack}
+                      disabled={autoPackPending}
+                      onCheckedChange={(on: boolean) => onAutoPack(on)}
+                      aria-invalid={autoPackError ? true : undefined}
+                      aria-describedby={autoPackError ? "argos-auto-pack-error" : undefined}
+                    />
+                    Sumar {argos.packQuestions} solas al acabarse, sin preguntar
+                  </label>
+                  {autoPackError ? (
+                    <p id="argos-auto-pack-error" role="alert" className="text-xs text-destructive">
+                      {autoPackError}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           ) : null}

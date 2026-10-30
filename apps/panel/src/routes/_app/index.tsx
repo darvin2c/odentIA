@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback, AvatarImage, Button, Input, toast } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem } from "@odentia/ui-patterns"
+import { ConfirmDialog, EmptyState, ErrorState, LoadingState, RowActions, type RowActionItem, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ChevronRight, LogOut, Plus, Search, ShieldCheck } from "lucide-react"
@@ -9,6 +9,7 @@ import { accountInvitationsQuery, accountOrganizationsQuery, billingStatusSchema
 import { adminAccessQuery } from "../../lib/admin-access"
 import { apiFetch } from "../../lib/api"
 import { API_URL, authClient, authFetch } from "../../lib/auth-client"
+import { authError } from "../../lib/auth-error"
 import { storedInvitation } from "../../lib/founders"
 import { adminUrl, domainOf, tenantUrl, webUrl } from "../../lib/host"
 import { panelWords } from "../../lib/brand"
@@ -204,7 +205,7 @@ function OrgsPage() {
   const leave = useMutation({
     mutationFn: (org: AccountOrganization) => apiFetch(`/api/account/organizations/${encodeURIComponent(org.organizationId)}/leave`, { method: "POST" }),
     onSuccess: async () => { setBloquearAuto(true); setLeaving(null); await queryClient.invalidateQueries({ queryKey: ["account"] }); toast.success("Saliste de la organización") },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   // La política de alta la decide el servidor (Fundadores, issue 165): si aún
   // no respondió, no se ofrece crear ni se explica nada.
@@ -366,7 +367,7 @@ function InvitationItem({ invitation, onRespond }: { invitation: AccountInvitati
       const result = accept
         ? await authClient.organization.acceptInvitation({ invitationId: invitation.id })
         : await authClient.organization.rejectInvitation({ invitationId: invitation.id })
-      if (result.error) throw new Error(result.error.message ?? "No se pudo responder la invitación")
+      if (result.error) throw authError(result.error)
       return accept
     },
     onSuccess: async (accepted) => {
@@ -376,7 +377,7 @@ function InvitationItem({ invitation, onRespond }: { invitation: AccountInvitati
       toast.success(accepted ? "Invitación aceptada" : "Invitación rechazada")
       if (accepted && (invitation.role === "owner" || invitation.role === "admin") && (!invitation.provisioning.hasProfile || !invitation.provisioning.hasBranch)) await navigate({ to: "/onboarding", search: { continue: invitation.organizationId } })
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   return <li className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-card p-4">
     <div><p className="font-medium">{invitation.organizationName}</p><p className="text-sm text-muted-foreground">{invitation.slug}.{domainOf(invitation.product)} · Te invitaron como {invitation.roleLabel}</p></div>

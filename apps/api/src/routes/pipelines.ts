@@ -6,7 +6,13 @@ import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
-const renameInput = z.strictObject({ name: z.string().min(1).max(120) })
+const renameInput = z.strictObject({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Escribe el nombre del paso")
+    .max(120, "El nombre del paso no puede superar 120 caracteres"),
+})
 
 /** Quien no trabaja con ventas recibe siempre el mismo mensaje. */
 function notForYou(c: Context) {

@@ -5,7 +5,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
 import { RECEPTION_DEFAULT_NAME, receptionName } from "./agent-names.js"
 import { AGENT_ROLES, switchableFunctions } from "./agent-roles.js"
-import { ServiceError, validation } from "./errors.js"
+import { invalidField, ServiceError, validation } from "./errors.js"
 
 export interface AgentConfig {
   organizationId: string
@@ -168,7 +168,7 @@ export async function upsertAgentConfig(
     input.closeAfterHours !== undefined &&
     (!Number.isInteger(input.closeAfterHours) || input.closeAfterHours < 6 || input.closeAfterHours > 23)
   ) {
-    throw validation("Las horas para cerrar por silencio van de 6 a 23")
+    throw invalidField("closeAfterHours", "Escribe un número de horas entre 6 y 23.")
   }
   if (input.decisionProvider !== undefined && !(DECISION_PROVIDERS as readonly string[]).includes(input.decisionProvider)) {
     throw validation("decisionProvider inválido")
@@ -183,10 +183,10 @@ export async function upsertAgentConfig(
     throw validation("Los emojis son «No usar» o «Pocos»")
   }
   if (input.about !== undefined && input.about.trim().length > ABOUT_CHARS) {
-    throw validation(`«Quiénes somos» admite hasta ${ABOUT_CHARS} caracteres`)
+    throw invalidField("about", `«Quiénes somos» admite hasta ${ABOUT_CHARS} caracteres`)
   }
   if (input.personaName && input.personaName.trim().length > PERSONA_CHARS) {
-    throw validation(`El nombre con que se presenta admite hasta ${PERSONA_CHARS} caracteres`)
+    throw invalidField("personaName", `El nombre con que se presenta admite hasta ${PERSONA_CHARS} caracteres`)
   }
   const switchable = switchableFunctions("recepcion")
   if (input.disabledFunctions !== undefined && input.disabledFunctions.some((id) => !switchable.includes(id))) {
@@ -197,7 +197,7 @@ export async function upsertAgentConfig(
     for (const [id, note] of Object.entries(input.functionNotes)) {
       if (!known.includes(id)) throw validation("Indicación para una función que no existe")
       if (typeof note !== "string" || note.trim().length > FUNCTION_NOTE_CHARS) {
-        throw validation(`Cada indicación admite hasta ${FUNCTION_NOTE_CHARS} caracteres`)
+        throw invalidField(`functionNotes.${id}`, `Cada indicación admite hasta ${FUNCTION_NOTE_CHARS} caracteres`)
       }
     }
   }

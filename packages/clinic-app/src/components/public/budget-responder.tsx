@@ -1,4 +1,4 @@
-import { Checkbox, RadioGroup, RadioGroupItem } from "@odentia/ui"
+import { Checkbox, FieldLegend, FieldSet, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { Check, Minus } from "lucide-react"
 import { useState } from "react"
@@ -59,8 +59,8 @@ export function BudgetResponder({
   return (
     <div className="flex flex-col gap-4">
       {several && !chosen ? (
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-2 p-0 text-sm font-semibold">Elige una</legend>
+        <FieldSet className="gap-2">
+          <FieldLegend className="mb-2 text-sm font-semibold">Elige una</FieldLegend>
           <RadioGroup
             value={pickedOptionId ?? ""}
             onValueChange={(value) => {
@@ -95,7 +95,7 @@ export function BudgetResponder({
             ))}
           </RadioGroup>
           <p className="text-sm text-muted-foreground">Dentro de la opción, puedes dejar algo para después.</p>
-        </fieldset>
+        </FieldSet>
       ) : several && viewedOption ? (
         <p className="text-sm font-semibold">Elegiste la {viewedOption.label.toLowerCase()}</p>
       ) : null}

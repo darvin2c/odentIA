@@ -1,10 +1,9 @@
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import { SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { apiFetchBytes } from "../../../lib/api"
 import { budgetPdfUrl, deliverBudgetApi, PLAN_QUERY_KEYS } from "../../../lib/budgets"
-import { mutationMessage } from "./budget-parts"
 import { BudgetSendButton } from "./budget-send"
 
 /**
@@ -46,7 +45,7 @@ export function BudgetShowActions({
         made = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
         if (alive) setPdf(made)
       } catch (err) {
-        if (alive) setError(mutationMessage(err))
+        if (alive) setError(submitErrorMessage(err))
       }
     })()
     return () => {
@@ -75,7 +74,7 @@ export function BudgetShowActions({
       await Promise.all(PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })))
     } catch (err) {
       if (win && !win.closed) win.close()
-      setError(mutationMessage(err))
+      setError(submitErrorMessage(err))
     } finally {
       setPrinting(false)
     }

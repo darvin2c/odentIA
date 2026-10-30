@@ -18,8 +18,8 @@ import type {
   TemplateUnsupported,
   WebhookParseResult,
 } from "./protocol.js"
-import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
-import { metaGraphVersion } from "./meta-graph.js"
+import { ConnectionRejectedError, ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
+import { graphRejectedPart, metaGraphVersion } from "./meta-graph.js"
 
 export interface WhatsAppTemplateRef {
   name: string
@@ -1259,8 +1259,9 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       {},
       deps,
     )
+    if (status >= 500) throw new Error(`WhatsApp no respondió al comprobar el número: ${graphError(status, json)}`)
     if (status >= 400) {
-      throw new Error("WhatsApp validate falló: token o phone_number_id inválido")
+      throw new ConnectionRejectedError("WhatsApp validate falló: token o phone_number_id inválido", graphRejectedPart(json))
     }
     const info = connectionInfo(json)
     return {

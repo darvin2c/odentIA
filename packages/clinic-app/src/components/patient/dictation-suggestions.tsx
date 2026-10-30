@@ -1,9 +1,10 @@
 import { formatMoney, VITAL_SIGNS } from "@odentia/clinical"
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { AgentMark, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, Field, FieldLabel, Input, toast } from "@odentia/ui"
+import { AgentMark, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { Check, CircleAlert, Mic, X } from "lucide-react"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { type FormEvent, useState } from "react"
+import { useState } from "react"
 import { CLINICAL_NAME } from "../../lib/agent-names"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { openBookingAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
@@ -673,57 +674,79 @@ interface EditableField {
   number?: boolean
   /** Una medida con decimales (la temperatura, el peso). */
   decimal?: boolean
+  /** Largo máximo del texto: el mismo que el campo de su operación (`OPERATIONS` en services). */
+  max?: number
+  /** Rango de un número: el mismo que el campo de su operación. */
+  min?: number
+  top?: number
 }
 
 /** Campos que el profesional corrige a mano en una sugerencia que no es del plan, con su rótulo. */
 const EDITABLE: Record<Exclude<DictationKind, "plan" | "procedimiento">, EditableField[]> = {
   nota: [
-    { key: "reason", label: "Motivo de consulta", long: true },
-    { key: "presentIllness", label: "Enfermedad actual", long: true },
-    { key: "illnessDuration", label: "Tiempo de enfermedad" },
-    { key: "evolution", label: "Evolución", long: true },
-    { key: "indications", label: "Indicaciones", long: true },
-    { key: "prognosis", label: "Pronóstico" },
+    { key: "reason", label: "Motivo de consulta", long: true, max: 2000 },
+    { key: "presentIllness", label: "Enfermedad actual", long: true, max: 4000 },
+    { key: "illnessDuration", label: "Tiempo de enfermedad", max: 200 },
+    { key: "evolution", label: "Evolución", long: true, max: 10_000 },
+    { key: "indications", label: "Indicaciones", long: true, max: 4000 },
+    { key: "prognosis", label: "Pronóstico", max: 2000 },
   ],
   diagnostico: [
-    { key: "diagnosisCode", label: "Código" },
+    { key: "diagnosisCode", label: "Código", max: 10 },
     { key: "toothNumber", label: "Pieza", number: true },
-    { key: "note", label: "Nota", long: true },
+    { key: "note", label: "Nota", long: true, max: 2000 },
   ],
   control: [
-    { key: "title", label: "Control" },
-    { key: "instructions", label: "Indicaciones", long: true },
+    { key: "title", label: "Control", max: 200 },
+    { key: "instructions", label: "Indicaciones", long: true, max: 2000 },
   ],
   // El hallazgo, su variante y su estado se eligen en la tarjeta; aquí, la pieza y una nota.
   odontograma: [
     { key: "toothNumber", label: "Pieza", number: true },
-    { key: "note", label: "Nota", long: true },
+    { key: "note", label: "Nota", long: true, max: 2000 },
   ],
   // La receta se completa en el formulario de siempre, «Emitir receta», ya lleno.
   receta: [],
   // Los signos vitales dictados, cada uno con su unidad (latidIA, issue 229).
-  signos: VITAL_SIGNS.map((sign) => ({ key: sign.key, label: `${sign.label} (${sign.suffix})`, decimal: true })),
+  signos: VITAL_SIGNS.map((sign) => ({ key: sign.key, label: `${sign.label} (${sign.suffix})`, decimal: true, min: sign.min, top: sign.max })),
   // El sistema se ve en el título; aquí, lo que se encontró. Sin texto queda «Sin alteraciones».
-  examen: [{ key: "finding", label: "Hallazgo", long: true }],
+  examen: [{ key: "finding", label: "Hallazgo", long: true, max: 1000 }],
   // El descanso se completa en su formulario, «Emitir descanso», ya lleno.
   descanso: [],
   // El día y la hora pedidos: se vuelve a buscar el hueco libre más cercano. Otro profesional o sede, en «Otro horario…».
   cita: [
-    { key: "date", label: "Día (AAAA-MM-DD)" },
-    { key: "time", label: "Hora (HH:MM, opcional)" },
+    { key: "date", label: "Día (AAAA-MM-DD)", max: 10 },
+    { key: "time", label: "Hora (HH:MM, opcional)", max: 5 },
   ],
   // Lleva lo indicado en la atención: no hay nada que escribir, se arma o se descarta.
   presupuesto: [],
   // La sustancia como se dijo, lo que le pasó y qué tan fuerte fue (leve, moderada o severa).
   alergia: [
-    { key: "substance", label: "Sustancia" },
-    { key: "reaction", label: "Qué le pasó", long: true },
+    { key: "substance", label: "Sustancia", max: 200 },
+    { key: "reaction", label: "Qué le pasó", long: true, max: 2000 },
   ],
   // El material se busca otra vez en Inventario por su nombre; la cantidad es el total, no se suma.
   material: [
-    { key: "product", label: "Material" },
-    { key: "quantity", label: "Cuántos en total", number: true },
+    { key: "product", label: "Material", max: 200 },
+    { key: "quantity", label: "Cuántos en total", number: true, min: 1 },
   ],
+}
+
+/** Lo que no pasa el esquema de la operación, dicho en el campo (los mismos límites que `OPERATIONS`). */
+function fieldError(field: EditableField, raw: string, validTooth: (value: string) => boolean): string | null {
+  const value = raw.trim()
+  if (value === "") return null
+  if (field.key === "toothNumber") return validTooth(value) ? null : "Escribe una pieza en numeración FDI, del 11 al 85 (por ejemplo, 16)."
+  if (field.max !== undefined && value.length > field.max) return `Escribe como mucho ${field.max} caracteres.`
+  if (field.key === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Escribe el día como AAAA-MM-DD (por ejemplo, 2026-11-05)."
+  if (field.key === "time" && !/^\d{2}:\d{2}$/.test(value)) return "Escribe la hora como HH:MM (por ejemplo, 16:00)."
+  if (field.number || field.decimal) {
+    const number = Number(value)
+    if (!Number.isFinite(number)) return "Escribe un número."
+    if (field.min !== undefined && number < field.min) return `Escribe al menos ${field.min}.`
+    if (field.top !== undefined && number > field.top) return `Escribe como mucho ${field.top}.`
+  }
+  return null
 }
 
 /** Lo que se corrige de una sugerencia: lo que trae y, de la presión, las dos partes. */
@@ -751,6 +774,22 @@ export function DictationEditDrawer({ session }: { session: DictationSession }) 
   return item ? <EditForm key={item.id} item={item} session={session} /> : null
 }
 
+interface EditValues {
+  draft: Record<string, string>
+  service: Candidate | null
+  surfaces: string[]
+}
+
+/** Cómo se llama en el formulario un dato que el servidor señala por su nombre en el PATCH. */
+function editFieldName(serverField: string): string {
+  const key = serverField.split(/[.[]/)[0] ?? serverField
+  if (key === "serviceId") return "service"
+  if (key === "surfaces") return "surfaces"
+  return `draft.${key}`
+}
+
+const TOOTH_MESSAGE = "Escribe una pieza en numeración FDI, del 11 al 85 (por ejemplo, 16)."
+
 function EditForm({ item, session }: { item: DictationSuggestion; session: DictationSession }) {
   const payload = item.payload
   const kind = item.kind
@@ -758,79 +797,105 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
   const plan = kind === "plan" || kind === "procedimiento"
   const done = kind === "procedimiento"
   const fields = fieldsOf(item)
-  const [draft, setDraft] = useState<Record<string, string>>(() =>
-    Object.fromEntries([...fields.map((field) => field.key), "toothNumber", "detail"].map((key) => [key, payload[key] == null ? "" : String(payload[key])])),
-  )
-  const [service, setService] = useState<Candidate | null>(() =>
-    typeof payload["serviceId"] === "string"
-      ? {
-          id: payload["serviceId"],
-          name: String(payload["serviceName"] ?? ""),
-          priceCents: Number(payload["priceCents"] ?? 0),
-          // La moneda viene del tarifario (en el payload); si falta, no se asume ninguna.
-          currency: typeof payload["currency"] === "string" ? payload["currency"] : "",
-          scope: (payload["serviceScope"] as string | null | undefined) ?? null,
-        }
-      : null,
-  )
-  const [surfaces, setSurfaces] = useState<string[]>(() => (Array.isArray(payload["surfaces"]) ? (payload["surfaces"] as string[]) : []))
   const [review, setReview] = useState<string | null>(null)
   const { title } = suggestionText(item)
-
-  const tooth = Number(draft["toothNumber"])
   const site = productUi().site
-  const validTooth = draft["toothNumber"] !== "" && (site?.isPlace(tooth) ?? false)
-  // Las caras son las de esa pieza, con los nombres del odontograma: una pieza anterior no tiene oclusal.
-  const available = validTooth ? (site?.partsOf(tooth) ?? []) : []
-  const scope = service?.scope ?? null
-  // Sin «dónde» en el producto (latidIA), una indicación no lleva pieza ni caras.
-  const bySite = Boolean(site) && (scope === null || scope === "tooth" || scope === "surfaces")
-  const withSurfaces = Boolean(site) && (scope === "surfaces" || (scope === null && surfaces.length > 0))
-  const candidates = candidatesOf(item)
-  const pick = (chosen: Candidate | ServiceCatalogItem) => setService({ id: chosen.id, name: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency, scope: chosen.scope ?? null })
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    setReview(null)
-    const patch: Record<string, unknown> = {}
-    if (plan) {
-      if (service && service.id !== payload["serviceId"]) patch["serviceId"] = service.id
-      if (bySite) patch["toothNumber"] = draft["toothNumber"] === "" ? null : tooth
-      if (withSurfaces) {
-        const kept = surfaces.filter((surface) => (available as string[]).includes(surface))
-        patch["surfaces"] = kept.length ? kept : null
-      }
-      if (!done) patch["detail"] = (draft["detail"] ?? "").trim() || null
-    } else {
-      for (const field of fields) {
-        const value = (draft[field.key] ?? "").trim()
-        patch[field.key] = value === "" ? null : field.number || field.decimal ? Number(value) : value
-      }
-      // Con un hallazgo escrito, el sistema queda con hallazgos; sin texto, sin alteraciones.
-      if (kind === "examen") patch["state"] = patch["finding"] ? "con_hallazgos" : "sin_alteraciones"
-    }
-    session.save.mutate(
-      { item, patch, confirm: true },
-      {
-        onSuccess: (result) => {
-          if (result.confirmed) session.closeEdit()
-          else setReview(result.item.note ?? "Todavía le falta algo para poder confirmarla.")
-        },
-      },
-    )
+  const isTooth = (value: string) => value !== "" && (site?.isPlace(Number(value)) ?? false)
+  const layout = (values: EditValues) => {
+    const tooth = Number(values.draft["toothNumber"])
+    // Las caras son las de esa pieza, con los nombres del odontograma: una pieza anterior no tiene oclusal.
+    const available = isTooth(values.draft["toothNumber"] ?? "") ? (site?.partsOf(tooth) ?? []) : []
+    const scope = values.service?.scope ?? null
+    // Sin «dónde» en el producto (latidIA), una indicación no lleva pieza ni caras.
+    const bySite = Boolean(site) && (scope === null || scope === "tooth" || scope === "surfaces")
+    const withSurfaces = Boolean(site) && (scope === "surfaces" || (scope === null && values.surfaces.length > 0))
+    return { tooth, available, bySite, withSurfaces }
   }
+
+  const defaultValues: EditValues = {
+    draft: Object.fromEntries([...fields.map((field) => field.key), "toothNumber", "detail"].map((key) => [key, payload[key] == null ? "" : String(payload[key])])),
+    service:
+      typeof payload["serviceId"] === "string"
+        ? {
+            id: payload["serviceId"],
+            name: String(payload["serviceName"] ?? ""),
+            priceCents: Number(payload["priceCents"] ?? 0),
+            // La moneda viene del tarifario (en el payload); si falta, no se asume ninguna.
+            currency: typeof payload["currency"] === "string" ? payload["currency"] : "",
+            scope: (payload["serviceScope"] as string | null | undefined) ?? null,
+          }
+        : null,
+    surfaces: Array.isArray(payload["surfaces"]) ? (payload["surfaces"] as string[]) : [],
+  }
+
+  const form = useAppForm({
+    defaultValues,
+    validators: {
+      onSubmit: ({ value }) => {
+        const errors: Record<string, string> = {}
+        if (plan) {
+          if (!done && !value.service) errors["service"] = "Elige la prestación."
+          const tooth = value.draft["toothNumber"] ?? ""
+          if (layout(value).bySite && tooth !== "" && !isTooth(tooth)) errors["draft.toothNumber"] = TOOTH_MESSAGE
+          if (!done && (value.draft["detail"] ?? "").trim().length > 2000) errors["draft.detail"] = "Escribe como mucho 2000 caracteres."
+        } else {
+          for (const field of fields) {
+            const message = fieldError(field, value.draft[field.key] ?? "", isTooth)
+            if (message) errors[`draft.${field.key}`] = message
+          }
+        }
+        return Object.keys(errors).length > 0 ? { fields: errors } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const { tooth, available, bySite, withSurfaces } = layout(value)
+      const { draft, service, surfaces } = value
+      const patch: Record<string, unknown> = {}
+      if (plan) {
+        if (service && service.id !== payload["serviceId"]) patch["serviceId"] = service.id
+        if (bySite) patch["toothNumber"] = draft["toothNumber"] === "" ? null : tooth
+        if (withSurfaces) {
+          const kept = surfaces.filter((surface) => (available as string[]).includes(surface))
+          patch["surfaces"] = kept.length ? kept : null
+        }
+        if (!done) patch["detail"] = (draft["detail"] ?? "").trim() || null
+      } else {
+        for (const field of fields) {
+          const text = (draft[field.key] ?? "").trim()
+          patch[field.key] = text === "" ? null : field.number || field.decimal ? Number(text) : text
+        }
+        // Con un hallazgo escrito, el sistema queda con hallazgos; sin texto, sin alteraciones.
+        if (kind === "examen") patch["state"] = patch["finding"] ? "con_hallazgos" : "sin_alteraciones"
+      }
+      const result = await session.save.mutateAsync({ item, patch, confirm: true })
+      if (result.confirmed) session.closeEdit()
+      else setReview(result.item.note ?? "Todavía le falta algo para poder confirmarla.")
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: editFieldName,
+    formMessage: (error) => dictationErrorText(error, "No pude guardar esto. Revísalo y vuelve a intentarlo."),
+  })
+  const values = useStore(form.store, (state) => state.values)
+  const { tooth, available, bySite, withSurfaces } = layout(values)
+  const service = values.service
+  const candidates = candidatesOf(item)
+  const pick = (chosen: Candidate | ServiceCatalogItem) =>
+    form.setFieldValue("service", { id: chosen.id, name: chosen.name, priceCents: chosen.priceCents, currency: chosen.currency, scope: chosen.scope ?? null })
 
   return (
     <FormDrawer
+      {...surface}
+      onSubmit={(event) => {
+        setReview(null)
+        surface.onSubmit(event)
+      }}
       open
       title={title}
       description={`Sugerencia de ${CLINICAL_NAME}`}
       onClose={session.closeEdit}
-      onSubmit={submit}
-      isSubmitting={session.save.isPending}
-      error={review ?? dictationErrorText(session.save.error, "No pude guardar esto. Revísalo y vuelve a intentarlo.")}
+      error={review ?? surface.error}
       submitLabel="Guardar y confirmar"
-      submitDisabled={plan && !done && !service}
     >
       <div className="flex flex-col gap-4">
         {item.sourceText ? (
@@ -843,106 +908,142 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
 
         {plan ? (
           <>
-            <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">Prestación</p>
-              <p className="text-sm">{service ? service.name : "Sin elegir"}</p>
-              <p className="text-xs text-muted-foreground">
-                {service ? `Precio del servicio: ${price(service.priceCents, service.currency)}. No se edita aquí.` : "El precio sale de la lista de servicios; no se edita aquí."}
-              </p>
-              {candidates.length > 0 ? (
-                <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Prestaciones parecidas">
-                  {candidates.map((candidate) => (
-                    <Button
-                      key={candidate.id}
-                      type="button"
-                      variant={service?.id === candidate.id ? "default" : "outline"}
-                      size="sm"
-                      className="h-auto min-h-11 whitespace-normal"
-                      aria-pressed={service?.id === candidate.id}
-                      onClick={() => pick(candidate)}
-                    >
-                      {candidate.name} · {price(candidate.priceCents, candidate.currency)}
-                    </Button>
-                  ))}
-                </fieldset>
-              ) : null}
-              <ServicePicker label="Buscar otra prestación" value={service?.id ?? ""} onChange={pick} />
-            </div>
+            <form.AppField name="service">
+              {(field) => (
+                <field.Group
+                  id={`dictado-${item.id}-servicio`}
+                  legend="Prestación"
+                  description={service ? `Precio del servicio: ${price(service.priceCents, service.currency)}. No se edita aquí.` : "El precio sale de la lista de servicios; no se edita aquí."}
+                >
+                  {(control) => (
+                    <div className="flex flex-col gap-2">
+                      <p className="text-sm">{service ? service.name : "Sin elegir"}</p>
+                      {candidates.length > 0 ? (
+                        <fieldset className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0" aria-label="Prestaciones parecidas">
+                          {candidates.map((candidate) => (
+                            <Button
+                              key={candidate.id}
+                              type="button"
+                              variant={service?.id === candidate.id ? "default" : "outline"}
+                              size="sm"
+                              className="h-auto min-h-11 whitespace-normal"
+                              aria-pressed={service?.id === candidate.id}
+                              onClick={() => pick(candidate)}
+                            >
+                              {candidate.name} · {price(candidate.priceCents, candidate.currency)}
+                            </Button>
+                          ))}
+                        </fieldset>
+                      ) : null}
+                      <Field data-invalid={control.invalid || undefined}>
+                        <FieldLabel htmlFor={control.id}>Buscar otra prestación</FieldLabel>
+                        <ServicePicker
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          value={service?.id ?? ""}
+                          onChange={pick}
+                        />
+                      </Field>
+                    </div>
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
             {bySite ? (
-              <Field>
-                <FieldLabel htmlFor={`dictado-${item.id}-pieza`}>Pieza</FieldLabel>
-                <Input
-                  id={`dictado-${item.id}-pieza`}
-                  className="w-24"
-                  inputMode="numeric"
-                  maxLength={2}
-                  value={draft["toothNumber"] ?? ""}
-                  aria-invalid={draft["toothNumber"] !== "" && !validTooth}
-                  onChange={(event) => setDraft({ ...draft, toothNumber: event.target.value.replace(/\D/g, "").slice(0, 2) })}
-                />
-                <FieldDescription>Número FDI, por ejemplo 16.</FieldDescription>
-              </Field>
+              <form.AppField name="draft.toothNumber">
+                {(field) => (
+                  <field.Control id={`dictado-${item.id}-pieza`} label="Pieza" description="Número FDI, por ejemplo 16.">
+                    {(control) => (
+                      <Input
+                        {...control.props}
+                        className="w-24"
+                        inputMode="numeric"
+                        maxLength={2}
+                        value={field.state.value ?? ""}
+                        onChange={(event) => field.handleChange(event.target.value.replace(/\D/g, "").slice(0, 2))}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
             ) : site ? (
               <p className="text-sm text-muted-foreground">Esta prestación no se indica por pieza.</p>
             ) : null}
             {withSurfaces ? (
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium">Superficies</span>
-                {available.length > 0 ? (
-                  <fieldset className="m-0 flex flex-wrap gap-1.5 border-0 p-0" aria-label={`Superficies de la pieza ${tooth}`}>
-                    {available.map((surface) => {
-                      const pressed = surfaces.includes(surface)
-                      return (
-                        <Button
-                          key={surface}
-                          type="button"
-                          size="sm"
-                          className="min-h-11"
-                          variant={pressed ? "default" : "outline"}
-                          aria-pressed={pressed}
-                          onClick={() => setSurfaces(pressed ? surfaces.filter((entry) => entry !== surface) : [...surfaces, surface])}
+              <form.AppField name="surfaces">
+                {(field) => (
+                  <field.Group legend="Superficies">
+                    {(control) =>
+                      available.length > 0 ? (
+                        <fieldset
+                          className="flex min-w-0 flex-wrap gap-1.5"
+                          aria-label={`Superficies de la pieza ${tooth}`}
+                          aria-invalid={control.props["aria-invalid"]}
+                          aria-describedby={control.describedBy}
                         >
-                          {partNames([surface])}
-                        </Button>
+                          {available.map((part) => {
+                            const pressed = field.state.value.includes(part)
+                            return (
+                              <Button
+                                key={part}
+                                type="button"
+                                size="sm"
+                                className="min-h-11"
+                                variant={pressed ? "default" : "outline"}
+                                aria-pressed={pressed}
+                                onBlur={control.onBlur}
+                                onClick={() => field.handleChange(pressed ? field.state.value.filter((entry) => entry !== part) : [...field.state.value, part])}
+                              >
+                                {partNames([part])}
+                              </Button>
+                            )
+                          })}
+                        </fieldset>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Escribe la pieza para elegir sus superficies.</p>
                       )
-                    })}
-                  </fieldset>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Escribe la pieza para elegir sus superficies.</p>
+                    }
+                  </field.Group>
                 )}
-              </div>
+              </form.AppField>
             ) : null}
             {done ? null : (
-              <Field>
-                <FieldLabel htmlFor={`dictado-${item.id}-detalle`}>Detalle</FieldLabel>
-                <Textarea id={`dictado-${item.id}-detalle`} rows={3} maxLength={2000} placeholder="Opcional" value={draft["detail"] ?? ""} onChange={(event) => setDraft({ ...draft, detail: event.target.value })} />
-              </Field>
+              <form.AppField name="draft.detail">
+                {(field) => <field.TextareaField id={`dictado-${item.id}-detalle`} label="Detalle" rows={3} maxLength={2000} placeholder="Opcional" />}
+              </form.AppField>
             )}
           </>
         ) : (
-          fields.map((field) => (
-            <Field key={field.key}>
-              <FieldLabel htmlFor={`dictado-${item.id}-${field.key}`}>{field.label}</FieldLabel>
-              {field.long ? (
-                <Textarea id={`dictado-${item.id}-${field.key}`} rows={3} value={draft[field.key] ?? ""} onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })} />
-              ) : (
-                <Input
-                  id={`dictado-${item.id}-${field.key}`}
-                  inputMode={field.number ? "numeric" : field.decimal ? "decimal" : undefined}
-                  value={draft[field.key] ?? ""}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      [field.key]: field.number
-                        ? event.target.value.replace(/\D/g, "").slice(0, 2)
-                        : field.decimal
-                          ? event.target.value.replace(",", ".").replace(/[^\d.]/g, "").slice(0, 6)
-                          : event.target.value,
-                    })
-                  }
-                />
-              )}
-            </Field>
+          fields.map((editable) => (
+            <form.AppField key={editable.key} name={`draft.${editable.key}`}>
+              {(field) =>
+                editable.long ? (
+                  <field.TextareaField id={`dictado-${item.id}-${editable.key}`} label={editable.label} rows={3} maxLength={editable.max} />
+                ) : (
+                  <field.Control id={`dictado-${item.id}-${editable.key}`} label={editable.label}>
+                    {(control) => (
+                      <Input
+                        {...control.props}
+                        inputMode={editable.number ? "numeric" : editable.decimal ? "decimal" : undefined}
+                        maxLength={editable.max}
+                        value={field.state.value ?? ""}
+                        onChange={(event) =>
+                          field.handleChange(
+                            editable.number
+                              ? event.target.value.replace(/\D/g, "").slice(0, 2)
+                              : editable.decimal
+                                ? event.target.value.replace(",", ".").replace(/[^\d.]/g, "").slice(0, 6)
+                                : event.target.value,
+                          )
+                        }
+                      />
+                    )}
+                  </field.Control>
+                )
+              }
+            </form.AppField>
           ))
         )}
 
@@ -950,7 +1051,7 @@ function EditForm({ item, session }: { item: DictationSuggestion; session: Dicta
           type="button"
           variant="outline"
           className="min-h-11 self-start text-destructive"
-          disabled={session.save.isPending || session.act.isPending}
+          disabled={surface.isSubmitting || session.act.isPending}
           onClick={() => session.act.mutate({ item, action: "discard" }, { onSuccess: session.closeEdit })}
         >
           Descartar sugerencia

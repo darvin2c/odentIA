@@ -1,31 +1,24 @@
 import { clinicalProfileFor, DIAGNOSIS_SYSTEM_INFO } from "@odentia/clinical"
-import {
-  Button,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  Input,
-  Skeleton,
-  toast,
-} from "@odentia/ui"
+import { Button, Skeleton, toast } from "@odentia/ui"
 import {
   common,
   countryOptions,
   ErrorState,
-  fieldErrorMessages,
   normalizeCountry,
   PageHeader,
-  PhoneInput,
   regionCountry,
+  type ServerFieldMap,
   SubmitButton,
   TimeZoneSelect,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
   zonesForCountry,
 } from "@odentia/ui-patterns"
-import { useForm, useStore } from "@tanstack/react-form"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { z } from "zod"
 import { ClinicLogoSettings } from "../../components/settings/clinic-logo"
 import { DiagnosisListSettings } from "../../components/settings/diagnosis-list"
@@ -34,13 +27,13 @@ import { SettingsNoAccess } from "../../components/settings/no-access"
 import { SearchSelect } from "../../components/settings/search-select"
 import {
   emptyTaxValues,
+  OTHER_TAX,
   otherTaxError,
   TaxesCard,
   taxesInputFrom,
   taxValuesFromProfile,
 } from "../../components/settings/taxes-card"
 import { useReceptionName } from "../../lib/agent-names"
-import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useOrgLocale } from "../../lib/locale"
 import {
@@ -101,13 +94,15 @@ const profileSchema = z.object({
   fiscalDocType: z.string(),
   fiscalDocNumber: z.string(),
   fiscalAddress: z.string(),
-  // Teléfono para urgencias (ADR 0050): E.164 del campo de teléfono o vacío.
-  emergencyPhone: z.string(),
+  // Teléfono para urgencias (ADR 0050): E.164 del campo de teléfono o null.
+  // Un número a medias lo detiene el propio campo, con su aviso.
+  emergencyPhone: z.string().nullable(),
   countryCode: z.string().length(2, "Elige el país"),
   currency: z.string().length(3, "Elige la moneda"),
   timezone: z.string().min(1, "Elige la zona horaria"),
-  // Siempre el español del país (#48): sale del país, no se elige aparte.
-  locale: z.string().min(2, "Elige el país"),
+  // Siempre el español del país (#48): sale del país y no tiene campo propio,
+  // así que no se valida aquí (nunca bloquea sin decir dónde); lo revisa el servidor.
+  locale: z.string(),
   // Impuestos (ADR 0083): "" es lo del país; «otra» lleva su porcentaje.
   taxLegalForm: z.string(),
   servicesTax: z.string(),
@@ -133,7 +128,7 @@ const emptyValues: ProfileValues = {
   fiscalDocType: "",
   fiscalDocNumber: "",
   fiscalAddress: "",
-  emergencyPhone: "",
+  emergencyPhone: null,
   countryCode: "",
   currency: "",
   timezone: "",
@@ -148,7 +143,7 @@ function toValues(profile: OrgProfile): ProfileValues {
     fiscalDocType: profile.fiscalDocType ?? "",
     fiscalDocNumber: profile.fiscalDocNumber ?? "",
     fiscalAddress: profile.fiscalAddress ?? "",
-    emergencyPhone: profile.emergencyPhone ?? "",
+    emergencyPhone: profile.emergencyPhone ?? null,
     // El país guardado se conserva tal cual: nunca se cambia por otro al cargar.
     countryCode: profile.countryCode.trim().toUpperCase(),
     currency: profile.currency,
@@ -189,7 +184,7 @@ function toInput(values: ProfileValues): OrgProfileInput {
     fiscalDocType: values.fiscalDocType.trim() || null,
     fiscalDocNumber: values.fiscalDocNumber.trim() || null,
     fiscalAddress: values.fiscalAddress.trim() || null,
-    emergencyPhone: values.emergencyPhone.trim() || null,
+    emergencyPhone: values.emergencyPhone?.trim() || null,
     countryCode: values.countryCode,
     currency: values.currency,
     timezone: values.timezone,
@@ -225,13 +220,6 @@ function OrgProfilePage() {
         queryClient.invalidateQueries({ queryKey: ["org-finance-profile"] }),
       ])
     },
-    onError: (error) =>
-      // Lo que la clínica puede corregir se dice con su motivo; lo demás, sin jerga.
-      toast.error(
-        error instanceof ApiError && error.status < 500 && error.shape.message
-          ? error.shape.message
-          : "No pudimos guardar los datos",
-      ),
   })
 
   return (
@@ -305,6 +293,21 @@ function ProfileSkeleton() {
   )
 }
 
+/**
+ * Cómo se llama en esta pantalla lo que el servidor señala por su nombre en el
+ * cuerpo: el formato sale del país, y cada impuesto va a su lista o, si se
+ * eligió «Otra tasa…», al porcentaje escrito.
+ */
+function profileFieldMap(values: ProfileValues): ServerFieldMap {
+  return (key) => {
+    if (key === "locale") return "countryCode"
+    if (key.startsWith("taxes.legalForm")) return "taxLegalForm"
+    if (key.startsWith("taxes.servicios")) return values.servicesTax === OTHER_TAX ? "servicesOther" : "servicesTax"
+    if (key.startsWith("taxes.productos")) return values.productsTax === OTHER_TAX ? "productsOther" : "productsTax"
+    return undefined
+  }
+}
+
 function ProfileForm({
   values,
   pending,
@@ -319,18 +322,15 @@ function ProfileForm({
   const language = displayLanguage(useOrgLocale())
   const [initialValues, setInitialValues] = useState(values)
   const [baseline, setBaseline] = useState(values)
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: initialValues,
     validators: { onSubmit: profileSchema },
+    // Si el servidor lo rechaza, cada motivo va a su campo y el resto junto a «Guardar».
     onSubmit: async ({ value, formApi }) => {
-      try {
-        await onSubmit(value)
-        setInitialValues(value)
-        setBaseline(value)
-        if (sameDraft(formApi.state.values, value)) formApi.reset(value)
-      } catch {
-        // La mutación muestra el error; el borrador queda intacto para reintentar.
-      }
+      await onSubmit(value)
+      setInitialValues(value)
+      setBaseline(value)
+      if (sameDraft(formApi.state.values, value)) formApi.reset(value)
     },
   })
   const currentValues = useStore(form.store, (state) => state.values)
@@ -372,128 +372,58 @@ function ProfileForm({
   const [now, setNow] = useState<Date | null>(null)
   useEffect(() => setNow(new Date()), [])
   const preview = now ? regionPreview(now, { locale, timeZone: timezone, currency }) : null
+  const submit = useFormSubmit(form, { fieldMap: profileFieldMap(currentValues) })
+  const submitError = useFormSubmitError(form)
 
   return (
-    <form
-      className="flex max-w-3xl flex-col gap-4"
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault()
-        void form.handleSubmit()
-      }}
-    >
+    <form className="flex max-w-3xl flex-col gap-4" noValidate onSubmit={submit}>
       <PageDraftGuard dirty={dirty} />
       <section aria-labelledby="org-identity" className={CARD}>
         <h2 id="org-identity" className="font-heading text-base font-medium">
           Identidad
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <form.Field name="legalName">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="org-legal-name">Razón social</FieldLabel>
-                  <Input
-                    id="org-legal-name"
-                    maxLength={200}
-                    aria-invalid={error ? true : undefined}
-                    aria-describedby={error ? "org-legal-name-error" : undefined}
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError id="org-legal-name-error">{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="tradeName">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="org-trade-name">Nombre comercial</FieldLabel>
-                  <Input
-                    id="org-trade-name"
-                    maxLength={200}
-                    aria-invalid={error ? true : undefined}
-                    aria-describedby={error ? "org-trade-name-error" : "org-trade-name-help"}
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  {error ? (
-                    <FieldError id="org-trade-name-error">{error}</FieldError>
-                  ) : (
-                    <FieldDescription id="org-trade-name-help">
-                      Así te ven tus pacientes: en WhatsApp, «Su enlace», el portal, el registro y los PDF. La
-                      razón social va solo en el comprobante.
-                    </FieldDescription>
-                  )}
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="fiscalDocType">
+          <form.AppField name="legalName">
+            {(field) => <field.TextField id="org-legal-name" label="Razón social" maxLength={200} />}
+          </form.AppField>
+          <form.AppField name="tradeName">
             {(field) => (
-              <Field>
-                <FieldLabel htmlFor="org-doc-type">Documento fiscal</FieldLabel>
-                <Input
-                  id="org-doc-type"
-                  maxLength={20}
-                  aria-describedby="org-doc-type-help"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldDescription id="org-doc-type-help">
-                  Como se llama en tu país el identificador fiscal de la clínica.
-                </FieldDescription>
-              </Field>
+              <field.TextField
+                id="org-trade-name"
+                label="Nombre comercial"
+                maxLength={200}
+                description="Así te ven tus pacientes: en WhatsApp, «Su enlace», el portal, el registro y los PDF. La razón social va solo en el comprobante."
+              />
             )}
-          </form.Field>
-          <form.Field name="fiscalDocNumber">
+          </form.AppField>
+          <form.AppField name="fiscalDocType">
             {(field) => (
-              <Field>
-                <FieldLabel htmlFor="org-doc-number">Número</FieldLabel>
-                <Input
-                  id="org-doc-number"
-                  maxLength={20}
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-              </Field>
+              <field.TextField
+                id="org-doc-type"
+                label="Documento fiscal"
+                maxLength={20}
+                description="Como se llama en tu país el identificador fiscal de la clínica."
+              />
             )}
-          </form.Field>
+          </form.AppField>
+          <form.AppField name="fiscalDocNumber">
+            {(field) => <field.TextField id="org-doc-number" label="Número" maxLength={20} />}
+          </form.AppField>
         </div>
-        <form.Field name="fiscalAddress">
+        <form.AppField name="fiscalAddress">
+          {(field) => <field.TextField id="org-fiscal-address" label="Dirección fiscal" maxLength={300} />}
+        </form.AppField>
+        <form.AppField name="emergencyPhone">
           {(field) => (
-            <Field>
-              <FieldLabel htmlFor="org-fiscal-address">Dirección fiscal</FieldLabel>
-              <Input
-                id="org-fiscal-address"
-                maxLength={300}
-                value={field.state.value}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
-            </Field>
+            <field.PhoneField
+              id="org-emergency-phone"
+              label="Teléfono para urgencias"
+              className="[&_[data-slot=input-group]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11 sm:[&_[data-slot=input-group]]:min-h-9"
+              defaultCountry={normalizeCountry(country) ?? undefined}
+              description={`${receptionName} lo da ante una urgencia, junto con el número de emergencias del país. Si lo dejas vacío, solo da ese número o dice que vaya a la emergencia más cercana.`}
+            />
           )}
-        </form.Field>
-        <form.Field name="emergencyPhone">
-          {(field) => (
-            <Field>
-              <FieldLabel htmlFor="org-emergency-phone">Teléfono para urgencias</FieldLabel>
-              <PhoneInput
-                id="org-emergency-phone"
-                className="[&_[data-slot=input-group]]:min-h-11 [&_[data-slot=select-trigger]]:min-h-11 sm:[&_[data-slot=input-group]]:min-h-9"
-                value={field.state.value || null}
-                defaultCountry={normalizeCountry(form.state.values.countryCode) ?? undefined}
-                aria-describedby="org-emergency-phone-hint"
-                onChange={(next) => field.handleChange(next ?? "")}
-              />
-              <FieldDescription id="org-emergency-phone-hint">
-                {receptionName} lo da ante una urgencia, junto con el número de emergencias del país. Si lo dejas vacío, solo da ese número o dice que vaya a la emergencia más cercana.
-              </FieldDescription>
-            </Field>
-          )}
-        </form.Field>
+        </form.AppField>
       </section>
 
       <section aria-labelledby="org-region" className={CARD}>
@@ -501,113 +431,116 @@ function ProfileForm({
           País y formato
         </h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <form.Field name="countryCode">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="org-country">País</FieldLabel>
+          <form.AppField name="countryCode">
+            {(field) => (
+              <field.Control id="org-country" label="País" description="Define el formato de los teléfonos.">
+                {(control) => (
                   <SearchSelect
-                    id="org-country"
+                    id={control.id}
                     label="País"
                     placeholder="Buscar país…"
                     value={field.state.value}
                     options={countries}
-                    invalid={Boolean(error)}
-                    aria-describedby="org-country-help"
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
                     onChange={(next) => {
                       if (next === field.state.value) return
                       field.handleChange(next)
                       void proposeRegion(next)
                     }}
                   />
-                  <FieldDescription id="org-country-help">
-                    Define el formato de los teléfonos.
-                  </FieldDescription>
-                  <FieldError>{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="timezone">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="org-timezone">Zona horaria</FieldLabel>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="timezone">
+            {(field) => (
+              <field.Control
+                id="org-timezone"
+                label="Zona horaria"
+                description={
+                  !field.state.value && countryZones.length > 1
+                    ? "Ese país tiene varias zonas horarias: elige la de la clínica."
+                    : "Con ella se leen la agenda, el historial y los documentos."
+                }
+              >
+                {(control) => (
                   <TimeZoneSelect
-                    id="org-timezone"
+                    id={control.id}
+                    name={control.name}
                     value={field.state.value || null}
                     onChange={(next) => field.handleChange(next ?? "")}
                     suggested={countryZones}
-                    invalid={Boolean(error)}
-                    aria-describedby="org-timezone-help"
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
                   />
-                  <FieldDescription id="org-timezone-help">
-                    {!field.state.value && countryZones.length > 1
-                      ? "Ese país tiene varias zonas horarias: elige la de la clínica."
-                      : "Con ella se leen la agenda, el historial y los documentos."}
-                  </FieldDescription>
-                  <FieldError>{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="currency">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="org-currency">Moneda</FieldLabel>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="currency">
+            {(field) => (
+              <field.Control
+                id="org-currency"
+                label="Moneda"
+                description="Con ella se cobra. Si la clínica ya tiene cobros o presupuestos en otra moneda, no se puede cambiar: los importes anteriores no se convierten."
+              >
+                {(control) => (
                   <SearchSelect
-                    id="org-currency"
+                    id={control.id}
                     label="Moneda"
                     placeholder="Buscar moneda…"
                     value={field.state.value}
                     options={currencies}
-                    invalid={Boolean(error)}
-                    aria-describedby="org-currency-help"
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
                     onChange={(next) => field.handleChange(next)}
                   />
-                  <FieldDescription id="org-currency-help">
-                    Con ella se cobra. Si la clínica ya tiene cobros o presupuestos en otra moneda,
-                    no se puede cambiar: los importes anteriores no se convierten.
-                  </FieldDescription>
-                  <FieldError>{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         </div>
         <RegionExample preview={preview} />
         <CountryRules country={country} language={language} />
       </section>
 
       <TaxesCard
+        form={form}
+        fields={{
+          taxLegalForm: "taxLegalForm",
+          servicesTax: "servicesTax",
+          servicesOther: "servicesOther",
+          productsTax: "productsTax",
+          productsOther: "productsOther",
+        }}
         country={country}
         countryLabel={country.length === 2 ? countryName(country, language) : ""}
         currency={currency}
         locale={locale}
-        values={currentValues}
-        onChange={(next) => {
-          for (const [key, value] of Object.entries(next)) form.setFieldValue(key as keyof typeof emptyTaxValues, value ?? "")
-        }}
         cardClassName={CARD}
       />
 
-      <div className="flex justify-end gap-3">
-        <Button
-          type="button"
-          variant="ghost"
-          className="min-h-11"
-          disabled={pending}
-          onClick={() => form.reset()}
-        >
-          {common.actions.cancel}
-        </Button>
-        <SubmitButton type="submit" className="min-h-11" pending={pending}>
-          {common.actions.save}
-        </SubmitButton>
+      <div className="flex flex-col items-end gap-2">
+        {submitError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {submitError}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-3">
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11"
+            disabled={pending}
+            onClick={() => form.reset()}
+          >
+            {common.actions.cancel}
+          </Button>
+          <SubmitButton type="submit" className="min-h-11" pending={pending}>
+            {common.actions.save}
+          </SubmitButton>
+        </div>
       </div>
     </form>
   )

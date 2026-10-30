@@ -25,7 +25,7 @@ import { foldedWordsMatch } from "./search-text.js"
 import { testContactSql } from "./conversation-state.js"
 import { CHANNEL_NAME } from "./agent-person-memory.js"
 import { requireContact } from "./contacts.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { findOrgCurrency, findOrgLocale, NO_CURRENCY, requireOrgCurrency } from "./locale.js"
 import { requirePatient } from "./patients.js"
 import { ensureDefaultPipeline, momentRank, type SaleMoment, stageOfMoment } from "./pipelines.js"
@@ -428,30 +428,31 @@ async function resolveAssignee(
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, assignedUserId)))
     .limit(1)
-  if (!membership) throw validation("El asignado no es miembro de esta organización")
+  if (!membership) throw invalidField("assignedUserId", "El asignado no es miembro de esta organización")
   return membership.userId
 }
 
 function cleanTitle(title: string): string {
   const value = title.trim()
-  if (!value || value.length > 200) throw validation("El título debe tener 1–200 caracteres")
+  if (!value || value.length > 200) throw invalidField("title", "El título debe tener 1–200 caracteres")
   return value
 }
 
 function cleanAmount(amountCents: number | null | undefined): number | null | undefined {
   if (amountCents === undefined || amountCents === null) return amountCents ?? null
   if (!Number.isInteger(amountCents) || amountCents < 0) {
-    throw validation("El valor debe ser un entero de céntimos >= 0")
+    throw invalidField("amountCents", "El valor debe ser un entero de céntimos >= 0")
   }
   return amountCents
 }
 
-function cleanNote(note: string | null | undefined, max: number, field: string) {
+/** `label` es cómo se nombra en el mensaje; `key`, el nombre del dato en el cuerpo. */
+function cleanNote(note: string | null | undefined, max: number, label: string, key: string) {
   if (note === undefined) return undefined
   if (note === null) return null
   const value = note.trim()
   if (!value) return null
-  if (value.length > max) throw validation(`${field} no puede superar ${max} caracteres`)
+  if (value.length > max) throw invalidField(key, `${label} no puede superar ${max} caracteres`)
   return value
 }
 
@@ -468,7 +469,7 @@ async function resolveService(
     .from(serviceCatalog)
     .where(and(eq(serviceCatalog.id, serviceId), eq(serviceCatalog.organizationId, orgId)))
     .limit(1)
-  if (!service) throw validation("Servicio inválido para esta organización")
+  if (!service) throw invalidField("serviceId", "Servicio inválido para esta organización")
   return service
 }
 
@@ -489,9 +490,9 @@ async function resolveBudget(
     .from(treatmentBudget)
     .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
     .limit(1)
-  if (!budget) throw validation("Presupuesto inválido para esta organización")
+  if (!budget) throw invalidField("budgetId", "Presupuesto inválido para esta organización")
   if (patientId && budget.patientId !== patientId) {
-    throw validation("El presupuesto pertenece a otro paciente")
+    throw invalidField("budgetId", "El presupuesto pertenece a otro paciente")
   }
   return budget.id
 }
@@ -507,8 +508,12 @@ async function requireConversationInOrg(tx: Db, orgId: string, id: string) {
   return row
 }
 
-/** El paciente debe estar vinculado al contacto (patient_contact), sin duplicar fichas. */
-async function requirePatientLink(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
+/**
+ * El paciente debe estar vinculado al contacto (patient_contact), sin duplicar
+ * fichas. `field`: el dato del cuerpo que lo trajo (el paciente o, si se
+ * adoptó del presupuesto, el presupuesto).
+ */
+async function requirePatientLink(tx: Db, orgId: string, patientId: string, contactId: string, field = "patientId"): Promise<void> {
   const [link] = await tx
     .select({ id: patientContact.id })
     .from(patientContact)
@@ -520,7 +525,7 @@ async function requirePatientLink(tx: Db, orgId: string, patientId: string, cont
       ),
     )
     .limit(1)
-  if (!link) throw validation("El paciente no está vinculado a este contacto")
+  if (!link) throw invalidField(field, "El paciente no está vinculado a este contacto")
 }
 
 /** Presupuesto efectivo coherente con el paciente efectivo (también al cambiar patientId). */
@@ -536,12 +541,12 @@ async function assertBudgetCoherent(
     .from(treatmentBudget)
     .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
     .limit(1)
-  if (!budget) throw validation("Presupuesto inválido para esta organización")
+  if (!budget) throw invalidField("budgetId", "Presupuesto inválido para esta organización")
   if (patientId && budget.patientId !== patientId) {
-    throw validation("El presupuesto pertenece a otro paciente")
+    throw invalidField("budgetId", "El presupuesto pertenece a otro paciente")
   }
   if (!patientId && budget.patientId) {
-    throw validation("El presupuesto pertenece a otro paciente")
+    throw invalidField("budgetId", "El presupuesto pertenece a otro paciente")
   }
 }
 
@@ -1107,7 +1112,7 @@ export async function createOpportunity(
       .from(pipeline)
       .where(and(eq(pipeline.id, input.pipelineId), eq(pipeline.organizationId, orgId)))
       .limit(1)
-    if (!pipe) throw validation("Embudo inválido para esta organización")
+    if (!pipe) throw invalidField("pipelineId", "Embudo inválido para esta organización")
   }
   const stage = await stageOfMoment(tx, orgId, pipelineId, "interesado")
   const title = cleanTitle(input.title)
@@ -1115,7 +1120,7 @@ export async function createOpportunity(
   const budgetId = await resolveBudget(tx, orgId, input.budgetId, patientId)
   // Si el presupuesto trae paciente y no se declaró, se adopta (sin duplicar ficha).
   const effectivePatientId = patientId ?? (await budgetPatient(tx, orgId, budgetId))
-  if (effectivePatientId) await requirePatientLink(tx, orgId, effectivePatientId, input.contactId)
+  if (effectivePatientId) await requirePatientLink(tx, orgId, effectivePatientId, input.contactId, patientId ? "patientId" : "budgetId")
   const existing = await sameOpenInterest(tx, orgId, {
     contactId: input.contactId,
     patientId: effectivePatientId,
@@ -1141,7 +1146,7 @@ export async function createOpportunity(
     (await findOrgCurrency(tx, orgId)) ??
     (amountCents === null ? NO_CURRENCY : await requireOrgCurrency(tx, orgId))
   const assignedUserId = (await resolveAssignee(tx, orgId, input.assignedUserId)) ?? null
-  const interestText = cleanNote(input.interestText ?? null, 500, "El interés") ?? null
+  const interestText = cleanNote(input.interestText ?? null, 500, "El interés", "interestText") ?? null
   const [created] = await tx
     .insert(opportunity)
     .values({
@@ -1333,7 +1338,7 @@ export async function updateOpportunity(
     }
   }
   if (input.interestText !== undefined) {
-    patch.interestText = cleanNote(input.interestText, 500, "El interés") ?? null
+    patch.interestText = cleanNote(input.interestText, 500, "El interés", "interestText") ?? null
     changed.push("interestText")
   }
   const hasService = input.serviceId !== undefined ? !!service : !!current.serviceId
@@ -1533,19 +1538,20 @@ export async function closeOpportunity(
 ): Promise<OpportunityDetail> {
   const current = await requireOpportunity(tx, orgId, id, true)
   if (current.status !== "open") throw validation("La oportunidad ya está cerrada")
-  if (input.outcome !== "won" && input.outcome !== "lost") throw validation("Elige si se ganó o se perdió")
+  if (input.outcome !== "won" && input.outcome !== "lost") throw invalidField("outcome", "Elige si se ganó o se perdió")
   const origin = originOf(actor)
   const allowed: readonly string[] =
     input.outcome === "won"
       ? origin === "automatico" ? OPPORTUNITY_WON_REASONS : ["acepto"]
       : origin === "automatico" ? OPPORTUNITY_LOST_REASONS : CHOOSABLE_LOST_REASONS
   if (!allowed.includes(input.reason)) {
-    throw validation(
+    throw invalidField(
+      "reason",
       input.outcome === "won" ? "Motivo de cierre inválido" : "Elige el motivo: precio, eligió otra clínica, no responde, ya no lo necesita u otro",
     )
   }
   const reason = input.reason as OpportunityCloseReason
-  const note = cleanNote(input.note ?? null, NOTE_MAX, "La nota") ?? null
+  const note = cleanNote(input.note ?? null, NOTE_MAX, "La nota", "note") ?? null
   const decided = await stageOfMoment(tx, orgId, current.pipelineId, "decidio")
   const now = new Date()
   await tx

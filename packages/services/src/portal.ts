@@ -28,6 +28,7 @@ import { decideBudget, getBudgetDetail, listBudgets, type BudgetWithTotals } fro
 import { getPatientDocument, listPatientDocuments } from "./clinical.js"
 import { sendOutbound } from "./conversations.js"
 import {
+  invalidField,
   isUniqueViolation,
   notFound,
   ServiceError,
@@ -253,9 +254,11 @@ export async function assertScope(
   const account = scope?.account === true
   const raw = Array.isArray(scope?.documentIds) ? scope.documentIds : []
   const documentIds = [...new Set(raw.filter((id) => typeof id === "string" && id.length > 0))]
-  if (documentIds.length > 100) throw validation("Demasiados documentos autorizados (máximo 100)")
+  // Los rechazos son de «Qué verá» (`scope` en el cuerpo de todas las rutas que lo llaman).
+  if (documentIds.length > 100)
+    throw validation("Demasiados documentos autorizados (máximo 100)", { scope: "Elige como mucho 100 documentos" })
   if (!appointments && !budgets && !account && documentIds.length === 0) {
-    throw validation("El alcance no puede estar vacío")
+    throw validation("El alcance no puede estar vacío", { scope: "Elige al menos una cosa que verá" })
   }
   if (documentIds.length > 0) {
     const found = await tx
@@ -269,7 +272,9 @@ export async function assertScope(
         ),
       )
     if (found.length !== documentIds.length) {
-      throw notFound("Documento")
+      throw new ServiceError("NOT_FOUND", 404, "Documento no encontrado", {
+        scope: "Uno de los documentos ya no está: vuelve a elegirlos",
+      })
     }
   }
   return { appointments, budgets, account, documents: documentIds }
@@ -712,7 +717,7 @@ export async function exchangePortalToken(
   if (!policy.enabled) throw portalDisabled()
   const token = assertTokenFormat(rawLinkToken)
   if (typeof input?.pin !== "string" || !PIN_RE.test(input.pin)) {
-    throw validation("El código de 6 dígitos es inválido")
+    throw invalidField("pin", "Escribe los 6 dígitos del código.")
   }
   const hash = hashToken(token)
   const [link] = await tx
@@ -735,7 +740,9 @@ export async function exchangePortalToken(
   await requireActiveGrant(tx, orgId, link.patientId, link.contactId)
   const grant = await requireActivePortalGrant(tx, orgId, link.patientId, link.contactId)
   if (!pinMatches(link.pinHash, input.pin)) {
-    throw new ServiceError("PORTAL_PIN_INVALID", 400, "El código es incorrecto")
+    // Del código escrito, no de quién es: se dice junto al campo.
+    const message = "El código es incorrecto. Revísalo o pide uno nuevo en recepción."
+    throw new ServiceError("PORTAL_PIN_INVALID", 400, message, { pin: message })
   }
   const [consumed] = await tx
     .update(portalLink)

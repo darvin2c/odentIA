@@ -1,4 +1,5 @@
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -18,7 +19,6 @@ import {
   ScrollArea,
   Spinner,
   toast,
-  Badge,
 } from "@odentia/ui"
 import {
   Attachment,
@@ -80,11 +80,11 @@ import {
 import { activeOrgLocale } from "../../lib/locale"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { filiationGapsText } from "../../lib/patients"
-import { invalidateAgentPanelQueries } from "../agent-panel"
 import { AnswerTraceDrawer } from "../agent/answer-trace"
 import { CaseBriefDrawer } from "../agent/case-brief"
 import { CorrectDrawer, type CorrectionTarget } from "../agent/correct-drawer"
 import { LessonDrawer } from "../agent/lesson-drawer"
+import { invalidateAgentPanelQueries } from "../agent-panel"
 import { BlockPersonDialog, ContactScreenBanner, conversationTarget, useContactScreenActions } from "../inbox-contact-screen"
 import { InboxApprovedMessages } from "../integrations/whatsapp/inbox-approved-messages"
 import { AgentActionCard, type AgentActionItem, AgentActionLines, useAgentActions } from "./agent-actions"

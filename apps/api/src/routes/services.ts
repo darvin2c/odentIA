@@ -83,22 +83,49 @@ const officialCodesQuery = z
   })
   .strict()
 
+/**
+ * Lo que se dice de cada dato de un servicio, en la voz de su formulario (el
+ * tarifario y el cajón «servicio propio» de la biblioteca), junto a su campo.
+ */
+const serviceName = z
+  .string()
+  .trim()
+  .min(1, { error: "Escribe el nombre del servicio." })
+  .max(200, { error: "Escribe como mucho 200 caracteres." })
+const serviceSpecialtyId = z.string().uuid({ error: "Elige una especialidad de la clínica" })
+const serviceScope = z
+  .string({ error: "Elige dónde se hace el servicio" })
+  .trim()
+  .min(1, { error: "Elige dónde se hace el servicio" })
+  .max(20, { error: "Elige dónde se hace el servicio" })
+const servicePriceCents = z
+  .number({ error: "Indica el precio (usa 0 si va incluido sin costo)" })
+  .int({ error: "El precio no es un importe válido" })
+  .min(0, { error: "El precio no puede ser negativo" })
+  .max(2147483647, { error: "El precio es demasiado alto" })
+const serviceDurationMin = z
+  .number({ error: "Duración: minutos enteros entre 1 y 1440" })
+  .int({ error: "Duración: minutos enteros entre 1 y 1440" })
+  .min(1, { error: "Duración: minutos enteros entre 1 y 1440" })
+  .max(1440, { error: "Duración: minutos enteros entre 1 y 1440" })
+const serviceEvaluationId = z.string().uuid({ error: "Elige la evaluación de la lista" })
+
 const createInput = z
   .object({
     templateId: z.string().uuid().nullish(),
-    name: z.string().trim().min(1).max(200).nullish(),
-    specialtyId: z.string().uuid().nullish(),
-    scope: z.string().trim().min(1).max(20).nullish(),
+    name: serviceName.nullish(),
+    specialtyId: serviceSpecialtyId.nullish(),
+    scope: serviceScope.nullish(),
     code: z.string().max(40).nullish(),
-    priceCents: z.number().int().min(0).max(2147483647),
+    priceCents: servicePriceCents,
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
       .nullish(),
-    durationMin: z.number().int().min(1).max(1440).nullish(),
+    durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
-    evaluationServiceId: z.string().uuid().nullish(),
+    evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
     officialCode: officialCodeInput,
     isActive: z.boolean().optional(),
@@ -108,32 +135,51 @@ const createInput = z
 const patchInput = z
   .object({
     templateId: z.string().uuid().nullish(),
-    name: z.string().trim().min(1).max(200).optional(),
-    specialtyId: z.string().uuid().optional(),
-    scope: z.string().trim().min(1).max(20).optional(),
+    name: serviceName.optional(),
+    specialtyId: serviceSpecialtyId.optional(),
+    scope: serviceScope.optional(),
     code: z.string().max(40).nullish(),
-    priceCents: z.number().int().min(0).max(2147483647).optional(),
+    priceCents: servicePriceCents.optional(),
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
       .optional(),
-    durationMin: z.number().int().min(1).max(1440).nullish(),
+    durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).optional(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
-    evaluationServiceId: z.string().uuid().nullish(),
+    evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
     officialCode: officialCodeInput,
     isActive: z.boolean().optional(),
   })
   .strict()
 
+/** Lo que se dice de cada dato de una fila de «Agregar servicios», en la voz de la pantalla. */
+const batchName = z
+  .string({ error: "Ponle un nombre" })
+  .trim()
+  .min(1, { error: "Ponle un nombre" })
+  .max(200, { error: "Máximo 200 caracteres" })
+const batchPrice = z
+  .number({ error: "Pon el precio (0 si no tiene costo)" })
+  .int({ error: "El precio va en la unidad menor de la moneda, sin decimales" })
+  .min(0, { error: "El precio no puede ser negativo" })
+  .max(2147483647, { error: "El precio es demasiado alto" })
+const batchBillingMode = z.enum(["treatment", "session"], { error: "Elige cómo se cobra" }).nullish()
+const batchDuration = z
+  .number({ error: "Minutos enteros entre 1 y 1440" })
+  .int({ error: "Minutos enteros entre 1 y 1440" })
+  .min(1, { error: "Minutos enteros entre 1 y 1440" })
+  .max(1440, { error: "Minutos enteros entre 1 y 1440" })
+  .nullish()
+
 const templateItemShape = {
-  templateId: z.string().uuid(),
+  templateId: z.uuid({ error: "Elige el tratamiento de la biblioteca" }),
   /** Nombre con el que la clínica lo ofrece; sin él, el de la biblioteca. */
-  name: z.string().trim().min(1).max(200).nullish(),
-  priceCents: z.number().int().min(0).max(2147483647),
-  billingMode: z.enum(["treatment", "session"]).nullish(),
-  durationMin: z.number().int().min(1).max(1440).nullish(),
+  name: batchName.nullish(),
+  priceCents: batchPrice,
+  billingMode: batchBillingMode,
+  durationMin: batchDuration,
 }
 
 /** «Agregar servicios»: de la biblioteca y propios, guardados en un solo acto. */
@@ -141,27 +187,36 @@ const batchInput = z
   .object({
     items: z
       .array(
-        z.discriminatedUnion("kind", [
-          z.object({ kind: z.literal("template"), ...templateItemShape }).strict(),
-          z
-            .object({
-              kind: z.literal("custom"),
-              name: z.string().trim().min(1).max(200),
-              specialtyId: z.string().uuid(),
-              scope: z.string().trim().min(1).max(20),
-              priceCents: z.number().int().min(0).max(2147483647),
-              billingMode: z.enum(["treatment", "session"]).nullish(),
-              durationMin: z.number().int().min(1).max(1440).nullish(),
-              leavesFinding: leavesFindingInput.nullish(),
-              officialCode: officialCodeInput,
-            })
-            .strict(),
-        ]),
+        z.discriminatedUnion(
+          "kind",
+          [
+            z.object({ kind: z.literal("template"), ...templateItemShape }).strict(),
+            z
+              .object({
+                kind: z.literal("custom"),
+                name: batchName,
+                specialtyId: z.uuid({ error: "Elige la especialidad" }),
+                scope: z
+                  .string({ error: "Elige dónde se hace" })
+                  .trim()
+                  .min(1, { error: "Elige dónde se hace" })
+                  .max(20, { error: "Elige dónde se hace" }),
+                priceCents: batchPrice,
+                billingMode: batchBillingMode,
+                durationMin: batchDuration,
+                leavesFinding: leavesFindingInput.nullish(),
+                officialCode: officialCodeInput,
+              })
+              .strict(),
+          ],
+          { error: "Cada servicio es de la biblioteca o propio" },
+        ),
+        { error: "Elige al menos un servicio con su precio" },
       )
-      .min(1)
-      .max(100),
+      .min(1, { error: "Elige al menos un servicio con su precio" })
+      .max(100, { error: "Guarda como mucho 100 servicios a la vez" }),
     /** «¿Cómo dice el agente estos precios?»: una sola respuesta para todo lo que se agrega. */
-    priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
+    priceDisclosure: z.enum(PRICE_DISCLOSURES, { error: "Elige cómo dice los precios" }).optional(),
   })
   .strict()
 

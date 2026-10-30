@@ -473,7 +473,12 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
-  const blockInput = z.object({ reason: z.enum(BLOCK_REASONS), note: z.string().trim().min(1).max(500) }).strict()
+  const blockInput = z
+    .object({
+      reason: z.enum(BLOCK_REASONS, { error: "Elige el motivo del bloqueo." }),
+      note: z.string().trim().min(1, "Escribe qué pasó.").max(500, "Escribe como mucho 500 caracteres."),
+    })
+    .strict()
 
   // Bloquear y desbloquear: solo quien maneja los contactos (recepción, dueño y administración).
   app.post("/:id/block", async (c) => {

@@ -8,8 +8,6 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-  Field,
-  FieldLabel,
 } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
@@ -30,22 +28,31 @@ export interface DiagnosisOption {
  * ADR 0041): ignora tildes y mayúsculas y pone primero lo odontológico; el
  * orden lo decide el servidor. `value` es el código y `system` su lista (un
  * código ya guardado conserva la suya); un código nuevo es de la lista de la
- * clínica.
+ * clínica. No pinta su etiqueta: la pantalla lo nombra con `Field` +
+ * `FieldLabel htmlFor={id}`.
  */
 export function DiagnosisSearch({
   value,
   system = null,
   onChange,
-  label = "Diagnóstico",
   disabled = false,
+  id: idProp,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
 }: {
   value: string
   system?: string | null
   onChange: (code: string, description: string, system: string | null) => void
-  label?: string
   disabled?: boolean
+  /** Va al buscador (para `FieldLabel htmlFor`). */
+  id?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  onBlur?: () => void
 }) {
-  const id = useId()
+  const fallbackId = useId()
+  const id = idProp ?? fallbackId
   const list = useDiagnosisSystem()
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
@@ -76,8 +83,7 @@ export function DiagnosisSearch({
     : null
 
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+    <div className="flex flex-col gap-3">
       <Combobox
         items={items}
         filter={null}
@@ -119,6 +125,9 @@ export function DiagnosisSearch({
           disabled={disabled}
           placeholder={`Buscar en la ${list.short} por código o nombre…`}
           showTrigger={false}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          onBlur={onBlur}
         />
         <ComboboxContent>
           {searching ? (
@@ -171,6 +180,6 @@ export function DiagnosisSearch({
           )}
         </div>
       )}
-    </Field>
+    </div>
   )
 }

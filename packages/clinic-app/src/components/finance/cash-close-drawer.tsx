@@ -12,7 +12,6 @@ import { formatMoney, formatMoneyInput } from "@odentia/clinical"
 import {
   Button,
   cn,
-  Field,
   FieldDescription,
   FieldLabel,
   FieldLegend,
@@ -20,10 +19,10 @@ import {
   Input,
   RadioGroup,
   RadioGroupItem,
-  Textarea,
   toast,
 } from "@odentia/ui"
-import { DetailDrawer, ErrorState, FormDrawer } from "@odentia/ui-patterns"
+import { DetailDrawer, ErrorState, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
 import { ticketDisplayNumber } from "./ticket-view"
@@ -34,6 +33,7 @@ import {
   CASH_TERMS,
   CASH_TERMS_ALWAYS,
   cashErrorMessage,
+  cashFormMessage,
   closeCashApi,
   type ClosureSheet,
   dayKeyOf,
@@ -60,6 +60,8 @@ function countLabel(count: number): string {
 /**
  * Elección única entre pocas opciones, todas a la vista (tipo de movimiento,
  * motivo, tipo de gasto). Es un grupo de radio: se recorre con las flechas.
+ * Con `label` es un `FieldSet` con su leyenda; sin él, solo las opciones, para
+ * ir dentro de `field.Group` (que pone la leyenda y el error).
  */
 export function ChoiceChips<T extends string>({
   label,
@@ -67,40 +69,62 @@ export function ChoiceChips<T extends string>({
   options,
   onChange,
   disabled,
+  id,
+  invalid = false,
+  onBlur,
+  "aria-describedby": describedBy,
 }: {
-  label: string
+  label?: string
   value: T | ""
   options: ReadonlyArray<{ value: T; label: string }>
   onChange: (value: T) => void
   disabled?: boolean
+  id?: string
+  invalid?: boolean
+  /** Al salir del grupo (no al pasar de una opción a otra). */
+  onBlur?: () => void
+  "aria-describedby"?: string
 }): React.JSX.Element {
-  const labelId = useId()
+  const group = (
+    <RadioGroup
+      id={id}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      className="flex flex-wrap gap-2"
+      value={value}
+      disabled={disabled}
+      onValueChange={(next) => onChange(next as T)}
+      onBlur={
+        onBlur
+          ? (event: React.FocusEvent<HTMLDivElement>) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
+    >
+      {options.map((option) => (
+        <FieldLabel
+          key={option.value}
+          className={cn(
+            "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+            value === option.value && "border-primary bg-primary-soft",
+            invalid && "border-destructive",
+          )}
+        >
+          <RadioGroupItem value={option.value} />
+          {option.label}
+        </FieldLabel>
+      ))}
+    </RadioGroup>
+  )
+  if (label === undefined) return group
   return (
-    <div className="flex flex-col gap-2">
-      <span id={labelId} className="text-sm font-medium">
+    <FieldSet data-invalid={invalid || undefined} className="gap-2">
+      <FieldLegend variant="label" className="mb-0">
         {label}
-      </span>
-      <RadioGroup
-        aria-labelledby={labelId}
-        className="flex flex-wrap gap-2"
-        value={value}
-        disabled={disabled}
-        onValueChange={(next) => onChange(next as T)}
-      >
-        {options.map((option) => (
-          <FieldLabel
-            key={option.value}
-            className={cn(
-              "flex min-h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
-              value === option.value && "border-primary bg-primary-soft",
-            )}
-          >
-            <RadioGroupItem value={option.value} />
-            {option.label}
-          </FieldLabel>
-        ))}
-      </RadioGroup>
-    </div>
+      </FieldLegend>
+      {group}
+    </FieldSet>
   )
 }
 
@@ -139,6 +163,41 @@ function OtherMethodsList({
 
 // --- Cerrar caja ---------------------------------------------------------------------
 
+type SplitField = "retained" | "delivered"
+
+interface CloseValues {
+  counted: string
+  retained: string
+  delivered: string
+  /** Lo último que la persona escribió manda; el otro importe se calcula de él. */
+  splitField: SplitField | null
+  notes: string
+}
+
+const CLOSE_DEFAULTS: CloseValues = { counted: "", retained: "", delivered: "", splitField: null, notes: "" }
+
+/** Contado, lo que queda y lo que se entrega según lo escrito (null: vacío o no se entiende). */
+function closeAmounts(
+  values: CloseValues,
+  unit: string,
+  locale: string,
+  opening: number,
+): { countedCents: number | null; retainedCents: number | null; deliveredCents: number | null } {
+  const countedCents = values.counted.trim() === "" ? null : parseAmount(values.counted, unit, locale)
+  if (countedCents === null) return { countedCents, retainedCents: null, deliveredCents: null }
+  if (!values.splitField) {
+    // Por defecto se deja lo mismo que quedó la vez anterior, si alcanza.
+    const retainedCents = Math.min(opening, countedCents)
+    return { countedCents, retainedCents, deliveredCents: countedCents - retainedCents }
+  }
+  const text = values.splitField === "retained" ? values.retained : values.delivered
+  const typed = text.trim() === "" ? null : parseAmount(text, unit, locale)
+  if (typed === null) return { countedCents, retainedCents: null, deliveredCents: null }
+  return values.splitField === "retained"
+    ? { countedCents, retainedCents: typed, deliveredCents: countedCents - typed }
+    : { countedCents, retainedCents: countedCents - typed, deliveredCents: typed }
+}
+
 export function CashCloseDrawer({
   branchId,
   branchName,
@@ -167,56 +226,16 @@ export function CashCloseDrawer({
   const queryClient = useQueryClient()
   const canClose = usePermission("finance.close")
   const cash = useCashState(branchId, open)
-  const [counted, setCounted] = useState("")
-  // Lo último que la persona escribió manda; el otro importe se calcula de él.
-  const [split, setSplit] = useState<{ field: "retained" | "delivered"; text: string } | null>(null)
-  const [notes, setNotes] = useState("")
   const [notesOpen, setNotesOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setCounted("")
-    setSplit(null)
-    setNotes("")
-    setNotesOpen(false)
-    setError(null)
-  }, [open, branchId])
+  const differenceId = useId()
+  const splitHelpId = useId()
 
   const state = cash.data?.data ?? null
   const unit = state?.currency ?? currency
   const money = (cents: number) => formatMoney(cents, unit, locale)
   const expected = state?.cashOnHandCents ?? 0
   const opening = state?.breakdown.openingCents ?? 0
-
-  const countedCents = counted.trim() === "" ? null : parseAmount(counted, unit, locale)
-  let retainedCents: number | null = null
-  let deliveredCents: number | null = null
-  if (countedCents !== null) {
-    if (!split) {
-      // Por defecto se deja lo mismo que quedó la vez anterior, si alcanza.
-      retainedCents = Math.min(opening, countedCents)
-      deliveredCents = countedCents - retainedCents
-    } else {
-      const typed = split.text.trim() === "" ? null : parseAmount(split.text, unit, locale)
-      if (typed !== null && split.field === "retained") {
-        retainedCents = typed
-        deliveredCents = countedCents - typed
-      } else if (typed !== null) {
-        deliveredCents = typed
-        retainedCents = countedCents - typed
-      }
-    }
-  }
-  const shown = (cents: number | null) =>
-    cents !== null && cents >= 0 ? formatMoneyInput(cents, unit, locale) : ""
-  const retainedText = split?.field === "retained" ? split.text : shown(retainedCents)
-  const deliveredText = split?.field === "delivered" ? split.text : shown(deliveredCents)
-  const overSplit =
-    (retainedCents !== null && retainedCents < 0) || (deliveredCents !== null && deliveredCents < 0)
-  const difference = countedCents === null ? null : countedCents - expected
-  const others = otherMethods(state?.byMethod ?? [])
-  const dirty = counted !== "" || split !== null || notes !== ""
+  const zero = formatMoneyInput(0, unit, locale)
 
   const closeMutation = useMutation({
     mutationFn: closeCashApi,
@@ -234,62 +253,100 @@ export function CashCloseDrawer({
       if (errorCode(err) === "CASH_WINDOW_CHANGED") {
         void queryClient.invalidateQueries({ queryKey: financeKeys.cash(branchId) })
       }
-      setError(cashErrorMessage(err))
     },
   })
+
+  const form = useAppForm({
+    defaultValues: CLOSE_DEFAULTS,
+    validators: {
+      onSubmit: ({ value }) => {
+        const { countedCents, retainedCents, deliveredCents } = closeAmounts(value, unit, locale, opening)
+        const fields: Record<string, string> = {}
+        if (value.counted.trim() === "") {
+          fields.counted = `Escribe el efectivo que contaste (${zero} si la caja está vacía).`
+        } else if (countedCents === null) {
+          fields.counted = "Ese importe no se entiende. Revísalo."
+        } else if (retainedCents === null || deliveredCents === null) {
+          fields[value.splitField ?? "retained"] = "Revisa cuánto dejas en caja y cuánto entregas."
+        } else if (retainedCents < 0 || deliveredCents < 0) {
+          if (value.splitField === "delivered") fields.delivered = "Lo que entregas no puede superar lo que contaste."
+          else fields.retained = "Lo que dejas en caja no puede superar lo que contaste."
+        }
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      if (!state) return
+      const { countedCents, retainedCents, deliveredCents } = closeAmounts(value, unit, locale, opening)
+      if (countedCents === null || retainedCents === null || deliveredCents === null) return
+      const notes = value.notes.trim()
+      await closeMutation.mutateAsync({
+        branchId,
+        shiftId: state.shiftId,
+        countedCents,
+        retainedCents,
+        deliveredCents,
+        ...(notes ? { notes } : {}),
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: { countedCents: "counted", retainedCents: "retained", deliveredCents: "delivered" },
+    formMessage: cashFormMessage,
+  })
+
+  useEffect(() => {
+    if (!open) return
+    form.reset(CLOSE_DEFAULTS)
+    setNotesOpen(false)
+  }, [open, branchId, form])
+
+  const values = useStore(form.store, (s) => s.values)
+  const { countedCents, retainedCents, deliveredCents } = closeAmounts(values, unit, locale, opening)
+  const shown = (cents: number | null) =>
+    cents !== null && cents >= 0 ? formatMoneyInput(cents, unit, locale) : ""
+  const difference = countedCents === null ? null : countedCents - expected
+  const others = otherMethods(state?.byMethod ?? [])
 
   const last = state?.lastClosure ?? null
   const description = last
     ? `Todo lo cobrado desde el cierre ${momentOf(spokenMoment(last.closedAt, locale, timeZone))}.`
     : "Todo lo cobrado hasta ahora: esta caja aún no tiene cierres."
-  const zero = formatMoneyInput(0, unit, locale)
+
+  const splitInput = (name: SplitField, label: string, computed: number | null) => (
+    <form.AppField name={name}>
+      {(field) => (
+        <field.Control label={label}>
+          {(control) => (
+            <Input
+              {...control.props}
+              aria-describedby={[splitHelpId, control.describedBy].filter(Boolean).join(" ")}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={zero}
+              value={values.splitField === name ? field.state.value : shown(computed)}
+              onChange={(event) => {
+                form.setFieldValue("splitField", name)
+                field.handleChange(event.target.value)
+              }}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title={branchName ? `Cerrar caja · ${branchName}` : "Cerrar caja"}
       description={description}
-      error={error}
-      isSubmitting={closeMutation.isPending}
       isLoading={open && cash.isPending}
-      isDirty={dirty}
       submitLabel="Cerrar caja"
       submitDisabled={!canClose || !state}
       onClose={() => {
-        if (!closeMutation.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!canClose) {
-          setError("Tu rol no puede cerrar la caja. Pídeselo a quien cobra o a administración.")
-          return
-        }
-        if (!state) return
-        if (countedCents === null) {
-          setError(`Escribe el efectivo que contaste (${zero} si la caja está vacía).`)
-          return
-        }
-        if (retainedCents === null || deliveredCents === null) {
-          setError("Revisa cuánto dejas en caja y cuánto entregas.")
-          return
-        }
-        if (retainedCents < 0 || deliveredCents < 0) {
-          setError(
-            split?.field === "delivered"
-              ? "Lo que entregas no puede superar lo que contaste."
-              : "Lo que dejas en caja no puede superar lo que contaste.",
-          )
-          return
-        }
-        setError(null)
-        closeMutation.mutate({
-          branchId,
-          shiftId: state.shiftId,
-          countedCents,
-          retainedCents,
-          deliveredCents,
-          ...(notes.trim() ? { notes: notes.trim() } : {}),
-        })
+        if (!surface.isSubmitting) onClose()
       }}
     >
       {cash.isError ? (
@@ -321,87 +378,55 @@ export function CashCloseDrawer({
             </dl>
           </section>
 
-          <Field>
-            <FieldLabel htmlFor="cierre-contado">1. Efectivo que contaste</FieldLabel>
-            <Input
-              id="cierre-contado"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder={zero}
-              aria-describedby="cierre-diferencia"
-              aria-invalid={counted.trim() !== "" && countedCents === null}
-              value={counted}
-              onChange={(event) => setCounted(event.target.value)}
-            />
-            <p id="cierre-diferencia" role="status" className="text-sm">
-              {difference === null ? (
-                counted.trim() !== "" ? (
-                  <span className="text-destructive">Ese importe no se entiende. Revísalo.</span>
-                ) : null
-              ) : difference === 0 ? (
-                <span className="text-success">Cuadra con lo que debe haber.</span>
-              ) : (
-                <span className="text-destructive">
-                  {difference < 0
-                    ? `Faltan ${money(-difference)}.`
-                    : `Sobran ${money(difference)}.`}{" "}
-                  Puedes cerrar igual; administración recibirá un aviso.
-                </span>
-              )}
-            </p>
-          </Field>
+          <form.AppField name="counted">
+            {(field) => (
+              <field.Control label="1. Efectivo que contaste">
+                {(control) => (
+                  <>
+                    <Input
+                      {...control.props}
+                      aria-describedby={[differenceId, control.describedBy].filter(Boolean).join(" ")}
+                      inputMode="decimal"
+                      autoComplete="off"
+                      placeholder={zero}
+                      value={field.state.value}
+                      onChange={(event) => field.handleChange(event.target.value)}
+                    />
+                    <p id={differenceId} role="status" className="text-sm">
+                      {difference === null ? null : difference === 0 ? (
+                        <span className="text-success">Cuadra con lo que debe haber.</span>
+                      ) : (
+                        <span className="text-destructive">
+                          {difference < 0
+                            ? `Faltan ${money(-difference)}.`
+                            : `Sobran ${money(difference)}.`}{" "}
+                          Puedes cerrar igual; administración recibirá un aviso.
+                        </span>
+                      )}
+                    </p>
+                  </>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
 
           <FieldSet className="gap-3">
             <FieldLegend variant="label" className="mb-0">
               2. Qué haces con el efectivo
             </FieldLegend>
             <div className="grid grid-cols-2 gap-3">
-              <Field>
-                <FieldLabel htmlFor="cierre-queda">Dejas en caja para mañana</FieldLabel>
-                <Input
-                  id="cierre-queda"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder={zero}
-                  aria-describedby="cierre-reparto"
-                  value={retainedText}
-                  onChange={(event) => setSplit({ field: "retained", text: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="cierre-entrega">Entregas</FieldLabel>
-                <Input
-                  id="cierre-entrega"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  placeholder={zero}
-                  aria-describedby="cierre-reparto"
-                  value={deliveredText}
-                  onChange={(event) => setSplit({ field: "delivered", text: event.target.value })}
-                />
-              </Field>
+              {splitInput("retained", "Dejas en caja para mañana", retainedCents)}
+              {splitInput("delivered", "Entregas", deliveredCents)}
             </div>
-            <FieldDescription id="cierre-reparto">
-              {overSplit ? (
-                <span className="text-destructive">
-                  Entre lo que dejas y lo que entregas no puede haber más de lo que contaste.
-                </span>
-              ) : (
-                "Escribe uno y el otro se calcula solo: juntos suman lo que contaste."
-              )}
+            <FieldDescription id={splitHelpId}>
+              Escribe uno y el otro se calcula solo: juntos suman lo que contaste.
             </FieldDescription>
           </FieldSet>
 
           {notesOpen ? (
-            <Field>
-              <FieldLabel htmlFor="cierre-nota">Nota (opcional)</FieldLabel>
-              <Textarea
-                id="cierre-nota"
-                maxLength={2000}
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-              />
-            </Field>
+            <form.AppField name="notes">
+              {(field) => <field.TextareaField label="Nota (opcional)" maxLength={2000} />}
+            </form.AppField>
           ) : (
             <div>
               <Button type="button" variant="link" className="h-auto p-0" onClick={() => setNotesOpen(true)}>
@@ -421,6 +446,11 @@ export function CashCloseDrawer({
           <p className="text-sm text-muted-foreground">
             Queda guardado y se puede imprimir la hoja de cierre.
           </p>
+          {!canClose ? (
+            <p className="text-sm font-medium">
+              Tu rol no puede cerrar la caja. Pídeselo a quien cobra o a administración.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </FormDrawer>
@@ -450,6 +480,15 @@ const MOVE_PURPOSES: Record<MoveKind, ReadonlyArray<{ value: string; label: stri
   ],
 }
 
+interface MoveValues {
+  kind: MoveKind
+  amount: string
+  purpose: string
+  detail: string
+}
+
+const MOVE_DEFAULTS: MoveValues = { kind: "aporte", amount: "", purpose: MOVE_PURPOSES.aporte[0].value, detail: "" }
+
 export function CashMoveDrawer({
   branchId,
   currency,
@@ -467,31 +506,14 @@ export function CashMoveDrawer({
   const queryClient = useQueryClient()
   const canWrite = usePermission("finance.write")
   const cash = useCashState(branchId, open)
-  const [kind, setKind] = useState<MoveKind>("aporte")
-  const [amount, setAmount] = useState("")
-  const [purpose, setPurpose] = useState(MOVE_PURPOSES.aporte[0].value)
-  const [detail, setDetail] = useState("")
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    setKind("aporte")
-    setAmount("")
-    setPurpose(MOVE_PURPOSES.aporte[0].value)
-    setDetail("")
-    setError(null)
-  }, [open, branchId])
+  const resultId = useId()
 
   // Una sede sin caja todavía parte de cero: el ingreso la crea.
   const state = cash.data?.data ?? null
   const unit = state?.currency ?? currency
   const money = (cents: number) => formatMoney(cents, unit, locale)
   const onHand = state?.cashOnHandCents ?? 0
-  const cents = amount.trim() === "" ? null : parseAmount(amount, unit, locale)
-  const after = cents === null ? null : kind === "aporte" ? onHand + cents : onHand - cents
-  const verb = kind === "aporte" ? "Ingresar" : "Retirar"
-  const purposeLabel = MOVE_PURPOSES[kind].find((item) => item.value === purpose)?.label ?? ""
-  const needsDetail = purpose === OTHER_PURPOSE
+  const centsOf = (text: string) => (text.trim() === "" ? null : parseAmount(text, unit, locale))
 
   const moveMutation = useMutation({
     mutationFn: addCashMovementApi,
@@ -504,46 +526,62 @@ export function CashMoveDrawer({
       if (errorCode(err) === "INSUFFICIENT_CASH") {
         void queryClient.invalidateQueries({ queryKey: financeKeys.cash(branchId) })
       }
-      setError(cashErrorMessage(err))
     },
   })
 
+  const form = useAppForm({
+    defaultValues: MOVE_DEFAULTS,
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        const cents = centsOf(value.amount)
+        if (value.amount.trim() !== "" && cents === null) fields.amount = "Ese importe no se entiende. Revísalo."
+        else if (cents === null || cents <= 0) fields.amount = "Escribe un importe mayor que cero."
+        else if (value.kind === "retiro" && cents > onHand)
+          fields.amount = `No puedes retirar más de lo que hay en la caja: ${money(onHand)}.`
+        if (value.purpose === OTHER_PURPOSE && !value.detail.trim()) fields.detail = "Cuenta para qué es el movimiento."
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const cents = centsOf(value.amount)
+      if (cents === null) return
+      const extra = value.detail.trim()
+      const label = MOVE_PURPOSES[value.kind].find((item) => item.value === value.purpose)?.label ?? ""
+      await moveMutation.mutateAsync({
+        branchId,
+        kind: value.kind,
+        amountCents: cents,
+        concept: (value.purpose === OTHER_PURPOSE ? extra : extra ? `${label}: ${extra}` : label).slice(0, 500),
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    fieldMap: { amountCents: "amount", concept: "detail" },
+    formMessage: cashFormMessage,
+  })
+
+  useEffect(() => {
+    if (open) form.reset(MOVE_DEFAULTS)
+  }, [open, branchId, form])
+
+  const values = useStore(form.store, (s) => s.values)
+  const cents = centsOf(values.amount)
+  const after = cents === null ? null : values.kind === "aporte" ? onHand + cents : onHand - cents
+  const verb = values.kind === "aporte" ? "Ingresar" : "Retirar"
+  const needsDetail = values.purpose === OTHER_PURPOSE
+
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title="Efectivo de la caja"
       description="Para el efectivo que entra o sale sin ser un cobro ni un gasto."
-      error={error}
-      isSubmitting={moveMutation.isPending}
       isLoading={open && cash.isPending}
-      isDirty={amount !== "" || detail !== ""}
       submitLabel={cents !== null && cents > 0 ? `${verb} ${money(cents)}` : verb}
       submitDisabled={!canWrite || cash.isError}
       onClose={() => {
-        if (!moveMutation.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (cents === null || cents <= 0) {
-          setError("Escribe un importe mayor que cero.")
-          return
-        }
-        if (after !== null && after < 0) {
-          setError(`No puedes retirar más de lo que hay en la caja: ${money(onHand)}.`)
-          return
-        }
-        const extra = detail.trim()
-        if (needsDetail && !extra) {
-          setError("Cuenta para qué es el movimiento.")
-          return
-        }
-        setError(null)
-        moveMutation.mutate({
-          branchId,
-          kind,
-          amountCents: cents,
-          concept: (needsDetail ? extra : extra ? `${purposeLabel}: ${extra}` : purposeLabel).slice(0, 500),
-        })
+        if (!surface.isSubmitting) onClose()
       }}
     >
       {cash.isError ? (
@@ -554,60 +592,73 @@ export function CashMoveDrawer({
         />
       ) : (
         <div className="flex flex-col gap-5">
-          <ChoiceChips
-            label="Qué haces"
-            value={kind}
-            options={MOVE_KINDS}
-            onChange={(next) => {
-              setKind(next)
-              setPurpose(MOVE_PURPOSES[next][0].value)
-              setError(null)
-            }}
-          />
-          <Field>
-            <FieldLabel htmlFor="efectivo-importe">Importe</FieldLabel>
-            <Input
-              id="efectivo-importe"
-              inputMode="decimal"
-              autoComplete="off"
-              placeholder={formatMoneyInput(0, unit, locale)}
-              aria-describedby="efectivo-resultado"
-              aria-invalid={amount.trim() !== "" && cents === null}
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-            />
-          </Field>
-          <ChoiceChips
-            label="Para qué"
-            value={purpose}
-            options={MOVE_PURPOSES[kind]}
-            onChange={setPurpose}
-          />
-          <Field>
-            <FieldLabel htmlFor="efectivo-detalle">
-              {needsDetail ? "Detalle" : "Detalle (opcional)"}
-            </FieldLabel>
-            <Input
-              id="efectivo-detalle"
-              maxLength={300}
-              value={detail}
-              onChange={(event) => setDetail(event.target.value)}
-            />
-          </Field>
+          <form.AppField name="kind">
+            {(field) => (
+              <field.Group legend="Qué haces">
+                {(control) => (
+                  <ChoiceChips
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    options={MOVE_KINDS}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      form.setFieldValue("purpose", MOVE_PURPOSES[next][0].value)
+                    }}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          <form.AppField name="amount">
+            {(field) => (
+              <field.Control label="Importe">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    aria-describedby={[resultId, control.describedBy].filter(Boolean).join(" ")}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder={formatMoneyInput(0, unit, locale)}
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="purpose">
+            {(field) => (
+              <field.Group legend="Para qué">
+                {(control) => (
+                  <ChoiceChips
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    options={MOVE_PURPOSES[values.kind]}
+                    onChange={(next) => field.handleChange(next)}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          <form.AppField name="detail">
+            {(field) => <field.TextField label={needsDetail ? "Detalle" : "Detalle (opcional)"} maxLength={300} />}
+          </form.AppField>
           <div
-            id="efectivo-resultado"
+            id={resultId}
             role="status"
             className="flex flex-wrap items-baseline justify-between gap-x-3 rounded-lg bg-muted p-3 text-sm"
           >
-            {after === null ? (
+            {after === null || after < 0 ? (
               <>
                 <span>En la caja hay</span>
                 <span className="text-base font-semibold tabular-nums">{money(onHand)}</span>
               </>
-            ) : after < 0 ? (
-              <span className="text-destructive">
-                No puedes retirar más de lo que hay en la caja: {money(onHand)}.
-              </span>
             ) : (
               <>
                 <span>El efectivo de la caja queda en</span>
@@ -615,6 +666,11 @@ export function CashMoveDrawer({
               </>
             )}
           </div>
+          {!canWrite ? (
+            <p className="text-sm font-medium">
+              Tu rol no puede ingresar ni retirar efectivo. Pídeselo a quien cobra o a administración.
+            </p>
+          ) : null}
         </div>
       )}
     </FormDrawer>
@@ -886,6 +942,7 @@ function CountedMovements({
   orgTimeZone: string
   onShowTickets?: (range: { from: string; to: string }) => void
 }): React.JSX.Element | null {
+  const headingId = useId()
   const timeZone = sheet.branch?.timezone || sheet.orgProfile?.timezone || orgTimeZone
   const from = dayKeyOf(sheet.closure.windowFrom, timeZone)
   const to = dayKeyOf(sheet.closure.closedAt ?? sheet.closure.windowTo ?? sheet.closure.windowFrom, timeZone)
@@ -905,8 +962,8 @@ function CountedMovements({
   }
   if (rows.length === 0 && !onShowTickets) return null
   return (
-    <section aria-labelledby="cierre-contado" className="flex flex-col gap-2">
-      <h3 id="cierre-contado" className="text-sm font-semibold">
+    <section aria-labelledby={headingId} className="flex flex-col gap-2">
+      <h3 id={headingId} className="text-sm font-semibold">
         Lo que contó · {rows.length === 1 ? "1 movimiento" : `${rows.length} movimientos`} en efectivo
       </h3>
       {rows.length > 0 ? (

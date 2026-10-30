@@ -5,7 +5,8 @@
  * foto de una hoja firmada, el resultado de una orden). Las reglas viven en el
  * servidor; aquí solo se llaman y se dicen.
  */
-import { apiFetch } from "./api"
+import type { ApiErrorShape } from "@odentia/ui-patterns"
+import { ApiError, apiFetch } from "./api"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname } from "./host"
 
@@ -141,7 +142,9 @@ export interface UploadedDocument {
 
 /**
  * Sube un archivo como documento de la persona (la foto de la hoja firmada en
- * papel, el resultado de una orden) por la misma vía que la galería.
+ * papel, el resultado de una orden) por la misma vía que la galería. Un
+ * rechazo del archivo (formato, peso, contenido) llega como error del campo
+ * `file`, para decirse junto al selector del archivo.
  */
 export async function uploadPatientFile(
   patientId: string,
@@ -164,14 +167,16 @@ export async function uploadPatientFile(
     body: form,
   })
   if (!response.ok) {
-    let message = `No se pudo subir el archivo (error ${response.status})`
+    let shape: ApiErrorShape = {}
     try {
-      const body = (await response.json()) as { error?: { message?: string } }
-      if (body.error?.message) message = body.error.message
+      const body = (await response.json()) as { error?: ApiErrorShape }
+      shape = body.error ?? {}
     } catch {
-      // Cuerpo que no es JSON: queda el mensaje general.
+      // Cuerpo que no es JSON: se dice lo de su estado.
     }
-    throw new Error(message)
+    if (shape.code === "VALIDATION" && shape.message && !shape.fields)
+      shape = { ...shape, fields: { file: shape.message } }
+    throw new ApiError(response.status, shape)
   }
   const body = (await response.json()) as { data: UploadedDocument }
   return body.data

@@ -70,7 +70,7 @@ import {
   templateReasonWords,
 } from "./clinic-messages.js"
 import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conversations.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { lapsedToInvite, recordInvitation } from "./return-invites.js"
@@ -118,6 +118,19 @@ export interface LineConfig {
 }
 
 export const TASK_NOTE_CHARS = 160
+
+/**
+ * Lo que se dice de un ajuste de línea fuera de rango, por su nombre en el
+ * cuerpo de PATCH `/api/agent/admin/lines/:key`: lo mismo en la ruta, aquí y
+ * en la pantalla.
+ */
+export const LINE_SETTING_MESSAGES = {
+  days: "El plazo va de 1 a 365 días.",
+  hoursBefore: "El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes.",
+  delayHours: "La espera va de 1 a 72 horas.",
+  hour: "La hora va de 0 a 23.",
+  taskNote: `La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres.`,
+} as const
 
 /** Los tiempos vigentes de una línea, para decirlos con las palabras del catálogo. */
 export function lineTiming(rule: Pick<RuleRow, "config"> | null, extra: LineTiming = {}): LineTiming {
@@ -283,46 +296,46 @@ export async function setLine(
   let enabled = input.enabled ?? was.enabled
   if (!agentPart && !teamPart) {
     if (input.enabled === true) {
-      throw validation("Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
+      throw invalidField("enabled", "Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
     }
     enabled = false
   }
   const config: LineConfig = { ...was.config }
   if (input.days !== undefined) {
-    if (line.defaultDays === null) throw validation(`«${line.name}» no tiene un plazo en días`)
+    if (line.defaultDays === null) throw invalidField("days", `«${line.name}» no tiene un plazo en días`)
     if (input.days === null) delete config.days
     else {
-      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw validation("El plazo va de 1 a 365 días")
+      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw invalidField("days", LINE_SETTING_MESSAGES.days)
       config.days = input.days
     }
   }
   if (input.hoursBefore !== undefined) {
-    if (kind !== "recordatorio_cita") throw validation(`«${line.name}» no se ajusta por horas`)
+    if (kind !== "recordatorio_cita") throw invalidField("hoursBefore", `«${line.name}» no se ajusta por horas`)
     const hours = [...new Set(input.hoursBefore)].sort((a, b) => b - a)
     if (hours.length < 1 || hours.length > 3 || hours.some((h) => !Number.isInteger(h) || h < 1 || h > 168)) {
-      throw validation("El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes")
+      throw invalidField("hoursBefore", LINE_SETTING_MESSAGES.hoursBefore)
     }
     config.hoursBefore = hours
   }
   if (input.delayHours !== undefined) {
-    if (line.delayHours === undefined) throw validation(`«${line.name}» no espera horas`)
+    if (line.delayHours === undefined) throw invalidField("delayHours", `«${line.name}» no espera horas`)
     if (input.delayHours === null) delete config.delayHours
     else {
-      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw validation("La espera va de 1 a 72 horas")
+      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw invalidField("delayHours", LINE_SETTING_MESSAGES.delayHours)
       config.delayHours = input.delayHours
     }
   }
   if (input.hour !== undefined) {
-    if (!line.hourAdjustable) throw validation(`«${line.name}» no tiene una hora de salida que se pueda fijar`)
+    if (!line.hourAdjustable) throw invalidField("hour", `«${line.name}» no tiene una hora de salida que se pueda fijar`)
     if (input.hour === null) delete config.hour
     else {
-      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw validation("La hora va de 0 a 23")
+      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw invalidField("hour", LINE_SETTING_MESSAGES.hour)
       config.hour = input.hour
     }
   }
   if (input.taskNote !== undefined) {
     const note = input.taskNote?.replace(/\s+/g, " ").trim() ?? ""
-    if (note.length > TASK_NOTE_CHARS) throw validation(`La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres`)
+    if (note.length > TASK_NOTE_CHARS) throw invalidField("taskNote", LINE_SETTING_MESSAGES.taskNote)
     if (note) config.taskNote = note
     else delete config.taskNote
   }
