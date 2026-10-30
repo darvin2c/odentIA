@@ -858,7 +858,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if (!url || ctx.agendaNudged || text.includes("/reserva?token=")) return null
     if (new Set(text.match(/\b\d{1,2}:\d{2}\b/g) ?? []).size < 2) return null
     ctx.agendaNudged = true
-    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: le ofreces horarios sin su enlace para ver toda la agenda. Agrégalo al final, en una frase («Puedes ver todos los horarios y elegir con quién aquí: ${url}»), y vuelve a llamar a la misma herramienta sola en su paso.`
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: le ofreces horarios sin su enlace para ver toda la agenda. Agrégalo al final, en una frase y en el trato de la conversación («La agenda completa, para elegir el día, la hora y con quién: ${url}»), y vuelve a llamar a la misma herramienta sola en su paso.`
   }
 
   /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
@@ -1350,7 +1350,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (!link) return null
       ctx.bookingLinkUrl = link.url
       const data = link.needsRegistration ? " Como aún no es paciente, ahí también deja sus datos al reservar." : ""
-      return `Su enlace para ver toda la agenda y elegir el día, la hora y con quién: ${link.url}\nOfrécele dos o tres de estos horarios, repartidos, y al final, siempre que le ofrezcas horarios, el enlace en una frase (por ejemplo «Puedes ver todos los horarios y elegir con quién aquí: ${link.url}»).${data}`
+      return `Su enlace para ver toda la agenda y elegir el día, la hora y con quién: ${link.url}\nOfrécele dos o tres de estos horarios, repartidos, y al final, siempre que le ofrezcas horarios, el enlace en una frase y en el trato de la conversación (por ejemplo «La agenda completa, para elegir el día, la hora y con quién: ${link.url}»).${data}`
     } catch (error) {
       if (error instanceof ServiceError) return null
       throw error
