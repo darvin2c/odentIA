@@ -63,16 +63,26 @@ export function clearSubmitErrors(form: AnyFormApi): void {
   }
 }
 
-/** Dice el rechazo de un envío en el formulario (reemplaza lo anterior). */
+/**
+ * Dice el rechazo de un envío en el formulario (reemplaza lo anterior). Lo de
+ * un campo que el formulario no tiene registrado se dice junto a los botones:
+ * ningún error se pierde.
+ */
 export function setSubmitErrors(form: AnyFormApi, errors: SubmitErrors): void {
   clearSubmitErrors(form)
   const state = keptOf(form)
+  const unseen: string[] = []
   for (const [name, message] of Object.entries(errors.fields ?? {})) {
     if (!message) continue
+    if (!form.getFieldMeta(name)) {
+      unseen.push(message)
+      continue
+    }
     setServerError(form, name, message)
     state.fields.set(name, form.getFieldValue(name))
   }
-  state.form = errors.form ? { message: errors.form, values: form.state.values } : null
+  const general = [...new Set([errors.form, ...unseen].filter(Boolean))].join(" ")
+  state.form = general ? { message: general, values: form.state.values } : null
   publish(state)
 }
 
