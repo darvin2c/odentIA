@@ -44,6 +44,13 @@ export interface NormalizedInbound {
   externalMessageId: string
   externalThreadId: string
   senderExternalId: string
+  /**
+   * El id que el proveedor le da a la persona para esta empresa y que llega
+   * aunque oculte su número (WhatsApp: BSUID, `from_user_id`). Si lo oculta,
+   * `externalThreadId` y `senderExternalId` lo llevan en lugar del número
+   * (`wa:PE.1349…`); con él se le responde igual (ADR 0108).
+   */
+  senderUserId?: string
   senderDisplayName?: string
   content: InboundContent
   /** ISO-8601 del instante de envío según el proveedor. */
@@ -277,6 +284,15 @@ export interface OutboundMessage {
         type: "media"
         media: { url: string; mimeType: string; filename: string; caption?: string }
       }
+}
+
+/**
+ * El proveedor contestó que no acepta el envío: no salió. A diferencia de una
+ * caída de la red o de un error del proveedor, no es un efecto ambiguo y el
+ * mensaje queda como no entregado, con este motivo.
+ */
+export class ProviderRejectedError extends Error {
+  override readonly name = "ProviderRejectedError"
 }
 
 export interface ChannelAdapterDeps {

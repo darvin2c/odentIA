@@ -2712,6 +2712,12 @@ function MessageBubble({
           {out && msg.held && msg.status !== "held" && msg.sentAt ? <span>· Entregada {clockWords(msg.sentAt)}</span> : null}
           {out && statusIcon(msg.status)}
         </div>
+        {/* Lo que no salió se dice en palabras, no solo con el icono. */}
+        {out && msg.deliveryNote ? (
+          <p className={`text-xs ${msg.status === "failed" ? "text-destructive" : "text-warning"} text-right`}>
+            {msg.deliveryNote}
+          </p>
+        ) : null}
         {onShowTrace ? (
           <Button
             type="button"

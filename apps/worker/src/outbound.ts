@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { channelAdapters, type OutboundMessage } from "@odentia/channels"
+import { channelAdapters, type OutboundMessage, ProviderRejectedError } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -103,7 +103,9 @@ function replyButtonsOf(value: unknown): { id: string; title: string }[] | null 
 /**
  * Envía un mensaje `queued` al proveedor. Solo reintenta errores anteriores a
  * la llamada externa; una excepción durante `sendMessage` es ambigua y exige
- * conciliación humana para no duplicar el efecto.
+ * conciliación humana para no duplicar el efecto, salvo que el proveedor haya
+ * contestado que no lo acepta (`ProviderRejectedError`): no salió y queda como
+ * no entregado, con su motivo.
  */
 export async function processOutbound(
   db: Db,
@@ -127,6 +129,7 @@ export async function processOutbound(
     return "deferred"
   }
   let providerAttempted = false
+  let conversationId: string | null = null
   try {
     await withOrgContext(db, orgId, async (tx) => {
       const [row] = await tx
@@ -138,6 +141,7 @@ export async function processOutbound(
         .limit(1)
       // Mensaje inexistente o ya procesado: ack.
       if (row?.message.status !== "queued") return
+      conversationId = row.conversation.id
       // Una conversación cerrada sí entrega lo que ya estaba en cola: la
       // despedida sale y enseguida se cierra (ADR 0024). Solo una conexión
       // desactivada lo impide, salvo en la prueba del chat web (fase 6 del pulido).
@@ -191,18 +195,27 @@ export async function processOutbound(
   } catch (error) {
     if (providerAttempted) {
       const detail = error instanceof Error ? error.message : String(error)
+      const rejected = error instanceof ProviderRejectedError
       await withOrgContext(db, orgId, async (tx) => {
         await tx
           .update(message)
-          .set({ status: "unknown", error: `ambiguous: ${detail.slice(0, 480)}` })
+          .set(
+            rejected
+              ? { status: "failed", error: detail.slice(0, 500) }
+              : { status: "unknown", error: `ambiguous: ${detail.slice(0, 480)}` },
+          )
           .where(and(eq(message.id, messageId), eq(message.organizationId, orgId)))
         await tx.insert(auditEvent).values({
           organizationId: orgId,
           action: "message.updated",
           entity: "message",
           entityId: messageId,
-          metadata: { op: "send-uncertain", error: detail.slice(0, 500) },
+          metadata: { op: rejected ? "send-failed" : "send-uncertain", error: detail.slice(0, 500) },
         })
+        // La Bandeja lo dice enseguida: no salió o no se sabe si salió.
+        if (conversationId) {
+          await notify(tx, { orgId, kind: "message.updated", conversationId, messageId, at: new Date().toISOString() })
+        }
       }).catch(() => {})
       return "done"
     }

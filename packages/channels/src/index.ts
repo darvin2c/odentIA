@@ -10,6 +10,7 @@ export {
   type WhatsAppDelivery,
   type WhatsAppNumberDelivery,
   whatsappCloudApiAdapter,
+  whatsappFailureWords,
 } from "./whatsapp-cloud-api.js"
 export {
   exchangeSignupCode,

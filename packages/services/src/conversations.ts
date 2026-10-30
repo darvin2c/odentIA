@@ -4,6 +4,7 @@ import {
   type NormalizedStatus,
   type ReplyButton,
   type TemplateCategory,
+  whatsappFailureWords,
 } from "@odentia/channels"
 import { type MissingPersonDatum, normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
@@ -31,6 +32,7 @@ import {
   isTelegramGroupThread,
   lockChannelIdentity,
   OMNI_CHANNELS,
+  settleProviderUser,
 } from "./contacts.js"
 import { assertContactWritable, type ContactScreenView, getContactScreenView } from "./contact-screen.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
@@ -153,8 +155,23 @@ export interface MessageItem {
   location: { latitude: number; longitude: number; name?: string; address?: string } | null
   /** Se borró su texto y sus adjuntos: era spam y pasaron 90 días (ADR 0054). */
   redactedAt: string | null
+  /** Lo que la Bandeja dice bajo un mensaje que no salió o del que no se sabe si salió; nulo si no hace falta. */
+  deliveryNote: string | null
   createdAt: string
 }
+
+/**
+ * Por qué no llegó, en palabras: el motivo del canal si lo dio así (pago, clave
+ * vencida, número sin WhatsApp); el de Meta tal cual no es para la clínica.
+ */
+export function deliveryNoteOf(status: string, error: string | null): string | null {
+  if (status === "failed") return whatsappFailureWords(error) ?? "No se entregó: el canal lo rechazó."
+  if (status === "unknown") {
+    return "No sabemos si llegó: el canal no confirmó el envío. No se reenvía solo, para no mandarlo dos veces."
+  }
+  return null
+}
+
 function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem["automatic"] = null): MessageItem {
   return {
     automatic,
@@ -185,6 +202,7 @@ function toMessageItem(row: typeof message.$inferSelect, automatic: MessageItem[
     contactReaction: row.contactReaction,
     location: row.location ?? null,
     redactedAt: row.redactedAt ? row.redactedAt.toISOString() : null,
+    deliveryNote: deliveryNoteOf(row.status, row.error),
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -226,7 +244,6 @@ export async function ingestInbound(
   reaction?: { emoji: string | null }
 }> {
   const orgId = job.orgId
-  const event = job.event
   const [connection] = await tx
     .select()
     .from(channelConnection)
@@ -236,11 +253,13 @@ export async function ingestInbound(
     .limit(1)
   if (!connection) throw new ServiceError("CONNECTION_NOT_FOUND", 404, "Conexión no encontrada")
   // La prueba del chat web funciona aunque el chat esté desactivado (fase 6 del pulido).
-  if (connection.status !== "active" && !(event.test && connection.provider === "web_chat")) {
+  if (connection.status !== "active" && !(job.event.test && connection.provider === "web_chat")) {
     throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada")
   }
 
   const channel = connection.channel
+  // Quien oculta su número entra por la dirección con la que ya se la conoce (ADR 0108).
+  const event = await settleProviderUser(tx, orgId, channel, job.event)
   // Coexistencia: lo que el equipo escribió desde la app del celular sale de la
   // clínica, y el historial al conectar ya pasó. Ninguno es la persona escribiendo ahora.
   const fromTeam = event.fromBusinessApp === true
@@ -294,6 +313,7 @@ export async function ingestInbound(
         contactId,
         channel,
         externalUserId: event.senderExternalId,
+        ...(event.senderUserId ? { providerUserId: event.senderUserId } : {}),
         displayName: event.senderDisplayName ?? null,
         isPrimary: true,
       })

@@ -832,6 +832,84 @@ export async function findChannelIdentity(
 }
 
 /**
+ * Quien usa nombre de usuario en WhatsApp puede ocultar su número: llega con su
+ * BSUID (`senderUserId`) y, sin número, su dirección es `wa:<BSUID>` (ADR 0108).
+ * Para que sus mensajes con número y sin él sean una sola persona y un solo hilo,
+ * la identidad guarda su BSUID y se la busca también por él:
+ * - Con identidad por su dirección: guarda su BSUID, o lo pone al día si cambió
+ *   (Meta lo regenera cuando la persona cambia de número).
+ * - Escribió antes sin número y ahora llega con él: su identidad y sus
+ *   conversaciones pasan a su número, que es como la conoce el resto.
+ * - Llega sin número y su identidad ya tiene su número: el mensaje entra con esa
+ *   dirección, en su hilo de siempre.
+ * Nunca une dos identidades que ya existen: eso lo decide el equipo con
+ * «Reasignar canal». Devuelve el evento con la dirección que corresponde.
+ */
+export async function settleProviderUser<
+  E extends { externalThreadId: string; senderExternalId: string; senderUserId?: string },
+>(tx: Db, orgId: string, channel: string, event: E): Promise<E> {
+  const userId = event.senderUserId
+  if (channel !== "whatsapp" || !userId) return event
+  // Primero el BSUID y después la dirección: la misma orden en toda ingesta.
+  await lockChannelIdentity(tx, orgId, channel, `user:${userId}`)
+  await lockChannelIdentity(tx, orgId, channel, event.senderExternalId)
+  const byAddress = await findChannelIdentity(tx, orgId, channel, event.senderExternalId)
+  const [byUser] = await tx
+    .select()
+    .from(contactIdentity)
+    .where(
+      and(
+        eq(contactIdentity.organizationId, orgId),
+        eq(contactIdentity.channel, channel),
+        eq(contactIdentity.providerUserId, userId),
+      ),
+    )
+    .limit(1)
+  if (byAddress) {
+    // Si otra identidad ya tiene ese BSUID son dos fichas de la misma persona: no se tocan.
+    if (!byUser) {
+      await tx
+        .update(contactIdentity)
+        .set({ providerUserId: userId })
+        .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, byAddress.id)))
+    }
+    return event
+  }
+  if (!byUser) return event
+  const direct = isDirectThread(channel, event.externalThreadId, event.senderExternalId)
+  if (event.senderExternalId === `wa:${userId}`) {
+    // Sin número: entra por la dirección con la que ya se la conoce.
+    return direct
+      ? { ...event, externalThreadId: byUser.externalUserId, senderExternalId: byUser.externalUserId }
+      : { ...event, senderExternalId: byUser.externalUserId }
+  }
+  const before = byUser.externalUserId
+  await tx
+    .update(contactIdentity)
+    .set({ externalUserId: event.senderExternalId })
+    .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, byUser.id)))
+  // Su hilo pasa al número en cada conexión del canal, salvo donde ya hay uno con él.
+  await tx.execute(sql`
+    update conversation c
+       set external_thread_id = ${event.senderExternalId}, updated_at = now()
+     where c.organization_id = ${orgId}
+       and c.external_thread_id = ${before}
+       and c.channel_connection_id in (
+         select cc.id from channel_connection cc where cc.organization_id = ${orgId} and cc.channel = ${channel})
+       and not exists (
+         select 1 from conversation o
+          where o.channel_connection_id = c.channel_connection_id and o.external_thread_id = ${event.senderExternalId})`)
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    action: "contact.identity_number",
+    entity: "contact",
+    entityId: byUser.contactId,
+    metadata: { channel },
+  })
+  return event
+}
+
+/**
  * Alta manual autorizada de identidad de canal. Idempotente para el mismo
  * contacto; 409 IDENTITY_IN_USE si pertenece a otro contacto.
  */
