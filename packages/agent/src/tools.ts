@@ -332,11 +332,6 @@ export interface AgentToolCtx {
   /** Las herramientas que el modelo tiene a la vista en este paso: las del camino o todas (`graph.ts`). */
   offeredTools?: ReadonlySet<string>
   /**
-   * Con el caso ya en el equipo, se le pidió reescribir lo que iba a salir: el turno vuelve
-   * al modelo una vez en vez de terminar con el aviso fijo (`routeAfterTools`).
-   */
-  rewriteAsked?: boolean
-  /**
    * Dónde buscó huecos en esta corrida (si encontró): la agenda que acompaña a los horarios abre
    * en esa sede y ese servicio, o en todas si buscó en más de una.
    */
@@ -952,15 +947,14 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   }
 
   /**
-   * Lo que se pide reescribir antes de enviar. Con el caso ya en el equipo el turno terminaría
-   * con el aviso fijo y se perdería lo que el modelo iba a decir: vuelve a él (`routeAfterTools`).
-   * Cada pedido queda en el registro del worker con la herramienta y si el caso ya estaba en el
-   * equipo: así una medición cuenta cuántas veces una comprobación frena un mensaje.
+   * Lo que una comprobación frena antes de enviar: el pedido de reescribirlo vuelve al modelo.
+   * Con el caso ya en el equipo el turno cierra con el aviso fijo (`routeAfterTools`), que no
+   * afirma nada que no conste. Cada uno queda en el registro del worker con la herramienta y si
+   * el caso ya estaba en el equipo: así una medición cuenta cuántas veces pasa.
    */
-  const askRewrite = (tool: string, mismatch: string): string => {
+  const notSent = (tool: string, mismatch: string): string => {
     const why = mismatch.replace(/\s+/g, " ").slice(0, 100)
     console.log(`agent: no enviado en ${tool}${ctx.handedOff ? ", con el caso en el equipo" : ""} conversation_id=${ctx.conversationId}: ${why}`)
-    if (ctx.handedOff) ctx.rewriteAsked = true
     return mismatch
   }
 
@@ -1039,7 +1033,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
       const mismatch =
         wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? (await unsavedContact(text)) ?? nameTwice(text) ?? formulaAgain(text)
-      if (mismatch) return askRewrite("send_reply", mismatch)
+      if (mismatch) return notSent("send_reply", mismatch)
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -1084,7 +1078,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (pending) return `No cerrado. ${pending}`
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
       const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? (await unsavedContact(text))
-      if (mismatch) return askRewrite("despedirse_y_cerrar", mismatch)
+      if (mismatch) return notSent("despedirse_y_cerrar", mismatch)
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -2352,7 +2346,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Antes de registrar nada: el aviso en otro idioma o en otro trato se vuelve a pedir.
       const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? (await unsavedContact(notice)) ?? formulaAgain(notice)) : null
-      if (mismatch) return askRewrite("request_human_handoff", mismatch)
+      if (mismatch) return notSent("request_human_handoff", mismatch)
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {

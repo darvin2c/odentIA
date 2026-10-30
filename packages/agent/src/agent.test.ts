@@ -2462,25 +2462,25 @@ it("en el chat web no dice que guardó su WhatsApp sin guardarlo, ni cuando guar
   expect(lastToolText(refused, 2)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
   expect(await agentMessages(second.conversationId)).toEqual(["No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?"])
 
-  // Con el caso ya en el equipo (una señal de alarma lo pasa): no se le nombra guardar_contacto,
-  // que ese camino no trae, y el turno vuelve al modelo en vez de cerrar con el aviso fijo.
+  // Con el caso ya en el equipo (una señal de alarma lo pasa), lo que la comprobación frena no
+  // vuelve al modelo: el turno cierra con el aviso fijo, que no dice que guardó nada.
   const actor = `u-contacto-c-${stamp}`
   await ownerDb.insert(user).values({ id: actor, name: actor, email: `${actor}@example.test` })
   await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${`m-${actor}`}, 'org_a', ${actor}, 'owner', now())`)
   const third = await writeAs(actor, "me duele el pecho, mi WhatsApp es 987 111 222")
-  const NOTICE = "Llama ahora al 106. Una persona del equipo continuará la atención; déjanos aquí tu WhatsApp para avisarte."
   const derived = new ScriptedModel((_messages, call) =>
     toolCall(
       "request_human_handoff",
-      { reason: "Aviso al interlocutor", summary: "Aviso al interlocutor", message: call === 1 ? "Llama ahora al 106. Ya guardé tu WhatsApp para avisarte." : NOTICE },
+      { reason: "Aviso al interlocutor", summary: "Aviso al interlocutor", message: "Llama ahora al 106. Ya guardé tu WhatsApp para avisarte." },
       `d-aviso-${call}`,
     ),
   )
   expect(await runScripted(derived, third.conversationId, third.messageId)).toBe("done")
+  expect(derived.offered).toHaveLength(1)
   expect(derived.offered[0]).not.toContain("guardar_contacto")
-  expect(lastToolText(derived, 1)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
-  expect(lastToolText(derived, 1)).not.toContain("guardar_contacto")
-  expect(await agentMessages(third.conversationId)).toEqual([NOTICE])
+  expect(await agentMessages(third.conversationId)).toEqual([
+    "Si es una emergencia, llama ahora al 106 o ve a la emergencia más cercana. Recibimos tu mensaje. Una persona del equipo te va a responder: déjanos aquí abajo dónde avisarte.",
+  ])
 })
 
 it("una corrección aprobada llega a la siguiente respuesta, queda en su traza y retirarla la quita", async () => {

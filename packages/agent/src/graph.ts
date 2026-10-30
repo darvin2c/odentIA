@@ -1206,16 +1206,13 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
         toolCtx.handoffNeedsReply = false
         return "llm"
       }
-      // Se le pidió reescribir el aviso o la respuesta: vuelve al modelo en vez de cerrar con el
-      // aviso fijo. Cada pedido sale una vez por corrida y `maxTurns` lo acota.
-      const rewrite = toolCtx.rewriteAsked === true
-      toolCtx.rewriteAsked = false
       // Con el caso ya en el equipo, consultar algo (su cita, el teléfono de la sede)
       // es para decirle algo concreto en el aviso: el turno sigue hasta que lo envíe.
-      // También después de hacer lo que pidió y sí puede hacer (`BEFORE_NOTICE`).
+      // También después de hacer lo que pidió y sí puede hacer (`BEFORE_NOTICE`). Lo que
+      // una comprobación frena no vuelve al modelo: el turno cierra con el aviso fijo.
       const lastCall = [...state.messages].reverse().find((item): item is AIMessage => item instanceof AIMessage && (item.tool_calls?.length ?? 0) > 0)
       const onlyRead = !!lastCall?.tool_calls?.every((call) => READ_TOOLS.includes(call.name) || BEFORE_NOTICE.has(call.name))
-      if (!onlyRead && !rewrite) return END
+      if (!onlyRead) return END
     }
     const maxTurns = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) => {
       const cfg = await getAgentConfig(tx, toolCtx.orgId)
