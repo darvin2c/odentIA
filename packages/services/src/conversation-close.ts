@@ -85,8 +85,14 @@ export function greetingName(displayName: string | null | undefined): string | n
   if (isWebchatPlaceholderName(displayName)) return null
   const first = displayName?.trim().split(/\s+/)[0] ?? ""
   if (!first || first.length > 30 || /[\d@+_]/.test(first) || !/\p{L}/u.test(first)) return null
+  // «Paciente» (la Agenda lo pone si nadie escribió el nombre) o «Prueba» no son
+  // su nombre: «Paciente, cuando desee…» se lee como un trato frío.
+  if (NOT_A_NAME.has(first.toLocaleLowerCase("es"))) return null
   return first
 }
+
+/** Palabras que ocupan el lugar del nombre sin serlo. */
+const NOT_A_NAME = new Set(["paciente", "cliente", "usuario", "usuaria", "prueba", "test", "visitante", "contacto", "sin", "desconocido", "desconocida"])
 
 function withName(name: string | null, sentence: string): string {
   if (!name) return sentence
@@ -684,7 +690,9 @@ export async function tickConversationCare(
       const late = now.getTime() - closeAt.getTime() > CARE_LATE_MS
       if (writable && late && !isWritingTime(now, schedule)) return null
       if (!(await stillQuiet(inner, row))) return null
-      if (writable) {
+      // Si en esta atención quedó una cita, no hay nada que retomar: «Recordar la
+      // cita» le escribe cerca de la fecha. Se cierra sin despedida (ADR 0113).
+      if (writable && !(await bookedInAttention(inner, orgId, row))) {
         // Antes de cerrar, porque al cerrar vence la propuesta.
         const proposedWhen = await proposedAppointmentWhen(inner, orgId, row.id)
         await sendFixed(inner, orgId, row.id, format(farewellText(voice, greetingName(row.contactName), proposedWhen), row.channel), {
@@ -758,6 +766,17 @@ export async function tickConversationCare(
   function format(text: string, channel: string): string {
     return deps.format ? deps.format(text, channel, { emojis: cfg.emojis }) : text
   }
+}
+
+/** ¿Esta atención dejó una cita en pie? La reservada por Sofi o desde el enlace de la conversación. */
+async function bookedInAttention(tx: Db, orgId: string, row: Pick<CareRow, "id" | "attentionStartedAt">): Promise<boolean> {
+  const [found] = await tx.execute<{ id: string }>(sql`
+    select a.id from appointment a
+    where a.organization_id = ${orgId} and a.conversation_id = ${row.id}::uuid
+      and a.created_at >= ${row.attentionStartedAt.toISOString()}::timestamptz
+      and a.status in ('programada', 'confirmada', 'atendida')
+    limit 1`)
+  return !!found
 }
 
 async function lastMessageOf(tx: Db, id: string) {

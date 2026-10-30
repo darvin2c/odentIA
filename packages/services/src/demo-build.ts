@@ -765,7 +765,8 @@ async function planDay(tx: Db, ctx: AgendaContext, day: string, notBefore: numbe
  * Cierra las citas de la demo que ya pasaron: la mayoría se atendió (con su
  * atención firmada, lo cobrado y lo escrito por la receta) y unas pocas
  * faltaron. Lo que la persona que presenta movió a mano no se toca: solo se
- * cierran las que siguen programadas o confirmadas.
+ * cierran las que siguen programadas o confirmadas, y nunca una que salió de
+ * una conversación.
  */
 async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<number> {
   const due = await tx
@@ -785,6 +786,9 @@ async function closeVisits(tx: Db, ctx: AgendaContext, before: Date): Promise<nu
         eq(appointment.organizationId, ctx.orgId),
         inArray(appointment.status, ["programada", "confirmada"]),
         lt(appointment.endsAt, new Date(before.getTime() - 30 * 60_000)),
+        // La que salió de una conversación la reservó alguien de verdad (quien prueba a Sofi por
+        // WhatsApp): se queda como esté, para que su llegada o su falta las diga la clínica (ADR 0113).
+        sql`${appointment.conversationId} is null`,
         // Si alguien ya abrió su atención en una presentación, la cita es suya: no se toca.
         sql`not exists (select 1 from encounter e where e.organization_id = ${appointment.organizationId} and e.appointment_id = ${appointment.id} and e.voided_at is null)`,
       ),

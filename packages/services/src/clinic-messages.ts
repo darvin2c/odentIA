@@ -202,6 +202,7 @@ const NOTICE_TITLES: Record<string, string> = {
   aviso_cita_reservada_datos: "Recordar la cita: cita reservada, faltan datos",
   recordatorio_cita_datos: "Recordar la cita: recordatorio, faltan datos",
   recordatorio_cita_confirmada: "Recordar la cita: recordatorio, cita confirmada",
+  cita_sin_llegar: "Recordar la cita: ¿vienes en camino?",
   aviso_cita_movida: "Recordar la cita: cambio de fecha",
   aviso_cita_cancelada: "Recordar la cita: cita cancelada",
 }
@@ -935,6 +936,8 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
     "Antes de la cita, a quien aún le faltan datos para atenderla: en lugar del recordatorio, con el botón «Completar mis datos».",
   recordatorio_cita_confirmada: () =>
     "Antes de una cita ya confirmada (la que eligió la persona o la que ya confirmó): en lugar del recordatorio, sin «Confirmar» y con «Cambiar mi cita».",
+  cita_sin_llegar: () =>
+    "A los 15 minutos de la hora, si la persona no llegó y en su sede ya marcaron llegadas ese día. Solo dentro del horario para escribir.",
   aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
   aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",
 }

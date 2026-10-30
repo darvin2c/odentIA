@@ -18,7 +18,7 @@ import {
   moveOwnAppointment,
   ownAppointmentChangeable,
 } from "./own-appointment.js"
-import { listAvailableSlots } from "./availability.js"
+import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { consentStatusOf } from "./message-permission.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { personalLinkToken } from "./personal-link-token.js"
@@ -705,7 +705,7 @@ export async function listWeekSlots(
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw validation("Rango de fechas inválido")
   if (to.getTime() - from.getTime() > SLOT_RANGE_DAYS * 86_400_000) throw validation(`El rango máximo es de ${SLOT_RANGE_DAYS} días`)
   // El paso de las horas lo decide la Agenda (`bookingStepMin`): el mismo que ofrece el agente.
-  const notBefore = new Date().toISOString()
+  const notBefore = selfBookingNotBefore()
   // Día por día: la Agenda recorta cada consulta a un tope de huecos, y con
   // varios profesionales una semana entera dejaría sin horarios los últimos días.
   const slots: BookingLinkSlot[] = []
@@ -840,7 +840,7 @@ export async function listBookingLinkProfessionals(
     ...(rules.durationMin ? { durationMin: rules.durationMin } : {}),
     from: now.toISOString(),
     to: until.toISOString(),
-    notBefore: now.toISOString(),
+    notBefore: selfBookingNotBefore(now),
     firstPerProfessional: true,
     ...(rules.forTest ? { forTest: true } : {}),
   })

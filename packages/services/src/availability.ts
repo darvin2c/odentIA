@@ -573,6 +573,19 @@ export async function validateAvailability(
 
 /* Huecos libres */
 
+/**
+ * Lo que se le ofrece a la persona para reservar sola (su enlace, Sofi) empieza
+ * al menos media hora después: una hora que empieza en tres minutos no le da
+ * tiempo de llegar y termina en una cita perdida (ADR 0113). Recepción sigue
+ * viendo el primer hueco libre.
+ */
+export const SELF_BOOKING_LEAD_MS = 30 * 60_000
+
+/** Desde cuándo se ofrece una hora a quien reserva sola. */
+export function selfBookingNotBefore(now = new Date()): string {
+  return new Date(now.getTime() + SELF_BOOKING_LEAD_MS).toISOString()
+}
+
 export interface SlotsQuery {
   branchId: string
   professionalUserId?: string

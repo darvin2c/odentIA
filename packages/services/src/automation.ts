@@ -36,6 +36,7 @@ import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-wor
 import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCalendarInvite } from "./appointment-calendar.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
+  APPOINTMENT_ARRIVAL_KEY,
   APPOINTMENT_DATA_NOTICE_KEY,
   REMINDER_CONFIRMED_KEY,
   REMINDER_DATA_KEY,
@@ -83,7 +84,7 @@ import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
-import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
+import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
@@ -135,8 +136,8 @@ function assertKind(kind: string): AutomationKind {
   return kind as AutomationKind
 }
 
-/** Los tipos de trabajo: los de cada línea y los avisos de cita de «Recordar la cita». */
-const JOB_KINDS: readonly string[] = [...AUTOMATION_KINDS, ...APPOINTMENT_NOTICE_KEYS]
+/** Los tipos de trabajo: los de cada línea, los avisos de cita y «¿Vienes en camino?» de «Recordar la cita». */
+const JOB_KINDS: readonly string[] = [...AUTOMATION_KINDS, ...APPOINTMENT_NOTICE_KEYS, APPOINTMENT_ARRIVAL_KEY]
 
 function assertJobKind(kind: string): string {
   if (!JOB_KINDS.includes(kind)) throw notFound("Línea del administrador")
@@ -1094,6 +1095,67 @@ export async function syncAppointmentReminders(
       if (job) programados++
     }
   }
+  const arrivals = await syncArrivalChecks(tx, orgId, rule, now)
+  return { programados: programados + arrivals.programados, omitidos: omitidos + arrivals.omitidos }
+}
+
+/** Minutos después de la hora en que se pregunta si viene en camino. */
+const ARRIVAL_ASK_AFTER_MS = 15 * 60_000
+/** Pasado esto desde la hora (o al terminar la cita), ya no se pregunta. */
+const ARRIVAL_ASK_UNTIL_MS = 60 * 60_000
+/** Que la sede marcó una llegada en estas horas dice que ahí se registran las llegadas. */
+const ARRIVAL_SIGNAL_MS = 12 * 3_600_000
+
+/**
+ * «¿Vienes en camino?» de «Recordar la cita» (ADR 0113): a los 15 minutos de la
+ * hora, a quien no tiene la llegada marcada. Solo en una sede que ya marcó
+ * alguna llegada en las últimas 12 horas: si allí no se registran, la falta de
+ * llegada no dice nada y se le escribiría a quien ya está en el sillón. Sale al
+ * momento y solo dentro del «Horario para escribir»; si no, no sale. Uno por
+ * cita (`cita_sin_llegar:<cita>`).
+ */
+async function syncArrivalChecks(tx: Db, orgId: string, rule: RuleRow, now: Date): Promise<SyncSummary> {
+  let programados = 0
+  let omitidos = 0
+  const due = await tx
+    .select()
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.isTest, false),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        isNull(appointment.arrivedAt),
+        lte(appointment.startsAt, new Date(now.getTime() - ARRIVAL_ASK_AFTER_MS)),
+        sql`${appointment.startsAt} > ${new Date(now.getTime() - ARRIVAL_ASK_UNTIL_MS).toISOString()}::timestamptz`,
+        sql`${appointment.endsAt} > ${now.toISOString()}::timestamptz`,
+        gte(appointment.startsAt, activeSince(rule)),
+        sql`exists (select 1 from appointment seen
+          where seen.organization_id = ${orgId} and seen.branch_id = ${appointment.branchId}
+            and seen.arrived_at between ${new Date(now.getTime() - ARRIVAL_SIGNAL_MS).toISOString()}::timestamptz and ${now.toISOString()}::timestamptz)`,
+        notYetQueued(orgId, APPOINTMENT_ARRIVAL_KEY, appointment.id),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+    .limit(BATCH_LIMIT)
+  for (const appt of due) {
+    const timeZone = await timezoneOf(tx, orgId, appt.branchId)
+    if (!isWritingTime(now, await writingScheduleOf(tx, orgId, timeZone))) continue
+    const contactId = await preferredContact(tx, orgId, appt.patientId)
+    if (!contactId) omitidos++
+    const time = new Intl.DateTimeFormat((await findOrgLocale(tx, orgId)).locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(appt.startsAt)
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: APPOINTMENT_ARRIVAL_KEY,
+      dedupeKey: `${APPOINTMENT_ARRIVAL_KEY}:${appt.id}`,
+      scheduledFor: now,
+      contactId,
+      appointmentId: appt.id,
+      patientId: appt.patientId,
+      payload: { timeZone, detail: `No ha llegado a su cita de las ${time}.` },
+    })
+    if (job) programados++
+  }
   return { programados, omitidos }
 }
 
@@ -1445,6 +1507,33 @@ async function stillValid(
     }
     if (appt.startsAt.getTime() < now.getTime() - 60_000) {
       return { valid: false, reason: "La cita ya pasó" }
+    }
+    // Uno por cita y por día: el de pocas horas antes que el «Horario para escribir»
+    // corre a la noche anterior llega el mismo día que el de un día antes (ADR 0113).
+    const tz = jobPayloadOf(job.payload).timeZone ?? (await timezoneOf(tx, orgId, null))
+    const [today] = await tx.execute<{ id: string }>(sql`
+      select j.id from automation_job j
+      where j.organization_id = ${orgId} and j.appointment_id = ${job.appointmentId} and j.kind = 'recordatorio_cita'
+        and j.status = 'enviado' and j.id <> ${job.id}
+        and (j.updated_at at time zone ${tz})::date = (${now.toISOString()}::timestamptz at time zone ${tz})::date
+      limit 1`)
+    if (today) return { valid: false, reason: "Ya se le recordó esta cita hoy" }
+    return { valid: true }
+  }
+  if (job.kind === APPOINTMENT_ARRIVAL_KEY && job.appointmentId) {
+    const [appt] = await tx
+      .select({ status: appointment.status, startsAt: appointment.startsAt, endsAt: appointment.endsAt, arrivedAt: appointment.arrivedAt })
+      .from(appointment)
+      .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
+      .limit(1)
+    if (!appt) return { valid: false, reason: "La cita ya no existe" }
+    if (appt.arrivedAt) return { valid: false, reason: "Ya llegó" }
+    if (!["programada", "confirmada"].includes(appt.status)) {
+      return { valid: false, reason: `La cita ya está ${APPOINTMENT_STATUS_WORDS[appt.status] ?? appt.status}` }
+    }
+    // Pasada la cita, preguntar si viene en camino ya no sirve: lo sigue «Reprogramar tras una inasistencia».
+    if (now.getTime() >= Math.min(appt.endsAt.getTime(), appt.startsAt.getTime() + ARRIVAL_ASK_UNTIL_MS)) {
+      return { valid: false, reason: "La hora de la cita ya pasó" }
     }
     return { valid: true }
   }
@@ -2038,6 +2127,7 @@ const NOTICE_TASK_TITLE: Record<string, (name: string) => string> = {
   aviso_cita_reservada: (name) => `Avisarle a ${name} que su cita quedó reservada`,
   aviso_cita_movida: (name) => `Avisarle a ${name} que su cita cambió de fecha`,
   aviso_cita_cancelada: (name) => `Avisarle a ${name} que su cita se canceló`,
+  [APPOINTMENT_ARRIVAL_KEY]: (name) => `Llamar a ${name}: no ha llegado a su cita`,
 }
 
 /**
@@ -2153,7 +2243,7 @@ async function linkOpportunityThread(tx: Db, orgId: string, job: JobRow, convers
 
 /** Hasta cuándo sirve llamar por el recordatorio de una cita: hasta que empieza. */
 async function reminderDue(tx: Db, orgId: string, job: JobRow): Promise<Date | undefined> {
-  if ((job.kind !== "recordatorio_cita" && !isAppointmentNotice(job.kind)) || !job.appointmentId) return undefined
+  if ((job.kind !== "recordatorio_cita" && job.kind !== APPOINTMENT_ARRIVAL_KEY && !isAppointmentNotice(job.kind)) || !job.appointmentId) return undefined
   const [appt] = await tx
     .select({ startsAt: appointment.startsAt })
     .from(appointment)
@@ -2426,9 +2516,10 @@ export async function deliverJob(
       return true
     })
     if (covered.length > 0) await close(covered, "cancelado", "Cubierto por otro recordatorio de la misma cita")
-  } else if (!isAppointmentNotice(job.kind)) {
+  } else if (!isAppointmentNotice(job.kind) && job.kind !== APPOINTMENT_ARRIVAL_KEY) {
     // Un aviso de cita no espera a mañana: la cita cambió hoy. Sí cuenta como el
-    // mensaje del día de la persona, así que lo demás espera.
+    // mensaje del día de la persona, así que lo demás espera. «¿Vienes en camino?»
+    // tampoco espera: mañana ya no sirve (ADR 0113).
     const rows = await tx.execute<{ sent: boolean; reminder: boolean }>(sql`
       select
         exists (select 1 from automation_job j
@@ -2762,7 +2853,7 @@ async function markCrashedJob(tx: Db, orgId: string, jobId: string, now: Date, e
   return { jobId, outcome: "fallido", detail }
 }
 
-/** Cancela lo pendiente de una cita al resolverse (confirmada/atendida/cancelada). */
+/** Cancela lo pendiente de una cita al resolverse (llegó, atendida, cancelada o no vino); confirmarla no la resuelve. */
 export async function cancelPendingForAppointment(
   tx: Db,
   orgId: string,
