@@ -9,8 +9,10 @@ export {
   type WhatsAppAccountDelivery,
   type WhatsAppDelivery,
   type WhatsAppNumberDelivery,
+  isWhatsAppAccountFailure,
   whatsappCloudApiAdapter,
   whatsappFailureWords,
+  whatsappHiddenAddress,
 } from "./whatsapp-cloud-api.js"
 export {
   exchangeSignupCode,

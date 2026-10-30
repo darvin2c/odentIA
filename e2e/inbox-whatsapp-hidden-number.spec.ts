@@ -53,7 +53,7 @@ test("quien oculta su número entra por su BSUID, sigue en su hilo cuando llega 
     await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
     await expect(page.getByText("¿Me confirman?", { exact: true }).last()).toBeVisible()
     // El motivo se dice en palabras; el de Meta, en inglés, no es para la clínica.
-    await expect(page.getByText("No se entregó: el canal lo rechazó.", { exact: true })).toBeVisible()
+    await expect(page.getByText("No se entregó.", { exact: true })).toBeVisible()
     await expect(page.getByText(/Parameter value/)).toHaveCount(0)
     await info.attach(`sin-numero-${label}`, { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   }

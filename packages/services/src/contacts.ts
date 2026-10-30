@@ -1,3 +1,4 @@
+import { whatsappHiddenAddress } from "@odentia/channels"
 import {
   normalizePhone,
   normalizeTags,
@@ -877,7 +878,7 @@ export async function settleProviderUser<
   }
   if (!byUser) return event
   const direct = isDirectThread(channel, event.externalThreadId, event.senderExternalId)
-  if (event.senderExternalId === `wa:${userId}`) {
+  if (event.senderExternalId === whatsappHiddenAddress(userId)) {
     // Sin número: entra por la dirección con la que ya se la conoce.
     return direct
       ? { ...event, externalThreadId: byUser.externalUserId, senderExternalId: byUser.externalUserId }

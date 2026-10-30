@@ -202,7 +202,12 @@ function waAddress(phone: unknown, userId: unknown): string | null {
   const digits = waDigits(phone)
   if (digits) return `wa:${digits}`
   const id = waUserId(userId)
-  return id ? `wa:${id}` : null
+  return id ? whatsappHiddenAddress(id) : null
+}
+
+/** La dirección de quien ocultó su número: su BSUID (ADR 0108). */
+export function whatsappHiddenAddress(userId: string): string {
+  return `wa:${userId}`
 }
 
 /** La persona de un mensaje: a dónde se le responde y su BSUID, si llegó. */
@@ -429,6 +434,17 @@ const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
 }
 
 const SEND_FAILURE_WORDS = new Set(Object.values(WHATSAPP_SEND_ERROR_WORDS))
+
+/** Rechazos que son de la cuenta de la clínica (pago, clave), no de la persona. */
+const ACCOUNT_FAILURE_WORDS = new Set([WHATSAPP_SEND_ERROR_WORDS[131042], WHATSAPP_SEND_ERROR_WORDS[190]])
+
+/**
+ * El envío no salió por la cuenta de WhatsApp de la clínica: se arregla una vez
+ * en la conexión, no persona por persona.
+ */
+export function isWhatsAppAccountFailure(error: string | null | undefined): boolean {
+  return !!error && ACCOUNT_FAILURE_WORDS.has(error)
+}
 
 /**
  * El motivo guardado de un envío que no salió, si es uno de los que se dicen en

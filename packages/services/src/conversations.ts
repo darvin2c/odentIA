@@ -5,6 +5,7 @@ import {
   type ReplyButton,
   type TemplateCategory,
   whatsappFailureWords,
+  whatsappHiddenAddress,
 } from "@odentia/channels"
 import { type MissingPersonDatum, normalizePhone } from "@odentia/clinical"
 import { type Db, type InboundMessageJob, sendOutboundMessage } from "@odentia/db"
@@ -165,7 +166,10 @@ export interface MessageItem {
  * vencida, número sin WhatsApp); el de Meta tal cual no es para la clínica.
  */
 export function deliveryNoteOf(status: string, error: string | null): string | null {
-  if (status === "failed") return whatsappFailureWords(error) ?? "No se entregó: el canal lo rechazó."
+  if (status === "failed") {
+    if (error === "connection-disabled") return "No se entregó: la conexión del canal estaba desactivada."
+    return whatsappFailureWords(error) ?? "No se entregó."
+  }
   if (status === "unknown") {
     return "No sabemos si llegó: el canal no confirmó el envío. No se reenvía solo, para no mandarlo dos veces."
   }
@@ -297,7 +301,12 @@ export async function ingestInbound(
       .insert(contact)
       .values({
         organizationId: orgId,
-        displayName: event.senderDisplayName ?? event.senderExternalId,
+        // Quien oculta su número y no tiene nombre de perfil no se llama por su BSUID (ADR 0108).
+        displayName:
+          event.senderDisplayName ??
+          (event.senderUserId && event.senderExternalId === whatsappHiddenAddress(event.senderUserId)
+            ? "Persona de WhatsApp"
+            : event.senderExternalId),
         // Quien escribe en una prueba es una persona de prueba (ADR 0094).
         ...(event.test ? { isTest: true } : {}),
       })
@@ -1127,6 +1136,8 @@ export function conversationFilterConditions(orgId: string, input: ConversationF
             sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`,
             and(
               eq(channelConnection.channel, "whatsapp"),
+              // Solo un hilo con número: los dígitos de un BSUID no son un teléfono (ADR 0108).
+              sql`${conversation.externalThreadId} ~ '^wa:[0-9]+$'`,
               sql`regexp_replace(${conversation.externalThreadId}, '[^0-9]', '', 'g') like ${`%${digits}%`}`,
             ),
           )!
