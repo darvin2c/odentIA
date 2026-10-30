@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useMemo, useState } from "react"
 import { z } from "zod"
 import { ApiError } from "../../lib/api"
+import { dayKey } from "../../lib/booking-days"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 
 /**
@@ -29,9 +30,7 @@ export const MAX_WEEKS = 8
 /** Sin preferencia de profesional: se ofrece cada hora con quien la tenga libre. */
 export const ANYONE = "cualquiera"
 
-export function dayKey(instant: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant))
-}
+export { dayKey }
 
 export function hourOf(instant: string, timeZone: string): number {
   return Number(new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", hour12: false }).format(new Date(instant)))

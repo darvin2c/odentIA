@@ -17,8 +17,8 @@ import {
   type ScheduleColumn,
   type SchedulePreview,
   type ScheduleRangeValue,
-  type SubmitOptions,
   SubmitButton,
+  type SubmitOptions,
   submitErrorOf,
   submitForm,
   useAppForm,
@@ -29,17 +29,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 import { z } from "zod"
 import type { AgendaAppointment } from "../../lib/agenda"
-import type { PhoneWhatsApp } from "../../lib/people"
 import { apiFetch } from "../../lib/api"
 import { fetchTreatmentCoordination } from "../../lib/clinical-journey"
 import { useCan, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
+import type { PhoneWhatsApp } from "../../lib/people"
+import { appWords } from "../../lib/product-words"
 import { fetchService } from "../../lib/services"
 import { PersonPicker } from "../person-picker"
 import { ServiceSelect } from "../service-select"
 import { whenSaid } from "./shared"
 import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields, type WhenValues } from "./when"
-import { appWords } from "../../lib/product-words"
 
 /** Con qué se abre «Nueva cita»: nada, un hueco tocado en la rejilla o un paciente. */
 export interface BookingSeed {
@@ -147,6 +147,7 @@ export function BookingDrawer({
   const canRegister = usePermission("patients.write")
   const can = useCan()
   const profile = useOrgProfile()
+  const tradeName = profile.data?.tradeName?.trim() || null
   // Lo que la clínica pide en su registro y aquí no se escribe: queda pendiente en su página.
   const configQuery = useQuery({
     queryKey: ["patient-registration-config"],
@@ -242,21 +243,22 @@ export function BookingDrawer({
       registered.data.whatsapp === "en_uso"
         ? "Su número de WhatsApp ya es de otra persona de la clínica: no se movió. Revísalo en su página antes de escribirle."
         : null
-    if (value.generalConsent !== null) {
-      const consent = value.generalConsent
-      // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono.
-      await (async () => {
-        const personId =
-          seed.person?.contactId ??
-          (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
-        await apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
+    // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono: los mensajes
+    // de su cita (se le dijo que le escribirán por WhatsApp) y su respuesta a novedades y promociones.
+    await (async () => {
+      const personId =
+        seed.person?.contactId ??
+        (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
+      const permission = (tipo: "recordatorio" | "novedades", recibir: boolean) =>
+        apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
           method: "POST",
-          body: JSON.stringify({ tipo: "novedades", recibir: consent, source: "telefono" }),
+          body: JSON.stringify({ tipo, recibir, source: "telefono" }),
         })
-      })().catch(() => {
-        consentNote.current = "No se pudo anotar si acepta novedades y promociones: anótalo en su página, en Datos."
-      })
-    }
+      await permission("recordatorio", true)
+      if (value.generalConsent !== null) await permission("novedades", value.generalConsent)
+    })().catch(() => {
+      consentNote.current = "No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes."
+    })
     // Las búsquedas de pacientes ya hechas dejaron de valer.
     void queryClient.invalidateQueries({ queryKey: ["patients"] })
     return registered.data
@@ -278,8 +280,13 @@ export function BookingDrawer({
             .nullable()
             .refine((phone) => Boolean(phone), "Escribe su teléfono: por ahí le llegan los avisos de la cita.")
         : z.string().nullable(),
-    // Opcional: si no se tocó, no se anota nada.
-    generalConsent: z.boolean().nullable(),
+    // A quien se registra se le pregunta por novedades: sin su respuesta no se guarda.
+    generalConsent: registering
+      ? z
+          .boolean()
+          .nullable()
+          .refine((consent) => consent !== null, "Pregúntale y elige una opción.")
+      : z.boolean().nullable(),
     serviceId: z.string(),
     reason: z.string().max(500, "Escribe el motivo en 500 caracteres o menos."),
     // El «cuándo» lo valida `WhenFields` con lo que ve en las horas.
@@ -427,6 +434,7 @@ export function BookingDrawer({
   }, [shown, patientName, onPreview])
   React.useEffect(() => () => onPreview(null), [onPreview])
 
+
   // «Lo que la clínica pide (fecha de nacimiento y documento) queda pendiente en su página.»
   const pendingWords = (() => {
     const config = configQuery.data?.data
@@ -491,6 +499,7 @@ export function BookingDrawer({
         title="Nueva cita"
         description={`Elige a quién y cuándo. La ${appWords().room.one} se asigna con el hueco.`}
         onClose={onClose}
+
         submitLabel={submitLabel}
       >
         <div className="grid gap-4">
@@ -569,31 +578,32 @@ export function BookingDrawer({
                   ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
-              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
-              <p className="text-xs text-muted-foreground">Díselo: «Te avisaremos por WhatsApp sobre tus citas.»</p>
+              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. */}
+              <p className="text-xs text-muted-foreground">
+                Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
+              </p>
               <form.AppField name="generalConsent">
                 {(field) => (
                   <field.Group
-                    legend="¿Acepta recibir novedades y promociones de la clínica?"
-                    description="Opcional: si no se lo preguntaste, déjalo así."
+                    legend={`¿Acepta recibir novedades y promociones${tradeName ? ` de ${tradeName}` : ""} por WhatsApp?`}
                     className="gap-1.5"
                   >
                     {(control) => (
                       <div className="flex flex-wrap gap-2">
                         {[
-                          { value: true, label: "Sí, aceptó por teléfono" },
-                          { value: false, label: "No aceptó" },
+                          { value: true, id: "cita-nuevo-permiso-si", label: "Sí, aceptó por teléfono" },
+                          { value: false, id: "cita-nuevo-permiso-no", label: "No aceptó" },
                         ].map((option) => (
                           <Button
                             key={option.label}
+                            id={option.id}
                             type="button"
                             size="sm"
+                            className="min-h-11 sm:min-h-8"
                             variant={field.state.value === option.value ? "default" : "outline"}
                             aria-pressed={field.state.value === option.value}
                             aria-describedby={control.describedBy}
-                            onClick={() =>
-                              field.handleChange(field.state.value === option.value ? null : option.value)
-                            }
+                            onClick={() => field.handleChange(option.value)}
                           >
                             {option.label}
                           </Button>

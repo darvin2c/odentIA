@@ -113,7 +113,7 @@ test("chat web: una línea, el primer sitio queda solo, otro espera tu sí y el 
     const window = site.frameLocator("iframe")
     await expect(window.getByRole("textbox", { name: "Tu nombre" })).toHaveCount(0)
     // La ventana carga dentro del sitio: «Enviar» se habilita cuando ya responde, y se escribe
-    // entonces (lo escrito antes se pierde al hidratar). Vacío no se deshabilita (ADR 0112).
+    // entonces (lo escrito antes se pierde al hidratar). Vacío no se deshabilita (ADR 0113).
     const send = window.getByRole("button", { name: "Enviar" })
     await expect(send).toBeEnabled({ timeout: 30_000 })
     await window.getByRole("textbox", { name: "Tu mensaje" }).fill("¿Atienden niños?")

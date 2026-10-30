@@ -14,7 +14,7 @@ import {
   type AgentConfig,
   agentServicesShown,
   type AgentServicesShown,
-  GENERAL_PERMISSION_QUESTION,
+  generalPermissionWords,
   PRICES_PER_CONVERSATION,
   CASE_LOOKUP_TOOLS,
   formatAgentCaseForPrompt,
@@ -399,7 +399,8 @@ export function receptionPrompt(zone: OrgLocale, cfg: AgentConfig, facts: Prompt
       ? "Si la persona confirma por escrito una cita que ya tiene (por ejemplo, responde «sí, ahí estaré» a un recordatorio), confírmala con confirmar_cita y díselo con la frase que te devuelve (si escribe por sus hijos, dice de quiénes son): no es una propuesta y no pide otro sí. Si tiene varias por confirmar, pregúntale cuál."
       : null,
     has("responder_permiso_mensajes")
-      ? `Si el último mensaje de la clínica en el hilo es la pregunta «${GENERAL_PERMISSION_QUESTION}» y la persona responde sí o no, anótalo con responder_permiso_mensajes y contéstale con la frase que te devuelve; no lo confundas con confirmar una cita.`
+      ? // La pregunta sale con el nombre de la clínica y de usted si la clínica trata de usted (`generalPermissionWords`).
+        `Si el último mensaje de la clínica en el hilo es la pregunta «${generalPermissionWords(null, cfg.treatment === "usted" ? "usted" : "tu").question}» y la persona responde sí o no, anótalo con responder_permiso_mensajes y contéstale con la frase que te devuelve; no lo confundas con confirmar una cita.`
       : null,
     has("elegir_mensajes")
       ? "Si la persona pide no recibir más un tipo de mensaje, volver a recibirlo o elegir qué mensajes recibe, anótalo con elegir_mensajes y contéstale con la frase que te devuelve. Si no queda claro qué tipo quiere dejar (los recordatorios de sus citas, los de controles y seguimiento, las novedades y promociones o ningún mensaje), pregúntale antes. «Cancelar» o «quiero cancelar» es cancelar una cita, nunca una baja."
@@ -759,25 +760,14 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .filter(Boolean)
           .join("\n")
       : null
-    // Quien aún no es paciente se reserva y registra aquí mismo con su sí, si la
-    // clínica tiene su aviso de privacidad publicado (ADR 0101); si no, por su
-    // enlace o por recepción. Se le dice desde el primer mensaje, para que no pida
-    // datos que no puede usar (auditoría del 27-oct).
-    // Lo que ya se sabe de quien escribe no se le vuelve a pedir (ADR 0104): con su
-    // nombre en la ficha, la indicación no dice «pídele sus nombres» ni «cómo se llama».
-    // Con solo su nombre de pila, se piden solo los apellidos (auditoría del ADR 0104).
-    async function newPersonLine(known: "todo" | "nombre" | "nada", givenNames: string): Promise<string> {
+    // Quien aún no es paciente reserva en su enlace, que ya trae la hora que eligió:
+    // ahí deja sus datos (ADR 0109, que precisa la 0101); por aquí no se registra a
+    // nadie. Sin registro en línea, lo registra recepción. Se le dice desde el primer
+    // mensaje, para que no pida datos que no puede usar (auditoría del 27-oct).
+    async function newPersonLine(): Promise<string> {
       const config = await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => getPatientRegistrationConfig(tx, toolCtx.orgId)).catch(() => null)
-      if (available.has("reservar_paciente_nuevo") && config?.enabled && config.privacyNotice.trim() && toolCtx.publicUrl) {
-        const document =
-          config.fields.docNumber === "required" ? " y, porque la clínica lo pide, su documento (si no lo tiene a la mano, sigue sin él)" : ""
-        const book =
-          known === "todo"
-            ? `resérvalo con reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo. Ya tienes sus nombres y apellidos${config.fields.docNumber === "required" ? "; porque la clínica lo pide, pídele también su documento (si no lo tiene a la mano, sigue sin él)" : ""}.`
-            : known === "nombre"
-              ? `pídele solo sus apellidos (ya sabes que se llama ${givenNames})${document} y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo.`
-              : `pídele sus nombres y apellidos${document} y usa reservar_paciente_nuevo: con su sí queda registrado y reservado aquí mismo.`
-        return `Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, ${book} Si la cita es para otra persona, pide los nombres y apellidos de esa persona${known === "nada" ? ", cómo se llama quien escribe" : ""} y, si no lo dijo, si es su hijo o hija menor de edad. No le pidas nada de salud ni otros datos. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita.`
+      if (available.has("reservar_paciente_nuevo") && config?.enabled && toolCtx.publicUrl) {
+        return "Este interlocutor aún no es paciente de la clínica. Si quiere una cita, ofrécele horarios; cuando elija uno, usa reservar_paciente_nuevo con ese hueco: te da su enlace con esa hora ya elegida, para que deje sus datos y quede reservada ahí, también si la cita es para otra persona (su hijo o hija, por ejemplo). Por aquí no lo registras: no le pidas apellidos, documento ni otros datos para eso, ni nada de salud. Si prefiere ver todos los horarios y elegir sola, envíale su enlace con enviar_enlace_cita."
       }
       const online = available.has("enviar_enlace_cita") && config?.enabled === true
       return online
@@ -816,7 +806,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
           .slice(0, 5)
           .map((p) => `${p.displayName} (id ${p.patientId}, vínculo: ${p.relationship})`)
           .join("; ")}${linkedPatients.length > 5 ? "; hay más: usa ver_contexto_paciente" : ""}. Antes de actuar por uno, verifica vínculo y autorización con ver_contexto_paciente. Si la cita es para alguien que no es el propio interlocutor, di su nombre completo al proponerla y, si no coincide con lo que contó (pide por su hija y el vinculado es otra persona), no la propongas: toma su nombre y el horario que prefiere y pasa el caso a recepción para que la registre.`
-      : await newPersonLine(nameKnown ? "todo" : onlyGivenNames ? "nombre" : "nada", person?.givenNames?.trim() ?? "")
+      : await newPersonLine()
     // Lo que el agente recuerda de la persona, venga del canal que venga: sus
     // datos guardados (nunca clínicos) y lo que sale de vínculos y citas.
     const memoryBlock = await withOrgContext(toolCtx.db, toolCtx.orgId, async (tx) =>
@@ -953,8 +943,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     const progress = attentionProgress({ items, startedAt, state, promotions: clinicData.promotions.map((promo) => promo.name), name: givenName })
     // `send_reply` pide de nuevo la respuesta que vuelve a «Entiendo…» o «anoté que…».
     toolCtx.formulas = progress.formulas
-    // La pregunta por el sí de quien se registra empieza por su nombre si aún no se le habló por él.
-    toolCtx.usedName = progress.usedName
+    toolCtx.pickLinks = progress.pickLinks
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
       .filter(Boolean)
       .join("\n\n")

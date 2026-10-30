@@ -155,6 +155,27 @@
       "when": 1793337021565,
       "tag": "0021_bsuid_de_whatsapp",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793385077540,
+      "tag": "0022_acciones_del_agente",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793385092067,
+      "tag": "0023_acciones_del_agente_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793390257419,
+      "tag": "0024_enlace_para_alguien_nuevo",
+      "breakpoints": true
     }
   ]
 }

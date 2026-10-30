@@ -1,5 +1,5 @@
 /**
- * Campos del formulario de Antecedentes (`useAppForm`, ADR 0112): grupo
+ * Campos del formulario de Antecedentes (`useAppForm`, ADR 0113): grupo
  * sanguíneo, revisión de cada grupo y las filas de condiciones y medicación.
  *
  * Composición de dominio sin queries ni permisos: reciben el `form` del padre

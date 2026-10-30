@@ -128,7 +128,7 @@ test("asistente clínico: dictado de práctica, sugerencias dentro de cada bloqu
   // «Finalizar y firmar» queda fijo al pie de la atención (fase 3, paso 2B), fuera del bloque de cierre.
   const signButton = page.getByRole("button", { name: "Finalizar y firmar", exact: true })
   await expect(closing).toContainText("Diagnóstico: hay uno sugerido, sin confirmar")
-  // Lo que falta no apaga «Finalizar y firmar» (ADR 0112, como en patients.spec): sin abrir el cierre,
+  // Lo que falta no apaga «Finalizar y firmar» (ADR 0113, como en patients.spec): sin abrir el cierre,
   // lleva a lo primero que falta (la evolución, sugerida pero sin confirmar) y lo marca en su campo.
   await expect(page.getByText("Faltan 2 para cerrar: diagnóstico y evolución")).toBeVisible()
   await expect(signButton).toBeEnabled()

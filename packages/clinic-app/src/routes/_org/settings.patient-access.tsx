@@ -192,7 +192,7 @@ function PortalForm({
             </SubmitButton>
           </div>
           {submitError ? (
-            // Junto a «Guardar» (ADR 0112), con el título de siempre de esta pantalla.
+            // Junto a «Guardar» (ADR 0113), con el título de siempre de esta pantalla.
             <div role="alert" className="flex flex-col gap-0.5 text-sm text-destructive">
               <p className="font-medium">No pudimos guardar el portal del paciente</p>
               <p>{submitError}</p>

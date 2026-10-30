@@ -18,13 +18,13 @@ import {
   type RegistrationConfig,
   type RegistrationFieldKey,
   registrationFieldAsked,
-  SEX_CODES,
   SEX_LABELS,
   validateDemographics,
   validateRegistrationAnswers,
 } from "@odentia/clinical"
 import {
   Button,
+  Checkbox,
   Field,
   FieldDescription,
   FieldError,
@@ -67,16 +67,16 @@ import {
 } from "@odentia/ui-patterns"
 import type { AnyFormApi } from "@tanstack/react-form"
 import { useStore } from "@tanstack/react-form"
-import { createContext, useContext, useState } from "react"
+import { createContext, useContext, useId, useState } from "react"
 import type { AddressSource } from "../../lib/address-suggestions"
 import { asksDocumentCountry, countryChoices } from "../../lib/person-data"
+import { productUi } from "../../product/product-ui"
 import { AddressStreetField } from "../address/address-street-field"
 import { ChoiceButtons, MultiChoiceButtons } from "../choice-buttons"
 import { SearchSelect } from "../settings/search-select"
 import { DocTypeChoice } from "./doc-type-choice"
 import { placeErrors } from "./form-errors"
 import { BLOOD_GROUP_LABELS } from "./patient-health-fields"
-import { productUi } from "../../product/product-ui"
 
 /**
  * El registro que llena el paciente (código QR, enlace de la clínica) y su
@@ -399,6 +399,13 @@ function useRegistrationFormContext(): RegistrationForm {
 function showFound(form: RegistrationForm, found: NonNullable<Found>): void {
   setSubmitErrors(form, { fields: { [found.field]: found.message } })
 }
+/**
+ * «Su enlace»: cada pantalla deja aquí su `check`, para revisar al enviar la
+ * pantalla desde la que se envía. Sin nada que aceptar al final, `label` es el
+ * de «Enviar», que va en la última pantalla con contenido (cada pantalla lo
+ * lleva; el cuestionario muestra solo el de la última).
+ */
+const FinishContext = createContext<{ label: string | null; sending: boolean; checks: Map<string, () => Found> } | null>(null)
 
 /**
  * «Su enlace»: quien ya es paciente completa solo lo que le falta y, si nadie
@@ -413,9 +420,17 @@ export interface RegistrationFill {
   hasRepresentative: boolean
   /** Su nombre, para saludarla. */
   firstName?: string | null
+  /** Aún no aceptó el aviso de privacidad (registrada por teléfono, por ejemplo): se pide al final. */
+  privacy?: boolean
+  /** Nunca respondió lo de novedades y promociones: se pregunta al final. */
+  promotions?: boolean
+  /** El nombre de la clínica, para decir a quién llegan sus datos. */
+  clinicName?: string
 }
 
 const HEALTH_KEYS = new Set(["allergies", "conditions", "medications", "bloodGroup"])
+/** El sexo en lo que llena la persona. */
+const PERSON_SEX_CODES = ["F", "M"] as const
 const PERSON_KEYS = ["givenNames", "familyName", "birthDate", "sex", "nationality", "birthPlace"] as const
 
 /** De lo que falta, lo que se escribe para completarlo (la misma regla del servidor). */
@@ -502,6 +517,15 @@ export function RegistrationQuestionnaire({
   const required = (key: RegistrationFieldKey) => config.fields[key] === "required"
   // Menor sin representante legal: en «Su enlace» deja los datos de su madre, padre o tutor.
   const repInFill = !!fill && !fill.hasRepresentative
+  // «Su enlace»: al final, solo lo que aún no aceptó o respondió; sin nada de eso, se envía desde la última
+  // pantalla con contenido, sin una pantalla vacía de «Antes de enviar».
+  const sendInFill = !!fill && (!!fill.privacy || !!fill.promotions)
+  const fillHasContent =
+    !!fill &&
+    (fill.health ||
+      [...PERSON_KEYS, "docType", "phone", "email", "address", "emergencyContactName", "insuranceType"].some((key) => fillWants(fill, key)))
+  const finishEarly = !!fill && !sendInFill && fillHasContent
+  const [checks] = useState(() => new Map<string, () => Found>())
   const forOther = draft.respondent === "representative"
   const minor = isRealDate(draft.birthDate) && isMinor(draft.birthDate, today)
   const age = ageOn(draft.birthDate, today)
@@ -550,6 +574,7 @@ export function RegistrationQuestionnaire({
   const healthAsked = (["allergies", "conditions", "medications", "bloodGroup"] as const).some(
     asked,
   )
+  const healthRequired = (["allergies", "conditions", "medications", "bloodGroup"] as const).some(required)
   const pregnancyAsked =
     asked("personal.embarazo") && draft.sex !== "M" && (age === null || (age >= 12 && age <= 55))
   const breastfeedingAsked =
@@ -730,7 +755,11 @@ export function RegistrationQuestionnaire({
     if (asked("medical.alcohol") && d.alcohol) medical.alcohol = d.alcohol
     if (Object.keys(medical).length) health.medical = medical
     if (Object.keys(health).length) answers.health = health
-    if (config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
+    if (fill ? fill.promotions && d.messages : config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
+    // Se le dijo que le escribiremos por WhatsApp a ese número sobre sus citas: va con lo que
+    // envía para que quede guardado. En «Su enlace», quien responde por un menor aún no tiene
+    // ficha en la que guardarlo.
+    if (forOther ? !fill && !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
     return answers
   }
 
@@ -788,9 +817,22 @@ export function RegistrationQuestionnaire({
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    // Solo se envía desde «Antes de enviar», con su botón: nunca con un Enter en otra pantalla.
-    if (sending || item !== "send") return
+    // Solo se envía desde «Antes de enviar», con su botón: nunca con un Enter en otra pantalla. En «Su
+    // enlace» sin nada que aceptar, desde la última pantalla con contenido: sus pantallas son todas de
+    // varios campos y el cuestionario solo envía desde la última.
+    if (sending || (item !== "send" && !finishEarly)) return
     const root = event.currentTarget
+    // Lo que falta en la pantalla desde la que se envía, junto a su campo.
+    const pending = fill ? (checks.get(item)?.() ?? null) : null
+    if (pending) {
+      showFound(form, pending)
+      requestAnimationFrame(() => {
+        root
+          .querySelector<HTMLElement>(`[data-field="${pending.field}"] :is(input:not([hidden]):not([aria-hidden=true]), button, [role=combobox], [role=checkbox])`)
+          ?.focus()
+      })
+      return
+    }
     const ok = await submitForm(form, { fieldMap: fieldOf, root })
     if (!ok) goToFirstInvalid(root)
   }
@@ -812,6 +854,7 @@ export function RegistrationQuestionnaire({
 
   return (
     <FormContext.Provider value={form}>
+      <FinishContext.Provider value={fill ? { label: finishEarly ? (sending ? "Enviando…" : submitLabel) : null, sending, checks } : null}>
       <Questionnaire
         item={item}
         onItemChange={setItem}
@@ -977,13 +1020,15 @@ export function RegistrationQuestionnaire({
                 invalid={control.invalid}
                 onBlur={control.onBlur}
                 value={draft.sex || null}
-                // «Desconocido» es para quien registra a otro sin saberlo; quien responde aquí lo sabe o lo deja en blanco.
-                options={SEX_CODES.filter((code) => code !== "D").map((code) => ({
+                // Quien llena su registro elige «Femenino» o «Masculino». «Indeterminado» es un dato clínico
+                // (un recién nacido, por ejemplo) y «Desconocido», de quien registra a otro sin saberlo: los
+                // registra el equipo en la ficha.
+                options={PERSON_SEX_CODES.map((code) => ({
                   value: code,
                   label: SEX_LABELS[code],
                 }))}
                 onChange={(value) => set({ sex: value })}
-                columns={3}
+                columns={2}
                 />
               )}
             </Labeled>
@@ -1081,7 +1126,7 @@ export function RegistrationQuestionnaire({
           <Labeled
             name="repPhone"
             label="Tu celular"
-            hint={`Te avisaremos por WhatsApp sobre las citas de ${name}.`}
+            hint={`Te escribiremos por WhatsApp a este número sobre las citas de ${name}: la confirmación, los recordatorios y los cambios.`}
           >
             {(control) => (
               <PhoneInput
@@ -1253,7 +1298,7 @@ export function RegistrationQuestionnaire({
             hint={
               forOther
                 ? "Si no tiene, sus avisos te llegan a ti."
-                : "Te avisaremos por WhatsApp sobre tus citas."
+                : "Te escribiremos por WhatsApp a este número sobre tus citas: la confirmación, los recordatorios y los cambios."
             }
           >
             {(control) => (
@@ -1505,12 +1550,17 @@ export function RegistrationQuestionnaire({
         <Question
           name="health"
           grouped
-          required={(["allergies", "conditions", "medications", "bloodGroup"] as const).some(
-            required,
-          )}
+          required={healthRequired}
           disabled={!healthAsked}
           title={you("Tu salud", `La salud de ${name}`)}
-          description="Así quien te atiende lo sabe antes de empezar."
+          description={
+            fill
+              ? healthRequired
+                ? "Ayuda a quien te atiende; lo revisa contigo en la cita."
+                : "Es opcional. Ayuda a quien te atiende; lo revisa contigo en la cita."
+              : "Así quien te atiende lo sabe antes de empezar."
+          }
+          saysOptional={!!fill}
           onSkip={() =>
             set({
               allergies: "",
@@ -2056,12 +2106,49 @@ export function RegistrationQuestionnaire({
             name="send"
             grouped
             required
+            disabled={finishEarly}
             title="Antes de enviar"
-            description="Tus respuestas llegan a la clínica al tocar «Enviar». Lo que ya tenemos no cambia."
+            description={`Tus respuestas llegan a ${fill.clinicName ?? "quien te atiende"} al tocar «Enviar». Lo que ya tenemos no cambia.`}
             submit={sending ? "Enviando…" : submitLabel}
             sending={sending}
+            check={() =>
+              needs(!!fill.promotions && !draft.messages, "messages", "Elige una opción.") ??
+              needs(!!fill.privacy && !draft.privacy, "privacy", "Para enviar necesitamos que aceptes el aviso de privacidad.")
+            }
           >
-            {null}
+            {fill.promotions ? (
+              <Labeled
+                name="messages"
+                group
+                label={`¿Quieres recibir novedades y promociones de ${fill.clinicName ?? "quien te atiende"} por WhatsApp?`}
+                hint={`Descuentos y campañas${fill.clinicName ? ` de ${fill.clinicName}` : ""}. Puedes darte de baja cuando quieras.`}
+              >
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    aria-labelledby={control.labelId}
+                    aria-describedby={control.describedBy}
+                    invalid={control.invalid}
+                    onBlur={control.onBlur}
+                    value={draft.messages || null}
+                    options={[
+                      { value: "si", label: "Sí, quiero" },
+                      { value: "no", label: "No, gracias" },
+                    ]}
+                    onChange={(value) => set({ messages: value })}
+                    columns={2}
+                  />
+                )}
+              </Labeled>
+            ) : null}
+            {fill.privacy ? (
+              <PrivacyAccept
+                clinicName={fill.clinicName ?? null}
+                notice={config.privacyNotice}
+                checked={draft.privacy}
+                onChange={(privacy) => set({ privacy })}
+              />
+            ) : null}
           </Question>
         ) : (
         <Question
@@ -2119,6 +2206,7 @@ export function RegistrationQuestionnaire({
         </Question>
         )}
       </Questionnaire>
+      </FinishContext.Provider>
     </FormContext.Provider>
   )
 }
@@ -2142,6 +2230,7 @@ function Question({
   name,
   title,
   description,
+  saysOptional = false,
   required = false,
   multiple = false,
   disabled = false,
@@ -2156,6 +2245,8 @@ function Question({
   name: string
   title: string
   description?: string
+  /** La descripción ya dice si es opcional: no se le suma «Todo es opcional.». */
+  saysOptional?: boolean
   required?: boolean
   multiple?: boolean
   disabled?: boolean
@@ -2170,10 +2261,14 @@ function Question({
   children: React.ReactNode
 }) {
   const form = useRegistrationFormContext()
+  const fillContext = useContext(FinishContext)
+  // Al enviar se revisa la pantalla desde la que se envía (en «Su enlace», también sin «Antes de enviar»).
+  if (fillContext && check) fillContext.checks.set(name, check)
+  const finish = fillContext?.label ? { label: fillContext.label, sending: fillContext.sending } : null
   const allOptional = grouped && !required
-  // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de «Antes de enviar».
+  // Lo que no es de ningún campo (lo rechazó el servidor) va al pie de la pantalla desde la que se envía.
   const submitError = useFormSubmitError(form)
-  const loose = name === "send" ? submitError : null
+  const loose = name === "send" || finish ? submitError : null
 
   function blocked(fieldset: HTMLElement): boolean {
     const found = check?.() ?? null
@@ -2183,7 +2278,7 @@ function Question({
     requestAnimationFrame(() => {
       fieldset
         .querySelector<HTMLElement>(
-          `[data-field="${found.field}"] :is(input:not([hidden]), button, [role=combobox])`,
+          `[data-field="${found.field}"] :is(input:not([hidden]):not([aria-hidden=true]), button, [role=combobox], [role=checkbox])`,
         )
         ?.focus()
     })
@@ -2239,7 +2334,7 @@ function Question({
       <QuestionnaireTitle className="text-xl leading-snug">{title}</QuestionnaireTitle>
       {description || allOptional ? (
         <QuestionnaireDescription>
-          {[description, allOptional ? "Todo es opcional." : null].filter(Boolean).join(" ")}
+          {[description, allOptional && !saysOptional ? "Todo es opcional." : null].filter(Boolean).join(" ")}
         </QuestionnaireDescription>
       ) : null}
       <AllOptionalContext.Provider value={allOptional}>
@@ -2255,12 +2350,24 @@ function Question({
           {missing ?? (required ? "Responde para seguir." : "Responde o toca «Saltar».")}
         </QuestionnaireError>
       )}
-      <QuestionnaireActions>
+      <QuestionnaireActions
+        // Cuando se envía desde aquí, «Saltar» sobra: todo es opcional y «Enviar» ya lo deja en blanco.
+        className={finish ? "has-[>[data-slot=questionnaire-submit]:not([hidden])]:[&>[data-slot=questionnaire-skip]]:hidden" : undefined}
+      >
         <QuestionnairePrevious>Anterior</QuestionnairePrevious>
         {required ? null : <QuestionnaireSkip>Saltar</QuestionnaireSkip>}
-        {submit ? (
-          <QuestionnaireSubmit disabled={sending}>{submit}</QuestionnaireSubmit>
-        ) : (
+        {submit ?? finish ? (
+          <QuestionnaireSubmit
+            disabled={submit ? sending : finish?.sending}
+            onClick={(event) => {
+              const fieldset = event.currentTarget.closest("fieldset")
+              if (check && fieldset && blocked(fieldset)) event.preventDefault()
+            }}
+          >
+            {submit ?? finish?.label}
+          </QuestionnaireSubmit>
+        ) : null}
+        {submit ? null : (
           <QuestionnaireNext
             onClick={(event) => {
               const fieldset = event.currentTarget.closest("fieldset")
@@ -2532,4 +2639,65 @@ function YesNoField({
  */
 function Carry() {
   return <QuestionnaireInput value="ok" readOnly hidden tabIndex={-1} aria-hidden="true" />
+}
+
+/**
+ * «Acepto el aviso de privacidad de…» al final de «Tus datos», para quien aún
+ * no lo aceptó (registrada por teléfono, por ejemplo), con el aviso a la vista
+ * al abrirlo.
+ */
+function PrivacyAccept({
+  clinicName,
+  notice,
+  checked,
+  onChange,
+}: {
+  clinicName: string | null
+  notice: string
+  checked: boolean
+  onChange: (accepted: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const noticeId = useId()
+  return (
+    <Labeled name="privacy" label="Aviso de privacidad">
+      {(control) => (
+        <>
+          <div className="flex items-start gap-3">
+            <Checkbox
+              id={control.id}
+              className="mt-3.5"
+              checked={checked}
+              aria-invalid={control.invalid || undefined}
+              aria-describedby={control.describedBy}
+              onBlur={control.onBlur}
+              onCheckedChange={(next) => onChange(next === true)}
+            />
+            <div className="flex min-w-0 flex-col items-start">
+              <label htmlFor={control.id} className="flex min-h-11 cursor-pointer items-center text-sm">
+                {clinicName ? `Acepto el aviso de privacidad de ${clinicName}.` : "Acepto el aviso de privacidad."}
+              </label>
+              {notice.trim() ? (
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto min-h-11 p-0 text-sm"
+                  aria-expanded={open}
+                  aria-controls={noticeId}
+                  onClick={() => setOpen((shown) => !shown)}
+                >
+                  {open ? "Ocultar el aviso" : "Ver el aviso de privacidad"}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          {open ? (
+            <ScrollArea id={noticeId} className="flex max-h-48 flex-col rounded-2xl bg-muted/60">
+              <QuestionnaireDescription className="p-4 whitespace-pre-wrap">{notice}</QuestionnaireDescription>
+            </ScrollArea>
+          ) : null}
+        </>
+      )}
+    </Labeled>
+  )
 }

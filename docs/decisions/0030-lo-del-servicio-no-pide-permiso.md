@@ -1,6 +1,6 @@
 # 0030 · Lo que es parte del servicio no pide permiso; novedades y promociones, sí
 
-Fecha: 2026-10-15 · Estado: aceptada · Precisa [0027](0027-escribirle-y-avisar-la-cita.md) y [0026](0026-recordar-la-cita-viene-prendida.md) (el permiso de recordatorios)
+Fecha: 2026-10-15 · Estado: aceptada · Precisa [0027](0027-escribirle-y-avisar-la-cita.md) y [0026](0026-recordar-la-cita-viene-prendida.md) (el permiso de recordatorios) · Precisada por [0109](0109-un-solo-formulario-con-lo-que-ya-sabemos.md) (la pregunta de novedades se hace donde aún no se respondió, también al reservar)
 
 ## Problema
 

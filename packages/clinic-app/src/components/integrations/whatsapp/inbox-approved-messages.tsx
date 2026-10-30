@@ -1,9 +1,10 @@
-import { Button, buttonVariants, cn, FieldLabel, RadioGroup, RadioGroupItem, Skeleton } from "@odentia/ui"
+import { Button, buttonVariants, cn, Input, ScrollArea, Skeleton } from "@odentia/ui"
 import { clearSubmitErrors, SubmitButton, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Fragment, useRef } from "react"
+import { Search, X } from "lucide-react"
+import { Fragment, useId, useRef, useState } from "react"
 import { z } from "zod"
 import { apiFetch } from "../../../lib/api"
 import { sinceWords } from "../../../lib/integrations"
@@ -15,8 +16,8 @@ import {
   approvedMessagesKey,
   closedWindowNotice,
 } from "../../../lib/whatsapp"
-import { Note } from "./note"
 import { PreviewText } from "./message-preview"
+import { Note } from "./note"
 
 /** Tope de cada dato en la ruta (`approvedInput`, `routes/conversations.ts`). */
 const VALUE_MAX = 1000
@@ -60,9 +61,10 @@ function approvedSchema(options: ApprovedMessageOption[]) {
 
 /**
  * La zona de escritura de un hilo de WhatsApp cuando ya pasaron las 24 horas:
- * lo dice antes de escribir, ofrece los mensajes aprobados por lo que dicen —con
- * los datos de esa persona ya puestos— y envía el elegido. Lo que hay y por qué
- * no hay ninguno lo decide el servidor; aquí solo se muestra.
+ * lo dice en una línea y la lista se abre solo al pedirla, para no comerse el
+ * hilo: los títulos a un lado, con buscador, y al otro el mensaje tal como
+ * saldrá, con los datos de esa persona ya puestos. Lo que hay y por qué no hay
+ * ninguno lo decide el servidor; aquí solo se muestra.
  */
 export function InboxApprovedMessages({
   conversationId,
@@ -81,8 +83,11 @@ export function InboxApprovedMessages({
 }) {
   const queryClient = useQueryClient()
   const locale = useOrgLocale()
+  const legendId = useId()
   const since = (iso: string) => sinceWords(iso, Date.now(), locale, activeOrgTimeZone())
   const zone = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState("")
 
   const query = useQuery({
     queryKey: approvedMessagesKey(conversationId),
@@ -91,6 +96,8 @@ export function InboxApprovedMessages({
   })
   const options = query.data?.data ?? []
   const none = query.data?.none ?? null
+  const text = search.trim().toLowerCase()
+  const shown = text ? options.filter((option) => option.title.toLowerCase().includes(text)) : options
 
   const send = useMutation({
     mutationFn: ({ option, values }: { option: ApprovedMessageOption; values?: string[] }) =>
@@ -99,6 +106,8 @@ export function InboxApprovedMessages({
         body: JSON.stringify({ messageId: option.id, ...(values ? { values } : {}) }),
       }),
     onSuccess: async () => {
+      setOpen(false)
+      setSearch("")
       onSent()
       // Tras enviar, el servidor dice cuándo se le podrá escribir de nuevo.
       await queryClient.invalidateQueries({ queryKey: approvedMessagesKey(conversationId) })
@@ -123,8 +132,8 @@ export function InboxApprovedMessages({
   const messageId = useStore(form.store, (state) => state.values.messageId)
   const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const formError = useFormSubmitError(form)
-  // Sin elegir todavía, el primero: es el que la persona tiene delante.
-  const selected = chosenOption(options, messageId)
+  // Sin elegir todavía, el primero de lo que se ve: su texto está a la vista antes de enviar.
+  const selected = chosenOption(shown, messageId)
 
   /** Elegir otro mensaje empieza de cero: lo que se dijo del anterior ya no vale. */
   function choose(id: string) {
@@ -134,6 +143,8 @@ export function InboxApprovedMessages({
   }
 
   function submit() {
+    // Lo que se envía es lo que se ve (el buscador puede dejar otro primero).
+    if (selected) choose(selected.id)
     void submitForm(form, {
       root: zone.current,
       // El servidor nombra cada dato por su posición en `values`: es el del mensaje elegido.
@@ -225,84 +236,98 @@ export function InboxApprovedMessages({
           </Note>
         ) : null
       ) : (
-        <>
-          <form.AppField name="messageId">
-            {(field) => (
-              <field.Group legend="Elige el mensaje">
-                {(control) => (
-                  // La lista no tiene desplazamiento propio: en la Bandeja se desplaza toda la zona de
-                  // escritura (aviso, lista y botón), con su tope, y el historial queda a la vista.
-                  <div>
-                    <RadioGroup
-                      aria-label="Elige el mensaje"
-                      aria-invalid={control.invalid || undefined}
-                      aria-describedby={control.describedBy}
-                      className="gap-2 py-0.5 pr-3 pl-0.5"
-                      value={selected?.id ?? ""}
-                      onValueChange={(value) => choose(String(value))}
-                    >
-                      {options.map((option) => {
-                        const isSelected = selected?.id === option.id
-                        const withFields = option.fields.length > 0
-                        const text = optionText(option)
-                        return (
-                          <div
-                            key={option.id}
-                            className={cn(
-                              "flex flex-col gap-2 rounded-xl border p-3",
-                              isSelected ? "border-primary bg-primary-soft/40" : "border-border",
-                            )}
-                          >
-                            <FieldLabel className="w-full cursor-pointer items-start gap-3 font-normal has-data-checked:bg-transparent">
-                              <RadioGroupItem value={option.id} className="mt-0.5" disabled={isSubmitting} />
-                              <span className="flex min-w-0 flex-1 flex-col gap-1">
-                                <span className="font-semibold [overflow-wrap:anywhere]">{option.title}</span>
-                                {/* Sin datos que escribir, el texto es parte de lo que se elige. */}
-                                {withFields ? null : (
-                                  <span className="text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</span>
-                                )}
-                              </span>
-                            </FieldLabel>
-                            {/* Con un dato que escribir, el texto va fuera de la etiqueta: su campo no debe activar la opción al pulsarlo. */}
-                            {withFields ? (
-                              <div className="pl-7 text-sm leading-10 whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
-                            ) : null}
-                            {option.buttons.length > 0 ? (
-                              <ul aria-label={`Botones de «${option.title}»`} className="flex flex-wrap gap-1.5 pl-7">
-                                {option.buttons.map((button) => (
-                                  <li key={button} className="rounded-lg border bg-card px-3 py-1 text-sm font-semibold text-primary">
-                                    {button}
-                                  </li>
-                                ))}
-                              </ul>
-                            ) : null}
-                          </div>
-                        )
-                      })}
-                    </RadioGroup>
+        <div className="flex flex-col gap-2">
+          {!open ? (
+            <Button type="button" size="sm" className="min-h-11 w-fit sm:min-h-8" onClick={() => setOpen(true)}>
+              Elegir un mensaje aprobado
+            </Button>
+          ) : (
+            <div className="flex h-[19rem] flex-col overflow-hidden rounded-2xl border bg-card max-sm:h-[24rem]">
+              <div className="flex shrink-0 items-center gap-2 border-b py-1 pr-1 pl-3">
+                <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                <Input
+                  aria-label="Buscar un mensaje aprobado"
+                  placeholder="Buscar un mensaje"
+                  className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+                <Button type="button" variant="ghost" size="icon-sm" className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8" aria-label="Cerrar la lista de mensajes" onClick={() => setOpen(false)}>
+                  <X className="size-4" />
+                </Button>
+              </div>
+              <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,2fr)_minmax(0,3fr)] max-sm:grid-cols-1 max-sm:grid-rows-[minmax(0,2fr)_minmax(0,3fr)]">
+                <ScrollArea className="min-h-0 border-r max-sm:border-r-0 max-sm:border-b">
+                  <div role="radiogroup" aria-labelledby={legendId} className="flex flex-col gap-0.5 p-1.5">
+                    <span id={legendId} className="sr-only">
+                      Elige el mensaje
+                    </span>
+                    {shown.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected?.id === option.id}
+                        disabled={isSubmitting}
+                        className={cn(
+                          "min-h-11 rounded-xl px-3 py-2 text-left text-sm outline-none [overflow-wrap:anywhere] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring sm:min-h-9",
+                          selected?.id === option.id && "bg-primary-soft font-semibold text-primary-soft-foreground hover:bg-primary-soft",
+                        )}
+                        onClick={() => choose(option.id)}
+                      >
+                        {option.title}
+                      </button>
+                    ))}
+                    {shown.length === 0 ? <p className="px-3 py-2 text-sm text-muted-foreground">Ningún mensaje coincide.</p> : null}
                   </div>
-                )}
-              </field.Group>
-            )}
-          </form.AppField>
+                </ScrollArea>
+                <div className="flex min-h-0 min-w-0 flex-col bg-canvas/60">
+                  <ScrollArea className="min-h-0 flex-1">
+                    {selected ? (
+                      <div className="flex flex-col gap-2 p-3">
+                        <div className="ml-auto flex max-w-full flex-col gap-2 rounded-2xl rounded-br-md bg-secondary px-3.5 py-2.5 text-sm leading-relaxed">
+                          <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{optionText(selected)}</div>
+                          {selected.buttons.length > 0 ? (
+                            <ul aria-label={`Botones de «${selected.title}»`} className="flex flex-col gap-1">
+                              {selected.buttons.map((button) => (
+                                <li key={button} className="rounded-lg bg-card px-3 py-1 text-center text-[13px] font-semibold text-primary">
+                                  {button}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </ScrollArea>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2 border-t px-3 py-2">
+                    <p className="min-w-0 flex-1 basis-40 text-xs text-muted-foreground">
+                      {selected && selected.fields.length > 0
+                        ? "Lo que escribas va dentro del mensaje."
+                        : selected?.previewParts.some((part) => part.data)
+                          ? "Su nombre y el de la clínica ya están puestos."
+                          : "Sale tal como se ve."}
+                    </p>
+                    <SubmitButton
+                      size="sm"
+                      className="min-h-11 shrink-0 sm:min-h-8"
+                      pending={isSubmitting}
+                      disabled={!selected}
+                      onClick={submit}
+                    >
+                      Enviar mensaje
+                    </SubmitButton>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {formError ? (
             <p role="alert" className="text-sm text-destructive">
               {formError}
             </p>
           ) : null}
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="min-w-0 flex-1 basis-64 text-sm text-muted-foreground">
-              {selected && selected.fields.length > 0
-                ? "Lo que escribas va dentro del mensaje, tal como se ve arriba."
-                : selected?.previewParts.some((part) => part.data)
-                  ? "El nombre de la persona y el de la clínica ya están puestos: los pone el sistema."
-                  : "Sale tal como se ve."}
-            </p>
-            <SubmitButton className="h-11 shrink-0 px-5" pending={isSubmitting} disabled={!selected} onClick={submit}>
-              Enviar mensaje
-            </SubmitButton>
-          </div>
-        </>
+        </div>
       )}
       {formError && options.length === 0 ? (
         <p role="alert" className="text-sm text-destructive">

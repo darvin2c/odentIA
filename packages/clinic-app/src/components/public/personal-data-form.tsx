@@ -3,10 +3,10 @@ import { Button } from "@odentia/ui"
 import { ErrorState, LoadingState } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { CircleCheck } from "lucide-react"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { publicAddressSource } from "../../lib/address-suggestions"
 import { ApiError } from "../../lib/api"
-import { fetchPersonalDataForm, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
+import { fetchPersonalDataForm, type PersonalDataForm as PersonalDataFormView, type PersonalDataInput, submitPersonalData } from "../../lib/booking-link"
 import { RegistrationQuestionnaire } from "../patient/registration-questionnaire"
 
 /** Lo que «Tus datos» puede completar (las mismas claves que acepta el servidor). */
@@ -42,8 +42,8 @@ function declaresHealth(health: RegistrationAnswers["health"]): boolean {
   return [health.personal, health.dental].some((group) => Object.keys(group ?? {}).length > 0)
 }
 
-/** Las respuestas del cuestionario, como las guarda «Tus datos». */
-function toInput(answers: RegistrationAnswers): PersonalDataInput {
+/** Las respuestas del cuestionario, como las guarda «Tus datos», con lo que aún no aceptó o respondió. */
+function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pending"]): PersonalDataInput {
   const demographics = answers.demographics as Record<string, unknown>
   const data: Partial<Record<string, string>> = {}
   for (const key of DATA_KEYS) {
@@ -63,21 +63,31 @@ function toInput(answers: RegistrationAnswers): PersonalDataInput {
         }
       : null,
     health: declaresHealth(answers.health) ? (answers.health ?? null) : null,
+    ...(pending.privacy ? { privacyAccepted: answers.privacyAccepted } : {}),
+    ...(pending.promotions && answers.acceptsMessages !== undefined ? { acceptsPromotions: answers.acceptsMessages } : {}),
+    ...(answers.acceptsReminders && data.phone ? { acceptsReminders: true } : {}),
   }
 }
 
+/** Si hay algo que enviar: un dato, su salud o lo que acepta. Solo su salud y nada respondido no se envía. */
+function sendsSomething(input: PersonalDataInput): boolean {
+  return Object.keys(input.data).length > 0 || !!input.health || input.privacyAccepted !== undefined || input.acceptsPromotions !== undefined
+}
+
 /**
- * «Tus datos y tu salud» de «Su enlace» (fase 2 del lienzo «Su enlace y el
- * código QR»): el mismo cuestionario por temas del registro, solo con lo que
- * falta y, si nadie la registró aún, su salud. Nunca muestra lo guardado. Las
- * reglas (qué se acepta, el documento repetido, el menor sin representante)
- * son del servidor.
+ * «Tus datos» de «Su enlace»: el mismo cuestionario por temas del registro,
+ * solo con lo que falta y, si nadie la registró aún, su salud (opcional; sin
+ * nada que falte, la pantalla es solo «Tu salud»). Al final, si aún no lo
+ * aceptó o respondió, el aviso de privacidad y las novedades. Nunca muestra lo
+ * guardado. Las reglas (qué se acepta, el documento repetido, el menor sin
+ * representante) son del servidor.
  */
 export function PersonalDataForm({
   slug,
   token,
   clinicName,
   appointmentLine,
+  backLabel,
   onDone,
 }: {
   slug: string
@@ -85,6 +95,8 @@ export function PersonalDataForm({
   clinicName: string
   /** «Te esperamos el jueves 23 a las 10:00.», si tiene cita. */
   appointmentLine?: string | null
+  /** El nombre de volver, el mismo de toda la página: «Ver mi cita». */
+  backLabel: string
   onDone: () => void
 }) {
   // La dirección se sugiere por la página de la clínica, sin el token (issue 36).
@@ -98,10 +110,26 @@ export function PersonalDataForm({
     retry: false,
     mutationFn: (input: PersonalDataInput) => submitPersonalData(slug, token, input),
   })
+  // Solo su salud y no contó nada: no hay nada que enviar; la tarjeta sigue ahí, opcional.
+  const [nothingToTell, setNothingToTell] = useState(false)
   const alreadySent = send.error instanceof ApiError && send.error.shape.code === "DATA_ALREADY_SENT"
+  if (nothingToTell) {
+    return (
+      <div role="status" className="flex flex-col items-center gap-4 rounded-3xl border bg-card px-5 py-10 text-center">
+        <p className="text-sm text-pretty text-muted-foreground">
+          No nos contaste nada de tu salud. Si quieres, cuéntanoslo antes de venir o en la cita.
+          {appointmentLine ? ` ${appointmentLine}` : ""}
+        </p>
+        <Button type="button" variant="link" className="min-h-11" onClick={onDone}>
+          {backLabel}
+        </Button>
+      </div>
+    )
+  }
   if (send.isSuccess || alreadySent) {
     const form = formQuery.data?.data
     const withHealth = !!form?.asksHealth && !!send.variables?.health
+    const onlyHealth = !!form && form.missing.length === 0
     return (
       <div role="status" className="flex flex-col items-center gap-4 rounded-3xl border bg-card px-5 py-10 text-center">
         <span className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -111,13 +139,15 @@ export function PersonalDataForm({
           <p className="text-xl font-semibold">{form?.firstName ? `Listo, ${form.firstName}` : "Listo"}</p>
           <p className="text-sm text-pretty text-muted-foreground">
             {alreadySent
-              ? "Tus datos ya están en la clínica."
-              : `${clinicName} ya tiene tus datos${withHealth ? " y tu salud" : ""}.`}
+              ? `${clinicName} ya tiene tus datos.`
+              : onlyHealth
+                ? `${clinicName} ya tiene ${withHealth ? "lo que nos contaste de tu salud" : "tus respuestas"}.`
+                : `${clinicName} ya tiene tus datos${withHealth ? " y tu salud" : ""}.`}
             {appointmentLine ? ` ${appointmentLine}` : ""}
           </p>
         </div>
         <Button type="button" variant="link" className="min-h-11" onClick={onDone}>
-          Volver a mi enlace
+          {backLabel}
         </Button>
       </div>
     )
@@ -141,13 +171,21 @@ export function PersonalDataForm({
           health: form.asksHealth,
           hasRepresentative: form.hasRepresentative,
           firstName: form.firstName,
+          privacy: form.pending.privacy,
+          promotions: form.pending.promotions,
+          clinicName,
         }}
         submitLabel="Enviar"
         shortcuts={false}
         addressSource={addressSource}
         onSubmit={async (answers) => {
+          const input = toInput(answers, form.pending)
+          if (!sendsSomething(input)) {
+            setNothingToTell(true)
+            return
+          }
           try {
-            await send.mutateAsync(toInput(answers))
+            await send.mutateAsync(input)
           } catch (error) {
             if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") return
             // Lo que es de un dato, el cuestionario lo dice en su campo.
