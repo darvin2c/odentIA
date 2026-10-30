@@ -385,11 +385,16 @@ export async function argosModel(
     ? await deps.createModel(spec)
     : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(reasoning === "none" ? {} : { reasoning }) })
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
+  const responses = viaResponses(model)
+  // Por /v1/responses, LangChain OpenAI (1.5.13, y aún la 1.8.0) solo envía la elección de una herramienta por su
+  // nombre: «required» no llegaba y el modelo quedaba libre de responder con texto, que no se lee. Va como
+  // `allowed_tools` con las tres, que llega tal cual y obliga lo mismo.
+  const choiceFor = (choice: string) => (responses && choice === "required" ? { type: "allowed_tools", mode: "required", tools: tools.map((item) => ({ type: "function", name: item.name })) } : choice)
   return {
     provider: spec.provider,
-    responses: viaResponses(model),
+    responses,
     invoke: async (messages, choice) => {
-      const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools(tools, { tool_choice: choice }) : model
+      const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools(tools, { tool_choice: choiceFor(choice) }) : model
       const reply = await bound.invoke(messages)
       reportReplyUse(spec.provider, spec.modelName, reply)
       return reply as AIMessage
@@ -920,7 +925,7 @@ export async function askArgos(
         messages.push(reply)
         const calls = reply.tool_calls ?? []
         if (!calls.length) {
-          // Una respuesta que no se lee (pasó una vez en 88) se pide otra vez, una sola.
+          // Una respuesta sin una llamada que se lea (solo texto, o argumentos que no son JSON) se pide otra vez, una sola.
           deps.onProblem?.(ARGOS_UNREADABLE, argosUnreadable(reply))
           unreadable += 1
           if (unreadable > 1) break
