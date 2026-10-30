@@ -19,7 +19,9 @@ import {
   createConnection,
   GENERAL_PERMISSION_NO,
   GENERAL_PERMISSION_QUESTION,
+  GENERAL_PERMISSION_YES,
   generalPermissionButtons,
+  generalPermissionWords,
   ingestInbound,
   PRICES_PER_CONVERSATION,
   SERVICES_IN_PROMPT,
@@ -558,6 +560,29 @@ describe("el permiso de novedades usa la pregunta y la respuesta reales (G1)", (
     )
     expect(answer).toContain(GENERAL_PERMISSION_NO)
     expect(answer).not.toContain("solo le escribiremos por sus citas")
+  })
+
+  it("la respuesta va con el trato de la clínica, como la pregunta: de usted si la clínica trata de usted", async () => {
+    const conversationId = await turn(new ScriptedModel(() => say("Hola.")), "tg:permiso-usted", "permiso-usted-1", "Hola")
+    const [thread] = await ownerDb.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId))
+    const contactId = thread!.contactId
+    const words = generalPermissionWords("Clínica Catálogo", "usted")
+    await withOrgContext(appDb, ORG, (tx) =>
+      sendOutbound(tx, ORG, {
+        conversationId,
+        senderKind: "agent",
+        content: { type: "text", text: words.question, buttons: generalPermissionButtons(contactId) },
+      }),
+    )
+    await turn(new ScriptedModel(() => say("Perfecto.")), "tg:permiso-usted", "permiso-usted-2", "sí, por favor")
+    const ctx: AgentToolCtx = {
+      db: appDb, orgId: ORG, conversationId, contactId, triggerId: null, secretsKey: KEY,
+      dryRun: false, handedOff: false, replySettled: false, toolsUsed: [], treatment: "usted",
+      usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, cacheWriteTokens: 0, calls: 0, reported: false, cacheReported: false },
+    }
+    const answer = String(await makeAgentTools(ctx).find((item) => item.name === "responder_permiso_mensajes")!.invoke({ granted: true }))
+    expect(answer).toContain(`«${words.yes}»`)
+    expect(answer).not.toContain(GENERAL_PERMISSION_YES)
   })
 })
 

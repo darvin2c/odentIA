@@ -7,7 +7,7 @@
  * Y cómo va esa atención, leído de sus fuentes y no de la memoria del modelo:
  * la indicación de cada turno dice lo que falta, no lo que ya se hizo.
  */
-import { ATTENTION_OPENING_MS, type AgentCaseState, GENERAL_PERMISSION_QUESTION, normalizeForSearch } from "@odentia/services"
+import { ATTENTION_OPENING_MS, type AgentCaseState, isGeneralPermissionQuestion, normalizeForSearch } from "@odentia/services"
 
 /** Lo que lee siempre, aunque la atención recién empiece: el aviso de cita que la persona responde. */
 export const HISTORY_MIN_TAIL = 20
@@ -138,10 +138,10 @@ export function attentionProgress(input: {
     offered: input.state.lookups.some((item) => item.tool === "buscar_huecos" && inAttention(item.at)),
     pending: pending ? describe(pending) : null,
     done: done ? describe(done) : null,
-    // La pregunta automática de novedades no le dice lo hecho.
+    // La pregunta automática de novedades (con el nombre y el trato de la clínica) no le dice lo hecho.
     doneTold:
       !done ||
-      said.some((item) => item.createdAt !== undefined && Date.parse(item.createdAt) > Date.parse(done.at) && item.body !== GENERAL_PERMISSION_QUESTION),
+      said.some((item) => item.createdAt !== undefined && Date.parse(item.createdAt) > Date.parse(done.at) && !isGeneralPermissionQuestion(item.body)),
     promotions: input.promotions.filter((name) => {
       const key = normalizeForSearch(name).trim()
       return key.length > 0 && spoken.includes(key)

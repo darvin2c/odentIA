@@ -1,4 +1,4 @@
-import { GENERAL_PERMISSION_QUESTION } from "@odentia/services"
+import { GENERAL_PERMISSION_QUESTION, generalPermissionWords } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { attentionLines, attentionProgress, fitHistory, formulasIn, HISTORY_CHARS, HISTORY_HEAD, nameQuestionsIn } from "./attention"
 
@@ -134,6 +134,11 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     const untold = attentionProgress({ items: [out(GENERAL_PERMISSION_QUESTION, 4)], startedAt, state: booked, promotions: [] })
     expect(untold.doneTold).toBe(false)
     expect(attentionLines(untold, "Sofi").join("\n")).toContain("pero todavía no se lo dijiste")
+    // La pregunta sale con el nombre de la clínica y su trato: de tú o de usted, tampoco cuenta.
+    for (const treatment of ["tu", "usted"] as const) {
+      const question = generalPermissionWords("Clínica Sonríe", treatment).question
+      expect(attentionProgress({ items: [out(question, 4)], startedAt, state: booked, promotions: [] }).doneTold).toBe(false)
+    }
     expect(attentionProgress({ items: [out("Listo, quedó reservada.", 4)], startedAt, state: booked, promotions: [] }).doneTold).toBe(true)
     // Lo hecho en la atención anterior no es de esta.
     const before = attentionProgress({ items: [], startedAt, state: { ...empty, recent: [proposal("ejecutada", -600)] }, promotions: [] })

@@ -662,6 +662,25 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     expect(permissions.find((row) => row.purpose === "recordatorio")).toMatchObject({ status: "revoked", source: "presencial" })
   })
 
+  it("quien estaba archivada y se registra desde su enlace sale sola del archivo", async () => {
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    const archivada = await person("archivada-enlace")
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: archivada.conversationId }, { secretsKey: KEY }))
+    await run((tx) => updateContact(tx, ORG, archivada.contactId, { isActive: false }, { userId: OWNER }))
+    const answers = {
+      demographics: {
+        displayName: "Elsa Ríos Vera", givenNames: "Elsa", familyName: "Ríos Vera", docType: "DNI" as const, docNumber: "40765124",
+        phone: "+51987777002", birthDate: "1979-06-11", sex: "F" as const,
+      },
+      respondent: "patient" as const,
+      privacyAccepted: true,
+      acceptsReminders: true,
+    }
+    expect(await run((tx) => registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion: config.version, answers }))).toEqual({ registered: true })
+    expect((await run((tx) => getContact(tx, ORG, archivada.contactId))).contact).toMatchObject({ isActive: true })
+    expect(await run((tx) => listPatientsByContact(tx, ORG, archivada.contactId))).toHaveLength(1)
+  })
+
   it("propone el celular solo cuando la conversación es de WhatsApp", async () => {
     const quien = await person("wa-enlace")
     const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }, { secretsKey: KEY }))

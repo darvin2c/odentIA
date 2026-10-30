@@ -598,6 +598,8 @@ export interface PersonalLinkDataInput {
   privacyAccepted?: boolean
   /** Su respuesta a novedades y promociones, si nunca la había dado. */
   acceptsPromotions?: boolean
+  /** Dejó su celular y se le dijo que le escribiremos por WhatsApp sobre sus citas. */
+  acceptsReminders?: true
 }
 
 /** De quién es ya ese documento, si es de otra persona. */
@@ -671,7 +673,10 @@ export async function submitPersonalLinkData(
     if (patientId && !link.decides) requireLinkDecider(link)
     throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
   }
-  await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, { requireSomething: true, toldWhatsApp: false })
+  await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, {
+    requireSomething: true,
+    toldWhatsApp: input.acceptsReminders === true && !!input.data.phone?.trim(),
+  })
   // «Tus datos» se envían una sola vez: después dice «Recibido».
   await tx
     .update(appointmentBookingLink)
@@ -883,11 +888,29 @@ export async function reservePersonalLink(
 }
 
 /**
+ * Lo que a la clínica aún le falta de un paciente para reservarle con su sí en
+ * el chat (ADR 0109): sus datos obligatorios (`getPatientMissingData`) y el
+ * aviso de privacidad, si la clínica lo escribió y no lo aceptó. Con algo de
+ * eso, el agente le da su enlace con la hora que eligió y ahí lo confirma al
+ * reservar (`reservePersonalLink`). Vacío si no falta nada o si quien escribe
+ * no decide por el paciente: a otro, su enlace solo le mostraría la cita.
+ */
+export async function chatBookingMissing(tx: Db, orgId: string, input: { contactId: string; patientId: string }): Promise<string[]> {
+  if (!(await contactDecides(tx, orgId, input.patientId, input.contactId))) return []
+  const missing = (await getPatientMissingData(tx, orgId, input.patientId)).map((item) => item.label.toLowerCase())
+  const { privacy } = await pendingOf(tx, orgId, input.contactId, input.patientId)
+  return privacy ? [...missing, "aceptar el aviso de privacidad"] : missing
+}
+
+/**
  * Al confirmar en la conversación la cita que reservó el agente (fase 3 del
  * lienzo «Su enlace y el código QR»): si al paciente le faltan datos y quien
- * escribe decide por él, su enlace con esa cita, con el token escrito (lo
- * redacta el agente, no pasa por el worker). Nulo si no falta nada, si quien
- * escribe no decide por el paciente o si la clínica no tiene dirección pública.
+ * escribe decide por él, su enlace con esa cita, para completarlos («Antes de
+ * venir, completa tus datos aquí»), con el token escrito (lo redacta el
+ * agente). Nulo si no falta nada, si quien escribe no decide por el paciente o
+ * si la clínica no tiene dirección pública. Desde el ADR 0109, a quien le
+ * falta algo el agente ya le da su enlace con la hora en vez de reservar por
+ * el chat: esto queda para quien ya tenía una cita por venir.
  */
 export async function bookedDataLink(
   tx: Db,
@@ -896,7 +919,10 @@ export async function bookedDataLink(
     contactId: string
     patientId: string
     appointmentId: string | null
-    /** Recién registrado por el chat (ADR 0101): el enlace va siempre, para llegar con todo completo. */
+    /**
+     * Recién registrado por el chat (ADR 0101): el enlace va siempre. Desde el ADR 0109 el agente
+     * ya no registra por el chat; solo lo trae una cita propuesta antes de ese cambio.
+     */
     always?: boolean
   },
   deps: { secretsKey: Buffer },

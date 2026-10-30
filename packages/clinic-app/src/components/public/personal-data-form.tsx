@@ -65,6 +65,7 @@ function toInput(answers: RegistrationAnswers, pending: PersonalDataFormView["pe
     health: declaresHealth(answers.health) ? (answers.health ?? null) : null,
     ...(pending.privacy ? { privacyAccepted: answers.privacyAccepted } : {}),
     ...(pending.promotions && answers.acceptsMessages !== undefined ? { acceptsPromotions: answers.acceptsMessages } : {}),
+    ...(answers.acceptsReminders && data.phone ? { acceptsReminders: true } : {}),
   }
 }
 

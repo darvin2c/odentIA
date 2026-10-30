@@ -1,6 +1,6 @@
 # 0101 · Registrar por el chat con un solo sí
 
-**Fecha:** 2026-10-28 · **Estado:** aceptada (lienzo «Registrar por el chat», aprobado el 28 oct). Sustituye la alternativa descartada de ADR 0097 («registrar a la persona nueva por el chat»). Precisada por [0109](0109-un-solo-formulario-con-lo-que-ya-sabemos.md): la cita reservada con su sí nace confirmada y cierra la reserva de su enlace.
+**Fecha:** 2026-10-28 · **Estado:** aceptada (lienzo «Registrar por el chat», aprobado el 28 oct). Sustituye la alternativa descartada de ADR 0097 («registrar a la persona nueva por el chat»). Precisada por [0109](0109-un-solo-formulario-con-lo-que-ya-sabemos.md): la cita reservada con su sí nace confirmada y cierra la reserva de su enlace. Además, quien aún no es paciente ya no se registra ni se reserva con su sí en el chat, y tampoco el paciente al que le falta un dato obligatorio o aceptar el aviso de privacidad: Sofi le manda su enlace con la hora que eligió y ahí confirma sus datos, acepta el aviso y reserva. Lo de abajo sobre registrar por el chat vale solo para las citas propuestas antes de ese cambio. Si aún se reserva con su sí y le faltan datos (porque ya tenía otra cita por venir), la confirmación lleva «Antes de venir, completa tus datos aquí».
 
 ## Problema
 

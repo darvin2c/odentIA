@@ -239,6 +239,28 @@ export async function issueAgendaLink(
   return bookingLinkFor(tx, orgId, input, deps, true)
 }
 
+/** La hora que eligió en el chat: con ella la página de su enlace abre la reserva ya elegida (ADR 0109). */
+export interface BookingLinkPick {
+  branchId: string
+  /** El usuario del profesional (el que entregan las horas del enlace), nunca su referencia. */
+  professionalUserId: string
+  /** Inicio en ISO 8601 con zona. */
+  startsAt: string
+}
+
+/**
+ * «Su enlace» con la hora que eligió en el chat: `sede`, `con` y `hora` (en UTC, ISO 8601), como los lee
+ * la página `/reserva`. Si sigue libre abre «Revisa y reserva»; si no, «Con quién y cuándo» con ese
+ * profesional. El token va al final: en un mensaje es la referencia `{{su-enlace:…}}` (`personalLinkRef`),
+ * que el worker cambia por el token al entregarlo y que, con sus llaves, corta la dirección que lee la
+ * comprobación de respuestas; así la hora y los ids quedan dentro de la dirección y no se leen como datos.
+ * Se escribe tal cual, sin codificar: codificada, el worker no la encontraría.
+ */
+export function bookingPickAddress(origin: string, token: string, pick: BookingLinkPick): string {
+  const query = new URLSearchParams({ sede: pick.branchId, con: pick.professionalUserId, hora: new Date(pick.startsAt).toISOString() })
+  return `${origin}/reserva?${query.toString()}&token=${token}`
+}
+
 async function bookingLinkFor(
   tx: Db,
   orgId: string,

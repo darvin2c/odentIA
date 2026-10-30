@@ -261,7 +261,7 @@ function PersonalLinkPage() {
         />,
       )
     }
-    return one(`Tus mensajes · ${view.clinicName}`, <MessagesStep slug={slug} token={token} messages={view.messages} onChanged={refresh} />)
+    return one(`Tus mensajes · ${view.clinicName}`, <MessagesStep slug={slug} token={token} clinicName={view.clinicName} messages={view.messages} onChanged={refresh} />)
   }
 
   // El enlace del agente para reservar: directo a elegir día y hora (o a revisar, si ya la eligió en el chat).
@@ -537,20 +537,22 @@ function Papers({ slug, token, papers }: { slug: string; token: string; papers: 
 }
 
 /** Los tres interruptores de «Tus mensajes» y la fila fija de los avisos (ADR 0040). */
-const MESSAGE_SWITCHES: { purpose: Exclude<MessageChoice, "ninguno">; title: string; detail: string }[] = [
-  { purpose: "recordatorio", title: "Recordatorios de tus citas", detail: "Te avisamos un día antes y unas horas antes." },
-  { purpose: "seguimiento", title: "Controles y seguimiento", detail: "Cuándo te toca tu control, o si faltaste a una cita." },
-  { purpose: "novedades", title: "Novedades y promociones", detail: "Campañas y ofertas de la clínica." },
+const MESSAGE_SWITCHES: { purpose: Exclude<MessageChoice, "ninguno">; title: string; detail: (clinicName: string) => string }[] = [
+  { purpose: "recordatorio", title: "Recordatorios de tus citas", detail: () => "Te avisamos un día antes y unas horas antes." },
+  { purpose: "seguimiento", title: "Controles y seguimiento", detail: () => "Cuándo te toca tu control, o si faltaste a una cita." },
+  { purpose: "novedades", title: "Novedades y promociones", detail: (clinicName) => `Campañas y ofertas de ${clinicName}.` },
 ]
 
 function MessagesStep({
   slug,
   token,
+  clinicName,
   messages,
   onChanged,
 }: {
   slug: string
   token: string
+  clinicName: string
   messages: PersonalLinkMessages
   onChanged: () => void
 }) {
@@ -571,7 +573,7 @@ function MessagesStep({
     <div className="flex flex-col gap-4">
       {current.nothing ? (
         <div role="status" className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
-          <p className="font-medium">No te enviaremos ningún mensaje de la clínica.</p>
+          <p className="font-medium">No te enviaremos ningún mensaje de {clinicName}.</p>
           <p className="text-sm text-muted-foreground">Tampoco los avisos de tus citas: si algo cambia, te llamaremos.</p>
           <Button
             type="button"
@@ -593,7 +595,7 @@ function MessagesStep({
                 <p id={labelId} className="font-medium">
                   {item.title}
                 </p>
-                <p className="text-sm text-muted-foreground">{item.detail}</p>
+                <p className="text-sm text-muted-foreground">{item.detail(clinicName)}</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="text-sm text-muted-foreground" aria-hidden>
@@ -633,14 +635,14 @@ function MessagesStep({
           disabled={save.isPending}
           onClick={() => setConfirmNothing(true)}
         >
-          No quiero ningún mensaje de la clínica
+          No quiero ningún mensaje de {clinicName}
         </Button>
       ) : null}
       <ConfirmDialog
         open={confirmNothing}
         onClose={() => setConfirmNothing(false)}
-        title="¿No quieres ningún mensaje de la clínica?"
-        description="Tampoco te llegarán los avisos de tus citas y papeles. Si tu cita cambia, la clínica te llamará."
+        title={`¿No quieres ningún mensaje de ${clinicName}?`}
+        description="Tampoco te llegarán los avisos de tus citas y papeles. Si tu cita cambia, te llamaremos."
         confirmLabel="Sí, no quiero ninguno"
         pending={save.isPending}
         onConfirm={() => save.mutate({ tipo: "ninguno", recibir: false })}

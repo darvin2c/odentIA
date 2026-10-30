@@ -42,7 +42,7 @@ export async function seedChannelTemplates(
       })
   }
 
-  // Los quince con los que viene la clínica, en estados distintos.
+  // Los diecisiete con los que viene la clínica, en estados distintos.
   const states: Record<CatalogMessageKey, { status: string; reason?: string; since?: Date; category?: string }> = {
     recordatorio_cita: { status: "aprobada", since: lastWeek },
     recordatorio_control: { status: "aprobada", since: lastWeek },
@@ -59,6 +59,8 @@ export async function seedChannelTemplates(
     aviso_cita_reservada_datos: { status: "en_revision" },
     // El recordatorio con «Completar mis datos», recién pedido: mientras tanto sale el de siempre.
     recordatorio_cita_datos: { status: "en_revision" },
+    // El recordatorio sin «Confirmar» de una cita ya confirmada, recién pedido: mientras tanto sale el de siempre.
+    recordatorio_cita_confirmada: { status: "en_revision" },
     aviso_cita_movida: { status: "aprobada", since: lastWeek },
     aviso_cita_cancelada: { status: "en_revision" },
     retomar_conversacion: { status: "aprobada", since: lastWeek },

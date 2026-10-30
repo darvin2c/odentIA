@@ -300,6 +300,8 @@ export interface PersonalDataInput {
   health?: RegistrationAnswers["health"] | null
   privacyAccepted?: boolean
   acceptsPromotions?: boolean
+  /** Se le dijo que le escribiremos por WhatsApp al celular que dejó. */
+  acceptsReminders?: boolean
 }
 
 /** «Tus datos»: solo lo que falta, una sola vez. */

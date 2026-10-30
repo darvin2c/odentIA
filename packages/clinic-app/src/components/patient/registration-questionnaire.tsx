@@ -672,6 +672,10 @@ export function RegistrationQuestionnaire({
     if (Object.keys(medical).length) health.medical = medical
     if (Object.keys(health).length) answers.health = health
     if (fill ? fill.promotions && d.messages : config.askMessages && d.privacy && d.messages) answers.acceptsMessages = d.messages === "si"
+    // Se le dijo que le escribiremos por WhatsApp a ese número sobre sus citas: va con lo que
+    // envía para que quede guardado. En «Su enlace», quien responde por un menor aún no tiene
+    // ficha en la que guardarlo.
+    if (forOther ? !fill && !!d.repPhone : wants("phone") && !!d.phone) answers.acceptsReminders = true
     return answers
   }
 
@@ -997,7 +1001,7 @@ export function RegistrationQuestionnaire({
           <Labeled
             name="repPhone"
             label="Tu celular"
-            hint={`Te avisaremos por WhatsApp sobre las citas de ${name}.`}
+            hint={`Te escribiremos por WhatsApp a este número sobre las citas de ${name}: la confirmación, los recordatorios y los cambios.`}
             htmlFor={id("repPhone")}
           >
             <PhoneInput
@@ -1156,7 +1160,7 @@ export function RegistrationQuestionnaire({
             hint={
               forOther
                 ? "Si no tiene, sus avisos te llegan a ti."
-                : "Te avisaremos por WhatsApp sobre tus citas."
+                : "Te escribiremos por WhatsApp a este número sobre tus citas: la confirmación, los recordatorios y los cambios."
             }
             htmlFor={id("phone")}
           >

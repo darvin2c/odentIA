@@ -84,6 +84,8 @@ const dataBody = z.strictObject({
   // El aviso que aún no aceptó y su respuesta a novedades y promociones, si nunca la dio.
   privacyAccepted: z.boolean().optional(),
   acceptsPromotions: z.boolean().optional(),
+  // Dejó su celular y se le dijo que le escribiremos por WhatsApp sobre sus citas.
+  acceptsReminders: z.literal(true).optional(),
   representative: z
     .strictObject({
       displayName: shortText(200).min(1),

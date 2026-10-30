@@ -52,7 +52,7 @@ import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js
 import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import { applyMessagePermissions } from "./data-consents.js"
 import { consentStatusOf } from "./message-permission.js"
-import { createPerson, findPersonByDocument } from "./people.js"
+import { createPerson, findPersonByDocument, setPersonArchived } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
@@ -430,6 +430,16 @@ export async function createPatientRegistrationLink(
     .limit(1)
     .for("share")
   if (!config || !config.enabled) throw validation("El registro público está deshabilitado")
+  // Quien se registra desde su propio enlace volvió, como quien escribe: sale sola
+  // del archivo. Antes de tomar el lock compartido, porque reactivar toma el exclusivo.
+  if (actorUserId === null) {
+    const [archived] = await tx
+      .select({ id: contact.id })
+      .from(contact)
+      .where(and(eq(contact.id, input.contactId), eq(contact.organizationId, orgId), eq(contact.isActive, false)))
+      .limit(1)
+    if (archived) await setPersonArchived(tx, orgId, { userId: null }, archived.id, false)
+  }
   await lockRegistrationContacts(tx, orgId, [input.contactId], false)
   const [person] = await tx
     .select()
