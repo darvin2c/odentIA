@@ -3,7 +3,27 @@ import { examSystemsText } from "@odentia/services/medical"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { askDictationModel, parseToolArguments, readDictation } from "../dictation.js"
+import { createConfiguredChatModel, resolveLlmSpec } from "../llm.js"
+import { cacheMarked, fakeProvider, systemBlock, toolCallReply } from "../test-provider.js"
 import { demoSegment, MEDICAL_DICTATION_PROFILE } from "./dictation.js"
+
+it("el dictado de latidIA razona por /v1/responses y su parte fija llega con el corte de caché", async () => {
+  const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "registrar_dictado"))
+  try {
+    const spec = resolveLlmSpec({ openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
+    const profile = MEDICAL_DICTATION_PROFILE
+    // Como `extractDictation`: con el razonamiento del perfil.
+    const model = await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
+    const pause = { services: ["Consulta"], diagnosisList: "CIE-10 (OMS)", catalog: examSystemsText(), transcript: "Viene por fiebre hace tres días.", context: "", pending: [] }
+    await askDictationModel(model, spec, { ...pause, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:00:00Z") }, profile)
+    expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses"])
+    expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text"))
+    // Por /v1/responses no se pide prompt_cache_options: el proveedor pone además su propio corte.
+    expect(provider.requests[0]?.body).not.toHaveProperty("prompt_cache_options")
+  } finally {
+    await provider.close()
+  }
+})
 
 /** Clío médica en modo de demostración y la lectura de su respuesta (issue 229, entrega 10). No mide a ningún modelo. */
 const SERVICES = ["Consulta de medicina general", "Nebulización", "Ecografía abdominal"]

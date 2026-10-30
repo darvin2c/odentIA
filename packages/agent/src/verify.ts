@@ -409,6 +409,11 @@ function mask(text: string, pattern: RegExp): string {
   return text.replace(pattern, (found) => " ".repeat(found.length))
 }
 
+/** Cuántas horas dice un texto, leídas como las lee la comprobación («9:00», «9 a. m.», «a las 9 y media»); las de un enlace no cuentan. */
+export function timesIn(text: string): number {
+  return extractTimes(mask(normalize(text), WEB_ADDRESS)).mentions.length
+}
+
 function factsOf(item: Evidence, timeZone: string): SourceFacts {
   const text = NOT_FACTS.reduce(mask, normalize(item.text))
   const amounts = new Set<number>()

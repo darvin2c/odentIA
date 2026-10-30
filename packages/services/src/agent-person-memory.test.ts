@@ -36,11 +36,12 @@ import {
 } from "./booking-links.js"
 import { getPersonalLinkView as getBookingLinkView } from "./su-enlace.js"
 import { createConnection } from "./connections.js"
-import { createContact } from "./contacts.js"
+import { createContact, getContact, updateContact } from "./contacts.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
 import { getOrgLocale } from "./locale.js"
 import { getPatientRegistrationConfig, registerPatient, savePatientRegistrationConfig } from "./patient-registration.js"
 import { listPatientsByContact, nextPatientNumber, setPatientContact } from "./patients.js"
+import { listPersonNotes } from "./people.js"
 import { secretsKeyFromEnv } from "./secrets.js"
 import type { Storage } from "./storage.js"
 import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
@@ -586,5 +587,47 @@ describe("reservar desde un enlace quien recién se contacta", () => {
     const consents = await ownerDb.select().from(patientDataConsent).where(eq(patientDataConsent.patientId, child!.id))
     expect(consents.map((row) => row.grantedByName)).toEqual(["Rosa Lima"])
     expect((await run((tx) => getBookingLinkView(tx, ORG, link.token)))).toMatchObject({ booking: { needsRegistration: false }, patientFirstName: "Mateo" })
+  })
+
+  it("quien se registra queda con el nombre que escribió, aunque ya tuviera otro guardado", async () => {
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    const quien = await person("renombra-enlace")
+    // Antes de registrarse, Sofi (o el equipo) le guardó un nombre: ya no es el del canal.
+    await run((tx) =>
+      updateContact(tx, ORG, quien.contactId, { givenNames: "Paciente", familyName: "Prueba WhatsApp" }, { userId: null, origin: "agent" }))
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }, { secretsKey: KEY }))
+    const answers = {
+      demographics: { displayName: "Darvin Willy Cotrina Cervera", givenNames: "Darvin Willy", familyName: "Cotrina Cervera", docType: "DNI" as const, docNumber: "46781234", phone: "+51987333444" },
+      respondent: "patient" as const,
+      privacyAccepted: true,
+    }
+    expect(await run((tx) =>
+      registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion: config.version, answers }))).toEqual({ registered: true })
+    // La Bandeja y su ficha lo nombran como se registró; el nombre de antes queda en sus notas.
+    const { contact: after } = await run((tx) => getContact(tx, ORG, quien.contactId))
+    expect(after.displayName).toBe("Darvin Willy Cotrina Cervera")
+    const [ficha] = await run((tx) => listPatientsByContact(tx, ORG, quien.contactId))
+    expect(ficha).toMatchObject({ displayName: "Darvin Willy Cotrina Cervera", relationship: "self" })
+    expect((await run((tx) => getBookingLinkView(tx, ORG, link.token)))).toMatchObject({ firstName: "Darvin" })
+    expect((await run((tx) => listPersonNotes(tx, ORG, quien.contactId))).map((note) => note.body)).toContain(
+      "Se registró como Darvin Willy Cotrina Cervera; antes figuraba como Paciente Prueba WhatsApp.")
+  })
+
+  it("con un documento guardado que no es el que escribió, conserva su nombre y lo escrito queda en sus notas", async () => {
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    const quien = await person("documento-enlace")
+    await run((tx) =>
+      updateContact(tx, ORG, quien.contactId, { givenNames: "Lucía", familyName: "Paz Soto", docType: "DNI", docNumber: "41239876" }, { userId: OWNER }))
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: quien.conversationId }, { secretsKey: KEY }))
+    const answers = {
+      demographics: { displayName: "Ana Ríos Vega", givenNames: "Ana", familyName: "Ríos Vega", docType: "DNI" as const, docNumber: "47651234", phone: "+51987555666" },
+      respondent: "patient" as const,
+      privacyAccepted: true,
+    }
+    expect(await run((tx) =>
+      registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion: config.version, answers }))).toEqual({ registered: true })
+    expect((await run((tx) => getContact(tx, ORG, quien.contactId))).contact).toMatchObject({ displayName: "Lucía Paz Soto", docNumber: "41239876" })
+    expect((await run((tx) => listPersonNotes(tx, ORG, quien.contactId))).map((note) => note.body)).toContain(
+      "En el registro escribió otros datos, que no se guardaron: documento 47651234, nombre Ana Ríos Vega. Revisa cuáles valen.")
   })
 })

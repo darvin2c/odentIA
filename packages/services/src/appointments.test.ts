@@ -763,9 +763,29 @@ it("el enlace y el agente ofrecen las mismas horas: el mismo paso y quien atiend
   const offered = new Set(link.slots.map(key))
   // Cada hora que dice el agente es una que también ofrece el enlace (paso de 45 minutos, no de 15).
   for (const gap of agent.gaps) expect(offered.has(key(gap))).toBe(true)
-  // El agente dice las dos primeras de cada profesional: las mismas que abren su día en el enlace.
+  // El agente dice tres de cada profesional, repartidas en su día: la primera y la última del enlace, y una de en medio.
   for (const professional of [PROFESSIONAL, PROFESSIONAL_2]) {
-    const first = link.slots.filter((slot) => slot.professionalUserId === professional).slice(0, 2).map(key)
-    expect(agent.gaps.filter((gap) => gap.professionalUserId === professional).map(key)).toEqual(first)
+    const day = link.slots.filter((slot) => slot.professionalUserId === professional).map(key)
+    expect(agent.gaps.filter((gap) => gap.professionalUserId === professional).map(key)).toEqual([
+      day[0],
+      day[Math.round((day.length - 1) / 2)],
+      day.at(-1),
+    ])
   }
+})
+
+it("los huecos se reparten antes del tope de la agenda: con muchos huecos se ve cada día hasta su última hora", async () => {
+  // Del lunes 1 al lunes 8 de marzo de 2027 en Lima, citas de 15 minutos cada 5: 92 huecos por día.
+  const week = { branchId, professionalUserId: PROFESSIONAL, from: "2027-03-01T05:00:00Z", to: "2027-03-09T05:00:00Z", durationMin: 15, stepMin: 5 }
+  // Sin repartir, el tope de 200 corta el tercer día.
+  expect((await run((tx) => listAvailableSlots(tx, ORG, week))).truncated).toBe(true)
+  const spread = await run((tx) => listAvailableSlots(tx, ORG, { ...week, perProfessionalPerDay: 3 }))
+  expect(spread.truncated).toBe(false)
+  // Seis días hábiles con tres horas cada uno; el último llega a la tarde: 9:00, 14:00 y 17:45.
+  expect(spread.slots).toHaveLength(18)
+  expect(spread.slots.filter((slot) => slot.startsAt.startsWith("2027-03-08")).map((slot) => slot.startsAt)).toEqual([
+    "2027-03-08T14:00:00.000Z",
+    "2027-03-08T19:00:00.000Z",
+    "2027-03-08T22:45:00.000Z",
+  ])
 })

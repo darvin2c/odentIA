@@ -20,6 +20,7 @@ import { createBookingLink } from "./booking-links.js"
 import { type IngestDeps, ingestInbound } from "./conversations.js"
 import { getInboxConversationDetail } from "./inbox.js"
 import { listPeople } from "./people.js"
+import { personalLinkRef, personalLinkToken } from "./personal-link-token.js"
 import { countConversationAction } from "./saas-actions.js"
 import type { Storage } from "./storage.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -335,6 +336,20 @@ describe("lo que ve el visitante", () => {
     expect(saved?.phone).toBe("+51987654321")
     poll = await c.run((tx) => pollWebchatVisitor(tx, c.orgId, found.connection.id, sessionId))
     expect(poll).toMatchObject({ askContact: false, contact: { whatsapp: "•••• 4321" } })
+    // «Su enlace» se guarda como referencia: el visitante lo recibe con su token, como por cualquier canal.
+    const linkId = randomUUID()
+    await ownerDb.insert(message).values({
+      organizationId: c.orgId,
+      conversationId: asked.conversationId,
+      direction: "out",
+      senderKind: "agent",
+      body: `La agenda completa: https://clinica.test/reserva?token=${personalLinkRef(linkId)}`,
+      status: "sent",
+      error: null,
+      externalId: "webchat:local:2",
+    })
+    poll = await c.run((tx) => pollWebchatVisitor(tx, c.orgId, found.connection.id, sessionId, { secretsKey: KEY }))
+    expect(poll.messages.at(-1)?.text).toBe(`La agenda completa: https://clinica.test/reserva?token=${personalLinkToken(KEY, linkId)}`)
   })
 
   it("las sesiones no se firman con el código de los avisos, y «Generar un código nuevo» no deja a nadie sin su conversación", async () => {

@@ -376,7 +376,9 @@ const simulateInput = z.object({
   app.get("/probar", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.write")) return forbidden(c, "agent.write")
-    return runService(c, 200, async () => probarView(await withOrgContext(deps.db, orgId, (tx) => getProbar(tx, orgId, userId))))
+    return runService(c, 200, async () =>
+      probarView(await withOrgContext(deps.db, orgId, (tx) => getProbar(tx, orgId, userId, { secretsKey: deps.secretsKey }))),
+    )
   })
 
   /** «Empezar de nuevo»: borra la prueba anterior con lo que creó y abre otra. */
@@ -387,7 +389,7 @@ const simulateInput = z.object({
       probarView(
         await withOrgContext(deps.db, orgId, async (tx) => {
           await openProbar(tx, orgId, userId, { secretsKey: deps.secretsKey })
-          return getProbar(tx, orgId, userId)
+          return getProbar(tx, orgId, userId, { secretsKey: deps.secretsKey })
         }),
       ),
     )

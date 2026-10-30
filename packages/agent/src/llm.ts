@@ -1,3 +1,4 @@
+import type { ContentBlock } from "@langchain/core/messages"
 import { ChatOpenAI } from "@langchain/openai"
 import { ServiceError } from "@odentia/services"
 import { FakeChatModel } from "./fake-model.js"
@@ -202,6 +203,28 @@ export async function createConfiguredChatModel(
       fetch: noRedirectFetch,
     },
   })
+}
+
+/** Si el modelo va por /v1/responses: el de `createConfiguredChatModel` con razonamiento. */
+export function viaResponses(model: unknown): boolean {
+  return model instanceof ChatOpenAI && model.useResponsesApi
+}
+
+/**
+ * La parte fija de un prompt, marcada para la caché de OpenAI: el proveedor
+ * guarda hasta el corte (`prompt_cache_breakpoint`) y la llamada siguiente
+ * que empiece igual lo lee a 0,1× de la entrada. Por Chat Completions va en un
+ * bloque `text`; por /v1/responses (`viaResponses`), en uno `input_text`, que
+ * LangChain 1.5.13 envía tal cual: a uno `text` le quita el corte. Sin caché
+ * (el modelo de demostración), el texto solo. Medido el 2026-10-29 (ADR 0012 y
+ * 0075): en Argos y en el dictado de latidIA, donde la parte fija es todo el
+ * mensaje de sistema, OpenAI ya la leía sin el corte de lo que guardó la
+ * llamada anterior, y el corte no bajó su costo. No se midió el corte que
+ * separa lo fijo de lo que cambia dentro del mismo mensaje.
+ */
+export function cachedPrompt(provider: LlmSpec["provider"], text: string, responses: boolean): string | ContentBlock[] {
+  if (provider !== "openai") return text
+  return [{ type: responses ? "input_text" : "text", text, prompt_cache_breakpoint: { mode: "explicit" } }]
 }
 
 /** El cuerpo de error del proveedor: OpenAI `{ error: { code, message } }`. */

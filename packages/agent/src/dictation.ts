@@ -10,7 +10,7 @@ import {
 } from "@odentia/services"
 import { z } from "zod"
 import { reportReplyUse } from "./ai-usage.js"
-import type { LlmSpec } from "./llm.js"
+import { cachedPrompt, type LlmSpec, viaResponses } from "./llm.js"
 
 /**
  * Clío, el asistente clínico: convierte lo que el profesional dicta en
@@ -183,16 +183,6 @@ export interface DictationProfile {
   ): Omit<DictationExtraction, "model">
 }
 
-/**
- * Cómo se marca el fin de la parte fija para la caché del proveedor. OpenAI
- * admite el corte en Chat Completions; con `explicitCache`
- * (`createConfiguredChatModel`) guarda solo hasta ahí y no escribe, además, lo
- * de cada pausa, que nunca se vuelve a leer.
- */
-const CACHE_MARK: Partial<Record<LlmSpec["provider"], Record<string, unknown>>> = {
-  openai: { prompt_cache_breakpoint: { mode: "explicit" } },
-}
-
 /** Lo que se le pregunta al modelo en una pausa del dictado, con lo de la clínica ya leído. */
 export interface DictationAsk {
   provider: LlmSpec["provider"]
@@ -211,19 +201,21 @@ export interface DictationAsk {
 /**
  * Los mensajes de una pausa. La parte fija (instrucciones y servicios; las
  * herramientas van antes) es igual en toda la atención y va marcada para la
- * caché del proveedor: la primera pausa la escribe y las siguientes la leen a
- * la décima parte. Lo que cambia en cada pausa (la fecha, lo ya ordenado, lo
- * pendiente y lo nuevo) va después, en el mensaje de la pausa. Con la hora en
- * las instrucciones, cada pausa escribía la caché y no la leía nunca (medido
- * el 2026-10-17, ADR 0012).
+ * caché del proveedor (`cachedPrompt`; `responses`: el modelo va por
+ * /v1/responses, como cuando el perfil razona): la primera pausa la escribe y
+ * las siguientes la leen a la décima parte. Lo que cambia en cada pausa (la
+ * fecha, lo ya ordenado, lo pendiente y lo nuevo) va después, en el mensaje de
+ * la pausa. Con la hora en las instrucciones, cada pausa escribía la caché y
+ * no la leía nunca (medido el 2026-10-17, ADR 0012). Con `explicitCache`,
+ * por Chat Completions, el proveedor no escribe además lo de cada pausa, que
+ * nunca se vuelve a leer; por /v1/responses ese pedido no se envía.
  */
-export function dictationMessages(input: DictationAsk, profile: DictationProfile): BaseMessage[] {
+export function dictationMessages(input: DictationAsk, profile: DictationProfile, responses: boolean): BaseMessage[] {
   const fixed = profile.systemPrompt({
     services: input.services,
     diagnosisList: input.diagnosisList,
     catalog: input.catalog,
   })
-  const mark = CACHE_MARK[input.provider]
   const today = new Intl.DateTimeFormat(input.zone.locale, {
     timeZone: input.zone.timezone,
     dateStyle: "full",
@@ -240,7 +232,7 @@ export function dictationMessages(input: DictationAsk, profile: DictationProfile
     .filter(Boolean)
     .join("\n\n")
   return [
-    new SystemMessage({ content: mark ? [{ type: "text", text: fixed, ...mark }] : fixed }),
+    new SystemMessage({ content: cachedPrompt(input.provider, fixed, responses) }),
     new HumanMessage({ content: human }),
   ]
 }
@@ -562,7 +554,7 @@ export async function askDictationModel(
         }
       ).bindTools([record])
     : (model as { invoke: (messages: BaseMessage[]) => Promise<AIMessage> })
-  const reply = await bound.invoke(dictationMessages(ask, profile))
+  const reply = await bound.invoke(dictationMessages(ask, profile, viaResponses(model)))
   reportReplyUse(spec.provider, spec.modelName, reply)
   const call =
     reply instanceof AIMessage || "tool_calls" in reply

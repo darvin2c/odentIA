@@ -77,16 +77,32 @@ interface ZonedParts {
   minutes: number
 }
 
+/**
+ * Un formateador por zona y forma: crearlo cuesta más que usarlo, y una consulta de huecos
+ * convierte cada hora candidata de cada profesional y día.
+ */
+const zoneFormats = new Map<string, Intl.DateTimeFormat>()
+function zoneFormat(timeZone: string, withSeconds: boolean): Intl.DateTimeFormat {
+  const key = `${withSeconds ? "s" : "m"}|${timeZone}`
+  let format = zoneFormats.get(key)
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      ...(withSeconds ? { second: "2-digit" as const } : {}),
+      hour12: false,
+    })
+    zoneFormats.set(key, format)
+  }
+  return format
+}
+
 function zonedPartsOf(instant: Date, timeZone: string): ZonedParts {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(instant)
+  const parts = zoneFormat(timeZone, false).formatToParts(instant)
   const get = (type: string): number => Number(parts.find((part) => part.type === type)?.value)
   const year = get("year")
   const month = get("month")
@@ -101,16 +117,7 @@ function zonedPartsOf(instant: Date, timeZone: string): ZonedParts {
 }
 
 function tzOffsetMs(timeZone: string, instant: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  }).formatToParts(instant)
+  const parts = zoneFormat(timeZone, true).formatToParts(instant)
   const get = (type: string): number => Number(parts.find((part) => part.type === type)?.value)
   const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"))
   return asUtc - instant.getTime()
@@ -582,8 +589,10 @@ export interface SlotsQuery {
   /** Solo el primer hueco de cada profesional: responde «quién puede atender primero». */
   firstPerProfessional?: boolean
   /**
-   * Como mucho estos huecos por profesional y día, los primeros: así una
-   * lista corta no se la queda una sola persona (decisión 16 de la fase 4).
+   * Como mucho estos huecos por profesional y día, repartidos en su jornada: el
+   * primero, el último y los de en medio. Así una lista corta no se la queda una
+   * sola persona y se ve también la tarde (decisión 16 de la fase 4). Se reparte
+   * antes del tope de 200, así que el tope cuenta lo que se ofrece.
    */
   perProfessionalPerDay?: number
   /** Para una persona de prueba (ADR 0094): sus huecos descuentan también las otras pruebas. */
@@ -621,6 +630,30 @@ export interface AvailableSlotsResult {
  */
 export function bookingStepMin(durationMin: number): number {
   return Math.min(60, Math.max(15, Math.round(durationMin / 5) * 5))
+}
+
+/**
+ * De los huecos de un día, ya ordenados por hora, como mucho `perDay` por
+ * profesional: el primero, el último y los de en medio repartidos. Con los
+ * primeros nada más, quien tenía la tarde libre solo aparecía a primera hora y
+ * la persona creía que no había más (auditoría del ADR 0104).
+ */
+function spreadOverDay(daySlots: AvailableSlot[], perDay: number): AvailableSlot[] {
+  const byProfessional = new Map<string, AvailableSlot[]>()
+  for (const slot of daySlots) {
+    const own = byProfessional.get(slot.professionalUserId)
+    if (own) own.push(slot)
+    else byProfessional.set(slot.professionalUserId, [slot])
+  }
+  const kept = new Set<AvailableSlot>()
+  for (const own of byProfessional.values()) {
+    if (own.length <= perDay) {
+      for (const slot of own) kept.add(slot)
+      continue
+    }
+    for (let i = 0; i < perDay; i++) kept.add(own[Math.round((i * (own.length - 1)) / Math.max(1, perDay - 1))]!)
+  }
+  return daySlots.filter((slot) => kept.has(slot))
 }
 
 /**
@@ -771,12 +804,10 @@ export async function listAvailableSlots(
     ).getUTCDay()
     // Lo de cada día se junta y se ordena por hora antes de cortar.
     const daySlots: AvailableSlot[] = []
-    const perProfessional = new Map<string, number>()
     for (const entry of rules) {
       if (entry.rule.weekday !== weekday) continue
       if (input.firstPerProfessional && found.has(entry.rule.professionalUserId)) continue
       for (let minute = entry.rule.startMin; minute + slotMin <= entry.rule.endMin; minute += step) {
-        if (perDay !== undefined && (perProfessional.get(entry.rule.professionalUserId) ?? 0) >= perDay) break
         const startUtc = zonedTimeToUtc(dayLabel, minute, resolved.timeZone)
         const endUtc = new Date(startUtc.getTime() + slotMin * 60000)
         if (endUtc <= from || startUtc >= to) continue
@@ -831,7 +862,6 @@ export async function listAvailableSlots(
           roomName,
           timeZone,
         })
-        perProfessional.set(entry.rule.professionalUserId, (perProfessional.get(entry.rule.professionalUserId) ?? 0) + 1)
         if (input.firstPerProfessional) {
           found.add(entry.rule.professionalUserId)
           break
@@ -845,7 +875,7 @@ export async function listAvailableSlots(
         a.professionalName.localeCompare(b.professionalName, "es") ||
         a.professionalUserId.localeCompare(b.professionalUserId),
     )
-    for (const slot of daySlots) {
+    for (const slot of perDay === undefined ? daySlots : spreadOverDay(daySlots, perDay)) {
       if (slots.length >= MAX_SLOTS) return { slots, truncated: true, timeZone, attending }
       slots.push(slot)
     }

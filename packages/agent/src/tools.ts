@@ -28,6 +28,10 @@ import {
   type ContactAppointmentOption,
   PERSONAL_LINK_TTL_DAYS,
   createBookingLink,
+  issueAgendaLink,
+  personalLinkAddress,
+  personalLinkRef,
+  GAPS_PER_PROFESSIONAL_PER_DAY,
   requestPortalReentry,
   annotateHandoff,
   agentReplyBlockedReason,
@@ -100,7 +104,7 @@ import { claimsOf } from "./claims.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
 import { formulasIn, nameQuestionsIn } from "./attention.js"
-import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, timesIn, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -207,9 +211,21 @@ const ASK_YES: Record<string, string> = {
 /** Lo que guarda lo que dijo la persona: con una de ellas en la corrida, «lo anoté» es cierto. */
 const CLAIM_NOTES = ["anotar_caso", "recordar_dato", "update_contact", "guardar_contacto", "elegir_mensajes"]
 
+/** Lo que hace la corrida con una cita o su enlace: con uno de estos, la respuesta habla de esa cita y no lleva la agenda. */
+const APPOINTMENT_ACTS = ["proponer_cita", "reservar_paciente_nuevo", "reprogramar_cita", "cancelar_cita", "confirmar_propuesta", "confirmar_cita", "enviar_enlace_cita"]
+
+/**
+ * La línea de la agenda: neutra en el trato (sirve con tú y con usted), en el idioma de la
+ * persona y, si reserva para otra persona, a nombre de quién queda la cita.
+ */
+function agendaPhrase(url: string, forName: string | null, language: "es" | "en" | null | undefined): string {
+  if (language === "en") return `The full schedule, to choose the day, the time and who with${forName ? ` (the appointment is booked for ${forName})` : ""}: ${url}`
+  return `La agenda completa, para elegir el día, la hora y con quién${forName ? ` (la cita queda a nombre de ${forName})` : ""}: ${url}`
+}
+
 /** La hora propuesta no salió de ningún hueco consultado: el modelo la inventó o la tomó de otra cosa (un horario de atención). */
 const SLOT_NOT_OFFERED =
-  "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista, vuelve a consultar con buscar_huecos (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
+  "Ese horario no está entre los huecos que consultaste con ese profesional: no se propuso. Si la persona aceptó una hora que le ofreciste, usa los datos exactos de ese hueco; si no los tienes a la vista o pidió una hora que no estaba entre los repartidos, vuelve a consultar con buscar_huecos desde esa hora (esa sede y ese profesional) y propone el hueco de la hora que le dijiste."
 
 /**
  * Si un hueco con ese inicio y ese profesional salió de buscar_huecos en este
@@ -305,6 +321,11 @@ export interface AgentToolCtx {
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
   claimNudged?: boolean
+  /**
+   * Dónde buscó huecos en esta corrida (si encontró): la agenda que acompaña a los horarios abre
+   * en esa sede y ese servicio, o en todas si buscó en más de una.
+   */
+  gapsSought?: { branchId: string | null; serviceId: string | null }
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -844,6 +865,46 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: en esta atención ya le respondiste con «Entiendo…» o «anoté que…». Respóndele directo a lo que dijo o preguntó, sin repetírselo; si no hay nada nuevo, una frase corta basta. Vuelve a llamar a la misma herramienta sola en su paso.`
   }
 
+  /** El origen de la clínica en el dominio de su producto (odentIA o latidIA; decisión 9 del issue 229); nulo sin dirección. */
+  const clinicLinkOrigin = async (tx: Db, publicUrl: PublicLinkConfig): Promise<string | null> => {
+    const clinic = await clinicAddressOf(tx, ctx.orgId)
+    return clinic ? clinicOrigin(clinic.slug, clinic.product, publicUrl) : null
+  }
+
+  /**
+   * Lo que acompaña siempre a los horarios que ofrece (lo pidió una clínica, igual en odentIA y
+   * en latidIA): su enlace para ver toda la agenda y elegir el día, la hora y con quién. Lo agrega
+   * el código al enviar, no el modelo: así va cada vez y sin otra llamada, `buscar_huecos` solo
+   * lee y el token no pasa por el modelo ni queda guardado (el mensaje lleva la referencia y el
+   * worker pone el token al entregarlo, ADR 0037). Es una oferta la respuesta con dos o más horas
+   * después de buscar huecos en la corrida. No va con la cita que se propone, mueve o confirma en
+   * la corrida, con otra esperando su sí, al cambiar una cita ni a quien ya tiene una por venir
+   * (`issueAgendaLink`: la página le mostraría esa cita).
+   */
+  const withAgenda = async (text: string): Promise<string> => {
+    const sought = ctx.gapsSought
+    const publicUrl = ctx.publicUrl
+    if (!sought || !publicUrl || ctx.dryRun || ctx.casePending || ctx.route?.path === "cambio_cita") return text
+    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?token=") || timesIn(text) < 2) return text
+    try {
+      const line = await inOrg(async (tx) => {
+        const origin = await clinicLinkOrigin(tx, publicUrl)
+        if (!origin) return null
+        const link = await issueAgendaLink(
+          tx,
+          ctx.orgId,
+          { conversationId: ctx.conversationId, ...(sought.branchId ? { branchId: sought.branchId } : {}), ...(sought.serviceId ? { serviceId: sought.serviceId } : {}) },
+          { secretsKey: ctx.secretsKey },
+        )
+        return link ? agendaPhrase(personalLinkAddress(origin, personalLinkRef(link.linkId)), link.forName, ctx.personLanguage) : null
+      })
+      return line ? `${text}\n\n${line}` : text
+    } catch {
+      // La agenda acompaña: si no se puede emitir (una prueba, varios pacientes, sin registro en línea), los horarios salen igual.
+      return text
+    }
+  }
+
   /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
   const nameTwice = (text: string): string | null => {
     if (ctx.nameNudged || nameQuestionsIn(text) < 2) return null
@@ -940,13 +1001,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (takenOver) return takenOver
       const kept = await personKeptWriting()
       if (kept) return kept
+      // Con horarios, su enlace para ver toda la agenda; se emite solo ahora, cuando sale.
+      const out = await withAgenda(text)
       const sent: ProposalItem[] = []
       // La pregunta que confirma una lista (la respuesta a un presupuesto) lleva «Sí» y «No».
       const buttons = ctx.confirmButtonsFor ? { buttons: proposalConfirmButtons(ctx.confirmButtonsFor) } : {}
-      const outcome = await propose("enviar_mensaje", { kind: "text", text, ...buttons }, "send_reply", undefined, (proposal) => {
+      const outcome = await propose("enviar_mensaje", { kind: "text", text: out, ...buttons }, "send_reply", undefined, (proposal) => {
         sent.push(proposal)
       })
-      for (const proposal of sent) await traceAnswer(text, traceOutcome(proposal), verdict?.checks ?? [], proposal)
+      for (const proposal of sent) await traceAnswer(out, traceOutcome(proposal), verdict?.checks ?? [], proposal)
       return outcome
     },
     {
@@ -1335,8 +1398,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // La hora ya va en la de la sede: el modelo la dice tal cual y nunca convierte zonas.
       const day = new Intl.DateTimeFormat(locale, { timeZone, weekday: "long", day: "numeric", month: "long" })
       const clock = new Intl.DateTimeFormat(locale, { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      // La agenda que acompaña a los horarios abre donde buscó: en esa sede, o en todas si buscó en
+      // varias, y con el servicio que buscó (una búsqueda sin servicio no le quita el que ya tenía).
+      const before = ctx.gapsSought
+      ctx.gapsSought = {
+        branchId: !before || before.branchId === input.branchId ? input.branchId : null,
+        serviceId: input.serviceId ?? before?.serviceId ?? null,
+      }
       const lines = [
-        "Huecos libres, ordenados por hora, hasta dos por profesional y día, en hora local de la sede (dilos así, sin convertir horas). El dato entre corchetes es solo para proponer_cita: no lo escribas a la persona.",
+        `Huecos libres, ordenados por hora, hasta ${GAPS_PER_PROFESSIONAL_PER_DAY} por profesional y día, repartidos en su jornada, en hora local de la sede (dilos así, sin convertir horas). El dato entre corchetes es solo para proponer_cita: no lo escribas a la persona.`,
         ...(who ? [who] : []),
         ...gaps.map((g) => {
           const start = new Date(g.startsAt)
@@ -1350,12 +1420,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         `Usa los datos exactos del hueco elegido en proponer_cita (startsAt, sede, ${room} y profesional): nunca inventes IDs ni horas.`,
       ]
       if (truncated) lines.push("Hay más huecos que no van aquí: acota el rango por días o pide los de un profesional.")
+      if (ctx.publicUrl && !ctx.dryRun && ctx.route?.path !== "cambio_cita") {
+        lines.push("Al enviar horarios, el sistema agrega al final de tu respuesta su enlace para ver toda la agenda: no lo escribas ni lo anuncies.")
+      }
       return lines.join("\n")
     },
     {
       name: "buscar_huecos",
       description:
-        `Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta dos huecos por profesional y día, por hora; cada hueco trae sede, ${room}, profesional, inicio, fin, zona y duración para proponer_cita.`,
+        `Huecos reales de agenda según horario del profesional, ausencias, feriados y citas ocupantes. Usa el id exacto de la sede (branchId); from/to en hora local de la sede y sin zona (por ejemplo 2026-10-16T08:00 y 2026-10-16T13:00 para «el viernes en la mañana»). No indiques durationMin: con serviceId se usa la duración del servicio y, sin servicio, la de una cita regular en esa sede; indícala solo si el interlocutor pide otra duración. Con serviceId ofrece solo a quien atiende ese servicio. Para pedir las horas de alguien en particular («con la Dra. Rojas»), pasa en profesional su identificador de la lista de profesionales. Devuelve hasta ${GAPS_PER_PROFESSIONAL_PER_DAY} huecos por profesional y día, repartidos en su jornada y por hora; cada hueco trae sede, ${room}, profesional, inicio, fin, zona y duración para proponer_cita.`,
       schema: z.object({
         branchId: z.string().uuid(),
         from: z.string().min(1),
@@ -1378,21 +1451,20 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const publicUrl = ctx.publicUrl
       if (!publicUrl) return "El enlace de reserva no está disponible: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
       try {
-        const { link, clinic } = await inOrg(async (tx) => ({
-          link: await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey }),
-          clinic: await clinicAddressOf(tx, ctx.orgId),
-        }))
-        // En el dominio de su producto (odentIA o latidIA; decisión 9 del issue 229).
-        const origin = clinic ? clinicOrigin(clinic.slug, clinic.product, publicUrl) : null
-        if (!origin) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
-        const url = new URL("/reserva", origin)
-        url.searchParams.set("token", link.token)
-        const who = link.patientName ?? "la persona"
+        // Sin dirección de la clínica no hay página que abrir: el enlace ni se emite.
+        const found = await inOrg(async (tx) => {
+          const origin = await clinicLinkOrigin(tx, publicUrl)
+          if (!origin) return null
+          const link = await createBookingLink(tx, ctx.orgId, { conversationId: ctx.conversationId, ...input }, { secretsKey: ctx.secretsKey })
+          return { link, url: personalLinkAddress(origin, link.token) }
+        })
+        if (!found) return "La clínica no tiene dirección pública: propón horarios por aquí con buscar_huecos. Si no tienes buscar_huecos, pasa el caso a una persona: no digas que enviaste un enlace."
+        const { link, url } = found
         // Quien aún no es paciente no puede reservar por aquí: ofrecerle «seguir por aquí» lo contradecía.
         const next = link.needsRegistration
           ? " Como aún no es paciente, ahí deja sus datos y reserva: díselo en una frase y no le ofrezcas reservar por aquí. Si ya eligió una hora contigo, dile que elija esa misma en la página (por ejemplo «ahí eliges el jueves a las 8:00»), sin pedirle que vuelva a decidir."
           : " Ofrece también seguir por aquí si lo prefiere."
-        return `Su enlace, para que ${who} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url.toString()}\nEnvíalo tal cual con send_reply, en un solo mensaje.${next} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
+        return `Su enlace, para que ${link.patientName ?? "la persona"} elija su cita viendo los horarios libres (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días; es el mismo si ya tenía uno): ${url}\nEnvíalo tal cual con send_reply, en un solo mensaje.${next} Cuando reserve, el sistema se lo confirma en esta conversación y queda en el estado del caso: no vuelvas a proponer horarios.`
       } catch (error) {
         if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
           return "Es una prueba del chat web: no se envía el enlace. Dile que en la prueba no se reserva nada y ofrece seguir por aquí."
@@ -1532,13 +1604,10 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (!forOther && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))).some((item) => item.relationship === "self")) {
         return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente)."
       }
-      const { notice, origin } = await inOrg(async (tx) => {
-        const clinic = await clinicAddressOf(tx, ctx.orgId)
-        return {
-          notice: await chatPrivacyNotice(tx, ctx.orgId),
-          origin: clinic && ctx.publicUrl ? clinicOrigin(clinic.slug, clinic.product, ctx.publicUrl) : null,
-        }
-      })
+      const { notice, origin } = await inOrg(async (tx) => ({
+        notice: await chatPrivacyNotice(tx, ctx.orgId),
+        origin: ctx.publicUrl ? await clinicLinkOrigin(tx, ctx.publicUrl) : null,
+      }))
       if (!notice || !origin) {
         return "La clínica no registra pacientes por el chat. Envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos."
       }
@@ -2250,13 +2319,24 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         // El caso ya pasó a una persona en esta corrida (lo decidió el camino):
         // no se registra otra derivación, solo sale el aviso al interlocutor.
         if (!notice) return "El caso ya pasó a una persona. Falta el aviso al interlocutor: llama de nuevo con message."
-        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
         return ctx.replySettled
           ? "Aviso al interlocutor registrado. No envíes más mensajes."
           : `El aviso al interlocutor no salió: ${outcome}`
       }
-      const validPriority = priority === "alta" || priority === "baja" ? priority : "media"
+      // Alta es una alarma o una urgencia medida (`URGENT_SCORE`), como en el camino que deriva: el
+      // modelo que escribe la daba a una tos de cuatro días (auditoría del 29-oct). Una queja o un
+      // cobro no los mide esa nota: conservan la que eligió, y sin nota también.
+      const asked = priority === "alta" || priority === "baja" ? priority : "media"
+      const urgency = ctx.route?.urgency ?? null
+      const notMeasured = ctx.route?.intent === "complaint" || topicKindOf(kind) === "pago"
+      const validPriority =
+        ctx.alarm === true || (urgency ?? 0) >= URGENT_SCORE
+          ? "alta"
+          : asked === "alta" && urgency !== null && !notMeasured
+            ? "media"
+            : asked
       // Con un tema abierto en el hilo, lo que vuelve a pedir se anota en ese
       // tema y solo sale el aviso: un tema por mensaje llena la cola del equipo.
       // Abre otro solo si sube a urgente (ADR 0097).
@@ -2272,7 +2352,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           await annotate(false)
           return `Ese tema ya lo tiene el equipo y lo que volvió a decir quedó anotado en él.${raised} ${REPLY_ASKED_AGAIN}`
         }
-        const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+        const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
         await annotate(ctx.replySettled === true)
         return ctx.replySettled ? "Ese tema ya lo tiene el equipo: lo anoté en él y salió el aviso. No envíes más mensajes." : `El aviso al interlocutor no salió: ${outcome}`
       }
@@ -2300,7 +2380,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         ctx.handoffNeedsReply = true
         return `Tema pasado al equipo (${destino}). ${REPLY_AFTER_HANDOFF}`
       }
-      const outcome = await propose("enviar_mensaje", { kind: "text", text: notice }, "request_human_handoff")
+      const outcome = await propose("enviar_mensaje", { kind: "text", text: await withAgenda(notice) }, "request_human_handoff")
       const noticeResult = ctx.replySettled ? " Aviso al interlocutor registrado." : ` El aviso al interlocutor no salió: ${outcome}`
       if (ctx.replySettled) await annotate(true)
       return `Tema pasado al equipo (${destino}).${noticeResult} No envíes nada más por este mensaje; en los siguientes sigues atendiendo todo lo demás.`

@@ -1,4 +1,4 @@
-import type { ProductAgentTexts } from "../product-agent.js"
+import { ALARM_NOT, type ProductAgentTexts } from "../product-agent.js"
 import { medicalHooks } from "./hooks.js"
 
 /**
@@ -97,19 +97,26 @@ export const MEDICAL_AGENT_TEXTS: ProductAgentTexts = {
   },
   // Las urgencias de un consultorio que no están entre las comunes: el
   // embarazo que sangra o el bebé que deja de moverse, la piel morada, quien
-  // no reacciona, el peor dolor de cabeza, vomitar sangre y tomar de más.
+  // no reacciona, el peor dolor de cabeza, vomitar sangre y tomar de más. Negadas
+  // justo antes no cuentan: «estoy embarazada y no tengo sangrado», «vomitó sin sangre».
   alarmSignals: [
-    /\bembarazada\b[^.!?]{0,40}\b(sangrando|sangrado|sangro|me baja sangre)\b/,
-    /\b(estoy sangrando|tengo sangrado|me baja sangre)\b[^.!?]{0,40}\bembarazada\b/,
+    new RegExp(
+      String.raw`\bembarazada\b[^.!?]{0,40}${ALARM_NOT}\b(sangrando|sangrado|sangro|me baja sangre)\b`,
+    ),
+    new RegExp(
+      String.raw`${ALARM_NOT}\b(estoy sangrando|tengo sangrado|me baja sangre)\b[^.!?]{0,40}\bembarazada\b`,
+    ),
     /\b(ya )?no siento (que se mueva |moverse )?(a )?(mi |el )?bebe\b/,
-    /\bse me (rompio|reviento) la (fuente|bolsa)\b/,
-    /\b(labios|cara|boca|unas) morad(o|a)s\b/,
-    /\bse (puso|esta poniendo) morad(o|a)\b/,
+    new RegExp(String.raw`${ALARM_NOT}\bse me (rompio|reviento) la (fuente|bolsa)\b`),
+    new RegExp(String.raw`${ALARM_NOT}\b(labios|cara|boca|unas) morad(o|a)s\b`),
+    new RegExp(String.raw`${ALARM_NOT}\bse (puso|esta poniendo) morad(o|a)\b`),
     /\bno (reacciona|despierta)\b/,
     /\b(peor|mas fuerte) dolor de cabeza de (mi|su) vida\b/,
-    /\bvomit\w*\b[^.!?]{0,15}\bsangre\b/,
-    /\b(se tomo|me tome|se trago|me trague) (todas las|muchas|un frasco de|toda la caja de) (pastillas|pildoras)\b/,
-    /\benvenen/,
+    new RegExp(String.raw`${ALARM_NOT}\bvomit\w*\b[^.!?]{0,15}${ALARM_NOT}\bsangre\b`),
+    new RegExp(
+      String.raw`${ALARM_NOT}\b(se tomo|me tome|se trago|me trague) (todas las|muchas|un frasco de|toda la caja de) (pastillas|pildoras)\b`,
+    ),
+    new RegExp(String.raw`${ALARM_NOT}\benvenen`),
     // Signo general de peligro de AIEPI (IMCI, OMS): un bebé que no puede beber ni
     // tomar el pecho necesita atención ya (auditoría del 27-oct: 39,5 °C y no lacta).
     // «39.5 de fiebre»: el punto entre dígitos no corta la frase.

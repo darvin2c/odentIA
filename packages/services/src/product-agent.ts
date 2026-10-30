@@ -40,7 +40,8 @@ export interface ProductAgentTexts {
   /**
    * Señales de alarma propias del producto, además de las comunes de
    * `agent/src/alarm.ts` (ADR 0084). Se prueban sobre el texto sin tildes y en
-   * minúsculas; solo frases fuertes. odentIA no suma ninguna.
+   * minúsculas; solo frases fuertes. Lo que se puede negar lleva `ALARM_NOT`
+   * delante. odentIA no suma ninguna.
    */
   alarmSignals: readonly RegExp[]
   /**
@@ -132,6 +133,22 @@ export const NO_AGENT_TEXTS: ProductAgentTexts = {
   },
   reports: { professional: "", eachProfessional: "", treatments: "", clinicalRecord: "" },
 }
+
+/**
+ * Una frase de alarma negada no es una alarma (ADR 0084): «tos y congestión, pero
+ * no me falta el aire» recibía el número de emergencias. Va justo delante de lo que
+ * alarma, en las frases comunes (`agent/src/alarm.ts`) y en las de `alarmSignals`:
+ * «no me falta el aire», «no me duele el pecho», «sin dolor en el pecho», «no tiene
+ * dificultad para respirar», «no le noto dificultad», «no ha convulsionado», «no
+ * tiene los labios morados», «ningún sangrado».
+ *
+ * Solo mira lo que está justo antes, así que «no sé, me falta el aire» y «no aguanto
+ * el dolor de pecho» siguen siendo alarmas. Quedan fuera, porque suelen contar lo que
+ * cambió: «nunca» y el pasado de antes («nunca se había desmayado y hoy le pasó»,
+ * «ayer no tenía dolor de pecho, hoy sí»). Y «no se», que sin tildes también es «no
+ * sé»: «no se tiene dificultad para respirar» puede ser «no sé, tiene dificultad».
+ */
+export const ALARM_NOT = String.raw`(?<!\b(?:(?:no|ni|tampoco)(?: (?:me|te|le|les|nos))?(?: (?:ha|he|han|ha tenido|he tenido|hay|hubo|esta|estoy|estuvo|tiene|tengo|tuvo|tuve|presenta|siente|siento|nota|noto|quedo))?(?: (?:ningun|ninguna|nada de|los|las))?|sin(?: ningun| ninguna)?|ningun|ninguna|nada de) )`
 
 /** «odentIA», «latidIA» o, sin texto del producto, «el sistema». */
 export const productName = (texts: ProductAgentTexts): string => texts.name || "el sistema"
