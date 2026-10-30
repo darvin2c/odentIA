@@ -4,7 +4,7 @@ import { ChatOpenAI } from "@langchain/openai"
 import { agentTextsFor } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
-import { argosMessages, argosModel } from "./argos.js"
+import { argosMessages, argosModel, argosUnreadable } from "./argos.js"
 import { FakeChatModel } from "./fake-model.js"
 import {
   cachedPrompt,
@@ -204,6 +204,68 @@ describe("el corte de la parte fija llega al proveedor por los dos caminos", () 
       expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses", "/v1/chat/completions"])
       expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text", expect.stringContaining("Cifras oficiales")))
       expect(systemBlock(provider.requests[1])).toEqual(cacheMarked("text", expect.stringContaining("Cifras oficiales")))
+    } finally {
+      await provider.close()
+    }
+  })
+})
+
+describe("Argos responde siempre con una herramienta", () => {
+  const texts = agentTextsFor("dental")
+  const ask = { texts, question: "¿Cuánto cobré este mes?", key: "gestion" as const, now: new Date("2026-10-30T15:00:00Z"), zone: { timezone: "America/Lima", locale: "es-PE" } }
+
+  it("por los dos caminos el proveedor recibe que use una, y en el último turno, responder", async () => {
+    const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "responder"))
+    try {
+      const platform = { openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 }
+      for (const deps of [{ platform }, { platform, reasoning: "none" as const }]) {
+        const model = await argosModel(deps, texts)
+        if (!model) throw new Error("Argos se quedó sin modelo")
+        for (const choice of ["required", "responder"]) await model.invoke(argosMessages(model.provider, ask, model.responses), choice)
+      }
+      expect(provider.requests.map((request) => request.body.tool_choice)).toEqual([
+        // Como texto, LangChain 1.5.13 no envía «required» por /v1/responses: va con las tres en `allowed_tools`.
+        { type: "allowed_tools", mode: "required", tools: ["buscar_nombres", "calcular", "responder"].map((name) => ({ type: "function", name })) },
+        { type: "function", name: "responder" },
+        "required",
+        { type: "function", function: { name: "responder" } },
+      ])
+    } finally {
+      await provider.close()
+    }
+  })
+
+  it("lo que no se lee queda para medir tal como llegó: el texto sin herramienta o los campos que no caben", async () => {
+    const provider = await fakeProvider((_, response) =>
+      json(response, 200, {
+        id: "resp_1",
+        object: "response",
+        created_at: 1,
+        status: "completed",
+        model: "gpt-6-luna",
+        output: [
+          { type: "reasoning", id: "rs_1", summary: [] },
+          { type: "message", id: "msg_1", role: "assistant", status: "completed", content: [{ type: "output_text", text: "{periodo} cobraste {cobrado_dinero}.", annotations: [] }] },
+        ],
+        usage: { input_tokens: 12, output_tokens: 9, total_tokens: 21, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 4 } },
+      }),
+    )
+    try {
+      const model = await argosModel({ platform: { openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 } }, texts)
+      if (!model) throw new Error("Argos se quedó sin modelo")
+      const reply = await model.invoke(argosMessages(model.provider, ask, model.responses), "required")
+      expect(reply.tool_calls).toEqual([])
+      expect(JSON.parse(argosUnreadable(reply))).toMatchObject({
+        estado: "completed",
+        salida: [{ type: "reasoning" }, { type: "message", content: [{ text: "{periodo} cobraste {cobrado_dinero}." }] }],
+      })
+      const call = { name: "responder", args: { tipo: "otra_cosa" } }
+      expect(JSON.parse(argosUnreadable(reply, call, [{ code: "custom", path: ["tipo"], message: "no es una opción", input: "otra_cosa" }]))).toEqual({
+        estado: "completed",
+        llamada: "responder",
+        campos: ["tipo: no es una opción"],
+        args: { tipo: "otra_cosa" },
+      })
     } finally {
       await provider.close()
     }

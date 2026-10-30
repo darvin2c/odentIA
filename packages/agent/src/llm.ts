@@ -170,7 +170,9 @@ const noRedirectFetch: typeof fetch = (input, init) => fetch(input, { ...init, r
  * /v1/responses, sin temperatura y con la caché automática del proveedor:
  * `explicitCache` no se envía, y un corte propio va en un bloque `input_text`
  * con `prompt_cache_breakpoint`, porque a uno `text` LangChain le quita la
- * marca (así lo hace Recepción, ADR 0104).
+ * marca (así lo hace Recepción, ADR 0104). Por ese camino LangChain tampoco
+ * envía un `tool_choice` de texto («required», «auto», «none»): solo una
+ * herramienta por su nombre o un objeto, como `allowed_tools` (Argos).
  */
 export async function createConfiguredChatModel(
   spec: LlmSpec,

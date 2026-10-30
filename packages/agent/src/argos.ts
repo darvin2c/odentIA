@@ -154,9 +154,11 @@ export function argosSchemas(texts: ProductAgentTexts) {
     frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin más huecos que {periodo} y {periodo_antes})."),
     como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
     falta: z.string().describe(`En parcial o no_existe: lo que ${productName(texts)} no registra. Vacío si nada falta.`),
+    // Lo cercano solo vale en no_existe: en otra respuesta el modelo a veces lo deja fuera entero, y sin su valor por
+    // defecto «frase_cercana» no se leía (9 de 115 llamadas de eval:argos el 2026-10-30).
     calculo_cercano: z.string().default("").describe("En no_existe: el id de un cálculo con lo más cercano que sí existe. Vacío si no hay."),
     sql_cercana: z.string().default("").describe("Vacía: lo cercano va en calculo_cercano."),
-    frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
+    frase_cercana: z.string().default("").describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
     titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas ni periodo: «Lo cobrado», «Lo que más se vendió»."),
     // Texto y no una lista cerrada: una pantalla desconocida no bota la respuesta, vale «ninguna».
     pantalla: z.string().describe(`La pantalla de ${productName(texts)} donde se ve esto, para el botón «Abrir…»: ${ARGOS_SCREENS.join(", ")}.`),
@@ -383,16 +385,57 @@ export async function argosModel(
     ? await deps.createModel(spec)
     : await createConfiguredChatModel(spec, { explicitCache: true, temperature: 0, ...(reasoning === "none" ? {} : { reasoning }) })
   type Bindable = { bindTools: (tools: unknown[], options?: Record<string, unknown>) => { invoke: (messages: BaseMessage[]) => Promise<AIMessage> } }
+  const responses = viaResponses(model)
+  // Por /v1/responses, LangChain OpenAI (1.5.13, y aún la 1.8.0) solo envía la elección de una herramienta por su
+  // nombre: «required» no llegaba y el modelo quedaba libre de responder con texto, que no se lee. Va como
+  // `allowed_tools` con las tres, que llega tal cual y obliga lo mismo.
+  const choiceFor = (choice: string) => (responses && choice === "required" ? { type: "allowed_tools", mode: "required", tools: tools.map((item) => ({ type: "function", name: item.name })) } : choice)
   return {
     provider: spec.provider,
-    responses: viaResponses(model),
+    responses,
     invoke: async (messages, choice) => {
-      const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools(tools, { tool_choice: choice }) : model
+      const bound = typeof (model as unknown as Partial<Bindable>).bindTools === "function" ? (model as unknown as Bindable).bindTools(tools, { tool_choice: choiceFor(choice) }) : model
       const reply = await bound.invoke(messages)
       reportReplyUse(spec.provider, spec.modelName, reply)
       return reply as AIMessage
     },
   }
+}
+
+/** El problema que anota `onProblem` cuando la respuesta del modelo no se lee. */
+export const ARGOS_UNREADABLE = "el modelo respondió algo que no se lee"
+
+/**
+ * Lo que no cabe en el esquema de una herramienta, campo por campo, para que
+ * el modelo lo corrija: con solo «revisa sus campos» repetía la misma
+ * respuesta (el 2026-10-30, en 3 de 50 preguntas le faltó dos veces seguidas
+ * «frase_cercana» y la persona se quedó sin respuesta).
+ */
+function fieldsProblem(issues: z.ZodError["issues"], args: unknown): string {
+  return issues
+    .map((issue) => {
+      const field = issue.path.map(String).join(".")
+      const value = issue.path.reduce<unknown>((at, key) => (at !== null && typeof at === "object" ? (at as Record<PropertyKey, unknown>)[key] : undefined), args)
+      if (!field) return issue.message
+      return value === undefined ? `falta «${field}»` : `«${field}»: ${issue.message}`
+    })
+    .join("; ")
+}
+
+/**
+ * Lo que llegó del modelo cuando no se lee, para medir (`onProblem`): cómo
+ * terminó la respuesta y, sin herramienta, lo que devolvió tal cual (por
+ * /v1/responses, cada parte: pensar, texto, llamadas; por Chat Completions, el
+ * texto y las llamadas que no son JSON). Con una llamada que no cabe en su
+ * esquema, en qué campos y sus argumentos. El modelo ve el resultado sin
+ * personas (`argosResultForModel`), pero también la pregunta: lo que escribe
+ * puede repetir un nombre que ella diga.
+ */
+export function argosUnreadable(reply: AIMessage, call?: { name: string; args: unknown }, issues?: z.ZodError["issues"]): string {
+  const meta = reply.response_metadata as { status?: unknown; finish_reason?: unknown; incomplete_details?: unknown; output?: unknown }
+  const ended = { estado: meta.status ?? meta.finish_reason ?? null, ...(meta.incomplete_details ? { incompleta: meta.incomplete_details } : {}) }
+  if (call) return JSON.stringify({ ...ended, llamada: call.name, campos: issues?.map((issue) => `${issue.path.map(String).join(".") || "(todo)"}: ${issue.message}`) ?? [], args: call.args })
+  return JSON.stringify({ ...ended, ...(meta.output ? { salida: meta.output } : { texto: reply.content, no_json: reply.invalid_tool_calls ?? [] }) })
 }
 
 /** La fila del buscador (decisión D1): Jev la decide con solo el texto. */
@@ -550,8 +593,12 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   decisions?: PlatformDecisions
   /** Sustituye el modelo de decisión (pruebas); `null` = sin modelo de decisión. */
   decisionModel?: DecisionModel | null
-  /** Cada vez que la base rechaza una consulta del modelo o su frase no se lee (para medir; no trae datos). */
-  onProblem?: (problem: string) => void
+  /**
+   * Cada vez que la base rechaza una consulta del modelo o su frase no se lee (para medir; no trae datos). Si el
+   * modelo respondió algo que no se lee, `unread` es lo que escribió (`argosUnreadable`): solo para medir, como
+   * `eval:argos`, porque puede repetir lo que dice la pregunta.
+   */
+  onProblem?: (problem: string, unread?: string) => void
   /** Cuánto piensa el modelo antes de escribir el plan (para medir); sin él, `ARGOS_REASONING`. */
   reasoning?: ArgosReasoning
   /** Cada paso, dicho para la pantalla (D22): «Busqué «ortodoncia»: …», «Calculé lo cobrado». Sin datos de pacientes. */
@@ -880,8 +927,8 @@ export async function askArgos(
         messages.push(reply)
         const calls = reply.tool_calls ?? []
         if (!calls.length) {
-          // Una respuesta que no se lee (pasó una vez en 88) se pide otra vez, una sola.
-          deps.onProblem?.("el modelo respondió algo que no se lee")
+          // Una respuesta sin una llamada que se lea (solo texto, o argumentos que no son JSON) se pide otra vez, una sola.
+          deps.onProblem?.(ARGOS_UNREADABLE, argosUnreadable(reply))
           unreadable += 1
           if (unreadable > 1) break
           messages.push(new HumanMessage({ content: "Responde con una de tus herramientas." }))
@@ -892,9 +939,9 @@ export async function askArgos(
           if (call.name === TOOL_NAME) {
             const parsed = planSchema.safeParse(call.args)
             if (!parsed.success) {
-              deps.onProblem?.("el modelo respondió algo que no se lee")
+              deps.onProblem?.(ARGOS_UNREADABLE, argosUnreadable(reply, call, parsed.error.issues))
               unreadable += 1
-              content = "No se pudo leer tu respuesta: revisa sus campos y responde otra vez."
+              content = `No se pudo leer tu respuesta (${fieldsProblem(parsed.error.issues, call.args)}): corrígela y responde otra vez.`
             } else if (plan) content = "Ya respondiste."
             else if (withoutQuery(parsed.data)) {
               plan = parsed.data
@@ -915,10 +962,10 @@ export async function askArgos(
             }
           } else if (call.name === "calcular") {
             const parsed = calcularSchema.safeParse(call.args)
-            content = parsed.success ? await calculate(parsed.data) : "No se pudo leer el cálculo: revisa sus campos."
+            content = parsed.success ? await calculate(parsed.data) : `No se pudo leer el cálculo (${fieldsProblem(parsed.error.issues, call.args)}): revisa sus campos.`
           } else if (call.name === "buscar_nombres") {
             const parsed = buscarSchema.safeParse(call.args)
-            content = parsed.success ? await search(parsed.data.textos) : "No se pudo leer la búsqueda."
+            content = parsed.success ? await search(parsed.data.textos) : `No se pudo leer la búsqueda (${fieldsProblem(parsed.error.issues, call.args)}).`
           } else content = `«${call.name}» no es una de tus herramientas.`
           messages.push(new ToolMessage({ content, tool_call_id: call.id ?? call.name }))
         }
