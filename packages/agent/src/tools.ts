@@ -87,6 +87,7 @@ import {
   ServiceError,
   updateContact,
   webchatHandoffWhere,
+  webchatReplyRoutes,
   saveWebchatContactForConversation,
   agentTextsFor,
   emergencyAdviceFor,
@@ -321,6 +322,20 @@ export interface AgentToolCtx {
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
   claimNudged?: boolean
+  /**
+   * En el chat web consta dónde avisarle (`claimsOf`): lo guardó guardar_contacto en esta
+   * corrida, ya había por dónde (`webchatReplyRoutes`) o la clínica ya la conoce.
+   */
+  contactOnFile?: boolean
+  /** Ya se le pidió una vez en esta corrida que no diga que tiene dónde avisarle sin tenerlo. */
+  contactNudged?: boolean
+  /** Las herramientas que el modelo tiene a la vista en este paso: las del camino o todas (`graph.ts`). */
+  offeredTools?: ReadonlySet<string>
+  /**
+   * Con el caso ya en el equipo, se le pidió reescribir lo que iba a salir: el turno vuelve
+   * al modelo una vez en vez de terminar con el aviso fijo (`routeAfterTools`).
+   */
+  rewriteAsked?: boolean
   /**
    * Dónde buscó huecos en esta corrida (si encontró): la agenda que acompaña a los horarios abre
    * en esa sede y ese servicio, o en todas si buscó en más de una.
@@ -936,6 +951,39 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return null
   }
 
+  /**
+   * Lo que se pide reescribir antes de enviar. Con el caso ya en el equipo el turno terminaría
+   * con el aviso fijo y se perdería lo que el modelo iba a decir: vuelve a él (`routeAfterTools`).
+   */
+  const askRewrite = (mismatch: string): string => {
+    if (ctx.handedOff) ctx.rewriteAsked = true
+    return mismatch
+  }
+
+  /**
+   * En el chat web dice que guardó su WhatsApp o su correo, o que el equipo ya lo
+   * tiene, y no hay por dónde avisarle (caso 17 de latidIA, 29-oct): ni lo guardó
+   * en esta corrida (`guardar_contacto`) ni lo tenía de antes (`webchatReplyRoutes`).
+   * Vale para la respuesta, la despedida y el aviso de un pase; una vez por corrida.
+   */
+  const unsavedContact = async (text: string): Promise<string | null> => {
+    // En una simulación el canal es WhatsApp (`conversationChannel`): nunca llega más abajo.
+    if (ctx.contactNudged || ctx.contactOnFile || !claimsOf(text).contact) return null
+    if ((await conversationChannel(ctx)) !== "webchat") return null
+    const routes = await inOrg((tx) => webchatReplyRoutes(tx, ctx.orgId, ctx.contactId)).catch(() => null)
+    if (!routes) return null
+    if (routes.whatsapp || routes.correo) {
+      ctx.contactOnFile = true
+      return null
+    }
+    ctx.contactNudged = true
+    // Solo se nombra guardar_contacto si el turno la tiene a la vista (ADR 0038): «derivar» no la trae.
+    const save = (ctx.offeredTools ?? toolNames).has("guardar_contacto")
+      ? "Si te lo escribió, guárdalo antes con guardar_contacto; si guardar_contacto no lo aceptó, díselo con sus palabras y pídele otro; si no te lo dio, no digas que lo tienes."
+      : "No digas que lo tienes ni que se guardó; si hace falta para avisarle, pídeselo."
+    return `No enviado: dices que guardaste su WhatsApp o su correo, o que el equipo ya lo tiene, y aún no hay por dónde avisarle. ${save} Después vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
   const checkReply = async (text: string): Promise<{ verdict: ReplyVerdict | null; blocked: string | null }> => {
     if (ctx.verifyReplies === false) return { verdict: null, blocked: null }
     const verdict = verifyReply(text, ctx.evidence ?? [], await orgZone())
@@ -985,8 +1033,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text) ?? formulaAgain(text)
-      if (mismatch) return mismatch
+      const mismatch =
+        wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? (await unsavedContact(text)) ?? nameTwice(text) ?? formulaAgain(text)
+      if (mismatch) return askRewrite(mismatch)
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -1030,8 +1079,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       const pending = ctx.dryRun ? null : await inOrg((tx) => closurePendingReason(tx, ctx.orgId, ctx.conversationId))
       if (pending) return `No cerrado. ${pending}`
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text) ?? wrongTreatment(text)
-      if (mismatch) return mismatch
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? (await unsavedContact(text))
+      if (mismatch) return askRewrite(mismatch)
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
       if (ctx.dryRun) {
@@ -2298,8 +2347,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Antes de registrar nada: el aviso en otro idioma o en otro trato se vuelve a pedir.
-      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? formulaAgain(notice)) : null
-      if (mismatch) return mismatch
+      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? (await unsavedContact(notice)) ?? formulaAgain(notice)) : null
+      if (mismatch) return askRewrite(mismatch)
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
       const annotate = (sent: boolean) => {
@@ -2399,10 +2448,16 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if ((await conversationChannel(ctx)) !== "webchat") return "Solo sirve en el chat de la web: en este canal ya tienes cómo responderle."
       try {
         const saved = await inOrg((tx) => saveWebchatContactForConversation(tx, ctx.orgId, ctx.conversationId, { whatsapp: whatsapp ?? null, email: email ?? null }))
+        ctx.contactOnFile = true
         const where = [saved?.whatsapp ? `WhatsApp ${saved.whatsapp}` : null, saved?.email ? `correo ${saved.email}` : null].filter(Boolean).join(" y ")
         return `Guardado: le avisaremos por ${where || "lo que dejó"}. Si ya dijo que sí a una cita propuesta, confírmala ahora con confirmar_propuesta (la del «Estado del caso»); si no, pídele su sí.`
       } catch (error) {
-        if (error instanceof ServiceError) return `No se guardó: ${error.message} Díselo con esas palabras y pídeselo de nuevo.`
+        if (error instanceof ServiceError) {
+          // «Ya tenemos cómo avisarte»: quien es paciente o escribe por otro canal (`saveVisitorContact`).
+          // Decírselo no es afirmar algo que no consta.
+          if (error.code === "WEBCHAT_CONTACT_KNOWN") ctx.contactOnFile = true
+          return `No se guardó: ${error.message} Díselo con esas palabras y pídeselo de nuevo.`
+        }
         throw error
       }
     },

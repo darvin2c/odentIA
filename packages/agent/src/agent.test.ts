@@ -2433,6 +2433,82 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
   expect((await inOrg((tx) => getProbar(tx, "org_a", fx.actorId))).conversationId).toBeNull()
 })
 
+it("en el chat web no dice que guardó su WhatsApp sin guardarlo, ni cuando guardar_contacto lo rechazó (caso 17 de latidIA, 29-oct)", async () => {
+  const stamp = Date.now()
+  const actors = [`u-contacto-a-${stamp}`, `u-contacto-b-${stamp}`]
+  await ownerDb.insert(user).values(actors.map((id) => ({ id, name: id, email: `${id}@example.test` })))
+  for (const id of actors) {
+    await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${`m-${id}`}, 'org_a', ${id}, 'owner', now())`)
+  }
+  const inOrg = <T>(fn: Parameters<typeof withOrgContext<T>>[2]) => withOrgContext(appDb, "org_a", fn)
+  // Con WhatsApp conectado, el número que deja sirve para avisarle si no es de otra persona (`webchatReplyRoutes`).
+  const [connected] = await ownerDb.execute<{ id: string }>(
+    sql`select id from channel_connection where organization_id = 'org_a' and channel = 'whatsapp' and status = 'active' limit 1`,
+  )
+  if (!connected) {
+    const whatsapp = await inOrg((tx) =>
+      createConnection(tx, "org_a", KEY, { channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WhatsApp", config: { phoneNumberId: "P", wabaId: "W", accessToken: "T", appSecret: "S" } }, { fetch, validateExternal: false }),
+    )
+    onTestFinished(async () => {
+      await ownerDb.execute(sql`delete from channel_connection where id = ${whatsapp.id}`)
+    })
+  }
+  const writeAs = async (actor: string, text: string) => {
+    const opened = await inOrg((tx) => openProbar(tx, "org_a", actor, { secretsKey: KEY }))
+    return inOrg((tx) =>
+      ingestInbound(
+        tx,
+        { orgId: "org_a", connectionId: opened.connectionId, event: buildWebchatInbound(opened.sessionId, { text, clientMessageId: randomUUID() }) },
+        webChatAdapter,
+        { storage: storageStub, fetch, secretsKey: KEY },
+      ))
+  }
+  const lastToolText = (model: ScriptedModel, call: number) => String((model.seen[call] ?? []).filter((m) => m.getType() === "tool").at(-1)?.content)
+  const SAVED = "Ya guardé tu WhatsApp para que puedan avisarte."
+
+  // Sin guardarlo no sale; guardado, sí.
+  const first = await writeAs(actors[0]!, "mi WhatsApp es 987 654 321")
+  const saves = new ScriptedModel((_messages, call) =>
+    call === 2 ? toolCall("guardar_contacto", { whatsapp: "987 654 321" }, "c-guarda") : toolCall("send_reply", { text: SAVED }, `c-envio-${call}`),
+  )
+  expect(await runScripted(saves, first.conversationId, first.messageId)).toBe("done")
+  expect(lastToolText(saves, 1)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
+  expect(lastToolText(saves, 2)).toContain("Guardado: le avisaremos por WhatsApp")
+  expect(await agentMessages(first.conversationId)).toEqual([SAVED])
+
+  // Ese número ya es de otra persona: guardar_contacto lo rechaza y decir que lo guardó no sale.
+  const second = await writeAs(actors[1]!, "mi WhatsApp es 987 654 321")
+  const refused = new ScriptedModel((_messages, call) =>
+    call === 1
+      ? toolCall("guardar_contacto", { whatsapp: "987 654 321" }, "r-guarda")
+      : toolCall("send_reply", { text: call === 2 ? "Listo, ya guardé tu WhatsApp." : "No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?" }, `r-envio-${call}`),
+  )
+  expect(await runScripted(refused, second.conversationId, second.messageId)).toBe("done")
+  expect(lastToolText(refused, 1)).toContain("No se guardó: No podemos avisarte por ese WhatsApp")
+  expect(lastToolText(refused, 2)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
+  expect(await agentMessages(second.conversationId)).toEqual(["No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?"])
+
+  // Con el caso ya en el equipo (una señal de alarma lo pasa): no se le nombra guardar_contacto,
+  // que ese camino no trae, y el turno vuelve al modelo en vez de cerrar con el aviso fijo.
+  const actor = `u-contacto-c-${stamp}`
+  await ownerDb.insert(user).values({ id: actor, name: actor, email: `${actor}@example.test` })
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${`m-${actor}`}, 'org_a', ${actor}, 'owner', now())`)
+  const third = await writeAs(actor, "me duele el pecho, mi WhatsApp es 987 111 222")
+  const NOTICE = "Llama ahora al 106. Una persona del equipo continuará la atención; déjanos aquí tu WhatsApp para avisarte."
+  const derived = new ScriptedModel((_messages, call) =>
+    toolCall(
+      "request_human_handoff",
+      { reason: "Aviso al interlocutor", summary: "Aviso al interlocutor", message: call === 1 ? "Llama ahora al 106. Ya guardé tu WhatsApp para avisarte." : NOTICE },
+      `d-aviso-${call}`,
+    ),
+  )
+  expect(await runScripted(derived, third.conversationId, third.messageId)).toBe("done")
+  expect(derived.offered[0]).not.toContain("guardar_contacto")
+  expect(lastToolText(derived, 1)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
+  expect(lastToolText(derived, 1)).not.toContain("guardar_contacto")
+  expect(await agentMessages(third.conversationId)).toEqual([NOTICE])
+})
+
 it("una corrección aprobada llega a la siguiente respuesta, queda en su traza y retirarla la quita", async () => {
   const stamp = Date.now()
   const adminId = `u-aprende-${stamp}`
