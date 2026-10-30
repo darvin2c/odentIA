@@ -454,8 +454,12 @@ const THROTTLE_CODES = new Set([4, 80007, 130429, 131056])
 
 const SEND_FAILURE_WORDS = new Set(Object.values(WHATSAPP_SEND_ERROR_WORDS))
 
-/** Rechazos que son de la cuenta de la clínica (pago, clave, ritmo), no de la persona. */
-const ACCOUNT_FAILURE_WORDS = new Set([WHATSAPP_SEND_ERROR_WORDS[131042], WHATSAPP_SEND_ERROR_WORDS[190], ACCOUNT_THROTTLE_WORDS])
+/**
+ * Rechazos que son de la cuenta de la clínica (pago, clave), no de la persona.
+ * El de ritmo no: no hay nada que arreglar en la conexión, y a quien no le llegó
+ * su aviso hay que llamarle.
+ */
+const ACCOUNT_FAILURE_WORDS = new Set([WHATSAPP_SEND_ERROR_WORDS[131042], WHATSAPP_SEND_ERROR_WORDS[190]])
 
 /**
  * El envío no salió por la cuenta de WhatsApp de la clínica: se arregla una vez

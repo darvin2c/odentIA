@@ -1077,11 +1077,15 @@ it("si su ficha ya tenía su número como WhatsApp, queda una sola identidad con
   const one = "PE.11122233344455566677"
   const hidden = await ingest("org_a", connId, waEvent("wamid.f1", `wa:${one}`, one))
   const person = (await contactOf(hidden.conversationId)).contactId
+  const blockedAt = new Date("2026-10-01T12:00:00Z")
+  await ownerDb.update(contactIdentity).set({ providerBlockedAt: blockedAt, isPrimary: true }).where(eq(contactIdentity.providerUserId, one))
   await claim(person, "51911100003")
   const known = await ingest("org_a", connId, waEvent("wamid.f2", "wa:51911100003", one))
   expect(known.conversationId).toBe(hidden.conversationId)
   expect((await contactOf(hidden.conversationId)).externalThreadId).toBe("wa:51911100003")
   expect(await identitiesOf(person)).toEqual([{ externalUserId: "wa:51911100003", providerUserId: one }])
+  // Lo que sabía la identidad sin número (principal, bloqueada en WhatsApp) pasa a la del número.
+  expect((await ownerDb.select().from(contactIdentity).where(eq(contactIdentity.contactId, person)))[0]).toMatchObject({ isPrimary: true, providerBlockedAt: blockedAt })
 
   // Con una conversación ya abierta por su número: sigue en esa, y la anterior queda como su historial.
   const two = "PE.22233344455566677788"

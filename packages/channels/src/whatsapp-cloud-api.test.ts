@@ -853,9 +853,9 @@ it("un límite de ritmo de Meta no salió y se puede reintentar; el de calidad d
   const quality = send(131048)
   await expect(quality).rejects.toBeInstanceOf(ProviderRejectedError)
   await expect(quality).rejects.not.toBeInstanceOf(ProviderThrottledError)
-  // El de la cuenta de la clínica no deja una tarea por persona; el de una persona, sí.
+  // Nada que arreglar en la conexión: a quien no le llegó su aviso, se le llama.
   const reason = (code: number) => send(code).then(() => null, (error: Error) => error.message)
-  expect(isWhatsAppAccountFailure(await reason(130429))).toBe(true)
+  expect(isWhatsAppAccountFailure(await reason(130429))).toBe(false)
   expect(isWhatsAppAccountFailure(await reason(131056))).toBe(false)
 })
 

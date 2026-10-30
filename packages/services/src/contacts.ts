@@ -963,8 +963,10 @@ async function moveHiddenThreads(
     update conversation c
        set external_thread_id = ${address}, contact_identity_id = ${toIdentityId}, updated_at = now()
      where c.organization_id = ${orgId}
-       and c.contact_identity_id = ${from.id}
+       and (c.contact_identity_id = ${from.id} or c.contact_identity_id is null)
        and c.external_thread_id = ${from.externalUserId}
+       and c.channel_connection_id in (
+         select cc.id from channel_connection cc where cc.organization_id = ${orgId} and cc.channel = ${from.channel})
        and not exists (
          select 1 from conversation o
           where o.channel_connection_id = c.channel_connection_id and o.external_thread_id = ${address})`)
