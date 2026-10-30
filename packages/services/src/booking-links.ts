@@ -8,7 +8,7 @@ import { channelConnection, contact, contactIdentity, conversation } from "@oden
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { addAgentCaseNote } from "./agent-case.js"
-import { createProposal } from "./agent-operations.js"
+import { createProposal, expireBookingProposals } from "./agent-operations.js"
 import { createAppointment } from "./appointments.js"
 import {
   assertOwnAppointmentChangeable,
@@ -182,6 +182,16 @@ export interface CreateBookingLinkInput {
   createdBy?: string | null
 }
 
+export interface IssuedBookingLink {
+  linkId: string
+  token: string
+  expiresAt: Date
+  patientName: string | null
+  /** Para quién reserva cuando no es la propia persona (un hijo, alguien a su cargo); nulo si es ella o aún no es paciente. */
+  forName: string | null
+  needsRegistration: boolean
+}
+
 /**
  * «Su enlace» para la persona de una conversación, con la reserva abierta: lo
  * que envía el agente (`enviar_enlace_cita`) y lo que prepara recepción en la
@@ -192,7 +202,31 @@ export async function createBookingLink(
   orgId: string,
   input: CreateBookingLinkInput,
   deps: { secretsKey: Buffer },
-): Promise<{ token: string; expiresAt: Date; patientName: string | null; needsRegistration: boolean }> {
+): Promise<IssuedBookingLink> {
+  return (await bookingLinkFor(tx, orgId, input, deps, false))!
+}
+
+/**
+ * La agenda que acompaña a los horarios que ofrece el agente: el mismo «Su enlace», abierto
+ * para reservar en la sede y el servicio de esos horarios. Nula si el paciente ya tiene una
+ * cita por venir: la página mostraría esa cita para cambiarla, no la agenda para reservar otra.
+ */
+export async function issueAgendaLink(
+  tx: Db,
+  orgId: string,
+  input: Omit<CreateBookingLinkInput, "createdBy">,
+  deps: { secretsKey: Buffer },
+): Promise<IssuedBookingLink | null> {
+  return bookingLinkFor(tx, orgId, input, deps, true)
+}
+
+async function bookingLinkFor(
+  tx: Db,
+  orgId: string,
+  input: CreateBookingLinkInput,
+  deps: { secretsKey: Buffer },
+  onlyWithoutAppointment: boolean,
+): Promise<IssuedBookingLink | null> {
   const [conv] = await tx
     .select({ contactId: conversation.contactId, isTest: conversation.isTest, personIsTest: contact.isTest })
     .from(conversation)
@@ -231,6 +265,7 @@ export async function createBookingLink(
       .limit(1)
     if (!site) throw branchNotFound()
   }
+  if (onlyWithoutAppointment && chosen && (await nextAppointmentOf(tx, orgId, chosen.id, new Date()))) return null
   const issued = await issuePersonalLink(
     tx,
     orgId,
@@ -245,7 +280,14 @@ export async function createBookingLink(
     },
     deps,
   )
-  return { token: issued.token, expiresAt: issued.expiresAt, patientName: chosen?.displayName ?? null, needsRegistration: !chosen }
+  return {
+    linkId: issued.linkId,
+    token: issued.token,
+    expiresAt: issued.expiresAt,
+    patientName: chosen?.displayName ?? null,
+    forName: chosen && chosen.relationship !== "self" ? chosen.displayName : null,
+    needsRegistration: !chosen,
+  }
 }
 
 /** El enlace por su huella. Un enlace desconocido no existe: no se distingue de uno mal escrito. */
@@ -288,6 +330,14 @@ interface ShownAppointment {
 /** Una cita se puede cambiar, cancelar o confirmar mientras siga en pie y no haya empezado (`own-appointment.ts`). */
 const isChangeable = (row: { status: string; startsAt: Date }): boolean => ownAppointmentChangeable(row)
 
+const SHOWN_COLUMNS = {
+  id: appointment.id,
+  version: appointment.version,
+  branchId: appointment.branchId,
+  status: appointment.status,
+  startsAt: appointment.startsAt,
+}
+
 /**
  * La cita que muestra el enlace: la suya (la que reservó con él o con la que
  * se envió) mientras no pase su hora, o la próxima en pie del paciente
@@ -295,16 +345,9 @@ const isChangeable = (row: { status: string; startsAt: Date }): boolean => ownAp
  */
 async function shownAppointment(tx: Db, orgId: string, link: LinkRow, patientId: string | null): Promise<ShownAppointment | null> {
   const now = new Date()
-  const columns = {
-    id: appointment.id,
-    version: appointment.version,
-    branchId: appointment.branchId,
-    status: appointment.status,
-    startsAt: appointment.startsAt,
-  }
   if (link.appointmentId) {
     const [own] = await tx
-      .select(columns)
+      .select(SHOWN_COLUMNS)
       .from(appointment)
       .where(and(eq(appointment.organizationId, orgId), eq(appointment.id, link.appointmentId)))
       .limit(1)
@@ -312,8 +355,13 @@ async function shownAppointment(tx: Db, orgId: string, link: LinkRow, patientId:
     if (own && own.startsAt > now && (isChangeable(own) || own.status === "cancelada")) return own
   }
   if (!patientId || link.expiresAt <= now) return null
+  return nextAppointmentOf(tx, orgId, patientId, now)
+}
+
+/** La próxima cita en pie del paciente: la que muestra su enlace mientras está vigente. */
+async function nextAppointmentOf(tx: Db, orgId: string, patientId: string, now: Date): Promise<ShownAppointment | null> {
   const [next] = await tx
-    .select(columns)
+    .select(SHOWN_COLUMNS)
     .from(appointment)
     .where(
       and(
@@ -838,6 +886,8 @@ export async function reserveBookingLink(
     .update(appointmentBookingLink)
     .set({ appointmentId: created.id, ...(forTreatment ? {} : { usedAt: new Date() }) })
     .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+  // La cita que esperaba su sí en el chat ya no se reserva: su «sí» de después reservaría otra.
+  if (link.row.conversationId) await expireBookingProposals(tx, orgId, link.row.conversationId)
   // Quien abrió el enlace (la madre que reserva para su hijo) es quien conversó: su conversación pasa a «Gestiona» (ADR 0085).
   await refreshConversationTier(tx, orgId, { contactId: link.row.contactId, at: new Date() })
   const view = await appointmentView(tx, orgId, created.id)

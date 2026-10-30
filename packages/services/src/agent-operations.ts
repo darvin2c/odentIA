@@ -1103,36 +1103,14 @@ export const GAPS_PER_PROFESSIONAL_PER_DAY = 3
 export const GAPS_SHOWN = 20
 
 /**
- * De los huecos de un profesional en un día, los que recibe el agente: el primero, el último y
- * los de en medio repartidos. Con los primeros nada más, quien tenía la tarde libre solo
- * aparecía a primera hora y la persona creía que no había más (auditoría del ADR 0104).
- */
-function spreadOverEachDay<T extends { startsAt: string; professionalUserId: string }>(slots: T[], timeZone: string, perDay: number): T[] {
-  const day = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
-  const byDay = new Map<string, T[]>()
-  for (const slot of slots) {
-    const key = `${slot.professionalUserId}|${day.format(new Date(slot.startsAt))}`
-    byDay.set(key, [...(byDay.get(key) ?? []), slot])
-  }
-  const kept = new Set<T>()
-  for (const group of byDay.values()) {
-    if (group.length <= perDay) {
-      for (const slot of group) kept.add(slot)
-      continue
-    }
-    for (let i = 0; i < perDay; i++) kept.add(group[Math.round((i * (group.length - 1)) / Math.max(1, perDay - 1))]!)
-  }
-  return slots.filter((slot) => kept.has(slot))
-}
-
-/**
  * Huecos libres según Agenda (`listAvailableSlots`): respeta horario semanal
  * del profesional, bloqueos y citas ocupantes, y con servicio ofrece solo a
  * quien lo atiende (la misma regla que recepción y el enlace). Hasta tres por
- * profesional y día, repartidos en su jornada y ordenados por hora: una sola
- * persona no se queda con la lista y se ve también la tarde. Sin horario
- * configurado no hay huecos (el agente debe decirlo, no inventarlos). Si
- * `truncated`, acota el rango o pagina por días.
+ * profesional y día, repartidos en su jornada (`perProfessionalPerDay`, antes
+ * del tope de la agenda) y ordenados por hora: una sola persona no se queda con
+ * la lista y se ve también la tarde. Sin horario configurado no hay huecos (el
+ * agente debe decirlo, no inventarlos). Si `truncated`, acota el rango o pagina
+ * por días.
  */
 export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): Promise<FreeGapResult> {
   if (!input.branchId?.trim()) throw validation("branchId es obligatoria para buscar huecos")
@@ -1170,10 +1148,10 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     ...(durationMin === undefined ? {} : { durationMin }),
     // El agente nunca ofrece una hora que ya pasó.
     notBefore: new Date().toISOString(),
+    perProfessionalPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
     ...(input.forTest ? { forTest: true } : {}),
   })
-  const spread = spreadOverEachDay(slots, timeZone, GAPS_PER_PROFESSIONAL_PER_DAY)
-  const shown = spread.slice(0, GAPS_SHOWN)
+  const shown = slots.slice(0, GAPS_SHOWN)
   const ids = [...new Set([...shown.map((s) => s.professionalUserId), ...(attending?.professionalUserIds ?? [])])]
   const names = ids.length
     ? new Map(
@@ -1189,7 +1167,7 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
       professionalName: names.get(s.professionalUserId) ?? null,
       roomId: s.roomId,
     })),
-    truncated: truncated || spread.length > GAPS_SHOWN,
+    truncated: truncated || slots.length > GAPS_SHOWN,
     timeZone,
     attending: attending
       ? {
@@ -2042,6 +2020,44 @@ function validatePayload(action: ProposalAction, payload: Record<string, unknown
   }
 }
 
+/** Deja vencidas propuestas que esperaban el sí: su «sí» de después ya no las ejecuta. */
+async function expireProposals(tx: Db, orgId: string, ids: string[], actorUserId: string | null, metadata: Record<string, unknown>): Promise<void> {
+  for (const id of ids) {
+    await tx
+      .update(agentProposal)
+      .set({ status: "expirada", updatedAt: new Date() })
+      .where(and(eq(agentProposal.id, id), eq(agentProposal.status, "propuesta")))
+    await tx.insert(auditEvent).values({
+      organizationId: orgId,
+      actorUserId,
+      action: "agent.proposal_expired",
+      entity: "agent_proposal",
+      entityId: id,
+      metadata,
+    })
+  }
+}
+
+/**
+ * La persona reservó por su enlace: la cita que esperaba su sí en esa conversación ya no se
+ * reserva. Si no, con la agenda que acompaña a los horarios, reservaba en la página y su «sí»
+ * de después reservaba otra (revisión del PR 355).
+ */
+export async function expireBookingProposals(tx: Db, orgId: string, conversationId: string): Promise<void> {
+  const pending = await tx
+    .select({ id: agentProposal.id })
+    .from(agentProposal)
+    .where(
+      and(
+        eq(agentProposal.organizationId, orgId),
+        eq(agentProposal.conversationId, conversationId),
+        eq(agentProposal.action, "reservar_cita"),
+        eq(agentProposal.status, "propuesta"),
+      ),
+    )
+  await expireProposals(tx, orgId, pending.map((row) => row.id), null, { bookedByLink: true })
+}
+
 /**
  * Crea una propuesta idempotente por clave, siempre en una conversación. Si el
  * acto es `directo`, se ejecuta en el mismo acto; si lo confirma el
@@ -2144,20 +2160,7 @@ export async function createProposal(
         ? pending.every((row) => row.action === "decidir_presupuesto")
         : appointment(input.action) && pending.every((row) => appointment(row.action)))
     if (replaces) {
-      for (const row of pending) {
-        await tx
-          .update(agentProposal)
-          .set({ status: "expirada", updatedAt: new Date() })
-          .where(and(eq(agentProposal.id, row.id), eq(agentProposal.status, "propuesta")))
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: input.actorUserId ?? null,
-          action: "agent.proposal_expired",
-          entity: "agent_proposal",
-          entityId: row.id,
-          metadata: { replaced: true },
-        })
-      }
+      await expireProposals(tx, orgId, pending.map((row) => row.id), input.actorUserId ?? null, { replaced: true })
     } else if (pending.length > 0 && input.action !== "enviar_mensaje") {
       throw new ServiceError(
         "PROPOSAL_PENDING_CONFIRM",

@@ -58,7 +58,15 @@ import {
   addAgentGuidance,
   removeAgentGuidance,
 } from "@odentia/services"
-import { closeConversationWith, configurePublicLinks, getPatientRegistrationConfig, professionalRef, savePatientRegistrationConfig } from "@odentia/services"
+import {
+  closeConversationWith,
+  configurePublicLinks,
+  getPatientRegistrationConfig,
+  professionalRef,
+  reserveBookingLink,
+  resolvePersonalLinkRefs,
+  savePatientRegistrationConfig,
+} from "@odentia/services"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
@@ -76,7 +84,7 @@ import { AIMessage, SystemMessage, type BaseMessage, type ToolMessage } from "@l
 import type { ChatResult } from "@langchain/core/outputs"
 import { user } from "@odentia/db/schema/auth"
 import { branch, auditEvent } from "@odentia/db/schema/org"
-import { appointment } from "@odentia/db/schema/agenda"
+import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { insertTestPatients } from "@odentia/services/test-patient"
 
@@ -2551,33 +2559,81 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   expect(refused).toContain("no tiene activo el registro de pacientes en línea")
 })
 
-it("con los horarios va siempre su enlace para ver toda la agenda (lo pidió una clínica)", async () => {
+it("con los horarios va siempre su enlace para ver toda la agenda: lo agrega el sistema al enviar (lo pidió una clínica)", async () => {
   const { conversationId } = await ingestText("tg:agenda-entera", "evt-agenda-entera-1", "¿Tienen cita el lunes?")
   const fx = await bookingFixture(conversationId, "agenda-entera")
-  const ctx: AgentToolCtx = {
+  // Cada corrida arma su contexto; lo que ya hizo en ella va en toolsUsed.
+  const runCtx = (triggerId: string, toolsUsed: string[] = []): AgentToolCtx => ({
     db: appDb, orgId: "org_a", conversationId, contactId: fx.contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
-    toolsUsed: [], usage: emptyUsage(),
+    triggerId, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed, usage: emptyUsage(),
     publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" },
-  }
+  })
+  const links = () => withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, fx.contactId)))
+  const withAgenda = async () => (await agentMessages(conversationId)).filter((body) => body.includes("La agenda completa"))
   const monday = upcomingMonday()
   const range = { branchId: fx.branchId, from: monday.toISOString(), to: new Date(monday.getTime() + 86_400_000).toISOString() }
-  const search = () => makeAgentTools(ctx).find((item) => item.name === "buscar_huecos")!.invoke(range)
-  const first = String(await search())
-  expect(first).toContain("hasta tres por profesional y día, repartidos en su jornada")
-  expect(first).toMatch(/Su enlace para ver toda la agenda y elegir el día, la hora y con quién: https:\/\/norte\.odentia\.test\/reserva\?token=[0-9a-f]{64}/)
-  // Una segunda búsqueda en la misma corrida no lo vuelve a traer: va una vez en la respuesta.
-  expect(String(await search())).not.toContain("/reserva?token=")
-  const url = ctx.bookingLinkUrl!
-  // La respuesta que ofrece horarios sin la agenda no sale: se pide una vez agregarla.
-  const reply = makeAgentTools(ctx).find((item) => item.name === "send_reply")!
-  const blocked = String(await reply.invoke({ text: "Tengo el lunes a las 9:00 o a las 11:30. ¿Cuál prefieres?" }))
-  expect(blocked).toContain("No enviado: le ofreces horarios sin su enlace para ver toda la agenda")
-  expect(blocked).toContain(url)
-  // En la corrida siguiente vuelve a ir con los horarios.
-  ctx.bookingLinkUrl = undefined
-  ctx.agendaNudged = false
-  expect(String(await search())).toContain(url)
+  const search = async (ctx: AgentToolCtx) => {
+    const found = String(await makeAgentTools(ctx).find((item) => item.name === "buscar_huecos")!.invoke(range))
+    // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
+    ctx.evidence = [{ kind: "agenda", source: "Agenda: horarios disponibles", text: found }]
+    return found
+  }
+  const offer = async (ctx: AgentToolCtx, found: string) => {
+    const [first, second] = [...found.matchAll(/, (\d{2}:\d{2})–/g)].map((match) => match[1])
+    await makeAgentTools(ctx).find((item) => item.name === "send_reply")!.invoke({ text: `Tengo el lunes a las ${first} o a las ${second}. ¿Cuál prefieres?` })
+  }
+
+  const ctx = runCtx("trig-agenda-1")
+  const found = await search(ctx)
+  // Buscar solo lee: el enlace no llega al modelo ni se crea al buscar.
+  expect(found).toContain("hasta 3 por profesional y día, repartidos en su jornada")
+  expect(found).toContain("el sistema agrega al final de tu respuesta su enlace para ver toda la agenda")
+  expect(found).not.toContain("/reserva?token=")
+  expect(await links()).toHaveLength(0)
+  await offer(ctx, found)
+  // Sale con la agenda, abierta en la sede donde buscó; el mensaje guarda la referencia y el token se pone al entregarlo.
+  const [sent] = await withAgenda()
+  expect(sent).toMatch(/\n\nLa agenda completa, para elegir el día, la hora y con quién: https:\/\/norte\.odentia\.test\/reserva\?token=\{\{su-enlace:[0-9a-f-]{36}\}\}$/)
+  expect(resolvePersonalLinkRefs(sent!, KEY)).toMatch(/\/reserva\?token=[0-9a-f]{64}$/)
+  const [link] = await links()
+  expect(link).toMatchObject({ booking: true, branchId: fx.branchId, serviceId: null })
+  expect(sent).toContain(link!.id)
+
+  // Con una cita propuesta en la corrida, la respuesta habla de esa cita: no lleva la agenda.
+  const proposing = runCtx("trig-agenda-2")
+  const again = await search(proposing)
+  const line = again.split("\n").find((text) => text.startsWith("- ")) ?? ""
+  await makeAgentTools(proposing).find((item) => item.name === "proponer_cita")!.invoke({
+    patientId: fx.patientId,
+    professionalUserId: line.match(/profesional ([^\]\s]+)/)?.[1],
+    roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)?.[1],
+    startsAt: line.match(ISO_INSTANT)?.[0],
+    branchId: fx.branchId,
+  })
+  const pending = () => withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
+  expect((await pending()).map((item) => item.action)).toEqual(["reservar_cita"])
+  proposing.toolsUsed.push("proponer_cita")
+  await offer(proposing, again)
+  expect(await withAgenda()).toHaveLength(1)
+
+  // Si reserva por la agenda mientras esa cita espera su sí, la propuesta vence: su «sí» de después no reserva otra.
+  const token = /token=([0-9a-f]{64})/.exec(resolvePersonalLinkRefs(sent!, KEY))![1]!
+  const other = again.split("\n").filter((text) => text.startsWith("- ")).at(-1) ?? ""
+  await withOrgContext(appDb, "org_a", (tx) =>
+    reserveBookingLink(tx, "org_a", token, {
+      branchId: fx.branchId,
+      startsAt: other.match(ISO_INSTANT)![0],
+      professionalUserId: fx.professionalId,
+      roomId: other.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
+    }, { secretsKey: KEY }))
+  expect(await pending()).toHaveLength(0)
+
+  // Con esa cita por venir, la página le mostraría la cita y no la agenda: los horarios siguientes salen sin ella.
+  const later = runCtx("trig-agenda-3")
+  await offer(later, await search(later))
+  expect(await withAgenda()).toHaveLength(1)
 })
 
 it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {

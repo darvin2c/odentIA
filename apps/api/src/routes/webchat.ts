@@ -227,7 +227,9 @@ export function createWebchatPublicRoute(deps: WebchatPublicDeps) {
     const tooMany = await limited(c, `webchat:poll:${found.connection.id}:${read.sessionId}`, LIMITS.poll)
     if (tooMany) return tooMany
     // Recién aquí lo `sent` pasa a `delivered`: el visitante lo recibió.
-    const poll = await withOrgContext(deps.db, found.orgId, (tx) => pollWebchatVisitor(tx, found.orgId, found.connection.id, read.sessionId))
+    const poll = await withOrgContext(deps.db, found.orgId, (tx) =>
+      pollWebchatVisitor(tx, found.orgId, found.connection.id, read.sessionId, { secretsKey: deps.secretsKey }),
+    )
     return c.json({ data: poll })
   })
 
