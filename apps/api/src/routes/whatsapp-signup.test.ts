@@ -746,7 +746,9 @@ describe("la dirección de avisos de la app de odentIA", () => {
       values ('u-org_g', 'Dueña', 'org_g@example.com', true, now(), now())`)
     await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at")
       values ('m-org_g', 'org_g', 'u-org_g', 'owner', now())`)
-    const seconds = (offset: number) => Math.floor(Date.now() / 1000) + offset
+    // Una sola hora de partida: si cada llamada leyera el reloj, el aviso y lo esperado podían caer en segundos distintos.
+    const start = Math.floor(Date.now() / 1000)
+    const seconds = (offset: number) => start + offset
     const accountUpdate = (time: number, value: Record<string, unknown>) => ({ id: "7007", time, changes: [{ field: "account_update", value }] })
     const removed = (time: number) =>
       accountUpdate(time, {

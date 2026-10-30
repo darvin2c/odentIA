@@ -406,7 +406,8 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await remove.getByRole("button", { name: "Eliminar", exact: true }).click()
   await expect(own).toHaveCount(0)
   await expect(ownPanel).toBeHidden()
-  expect((await messagesOf(page, org.slug, wa.id)).some((item) => item.title === "Tu trabajo ya está listo")).toBe(false)
+  // La lista se oculta antes de que el servidor termine de eliminarlo: se espera a que deje de estar.
+  await expect.poll(async () => (await messagesOf(page, org.slug, wa.id)).some((item) => item.title === "Tu trabajo ya está listo")).toBe(false)
   // Uno que viene con odentIA no ofrece eliminarse, y el servidor tampoco lo deja.
   await byTeam.getByRole("listitem").filter({ hasText: "Retomar la conversación" }).getByRole("button").click()
   const resumePanel = surface(page, { name: "Retomar la conversación", exact: true })
