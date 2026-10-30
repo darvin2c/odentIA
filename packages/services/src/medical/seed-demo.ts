@@ -459,7 +459,11 @@ export async function seedMedicalDemo(
   }
   await db.transaction(async (tx) => {
     for (const [key, patientGuide] of Object.entries(guides)) {
-      await updateService(tx, ORG, VELA_ID, prenatalId(key), { patientGuide })
+      // Ecografías y muestras se cobran por cada una; el paquete, una vez.
+      await updateService(tx, ORG, VELA_ID, prenatalId(key), {
+        patientGuide,
+        ...(key === "control-prenatal-7-o-mas" ? {} : { billingMode: "session" }),
+      })
     }
     const startedAt = new Date(lima(0, "09:00"))
     const [visit] = await tx
