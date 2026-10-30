@@ -15,7 +15,7 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter } from "./encounters.js"
-import { buildBudgetSnapshot, renderBudgetPdf } from "./financial-document-pdf.js"
+import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { addPlanItem } from "./plan.js"
 import { createPromotion } from "./promotions.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"

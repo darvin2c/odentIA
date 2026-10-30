@@ -11,6 +11,10 @@ import {
   deliverBudget,
   duplicateBudgetOption,
   getBudgetDetail,
+  getBudgetPresentation,
+  BUDGET_OPTION_NAME_MAX,
+  BUDGET_OPTION_TEXT_MAX,
+  BUDGET_TEXT_MAX,
   budgetsSeenInPortal,
   listBudgets,
   operationBodySchema,
@@ -21,7 +25,9 @@ import {
   reviseBudget,
   sendBudget,
   updateBudgetDraft,
+  updateBudgetPresentation,
 } from "@odentia/services"
+import { patientGuideSchema } from "@odentia/clinical"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
@@ -36,6 +42,11 @@ function forbid(c: Context) {
  * - POST /:id/budgets { planId, itemIds, title?, notes? } → 201
  * - GET /:id/budgets/:budgetId → detalle con líneas + totales
  * - PATCH /:id/budgets/:budgetId { title?, notes? } (solo borrador)
+ * - GET /:id/budgets/:budgetId/presentation → lo que explica el presupuesto (`findings`
+ *   solo con `clinical.read`; si no, null y `hasFindings`)
+ * - PATCH /:id/budgets/:budgetId/presentation { findings?, proposal?, validUntil?,
+ *   options?: [{ optionId, name?, pros?, cons? }], lines?: [{ lineId, patientGuide }] }
+ *   con `budgets.write`; solo borrador
  * - POST /:id/budgets/:budgetId/lines { lines: [{ planItemId, priceCents?, reason?, promotionId?|null, promotionFinalPriceCents? }] } (solo borrador)
  * - POST /:id/budgets/:budgetId/items { itemIds } (añade tratamientos del plan; solo borrador)
  * - POST /:id/budgets/:budgetId/items/remove { itemIds } (quita tratamientos; solo borrador)
@@ -83,6 +94,31 @@ const budgetSendInput = operationBodySchema("presupuesto.reenviar")
 const budgetRevisionInput = budgetCreateInput.omit({ planId: true }).extend({
   reason: z.string().trim().min(1).max(2000),
 }).strict()
+
+const budgetPresentationInput = z
+  .object({
+    findings: z.string().max(BUDGET_TEXT_MAX).nullish(),
+    proposal: z.string().max(BUDGET_TEXT_MAX).nullish(),
+    validUntil: z.iso.date().nullish(),
+    options: z
+      .array(
+        z
+          .object({
+            optionId: z.uuid(),
+            name: z.string().max(BUDGET_OPTION_NAME_MAX).nullish(),
+            pros: z.string().max(BUDGET_OPTION_TEXT_MAX).nullish(),
+            cons: z.string().max(BUDGET_OPTION_TEXT_MAX).nullish(),
+          })
+          .strict(),
+      )
+      .max(3)
+      .optional(),
+    lines: z
+      .array(z.object({ lineId: z.uuid(), patientGuide: patientGuideSchema.nullable() }).strict())
+      .max(200)
+      .optional(),
+  })
+  .strict()
 
 const budgetLinesInput = z
   .object({
@@ -186,6 +222,34 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
       })
       return { ...economicView(memberRole, budget), seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null }
     })
+  })
+
+  app.get("/:id/budgets/:budgetId/presentation", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getBudgetPresentation(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
+          memberRole,
+          actorUserId: userId,
+          clinicalAccess: canAccess(memberRole, "clinical.read"),
+        }),
+      ),
+    )
+  })
+
+  app.patch("/:id/budgets/:budgetId/presentation", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "budgets.write")) return forbid(c)
+    const parsed = budgetPresentationInput.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        updateBudgetPresentation(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
+          memberRole,
+          clinicalAccess: canAccess(memberRole, "clinical.read"),
+        }),
+      ),
+    )
   })
 
   app.patch("/:id/budgets/:budgetId", async (c) => {

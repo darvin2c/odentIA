@@ -835,6 +835,9 @@ export interface TicketFrozen {
   clinic: {
     legalName: string
     tradeName: string | null
+    /** Desde que el ticket lo imprime; sin ellos (tickets de antes), los de hoy. */
+    fiscalDocType?: string | null
+    fiscalDocNumber?: string | null
     fiscalAddress: string | null
     locale: string
     currency: string
@@ -1291,6 +1294,8 @@ export async function collectCharge(
         clinic: {
           legalName: profile.legalName ?? "",
           tradeName: profile.tradeName ?? null,
+          fiscalDocType: profile.fiscalDocType ?? null,
+          fiscalDocNumber: profile.fiscalDocNumber ?? null,
           fiscalAddress: profile.fiscalAddress ?? null,
           locale: profile.locale,
           currency: profile.currency,
@@ -1698,6 +1703,8 @@ export async function refundCredit(
     clinic: {
       legalName: profile.legalName ?? "",
       tradeName: profile.tradeName ?? null,
+      fiscalDocType: profile.fiscalDocType ?? null,
+      fiscalDocNumber: profile.fiscalDocNumber ?? null,
       fiscalAddress: profile.fiscalAddress ?? null,
       locale: profile.locale,
       currency: profile.currency,
@@ -1741,14 +1748,7 @@ export interface RefundFrozen {
   refundIds: string[]
   patient: { displayName: string; docType: string | null; docNumber: string | null }
   issuer: { userId: string; name: string }
-  clinic: {
-    legalName: string
-    tradeName: string | null
-    fiscalAddress: string | null
-    locale: string
-    currency: string
-    timezone: string
-  }
+  clinic: TicketFrozen["clinic"]
   branch: { id: string; name: string }
   amountCents: number
   currency: string
@@ -2115,6 +2115,8 @@ export async function returnFromTicket(
     clinic: {
       legalName: profile.legalName ?? "",
       tradeName: profile.tradeName ?? null,
+      fiscalDocType: profile.fiscalDocType ?? null,
+      fiscalDocNumber: profile.fiscalDocNumber ?? null,
       fiscalAddress: profile.fiscalAddress ?? null,
       locale: profile.locale,
       currency: profile.currency,

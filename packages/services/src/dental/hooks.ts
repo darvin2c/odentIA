@@ -25,6 +25,7 @@ import {
   pendingProbingWords,
   phaseForKind,
   SIGNED_ODONTOGRAM_PURPOSE_LABELS,
+  TREATMENT_PHASE_LABELS,
   TREATMENT_PHASES,
 } from "@odentia/dental"
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
@@ -315,6 +316,27 @@ export const dentalHooks: ProductHooks = {
 
   planPhases: TREATMENT_PHASES,
   phaseFor: (kind) => phaseForKind(kind),
+  phaseWords: (phase) => TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
+
+  // El odontograma firmado no cambia ni se anula: si existe, está vigente.
+  async documentCheck(tx, orgId, type, id) {
+    if (type !== "signed_odontogram") return null
+    const [row] = await tx
+      .select()
+      .from(odontogramAssessment)
+      .where(and(eq(odontogramAssessment.id, id), eq(odontogramAssessment.organizationId, orgId)))
+      .limit(1)
+    if (!row) return null
+    return {
+      patientId: row.patientId,
+      state: "vigente",
+      label: "Odontograma firmado",
+      issuedAt: row.createdAt,
+      validUntil: null,
+      voidedAt: null,
+      signer: { name: row.examinerName, title: row.examinerTitle, registration: row.registrationNumber },
+    }
+  },
 
   async templateSurfaceLimits(tx, templateId) {
     const [rule] = await tx

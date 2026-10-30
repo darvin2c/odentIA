@@ -18,6 +18,7 @@ import { odontogramAssessment, odontogramEntry, planItemFinding } from "@odentia
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { requireDraftLink } from "../clinical.js"
+import { documentCheckUrl } from "../document-check.js"
 import { resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
 import { notFound, ServiceError, validation } from "../errors.js"
 import { orgDentalProfile } from "./profile.js"
@@ -717,6 +718,8 @@ export async function getSignedOdontogramPrint(
     assessment,
     patient: await printPatientOf(tx, orgId, patientId),
     establishment: await establishmentOf(tx, orgId),
+    // La dirección del QR de la hoja: quien la tiene en la mano comprueba que sigue vigente.
+    checkUrl: await documentCheckUrl(tx, orgId, "signed_odontogram", assessment.id),
   }
 }
 

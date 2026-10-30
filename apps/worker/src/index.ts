@@ -4,7 +4,7 @@ import { configureMetaGraphVersion } from "@odentia/channels"
 import type { AgentRunJob, InboundMessageJob, OutboundMessageJob, QueueMessage } from "@odentia/db"
 import { createAppDb, createOwnerDb, type Db } from "@odentia/db"
 import { configureMailLinks, createMailer } from "@odentia/mail"
-import { configurePublicLinks, createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
+import { configureDocumentChecks, configureDocumentLogos, configurePublicLinks, createStorage, type Storage, secretsKeyFromEnv } from "@odentia/services"
 import { sql } from "drizzle-orm"
 import { env } from "./env.js"
 import { type DemoTaskMessage, processDemoTask } from "./handler.js"
@@ -34,6 +34,7 @@ const publicLinks = {
   productDomains: env.MEDICAL_DOMAIN ? { medical: env.MEDICAL_DOMAIN } : {},
 }
 configurePublicLinks(publicLinks)
+configureDocumentChecks(secretsKey)
 // La misma versión del Graph de Meta que la API (`META_GRAPH_VERSION`).
 configureMetaGraphVersion(env.META_GRAPH_VERSION)
 // Términos, Privacidad y Ayuda del pie de cada correo.
@@ -56,6 +57,8 @@ const storage: Storage = createStorage({
   publicBaseUrl: env.S3_PUBLIC_URL,
   attachmentsBucket: env.S3_ATTACHMENTS_BUCKET,
 })
+// El logo de cada clínica en sus papeles: se lee del almacenamiento, nunca por HTTP.
+configureDocumentLogos(storage)
 
 const transcribe = createTranscriber(env)
 

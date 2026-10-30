@@ -69,27 +69,6 @@ export async function openServerPdf(path: string): Promise<void> {
   }
 }
 
-/** Imprime un bloque de la pantalla (constancias que no tienen PDF del servidor). */
-export function printNodeById(nodeId: string): void {
-  const node = document.getElementById(nodeId)
-  if (!node) return
-  const width = node.dataset.printWidth ?? "80mm"
-  const full = node.dataset.printFull === "1"
-  const style = document.createElement("style")
-  style.textContent = `@media print {
-    body * { visibility: hidden; }
-    #${nodeId}, #${nodeId} * { visibility: visible; }
-    #${nodeId} { position: absolute; inset: 0 ${full ? "0" : "auto"} auto 0; width: ${full ? "auto" : width}; }
-  }`
-  document.head.append(style)
-  const cleanup = () => {
-    style.remove()
-    window.removeEventListener("afterprint", cleanup)
-  }
-  window.addEventListener("afterprint", cleanup)
-  window.print()
-}
-
 function Row({
   label,
   value,

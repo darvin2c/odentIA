@@ -4,10 +4,10 @@ import {
   type ConsentSections,
   clinicalProfileFor,
   consentSignatureNote,
+  diagnosisCodeLabel,
 } from "@odentia/clinical"
 import { createHash } from "node:crypto"
 import type { Db } from "@odentia/db"
-import { PDFDocument, StandardFonts } from "pdf-lib"
 import {
   attachConsentPdf,
   attachConsentRevokePdf,
@@ -15,140 +15,218 @@ import {
   type ConsentDocumentRow,
   getConsentPrint,
 } from "./clinical-forms.js"
-import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
+import { credentialOf } from "./clinical-papers.js"
+import { documentCheckUrl } from "./document-check.js"
+import { loadDocumentClinic } from "./document-clinic.js"
+import {
+  chartNumber,
+  dayTimeWords,
+  documentFormat,
+  DocumentKit,
+  type DocumentClinic,
+  SIZE,
+  strokesOf,
+} from "./document-kit.js"
 import { registerPatientDocument } from "./clinical.js"
 import { ServiceError } from "./errors.js"
-import { MUTED, safe, strokesOf, when, Writer, type Zone } from "./pdf-writer.js"
 import type { Storage } from "./storage.js"
 
 type ConsentPrint = Awaited<ReturnType<typeof getConsentPrint>>
+
+/** El encabezado y las secciones de lo que se consiente: iguales firmado o por firmar. */
+function consentBody(kit: DocumentKit, data: ConsentPrint) {
+  const { document: doc, patient } = data
+  const sectionStyle = { face: "sansBold" as const, size: SIZE.read, leading: 1.4, before: 12, after: 1 }
+  kit.gap(20)
+  kit.text("Consentimiento informado", { size: SIZE.second, face: "sansSemi", tone: "gray" })
+  kit.gap(1)
+  kit.text(doc.titleSnapshot, { face: "serif", size: SIZE.titleBudget, leading: 1.2 })
+  kit.text([`Plantilla v${doc.templateVersion}`, doc.procedureRef].filter(Boolean).join(" · "), {
+    size: SIZE.second,
+    tone: "gray",
+  })
+  kit.gap(12)
+  kit.facts(
+    [
+      { label: "Paciente", value: patient.displayName, strong: true },
+      ...(patient.docNumber ? [{ label: patient.docType ?? "Documento", value: patient.docNumber }] : []),
+      { label: "Historia clínica", value: chartNumber(patient.patientNumber) },
+    ],
+    3,
+  )
+  const sections = doc.sectionsSnapshot as ConsentSections | null
+  if (sections) {
+    kit.subheading(CONSENT_SECTION_LABELS.procedure, sectionStyle)
+    kit.text(sections.procedure, { size: SIZE.read })
+    if (doc.diagnosisCode) {
+      kit.subheading(CONSENT_SECTION_LABELS.diagnosis, sectionStyle)
+      const code = diagnosisCodeLabel(doc.diagnosisSystem, doc.diagnosisCode)
+      kit.text(data.diagnosisDescription ? `${code} · ${data.diagnosisDescription}` : code, { size: SIZE.read })
+    }
+    kit.subheading(CONSENT_SECTION_LABELS.benefits, sectionStyle)
+    kit.bullets(sections.benefits, { size: SIZE.read })
+    kit.subheading(CONSENT_SECTION_LABELS.risks, sectionStyle)
+    kit.bullets(sections.risks, { size: SIZE.read })
+    kit.subheading(CONSENT_SECTION_LABELS.alternatives, sectionStyle)
+    kit.bullets(sections.alternatives, { size: SIZE.read })
+    kit.subheading(CONSENT_SECTION_LABELS.consequences, sectionStyle)
+    kit.text(sections.consequences, { size: SIZE.read })
+    if (sections.notes) {
+      kit.subheading(CONSENT_SECTION_LABELS.notes, sectionStyle)
+      kit.text(sections.notes, { size: SIZE.read })
+    }
+  } else {
+    kit.gap(14)
+    kit.text(doc.bodySnapshot, { size: SIZE.read })
+  }
+  kit.gap(16)
+  kit.panel({
+    title: "Declaración",
+    // La que aceptó al firmar; lo firmado antes de copiarla, la de siempre.
+    body: doc.declarationSnapshot ?? CONSENT_DECLARATION,
+    size: SIZE.read,
+  })
+}
+
+function consentKit(data: ConsentPrint, clinic: DocumentClinic) {
+  const { document: doc, patient } = data
+  return DocumentKit.open(clinic, documentFormat(clinic), {
+    title: doc.titleSnapshot,
+    docLabel: "Consentimiento",
+    patientLabel: `${patient.displayName} · ${chartNumber(patient.patientNumber)}`,
+    ...(doc.signedAt ? { createdAt: new Date(doc.signedAt) } : {}),
+  })
+}
+
 /**
- * PDF del consentimiento: establecimiento, paciente, secciones, declaración
- * aceptada, firmas manuscritas (persona, profesional y testigo) y, con
- * `revocation`, la revocación. El firmado se guarda sin ella; la revocación es
- * otro PDF. La huella SHA-256 se calcula sobre estos bytes.
+ * PDF del consentimiento: clínica, paciente, secciones, declaración aceptada, firmas
+ * con su trazo (persona y profesional), testigo, nivel de firma, huella y, con
+ * `revocation`, la revocación. El firmado se guarda sin ella; la revocación es otro
+ * PDF. La huella SHA-256 se calcula sobre estos bytes; los ya guardados no se tocan.
  */
 export async function renderConsentPdf(
   data: ConsentPrint,
-  { revocation = data.document.status === "revocado" }: { revocation?: boolean } = {},
+  clinic: DocumentClinic,
+  { revocation = data.document.status === "revocado", checkUrl = null }: { revocation?: boolean; checkUrl?: string | null } = {},
 ): Promise<Uint8Array> {
-  const { document: doc, patient, establishment } = data
-  const zone: Zone = {
-    locale: establishment?.locale || NEUTRAL_LOCALE,
-    timezone: establishment?.timezone || NEUTRAL_TIMEZONE,
+  const { document: doc } = data
+  const zone = clinic
+  const kit = await consentKit(data, clinic)
+  if (revocation && doc.status === "revocado") {
+    kit.gap(14)
+    kit.stateBox({
+      kind: "alert",
+      title: "REVOCADO",
+      detail: `${doc.revokerName ?? "-"} · ${doc.revokedAt ? dayTimeWords(doc.revokedAt, zone) : "-"} · Motivo: ${doc.revokeReason ?? "-"}`,
+    })
   }
-  const pdf = await PDFDocument.create()
-  pdf.setTitle(safe(doc.titleSnapshot))
-  pdf.setSubject(`Consentimiento informado ${doc.id}`)
-  pdf.setProducer("odentIA")
-  pdf.setCreationDate(doc.signedAt ?? new Date())
-  const w = new Writer(
-    pdf,
-    await pdf.embedFont(StandardFonts.Helvetica),
-    await pdf.embedFont(StandardFonts.HelveticaBold),
-  )
-  if (establishment) {
-    w.text(establishment.tradeName ?? establishment.legalName ?? "", { size: 12, bold: true })
-    w.text(
-      [
-        establishment.legalName,
-        establishment.fiscalDocNumber &&
-          [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" "),
-        establishment.address,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      { size: 8, color: MUTED },
-    )
-    w.gap()
-  }
-  w.text("CONSENTIMIENTO INFORMADO", { size: 9, bold: true, color: MUTED })
-  w.text(doc.titleSnapshot, { size: 15, bold: true })
-  w.text(`Plantilla v${doc.templateVersion} · Documento ${doc.id}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(
-    `Paciente: ${patient.displayName} · HC ${String(patient.patientNumber).padStart(6, "0")}${patient.docNumber ? ` · ${patient.docType ?? ""} ${patient.docNumber}` : ""}${patient.birthDate ? ` · nacimiento ${patient.birthDate}` : ""}`,
-  )
-  if (doc.procedureRef) w.text(`Aplica a: ${doc.procedureRef}`)
-  const sections = doc.sectionsSnapshot as ConsentSections | null
-  if (sections) {
-    w.heading(CONSENT_SECTION_LABELS.procedure)
-    w.text(sections.procedure)
-    if (doc.diagnosisCode) {
-      w.heading(CONSENT_SECTION_LABELS.diagnosis)
-      w.text(`${doc.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-    }
-    w.heading(CONSENT_SECTION_LABELS.benefits)
-    w.list(sections.benefits)
-    w.heading(CONSENT_SECTION_LABELS.risks)
-    w.list(sections.risks)
-    w.heading(CONSENT_SECTION_LABELS.alternatives)
-    w.list(sections.alternatives)
-    w.heading(CONSENT_SECTION_LABELS.consequences)
-    w.text(sections.consequences)
-    if (sections.notes) {
-      w.heading(CONSENT_SECTION_LABELS.notes)
-      w.text(sections.notes)
-    }
-  } else {
-    w.gap()
-    w.text(doc.bodySnapshot)
-  }
-  w.heading("Declaración")
-  // La que aceptó al firmar; lo firmado antes de copiarla, la de siempre.
-  w.text(doc.declarationSnapshot ?? CONSENT_DECLARATION)
-  if (doc.comprehensionConfirmed)
-    w.text("Comprensión confirmada por la persona firmante.", { size: 8, color: MUTED })
-  w.gap(10)
+  consentBody(kit, data)
+  kit.gap(20)
   const method = (doc.signatureMethod ?? "clinica") as keyof typeof CONSENT_SIGNATURE_WORDS
-  const signerCaption = `${doc.signerName}${doc.signerDoc ? ` · ${doc.signerDoc}` : ""}${doc.representativeRelation ? ` · ${doc.representativeRelation}` : ""} · ${when(doc.signedAt, zone)}`
-  const signerLabel =
-    doc.signerKind === "representante" ? "Firma del representante legal" : "Firma del paciente"
+  const signerHeading = doc.signerKind === "representante" ? "Representante legal" : "Paciente"
+  const signedAt = doc.signedAt ? `Firmó el ${dayTimeWords(doc.signedAt, zone)}` : ""
+  const signerLines = [
+    { text: doc.signerName, strong: true },
+    ...(doc.signerDoc ? [{ text: doc.signerDoc }] : []),
+    ...(doc.representativeRelation ? [{ text: doc.representativeRelation }] : []),
+    { text: method === "papel" ? `${signedAt}. Firmó la hoja en papel; su foto queda en Documentos.` : signedAt },
+  ]
+  // El profesional confirma con su perfil (nombre y colegiatura), sin trazo: firma electrónica.
+  const professionalStrokes = strokesOf(doc.professionalSignature)
+  const informerLines = [
+    { text: doc.informerName ?? "-", strong: true },
+    ...(credentialOf(doc.informerTitle, doc.informerRegistration) ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }] : []),
+    { text: doc.informedAt ? `Informó el ${dayTimeWords(doc.informedAt, zone)}` : "" },
+    ...(professionalStrokes ? [] : [{ text: "Firmado electrónicamente" }]),
+  ]
   if (method === "papel") {
-    // La firma está en la hoja de papel, guardada como documento de la persona.
-    w.text(signerLabel, { size: 9, bold: true })
-    w.text(`${signerCaption} · firmó la hoja en papel; su foto queda en Documentos`, { size: 8, color: MUTED })
+    kit.subheading(signerHeading, { size: SIZE.table })
+    for (const line of signerLines) kit.text(line.text, { size: line.strong ? SIZE.table : SIZE.second, face: line.strong ? "sansSemi" : "sans", tone: line.strong ? "ink" : "gray" })
+    kit.gap(10)
+    kit.subheading("Profesional que informa", { size: SIZE.table })
+    for (const line of informerLines) kit.text(line.text, { size: line.strong ? SIZE.table : SIZE.second, face: line.strong ? "sansSemi" : "sans", tone: line.strong ? "ink" : "gray" })
+  } else if (professionalStrokes) {
+    kit.penSignatures([
+      { heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines },
+      { heading: "Profesional que informa", strokes: professionalStrokes, lines: informerLines },
+    ])
   } else {
-    w.signature(signerLabel, strokesOf(doc.signatureData), signerCaption)
+    kit.penSignatures([{ heading: signerHeading, strokes: strokesOf(doc.signatureData), lines: signerLines }])
+    kit.gap(12)
+    kit.subheading("Profesional que informa", { size: SIZE.table })
+    for (const line of informerLines) kit.text(line.text, { size: line.strong ? SIZE.table : SIZE.second, face: line.strong ? "sansSemi" : "sans", tone: line.strong ? "ink" : "gray" })
+  }
+  if (doc.witnessName) {
+    kit.gap(10)
+    kit.text(`Testigo: ${doc.witnessName}${doc.witnessDoc ? ` · ${doc.witnessDoc}` : ""}`, { size: SIZE.second })
   }
   if (method === "enlace" && doc.personSignedAt) {
     // La evidencia de una firma a distancia: cuándo y desde dónde.
-    const from = [doc.personSignedIp && `IP ${doc.personSignedIp}`, doc.personSignedUserAgent]
-      .filter(Boolean)
-      .join(" · ")
-    w.text(`Firmó en su enlace ${when(doc.personSignedAt, zone)}${from ? ` · ${from}` : ""}`, {
-      size: 7,
-      color: MUTED,
+    const from = [doc.personSignedIp && `IP ${doc.personSignedIp}`, doc.personSignedUserAgent].filter(Boolean).join(" · ")
+    kit.gap(6)
+    kit.text(`Firmó en su enlace ${dayTimeWords(doc.personSignedAt, zone)}${from ? ` · ${from}` : ""}`, {
+      size: SIZE.label,
+      tone: "gray",
     })
   }
-  w.gap(6)
-  const informerCaption = `${doc.informerName ?? "-"}${doc.informerTitle ? ` · ${doc.informerTitle}` : ""}${doc.informerRegistration ? ` · ${doc.informerRegistration}` : ""} · informó ${when(doc.informedAt, zone)}`
-  const professionalStrokes = strokesOf(doc.professionalSignature)
-  if (professionalStrokes) {
-    w.signature("Firma del profesional que informa", professionalStrokes, informerCaption)
-  } else {
-    // El profesional confirma con su perfil (nombre y colegiatura), sin trazo.
-    w.text("Profesional que informa", { size: 9, bold: true })
-    w.text(`Informó a la persona y resolvió sus dudas · firma con su perfil profesional`, { size: 8 })
-    w.text(informerCaption, { size: 8, color: MUTED })
-  }
-  w.gap(4)
-  w.text(CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica, { size: 8, color: MUTED })
-  if (doc.witnessName) {
-    w.gap(6)
-    w.text(`Testigo: ${doc.witnessName}${doc.witnessDoc ? ` · ${doc.witnessDoc}` : ""}`)
-  }
   if (revocation && doc.status === "revocado") {
-    w.gap(10)
-    w.text("REVOCADO", { size: 11, bold: true })
-    w.text(
-      `${doc.revokerName ?? "-"} · ${when(doc.revokedAt, zone)} · Motivo: ${doc.revokeReason ?? "-"}`,
-    )
-    w.signature("Firma de quien revoca", strokesOf(doc.revokeSignature), doc.revokerName ?? "")
+    kit.gap(14)
+    kit.penSignatures([
+      { heading: "Quien revoca", strokes: strokesOf(doc.revokeSignature), lines: [{ text: doc.revokerName ?? "-", strong: true }] },
+    ])
   }
-  w.gap(14)
-  w.text(consentSignatureNote(clinicalProfileFor(establishment?.country).signatureLaw), { size: 7, color: MUTED })
-  return pdf.save({ useObjectStreams: false })
+  kit.gap(16)
+  kit.rule()
+  kit.gap(8)
+  const words = CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica
+  const note = consentSignatureNote(clinicalProfileFor(data.establishment?.country).signatureLaw)
+  const qrSize = 54
+  const needed = 44 + (checkUrl ? 10 : 0)
+  kit.ensure(needed)
+  const top = kit.y
+  const textWidth = checkUrl ? kit.width - qrSize - 15 : kit.width
+  kit.text(words, { size: SIZE.second, face: "sansSemi", width: textWidth })
+  kit.text(note, { size: SIZE.label, tone: "gray", width: textWidth, leading: 1.4 })
+  if (checkUrl) {
+    kit.qr(checkUrl, kit.right - qrSize, top, qrSize)
+    kit.y = Math.min(kit.y, top - qrSize)
+  }
+  return kit.finish()
+}
+
+/**
+ * La hoja para firmar en papel de un consentimiento pendiente: lo mismo, con los
+ * recuadros vacíos. No lleva QR: aún no es un documento que comprobar.
+ */
+export async function renderConsentPaperPdf(data: ConsentPrint, clinic: DocumentClinic): Promise<Uint8Array> {
+  const { document: doc, patient } = data
+  const kit = await consentKit(data, clinic)
+  consentBody(kit, data)
+  kit.gap(20)
+  const minor = "minor" in patient && patient.minor === true
+  if (minor) {
+    kit.stateBox({ kind: "note", title: "Menor de edad", detail: "Firma su representante legal." })
+    kit.gap(10)
+  }
+  kit.penSignatures(
+    [
+      {
+        heading: minor ? "Representante legal" : "Paciente",
+        strokes: null,
+        lines: [{ text: "Nombre, documento y firma" }, { text: "Fecha y hora" }],
+      },
+      {
+        heading: "Profesional que informa",
+        strokes: null,
+        lines: [
+          ...(doc.informerName ? [{ text: doc.informerName, strong: true }] : []),
+          ...(credentialOf(doc.informerTitle, doc.informerRegistration) ? [{ text: credentialOf(doc.informerTitle, doc.informerRegistration) ?? "" }] : []),
+          { text: "Fecha y hora" },
+        ],
+      },
+    ],
+  )
+  return kit.finish()
 }
 
 /**
@@ -185,7 +263,11 @@ async function storeConsentPdf(
 ): Promise<ConsentDocumentRow> {
   const { run, storage, orgId, userId, consentId } = input
   const doc = data.document
-  const bytes = await renderConsentPdf(data, { revocation: kind === "revocado" })
+  const { clinic, checkUrl } = await run(async (tx) => ({
+    clinic: await loadDocumentClinic(tx, orgId),
+    checkUrl: await documentCheckUrl(tx, orgId, "consent", consentId),
+  }))
+  const bytes = await renderConsentPdf(data, clinic, { revocation: kind === "revocado", checkUrl })
   const sha256 = createHash("sha256").update(bytes).digest("hex")
   const ref = await storage.putPatientDocument({
     orgId,

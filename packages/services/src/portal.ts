@@ -5,10 +5,12 @@ import {
   patient,
   patientContact,
   patientDocument,
+  treatmentBudget,
 } from "@odentia/db/schema/clinical"
+import { type PatientGuide, parsePatientGuide } from "@odentia/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
 import { user } from "@odentia/db/schema/auth"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import {
   portalAccessLog,
   portalLink,
@@ -1230,6 +1232,8 @@ export async function getPortalRescheduleSlots(
 }
 
 export interface PortalBudgetLineView {
+  /** Cómo se hace, qué incluye y qué sigue, congelado al entregar. */
+  patientGuide: PatientGuide | null
   planItemId: string
   /** La opción de la línea (con una sola opción, la única). */
   optionId: string
@@ -1278,8 +1282,24 @@ export interface PortalBudgetView {
   decisionNote: string | null
   /** El estado con su nombre de siempre («Enviado · espera respuesta», «Aceptó 2 de 3»). */
   stateText: string
+  /** AAAA-MM-DD; imprimir o mostrarlo vencido no impide aceptar. */
+  validUntil: string | null
+  /** «Lo que encontramos»: solo para la propia persona o su representante. */
+  findings: string | null
+  proposal: string | null
+  /** Las condiciones de la clínica; vacías, esa sección no sale. */
+  terms: { payment: string | null; change: string | null }
   /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
-  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
+  options: Array<{
+    id: string
+    label: string
+    name: string | null
+    pros: string | null
+    cons: string | null
+    isRecommended: boolean
+    decision: string
+    totalCents: number | null
+  }>
   items: PortalBudgetLineView[]
 }
 
@@ -1293,7 +1313,44 @@ export async function portalBudgetLocale(tx: Db, orgId: string): Promise<string 
   }
 }
 
-export function toPortalBudget(budget: BudgetWithTotals, locale: string | null): PortalBudgetView {
+/** Lo que la vista de la persona suma al presupuesto. */
+export interface PortalBudgetContext {
+  locale: string | null
+  terms: PortalBudgetView["terms"]
+  findings: ReadonlyMap<string, string | null>
+}
+
+/**
+ * Formato, condiciones y lo encontrado de estos presupuestos. `findings` es dato clínico
+ * y no viaja en el detalle: se lee aquí, solo para quien decide por el paciente.
+ */
+export async function portalBudgetContext(
+  tx: Db,
+  orgId: string,
+  budgetIds: string[],
+  clinicalAllowed: boolean,
+): Promise<PortalBudgetContext> {
+  const [profile] = await tx
+    .select({ payment: orgProfile.budgetPaymentTerms, change: orgProfile.budgetChangeTerms })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const rows =
+    clinicalAllowed && budgetIds.length > 0
+      ? await tx
+          .select({ id: treatmentBudget.id, findings: treatmentBudget.findings })
+          .from(treatmentBudget)
+          .where(and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds)))
+      : []
+  return {
+    locale: await portalBudgetLocale(tx, orgId),
+    terms: { payment: profile?.payment?.trim() || null, change: profile?.change?.trim() || null },
+    findings: new Map(rows.map((row) => [row.id, row.findings])),
+  }
+}
+
+export function toPortalBudget(budget: BudgetWithTotals, context: PortalBudgetContext): PortalBudgetView {
+  const { locale } = context
   return {
     id: budget.id,
     planId: budget.planId,
@@ -1313,9 +1370,16 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
     acceptedByName: budget.acceptedByName,
     decisionNote: budget.decisionNote,
     stateText: budget.stateText,
+    validUntil: budget.validUntil,
+    findings: context.findings.get(budget.id) ?? null,
+    proposal: budget.proposal,
+    terms: context.terms,
     options: budget.options.map((option) => ({
       id: option.id,
       label: option.label,
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
       isRecommended: option.isRecommended,
       decision: option.decision,
       totalCents: option.totalCents,
@@ -1337,6 +1401,8 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
       currency: line.currency,
       decision: line.decision,
       itemStatus: line.itemStatus,
+      // Lo congelado al entregar: lo que se le explicó a esta persona.
+      patientGuide: parsePatientGuide(line.patientGuide),
     })),
   }
 }
@@ -1344,12 +1410,12 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
 /** Presupuestos visibles del paciente: nunca borradores ni internos. */
 export async function listPortalBudgets(tx: Db, ctx: PortalContext): Promise<PortalBudgetView[]> {
   requireScope(ctx.session, "budgets")
-  const budgets = await listBudgets(tx, ctx.orgId, ctx.session.patientId)
-  const locale = await portalBudgetLocale(tx, ctx.orgId)
+  const budgets = (await listBudgets(tx, ctx.orgId, ctx.session.patientId)).filter((budget) => budget.status !== "borrador")
+  // Lo encontrado va a quien decide por el paciente, no a cualquiera con acceso al portal.
+  const decides = await contactDecides(tx, ctx.orgId, ctx.session.patientId, ctx.session.contactId)
+  const context = await portalBudgetContext(tx, ctx.orgId, budgets.map((budget) => budget.id), decides)
   await logAccess(tx, ctx.orgId, ctx.session.id, "budgets.listed")
-  return budgets
-    .filter((budget) => budget.status !== "borrador")
-    .map((budget) => toPortalBudget(budget, locale))
+  return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
 export interface DecidePortalBudgetInput {
@@ -1410,7 +1476,8 @@ export async function decidePortalBudget(
   input: DecidePortalBudgetInput,
 ): Promise<{ budget: PortalBudgetView; replay: boolean }> {
   requireScope(ctx.session, "budgets")
-  const locale = await portalBudgetLocale(tx, ctx.orgId)
+  // Quien responde decide por el paciente: lo valida la misma regla al decidir.
+  const context = await portalBudgetContext(tx, ctx.orgId, [budgetId], true)
   const result = await decideBudgetByPerson(tx, ctx.orgId, {
     patientId: ctx.session.patientId,
     contactId: ctx.session.contactId,
@@ -1420,7 +1487,7 @@ export async function decidePortalBudget(
   })
   if (result.replay) {
     await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
-    return { budget: toPortalBudget(result.budget, locale), replay: true }
+    return { budget: toPortalBudget(result.budget, context), replay: true }
   }
   const decided = result.budget
   await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.budget_decided", "treatment_budget", budgetId, {
@@ -1437,7 +1504,7 @@ export async function decidePortalBudget(
     body: "Un representante decidió un presupuesto desde el portal.",
     href: `/patients/${ctx.session.patientId}?tab=plan`,
   })
-  return { budget: toPortalBudget(decided, locale), replay: false }
+  return { budget: toPortalBudget(decided, context), replay: false }
 }
 
 /**

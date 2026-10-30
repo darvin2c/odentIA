@@ -41,12 +41,11 @@ import { budgetStateText } from "@odentia/clinical"
 import { deliverBudget, requireOwnBudget } from "./budgets.js"
 import { getPaymentReturn } from "./payments.js"
 import {
-  buildBudgetSnapshot,
   buildTicketSnapshot,
-  renderBudgetPdf,
   renderReturnPdf,
   renderTicketPdf,
 } from "./financial-document-pdf.js"
+import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import type { Storage } from "./storage.js"
 import { requirePatient } from "./patients.js"
 import { listDecisionRecipients } from "./responsibilities.js"
@@ -1027,6 +1026,7 @@ export async function sendFinancialDocument(
     const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.documentId, {
       actorUserId,
       memberRole,
+      recipientContactId: recipient.contactId,
     })
     pdf = await renderBudgetPdf(snap, input.paper ?? null)
     filename = asciiFilename(`Presupuesto-${snap.numberLabel.replace(/\D/g, "")}-r${snap.sourceId.slice(0, 4)}.pdf`)

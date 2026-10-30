@@ -4,6 +4,7 @@ import {
   createService,
   getService,
   getTemplate,
+  getTemplatePatientGuide,
   listMostUsedServices,
   listMaterialProducts,
   listServiceMaterials,
@@ -22,6 +23,7 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
+import { patientGuideSchema } from "@odentia/clinical"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -107,6 +109,8 @@ const createInput = z
 
 const patchInput = z
   .object({
+    // Guardar la explicación es revisarla: queda quién y cuándo. Nula la quita.
+    patientGuide: patientGuideSchema.nullish(),
     templateId: z.string().uuid().nullish(),
     name: z.string().trim().min(1).max(200).optional(),
     specialtyId: z.string().uuid().optional(),
@@ -387,6 +391,15 @@ export function createServicesRoute(deps: CrmDeps) {
     }
   })
 
+  // El texto sugerido para explicar un tratamiento: un punto de partida, no sale a un paciente.
+  app.get("/templates/:id/patient-guide", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "catalog.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
+    }
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getTemplatePatientGuide(tx, c.req.param("id"))))
+  })
+
   app.get("/templates/:id", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "catalog.read")) {
@@ -479,6 +492,7 @@ export function createServicesRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updateService(tx, orgId, userId, c.req.param("id"), {
+          ...(parsed.data.patientGuide !== undefined ? { patientGuide: parsed.data.patientGuide } : {}),
           templateId: parsed.data.templateId,
           name: parsed.data.name,
           specialtyId: parsed.data.specialtyId,

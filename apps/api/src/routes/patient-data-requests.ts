@@ -170,7 +170,7 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
           metadata: { patientId, documents: record.documents.length },
         })
         return {
-          pdf: await renderPatientRecordPdf(record),
+          pdf: await renderPatientRecordPdf(record, record.clinic),
           fhir: JSON.stringify(patientRecordFhirBundle(record), null, 2),
           fileName: patientRecordFileName(record, "zip"),
           files: await patientRecordFiles(tx, orgId, record),

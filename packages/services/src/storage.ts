@@ -64,6 +64,12 @@ export interface Storage {
    */
   getAttachment?(objectKey: string): Promise<Uint8Array>
   /**
+   * Lee del bucket público una imagen de esa carpeta (el logo de una clínica, para
+   * sus papeles), por su dirección guardada. Lee del almacenamiento, nunca por HTTP;
+   * null si la dirección no es de esa carpeta de este bucket.
+   */
+  readPublicObject?(url: string, folder: string, signal?: AbortSignal): Promise<Uint8Array | null>
+  /**
    * URL firmada para que el navegador suba un objeto con PUT directo al bucket
    * privado (tomografías, ADR 0055). Exige CORS en el bucket. Opcional en dobles.
    */
@@ -150,6 +156,13 @@ export function createStorage(env: StorageEnv): Storage {
           expiresIn: ttlSeconds,
         },
       )
+    },
+    async readPublicObject(url, folder, signal) {
+      if (!url.startsWith(publicPrefix)) return null
+      const key = url.slice(publicPrefix.length)
+      if (!isInAvatarFolder(key, folder)) return null
+      const out = await client.send(new GetObjectCommand({ Bucket: env.avatarsBucket, Key: key }), { abortSignal: signal })
+      return out.Body ? out.Body.transformToByteArray() : null
     },
     async getAttachment(objectKey) {
       const out = await client.send(

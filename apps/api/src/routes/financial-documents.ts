@@ -7,6 +7,8 @@ import {
   getFinancialDocumentPdf,
   getHealthDocumentSendOptions,
   getRefundReceiptPdf,
+  HEALTH_DOCUMENT_TYPES,
+  renderHealthDocumentPdf,
   saveRecipientEmail,
   sendFinancialDocument,
   sendHealthDocument,
@@ -60,6 +62,11 @@ const paperQuery = z.object({
   documentId: z.uuid(),
   /** Hoja explícita (impresión); ausente = papel del perfil. */
   paper: z.enum(["A4", "Letter"]).optional(),
+})
+
+const healthPdfQuery = z.object({
+  documentType: z.enum(HEALTH_DOCUMENT_TYPES),
+  documentId: z.uuid(),
 })
 
 const sendInput = z
@@ -142,6 +149,33 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
         }),
       ),
     )
+  })
+
+  // El papel de salud para que el equipo lo vea o lo imprima: el mismo que se envía.
+  app.get("/:id/health-document-pdf", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a la historia clínica"), 403)
+    }
+    const parsed = healthPdfQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const patientId = c.req.param("id")
+    try {
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        renderHealthDocumentPdf(tx, orgId, patientId, parsed.data.documentType, parsed.data.documentId, deps.storage),
+      )
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "documentos" })
+      return new Response(Buffer.from(pdf.bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.filename)}"`,
+          "Cache-Control": "private, no-store",
+        },
+      })
+    } catch (error) {
+      return serviceErrorResponse(c, error) ?? Promise.reject(error)
+    }
   })
 
   app.get("/:id/financial-document-pdf", async (c) => {

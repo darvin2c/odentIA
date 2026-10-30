@@ -154,7 +154,7 @@ it("«Te espera» trae lo que vence dentro de 3 días o ya venció", async () =>
 it("la copia de la historia: PDF, paquete FHIR R4 y envío a la propia persona sin repetirlo", async () => {
   const { f, run, selfId, patientId } = await adult()
   const record = await run((tx) => loadPatientRecord(tx, "org_a", patientId))
-  const pdf = await renderPatientRecordPdf(record)
+  const pdf = await renderPatientRecordPdf(record, record.clinic)
   expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
   const bundle = patientRecordFhirBundle(record) as { resourceType: string; type: string; entry: Array<{ resource: { resourceType: string } }> }
   expect(bundle).toMatchObject({ resourceType: "Bundle", type: "collection" })

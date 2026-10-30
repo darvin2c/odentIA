@@ -4,6 +4,8 @@
  * código. La biblioteca solo sugiere: un texto sugerido no le llega a un
  * paciente hasta que la clínica lo guarda en su servicio.
  */
+import { z } from "zod"
+
 export interface PatientGuideStep {
   when: string
   what: string
@@ -33,6 +35,32 @@ export const PATIENT_GUIDE_LIMITS = {
   scheduleWhen: 80,
   scheduleWhat: 400,
 } as const
+
+/** Lo que acepta una ruta: rechaza lo que pasa del límite en lugar de recortarlo. */
+const guideText = z.string().max(PATIENT_GUIDE_LIMITS.text)
+const guideShort = z.string().max(PATIENT_GUIDE_LIMITS.short)
+export const patientGuideSchema = z
+  .object({
+    visits: guideShort.optional(),
+    visitLength: guideShort.optional(),
+    how: guideText.optional(),
+    includes: guideText.optional(),
+    excludes: guideText.optional(),
+    aftercare: guideText.optional(),
+    warnings: guideText.optional(),
+    schedule: z
+      .array(
+        z
+          .object({
+            when: z.string().max(PATIENT_GUIDE_LIMITS.scheduleWhen),
+            what: z.string().max(PATIENT_GUIDE_LIMITS.scheduleWhat),
+          })
+          .strict(),
+      )
+      .max(PATIENT_GUIDE_LIMITS.scheduleRows)
+      .optional(),
+  })
+  .strict()
 
 const TEXT_KEYS = ["how", "includes", "excludes", "aftercare", "warnings"] as const
 const SHORT_KEYS = ["visits", "visitLength"] as const

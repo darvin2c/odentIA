@@ -1,37 +1,53 @@
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
+  diagnosisCatalog,
   orgCounter,
   encounterProcedure,
   patient,
+  patientAllergy,
   patientCharge,
   patientPaymentApplication,
+  serviceCatalog,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentBudgetOption,
   treatmentPlan,
   treatmentPlanItem,
 } from "@odentia/db/schema/clinical"
-import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
+import { consentTemplate, consentTemplateService } from "@odentia/db/schema/clinical-forms"
+import { contact } from "@odentia/db/schema/crm"
+import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { promotion as promotionTable } from "@odentia/db/schema/promotions"
 import {
   BUDGET_OPTIONS_MAX,
   budgetOptionLabel,
   budgetStateText,
+  type ConsentSections,
+  diagnosisCodeLabel,
+  isClinicalProduct,
+  type PatientGuide,
+  parsePatientGuide,
+  type ProductWords,
+  productWords,
   sumAcceptedCents,
 } from "@odentia/clinical"
-import { and, asc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNull, type SQL, type SQLWrapper, sql } from "drizzle-orm"
 import { budgetAwaitsAnswer } from "./budget-awaiting.js"
 import { notFound, ServiceError, validation } from "./errors.js"
-import { requireOrgCurrency } from "./locale.js"
+import { NEUTRAL_TIMEZONE, requireOrgCurrency } from "./locale.js"
 import { decideBudgetOpportunity, linkPresentedBudget } from "./opportunities.js"
 import { requirePatient } from "./patients.js"
 import type { PlanItemDecision } from "./plan.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 
-import { branchAddressColumns, branchAddressWriter } from "./branches.js"
-import { requireDecisionContact } from "./responsibilities.js"
+import { livePersonalLinkToken } from "./booking-links.js"
+import { documentSecretsKey } from "./document-check.js"
+import { type DocumentClinic, loadDocumentClinic } from "./document-clinic.js"
+import { listPaymentMethods } from "./payment-methods.js"
+import { personalLinkUrl } from "./public-links.js"
+import { listDecisionRecipients, requireDecisionContact } from "./responsibilities.js"
 import { assertExecutableCodings } from "./procedure-codings.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import type { ProductSite, SiteFields } from "./product-hooks.js"
@@ -95,6 +111,10 @@ export interface BudgetOptionWithTotals {
   position: number
   /** «Opción A». */
   label: string
+  /** «Conservar el molar» y qué pesar al elegirla; nulos si no se escribieron. */
+  name: string | null
+  pros: string | null
+  cons: string | null
   isRecommended: boolean
   /** `pendiente` mientras decide, `elegida` o `no_elegida`. */
   decision: string
@@ -121,8 +141,15 @@ function lineTotal(
   return total
 }
 
+/**
+ * Lo que se dice de un presupuesto sin ser su hoja: `findings` es dato clínico y nunca
+ * viaja aquí (ni al agente ni a lo público). Se lee con `getBudgetPresentation`, si
+ * quien pregunta puede, o sale en su hoja a quien corresponde.
+ */
+export type BudgetPublicRow = Omit<BudgetRow, "findings">
+
 /** Presupuesto con líneas snapshot y totales enteros (null = precio desconocido). */
-export type BudgetWithTotals = BudgetRow & {
+export type BudgetWithTotals = BudgetPublicRow & {
   /** Todas las líneas, de todas las opciones (cada una dice su `optionId`). */
   items: BudgetLineWithStatus[]
   /** Las opciones, en orden; con una sola, la pantalla no habla de opciones. */
@@ -137,6 +164,8 @@ export type BudgetWithTotals = BudgetRow & {
   tariffTotalCents: number | null
   /** Rebaja total acordada (tarifa − final; null si algún precio es desconocido). */
   discountCents: number | null
+  /** Hay texto de «Lo que encontramos», sin decir cuál. */
+  hasFindings: boolean
   /** Espera la respuesta de quien decide (`budgetAwaitsAnswer`): la pantalla no lo deduce del estado. */
   awaitsAnswer: boolean
   /** El estado dicho con un solo nombre en toda la aplicación (`budgetStateText`). */
@@ -517,6 +546,9 @@ function optionTotals(option: BudgetOptionRow, items: BudgetLineWithStatus[]): B
     id: option.id,
     position: option.position,
     label: budgetOptionLabel(option.position),
+    name: option.name,
+    pros: option.pros,
+    cons: option.cons,
     isRecommended: option.isRecommended,
     decision: option.decision,
     lineCount: lines.length,
@@ -527,13 +559,22 @@ function optionTotals(option: BudgetOptionRow, items: BudgetLineWithStatus[]): B
   }
 }
 
-function withTotals(budget: BudgetRow, items: BudgetLineWithStatus[], optionRows: BudgetOptionRow[]): BudgetWithTotals {
+/** Sin el texto clínico: lo que puede salir de aquí a cualquiera con `budgets.read`. */
+function withoutFindings<T extends { findings: string | null }>(row: T): Omit<T, "findings"> {
+  const { findings: _clinical, ...rest } = row
+  return rest
+}
+
+function withTotals(fullBudget: BudgetRow, items: BudgetLineWithStatus[], optionRows: BudgetOptionRow[]): BudgetWithTotals {
+  const budget = withoutFindings(fullBudget)
+  const hasFindings = !!fullBudget.findings
   const options = optionRows.map((option) => optionTotals(option, items))
   // El presupuesto vale lo de una sola opción (la elegida o la recomendada): lo
   // que se cobra por sesión cuenta todas sus visitas previstas.
   const value = valueOptionOf(options)
   return {
     ...budget,
+    hasFindings,
     items,
     options,
     totalCents: value ? value.totalCents : 0,
@@ -1166,7 +1207,7 @@ export async function updateBudgetDraft(
   budgetId: string,
   input: UpdateBudgetDraftInput,
   opts: BudgetActorOpts = {},
-): Promise<BudgetRow> {
+): Promise<BudgetPublicRow> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
@@ -1198,7 +1239,178 @@ export async function updateBudgetDraft(
   if (!updated) throw notFound("Presupuesto")
   await audit(tx, orgId, actorUserId, "budget.updated", budgetId, { patientId, fields })
   await notifyBudget(tx, orgId)
-  return updated
+  return withoutFindings(updated)
+}
+
+// ---------------------------------------------------------- lo que explica ---
+
+export const BUDGET_TEXT_MAX = 4000
+export const BUDGET_OPTION_NAME_MAX = 120
+export const BUDGET_OPTION_TEXT_MAX = 1000
+
+export interface BudgetPresentationInput {
+  /** Nulo o vacío lo borra; sin la clave no se toca. */
+  findings?: string | null
+  proposal?: string | null
+  /** AAAA-MM-DD; nulo: se calcula al entregar con los días de la clínica. */
+  validUntil?: string | null
+  options?: Array<{ optionId: string; name?: string | null; pros?: string | null; cons?: string | null }>
+  /** El ajuste solo para este paciente; nulo vuelve a la explicación del servicio. */
+  lines?: Array<{ lineId: string; patientGuide: unknown }>
+}
+
+export interface BudgetPresentation {
+  budgetId: string
+  status: string
+  /** Solo para quien lee lo clínico; null para los demás. */
+  findings: string | null
+  /** Hay texto, aunque quien pregunta no pueda leerlo. */
+  hasFindings: boolean
+  proposal: string | null
+  validUntil: string | null
+  options: Array<{ id: string; label: string; name: string | null; pros: string | null; cons: string | null }>
+  lines: Array<{
+    id: string
+    optionId: string
+    planItemId: string
+    title: string
+    /** El ajuste, o lo congelado al entregar. */
+    patientGuide: PatientGuide | null
+    /** La del servicio hoy: la que saldrá si no hay ajuste. */
+    serviceGuide: PatientGuide | null
+  }>
+}
+
+function assertLongText(value: string | null | undefined, label: string, max: number): string | null {
+  const text = value?.trim() ?? ""
+  if (text.length > max) throw validation(`${label}: hasta ${max} caracteres`)
+  return text || null
+}
+
+function assertCivilDate(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
+    throw validation("La vigencia debe ser una fecha AAAA-MM-DD")
+  return value
+}
+
+async function servicesOf(tx: Db, orgId: string, serviceIds: Array<string | null>) {
+  const ids = [...new Set(serviceIds.filter((id): id is string => !!id))]
+  if (ids.length === 0) return new Map<string, { patientGuide: PatientGuide | null; durationMin: number | null }>()
+  const rows = await tx
+    .select({ id: serviceCatalog.id, patientGuide: serviceCatalog.patientGuide, durationMin: serviceCatalog.durationMin })
+    .from(serviceCatalog)
+    .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, ids)))
+  return new Map(rows.map((row) => [row.id, { patientGuide: parsePatientGuide(row.patientGuide), durationMin: row.durationMin }]))
+}
+
+/** Lo que explica el presupuesto, para editarlo o mirarlo. */
+export async function getBudgetPresentation(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  budgetId: string,
+  opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess: boolean },
+): Promise<BudgetPresentation> {
+  const budget = await requireBudget(tx, orgId, patientId, budgetId)
+  if (opts.actorUserId) {
+    await assertOwnBudget(tx, orgId, budgetId, opts.actorUserId, opts.memberRole, "Solo puedes ver presupuestos de lo que indicaste tú")
+  }
+  const lines = await listBudgetLines(tx, orgId, patientId, budgetId)
+  const options = await listOptions(tx, orgId, [budgetId])
+  const services = await servicesOf(tx, orgId, lines.map((line) => line.serviceId))
+  return {
+    budgetId,
+    status: budget.status,
+    findings: opts.clinicalAccess ? budget.findings : null,
+    hasFindings: !!budget.findings,
+    proposal: budget.proposal,
+    validUntil: budget.validUntil,
+    options: options.map((option) => ({
+      id: option.id,
+      label: budgetOptionLabel(option.position),
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
+    })),
+    lines: lines.map((line) => ({
+      id: line.id,
+      optionId: line.optionId,
+      planItemId: line.planItemId,
+      title: line.title,
+      patientGuide: parsePatientGuide(line.patientGuide),
+      serviceGuide: (line.serviceId && services.get(line.serviceId)?.patientGuide) || null,
+    })),
+  }
+}
+
+/**
+ * Guarda lo que explica un presupuesto en borrador: lo encontrado, lo propuesto, la
+ * vigencia, el nombre y lo que pesar en cada opción y el ajuste de una línea para este
+ * paciente. Entregado, ya no cambia (también lo impiden sus guardas en la base).
+ */
+export async function updateBudgetPresentation(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+  budgetId: string,
+  input: BudgetPresentationInput,
+  opts: BudgetActorOpts & { clinicalAccess: boolean },
+): Promise<BudgetPresentation> {
+  await requirePatient(tx, orgId, patientId)
+  const current = await lockForWrite(tx, orgId, patientId, budgetId)
+  await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
+  if (current.status !== "borrador") throw conflict("BUDGET_STATUS", "Lo entregado no cambia: solo se edita un borrador")
+  const fields: string[] = []
+  const set: Partial<typeof treatmentBudget.$inferInsert> = {}
+  if (input.findings !== undefined) {
+    set.findings = assertLongText(input.findings, "Lo que encontramos", BUDGET_TEXT_MAX)
+    fields.push("findings")
+  }
+  if (input.proposal !== undefined) {
+    set.proposal = assertLongText(input.proposal, "Lo que le proponemos", BUDGET_TEXT_MAX)
+    fields.push("proposal")
+  }
+  if (input.validUntil !== undefined) {
+    set.validUntil = input.validUntil ? assertCivilDate(input.validUntil) : null
+    fields.push("validUntil")
+  }
+  if (fields.length > 0) {
+    await tx
+      .update(treatmentBudget)
+      .set({ ...set, updatedAt: new Date() })
+      .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
+  }
+  if (input.options?.length) {
+    const known = new Set((await listOptions(tx, orgId, [budgetId])).map((option) => option.id))
+    for (const option of input.options) {
+      if (!known.has(option.optionId)) throw notFound("Opción del presupuesto")
+      const patch: Partial<typeof treatmentBudgetOption.$inferInsert> = {}
+      if (option.name !== undefined) patch.name = assertLongText(option.name, "El nombre de la opción", BUDGET_OPTION_NAME_MAX)
+      if (option.pros !== undefined) patch.pros = assertLongText(option.pros, "A favor", BUDGET_OPTION_TEXT_MAX)
+      if (option.cons !== undefined) patch.cons = assertLongText(option.cons, "A considerar", BUDGET_OPTION_TEXT_MAX)
+      await tx
+        .update(treatmentBudgetOption)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(and(eq(treatmentBudgetOption.organizationId, orgId), eq(treatmentBudgetOption.id, option.optionId)))
+    }
+    fields.push("options")
+  }
+  if (input.lines?.length) {
+    const known = new Set((await listBudgetLines(tx, orgId, patientId, budgetId)).map((line) => line.id))
+    for (const line of input.lines) {
+      if (!known.has(line.lineId)) throw notFound("Línea del presupuesto")
+      await tx
+        .update(treatmentBudgetItem)
+        .set({ patientGuide: parsePatientGuide(line.patientGuide), updatedAt: new Date() })
+        .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.id, line.lineId)))
+    }
+    fields.push("lines")
+  }
+  if (fields.length === 0) throw validation("Sin cambios: patch vacío")
+  await audit(tx, orgId, actorUserId, "budget.presentation_updated", budgetId, { patientId, fields })
+  await notifyBudget(tx, orgId)
+  return getBudgetPresentation(tx, orgId, patientId, budgetId, { clinicalAccess: opts.clinicalAccess })
 }
 
 // ------------------------------------------------------------- opciones ---
@@ -1259,6 +1471,7 @@ export async function duplicateBudgetOption(
       sessionsPlanned: line.sessionsPlanned,
       currency: line.currency,
       decision: "pendiente",
+      patientGuide: line.patientGuide,
       createdBy: actorUserId,
     })
   }
@@ -1371,7 +1584,7 @@ export async function deliverBudget(
   patientId: string,
   budgetId: string,
   opts: BudgetActorOpts = {},
-): Promise<BudgetRow> {
+): Promise<BudgetPublicRow> {
   await requirePatient(tx, orgId, patientId)
   const current = await lockForWrite(tx, orgId, patientId, budgetId)
   await assertOwnBudget(tx, orgId, budgetId, actorUserId, opts.memberRole)
@@ -1401,9 +1614,22 @@ export async function deliverBudget(
       throw error
     }
   }
+  // Lo entregado no cambia: cada línea se queda con su explicación de hoy (la del
+  // servicio, salvo que se ajustara para este paciente), y el presupuesto con su vigencia.
+  // Va antes de cambiar el estado: las guardas de la base ya no lo admitirían después.
+  const services = await servicesOf(tx, orgId, lines.map((line) => line.serviceId))
+  for (const line of lines) {
+    const guide = line.serviceId ? services.get(line.serviceId)?.patientGuide : null
+    if (line.patientGuide || !guide) continue
+    await tx
+      .update(treatmentBudgetItem)
+      .set({ patientGuide: guide, updatedAt: new Date() })
+      .where(and(eq(treatmentBudgetItem.organizationId, orgId), eq(treatmentBudgetItem.id, line.id)))
+  }
+  const validUntil = current.validUntil ?? (await defaultBudgetValidUntil(tx, orgId))
   const [updated] = await tx
     .update(treatmentBudget)
-    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date(), validUntil })
     .where(
       and(
         eq(treatmentBudget.id, budgetId),
@@ -1442,7 +1668,25 @@ export async function deliverBudget(
     total: { cents: full.totalCents, currency: updated.currency },
   })
   await notifyBudget(tx, orgId)
-  return updated
+  return withoutFindings(updated)
+}
+
+/** Hoy, en la zona de la clínica, más los días de vigencia de la clínica. */
+async function defaultBudgetValidUntil(tx: Db, orgId: string): Promise<string> {
+  const [profile] = await tx
+    .select({ days: orgProfile.budgetValidDays, timezone: orgProfile.timezone })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: profile?.timezone ?? NEUTRAL_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date())
+  const date = new Date(`${today}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + (profile?.days ?? 30))
+  return date.toISOString().slice(0, 10)
 }
 export interface AdjustBudgetLineInput {
   planItemId: string
@@ -1973,6 +2217,7 @@ export async function reviseBudget(
     organizationId: orgId, patientId, planId: current.planId, budgetNumber: current.budgetNumber,
     revisionNumber: current.revisionNumber + 1, supersedesBudgetId: current.id,
     title: assertTitle(input.title, current.title), notes: assertNotes(input.notes) ?? current.notes,
+    findings: current.findings, proposal: current.proposal,
     currency: current.currency, createdBy: actorUserId,
   }).returning()
   if (!revision) throw new Error("No se pudo crear la revisión")
@@ -2028,6 +2273,7 @@ export async function reviseBudget(
       billingMode:
         carried?.billingMode ?? (item.serviceId ? (billingModes[item.serviceId] ?? "treatment") : "treatment"),
       sessionsPlanned: carried?.sessionsPlanned ?? item.plannedSessions,
+      patientGuide: carried?.patientGuide ?? null,
       currency: snapshot.currency, createdBy: actorUserId,
     })
   }
@@ -2037,6 +2283,9 @@ export async function reviseBudget(
 }
 
 export interface BudgetPrintLine {
+  /** La línea y el tratamiento del plan del que sale. */
+  id: string
+  planItemId: string
   title: string
   detail: string | null
   /** Precio de referencia de la unidad (tarifa, o lo acordado si es mayor). */
@@ -2054,11 +2303,24 @@ export interface BudgetPrintLine {
   billingMode: string
   sessionsPlanned: number | null
   decision: string
+  /** Fase, orden y sesiones del plan. */
+  phase: string | null
+  sortOrder: number
+  plannedSessions: number | null
+  /** La duración del servicio, para lo que no tiene explicación. */
+  durationMin: number | null
+  /** Lo congelado al entregar; en borrador, el ajuste o la del servicio. */
+  guide: PatientGuide | null
+  /** Solo si quien lo recibe puede leer lo clínico. */
+  diagnosis: { label: string; title: string | null } | null
 }
 
 /** Una opción en la hoja: sus líneas y su total, nunca sumado con las demás. */
 export interface BudgetPrintOption {
   label: string
+  name: string | null
+  pros: string | null
+  cons: string | null
   isRecommended: boolean
   /** `pendiente`, `elegida` o `no_elegida`. */
   decision: string
@@ -2066,6 +2328,14 @@ export interface BudgetPrintOption {
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
+}
+
+/** Lo que pesa de un consentimiento unido a un servicio del presupuesto. */
+export interface BudgetConsentFacts {
+  title: string
+  risks: string[]
+  alternatives: string[]
+  consequences: string
 }
 
 export interface BudgetPrintPayload {
@@ -2086,8 +2356,18 @@ export interface BudgetPrintPayload {
   locale: string
   timezone: string
   issuedAt: Date
+  /** AAAA-MM-DD; imprimirlo vencido no cambia nada: solo se dice. */
+  validUntil: string | null
   clinic: { name: string; branchName: string | null; address: string | null; phone: string | null }
-  patient: { displayName: string; docType: string | null; docNumber: string | null }
+  /** La clínica como la dice el papel (logo y documento fiscal incluidos). */
+  documentClinic: DocumentClinic
+  patient: {
+    displayName: string
+    docType: string | null
+    docNumber: string | null
+    patientNumber: number
+    birthDate: string | null
+  }
   professional: { name: string; title: string | null; registration: string | null } | null
   /** Las líneas de la opción que vale (con una sola opción, todas). */
   lines: BudgetPrintLine[]
@@ -2096,9 +2376,34 @@ export interface BudgetPrintPayload {
   subtotalCents: number | null
   discountCents: number | null
   totalCents: number | null
+  /** Nombres de la hoja para el producto de la clínica. */
+  words: ProductWords["budgetPaper"]
+  /** Solo para quien puede leer lo clínico; si no, nulo o vacío. */
+  findings: string | null
+  allergies: string[]
+  /** La grilla del sitio (odentIA: piezas FDI); nula sin marcas o sin permiso. */
+  chart: { label: string; rows: Array<Array<{ label: string; marked: boolean }>> } | null
+  proposal: string | null
+  /** Las fases del producto, en orden; vacías si el producto no habla de etapas. */
+  phases: Array<{ key: string; label: string }>
+  terms: { payment: string | null; change: string | null }
+  paymentMethods: string[]
+  consents: BudgetConsentFacts[]
+  /** Cómo respondió, si ya respondió: «Aceptó por su enlace». */
+  decisionWords: { text: string; by: string | null; at: Date | null } | null
+  /** Su enlace vivo, si ya tiene uno; generar uno no es algo que haga un papel. */
+  personalLinkUrl: string | null
 }
 
-function printLine(site: ProductSite, line: BudgetLineWithStatus): BudgetPrintLine {
+function printLine(
+  site: ProductSite,
+  line: BudgetLineWithStatus,
+  extras: {
+    plan: Map<string, { phase: string; sortOrder: number; plannedSessions: number; diagnosis: BudgetPrintLine["diagnosis"] }>
+    services: Map<string, { patientGuide: PatientGuide | null; durationMin: number | null }>
+    isDraft: boolean
+  },
+): BudgetPrintLine {
   const units = budgetLineUnits(line)
   const unitCents = line.priceCents
   // La referencia nunca queda por debajo de lo acordado: un precio mayor
@@ -2109,7 +2414,11 @@ function printLine(site: ProductSite, line: BudgetLineWithStatus): BudgetPrintLi
       : Math.max(line.tariffPriceCents ?? unitCents, unitCents)
   const totalCents = unitCents == null ? null : unitCents * units
   const listTotalCents = listUnitCents == null ? null : listUnitCents * units
+  const plan = extras.plan.get(line.planItemId)
+  const service = line.serviceId ? extras.services.get(line.serviceId) : null
   return {
+    id: line.id,
+    planItemId: line.planItemId,
     title: line.title,
     detail: site.words(line, "short"),
     listUnitCents,
@@ -2123,23 +2432,81 @@ function printLine(site: ProductSite, line: BudgetLineWithStatus): BudgetPrintLi
     billingMode: line.billingMode,
     sessionsPlanned: line.sessionsPlanned,
     decision: line.decision,
+    phase: plan?.phase ?? null,
+    sortOrder: plan?.sortOrder ?? 0,
+    plannedSessions: plan?.plannedSessions ?? null,
+    durationMin: service?.durationMin ?? null,
+    // Lo entregado es lo congelado: lo que se cambie en el servicio después no le llega.
+    guide: parsePatientGuide(line.patientGuide) ?? (extras.isDraft ? (service?.patientGuide ?? null) : null),
+    diagnosis: plan?.diagnosis ?? null,
   }
 }
 
 /**
- * Contenido de la hoja del presupuesto (lo que imprime el PDF): precios
- * finales acordados, referencia del descuento y código de cotización 310.
- * Con varias opciones, cada una con su total. Moneda, formato, zona y papel
- * salen del perfil de la clínica.
+ * Lo que pesa antes de decidir, de los consentimientos unidos a estos servicios: la
+ * última versión publicada de cada uno. Sin consentimiento, esa parte no sale.
+ */
+async function consentFactsOf(tx: Db, orgId: string, serviceIds: Array<string | null>): Promise<BudgetConsentFacts[]> {
+  const ids = [...new Set(serviceIds.filter((id): id is string => !!id))]
+  if (ids.length === 0) return []
+  const links = await tx
+    .select({ key: consentTemplateService.templateKey })
+    .from(consentTemplateService)
+    .where(and(eq(consentTemplateService.organizationId, orgId), inArray(consentTemplateService.serviceId, ids)))
+  const keys = [...new Set(links.map((link) => link.key))]
+  if (keys.length === 0) return []
+  const rows = await tx
+    .select({ key: consentTemplate.key, title: consentTemplate.title, sections: consentTemplate.sections, version: consentTemplate.version })
+    .from(consentTemplate)
+    .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.status, "publicado"), inArray(consentTemplate.key, keys)))
+    .orderBy(asc(consentTemplate.key), desc(consentTemplate.version))
+  const facts: BudgetConsentFacts[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    if (seen.has(row.key)) continue
+    seen.add(row.key)
+    const sections = row.sections as ConsentSections | null
+    if (!sections) continue
+    facts.push({ title: row.title, risks: sections.risks, alternatives: sections.alternatives, consequences: sections.consequences })
+  }
+  return facts
+}
+
+function decisionWordsOf(budget: BudgetWithTotals, deciderName: string | null): BudgetPrintPayload["decisionWords"] {
+  if (!budget.decidedAt || !["aceptado", "parcial", "rechazado", "pospuesto"].includes(budget.status)) return null
+  const verb: Record<string, string> = {
+    aceptado: "Aceptó",
+    parcial: "Aceptó una parte",
+    rechazado: "No aceptó",
+    pospuesto: "Lo dejó para después",
+  }
+  // Lo que responde la persona no queda a nombre de nadie del equipo: `decidedBy` nulo.
+  const where = budget.decidedBy ? "en la clínica" : "por su enlace"
+  return {
+    text: `${verb[budget.status] ?? "Respondió"} ${where}`,
+    by: budget.acceptedByName ?? deciderName,
+    at: budget.decidedAt,
+  }
+}
+
+/**
+ * Contenido de la hoja del presupuesto (lo que imprime el PDF): precios finales
+ * acordados, referencia del descuento, código de cotización 310 y lo que explica
+ * cada línea. Con varias opciones, cada una con su total. Moneda, formato, zona y
+ * papel salen del perfil de la clínica.
+ *
+ * `clinicalAccess` decide si lleva lo encontrado, los diagnósticos y las alergias: solo
+ * quien lee lo clínico, o el papel que va a la propia persona o a su representante.
  */
 export async function getBudgetPrintPayload(
   tx: Db,
   orgId: string,
   patientId: string,
   budgetId: string,
-  opts: BudgetActorOpts & { actorUserId?: string } = {},
+  opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess?: boolean } = {},
 ): Promise<BudgetPrintPayload> {
   const budget = await getBudgetDetail(tx, orgId, patientId, budgetId, opts)
+  const clinicalAccess = opts.clinicalAccess === true
   const [profile] = await tx
     .select()
     .from(orgProfile)
@@ -2151,6 +2518,8 @@ export async function getBudgetPrintPayload(
       displayName: patientPerson.displayName,
       docType: patientPerson.docType,
       docNumber: patientPerson.docNumber,
+      patientNumber: patient.patientNumber,
+      birthDate: patientPerson.birthDate,
     })
     .from(patient)
     .innerJoin(patientPerson, joinPatientPerson(patientPerson))
@@ -2162,7 +2531,8 @@ export async function getBudgetPrintPayload(
     .from(treatmentPlan)
     .where(and(eq(treatmentPlan.id, budget.planId), eq(treatmentPlan.organizationId, orgId)))
     .limit(1)
-  const site = (await productHooks(tx, orgId)).site
+  const hooks = await productHooks(tx, orgId)
+  const site = hooks.site
   // Firma quien preparó el presupuesto; si no consta, quien abrió el plan.
   const author = budget.createdBy ?? planRow?.createdBy ?? null
   let professional: BudgetPrintPayload["professional"] = null
@@ -2186,24 +2556,65 @@ export async function getBudgetPrintPayload(
       }
     }
   }
-  // El presupuesto no pertenece a una sede. Si la clínica tiene una sola, la
-  // hoja lleva su nombre, dirección y teléfono; con varias, los de la clínica.
-  const branches = await tx
-    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
-    .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
-    .limit(2)
-  const onlyBranch = branches.length === 1 ? branches[0]! : null
+  const documentClinic = await loadDocumentClinic(tx, orgId)
+  const isDraft = budget.status === "borrador"
+  // Fase, orden, sesiones y diagnóstico de cada línea salen del plan.
+  const planItems = budget.items.length
+    ? await tx
+        .select({
+          id: treatmentPlanItem.id,
+          phase: treatmentPlanItem.phase,
+          sortOrder: treatmentPlanItem.sortOrder,
+          plannedSessions: treatmentPlanItem.plannedSessions,
+          diagnosisSystem: treatmentPlanItem.diagnosisSystem,
+          diagnosisCode: treatmentPlanItem.diagnosisCode,
+        })
+        .from(treatmentPlanItem)
+        .where(and(eq(treatmentPlanItem.organizationId, orgId), inArray(treatmentPlanItem.id, budget.items.map((line) => line.planItemId))))
+    : []
+  const codes = clinicalAccess
+    ? [...new Set(planItems.filter((item) => item.diagnosisCode).map((item) => `${item.diagnosisSystem}|${item.diagnosisCode}`))]
+    : []
+  const titles = new Map<string, string>()
+  if (codes.length > 0) {
+    const found = await tx
+      .select({ system: diagnosisCatalog.systemKey, code: diagnosisCatalog.code, title: diagnosisCatalog.title })
+      .from(diagnosisCatalog)
+      .where(inArray(diagnosisCatalog.code, codes.map((code) => code.split("|")[1] ?? "")))
+    for (const row of found) titles.set(`${row.system}|${row.code}`, row.title)
+  }
+  const plan = new Map(
+    planItems.map((item) => [
+      item.id,
+      {
+        phase: item.phase,
+        sortOrder: item.sortOrder,
+        plannedSessions: item.plannedSessions,
+        diagnosis:
+          clinicalAccess && item.diagnosisCode
+            ? {
+                label: diagnosisCodeLabel(item.diagnosisSystem, item.diagnosisCode),
+                title: titles.get(`${item.diagnosisSystem}|${item.diagnosisCode}`) ?? null,
+              }
+            : null,
+      },
+    ]),
+  )
+  const services = await servicesOf(tx, orgId, budget.items.map((line) => line.serviceId))
+  const toLine = (line: BudgetLineWithStatus) => printLine(site, line, { plan, services, isDraft })
   const value = valueOptionOf(budget.options)
-  const lines = budget.items.filter((line) => !value || line.optionId === value.id).map((line) => printLine(site, line))
+  const lines = budget.items.filter((line) => !value || line.optionId === value.id).map(toLine)
   const subtotalCents = sumCents(lines.map((line) => line.listTotalCents))
   const options: BudgetPrintOption[] =
     budget.options.length > 1
       ? budget.options.map((option) => {
-          const optionLines = budget.items.filter((line) => line.optionId === option.id).map((line) => printLine(site, line))
+          const optionLines = budget.items.filter((line) => line.optionId === option.id).map(toLine)
           const optionSubtotal = sumCents(optionLines.map((line) => line.listTotalCents))
           return {
             label: option.label,
+            name: option.name,
+            pros: option.pros,
+            cons: option.cons,
             isRecommended: option.isRecommended,
             decision: option.decision,
             lines: optionLines,
@@ -2214,6 +2625,44 @@ export async function getBudgetPrintPayload(
           }
         })
       : []
+  // Lo clínico solo si corresponde; `findings` se lee aquí, nunca viaja en el detalle.
+  const [clinical] = clinicalAccess
+    ? await tx
+        .select({ findings: treatmentBudget.findings })
+        .from(treatmentBudget)
+        .where(and(eq(treatmentBudget.id, budgetId), eq(treatmentBudget.organizationId, orgId)))
+        .limit(1)
+    : []
+  const allergies = clinicalAccess
+    ? await tx
+        .select({ substance: patientAllergy.substance })
+        .from(patientAllergy)
+        .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId), eq(patientAllergy.isActive, true)))
+    : []
+  const phases = hooks.phaseWords
+    ? hooks.planPhases.flatMap((key) => {
+        const label = hooks.phaseWords?.(key)
+        return label ? [{ key, label }] : []
+      })
+    : []
+  const methods = await listPaymentMethods(tx, orgId)
+  const [decider] = budget.decisionContactId
+    ? await tx
+        .select({ name: contact.displayName })
+        .from(contact)
+        .where(and(eq(contact.id, budget.decisionContactId), eq(contact.organizationId, orgId)))
+        .limit(1)
+    : []
+  // Su enlace, si ya tiene uno vivo: un papel no crea ni renueva enlaces.
+  let personalLinkUrlOf: string | null = null
+  const key = documentSecretsKey()
+  if (key && !isDraft) {
+    const [recipient] = await listDecisionRecipients(tx, orgId, patientId)
+    if (recipient) {
+      const token = await livePersonalLinkToken(tx, orgId, { contactId: recipient.contactId, patientId }, { secretsKey: key })
+      if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token)
+    }
+  }
   return {
     quotationCode: "310",
     paper: profile.sheetSize,
@@ -2223,18 +2672,20 @@ export async function getBudgetPrintPayload(
     planTitle: planRow?.title ?? budget.title,
     status: budget.status,
     stateText: budget.stateText,
-    isDraft: budget.status === "borrador",
+    isDraft,
     notes: budget.notes,
     currency: budget.currency,
     locale: profile.locale,
     timezone: profile.timezone,
     issuedAt: budget.presentedAt ?? budget.createdAt,
+    validUntil: budget.validUntil,
     clinic: {
-      name: profile.tradeName || profile.legalName || "",
-      branchName: onlyBranch?.name ?? null,
-      address: (onlyBranch ? (await branchAddressWriter(tx, orgId))(onlyBranch.address) : null) ?? profile.fiscalAddress ?? null,
-      phone: onlyBranch?.phone ?? null,
+      name: documentClinic.tradeName,
+      branchName: documentClinic.branchName,
+      address: documentClinic.address,
+      phone: documentClinic.phone,
     },
+    documentClinic,
     patient: patientRow,
     professional,
     lines,
@@ -2243,5 +2694,16 @@ export async function getBudgetPrintPayload(
     discountCents:
       subtotalCents == null || budget.totalCents == null ? null : subtotalCents - budget.totalCents,
     totalCents: budget.totalCents,
+    words: productWords(isClinicalProduct(profile.product) ? profile.product : "dental").budgetPaper,
+    findings: clinical?.findings ?? null,
+    allergies: allergies.map((row) => row.substance),
+    chart: clinicalAccess && site.chart ? site.chart(budget.items) : null,
+    proposal: budget.proposal,
+    phases,
+    terms: { payment: profile.budgetPaymentTerms?.trim() || null, change: profile.budgetChangeTerms?.trim() || null },
+    paymentMethods: methods.map((method) => method.name),
+    consents: await consentFactsOf(tx, orgId, budget.items.map((line) => line.serviceId)),
+    decisionWords: decisionWordsOf(budget, decider?.name ?? null),
+    personalLinkUrl: personalLinkUrlOf,
   }
 }

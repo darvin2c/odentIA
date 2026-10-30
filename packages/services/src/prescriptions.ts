@@ -352,10 +352,16 @@ export async function getPrescriptionPrint(tx: Db, orgId: string, patientId: str
             ),
           )
       : []
+  // Las alergias activas van a la vista en la receta: es lo que evita un error al dispensar.
+  const allergies = await tx
+    .select({ substance: patientAllergy.substance })
+    .from(patientAllergy)
+    .where(and(eq(patientAllergy.organizationId, orgId), eq(patientAllergy.patientId, patientId), eq(patientAllergy.isActive, true)))
   return {
     prescription: detail,
     diagnosisDescription: dx?.description ?? null,
     patient: person,
     establishment: org ?? null,
+    allergies: allergies.map((row) => row.substance),
   }
 }

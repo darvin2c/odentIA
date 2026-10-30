@@ -19,7 +19,6 @@ import type { Db } from "@odentia/db"
 import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
-import { PDFDocument, StandardFonts } from "pdf-lib"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
 import { notFound, ServiceError, validation } from "./errors.js"
 import {
@@ -29,12 +28,13 @@ import {
   requireDocumentConnection,
   type SendDeps,
 } from "./financial-documents.js"
-import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { requirePatient } from "./patients.js"
-import { MUTED, safe, when, Writer, type Zone } from "./pdf-writer.js"
+import { ORDER_KIND_WORDS, renderMedicalLeavePdf, renderOrderPdf, renderPrescriptionPdf } from "./clinical-papers.js"
+import { renderConsentPaperPdf } from "./consent-pdf.js"
+import { type CheckableDocument, documentCheckUrl } from "./document-check.js"
+import { loadDocumentClinic } from "./document-clinic.js"
 import { getPrescriptionPrint } from "./prescriptions.js"
 import { getMedicalLeavePrint } from "./medical-leaves.js"
-import { medicalLeaveWords } from "@odentia/clinical"
 import type { Storage } from "./storage.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
 import { sendPersonalLink } from "./su-enlace.js"
@@ -203,184 +203,18 @@ export async function getHealthDocumentSendOptions(
 
 // --- PDF -----------------------------------------------------------------------
 
-export async function newWriter(title: string): Promise<{ pdf: PDFDocument; w: Writer }> {
-  const pdf = await PDFDocument.create()
-  pdf.setTitle(safe(title))
-  pdf.setProducer("odentIA")
-  const w = new Writer(
-    pdf,
-    await pdf.embedFont(StandardFonts.Helvetica),
-    await pdf.embedFont(StandardFonts.HelveticaBold),
-  )
-  return { pdf, w }
-}
-
-export interface Establishment {
-  legalName: string | null
-  tradeName: string | null
-  fiscalDocType: string | null
-  fiscalDocNumber: string | null
-  address: string | null
-  locale?: string | null
-  timezone?: string | null
-}
-
-export function header(w: Writer, establishment: Establishment | null) {
-  if (!establishment) return
-  w.text(establishment.tradeName ?? establishment.legalName ?? "", { size: 12, bold: true })
-  w.text(
-    [
-      establishment.legalName,
-      establishment.fiscalDocNumber &&
-        [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" "),
-      establishment.address,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-    { size: 8, color: MUTED },
-  )
-  w.gap()
-}
-
-export function patientLine(person: {
-  displayName: string
-  patientNumber: number
-  docType: string | null
-  docNumber: string | null
-  birthDate: string | null
-}): string {
-  return `Paciente: ${person.displayName} · HC ${String(person.patientNumber).padStart(6, "0")}${
-    person.docNumber ? ` · ${person.docType ?? ""} ${person.docNumber}` : ""
-  }${person.birthDate ? ` · nacimiento ${person.birthDate}` : ""}`
-}
-
-export function zoneOf(establishment: Establishment | null): Zone {
-  return {
-    locale: establishment?.locale || NEUTRAL_LOCALE,
-    timezone: establishment?.timezone || NEUTRAL_TIMEZONE,
-  }
-}
-
-/** PDF de la receta: lo mismo que su hoja impresa. */
-export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getPrescriptionPrint>>) {
-  const { prescription: rx, patient: person, establishment } = data
-  const zone = zoneOf(establishment)
-  const { pdf, w } = await newWriter(`Receta ${rx.prescriptionNumber}`)
-  header(w, establishment)
-  w.text("RECETA", { size: 9, bold: true, color: MUTED })
-  w.text(`Receta N.º ${rx.prescriptionNumber}`, { size: 15, bold: true })
-  w.text(`Emitida ${when(rx.issuedAt, zone)}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(patientLine(person))
-  // El peso con que se recetó (latidIA, a un menor de 12 años).
-  if (rx.patientWeightKg) w.text(`Peso: ${Number(rx.patientWeightKg)} kg`)
-  if (rx.diagnosisCode) w.text(`Diagnóstico: ${rx.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-  w.heading("Medicamentos")
-  for (const item of rx.items) {
-    w.text(
-      `${item.genericName ?? item.medicationName}${item.strength ? ` ${item.strength}` : ""}${
-        item.dosageForm ? ` · ${item.dosageForm}` : ""
-      }${item.brandName ? ` (${item.brandName})` : ""}`,
-      { bold: true },
-    )
-    w.text(
-      `${item.dose} · vía ${item.route} · ${item.frequency} · ${item.duration}${
-        item.quantity ? ` · cantidad ${item.quantity}` : ""
-      }`,
-      { indent: 10 },
-    )
-    if (item.instructions) w.text(item.instructions, { indent: 10 })
-  }
-  if (rx.notes) {
-    w.heading("Indicaciones")
-    w.text(rx.notes)
-  }
-  if (rx.validUntil) w.text(`Válida hasta ${rx.validUntil}`, { size: 9 })
-  w.gap(14)
-  w.text(
-    `${rx.prescriberName ?? "-"}${rx.prescriberTitle ? ` · ${rx.prescriberTitle}` : ""}${
-      rx.prescriberRegistration ? ` · ${rx.prescriberRegistration}` : ""
-    }`,
-    { size: 9, bold: true },
-  )
-  w.text("Firma con su perfil profesional.", { size: 8, color: MUTED })
-  return pdf.save({ useObjectStreams: false })
-}
-
-const ORDER_KIND_WORDS: Record<string, string> = {
-  imagen: "Orden de imagen",
-  laboratorio: "Orden de laboratorio",
-  interconsulta: "Derivación",
-}
-
-/** PDF de la orden: lo mismo que su hoja impresa. */
-export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPrint>>) {
-  const { order, patient: person, establishment, requestedBy } = data
-  const zone = zoneOf(establishment)
-  const kind = ORDER_KIND_WORDS[order.kind] ?? "Orden"
-  const { pdf, w } = await newWriter(`${kind} · ${order.title}`)
-  header(w, establishment)
-  w.text(kind.toUpperCase(), { size: 9, bold: true, color: MUTED })
-  w.text(order.title, { size: 15, bold: true })
-  w.text(`Pedida ${when(order.createdAt, zone)}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(patientLine(person))
-  w.text(`Para: ${order.recipient}`)
-  if (order.diagnosisCode) w.text(`Diagnóstico: ${order.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-  if (order.detail) {
-    w.heading("Detalle")
-    w.text(order.detail)
-  }
-  w.gap(14)
-  if (requestedBy) {
-    w.text(
-      `${requestedBy.name}${requestedBy.title ? ` · ${requestedBy.title}` : ""}${
-        requestedBy.registration ? ` · ${requestedBy.registration}` : ""
-      }`,
-      { size: 9, bold: true },
-    )
-    w.text("Pide con su perfil profesional.", { size: 8, color: MUTED })
-  }
-  return pdf.save({ useObjectStreams: false })
+const CHECK_TYPE: Record<HealthDocumentType, CheckableDocument> = {
+  prescription: "prescription",
+  order: "order",
+  medical_leave: "medical_leave",
+  consent: "consent",
 }
 
 /**
- * PDF del descanso médico: lo mismo que su hoja impresa. Un documento propio,
- * sin el formato oficial de ningún país (issue 229, decisión 8); el
- * diagnóstico va solo si la persona lo autorizó.
- */
-export async function renderMedicalLeavePdf(data: Awaited<ReturnType<typeof getMedicalLeavePrint>>) {
-  const { leave, patient: person, establishment } = data
-  const zone = zoneOf(establishment)
-  const { pdf, w } = await newWriter(`Descanso médico ${leave.leaveNumber}`)
-  header(w, establishment)
-  w.text("DESCANSO MÉDICO", { size: 9, bold: true, color: MUTED })
-  w.text(`Constancia N.º ${leave.leaveNumber}`, { size: 15, bold: true })
-  w.text(`Emitida ${when(leave.issuedAt, zone)}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(patientLine(person))
-  w.gap(6)
-  w.text(`Se indican ${medicalLeaveWords(leave.startsOn, leave.days)}.`, { bold: true })
-  if (leave.showDiagnosis && leave.diagnosisCode)
-    w.text(`Diagnóstico: ${leave.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-  if (leave.notes) {
-    w.heading("Indicaciones")
-    w.text(leave.notes)
-  }
-  w.gap(14)
-  w.text(
-    `${leave.signerName ?? "-"}${leave.signerTitle ? ` · ${leave.signerTitle}` : ""}${
-      leave.signerRegistration ? ` · ${leave.signerRegistration}` : ""
-    }`,
-    { size: 9, bold: true },
-  )
-  w.text("Firma con su perfil profesional.", { size: 8, color: MUTED })
-  return pdf.save({ useObjectStreams: false })
-}
-
-/**
- * El PDF de un papel de salud, para enviarlo; imprimir usa su hoja en
- * pantalla. Receta y orden se generan; el consentimiento es el guardado.
+ * El PDF de un papel de salud: el mismo para enviarlo, para «Tus papeles» y para
+ * que el equipo lo vea. Receta, orden y descanso se generan, con su sello si se
+ * anularon (enviarlos sigue prohibido: `loadHealthMeta`). El consentimiento firmado
+ * es el guardado, el de la huella; el pendiente es la hoja para firmar en papel.
  */
 export async function renderHealthDocumentPdf(
   tx: Db,
@@ -391,10 +225,14 @@ export async function renderHealthDocumentPdf(
   /** Para leer el consentimiento guardado; receta y orden no lo usan. */
   storage: Pick<Storage, "getAttachment"> = {},
 ): Promise<{ bytes: Uint8Array; filename: string; label: string }> {
+  const context = async () => ({
+    clinic: await loadDocumentClinic(tx, orgId),
+    checkUrl: await documentCheckUrl(tx, orgId, CHECK_TYPE[type], documentId),
+  })
   if (type === "prescription") {
     const data = await getPrescriptionPrint(tx, orgId, patientId, documentId)
     return {
-      bytes: await renderPrescriptionPdf(data),
+      bytes: await renderPrescriptionPdf(data, await context()),
       filename: `Receta-${data.prescription.prescriptionNumber}.pdf`,
       label: `Receta N.º ${data.prescription.prescriptionNumber}`,
     }
@@ -402,7 +240,7 @@ export async function renderHealthDocumentPdf(
   if (type === "medical_leave") {
     const data = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
     return {
-      bytes: await renderMedicalLeavePdf(data),
+      bytes: await renderMedicalLeavePdf(data, await context()),
       filename: `Descanso-medico-${data.leave.leaveNumber}.pdf`,
       label: `Descanso médico N.º ${data.leave.leaveNumber}`,
     }
@@ -411,7 +249,7 @@ export async function renderHealthDocumentPdf(
     const data = await getOrderPrint(tx, orgId, documentId)
     if (data.order.patientId !== patientId) throw notFound("Orden")
     return {
-      bytes: await renderOrderPdf(data),
+      bytes: await renderOrderPdf(data, await context()),
       filename: `Orden-${data.order.title}.pdf`,
       label: `${ORDER_KIND_WORDS[data.order.kind] ?? "Orden"} · ${data.order.title}`,
     }
@@ -419,6 +257,13 @@ export async function renderHealthDocumentPdf(
   const data = await getConsentPrint(tx, orgId, documentId)
   if (data.document.patientId !== patientId) throw notFound("Consentimiento")
   const doc = data.document
+  if (doc.status === "pendiente") {
+    return {
+      bytes: await renderConsentPaperPdf(data, await loadDocumentClinic(tx, orgId)),
+      filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+      label: `Consentimiento · ${doc.titleSnapshot}`,
+    }
+  }
   // Se envía el PDF que se guardó al firmar, no uno nuevo: es el de la huella (#47).
   if (!doc.pdfDocumentId || !doc.pdfSha256)
     throw new ServiceError("CONSENT_PDF_MISSING", 409, "El consentimiento aún no tiene su PDF guardado")

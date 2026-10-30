@@ -3,6 +3,7 @@ import {
   bodySiteOf,
   type DentalSite,
   dentalSiteOf,
+  FDI_ADULT_ROWS,
   ISO_3950,
   isValidTooth,
   surfacesForTooth,
@@ -131,6 +132,18 @@ export const dentalProductSite: ProductSite = {
   },
   value(code) {
     return code && /^[1-8][1-8]$/.test(code) ? Number(code) : null
+  },
+  chart(rows) {
+    const marked = new Set<number>()
+    for (const row of rows) {
+      const { toothNumber } = dentalSiteOfRow(row)
+      if (toothNumber != null) marked.add(toothNumber)
+    }
+    if (marked.size === 0) return null
+    return {
+      label: "Pieza",
+      rows: FDI_ADULT_ROWS.map((row) => row.map((tooth) => ({ label: String(tooth), marked: marked.has(tooth) }))),
+    }
   },
   words(row, form = "long") {
     const site = dentalSiteOfRow(row)

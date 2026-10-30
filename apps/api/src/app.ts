@@ -6,7 +6,7 @@ import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
 import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { configurePublicLinks, onDomain, productOfHost, trustedOriginsOn, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import { configureDocumentChecks, configureDocumentLogos, configurePublicLinks, onDomain, productOfHost, trustedOriginsOn, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
@@ -76,6 +76,7 @@ import { createTasksRoute } from "./routes/tasks.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
+import { createPublicDocumentsRoute } from "./routes/public-documents.js"
 import { createPublicReportDigestRoute } from "./routes/report-digest-public.js"
 import { createReportsRoute } from "./routes/reports.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
@@ -180,9 +181,13 @@ const orgProfileInput = z.object({
 
 /** Lo que se imprime: se edita en «Medios de pago y ticket», aparte de los datos de la clínica. */
 const orgPrintingInput = z.object({
-  receiptWidth: z.enum(["58", "80"]),
-  sheetSize: z.enum(["A4", "Letter"]),
-  ticketFooter: z.string().trim().min(1, "Escribe la frase al pie del ticket").max(280),
+  receiptWidth: z.enum(["58", "80"]).optional(),
+  sheetSize: z.enum(["A4", "Letter"]).optional(),
+  ticketFooter: z.string().trim().min(1, "Escribe la frase al pie del ticket").max(280).optional(),
+  // Las condiciones del presupuesto: vacías, esa sección no sale en la hoja.
+  budgetValidDays: z.number().int().min(1).max(365).optional(),
+  budgetPaymentTerms: z.string().trim().max(2000).nullish(),
+  budgetChangeTerms: z.string().trim().max(2000).nullish(),
 })
 
 type AuditRow = typeof auditEvent.$inferSelect
@@ -225,6 +230,8 @@ export function createApp(deps: AppDeps) {
   // «Su enlace» de cada persona vive en el subdominio de su clínica: los
   // mensajes y las plantillas de WhatsApp que lo llevan leen esta dirección.
   configurePublicLinks({ webURL: deps.webURL, cookieDomain: deps.cookieDomain, productDomains: deps.productDomains ?? {} })
+  configureDocumentChecks(deps.secretsKey)
+  configureDocumentLogos(deps.storage)
   // Cada producto en su dominio: odentIA en `cookieDomain` y latidIA en el suyo.
   const domains: Partial<Record<ClinicalProduct, string>> = { dental: deps.cookieDomain, ...deps.productDomains }
   const adminOrigin = new URL(deps.adminURL).origin
@@ -389,6 +396,7 @@ export function createApp(deps: AppDeps) {
   )
   app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))
   app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
+  app.route("/api/public/documents", createPublicDocumentsRoute({ db, secretsKey: deps.secretsKey, remoteAddress: deps.registrationRemoteAddress }))
   app.route("/api/public/calendar", createPublicCalendarRoute({
       db,
       ownerDb: deps.ownerDb,

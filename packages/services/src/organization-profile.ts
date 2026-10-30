@@ -158,6 +158,11 @@ export interface UpdateOrgRegionInput {
   receiptWidth?: string | null
   sheetSize?: string | null
   ticketFooter?: string | null
+  /** Días de vigencia del presupuesto al entregarlo (1 a 365). */
+  budgetValidDays?: number | null
+  /** «Cómo se paga» y «Si el importe cambia»: vacíos, esa sección no sale. */
+  budgetPaymentTerms?: string | null
+  budgetChangeTerms?: string | null
   /** Al cambiar de país se proponen moneda/formato/papel; todo se puede cambiar. */
   applyCountryPreset?: boolean
   /** Impuestos de lo cobrado (ADR 0083): null en una cifra es volver a lo del país. */
@@ -298,6 +303,20 @@ export async function updateOrgRegion(
   if (input.sheetSize !== undefined && input.sheetSize !== null) {
     set.sheetSize = assertSheetSize(input.sheetSize)
     fields.push("sheetSize")
+  }
+  if (input.budgetValidDays !== undefined && input.budgetValidDays !== null) {
+    if (!Number.isInteger(input.budgetValidDays) || input.budgetValidDays < 1 || input.budgetValidDays > 365)
+      throw validation("La vigencia del presupuesto va de 1 a 365 días")
+    set.budgetValidDays = input.budgetValidDays
+    fields.push("budgetValidDays")
+  }
+  if (input.budgetPaymentTerms !== undefined) {
+    set.budgetPaymentTerms = input.budgetPaymentTerms?.trim() || null
+    fields.push("budgetPaymentTerms")
+  }
+  if (input.budgetChangeTerms !== undefined) {
+    set.budgetChangeTerms = input.budgetChangeTerms?.trim() || null
+    fields.push("budgetChangeTerms")
   }
   if (input.ticketFooter !== undefined && input.ticketFooter !== null) {
     set.ticketFooter = assertTicketFooter(input.ticketFooter)

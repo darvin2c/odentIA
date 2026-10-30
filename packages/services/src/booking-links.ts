@@ -93,6 +93,35 @@ export interface IssuedPersonalLink {
 }
 
 /**
+ * El enlace que esta persona ya tiene vivo para este paciente, sin tocarlo: leerlo no
+ * renueva ni crea nada. Para lo que solo lo muestra (el QR de un papel); sin uno vivo, null.
+ */
+export async function livePersonalLinkToken(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; patientId: string },
+  deps: { secretsKey: Buffer },
+): Promise<string | null> {
+  const [live] = await tx
+    .select({ id: appointmentBookingLink.id, tokenHash: appointmentBookingLink.tokenHash })
+    .from(appointmentBookingLink)
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.contactId, input.contactId),
+        eq(appointmentBookingLink.patientId, input.patientId),
+        isNull(appointmentBookingLink.revokedAt),
+        gt(appointmentBookingLink.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(desc(appointmentBookingLink.createdAt))
+    .limit(1)
+  if (!live) return null
+  const token = tokenFor(deps.secretsKey, live.id)
+  return hashToken(token) === live.tokenHash ? token : null
+}
+
+/**
  * Da el enlace de esta persona para este paciente: el que ya tiene vivo, con
  * su vigencia renovada, o uno nuevo. Uno solo por persona y paciente: el
  * nuevo deja sin efecto los anteriores.

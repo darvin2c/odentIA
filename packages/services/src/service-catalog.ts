@@ -1,6 +1,8 @@
 import {
   type ProcedureCodingSnapshot,
   type ServiceListProfile,
+  type PatientGuide,
+  parsePatientGuide,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
@@ -296,6 +298,20 @@ export async function getTemplate(
   return { ...row, codings: coding ? [coding] : [] }
 }
 
+/**
+ * El texto sugerido de un tratamiento de la biblioteca, para que la clínica parta de
+ * él. Solo se lee aquí: no le llega a un paciente hasta que ella lo guarda en su servicio.
+ */
+export async function getTemplatePatientGuide(tx: Db, templateId: string): Promise<{ suggestion: PatientGuide | null }> {
+  const [row] = await tx
+    .select({ patientGuide: treatmentTemplate.patientGuide })
+    .from(treatmentTemplate)
+    .where(eq(treatmentTemplate.id, templateId))
+    .limit(1)
+  if (!row) throw notFound("Prestación de la biblioteca")
+  return { suggestion: parsePatientGuide(row.patientGuide) }
+}
+
 async function audit(
   tx: Db,
   orgId: string,
@@ -522,6 +538,9 @@ const serviceListColumns = () => ({
   billingMode: serviceCatalog.billingMode,
   priceDisclosure: serviceCatalog.priceDisclosure,
   evaluationServiceId: serviceCatalog.evaluationServiceId,
+  patientGuide: serviceCatalog.patientGuide,
+  patientGuideReviewedAt: serviceCatalog.patientGuideReviewedAt,
+  patientGuideReviewedBy: serviceCatalog.patientGuideReviewedBy,
   leavesFinding: serviceLeavesFinding,
   procedureSystem: serviceCatalog.procedureSystem,
   procedureCode: serviceCatalog.procedureCode,
@@ -778,6 +797,11 @@ export interface UpdateServicePatch {
   evaluationServiceId?: string | null
   /** Qué deja en la pieza al completarse; `null` = nada. */
   leavesFinding?: ServiceLeaves | null
+  /**
+   * La explicación para el paciente, tal como la deja la clínica; `null` o vacía la
+   * quita. Guardarla es revisarla: queda quién y cuándo.
+   */
+  patientGuide?: unknown
   /** Código oficial de un servicio propio; `null` = sin código (solo donde no es obligatorio). */
   officialCode?: string | null
   isActive?: boolean
@@ -925,6 +949,13 @@ export async function updateService(
   } else if (set.scope !== undefined && leaves === undefined && current.leavesFinding) {
     // Cambiar dónde se hace no deja un dibujo que ya no encaja.
     await checkServiceFinding(tx, orgId, current.leavesFinding, set.scope)
+  }
+
+  if (patch.patientGuide !== undefined) {
+    set.patientGuide = parsePatientGuide(patch.patientGuide)
+    set.patientGuideReviewedAt = new Date()
+    set.patientGuideReviewedBy = actorUserId
+    fields.push("patientGuide")
   }
 
   const resolvedScope = (set.scope ?? current.scope) as string | null

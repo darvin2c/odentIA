@@ -39,7 +39,7 @@ import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } 
 import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError } from "./errors.js"
-import { buildBudgetSnapshot, renderBudgetPdf } from "./financial-document-pdf.js"
+import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { type DocumentRecipient, deliverDocumentPdf, type RecipientRelation } from "./financial-documents.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 import { findOrgLocale } from "./locale.js"
@@ -277,7 +277,7 @@ export async function sendBudget(
     if (route.cause === "sin_permiso") throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
     throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
   }
-  const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId)
+  const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId, { recipientContactId: recipient.contactId })
   const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   const senderKind = actor.by === "agente" || !actor.userId ? "agent" : "user"
   // «Ver y responder» abre su enlace: el mismo que ya tenga, donde el presupuesto aparece.

@@ -60,7 +60,7 @@ import { findOrgCountry, findOrgLocale } from "./locale.js"
 import { getPatientMissingData, getPatientRegistrationConfig } from "./patient-registration.js"
 import { type DeclaredPatientHealthInput, getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import { patientOrganizationToday, patientPersonId, requirePatient, updatePatient } from "./patients.js"
-import { decideBudgetByPerson, type DecidePortalBudgetInput, portalBudgetLocale, type PortalBudgetView, toPortalBudget } from "./portal.js"
+import { decideBudgetByPerson, type DecidePortalBudgetInput, portalBudgetContext, type PortalBudgetView, toPortalBudget } from "./portal.js"
 import { pendingQuestionnaire, submitQuestionnaireFromLink } from "./portal-questionnaire.js"
 import { personalLinkRef } from "./personal-link-token.js"
 import { personalLinkMessageUrl, personalLinkUrl } from "./public-links.js"
@@ -160,8 +160,9 @@ async function budgetsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Pro
     (budget) => budget.status !== "borrador" && budget.awaitsAnswer,
   )
   if (budgets.length === 0) return []
-  const locale = await portalBudgetLocale(tx, orgId)
-  return budgets.map((budget) => toPortalBudget(budget, locale))
+  // `link.decides` ya dijo que es la propia persona o su representante.
+  const context = await portalBudgetContext(tx, orgId, budgets.map((budget) => budget.id), true)
+  return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
 async function consentsOf(tx: Db, orgId: string, link: ResolvedPersonalLink): Promise<PersonalLinkConsent[]> {
@@ -761,9 +762,9 @@ export async function decidePersonalLinkBudget(
       metadata: { status: result.budget.status, origin: "paciente" },
     })
   }
-  const locale = await portalBudgetLocale(tx, orgId)
+  const context = await portalBudgetContext(tx, orgId, [budgetId], true)
   return {
-    budget: toPortalBudget(result.budget, locale),
+    budget: toPortalBudget(result.budget, context),
     toSchedule: result.budget.items
       .filter((line) => line.decision === "aceptado" && line.itemStatus === "pendiente")
       .map((line) => ({ planItemId: line.planItemId, title: line.title })),

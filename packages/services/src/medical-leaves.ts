@@ -10,6 +10,7 @@ import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
+import { listDecisionRecipients, patientAge } from "./responsibilities.js"
 
 /**
  * El descanso médico (issue 229, decisión 8): la constancia de reposo, como la
@@ -228,10 +229,25 @@ export async function getMedicalLeavePrint(tx: Db, orgId: string, patientId: str
             ),
           )
       : []
+  // «Evaluado el»: la hora de la atención que dio el descanso, si salió de una.
+  const [visit] = leave.encounterId
+    ? await tx
+        .select({ startedAt: encounter.startedAt })
+        .from(encounter)
+        .where(and(eq(encounter.id, leave.encounterId), eq(encounter.organizationId, orgId)))
+        .limit(1)
+    : []
+  // Un menor no se representa solo: el papel nombra a quien lo representa hoy.
+  const age = await patientAge(tx, orgId, patientId)
+  const guardian = age.isMinor
+    ? (await listDecisionRecipients(tx, orgId, patientId)).find((row) => row.relation === "representante_legal")
+    : null
   return {
     leave,
     diagnosisDescription: dx?.description ?? null,
     patient: person,
     establishment: org ?? null,
+    evaluatedAt: visit?.startedAt ?? null,
+    guardianName: guardian?.displayName ?? null,
   }
 }

@@ -14,6 +14,7 @@ import type { Db } from "@odentia/db"
 import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
 import { validation } from "./errors.js"
+import type { DocumentCheckFacts } from "./document-check.js"
 import type { TimelineItem } from "./patient-history.js"
 import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
 
@@ -89,6 +90,11 @@ export interface ProductSite {
    * «Cuadrante 1», «Arcada superior»).
    */
   words(row: SiteColumns, form?: "short" | "long" | "full"): string | null
+  /**
+   * Las marcas de estos sitios en la grilla del producto, para la hoja del presupuesto
+   * (odentIA: las piezas FDI). Sin él, o sin ninguna marca, no hay grilla.
+   */
+  chart?(rows: SiteColumns[]): { label: string; rows: Array<Array<{ label: string; marked: boolean }>> } | null
   /** El sitio como `bodySite` de FHIR para la exportación de la historia; null sin sitio. */
   bodySite(row: SiteColumns): { text: string } | null
   /** Lo que se le dice a quien manda un sitio suelto que no vale («Pieza FDI inválida: 19»). */
@@ -372,6 +378,13 @@ export interface ProductHooks {
   planPhases: readonly string[]
   /** La fase que propone un tipo de tratamiento de la biblioteca. */
   phaseFor(kind: string | null): string
+  /** El nombre de una fase en el papel; sin nombre (una sola fase), el presupuesto no habla de etapas. */
+  phaseWords?(phase: string): string | null
+  /**
+   * Lo que un documento que solo existe en este producto dice al comprobarlo con su
+   * QR (odentIA: el odontograma firmado). Sin él, ese documento no se comprueba.
+   */
+  documentCheck?(tx: Db, orgId: string, type: string, id: string): Promise<DocumentCheckFacts | null>
   /** Cuántas caras admite un tratamiento de la biblioteca (odentIA: su regla dental); null si no dice. */
   templateSurfaceLimits(
     tx: Db,
