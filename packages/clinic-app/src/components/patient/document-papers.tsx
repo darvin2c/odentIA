@@ -141,7 +141,14 @@ export function PrescriptionPaper({
   const issued = prescription.status === "emitida"
   const menu: RowActionItem[] =
     canWrite && issued
-      ? [{ key: "anular", label: "Anular receta", tone: "danger", onSelect: () => setCancelling(true) }]
+      ? [
+          {
+            key: "anular",
+            label: "Anular receta",
+            tone: "danger",
+            onSelect: () => setCancelling(true),
+          },
+        ]
       : []
   return (
     <DocumentPaperPanel
@@ -226,7 +233,14 @@ export function MedicalLeavePaper({
       }
       menu={
         canWrite && issued
-          ? [{ key: "anular", label: "Anular descanso médico", tone: "danger", onSelect: () => setCancelling(true) }]
+          ? [
+              {
+                key: "anular",
+                label: "Anular descanso médico",
+                tone: "danger",
+                onSelect: () => setCancelling(true),
+              },
+            ]
           : []
       }
       revision={leave.status}
@@ -239,7 +253,9 @@ export function MedicalLeavePaper({
               ? `Con el diagnóstico ${leave.diagnosisCode}: la persona lo autorizó.`
               : "Sin diagnóstico: la persona no autorizó que figure."}
           </p>
-          {leave.cancelReason ? <p className="text-muted-foreground">Anulado: {leave.cancelReason}</p> : null}
+          {leave.cancelReason ? (
+            <p className="text-muted-foreground">Anulado: {leave.cancelReason}</p>
+          ) : null}
         </>
       }
     >
@@ -265,7 +281,12 @@ export function MedicalLeavePaper({
   )
 }
 
-export function OrderPaper({ order, page, onClose, onChanged }: PaperSurface & { order: ClinicalOrder }) {
+export function OrderPaper({
+  order,
+  page,
+  onClose,
+  onChanged,
+}: PaperSurface & { order: ClinicalOrder }) {
   const canWrite = usePermission("clinical.write")
   const refresh = useRefreshPapers(order.patientId, onChanged)
   const [sending, setSending] = useState(false)
@@ -276,7 +297,12 @@ export function OrderPaper({ order, page, onClose, onChanged }: PaperSurface & {
     canWrite && open
       ? [
           { key: "resultado", label: "Subir el resultado", onSelect: () => setResultOpen(true) },
-          { key: "cancelar", label: "Cancelar…", tone: "danger", onSelect: () => setCancelOpen(true) },
+          {
+            key: "cancelar",
+            label: "Cancelar…",
+            tone: "danger",
+            onSelect: () => setCancelOpen(true),
+          },
         ]
       : []
   return (
@@ -326,28 +352,50 @@ export function OrderPaper({ order, page, onClose, onChanged }: PaperSurface & {
         />
       ) : null}
       {resultOpen ? (
-        <OrderResultDrawer order={order} onClose={() => setResultOpen(false)} onSaved={() => void refresh()} />
+        <OrderResultDrawer
+          order={order}
+          onClose={() => setResultOpen(false)}
+          onSaved={() => void refresh()}
+        />
       ) : null}
       {cancelOpen ? (
-        <OrderCancelDrawer order={order} onClose={() => setCancelOpen(false)} onSaved={() => void refresh()} />
+        <OrderCancelDrawer
+          order={order}
+          onClose={() => setCancelOpen(false)}
+          onSaved={() => void refresh()}
+        />
       ) : null}
     </DocumentPaperPanel>
   )
 }
 
 /** La historia del consentimiento: quién lo creó, lo firmó, lo revocó. */
-function ConsentHistoryDrawer({ document, onClose }: { document: ConsentDocument; onClose: () => void }) {
+function ConsentHistoryDrawer({
+  document,
+  onClose,
+}: {
+  document: ConsentDocument
+  onClose: () => void
+}) {
   const history = useQuery({
     queryKey: ["consent-history", document.id, document.status],
     queryFn: () => fetchConsentHistory(document.id),
   })
   return (
-    <DetailDrawer open title="Historia del documento" description={document.titleSnapshot} onClose={onClose}>
+    <DetailDrawer
+      open
+      title="Historia del documento"
+      description={document.titleSnapshot}
+      onClose={onClose}
+    >
       <ol className="flex flex-col gap-1 text-sm text-muted-foreground">
         {(history.data?.data ?? []).map((event) => (
           <li key={event.id}>
-            {new Date(event.createdAt).toLocaleString(activeOrgLocale(), { dateStyle: "medium", timeStyle: "short" })} ·{" "}
-            {CONSENT_EVENT_LABELS[event.toStatus] ?? event.toStatus}
+            {new Date(event.createdAt).toLocaleString(activeOrgLocale(), {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}{" "}
+            · {CONSENT_EVENT_LABELS[event.toStatus] ?? event.toStatus}
             {event.reason && event.reason !== "Documento creado" ? ` · ${event.reason}` : ""}
           </li>
         ))}
@@ -356,7 +404,12 @@ function ConsentHistoryDrawer({ document, onClose }: { document: ConsentDocument
   )
 }
 
-export function ConsentPaper({ document, page, onClose, onChanged }: PaperSurface & { document: ConsentDocument }) {
+export function ConsentPaper({
+  document,
+  page,
+  onClose,
+  onChanged,
+}: PaperSurface & { document: ConsentDocument }) {
   const canWrite = usePermission("clinical.write")
   const refresh = useRefreshPapers(document.patientId, onChanged)
   const cancelId = useId()
@@ -378,7 +431,11 @@ export function ConsentPaper({ document, page, onClose, onChanged }: PaperSurfac
       await refresh()
     },
     onError: (cause) =>
-      setError(cause instanceof ApiError ? (cause.shape.message ?? "No se pudo anular") : "No se pudo anular"),
+      setError(
+        cause instanceof ApiError
+          ? (cause.shape.message ?? "No se pudo anular")
+          : "No se pudo anular",
+      ),
   })
   const menu: RowActionItem[] = [
     // Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces.
@@ -404,7 +461,14 @@ export function ConsentPaper({ document, page, onClose, onChanged }: PaperSurfac
         ]
       : []),
     ...(canWrite && signed
-      ? [{ key: "revocar", label: "Revocar…", tone: "danger" as const, onSelect: () => setRevokeOpen(true) }]
+      ? [
+          {
+            key: "revocar",
+            label: "Revocar…",
+            tone: "danger" as const,
+            onSelect: () => setRevokeOpen(true),
+          },
+        ]
       : []),
   ]
   const signatureWords = consentSignatureWords(document)
@@ -421,8 +485,14 @@ export function ConsentPaper({ document, page, onClose, onChanged }: PaperSurfac
           : signed
             ? { kind: "open", onOpen: () => setSending(true) }
             : pending
-              ? { kind: "blocked", reason: "Se envía cuando esté firmado. Esta hoja es para firmar en papel." }
-              : { kind: "blocked", reason: `Está ${CONSENT_STATUS_LABELS[document.status].toLowerCase()}: ya no se envía.` }
+              ? {
+                  kind: "blocked",
+                  reason: "Se envía cuando esté firmado. Esta hoja es para firmar en papel.",
+                }
+              : {
+                  kind: "blocked",
+                  reason: `Está ${CONSENT_STATUS_LABELS[document.status].toLowerCase()}: ya no se envía.`,
+                }
       }
       menu={menu}
       revision={`${document.status}-${document.pdfDocumentId ?? ""}-${document.revokePdfDocumentId ?? ""}`}
@@ -474,7 +544,12 @@ export function ConsentPaper({ document, page, onClose, onChanged }: PaperSurfac
         onSigned={refresh}
       />
       {revokeOpen ? (
-        <DetailDrawer open size="lg" title="Revocar consentimiento" onClose={() => setRevokeOpen(false)}>
+        <DetailDrawer
+          open
+          size="lg"
+          title="Revocar consentimiento"
+          onClose={() => setRevokeOpen(false)}
+        >
           <RevokeForm
             document={document}
             onCancel={() => setRevokeOpen(false)}
@@ -485,7 +560,9 @@ export function ConsentPaper({ document, page, onClose, onChanged }: PaperSurfac
           />
         </DetailDrawer>
       ) : null}
-      {historyOpen ? <ConsentHistoryDrawer document={document} onClose={() => setHistoryOpen(false)} /> : null}
+      {historyOpen ? (
+        <ConsentHistoryDrawer document={document} onClose={() => setHistoryOpen(false)} />
+      ) : null}
       <ConfirmDialog
         open={cancelOpen}
         title="Anular consentimiento pendiente"
@@ -560,12 +637,18 @@ export function BudgetPaper({
       menu={[
         ...(draft
           ? []
-          : [{ key: "explica", label: "Lo que se le explicó", onSelect: () => setReviewing(true) }]),
+          : [
+              { key: "explica", label: "Lo que se le explicó", onSelect: () => setReviewing(true) },
+            ]),
         {
           key: "plan",
           label: "Abrir en su Plan",
           onSelect: () =>
-            void navigate({ to: "/patients/$patientId", params: { patientId }, search: { tab: "plan", budgetId: budget.id } }),
+            void navigate({
+              to: "/patients/$patientId",
+              params: { patientId },
+              search: { tab: "plan", budgetId: budget.id },
+            }),
         },
       ]}
       revision={`${budget.status}-${budget.updatedAt ?? ""}`}
@@ -573,7 +656,11 @@ export function BudgetPaper({
       onClose={onClose}
     >
       {reviewing ? (
-        <BudgetReviewDrawer patientId={patientId} budgetId={budget.id} onClose={() => setReviewing(false)} />
+        <BudgetReviewDrawer
+          patientId={patientId}
+          budgetId={budget.id}
+          onClose={() => setReviewing(false)}
+        />
       ) : null}
     </DocumentPaperPanel>
   )

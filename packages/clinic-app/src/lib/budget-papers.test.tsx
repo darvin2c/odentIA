@@ -5,7 +5,9 @@ import { useBudgetPapers } from "./budget-papers"
 import { fetchBudgets } from "./budgets"
 
 let allowed = true
-vi.mock("./crm", () => ({ usePermission: (permission: string) => permission === "budgets.read" && allowed }))
+vi.mock("./crm", () => ({
+  usePermission: (permission: string) => permission === "budgets.read" && allowed,
+}))
 vi.mock("./budgets", () => ({ fetchBudgets: vi.fn(async () => ({ data: [] })) }))
 
 function Rows() {

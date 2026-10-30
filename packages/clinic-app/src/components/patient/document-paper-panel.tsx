@@ -147,7 +147,8 @@ export function DocumentPaperPanel({
       Descargar PDF
     </Button>
   )
-  const more = menu.length > 0 ? <RowActions label={`Más acciones de ${title}`} items={menu} /> : null
+  const more =
+    menu.length > 0 ? <RowActions label={`Más acciones de ${title}`} items={menu} /> : null
   const blockedWhy =
     send?.kind === "blocked" ? (
       <p role="status" className="text-xs text-muted-foreground">

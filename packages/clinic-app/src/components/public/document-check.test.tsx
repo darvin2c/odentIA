@@ -22,14 +22,17 @@ describe("Comprobar un documento", () => {
     ["anulado", "Documento anulado"],
     ["revocado", "Documento revocado"],
     ["vencido", "Documento vencido"],
-  ] as const)("%s dice su estado con su palabra y lo mínimo para cotejar el papel", (state, title) => {
-    const page = renderToStaticMarkup(<DocumentCheckResult check={{ ...base, state }} />)
-    expect(page).toContain(title)
-    expect(page).toContain("Receta N.º 12")
-    expect(page).toContain("R. Q.")
-    expect(page).toContain("Dra. Ana Torres")
-    expect(page).toContain('href="tel:+5115550123"')
-  })
+  ] as const)(
+    "%s dice su estado con su palabra y lo mínimo para cotejar el papel",
+    (state, title) => {
+      const page = renderToStaticMarkup(<DocumentCheckResult check={{ ...base, state }} />)
+      expect(page).toContain(title)
+      expect(page).toContain("Receta N.º 12")
+      expect(page).toContain("R. Q.")
+      expect(page).toContain("Dra. Ana Torres")
+      expect(page).toContain('href="tel:+5115550123"')
+    },
+  )
 
   it("sin teléfono no ofrece llamar", () => {
     const page = renderToStaticMarkup(
@@ -46,9 +49,15 @@ describe("Comprobar un documento", () => {
   })
 
   it("el 404 de la API es «no se pudo comprobar»; otro fallo se puede reintentar", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 404 })),
+    )
     await expect(fetchDocumentCheck("x")).resolves.toBeNull()
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}", { status: 500 })),
+    )
     await expect(fetchDocumentCheck("x")).rejects.toThrow()
   })
 })

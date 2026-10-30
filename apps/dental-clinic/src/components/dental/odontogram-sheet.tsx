@@ -63,7 +63,9 @@ export function SheetLetterhead({ establishment }: { establishment: PrintEstabli
         </div>
       </div>
       <div className="text-right text-xs">
-        {establishment?.branchName ? <p className="font-medium">Sede {establishment.branchName}</p> : null}
+        {establishment?.branchName ? (
+          <p className="font-medium">Sede {establishment.branchName}</p>
+        ) : null}
         {establishment?.address ? <p>{establishment.address}</p> : null}
         {establishment?.phone ? <p>{establishment.phone}</p> : null}
       </div>
@@ -105,8 +107,14 @@ export function SheetSignature({
       </div>
       {checkUrl ? (
         <div className="flex shrink-0 items-center gap-2">
-          <p className="max-w-32 text-right text-[10px]">Escanee para comprobar que sigue vigente</p>
-          {qr.data ? <img src={qr.data} alt="Código para comprobar este documento" className="size-20" /> : <span className="size-20" />}
+          <p className="max-w-32 text-right text-[10px]">
+            Escanee para comprobar que sigue vigente
+          </p>
+          {qr.data ? (
+            <img src={qr.data} alt="Código para comprobar este documento" className="size-20" />
+          ) : (
+            <span className="size-20" />
+          )}
         </div>
       ) : null}
     </footer>

@@ -127,7 +127,11 @@ export function BudgetReviewDrawer({
     queryFn: () => fetchPatientDiagnoses(patientId),
     enabled: canClinical,
   })
-  const preview = useBudgetSendPreview(patientId, budgetId, presentation.data?.data.status === "borrador")
+  const preview = useBudgetSendPreview(
+    patientId,
+    budgetId,
+    presentation.data?.data.status === "borrador",
+  )
   const data = presentation.data?.data
   const editable = canWrite && data?.status === "borrador"
 
@@ -146,9 +150,13 @@ export function BudgetReviewDrawer({
 
   const proposedText = useMemo(
     () =>
-      data && canClinical && !data.findings
-        ? proposedFindings(data.lines, planItems.data?.data ?? [], diagnoses.data?.data ?? [], (tooth) =>
-            productUi().site?.placeName(tooth),
+      // Solo en borrador: de lo entregado se muestra lo que se entregó, no una propuesta.
+      data?.status === "borrador" && canClinical && !data.findings
+        ? proposedFindings(
+            data.lines,
+            planItems.data?.data ?? [],
+            diagnoses.data?.data ?? [],
+            (tooth) => productUi().site?.placeName(tooth),
           )
         : "",
     [data, canClinical, planItems.data, diagnoses.data],
@@ -165,8 +173,10 @@ export function BudgetReviewDrawer({
   const pendingBody = (): BudgetPresentationBody | null => {
     if (!data || !editable) return null
     const body: BudgetPresentationBody = {}
-    if (canClinical && findingsValue.trim() !== (data.findings ?? "")) body.findings = findingsValue.trim() || null
-    if (proposal !== undefined && proposal.trim() !== (data.proposal ?? "")) body.proposal = proposal.trim() || null
+    if (canClinical && findingsValue.trim() !== (data.findings ?? ""))
+      body.findings = findingsValue.trim() || null
+    if (proposal !== undefined && proposal.trim() !== (data.proposal ?? ""))
+      body.proposal = proposal.trim() || null
     if (validUntil !== undefined && validUntil !== data.validUntil) body.validUntil = validUntil
     const optionRows = Object.entries(options).map(([optionId, draft]) => ({
       optionId,
@@ -175,7 +185,10 @@ export function BudgetReviewDrawer({
       cons: draft.cons.trim() || null,
     }))
     if (optionRows.length > 0) body.options = optionRows
-    const lineRows = Object.entries(lineGuides).map(([lineId, patientGuide]) => ({ lineId, patientGuide }))
+    const lineRows = Object.entries(lineGuides).map(([lineId, patientGuide]) => ({
+      lineId,
+      patientGuide,
+    }))
     if (lineRows.length > 0) body.lines = lineRows
     return Object.keys(body).length > 0 ? body : null
   }
@@ -240,18 +253,28 @@ export function BudgetReviewDrawer({
   const sendable = canSend && data?.status === "borrador"
   const busy = sendMutation.isPending || saveMutation.isPending || saveOnly.isPending
   const missing = (data?.lines ?? []).filter(
-    (line) => !(lineGuides[line.id] !== undefined ? lineGuides[line.id] : line.patientGuide ?? line.serviceGuide),
+    (line) =>
+      !(lineGuides[line.id] !== undefined
+        ? lineGuides[line.id]
+        : (line.patientGuide ?? line.serviceGuide)),
   )
   const serviceOf = (line: BudgetPresentation["lines"][number]) =>
-    budget.data?.data.items.find((item) => item.planItemId === line.planItemId && item.optionId === line.optionId)
-      ?.serviceId ?? null
+    budget.data?.data.items.find(
+      (item) => item.planItemId === line.planItemId && item.optionId === line.optionId,
+    )?.serviceId ?? null
   const dated = validUntil !== undefined ? validUntil : (data?.validUntil ?? null)
   const several = (data?.options.length ?? 0) > 1
 
   const optionDraft = (option: BudgetPresentation["options"][number]): OptionDraft =>
-    options[option.id] ?? { name: option.name ?? "", pros: option.pros ?? "", cons: option.cons ?? "" }
-  const changeOption = (option: BudgetPresentation["options"][number], patch: Partial<OptionDraft>) =>
-    setOptions((current) => ({ ...current, [option.id]: { ...optionDraft(option), ...patch } }))
+    options[option.id] ?? {
+      name: option.name ?? "",
+      pros: option.pros ?? "",
+      cons: option.cons ?? "",
+    }
+  const changeOption = (
+    option: BudgetPresentation["options"][number],
+    patch: Partial<OptionDraft>,
+  ) => setOptions((current) => ({ ...current, [option.id]: { ...optionDraft(option), ...patch } }))
 
   return (
     <>
@@ -260,7 +283,11 @@ export function BudgetReviewDrawer({
         dock={false}
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
         title={data?.status === "borrador" ? "Revisar y enviar" : "Lo que se le explicó"}
-        description={budget.data ? `${budgetNumberLabel(budget.data.data.budgetNumber)} · ${budget.data.data.stateText}` : undefined}
+        description={
+          budget.data
+            ? `${budgetNumberLabel(budget.data.data.budgetNumber)} · ${budget.data.data.stateText}`
+            : undefined
+        }
         isSubmitting={busy}
         isDirty={userEdited}
         error={error}
@@ -315,8 +342,8 @@ export function BudgetReviewDrawer({
                 />
                 {editable && !data.findings && findings === undefined && proposedText ? (
                   <FieldDescription>
-                    Armado con los diagnósticos de los tratamientos. Revísalo y escríbelo en palabras de la persona: se
-                    guarda al enviar o al ver el PDF.
+                    Armado con los diagnósticos de los tratamientos. Revísalo y escríbelo en
+                    palabras de la persona: se guarda al enviar o al ver el PDF.
                   </FieldDescription>
                 ) : null}
               </Field>
@@ -357,17 +384,31 @@ export function BudgetReviewDrawer({
               <FieldLegend>Lo que se haría</FieldLegend>
               <ul className="flex flex-col divide-y rounded-lg border">
                 {data.lines.map((line) => {
-                  const own = lineGuides[line.id] !== undefined ? lineGuides[line.id] : line.patientGuide
+                  const own =
+                    lineGuides[line.id] !== undefined ? lineGuides[line.id] : line.patientGuide
                   const shown = own ?? line.serviceGuide
                   const editing = openLine === line.id
                   return (
                     <li key={line.id} className="flex flex-col gap-2 p-3 text-sm">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="min-w-0 font-medium break-words">{line.title}</span>
+                        <span className="min-w-0 font-medium break-words">
+                          {line.title}
+                          {several ? (
+                            <span className="font-normal text-muted-foreground">
+                              {" "}
+                              · {data.options.find((option) => option.id === line.optionId)?.label}
+                            </span>
+                          ) : null}
+                        </span>
                         {editable ? (
                           <div className="flex flex-wrap items-center gap-2">
                             {!editing ? (
-                              <Button type="button" size="sm" variant="outline" onClick={() => setOpenLine(line.id)}>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setOpenLine(line.id)}
+                              >
                                 Cambiar solo para este paciente
                               </Button>
                             ) : null}
@@ -391,15 +432,23 @@ export function BudgetReviewDrawer({
                         <GuideFields
                           idPrefix={`linea-${line.id}`}
                           value={own ?? line.serviceGuide ?? {}}
-                          onChange={(next) => setLineGuides((current) => ({ ...current, [line.id]: next }))}
+                          onChange={(next) =>
+                            setLineGuides((current) => ({ ...current, [line.id]: next }))
+                          }
                         />
                       ) : hasGuide(shown) ? (
                         <>
-                          {own ? <span className="text-xs text-muted-foreground">Ajustado para este paciente</span> : null}
+                          {own ? (
+                            <span className="text-xs text-muted-foreground">
+                              Ajustado para este paciente
+                            </span>
+                          ) : null}
                           <GuideSummary guide={shown} />
                         </>
                       ) : (
-                        <span className="text-muted-foreground">Sin explicación: sale solo con su nombre y precio.</span>
+                        <span className="text-muted-foreground">
+                          Sin explicación: sale solo con su nombre y precio.
+                        </span>
                       )}
                     </li>
                   )
@@ -453,10 +502,15 @@ export function BudgetReviewDrawer({
               : null}
 
             {data.status === "borrador" ? (
-              <section aria-label="Antes de enviar" className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
+              <section
+                aria-label="Antes de enviar"
+                className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm"
+              >
                 <h3 className="font-medium">Antes de enviar</h3>
                 <ul className="flex flex-col gap-1.5">
-                  {dated ? null : <li>No tiene fecha de vigencia: el papel no dirá hasta cuándo vale.</li>}
+                  {dated ? null : (
+                    <li>No tiene fecha de vigencia: el papel no dirá hasta cuándo vale.</li>
+                  )}
                   {missing.map((line) => {
                     const serviceId = serviceOf(line)
                     return (
@@ -474,13 +528,18 @@ export function BudgetReviewDrawer({
                       </li>
                     )
                   })}
-                  {dated && missing.length === 0 ? <li>Todo tiene su explicación y su fecha.</li> : null}
+                  {dated && missing.length === 0 ? (
+                    <li>Todo tiene su explicación y su fecha.</li>
+                  ) : null}
                   {blocked ? <li>{blocked}</li> : null}
                 </ul>
                 <p className="text-muted-foreground">
-                  <strong className="font-medium text-foreground">Quién ve los diagnósticos.</strong> La propia persona y su
-                  representante legal reciben el presupuesto completo. Si lo imprime quien no lee la historia o lo recibe
-                  otra persona, sale sin «Lo que encontramos» ni las alergias.
+                  <strong className="font-medium text-foreground">
+                    Quién ve los diagnósticos.
+                  </strong>{" "}
+                  La propia persona y su representante legal reciben el presupuesto completo. Si lo
+                  imprime quien no lee la historia o lo recibe otra persona, sale sin «Lo que
+                  encontramos» ni las alergias.
                 </p>
               </section>
             ) : null}

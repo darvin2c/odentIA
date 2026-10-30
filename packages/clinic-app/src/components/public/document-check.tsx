@@ -23,7 +23,8 @@ const STATES: Record<
     title: "Documento vigente",
     icon: CircleCheck,
     tone: "text-success",
-    say: () => "Fue emitido por esta clínica y no ha sido anulado. Compare estos datos con el documento que tiene en la mano.",
+    say: () =>
+      "Fue emitido por esta clínica y no ha sido anulado. Compare estos datos con el documento que tiene en la mano.",
   },
   anulado: {
     title: "Documento anulado",
@@ -86,7 +87,10 @@ export function DocumentCheckResult({ check }: { check: DocumentCheck }) {
         </dl>
       </section>
       {check.clinic.phone ? (
-        <a href={`tel:${check.clinic.phone}`} className={buttonVariants({ className: "min-h-11 w-full" })}>
+        <a
+          href={`tel:${check.clinic.phone}`}
+          className={buttonVariants({ className: "min-h-11 w-full" })}
+        >
           <Phone aria-hidden />
           Llamar a la clínica
         </a>
@@ -103,12 +107,16 @@ export function DocumentCheckUnavailable({ onRetry }: { onRetry?: () => void }) 
         <CircleHelp aria-hidden className="size-10 text-muted-foreground" />
         <h1 className="font-heading text-xl font-medium">No pudimos comprobar este documento</h1>
         <p className="text-sm text-muted-foreground">
-          Vuelva a escanear el código del papel. Si sigue igual, pídale a la clínica que emitió el documento que se lo
-          confirme.
+          Vuelva a escanear el código del papel. Si sigue igual, pídale a la clínica que emitió el
+          documento que se lo confirme.
         </p>
       </section>
       {onRetry ? (
-        <button type="button" className={buttonVariants({ variant: "outline", className: "min-h-11 w-full" })} onClick={onRetry}>
+        <button
+          type="button"
+          className={buttonVariants({ variant: "outline", className: "min-h-11 w-full" })}
+          onClick={onRetry}
+        >
           Reintentar
         </button>
       ) : null}

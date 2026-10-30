@@ -22,7 +22,9 @@ export function hasGuide(guide: PatientGuide | null | undefined): guide is Patie
  * nada, null. `undefined` (no se tocó) no cambia nada: un texto sugerido solo se
  * vuelve real al pulsar «Guardar», y hasta entonces vive en `draft`.
  */
-export function guideToSave(draft: PatientGuide | undefined): { patientGuide: PatientGuide | null } | null {
+export function guideToSave(
+  draft: PatientGuide | undefined,
+): { patientGuide: PatientGuide | null } | null {
   if (draft === undefined) return null
   return { patientGuide: parsePatientGuide(draft) }
 }
@@ -68,7 +70,10 @@ export function ServiceGuideSection({
       <FieldLegend>Lo que se le explica al paciente</FieldLegend>
       <FieldGroup>
         {offersSuggestion(saved, suggestion, draft) && suggestion ? (
-          <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 p-3 text-sm">
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/40 p-3 text-sm"
+          >
             <span>Hay un texto sugerido para este servicio.</span>
             <Button
               type="button"
@@ -86,8 +91,8 @@ export function ServiceGuideSection({
         ) : null}
         {usedSuggestion && draft !== undefined ? (
           <p role="status" className="rounded-md bg-warning-soft p-3 text-sm">
-            Texto sugerido sin revisar. Revísalo y ajústalo a cómo lo hace tu clínica: saldrá en cada presupuesto de este
-            servicio cuando pulses «Guardar».
+            Texto sugerido sin revisar. Revísalo y ajústalo a cómo lo hace tu clínica: saldrá en
+            cada presupuesto de este servicio cuando pulses «Guardar».
           </p>
         ) : null}
         <GuideFields
@@ -96,7 +101,9 @@ export function ServiceGuideSection({
           disabled={disabled}
           onChange={(next) => onChange(next, "escrito")}
         />
-        {reviewedWords && draft === undefined ? <p className="text-xs text-muted-foreground">{reviewedWords}</p> : null}
+        {reviewedWords && draft === undefined ? (
+          <p className="text-xs text-muted-foreground">{reviewedWords}</p>
+        ) : null}
         {consents}
       </FieldGroup>
     </FieldSet>
@@ -121,7 +128,10 @@ export function GuideFields({
   const schedule = value.schedule ?? []
   const showSchedule = askSchedule || schedule.length > 0
   const showWarnings = askWarnings || Boolean(value.warnings)
-  const textArea = (key: "how" | "includes" | "excludes" | "aftercare" | "warnings", label: string) => (
+  const textArea = (
+    key: "how" | "includes" | "excludes" | "aftercare" | "warnings",
+    label: string,
+  ) => (
     <Field>
       <FieldLabel htmlFor={`${idPrefix}-${key}`}>{label}</FieldLabel>
       <Textarea
@@ -180,7 +190,11 @@ export function GuideFields({
                     disabled={disabled}
                     value={step.when}
                     onChange={(event) =>
-                      set({ schedule: schedule.map((row, at) => (at === index ? { ...row, when: event.target.value } : row)) })
+                      set({
+                        schedule: schedule.map((row, at) =>
+                          at === index ? { ...row, when: event.target.value } : row,
+                        ),
+                      })
                     }
                   />
                 </Field>
@@ -192,7 +206,11 @@ export function GuideFields({
                     disabled={disabled}
                     value={step.what}
                     onChange={(event) =>
-                      set({ schedule: schedule.map((row, at) => (at === index ? { ...row, what: event.target.value } : row)) })
+                      set({
+                        schedule: schedule.map((row, at) =>
+                          at === index ? { ...row, what: event.target.value } : row,
+                        ),
+                      })
                     }
                   />
                 </Field>
@@ -243,7 +261,13 @@ export function GuideFields({
             </Button>
           ) : null}
           {!showWarnings ? (
-            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setAskWarnings(true)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => setAskWarnings(true)}
+            >
               <Plus aria-hidden /> Agregar señales de alarma
             </Button>
           ) : null}

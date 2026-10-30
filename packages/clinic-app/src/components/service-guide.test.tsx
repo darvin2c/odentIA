@@ -10,7 +10,9 @@ describe("Lo que se le explica al paciente", () => {
     // Usarlo solo llena el borrador: lo vuelve real el «Guardar» del formulario.
     expect(guideToSave(suggestion)).toEqual({ patientGuide: suggestion })
     // Vaciarlo y guardar quita la explicación.
-    expect(guideToSave({ how: "   ", schedule: [{ when: "", what: "" }] })).toEqual({ patientGuide: null })
+    expect(guideToSave({ how: "   ", schedule: [{ when: "", what: "" }] })).toEqual({
+      patientGuide: null,
+    })
   })
 
   it("solo se ofrece si el servicio está vacío y nada se ha escrito", () => {

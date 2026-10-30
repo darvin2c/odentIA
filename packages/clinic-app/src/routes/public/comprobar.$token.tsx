@@ -1,7 +1,10 @@
 import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { DocumentCheckResult, DocumentCheckUnavailable } from "../../components/public/document-check"
+import {
+  DocumentCheckResult,
+  DocumentCheckUnavailable,
+} from "../../components/public/document-check"
 import { fetchDocumentCheck } from "../../lib/document-check"
 
 export const Route = createFileRoute("/comprobar/$token")({
