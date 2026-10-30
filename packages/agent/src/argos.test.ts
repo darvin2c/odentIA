@@ -286,12 +286,36 @@ describe("Argos sobre las vistas", () => {
     expect(model.sent()).toMatch(/Atienden pacientes \(tienen horario o citas como profesional, lleven o no «Dr\.»\): /)
   })
 
-  it("si el modelo responde algo que no se lee, se le pide otra vez una sola", async () => {
+  it("si el modelo responde algo que no se lee, se le pide otra vez una sola, y lo que llegó queda para medir", async () => {
     const model = new ScriptedModel([{ ...COBRADO, tipo: "otra_cosa" as ArgosPlan["tipo"] }, COBRADO])
-    expect(await ask(model, "¿Cuánto cobramos?")).toMatchObject({ kind: "respuesta" })
+    const unread: string[] = []
+    const onProblem = (_: string, raw?: string) => void (raw && unread.push(raw))
+    expect(await askArgos(appDb, { ...deps(model), onProblem }, { orgId: ORG, userId: OWNER, memberRole: "owner", text: "¿Cuánto cobramos?" })).toMatchObject({ kind: "respuesta" })
     expect(model.calls).toHaveLength(2)
+    expect(unread.map((raw) => JSON.parse(raw))).toMatchObject([{ llamada: "responder", campos: [expect.stringMatching(/^tipo: /)], args: { tipo: "otra_cosa" } }])
+    // El modelo sabe qué corregir: el campo que no se leyó y por qué.
+    expect(model.sent()).toContain("No se pudo leer tu respuesta («tipo»: ")
     const twice = new ScriptedModel([{ ...COBRADO, tipo: "otra_cosa" as ArgosPlan["tipo"] }, { ...COBRADO, tipo: "otra_cosa" as ArgosPlan["tipo"] }])
     expect(await ask(twice, "¿Cuánto cobramos?")).toMatchObject({ kind: "sin_modelo" })
+  })
+
+  it("una respuesta sin lo cercano se lee igual, y si le falta algo que sí hace falta se le dice qué (eval:argos del 2026-10-30)", async () => {
+    const calc: ToolTurn = {
+      tools: [
+        {
+          name: "calcular",
+          args: { id: "c1", cifra: { clave: "cobrado", por: ["medio"], filtros: [], parte_del_total: false, limite: null, orden: "mayor" }, sql: "", periodo: "este_mes", compara: "no", otro_periodo: "", sede: "" },
+        },
+      ],
+    }
+    // Así respondió el modelo en 9 de 115 llamadas: sin sql, calculo_cercano, sql_cercana ni frase_cercana, que solo valen en no_existe.
+    const withoutClosest = { calculo: "c1", frase: "{periodo} se cobró así: {lista}.", frase_vacia: "{periodo} no se cobró nada.", sql: undefined, sql_cercana: undefined, frase_cercana: undefined }
+    const model = new ScriptedModel([calc, withoutClosest])
+    expect(await ask(model, "¿Cómo nos pagaron este mes?")).toMatchObject({ kind: "respuesta" })
+    expect(model.calls).toHaveLength(2)
+    const fixed = new ScriptedModel([calc, { ...withoutClosest, frase_vacia: undefined }, withoutClosest])
+    expect(await ask(fixed, "¿Cómo nos pagaron este mes?")).toMatchObject({ kind: "respuesta" })
+    expect(fixed.sent()).toContain("No se pudo leer tu respuesta (falta «frase_vacia»): corrígela y responde otra vez.")
   })
 
   it("si el modelo no responde lo dice, y ese intento no gasta preguntas del mes", async () => {

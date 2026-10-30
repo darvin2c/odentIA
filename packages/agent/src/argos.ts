@@ -154,9 +154,11 @@ export function argosSchemas(texts: ProductAgentTexts) {
     frase_vacia: z.string().describe("La frase si la consulta no trae filas (sin más huecos que {periodo} y {periodo_antes})."),
     como: z.string().describe("«Así lo calculé»: una o dos frases simples con qué se contó, de qué periodo y con qué regla."),
     falta: z.string().describe(`En parcial o no_existe: lo que ${productName(texts)} no registra. Vacío si nada falta.`),
+    // Lo cercano solo vale en no_existe: en otra respuesta el modelo a veces lo deja fuera entero, y sin su valor por
+    // defecto «frase_cercana» no se leía (9 de 115 llamadas de eval:argos el 2026-10-30).
     calculo_cercano: z.string().default("").describe("En no_existe: el id de un cálculo con lo más cercano que sí existe. Vacío si no hay."),
     sql_cercana: z.string().default("").describe("Vacía: lo cercano va en calculo_cercano."),
-    frase_cercana: z.string().describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
+    frase_cercana: z.string().default("").describe("La frase de sql_cercana, con sus huecos. Vacía si no hay."),
     titulo: z.string().describe("Un título corto de la respuesta, sin nombres de personas ni periodo: «Lo cobrado», «Lo que más se vendió»."),
     // Texto y no una lista cerrada: una pantalla desconocida no bota la respuesta, vale «ninguna».
     pantalla: z.string().describe(`La pantalla de ${productName(texts)} donde se ve esto, para el botón «Abrir…»: ${ARGOS_SCREENS.join(", ")}.`),
@@ -397,6 +399,23 @@ export async function argosModel(
 
 /** El problema que anota `onProblem` cuando la respuesta del modelo no se lee. */
 export const ARGOS_UNREADABLE = "el modelo respondió algo que no se lee"
+
+/**
+ * Lo que no cabe en el esquema de una herramienta, campo por campo, para que
+ * el modelo lo corrija: con solo «revisa sus campos» repetía la misma
+ * respuesta (el 2026-10-30, en 3 de 50 preguntas le faltó dos veces seguidas
+ * «frase_cercana» y la persona se quedó sin respuesta).
+ */
+function fieldsProblem(issues: z.ZodError["issues"], args: unknown): string {
+  return issues
+    .map((issue) => {
+      const field = issue.path.map(String).join(".")
+      const value = issue.path.reduce<unknown>((at, key) => (at !== null && typeof at === "object" ? (at as Record<PropertyKey, unknown>)[key] : undefined), args)
+      if (!field) return issue.message
+      return value === undefined ? `falta «${field}»` : `«${field}»: ${issue.message}`
+    })
+    .join("; ")
+}
 
 /**
  * Lo que llegó del modelo cuando no se lee, para medir (`onProblem`): cómo
@@ -915,7 +934,7 @@ export async function askArgos(
             if (!parsed.success) {
               deps.onProblem?.(ARGOS_UNREADABLE, argosUnreadable(reply, call, parsed.error.issues))
               unreadable += 1
-              content = "No se pudo leer tu respuesta: revisa sus campos y responde otra vez."
+              content = `No se pudo leer tu respuesta (${fieldsProblem(parsed.error.issues, call.args)}): corrígela y responde otra vez.`
             } else if (plan) content = "Ya respondiste."
             else if (withoutQuery(parsed.data)) {
               plan = parsed.data
@@ -936,10 +955,10 @@ export async function askArgos(
             }
           } else if (call.name === "calcular") {
             const parsed = calcularSchema.safeParse(call.args)
-            content = parsed.success ? await calculate(parsed.data) : "No se pudo leer el cálculo: revisa sus campos."
+            content = parsed.success ? await calculate(parsed.data) : `No se pudo leer el cálculo (${fieldsProblem(parsed.error.issues, call.args)}): revisa sus campos.`
           } else if (call.name === "buscar_nombres") {
             const parsed = buscarSchema.safeParse(call.args)
-            content = parsed.success ? await search(parsed.data.textos) : "No se pudo leer la búsqueda."
+            content = parsed.success ? await search(parsed.data.textos) : `No se pudo leer la búsqueda (${fieldsProblem(parsed.error.issues, call.args)}).`
           } else content = `«${call.name}» no es una de tus herramientas.`
           messages.push(new ToolMessage({ content, tool_call_id: call.id ?? call.name }))
         }

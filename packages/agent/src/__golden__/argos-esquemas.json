@@ -269,8 +269,9 @@
         "type": "string"
       },
       "frase_cercana": {
-        "type": "string",
-        "description": "La frase de sql_cercana, con sus huecos. Vacía si no hay."
+        "default": "",
+        "description": "La frase de sql_cercana, con sus huecos. Vacía si no hay.",
+        "type": "string"
       },
       "titulo": {
         "type": "string",
