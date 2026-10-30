@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
 import { messengerAdapter, verifyMetaChallenge } from "./meta-messaging.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 
 const config = { pageId: "PAGE1", pageAccessToken: "TOKEN", appSecret: "appsecret123" }
 
@@ -194,6 +195,21 @@ it("rechaza plantillas y exige pageId", async () => {
   await expect(
     messengerAdapter.sendMessage({}, { to: "msgr:1", kind: { type: "text", text: "hola" } }, { fetch }),
   ).rejects.toThrow("pageId")
+})
+
+it("lo que Meta rechaza con su error no salió; un límite de ritmo se puede reintentar; un 5xx sigue siendo ambiguo", async () => {
+  const send = (status: number, json: unknown) =>
+    messengerAdapter.sendMessage(config, { to: "msgr:1", kind: { type: "text", text: "hola" } }, {
+      fetch: (async () => new Response(JSON.stringify(json), { status })) as typeof fetch,
+    })
+  const outside = send(400, { error: { message: "(#10) This message is sent outside of allowed window", code: 10 } })
+  await expect(outside).rejects.toBeInstanceOf(ProviderRejectedError)
+  await expect(outside).rejects.not.toBeInstanceOf(ProviderThrottledError)
+  await expect(send(400, { error: { message: "(#613) Calls to this api have exceeded the rate limit", code: 613 } })).rejects.toBeInstanceOf(ProviderThrottledError)
+  await expect(send(500, { error: { message: "Unknown error", code: 1 } })).rejects.not.toBeInstanceOf(ProviderRejectedError)
+  await expect(
+    messengerAdapter.sendMessage(config, { to: "msgr:1", kind: { type: "template", name: "x", language: "es", params: [] } }, { fetch }),
+  ).rejects.toBeInstanceOf(ProviderRejectedError)
 })
 
 it("challenge de verificación exige verify_token igual al secreto", () => {

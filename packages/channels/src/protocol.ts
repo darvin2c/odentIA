@@ -292,7 +292,15 @@ export interface OutboundMessage {
  * mensaje queda como no entregado, con este motivo.
  */
 export class ProviderRejectedError extends Error {
-  override readonly name = "ProviderRejectedError"
+  override readonly name: string = "ProviderRejectedError"
+}
+
+/**
+ * El proveedor no aceptó el envío por un límite de ritmo (demasiados mensajes
+ * seguidos): no salió, y por eso volver a intentarlo más tarde no lo duplica.
+ */
+export class ProviderThrottledError extends ProviderRejectedError {
+  override readonly name: string = "ProviderThrottledError"
 }
 
 export interface ChannelAdapterDeps {

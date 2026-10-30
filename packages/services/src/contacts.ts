@@ -841,19 +841,25 @@ export async function findChannelIdentity(
  *   (Meta lo regenera cuando la persona cambia de número).
  * - Escribió antes sin número y ahora llega con él: su identidad y sus
  *   conversaciones pasan a su número, que es como la conoce el resto.
+ * - Su ficha ya tenía su número como otra identidad (el equipo lo puso como su
+ *   WhatsApp mientras lo ocultaba): las dos son la misma cuenta de WhatsApp y
+ *   quedan en la de su número.
  * - Llega sin número y su identidad ya tiene su número: el mensaje entra con esa
  *   dirección, en su hilo de siempre.
- * Nunca une dos identidades que ya existen: eso lo decide el equipo con
- * «Reasignar canal». Devuelve el evento con la dirección que corresponde.
+ * Nunca une identidades de dos fichas: eso lo decide el equipo con «Reasignar
+ * canal». Devuelve el evento con la dirección que corresponde.
  */
 export async function settleProviderUser<
   E extends { externalThreadId: string; senderExternalId: string; senderUserId?: string },
 >(tx: Db, orgId: string, channel: string, event: E): Promise<E> {
   const userId = event.senderUserId
   if (channel !== "whatsapp" || !userId) return event
-  // Primero el BSUID y después la dirección: la misma orden en toda ingesta.
+  const hidden = whatsappHiddenAddress(userId)
+  // Primero el BSUID, después la dirección y al final la dirección sin número:
+  // la misma orden en toda ingesta.
   await lockChannelIdentity(tx, orgId, channel, `user:${userId}`)
   await lockChannelIdentity(tx, orgId, channel, event.senderExternalId)
+  if (event.senderExternalId !== hidden) await lockChannelIdentity(tx, orgId, channel, hidden)
   const byAddress = await findChannelIdentity(tx, orgId, channel, event.senderExternalId)
   const [byUser] = await tx
     .select()
@@ -867,39 +873,29 @@ export async function settleProviderUser<
     )
     .limit(1)
   if (byAddress) {
-    // Si otra identidad ya tiene ese BSUID son dos fichas de la misma persona: no se tocan.
     if (!byUser) {
       await tx
         .update(contactIdentity)
         .set({ providerUserId: userId })
         .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, byAddress.id)))
+    } else if (byUser.id !== byAddress.id && byUser.contactId === byAddress.contactId && byUser.externalUserId === hidden) {
+      await foldHiddenIdentity(tx, orgId, channel, byUser, byAddress)
     }
     return event
   }
   if (!byUser) return event
   const direct = isDirectThread(channel, event.externalThreadId, event.senderExternalId)
-  if (event.senderExternalId === whatsappHiddenAddress(userId)) {
+  if (event.senderExternalId === hidden) {
     // Sin número: entra por la dirección con la que ya se la conoce.
     return direct
       ? { ...event, externalThreadId: byUser.externalUserId, senderExternalId: byUser.externalUserId }
       : { ...event, senderExternalId: byUser.externalUserId }
   }
-  const before = byUser.externalUserId
   await tx
     .update(contactIdentity)
     .set({ externalUserId: event.senderExternalId })
     .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, byUser.id)))
-  // Su hilo pasa al número en cada conexión del canal, salvo donde ya hay uno con él.
-  await tx.execute(sql`
-    update conversation c
-       set external_thread_id = ${event.senderExternalId}, updated_at = now()
-     where c.organization_id = ${orgId}
-       and c.external_thread_id = ${before}
-       and c.channel_connection_id in (
-         select cc.id from channel_connection cc where cc.organization_id = ${orgId} and cc.channel = ${channel})
-       and not exists (
-         select 1 from conversation o
-          where o.channel_connection_id = c.channel_connection_id and o.external_thread_id = ${event.senderExternalId})`)
+  await moveHiddenThreads(tx, orgId, byUser, byUser.id, event.senderExternalId)
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     action: "contact.identity_number",
@@ -908,6 +904,70 @@ export async function settleProviderUser<
     metadata: { channel },
   })
   return event
+}
+
+/**
+ * La misma persona quedó con dos identidades en su ficha: la de su número y la
+ * de su BSUID. La de su número se queda con el BSUID, con lo que la otra sabía
+ * (principal, bloqueada en WhatsApp) y con sus conversaciones; la otra se borra.
+ */
+async function foldHiddenIdentity(
+  tx: Db,
+  orgId: string,
+  channel: string,
+  hidden: typeof contactIdentity.$inferSelect,
+  phone: typeof contactIdentity.$inferSelect,
+): Promise<void> {
+  const own = (id: string) => and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.id, id))
+  // El BSUID es único por clínica y canal: se suelta antes de pasarlo.
+  await tx.update(contactIdentity).set({ providerUserId: null }).where(own(hidden.id))
+  await tx
+    .update(contactIdentity)
+    .set({
+      providerUserId: hidden.providerUserId,
+      isPrimary: phone.isPrimary || hidden.isPrimary,
+      providerBlockedAt: phone.providerBlockedAt ?? hidden.providerBlockedAt,
+      displayName: phone.displayName ?? hidden.displayName,
+    })
+    .where(own(phone.id))
+  await moveHiddenThreads(tx, orgId, hidden, phone.id, phone.externalUserId)
+  // Las que no pudieron pasar a su número siguen siendo suyas, como historial.
+  await tx.execute(sql`
+    update conversation set contact_identity_id = ${phone.id}, updated_at = now()
+     where organization_id = ${orgId} and contact_identity_id = ${hidden.id}`)
+  await tx.delete(contactIdentity).where(own(hidden.id))
+  await tx.insert(auditEvent).values({
+    organizationId: orgId,
+    action: "contact.identity_number",
+    entity: "contact",
+    entityId: phone.contactId,
+    metadata: { channel, folded: true },
+  })
+}
+
+/**
+ * Las conversaciones de la identidad que se conocía sin número pasan a su
+ * número, en cada conexión del canal, y a la identidad que lo tiene. Donde ya
+ * hay una conversación con su número, la anterior queda como estaba: sus
+ * mensajes no se mueven, porque las citas y lo que hizo Sofi están atados a su
+ * conversación, y la persona sigue escribiendo en la de su número.
+ */
+async function moveHiddenThreads(
+  tx: Db,
+  orgId: string,
+  from: typeof contactIdentity.$inferSelect,
+  toIdentityId: string,
+  address: string,
+): Promise<void> {
+  await tx.execute(sql`
+    update conversation c
+       set external_thread_id = ${address}, contact_identity_id = ${toIdentityId}, updated_at = now()
+     where c.organization_id = ${orgId}
+       and c.contact_identity_id = ${from.id}
+       and c.external_thread_id = ${from.externalUserId}
+       and not exists (
+         select 1 from conversation o
+          where o.channel_connection_id = c.channel_connection_id and o.external_thread_id = ${address})`)
 }
 
 /**

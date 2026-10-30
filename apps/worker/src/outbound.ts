@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { channelAdapters, type OutboundMessage, ProviderRejectedError } from "@odentia/channels"
+import { channelAdapters, type OutboundMessage, ProviderRejectedError, ProviderThrottledError } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
@@ -105,13 +105,16 @@ function replyButtonsOf(value: unknown): { id: string; title: string }[] | null 
  * la llamada externa; una excepción durante `sendMessage` es ambigua y exige
  * conciliación humana para no duplicar el efecto, salvo que el proveedor haya
  * contestado que no lo acepta (`ProviderRejectedError`): no salió y queda como
- * no entregado, con su motivo.
+ * no entregado, con su motivo. Si lo frenó un límite de ritmo
+ * (`ProviderThrottledError`) sigue en cola y se reintenta más tarde, hasta el
+ * tope de entregas; mientras espera, otro mensaje de la conversación puede
+ * salir antes que él.
  */
 export async function processOutbound(
   db: Db,
   deps: SendDeps,
   msg: QueueMessage<OutboundMessageJob>,
-): Promise<"done" | "retry" | "deferred"> {
+): Promise<"done" | "retry" | "deferred" | "throttled"> {
   const { orgId, messageId } = msg.message
   // Restricción/pausa comercial: no se envía, no se pierde, no cuenta como
   // fallo (sale por "deferred" con VT largo; el reintento envenenado tampoco
@@ -195,6 +198,18 @@ export async function processOutbound(
   } catch (error) {
     if (providerAttempted) {
       const detail = error instanceof Error ? error.message : String(error)
+      if (error instanceof ProviderThrottledError && msg.read_ct < MAX_DELIVERIES) {
+        await withOrgContext(db, orgId, async (tx) => {
+          await tx.insert(auditEvent).values({
+            organizationId: orgId,
+            action: "message.updated",
+            entity: "message",
+            entityId: messageId,
+            metadata: { op: "send-throttled", error: detail.slice(0, 500) },
+          })
+        }).catch(() => {})
+        return "throttled"
+      }
       const rejected = error instanceof ProviderRejectedError
       await withOrgContext(db, orgId, async (tx) => {
         await tx
@@ -255,5 +270,17 @@ export async function consumeOutbound(
     // Sin ack y sin contar fallo: reaparece en 6 h para reevaluar (o antes si
     // alguien reanuda y reencola). El mensaje queda `queued` hasta entonces.
     await db.execute(sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, 21600)`)
+  } else if (verdict === "throttled") {
+    await db.execute(
+      sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, ${throttledDelaySeconds(msg.read_ct)})`,
+    )
   }
+}
+
+/**
+ * Cuánto espera un envío frenado por un límite de ritmo antes de volver a
+ * intentarlo: el doble cada vez (1, 2, 4 y 8 minutos), hasta 15 minutos.
+ */
+export function throttledDelaySeconds(readCount: number): number {
+  return Math.min(900, 60 * 2 ** Math.max(0, readCount - 1))
 }

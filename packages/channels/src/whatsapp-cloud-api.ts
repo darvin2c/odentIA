@@ -18,7 +18,7 @@ import type {
   TemplateUnsupported,
   WebhookParseResult,
 } from "./protocol.js"
-import { ProviderRejectedError } from "./protocol.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 import { metaGraphVersion } from "./meta-graph.js"
 
 export interface WhatsAppTemplateRef {
@@ -422,6 +422,9 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
  */
 const NOT_ON_WHATSAPP_CODE = 131026
 
+const ACCOUNT_THROTTLE_WORDS =
+  "WhatsApp frenó el envío porque la clínica mandó demasiados mensajes en poco tiempo. Envíalo de nuevo en unos minutos."
+
 const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   [NOT_ON_WHATSAPP_CODE]: "WhatsApp no pudo entregarlo: lo más probable es que este número no tenga WhatsApp.",
   // «Business eligibility payment issue»: la cuenta de WhatsApp Business no
@@ -431,12 +434,28 @@ const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   // «Error validating access token»: la clave que dio Meta al conectar con
   // Facebook venció (dura 60 días) o la retiraron (darvin2c/odentIA#121).
   190: "WhatsApp no envió el mensaje porque la conexión con Meta venció o fue retirada. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
+  // Límites de ritmo de la app (4), de la cuenta (80007) y de envío del número (130429).
+  4: ACCOUNT_THROTTLE_WORDS,
+  80007: ACCOUNT_THROTTLE_WORDS,
+  130429: ACCOUNT_THROTTLE_WORDS,
+  // «Pair rate limit»: demasiados mensajes seguidos a la misma persona.
+  131056: "WhatsApp frenó el envío porque se le mandaron demasiados mensajes seguidos a esta persona. Envíalo de nuevo en unos minutos.",
+  // Lo que WhatsApp aún no deja enviar a quien oculta su número (ADR 0108).
+  131062: "WhatsApp no deja enviar este tipo de mensaje a quien oculta su número.",
 }
+
+/**
+ * Límites de ritmo: Meta no lo aceptó por ahora y pide volver a intentarlo más
+ * tarde, así que el envío se reintenta sin riesgo de duplicarlo. 131048 (por la
+ * calidad del número) y 131049 (no antes de 24 horas) no se arreglan esperando
+ * unos minutos.
+ */
+const THROTTLE_CODES = new Set([4, 80007, 130429, 131056])
 
 const SEND_FAILURE_WORDS = new Set(Object.values(WHATSAPP_SEND_ERROR_WORDS))
 
-/** Rechazos que son de la cuenta de la clínica (pago, clave), no de la persona. */
-const ACCOUNT_FAILURE_WORDS = new Set([WHATSAPP_SEND_ERROR_WORDS[131042], WHATSAPP_SEND_ERROR_WORDS[190]])
+/** Rechazos que son de la cuenta de la clínica (pago, clave, ritmo), no de la persona. */
+const ACCOUNT_FAILURE_WORDS = new Set([WHATSAPP_SEND_ERROR_WORDS[131042], WHATSAPP_SEND_ERROR_WORDS[190], ACCOUNT_THROTTLE_WORDS])
 
 /**
  * El envío no salió por la cuenta de WhatsApp de la clínica: se arregla una vez
@@ -1067,7 +1086,10 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       const detail = words ?? `WhatsApp send falló: ${status} ${graphError(status, json)}`
       // Meta contestó con su error: no lo aceptó. Un 5xx o una respuesta sin
       // id no dicen si salió, y se tratan como ambiguos.
-      if (status >= 400 && status < 500 && error) throw new ProviderRejectedError(detail)
+      if (status >= 400 && status < 500 && error) {
+        if (typeof error.code === "number" && THROTTLE_CODES.has(error.code)) throw new ProviderThrottledError(detail)
+        throw new ProviderRejectedError(detail)
+      }
       throw new Error(detail)
     }
     return { externalId: id }
@@ -1190,7 +1212,9 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
   /**
    * Bloquear y desbloquear números (Block Users API): POST o DELETE en
    * `block_users`, que responde por número. El número viaja sin el prefijo
-   * `wa:` del hilo. Meta solo bloquea a quien escribió en las últimas 24 horas.
+   * `wa:` del hilo; quien oculta su número va por su BSUID en `user_id`, y la
+   * respuesta lo devuelve igual en `input` (ADR 0108). Meta solo bloquea a quien
+   * escribió en las últimas 24 horas.
    * https://developers.facebook.com/docs/whatsapp/cloud-api/block-users
    */
   async setBlocked(config, input, deps) {
@@ -1200,7 +1224,10 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.phoneNumberId}/block_users`,
-      { method: input.blocked ? "POST" : "DELETE", body: { messaging_product: "whatsapp", block_users: users.map((user) => ({ user })) } },
+      {
+        method: input.blocked ? "POST" : "DELETE",
+        body: { messaging_product: "whatsapp", block_users: users.map((user) => (/^\d+$/.test(user) ? { user } : { user_id: user })) },
+      },
       deps,
     )
     const result = json && typeof json === "object" && "block_users" in json ? (json.block_users as Record<string, unknown>) : null

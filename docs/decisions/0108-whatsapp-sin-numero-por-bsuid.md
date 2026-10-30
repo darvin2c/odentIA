@@ -13,9 +13,13 @@ Quien usa nombre de usuario en WhatsApp puede ocultar su número. Si la empresa 
   - Escribió sin número y después llega con él (Meta lo manda en cuanto se le responde): su identidad y su conversación pasan a su número, que es como la conocen la ficha, «Usarlo como su WhatsApp» y los envíos.
   - Llega sin número y su identidad ya tiene su número: el mensaje entra con ese número, en su conversación de siempre.
   - Con número y BSUID: se guarda el BSUID, o se pone al día, porque Meta lo regenera cuando la persona cambia de número.
+  - Su ficha ya tenía su número como otra identidad (el equipo lo puso como su WhatsApp mientras ella lo ocultaba): son la misma cuenta de WhatsApp, así que la identidad del número se queda con el BSUID y con las conversaciones de la otra, y la otra se borra.
 - **Se responde con `recipient`** cuando la dirección es un BSUID. Si hay número, se usa `to`, como Meta.
-- **Nunca se unen dos identidades que ya existen**, siguiendo la regla de siempre: lo decide el equipo con «Reasignar canal».
-- **Un rechazo claro de Meta no es ambiguo**: si Meta responde 4xx con su error, el mensaje no salió y queda `failed` con su motivo (`ProviderRejectedError`). Una caída de la red, un 5xx o una respuesta sin id siguen siendo `unknown` y no se reenvían. La Bandeja dice en palabras por qué no llegó (`deliveryNote`); el motivo de Meta en inglés no se muestra.
+- **Nunca se unen identidades de dos fichas**, siguiendo la regla de siempre: lo decide el equipo con «Reasignar canal». Mientras tanto, cada mensaje entra por su dirección.
+- **Las conversaciones no se funden**: si la persona ya tenía una conversación por su número en esa conexión, la que tenía sin número queda como su historial, en la misma identidad, y lo nuevo llega a la del número. Sus mensajes no se mueven porque las citas y lo que hizo Sofi (derivaciones, propuestas, registros) están atados a su conversación.
+- **Un rechazo claro del proveedor no es ambiguo**: si WhatsApp, Messenger, Instagram o Telegram responden 4xx con su error, el mensaje no salió y queda `failed` con su motivo (`ProviderRejectedError`). Una caída de la red, un 5xx o una respuesta sin id siguen siendo `unknown` y no se reenvían. La Bandeja dice en palabras por qué no llegó (`deliveryNote`); el motivo de Meta en inglés no se muestra.
+- **Un límite de ritmo se reintenta** (`ProviderThrottledError`: en WhatsApp 4, 80007, 130429 y 131056; en Messenger e Instagram 4, 17, 32, 613, 80001, 80002 y 80006; en Telegram 429): no salió, así que reintentarlo no lo duplica. El mensaje sigue en cola y vuelve a intentarse a los 1, 2, 4 y 8 minutos; al quinto intento queda `failed`. Mientras espera, otro mensaje de la conversación puede salir antes. Los límites de la cuenta de la clínica no dejan una tarea por persona.
+- **Bloquear a quien oculta su número** usa su BSUID en `user_id` de la Block Users API, como indica Meta.
 
 ## Alternativas descartadas
 
@@ -26,7 +30,6 @@ Quien usa nombre de usuario en WhatsApp puede ocultar su número. Si la empresa 
 
 - Quien escribió con número antes de este cambio y vuelve después de 30 días sin número no tiene su BSUID guardado: entra como persona nueva y el equipo la une con «Reasignar canal». Desde este cambio, cada mensaje con número guarda el BSUID.
 - Quien solo escribió sin número no tiene teléfono en su ficha mientras Meta no lo mande; la ficha la muestra por su nombre.
-- Bloquear (Block Users API) sigue usando el número.
 - La conversación `wa:undefined` de antes de este cambio no se puede reparar: no se guardó el BSUID. Esa persona entra bien en cuanto vuelva a escribir.
 
 ## Referencias

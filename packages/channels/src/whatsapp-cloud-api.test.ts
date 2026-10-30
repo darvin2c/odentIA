@@ -2,8 +2,8 @@ import { createHmac } from "node:crypto"
 import { expect, it } from "vitest"
 import whatsappFixtures from "./__fixtures__/whatsapp.json"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
-import { ProviderRejectedError } from "./protocol.js"
-import { buildBody, splitWhatsAppWebhook, whatsappCloudApiAdapter, whatsappFailureWords } from "./whatsapp-cloud-api.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
+import { buildBody, isWhatsAppAccountFailure, splitWhatsAppWebhook, whatsappCloudApiAdapter, whatsappFailureWords } from "./whatsapp-cloud-api.js"
 
 // Golden JSON con forma oficial de Cloud API; el contrato lo valida en runtime.
 const fx: ContractFixtures = whatsappFixtures as unknown as ContractFixtures
@@ -586,6 +586,13 @@ it("bloquea y desbloquea números con la Block Users API y dice cuáles confirm�
   expect(meta.calls[2]?.method).toBe("DELETE")
 })
 
+it("a quien oculta su número se le bloquea por su BSUID, en `user_id` (ADR 0108)", async () => {
+  const meta = fakeFetch({ json: { messaging_product: "whatsapp", block_users: { added_users: [{ input: BSUID, user_id: BSUID }] } } })
+  const done = await whatsappCloudApiAdapter.setBlocked!(fx.config, { users: [`wa:${BSUID}`], blocked: true }, { fetch: meta.fetch })
+  expect(done).toEqual({ done: [`wa:${BSUID}`], failed: [] })
+  expect(meta.calls[0]?.body).toEqual({ messaging_product: "whatsapp", block_users: [{ user_id: BSUID }] })
+})
+
 // Cargas con la forma oficial de Cloud API (mensajes audio, video y sticker).
 it("la nota de voz, el audio y el video entran como media; el sticker no entra", () => {
   const contacts = [{ profile: { name: "Ana Paz" }, wa_id: "51999000111" }]
@@ -831,6 +838,25 @@ it("lo que Meta rechaza con su error es un rechazo claro; un 5xx o una respuesta
   await expect(down).rejects.toThrow("Service temporarily unavailable")
   await expect(down).rejects.not.toBeInstanceOf(ProviderRejectedError)
   await expect(send({ status: 200, json: {} })).rejects.not.toBeInstanceOf(ProviderRejectedError)
+  await expect(rejected).rejects.not.toBeInstanceOf(ProviderThrottledError)
+})
+
+it("un límite de ritmo de Meta no salió y se puede reintentar; el de calidad del número, no", async () => {
+  const send = (code: number) =>
+    whatsappCloudApiAdapter.sendMessage(
+      fx.config,
+      { to: "wa:51999000111", kind: { type: "text", text: "Hola" } },
+      { fetch: fakeFetch({ status: 400, json: { error: { message: "Rate limit hit", code } } }).fetch },
+    )
+  for (const code of [4, 80007, 130429, 131056]) await expect(send(code)).rejects.toBeInstanceOf(ProviderThrottledError)
+  await expect(send(131056)).rejects.toThrow("demasiados mensajes seguidos a esta persona")
+  const quality = send(131048)
+  await expect(quality).rejects.toBeInstanceOf(ProviderRejectedError)
+  await expect(quality).rejects.not.toBeInstanceOf(ProviderThrottledError)
+  // El de la cuenta de la clínica no deja una tarea por persona; el de una persona, sí.
+  const reason = (code: number) => send(code).then(() => null, (error: Error) => error.message)
+  expect(isWhatsAppAccountFailure(await reason(130429))).toBe(true)
+  expect(isWhatsAppAccountFailure(await reason(131056))).toBe(false)
 })
 
 it("el motivo guardado se dice en palabras solo si es uno de los conocidos", () => {

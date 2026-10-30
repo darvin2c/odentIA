@@ -4,7 +4,7 @@ import { message } from "@odentia/db/schema/crm"
 import { closeConversationWith, createConnection, ingestInbound, personalLinkRef, personalLinkToken, sendOutbound } from "@odentia/services"
 import { eq, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { processOutbound } from "./outbound.js"
+import { processOutbound, throttledDelaySeconds } from "./outbound.js"
 import { appDb, KEY, ownerDb, setupTestDb, storageStub, tgConnId } from "./test-setup.js"
 
 setupTestDb()
@@ -307,6 +307,29 @@ it("lo que Meta rechaza con su error queda como no entregado, con su motivo y si
   expect(row).toEqual({ status: "failed", error: "WhatsApp send falló: 400 (#131009) Parameter value is not valid" })
   expect(await processOutbound(appDb, rejecting, outJob(messageId, 5))).toBe("done")
   expect(calls).toBe(1)
+})
+
+it("un límite de ritmo de Meta deja el mensaje en cola para reintentarlo más tarde; al tope, queda como no entregado", async () => {
+  const messageId = await queuedWhatsApp("wa:51911100010")
+  let calls = 0
+  const throttled = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => {
+      calls++
+      return new Response(JSON.stringify({ error: { message: "(#131056) Pair rate limit hit", code: 131056 } }), { status: 400 })
+    }) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, throttled, outJob(messageId, 1))).toBe("throttled")
+  expect((await messageState(messageId))?.status).toBe("queued")
+  expect(await processOutbound(appDb, throttled, outJob(messageId, 5))).toBe("done")
+  const [row] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ status: message.status, error: message.error }).from(message).where(eq(message.id, messageId)),
+  )
+  expect(row?.status).toBe("failed")
+  expect(row?.error).toContain("demasiados mensajes seguidos a esta persona")
+  expect(calls).toBe(2)
+  expect([1, 2, 3, 4, 9].map(throttledDelaySeconds)).toEqual([60, 120, 240, 480, 900])
 })
 
 it("«Su enlace» se guarda como referencia y sale con su token: el token solo existe al entregarlo", async () => {
