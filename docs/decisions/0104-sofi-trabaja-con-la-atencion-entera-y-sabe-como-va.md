@@ -95,7 +95,7 @@ En el chat web, Sofi decía «Ya guardé tu WhatsApp» o «El equipo ya tiene tu
 
 ### Alternativas descartadas
 
-- **Pedirle que guarde el número apenas lo escriba**, en la línea de la corrida («si lo escribe, guárdalo…») o en la indicación de «derivar» («…no se lo vuelvas a pedir si ya lo escribió»), con `guardar_contacto` en todos los caminos. Sofi dejó de pedir el contacto: no lo pidió nunca en 7 de 8 conversaciones, frente a 1 de 8 sin el cambio, y la persona no llegó a dejarlo. Con solo la herramienta en todos los caminos, sin texto, quedó sin medir (se agotó el crédito): está en la rama `claude/contacto-en-todos-los-caminos`.
+- **`guardar_contacto` en todos los caminos**, para que el número que escribe en «derivar», «información», «saludo» o «cambio de cita» no se pierda. Sofi dejó de pedir el contacto y casi nadie llegó a dejarlo. En tres comparaciones a la vez con la misma versión sin el cambio, la que no lo pidió nunca fue de 1 de 8 a 6 de 8 (con «si lo escribe, guárdalo…» en la línea de la corrida y lo de «derivar»), a 7 de 8 (solo con «…no se lo vuelvas a pedir si ya lo escribió» en la indicación de «derivar») y a 5 de 8 (solo la herramienta, sin texto). Sin el cambio guardó 12 de 16 números válidos; con él, 4 de 4.
 
 ### Consecuencias
 
