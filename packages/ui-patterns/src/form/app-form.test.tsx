@@ -138,6 +138,36 @@ function HiddenFieldForm({ save }: { save: () => Promise<void> }) {
   )
 }
 
+/** Una pregunta de opciones que hay que responder antes de guardar. */
+function ChoiceForm() {
+  const form = useAppForm({
+    defaultValues: { kind: "" },
+    validators: { onSubmit: ({ value }) => (value.kind ? undefined : { fields: { kind: "Elige una clase" } }) },
+    onSubmit: async () => {},
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormPanel {...surface} title="Nueva lección" onClose={() => {}}>
+      <form.AppField name="kind">
+        {(field) => (
+          <field.Group legend="Clase">
+            {() => (
+              <div>
+                <button type="button" onClick={() => field.handleChange("regla")}>
+                  Regla
+                </button>
+                <button type="button" onClick={() => field.handleChange("ejemplo")}>
+                  Ejemplo
+                </button>
+              </div>
+            )}
+          </field.Group>
+        )}
+      </form.AppField>
+    </FormPanel>
+  )
+}
+
 describe("useAppForm", () => {
   it("lo que no pasa la validación se marca en su campo, no se envía y el foco va a él", async () => {
     const user = userEvent.setup()
@@ -255,5 +285,15 @@ describe("useAppForm", () => {
 
     expect((await screen.findByText("Elige la región")).getAttribute("role")).toBe("alert")
     expect(save).not.toHaveBeenCalled()
+  })
+
+  it("un grupo sin responder recibe el foco en su primera opción al enviar", async () => {
+    const user = userEvent.setup()
+    render(<ChoiceForm />)
+
+    await user.click(screen.getByRole("button", { name: "Guardar" }))
+
+    expect(await screen.findByText("Elige una clase")).toBeTruthy()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Regla" })))
   })
 })

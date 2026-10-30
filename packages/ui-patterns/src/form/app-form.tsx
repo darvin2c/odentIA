@@ -154,13 +154,13 @@ const FOCUSABLE =
 /**
  * Lleva el foco al primer campo marcado: tras un envío que no pasó, quien
  * guarda llega directo a lo que hay que corregir (también desde el pie fijo
- * de un formulario largo). Un grupo marcado (opciones, chips) recibe el foco
- * en su primera opción.
+ * de un formulario largo). Un grupo marcado (opciones, chips: el `fieldset` de
+ * `field.Group` con `data-invalid`) recibe el foco en su primera opción.
  */
 export function focusFirstInvalid(root: ParentNode | null): void {
   const run = () => {
     const scope: ParentNode = root && (root as Node).isConnected ? root : document
-    for (const marked of scope.querySelectorAll<HTMLElement>('[aria-invalid="true"]')) {
+    for (const marked of scope.querySelectorAll<HTMLElement>('[aria-invalid="true"], fieldset[data-invalid="true"]')) {
       // Con `tabindex` (también -1: la firma, la persona elegida) se enfoca él; si no, su primer control.
       const target =
         marked.matches(FOCUSABLE) || marked.hasAttribute("tabindex") ? marked : marked.querySelector<HTMLElement>(FOCUSABLE)
