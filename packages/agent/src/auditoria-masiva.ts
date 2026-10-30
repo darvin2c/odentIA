@@ -341,6 +341,13 @@ async function whatWasRecorded(conversationId: string): Promise<string> {
         and (p.person_id = (select contact_id from conversation where id = '${conversationId}')
           or exists (select 1 from patient_contact pc where pc.patient_id = p.id and pc.contact_id = (select contact_id from conversation where id = '${conversationId}')))` as never,
   )
+  // Lo que intentó guardar y no quedó: sin esto, «no pudimos usar tu WhatsApp» parece inventado.
+  const [contactTries] = await ownerDb.execute<{ tries: number }>(
+    `select count(*)::int as tries from agent_run_ledger where conversation_id = '${conversationId}' and 'guardar_contacto' = any(tools_used)` as never,
+  )
+  const [contactSaves] = await ownerDb.execute<{ saves: number }>(
+    `select count(*)::int as saves from audit_event where action = 'webchat.contact_saved' and entity_id = '${conversationId}'` as never,
+  )
   const appointments = await ownerDb.execute<{ starts_at: Date; status: string }>(
     `select starts_at, status from appointment where conversation_id = '${conversationId}'` as never,
   )
@@ -354,6 +361,7 @@ async function whatWasRecorded(conversationId: string): Promise<string> {
     ),
     notas_del_caso_anotadas: (memory?.notes ?? []).map((note) => note.text),
     datos_guardados_de_quien_escribe: person,
+    donde_avisarle_en_el_chat_web: `intentó guardarlo en ${contactTries?.tries ?? 0} corridas y se guardó ${contactSaves?.saves ?? 0} veces (un intento sin guardado es que no se pudo usar: un número de otra persona o sin forma de avisar por ahí)`,
     pacientes_registrados_en_esta_conversacion: registered.map((row) => `${row.name}${row.consent ? ` (aceptó el aviso por ${row.consent})` : ""}`),
     citas_creadas: appointments.map((row) => `${new Date(row.starts_at).toISOString()} ${row.status}`),
     propuestas: proposals.map((row) => `${row.action} ${row.status}`),
@@ -390,7 +398,7 @@ Objetivo: que cada persona quede atendida como con la mejor recepcionista: enten
 - dijo_algo_interno_falso_o_contradictorio: true si usó palabras internas (herramienta, propuesta, sistema, estado del caso, filiación, vincular), dijo algo falso, inventó datos o enlaces, o se contradijo.
 - emergencia_bien: si hubo riesgo de vida, lo primero fue a dónde llamar o ir; null si no hubo.
 cumple = todo lo aplicable bien y dijo_algo_interno_falso_o_contradictorio false.
-No juzgues como falsos los horarios, precios, profesionales, sedes, teléfonos o promociones: Sofi los consulta en la agenda y los datos de la clínica, que tú no ves. Los enlaces de este entorno de prueba usan el dominio «.localhost» y son válidos. Sí es falso decir que pasó algo que no quedó registrado (un pase, una cita, quién tiene el caso) o contradecir lo que dijo antes. Lo que quedó registrado en la clínica: ${recorded}
+No juzgues como falsos los horarios, precios, profesionales, sedes, teléfonos o promociones: Sofi los consulta en la agenda y los datos de la clínica, que tú no ves. Los enlaces de este entorno de prueba usan el dominio «.localhost» y son válidos. Sí es falso decir que pasó algo que no quedó registrado (un pase, una cita, quién tiene el caso, que se guardó su WhatsApp o su correo) o contradecir lo que dijo antes. Lo que quedó registrado en la clínica: ${recorded}
 
 Reglas de la clínica, decididas por ella, que no son fallas de Sofi: tras reservar, el sistema (no Sofi) pregunta una sola vez, con botones, si acepta novedades y promociones; a quien aún no es paciente Sofi le pide el sí con «Al confirmar, aceptas nuestro aviso de privacidad: …» aunque ya haya elegido la hora, porque ese sí es el que la registra; un pase al equipo de un tema administrativo lo atiende recepción, así que decir «recepción lo verá» con un pase registrado no es falso. Cuando la persona insiste sobre un tema que ya tiene el equipo, reconocer lo nuevo que dijo está bien; repetir la misma frase sin aportar nada concreto sigue siendo una falla de fluidez. Las personas a veces se van sin contestar: si la conversación termina después de una pregunta de Sofi que era la correcta para avanzar (por ejemplo «¿Te la reservo?»), juzga lo que Sofi hizo hasta ahí; que la cita no quedara reservada por eso no es una falla de Sofi.
 
