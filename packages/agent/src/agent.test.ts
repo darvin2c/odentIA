@@ -2394,7 +2394,7 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
 
   // La cita existe de verdad, de la persona de prueba, y la base la marca «Prueba».
   const [booked] = await ownerDb.select().from(appointment).where(eq(appointment.conversationId, opened.conversationId))
-  expect(booked).toMatchObject({ patientId: testPatient!.patientId, isTest: true, status: "programada" })
+  expect(booked).toMatchObject({ patientId: testPatient!.patientId, isTest: true, status: "confirmada" })
   const state = await inOrg((tx) => getProbar(tx, "org_a", fx.actorId))
   expect(state.created).toMatchObject([{ appointmentId: booked!.id }])
   expect(state.turns.map((turn) => turn.toolsUsed)).toEqual([

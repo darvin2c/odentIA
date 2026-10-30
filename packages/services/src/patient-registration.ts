@@ -51,6 +51,7 @@ import {
 import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import { applyMessagePermissions } from "./data-consents.js"
+import { consentStatusOf } from "./message-permission.js"
 import { createPerson, findPersonByDocument } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
@@ -990,10 +991,15 @@ export async function registerPatient(
     const grantorId = representativePending
       ? null
       : await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")
-    if (grantorId && asked.length > 0) {
+    // Lo que ya respondió no se pisa: haberle dicho que le escribiremos sobre su cita no
+    // vuelve a encender los recordatorios que apagó (ni los de quien no quiere ningún mensaje).
+    const keepsReminders =
+      !!grantorId && answers.acceptsReminders === true && (await consentStatusOf(tx, orgId, grantorId, "recordatorio")) !== null
+    const toApply = keepsReminders ? asked.filter((purpose) => purpose !== "recordatorios") : asked
+    if (grantorId && toApply.length > 0) {
       await applyMessagePermissions(tx, orgId, actorUserId, grantorId, {
         accepted: purposes,
-        asked,
+        asked: toApply,
         channel: isPublic ? "formulario_publico" : "presencial",
       })
     }

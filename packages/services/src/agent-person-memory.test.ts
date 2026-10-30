@@ -21,6 +21,7 @@ import {
   removePersonFact,
 } from "./agent-person-memory.js"
 import { addAgentCaseNote } from "./agent-case.js"
+import { setMessageChoice } from "./automation.js"
 import { getCaseBrief, parseHandoffSaid } from "./agent-case-brief.js"
 import { annotateHandoff, createHandoff, listHandoffs } from "./agent-operations.js"
 import { createRoom } from "./appointments.js"
@@ -480,7 +481,7 @@ describe("reservar desde un enlace", () => {
       }))
     // Registrada por teléfono: sin fecha, sin sexo y sin el aviso aceptado.
     const [created] = await insertTestPatients(ownerDb, {
-      organizationId: ORG, displayName: "Lía Campos", givenNames: "Lía", familyName: "Campos", docType: "DNI", docNumber: "41239876",
+      organizationId: ORG, displayName: "Lía Campos", givenNames: "Lía", familyName: "Campos", docType: "DNI", docNumber: "40987123",
       phone: "+51987000111", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)),
     })
     await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: lia.contactId, relationship: "self", isPreferred: true }))
@@ -488,7 +489,7 @@ describe("reservar desde un enlace", () => {
     // Al reservar ve lo que ya sabemos, con el documento abreviado, lo que falta y lo pendiente.
     const sent = await run((tx) => createBookingLink(tx, ORG, { conversationId: lia.conversationId, branchId: site!.id }, { secretsKey: KEY }))
     const view = await run((tx) => getBookingLinkView(tx, ORG, sent.token))
-    expect(view.you).toEqual({ name: "Lía Campos", document: "DNI ••••9876", phone: "+51987000111" })
+    expect(view.you).toEqual({ name: "Lía Campos", document: "DNI ••••7123", phone: "+51987000111" })
     expect(view.pending).toEqual({ privacy: true, promotions: true })
     expect(view.data?.missing.map((item) => item.key)).toEqual(expect.arrayContaining(["birthDate", "sex"]))
 
@@ -639,6 +640,26 @@ describe("reservar desde un enlace quien recién se contacta", () => {
       ["novedades", "granted", "registro"],
       ["recordatorio", "granted", "registro"],
     ])
+  })
+
+  it("registrarse por el enlace no pisa lo que ya respondió: quien no quiere ningún mensaje sigue igual", async () => {
+    const config = await run((tx) => getPatientRegistrationConfig(tx, ORG))
+    const nadie = await person("nadie-enlace")
+    // Le dijo en persona a recepción que no quiere ningún mensaje.
+    await run((tx) => setMessageChoice(tx, ORG, OWNER, nadie.contactId, { choice: "ninguno", receive: false, source: "presencial" }))
+    const link = await run((tx) => createBookingLink(tx, ORG, { conversationId: nadie.conversationId }, { secretsKey: KEY }))
+    const answers = {
+      demographics: {
+        displayName: "Nora Díaz Paz", givenNames: "Nora", familyName: "Díaz Paz", docType: "DNI" as const, docNumber: "40765123",
+        phone: "+51987777001", birthDate: "1985-01-20", sex: "F" as const,
+      },
+      respondent: "patient" as const,
+      privacyAccepted: true,
+      acceptsReminders: true,
+    }
+    expect(await run((tx) => registerFromBookingLink(tx, ORG, link.token, { submissionId: randomUUID(), formVersion: config.version, answers }))).toEqual({ registered: true })
+    const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, nadie.contactId))
+    expect(permissions.find((row) => row.purpose === "recordatorio")).toMatchObject({ status: "revoked", source: "presencial" })
   })
 
   it("propone el celular solo cuando la conversación es de WhatsApp", async () => {
