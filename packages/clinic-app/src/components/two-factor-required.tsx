@@ -116,7 +116,8 @@ function CodeStep({ orgName }: { orgName: string }) {
         const wrong = recovery
           ? "Ese código no existe o ya se usó."
           : "Ese código no coincide. Escribe el que muestra ahora la app (cambia cada 30 segundos). Si sigue fallando, revisa que la hora del teléfono esté en automático."
-        throw new ApiError(status, { code: "INVALID_CODE", message: wrong, fields: { code: wrong } })
+        // Better Auth responde 401 a un código equivocado: como rechazo (400) va a su campo y no se lee como sesión vencida.
+        throw new ApiError(400, { code: "INVALID_CODE", message: wrong, fields: { code: wrong } })
       }
       window.location.reload()
     },

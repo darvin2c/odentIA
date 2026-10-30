@@ -356,7 +356,10 @@ function TeamPage() {
                           ) : (
                             <Button
                               variant="ghost"
-                              onClick={() => setReactivate(row)}
+                              onClick={() => {
+                                reactivateForm.reset()
+                                setReactivate(row)
+                              }}
                             >
                               Reactivar
                             </Button>

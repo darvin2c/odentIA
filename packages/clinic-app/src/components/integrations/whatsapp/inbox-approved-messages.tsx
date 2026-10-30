@@ -14,6 +14,7 @@ import {
   type ApprovedMessages,
   approvedFields,
   approvedMessagesKey,
+  approvedValues,
   closedWindowNotice,
 } from "../../../lib/whatsapp"
 import { PreviewText } from "./message-preview"
@@ -123,9 +124,7 @@ export function InboxApprovedMessages({
     onSubmit: async ({ value, formApi }) => {
       const option = chosenOption(options, value.messageId)
       if (!option) return
-      const values =
-        option.fields.length > 0 ? option.fields.map((_, at) => (value.typed[option.id]?.[at] ?? "").trim()) : undefined
-      await send.mutateAsync({ option, values })
+      await send.mutateAsync({ option, values: approvedValues(option, value.typed[option.id]) })
       formApi.reset()
     },
   })

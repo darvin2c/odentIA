@@ -31,21 +31,21 @@ import { KnowledgeBasics } from "../../components/agent/knowledge-basics"
 import { KnowledgeDetail } from "../../components/agent/knowledge-detail"
 import { KnowledgeGaps } from "../../components/agent/knowledge-gaps"
 import {
-  type KnowledgeBasicItem,
   type KnowledgeBasics as Basics,
-  type KnowledgeEntry,
   type KnowledgeGap as Gap,
+  type KnowledgeBasicItem,
+  type KnowledgeEntry,
   type KnowledgeSources as Sources,
   TOUCH,
 } from "../../components/agent/knowledge-model"
 import { KnowledgeSources } from "../../components/agent/knowledge-sources"
 import { LessonDrawer } from "../../components/agent/lesson-drawer"
 import { AgentTabs } from "../../components/agent-tabs"
+import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { activeOrgLocale } from "../../lib/locale"
-import { useReceptionName } from "../../lib/agent-names"
+import { PageDraftGuard } from "../../lib/page-draft-guard"
 import { isAmbiguousMutationError } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/knowledge")({
@@ -516,6 +516,8 @@ function AgentKnowledgePage() {
           submitLabel={answering ? "Guardar y publicar" : runNext ? "Guardar y seguir" : "Guardar"}
           cancelLabel="Cancelar"
           submitDisabled={ambiguous}
+          // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
+          error={ambiguous ? submitErrorMessage(saveMutation.error) : surface.error}
         >
           <FieldGroup>
             {answering ? (

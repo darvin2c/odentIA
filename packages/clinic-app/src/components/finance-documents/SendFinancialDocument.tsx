@@ -5,6 +5,7 @@ import {
   DataRefreshMarker,
   ErrorState,
   FormDrawer,
+  isUnconfirmedSubmit,
   SubmitButton,
   setSubmitErrors,
   useAppForm,
@@ -14,7 +15,7 @@ import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { FileText, Send } from "lucide-react"
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react"
 import { apiFetch, apiFetchBytes } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
@@ -211,7 +212,13 @@ export function SendFinancialDocument({
       })
     },
   })
-  const surface = useFormSurface(form, { formMessage: financeFormMessage })
+  // El envío conserva su identificador: reintentar sin respuesta no lo manda dos veces, y así se dice.
+  const surface = useFormSurface(form, {
+    formMessage: (error) =>
+      isUnconfirmedSubmit(error)
+        ? "No pudimos confirmar el envío. Tu mensaje se conserva: puedes intentarlo otra vez sin que se envíe dos veces."
+        : financeFormMessage(error),
+  })
   const recipientId = useStore(form.store, (state) => state.values.recipientContactId) || null
   const connectionId = useStore(form.store, (state) => state.values.connectionId)
 

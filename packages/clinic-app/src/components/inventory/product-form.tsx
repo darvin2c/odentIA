@@ -234,6 +234,8 @@ export function ProductFormDrawer({
       title={product ? "Editar producto" : "Nuevo producto"}
       description={branchName}
       submitDisabled={blocked}
+      // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
+      error={blocked ? inventoryUnconfirmedMessage(mutation.error, { repeatable: false }) : surface.error}
       // Enter tampoco reenvía: el aviso de que no se pudo confirmar sigue a la vista.
       onSubmit={(event) => (blocked ? event.preventDefault() : surface.onSubmit(event))}
       submitLabel="Guardar"

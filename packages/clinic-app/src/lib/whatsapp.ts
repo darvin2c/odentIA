@@ -1,6 +1,6 @@
+import { ADMIN_NAME } from "./agent-names"
 import type { ConnectionItem, OwnAppState } from "./crm"
 import { type ChannelField, channelAccount } from "./integrations"
-import { ADMIN_NAME } from "./agent-names"
 import { appWords } from "./product-words"
 
 /**
@@ -679,6 +679,19 @@ export function closedWindowNotice(
  */
 export function approvedFields(option: Pick<ApprovedMessageOption, "fields">): ApprovedMessageOption["fields"] {
   return [...option.fields].sort((a, b) => a.index - b.index)
+}
+
+/**
+ * Lo escrito para un mensaje, como `values` del envío: recortado y en el orden
+ * de `approvedFields` (`typed[i]`); lo que falta viaja vacío y el servidor dice
+ * qué completar. Un mensaje sin datos no envía ninguno.
+ */
+export function approvedValues(
+  option: Pick<ApprovedMessageOption, "fields">,
+  typed: ReadonlyArray<string | undefined> | undefined,
+): string[] | undefined {
+  if (option.fields.length === 0) return undefined
+  return option.fields.map((_, at) => (typed?.[at] ?? "").trim())
 }
 
 /* ---------- Claves de consulta ---------- */

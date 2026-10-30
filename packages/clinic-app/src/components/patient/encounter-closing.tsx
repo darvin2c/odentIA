@@ -72,8 +72,11 @@ const EMPTY_CLOSING: ClosingValues = {
  * abrirlo de nuevo después de uno correcto (`form.reset`).
  */
 export function useClosingForm(options: {
-  /** Hay consentimientos sin firmar: se pide por qué se sigue sin ellos. */
-  needsReason: boolean
+  /**
+   * Hay consentimientos sin firmar y se cierra desde aquí: se pide por qué se
+   * sigue sin ellos. Se lee al enviar (firmar con lo dictado no lo pide).
+   */
+  needsReason: () => boolean
   /** El perfil no tiene colegiatura: se pide aquí. */
   needsRegistration: boolean
   onSubmit: (value: ClosingValues) => Promise<void>
@@ -85,7 +88,7 @@ export function useClosingForm(options: {
     validators: {
       onSubmit: ({ value }) => {
         const fields: Record<string, string> = {}
-        if (latest.current.needsReason && !value.consentSkipReason.trim())
+        if (latest.current.needsReason() && !value.consentSkipReason.trim())
           fields.consentSkipReason = "Escribe por qué sigues sin el consentimiento, o fírmalo ahora"
         if (latest.current.needsRegistration) Object.assign(fields, signatureRegistrationErrors(value))
         return Object.keys(fields).length > 0 ? { fields } : undefined
@@ -96,11 +99,6 @@ export function useClosingForm(options: {
 }
 
 export type ClosingForm = ReturnType<typeof useClosingForm>
-
-/** Los valores con que se abre el cierre: lo que ya tiene el perfil y lo que propone el país. */
-export function closingDefaults(registration: SignatureRegistration): ClosingValues {
-  return { ...EMPTY_CLOSING, ...registration }
-}
 
 function consentLine(need: ConsentNeed, who: string): { title: string; detail: string } {
   if (need.status === "sin_publicar")

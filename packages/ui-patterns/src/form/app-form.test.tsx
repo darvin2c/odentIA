@@ -7,6 +7,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { useAppForm, useFormSurface } from "./app-form.js"
 import { INCOMPLETE_PHONE } from "./fields.js"
 import { FormPanel } from "./form-panel.js"
+import { setSubmitErrors } from "./server-errors.js"
 import { SUBMIT_ERROR_WORDS } from "./submit-error.js"
 
 // Base UI ScrollArea/Select y jsdom necesitan polyfills mínimos
@@ -168,6 +169,68 @@ function ChoiceForm() {
   )
 }
 
+/** Invitar a varias personas seguidas: el cajón sigue con el mismo rol. */
+function InviteForm() {
+  const form = useAppForm({
+    defaultValues: { email: "", role: "support" },
+    onSubmit: async ({ value, formApi }) => formApi.reset({ email: "", role: value.role }),
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormPanel {...surface} title="Invitar" onClose={() => {}}>
+      <form.AppField name="email">{(field) => <field.TextField label="Correo" />}</form.AppField>
+      <form.AppField name="role">{(field) => <field.TextField label="Rol" />}</form.AppField>
+    </FormPanel>
+  )
+}
+
+/** Una compra con filas que se pueden quitar; el servidor rechaza precios por fila. */
+function LinesForm({ save }: { save: () => Promise<void> }) {
+  const form = useAppForm({
+    defaultValues: { lines: [{ price: "1" }, { price: "" }, { price: "" }] },
+    onSubmit: save,
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormPanel {...surface} title="Nueva compra" onClose={() => {}}>
+      <form.AppField name="lines" mode="array">
+        {(list) =>
+          list.state.value.map((_, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: las filas de TanStack Form se identifican por su índice
+            <div key={index}>
+              <form.AppField name={`lines[${index}].price`}>
+                {(field) => <field.TextField label={`Precio ${index + 1}`} />}
+              </form.AppField>
+              <button type="button" onClick={() => list.removeValue(index)}>
+                Quitar {index + 1}
+              </button>
+            </div>
+          ))
+        }
+      </form.AppField>
+    </FormPanel>
+  )
+}
+
+/** Un dato que estuvo en pantalla y ya no; la pantalla marca su falta por su cuenta (`setSubmitErrors`). */
+function ClosedSectionForm() {
+  const [open, setOpen] = useState(true)
+  const form = useAppForm({
+    defaultValues: { name: "Centro", note: "" },
+    onSubmit: async ({ formApi }) => setSubmitErrors(formApi, { fields: { note: "Escribe la nota" } }),
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormPanel {...surface} title="Nueva sede" onClose={() => {}}>
+      <button type="button" onClick={() => setOpen(false)}>
+        Cerrar nota
+      </button>
+      <form.AppField name="name">{(field) => <field.TextField label="Nombre" />}</form.AppField>
+      {open ? <form.AppField name="note">{(field) => <field.TextField label="Nota" />}</form.AppField> : null}
+    </FormPanel>
+  )
+}
+
 describe("useAppForm", () => {
   it("lo que no pasa la validación se marca en su campo, no se envía y el foco va a él", async () => {
     const user = userEvent.setup()
@@ -295,5 +358,54 @@ describe("useAppForm", () => {
 
     expect(await screen.findByText("Elige una clase")).toBeTruthy()
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Regla" })))
+  })
+
+  it("lo que deja `reset(values)` desde `onSubmit` sigue en el campo después de guardar", async () => {
+    const user = userEvent.setup()
+    render(<InviteForm />)
+
+    const role = screen.getByLabelText("Rol") as HTMLInputElement
+    await user.clear(role)
+    await user.type(role, "admin")
+    await user.type(screen.getByLabelText("Correo"), "ana@clinica.pe")
+    await user.click(screen.getByRole("button", { name: "Guardar" }))
+
+    await waitFor(() => expect((screen.getByLabelText("Correo") as HTMLInputElement).value).toBe(""))
+    expect((screen.getByLabelText("Rol") as HTMLInputElement).value).toBe("admin")
+  })
+
+  it("al quitar una fila, el rechazo de las filas no queda en otra fila ni se pierde sin corregir", async () => {
+    const user = userEvent.setup()
+    const save = vi.fn(async () => {
+      throw new FakeApiError(400, {
+        code: "VALIDATION",
+        message: "Revisa los precios",
+        fields: { "lines[1].price": "Escribe el precio", "lines[2].price": "Escribe el precio" },
+      })
+    })
+    render(<LinesForm save={save} />)
+
+    await user.click(screen.getByRole("button", { name: "Guardar" }))
+    await waitFor(() => expect(screen.getAllByText("Escribe el precio")).toHaveLength(2))
+
+    await user.click(screen.getByRole("button", { name: "Quitar 1" }))
+
+    // Las filas se movieron: ninguna lleva el aviso de otra; el próximo envío lo vuelve a decir.
+    await waitFor(() => expect(screen.queryByText("Escribe el precio")).toBeNull())
+    expect(screen.getByLabelText("Precio 1").getAttribute("aria-invalid")).toBeNull()
+    expect(screen.getByLabelText("Precio 2").getAttribute("aria-invalid")).toBeNull()
+    // El servidor vuelve a señalar la fila que sigue sin precio (la que ya no existe va junto a los botones).
+    await user.click(screen.getByRole("button", { name: "Guardar" }))
+    await waitFor(() => expect(screen.getByLabelText("Precio 2").getAttribute("aria-invalid")).toBe("true"))
+  })
+
+  it("lo que se marca en un dato que ya no está en pantalla se dice junto a los botones", async () => {
+    const user = userEvent.setup()
+    render(<ClosedSectionForm />)
+
+    await user.click(screen.getByRole("button", { name: "Cerrar nota" }))
+    await user.click(screen.getByRole("button", { name: "Guardar" }))
+
+    expect((await screen.findByText("Escribe la nota")).getAttribute("role")).toBe("alert")
   })
 })

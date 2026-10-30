@@ -5,6 +5,7 @@ import { sinceWords } from "./integrations"
 import {
   accountWords,
   approvedFields,
+  approvedValues,
   type ClinicMessage,
   closedWindowNotice,
   connectionPending,
@@ -432,6 +433,12 @@ describe("Bandeja, pasadas las 24 horas", () => {
     // No cambia la lista del mensaje.
     expect(fields.map((field) => field.index)).toEqual([2, 1])
     expect(approvedFields({ fields: [] })).toEqual([])
+    expect(approvedValues({ fields }, [" 20 % en limpiezas ", "octubre"])).toEqual(["20 % en limpiezas", "octubre"])
+    // Lo que falta viaja vacío: el servidor dice qué completar.
+    expect(approvedValues({ fields }, [undefined, "octubre"])).toEqual(["", "octubre"])
+    expect(approvedValues({ fields }, undefined)).toEqual(["", ""])
+    // Un mensaje que no pide datos no envía ninguno.
+    expect(approvedValues({ fields: [] }, ["sobra"])).toBeUndefined()
   })
 })
 

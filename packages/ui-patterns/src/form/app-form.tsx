@@ -79,9 +79,20 @@ export const useAppForm: typeof appForm.useAppForm = (props) => {
   passed.current = props.defaultValues
   const kept = React.useRef<KeptReset | null>(null)
   if (kept.current && !evaluate(props.defaultValues, kept.current.passed)) kept.current = null
-  const form = appForm.useAppForm(
-    kept.current ? { ...props, defaultValues: kept.current.values as typeof props.defaultValues } : props,
-  )
+  const self = React.useRef<AnyFormApi | null>(null)
+  const onSubmit = props.onSubmit
+  const form = appForm.useAppForm({
+    ...props,
+    ...(kept.current ? { defaultValues: kept.current.values as typeof props.defaultValues } : {}),
+    // TanStack le pasa a `onSubmit` su objeto interno, sin el `reset` de abajo: recibe este.
+    ...(onSubmit
+      ? {
+          onSubmit: (args: Parameters<typeof onSubmit>[0]) =>
+            onSubmit({ ...args, formApi: (self.current ?? args.formApi) as typeof args.formApi }),
+        }
+      : {}),
+  })
+  self.current = form
   if (!keepingResets.has(form)) {
     keepingResets.add(form)
     const reset = form.reset

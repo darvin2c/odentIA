@@ -360,6 +360,8 @@ export function PurchaseFormDrawer({
       title={editing ? `Editar ${order?.label}` : "Nueva compra"}
       description={branchName}
       submitDisabled={blocked}
+      // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
+      error={blocked ? inventoryUnconfirmedMessage(mutation.error, { repeatable: false }) : surface.error}
       submitLabel={submitLabel}
       cancelLabel="Cancelar"
       secondaryAction={

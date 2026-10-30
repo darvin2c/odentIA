@@ -1,36 +1,36 @@
-import { formatVitals, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
+import { formatMoney, formatVitals, parseVitals, VITAL_SIGNS, type Vitals, vitalsErrors } from "@odentia/clinical"
 import {
   Button,
   cn,
-  Field,
-  FieldError,
-  FieldLabel,
-  Input,
-  Textarea,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Field,
+  FieldError,
+  FieldLabel,
+  Input,
+  Textarea,
 } from "@odentia/ui"
 import {
+  addDays,
   ConfirmDialog,
+  clearSubmitErrors,
   DetailDrawer,
   DetailPanel,
   FormDrawer,
   FormPanel,
-  clearSubmitErrors,
+  MasterDetail,
+  PageHeader,
   setSubmitErrors,
   submitErrorMessage,
   submitErrorOf,
   submitForm,
   useAppForm,
-  useFormSubmitError,
-  MasterDetail,
   useDetailMode,
-  PageHeader,
-  addDays,
+  useFormSubmitError,
   zonedDateOf,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
@@ -38,40 +38,40 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useId, useRef, useState } from "react"
 import { ApiError, apiFetch } from "../../lib/api"
-import { DictationMobileBar, dictationMobileBarVisible, DictationPanel, DictationTranscript } from "./dictation-panel"
-import { type DictationKind, type DictationSuggestion, useDictationSession } from "./dictation-session"
-import { DictationSignDialog } from "./dictation-sign-dialog"
 import { PLAN_QUERY_KEYS } from "../../lib/budgets"
-import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
+import { type ConsentDocument, fetchConsents } from "../../lib/clinical-forms"
 import {
   clinicDateTimeValue,
   fetchFollowUps,
   instantFromClinicValue,
 } from "../../lib/clinical-journey"
-import { fetchPatientAccount3 } from "../../lib/finance-collect"
 import { useMemberName, useMyUserId, usePermission } from "../../lib/crm"
+import { type ConsentNeed, prepareConsents } from "../../lib/encounter-documents"
 import {
   CLOSING_REQUIREMENT_LABELS,
   type ClosingRequirement,
+  type FinalizedMaterials,
   fetchEncounterClosing,
   fetchMyProfessionalProfile,
-  type FinalizedMaterials,
   saveProfessionalProfileApi,
   takeOverEncounterApi,
   voidEncounterApi,
 } from "../../lib/encounters"
-import { type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
-import { formatMoney } from "@odentia/clinical"
+import { fetchPatientAccount3 } from "../../lib/finance-collect"
+import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
 import { useOrgProfile } from "../../lib/org"
+import { ageFrom, type Encounter, type EncounterDetail, hcLabel, type PatientFull } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
+import { AttendingForNotice } from "../agenda/attending-for-notice"
+import { useAgentPanelDockBlocker } from "../agent-panel"
 import { ProfessionalProfileDrawer } from "../professional-profile-drawer"
 import { ChoiceSelect } from "../ui/choice-select"
-import { useAgentPanelDockBlocker } from "../agent-panel"
-import { EncounterBreadcrumb } from "./encounter-breadcrumb"
-import { AttendingForNotice } from "../agenda/attending-for-notice"
-import { prepareConsents, type ConsentNeed } from "../../lib/encounter-documents"
-import { fetchConsents, type ConsentDocument } from "../../lib/clinical-forms"
-import { ageFrom } from "../../lib/patients"
 import { ConsentSigningScreen, useSignAs } from "./consent-signing"
+import { DictationMobileBar, DictationPanel, DictationTranscript, dictationMobileBarVisible } from "./dictation-panel"
+import { type DictationKind, type DictationSuggestion, useDictationSession } from "./dictation-session"
+import { DictationSignDialog } from "./dictation-sign-dialog"
+import { DictationBlockSuggestions, DictationEditDrawer } from "./dictation-suggestions"
+import { EncounterBreadcrumb } from "./encounter-breadcrumb"
 import {
   CLOSING_FIELD_MAP,
   type ClosingValues,
@@ -80,15 +80,13 @@ import {
   useClosingForm,
 } from "./encounter-closing"
 import { DeclaredQuestionnaireNotice, EncounterAllergyReview, EncounterContextBody } from "./encounter-context"
-import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterDiagnoses } from "./encounter-diagnoses"
+import { EncounterDocumentsBlock, useEncounterDocuments } from "./encounter-documents"
 import { EncounterMaterialsCorrection, FinalizedMaterialsNote } from "./encounter-materials"
 import { EncounterBudgetSend, EncounterPlanPanel } from "./encounter-plan-panel"
-import { BudgetSendButton } from "./plan/budget-send"
 import { EncounterProcedures } from "./encounter-procedures"
 import { PatientClinicalStrip } from "./patient-header"
-import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import { productUi } from "../../product/product-ui"
+import { BudgetSendButton } from "./plan/budget-send"
 
 export interface EncounterEditorProps {
   patientId: string
@@ -437,7 +435,8 @@ export function EncounterEditor({
   // Firmar con lo dictado: las sugerencias marcadas se confirman dentro del mismo envío del cierre.
   const signIdsRef = useRef<string[] | null>(null)
   const closingForm = useClosingForm({
-    needsReason: unsignedConsents.length > 0,
+    // Firmar con lo dictado no lo pide: con consentimientos por firmar, sigue al cierre (`finalizeWith`).
+    needsReason: () => unsignedConsents.length > 0 && signIdsRef.current === null,
     needsRegistration,
     onSubmit: (value) => finalizeWith(value),
   })
@@ -597,6 +596,8 @@ export function EncounterEditor({
     const run = (async () => {
       // Sin nada enviado, «Guardado» conserva su hora: cerrar un bloque sin cambios no es guardar.
       let sentAny = false
+      // Lo que se envió: al guardar bien solo eso deja de tener algo que corregir.
+      const sent = new Set<string>()
       try {
         if (mountedRef.current) setSaveState("saving")
         for (;;) {
@@ -604,6 +605,7 @@ export function EncounterEditor({
           sentAny = true
           const sendable = [...dirtyRef.current]
           dirtyRef.current.clear()
+          for (const key of sendable) sent.add(key)
           for (const key of sendable) inflightRef.current.add(key)
           try {
             const saved = await apiFetch<{ data: Encounter }>(
@@ -631,8 +633,8 @@ export function EncounterEditor({
         }
         if (mountedRef.current) {
           setSaveError(null)
-          // Lo guardado ya no tiene nada que corregir.
-          clearSubmitErrors(draftForm)
+          // Lo guardado ya no tiene nada que corregir; lo que falta para cerrar sigue marcado.
+          clearSubmitErrors(draftForm, (name) => [...sent].some((key) => name === key || name.startsWith(`${key}.`)))
           setSaveState(dirtyRef.current.size > 0 ? "pending" : "saved")
           if (sentAny) setSavedAt(new Date().toISOString())
         }

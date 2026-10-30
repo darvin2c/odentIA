@@ -5,6 +5,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
   InputGroupText,
+  toast,
 } from "@odentia/ui"
 import {
   CountrySelect,
@@ -31,11 +32,11 @@ import { z } from "zod"
 import { ApiError, apiFetch } from "../lib/api"
 import { API_URL, authClient } from "../lib/auth-client"
 import { type AuthClientError, authError, authFailureOf, authFormMessage } from "../lib/auth-error"
+import { panelWords } from "../lib/brand"
 import { addressAlternatives, addressFromName, CLINIC_ADDRESS_PATTERN } from "../lib/clinic-address"
 import { FOUNDER_INVITATION_HEADER, forgetInvitation, rememberInvitation, storedInvitation } from "../lib/founders"
 import { requireTermsAccepted, requireVerifiedSession } from "../lib/guards"
 import { BASE_DOMAIN, tenantUrl } from "../lib/host"
-import { panelWords } from "../lib/brand"
 
 export const Route = createFileRoute("/onboarding")({
   beforeLoad: async ({ location }) => {
@@ -295,8 +296,15 @@ function OnboardingPage() {
           founderToken ? { headers: { [FOUNDER_INVITATION_HEADER]: founderToken } } : undefined,
         )
         if (orgError) {
-          const { code } = authFailureOf(orgError)
+          const { code, message } = authFailureOf(orgError)
           if (code === "INVITATION_INVALID") forgetInvitation()
+          if (code === "INVITATION_REQUIRED" || code === "INVITATION_INVALID") {
+            // Sin una invitación que sirva no se abre la clínica aquí: se vuelve al inicio (como antes),
+            // y el aviso viaja en un toast porque este formulario deja de estar a la vista.
+            toast.error(message)
+            await navigate({ to: "/" })
+            return
+          }
           if (code === "ORGANIZATION_ALREADY_EXISTS" || code === "ORGANIZATION_SLUG_ALREADY_TAKEN") {
             // Alguien la tomó entre la comprobación y el envío: el campo lo dice
             // y lo sigue diciendo al volver a «Continuar» hasta que cambie.

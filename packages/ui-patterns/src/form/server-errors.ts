@@ -24,6 +24,8 @@ interface Kept {
   form: { message: string; values: unknown } | null
   /** Campo con error → el valor con que se envió. */
   fields: Map<string, unknown>
+  /** Lista con filas con error → cuántas tenía al enviarse. */
+  lists: Map<string, number>
   listeners: Set<() => void>
 }
 
@@ -33,7 +35,7 @@ const kept = new WeakMap<object, Kept>()
 function keptOf(form: AnyFormApi): Kept {
   let found = kept.get(form.store)
   if (!found) {
-    found = { form: null, fields: new Map(), listeners: new Set() }
+    found = { form: null, fields: new Map(), lists: new Map(), listeners: new Set() }
     kept.set(form.store, found)
   }
   return found
@@ -52,15 +54,33 @@ function publish(state: Kept): void {
   for (const listener of state.listeners) listener()
 }
 
-/** Borra lo que dijo el envío anterior (al volver a enviar, al guardar bien). */
-export function clearSubmitErrors(form: AnyFormApi): void {
+/**
+ * Borra lo que dijo el envío anterior (al volver a enviar, al guardar bien).
+ * Con `which`, solo lo de esos campos (un autoguardado que mandó una parte)
+ * y el aviso general se queda.
+ */
+export function clearSubmitErrors(form: AnyFormApi, which?: (name: string) => boolean): void {
   const state = keptOf(form)
-  for (const name of state.fields.keys()) setServerError(form, name, undefined)
-  state.fields.clear()
-  if (state.form) {
+  for (const name of [...state.fields.keys()]) {
+    if (which && !which(name)) continue
+    setServerError(form, name, undefined)
+    state.fields.delete(name)
+  }
+  if (!which) state.lists.clear()
+  if (!which && state.form) {
     state.form = null
     publish(state)
   }
+}
+
+/** El campo está en pantalla: TanStack conserva la meta de un campo desmontado o nunca montado. */
+function isMounted(form: AnyFormApi, name: string): boolean {
+  return Boolean((form.fieldInfo as Record<string, { instance: unknown } | undefined>)[name]?.instance)
+}
+
+/** Las listas que contienen al campo (`lines[1].price` → `lines`). */
+function listsOf(name: string): string[] {
+  return [...name.matchAll(/\[\d+\]/g)].map((match) => name.slice(0, match.index))
 }
 
 /**
@@ -74,12 +94,16 @@ export function setSubmitErrors(form: AnyFormApi, errors: SubmitErrors): void {
   const unseen: string[] = []
   for (const [name, message] of Object.entries(errors.fields ?? {})) {
     if (!message) continue
-    if (!form.getFieldMeta(name)) {
+    if (!isMounted(form, name)) {
       unseen.push(message)
       continue
     }
     setServerError(form, name, message)
     state.fields.set(name, form.getFieldValue(name))
+    for (const list of listsOf(name)) {
+      const rows = form.getFieldValue(list)
+      if (Array.isArray(rows)) state.lists.set(list, rows.length)
+    }
   }
   const general = [...new Set([errors.form, ...unseen].filter(Boolean))].join(" ")
   state.form = general ? { message: general, values: form.state.values } : null
@@ -97,11 +121,10 @@ export function keepValidationErrors(form: AnyFormApi): void {
   const fields: Record<string, string> = {}
   const unseen: string[] = []
   const metas = form.state.fieldMeta as Record<string, { errorMap?: { onSubmit?: unknown } } | undefined>
-  const mounted = form.fieldInfo as Record<string, { instance: unknown } | undefined>
   for (const [name, meta] of Object.entries(metas)) {
     const message = fieldErrorMessages([meta?.errorMap?.onSubmit].flat())[0]
     if (!message) continue
-    if (mounted[name]?.instance) fields[name] = message
+    if (isMounted(form, name)) fields[name] = message
     else unseen.push(message)
   }
   const formError = form.state.errorMap.onSubmit
@@ -112,17 +135,42 @@ export function keepValidationErrors(form: AnyFormApi): void {
 /**
  * Quita el error de un campo en cuanto cambia su valor (lo escriba la persona
  * o la pantalla). Devuelve cómo dejar de vigilar.
+ *
+ * Al quitar o agregar una fila, TanStack cambia los valores y después mueve la
+ * meta de las filas: se mira en una microtarea, ya movido, y los errores de esa
+ * lista se borran porque ya no se sabe de qué fila son (el próximo envío los
+ * vuelve a decir).
  */
 export function watchSubmitErrors(form: AnyFormApi): () => void {
-  const subscription = form.store.subscribe(() => {
+  let queued = false
+  let stopped = false
+  const check = () => {
+    queued = false
+    if (stopped) return
     const state = keptOf(form)
+    for (const [list, length] of state.lists) {
+      const rows = form.getFieldValue(list)
+      if (Array.isArray(rows) && rows.length === length) continue
+      state.lists.delete(list)
+      const prefix = `${list}[`
+      for (const name of state.fields.keys()) if (name.startsWith(prefix)) state.fields.delete(name)
+      for (const name of Object.keys(form.state.fieldMeta)) if (name.startsWith(prefix)) setServerError(form, name, undefined)
+    }
     for (const [name, value] of state.fields) {
       if (Object.is(form.getFieldValue(name), value)) continue
       state.fields.delete(name)
       setServerError(form, name, undefined)
     }
+  }
+  const subscription = form.store.subscribe(() => {
+    if (queued) return
+    queued = true
+    queueMicrotask(check)
   })
-  return () => subscription.unsubscribe()
+  return () => {
+    stopped = true
+    subscription.unsubscribe()
+  }
 }
 
 /** El error general del último envío mientras no cambie nada de lo enviado. */

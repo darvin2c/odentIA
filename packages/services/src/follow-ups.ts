@@ -205,11 +205,14 @@ async function reserveFollowUpAppointment(
   try {
     return await createAppointment(tx, orgId, actorUserId, { ...input, patientId, status: "programada" })
   } catch (error) {
-    if (!(error instanceof ServiceError) || (error.status !== 400 && error.status !== 409)) throw error
-    const fields = error.fields
-      ? Object.fromEntries(Object.entries(error.fields).map(([key, text]) => [`appointment.${key}`, text]))
-      : { "appointment.startsAt": error.message }
-    throw new ServiceError(error.code, error.status, error.message, fields)
+    if (!(error instanceof ServiceError)) throw error
+    // Lo que ya señala un dato (también un 404: el profesional, la unidad o el servicio ya no está) va con su nombre aquí.
+    if (error.fields) {
+      const fields = Object.fromEntries(Object.entries(error.fields).map(([key, text]) => [`appointment.${key}`, text]))
+      throw new ServiceError(error.code, error.status, error.message, fields)
+    }
+    if (error.status !== 400 && error.status !== 409) throw error
+    throw new ServiceError(error.code, error.status, error.message, { "appointment.startsAt": error.message })
   }
 }
 export async function scheduleFollowUp(

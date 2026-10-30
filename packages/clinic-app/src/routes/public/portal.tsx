@@ -1,4 +1,3 @@
-import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { Badge, Button, Field, FieldError, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import {
   EmptyState,
@@ -12,18 +11,20 @@ import {
   useFormSubmit,
   useFormSubmitError,
 } from "@odentia/ui-patterns"
+import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Fingerprint } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import { AnswerAppField, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
 import { AppointmentBlock } from "../../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
 import {
   chosenSlotSchema,
-  ProfessionalSelect,
   longDay,
+  ProfessionalSelect,
   SLOT_FIELD_MAP,
   shortDay,
   slotTakenError,
@@ -32,18 +33,21 @@ import {
   type WeekSlot,
   WeekSlotsField,
 } from "../../components/public/week-slots"
+import { ApiError } from "../../lib/api"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { setOrgLocale } from "../../lib/locale"
 import {
   cancelPortalAppointmentApi,
   closePortalSessionApi,
   confirmPortalAppointmentApi,
-  downloadPortalCalendar,
   decidePortalBudgetApi,
+  downloadPortalCalendar,
   exchangePortalTokenApi,
   fetchPortalAccount,
   fetchPortalAppointments,
   fetchPortalBudgets,
-  fetchPortalDocumentUrl,
   fetchPortalDocuments,
+  fetchPortalDocumentUrl,
   fetchPortalQuestionnaire,
   fetchPortalRescheduleSlots,
   fetchPortalSession,
@@ -65,10 +69,6 @@ import {
   verifyPasskeyAuthApi,
   verifyPasskeyRegistrationApi,
 } from "../../lib/portal"
-import { ApiError } from "../../lib/api"
-import { orgSlugFromHostname, requestHostname } from "../../lib/host"
-import { setOrgLocale } from "../../lib/locale"
-import { AnswerAppField, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
 import { appWords } from "../../lib/product-words"
 import { productUi } from "../../product/product-ui"
 
@@ -158,12 +158,14 @@ function passkeyFriendlyMessage(error: unknown): string {
 
 /**
  * Lo que se dice junto a los botones cuando no es de ningún campo: el gesto
- * cancelado y el acceso que no está disponible, en palabras del paciente; lo
- * demás, como lo dice la API (`null`).
+ * cancelado y el acceso que no está disponible, en palabras del paciente. Sin
+ * respuesta, con un 5xx o con un error del navegador (WebAuthn) no se habla de
+ * «guardar» ni se muestra su texto en inglés. Lo demás, como lo dice la API (`null`).
  */
 function portalFormMessage(error: unknown): string | null {
   if (error instanceof Error && error.name === "NotAllowedError") return "Se canceló. Vuelve a intentarlo cuando quieras."
   if (error instanceof ApiError && error.status === 404) return "Este acceso no está disponible."
+  if (!(error instanceof ApiError) || error.status >= 500 || error.status === 408) return "No pudimos completar la solicitud."
   return null
 }
 
