@@ -469,6 +469,24 @@ it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier dec
   expect(ownPdf.headers.get("content-type")).toBe("application/pdf")
   expect(Buffer.from(await ownPdf.arrayBuffer()).subarray(0, 5).toString("latin1")).toBe("%PDF-")
 
+  // El papel de salud es de quien lee lo clínico; recepción y caja no lo reciben.
+  const healthPath = `/patients/${PAT_A}/health-document-pdf?documentType=prescription&documentId=${PAT_A}`
+  expect((await buildApp("reception", RECEP).request(healthPath)).status).toBe(403)
+  expect((await buildApp("cashier", CASH).request(healthPath)).status).toBe(403)
+  expect((await buildApp("clinician", DENT1).request(healthPath)).status).toBe(404)
+
+  // Lo que explica el presupuesto: recepción lo lee sin lo clínico y no lo edita.
+  const presentationPath = `/patients/${PAT_A}/budgets/${BUDGET1}/presentation`
+  const asReception = await buildApp("reception", RECEP).request(presentationPath)
+  expect(asReception.status).toBe(200)
+  expect(((await asReception.json()) as { data: { findings: string | null } }).data.findings).toBeNull()
+  const editedByReception = await buildApp("reception", RECEP).request(presentationPath, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal: "Otra" }),
+  })
+  expect(editedByReception.status).toBe(403)
+
   // Recepción lo ve como lo recibe la persona: el tratamiento con su pieza
   // («Resina · pieza 16»). Caja, como documento económico, sin pieza. Ninguna
   // recibe superficies ni códigos de procedimiento.

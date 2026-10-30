@@ -357,7 +357,7 @@ export async function getRefundReceiptPdf(
       ],
       size: SIZE.table,
     })
-    kit.anchorBottom(50)
+    kit.anchorBottom(62)
     kit.signLine("Recibí conforme: nombre y firma", "Fecha")
   }
   return { bytes: await kit.finish(), filename: `Devolucion-${frozen.refundedAt.slice(0, 10)}.pdf` }
@@ -455,7 +455,7 @@ export async function renderReturnPdf(
       ],
     })
     if (frozen.payout.kind === "pagado") {
-      kit.anchorBottom(50)
+      kit.anchorBottom(62)
       kit.signLine("Recibí conforme: nombre y firma", "Fecha")
     }
   }

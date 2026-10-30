@@ -767,6 +767,7 @@ await db.insert(orgProfile).values([
     legalName: "Dental Smile S.A.C.",
     // El nombre que ven los pacientes en todo (decisión 19); la razón social, solo en el comprobante.
     tradeName: "Dental Smile",
+    fiscalDocType: "RUC",
     fiscalDocNumber: "20601234567",
     // Explicito: país, moneda, idioma y zona son el contrato de la agenda y del
     // formato de los teléfonos (IANA canónico y ISO-3166-1).
@@ -783,6 +784,7 @@ await db.insert(orgProfile).values([
     organizationId: ORG_B,
     legalName: "Clínica Norte S.A.C.",
     tradeName: "Clínica Norte",
+    fiscalDocType: "RUC",
     fiscalDocNumber: "20550987654",
     countryCode: "PE",
     currency: "PEN",
@@ -2167,6 +2169,7 @@ const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
 })
 const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   serviceId: serviceIdA("ENDODONCIA_POSTERIOR"),
+  phase: "urgencia",
   planId: planRestaurador.id,
   sourceEncounterId: draft.id,
   toothNumber: 46,

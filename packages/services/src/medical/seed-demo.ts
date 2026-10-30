@@ -117,6 +117,7 @@ export async function seedMedicalDemo(
     product: "medical",
     legalName: "Consultorio San Martín S.A.C.",
     tradeName: "Consultorio San Martín",
+    fiscalDocType: "RUC",
     fiscalDocNumber: "20609876543",
     countryCode: "PE",
     currency: "PEN",
@@ -200,7 +201,7 @@ export async function seedMedicalDemo(
     "ecografia-transvaginal": 12000,
     "control-prenatal-7-o-mas": 120000,
     "ecografia-obstetrica": 12000,
-    papanicolaou: 6000,
+    "toma-de-muestra-de-sangre": 3000,
   }
   const library = await db
     .select({ id: treatmentTemplate.id, key: treatmentTemplate.key })
@@ -427,7 +428,7 @@ export async function seedMedicalDemo(
     .select({ id: serviceCatalog.id, key: treatmentTemplate.key })
     .from(serviceCatalog)
     .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
-    .where(and(eq(serviceCatalog.organizationId, ORG), inArray(treatmentTemplate.key, ["control-prenatal-7-o-mas", "ecografia-obstetrica", "papanicolaou"])))
+    .where(and(eq(serviceCatalog.organizationId, ORG), inArray(treatmentTemplate.key, ["control-prenatal-7-o-mas", "ecografia-obstetrica", "toma-de-muestra-de-sangre"])))
   const prenatalId = (key: string) => {
     const found = prenatal.find((row) => row.key === key)
     if (!found) throw new Error(`Falta el servicio ${key}`)
@@ -440,7 +441,7 @@ export async function seedMedicalDemo(
       includes: "todos los controles hasta el parto y las indicaciones de vitaminas y hierro.",
       excludes: "Parto, cesárea y hospitalización\nAnálisis de laboratorio y medicamentos\nVacunas y evaluación de otros especialistas",
       schedule: [
-        { when: "Semanas 10 a 13", what: "Primer control, Papanicolaou y primera ecografía" },
+        { when: "Semanas 10 a 13", what: "Primer control, análisis de sangre y primera ecografía" },
         { when: "Semanas 14 a 27", what: "Cada 4 semanas; ecografía de las semanas 18 a 22" },
         { when: "Semanas 28 a 36", what: "Cada 2 semanas; ecografía de las semanas 30 a 34" },
         { when: "Semana 37 hasta el parto", what: "Cada semana; preparación para el parto" },
@@ -451,10 +452,9 @@ export async function seedMedicalDemo(
       how: "Sin dolor ni radiación. Comprueban la edad del embarazo, la formación del bebé, su crecimiento y la placenta.",
       includes: "las ecografías con su informe.",
     },
-    papanicolaou: {
-      visits: "1",
-      how: "Una muestra del cuello del útero para descartar lesiones. Es seguro en el embarazo y se omite si tiene uno reciente.",
-      includes: "la toma de la muestra y la revisión del resultado.",
+    "toma-de-muestra-de-sangre": {
+      how: "Sirve para hemograma, grupo y factor Rh, glucosa, VIH, sífilis y hepatitis B; luego, prueba de azúcar y control de anemia.",
+      includes: "la toma de la muestra. El laboratorio se paga aparte.",
     },
   }
   await db.transaction(async (tx) => {
@@ -481,8 +481,8 @@ export async function seedMedicalDemo(
         await addPlanItem(tx, ORG, VELA_ID, julia, {
           serviceId: prenatalId(key),
           sourceEncounterId: visit.id,
-          diagnosisCode: "Z34.0",
-          ...(key === "ecografia-obstetrica" ? { plannedSessions: 3 } : {}),
+          diagnosisCode: "Z34.9",
+          ...(key === "control-prenatal-7-o-mas" ? {} : { plannedSessions: 3 }),
         }),
       )
     }
