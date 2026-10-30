@@ -260,5 +260,12 @@ it("las explicaciones sugeridas: una clave que no es de la biblioteca falla ante
   expect(() => loadPatientGuides(["endo"], '{"no_existe":{"how":"Algo"}}')).toThrow(/no_existe/)
   expect(() => loadPatientGuides(["endo"], '{"endo":{"how":"   "}}')).toThrow(/vacía/)
   // El archivo vigente en el repositorio se lee sin error.
-  expect(() => loadPatientGuides([])).not.toThrow()
+  const keys = ["biblioteca.csv", "biblioteca_medica.csv"].flatMap((file) =>
+    strictRead(file)
+      .split("\n")
+      .slice(1)
+      .filter(Boolean)
+      .map((line) => line.split(",")[0]!),
+  )
+  expect(() => loadPatientGuides(keys)).not.toThrow()
 })
