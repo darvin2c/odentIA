@@ -37,6 +37,7 @@ import {
   type BookingLinkBranch,
   bookingContext,
   clinicNameOf,
+  hasSchedulableItems,
   issuePersonalLink,
   linkContactFirstName,
   linkExpired,
@@ -296,7 +297,9 @@ export async function getPersonalLinkView(tx: Db, orgId: string, token: string):
   const questionnaire = await questionnaireOf(tx, orgId, link)
   const messages = await messagesOf(tx, orgId, link)
   const papers = await papersOf(tx, orgId, link)
-  const context = link.canBook || budgets.length > 0 ? await bookingContext(tx, orgId, link.row) : null
+  // Las sedes, para reservar o para agendar lo aceptado de su presupuesto (también después de responderlo).
+  const schedulable = !link.canBook && budgets.length === 0 && link.patientId !== null && link.decides && !link.expired && (await hasSchedulableItems(tx, orgId, link.patientId))
+  const context = link.canBook || budgets.length > 0 || schedulable ? await bookingContext(tx, orgId, link.row) : null
   // «Tus mensajes» siempre sirve a quien los recibe: el enlace no vence por no tener otra cosa pendiente.
   const nothing =
     !link.canBook && !appointment && !missing && budgets.length === 0 && consents.length === 0 && !questionnaire && !messages && papers.length === 0

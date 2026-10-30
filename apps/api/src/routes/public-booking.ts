@@ -18,6 +18,7 @@ import {
   getPersonalLinkPaper,
   getPersonalLinkQuestionnaire,
   getPersonalLinkView,
+  listBookingLinkProfessionals,
   listBookingLinkSlots,
   registerFromBookingLink,
   reserveBookingLink,
@@ -42,6 +43,7 @@ const MAX_BUCKETS = 10000
 const LIMITS = { get: 240, post: 30, address: 60 } as const
 const token = z.string().regex(/^[0-9a-f]{64}$/)
 const slotsQuery = z.strictObject({ token, branchId: z.uuid(), from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) })
+const professionalsQuery = z.strictObject({ token, branchId: z.uuid() })
 const reserveBody = z.strictObject({
   token,
   branchId: z.uuid(),
@@ -233,6 +235,14 @@ export function createPublicBookingRoute(deps: {
     if (!query.success) return c.json(errorBody(c, "VALIDATION", "Revisa las fechas pedidas"), 400)
     const { token: linkToken, ...range } = query.data
     return answer(c, 200, () => inOrg(c, (tx, orgId) => listBookingLinkSlots(tx, orgId, linkToken, range)))
+  })
+
+  // Con quién: quienes atienden en la sede y el próximo horario libre de cada uno, aunque no sea esta semana.
+  app.get("/:slug/professionals", async (c) => {
+    const query = professionalsQuery.safeParse(c.req.query())
+    if (!query.success) return c.json(errorBody(c, "VALIDATION", "Revisa la sede pedida"), 400)
+    const { token: linkToken, branchId } = query.data
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => listBookingLinkProfessionals(tx, orgId, linkToken, { branchId })))
   })
 
   // Quien aún no es paciente deja aquí sus datos esenciales: la ficha la crea el registro de pacientes.

@@ -6,8 +6,11 @@ import { beforeAll, describe, expect, it } from "vitest"
 import { professionalRef } from "./agent-clinic-info.js"
 import { findFreeGaps, GAPS_PER_PROFESSIONAL_PER_DAY } from "./agent-operations.js"
 import { createRoom } from "./appointments.js"
-import { getAgendaAvailability, listAvailableSlots, setProfessionalSchedule, zonedTimeToUtc } from "./availability.js"
+import { createScheduleBlock, getAgendaAvailability, listAvailableSlots, setProfessionalSchedule, zonedTimeToUtc } from "./availability.js"
+import { issuePersonalLink, listBookingLinkProfessionals, listBookingLinkSlots, NEXT_FREE_HORIZON_DAYS } from "./booking-links.js"
 import { listSpecialtiesOverview, setSpecialtyProfessionals } from "./clinical-forms.js"
+import { createContact } from "./contacts.js"
+import { secretsKeyFromEnv } from "./secrets.js"
 import { createService } from "./service-catalog.js"
 import { librarySpecialtyIds } from "./specialties.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -226,5 +229,55 @@ describe("los huecos del agente (decisión 16)", () => {
     await expect(
       run((tx) => findFreeGaps(tx, ORG, { branchId: centro, professionalRef: "pro-0000000000", from: tuesday, to: `${tuesday}T23:59` })),
     ).rejects.toMatchObject({ status: 400 })
+  })
+})
+
+describe("«Su enlace»: con quién reservar y su próximo horario", () => {
+  const KEY = secretsKeyFromEnv("cd".repeat(32))
+
+  it("son quienes atienden su servicio en la sede, cada uno con su próximo horario: el primero de las horas del enlace", async () => {
+    // Endodoncia la atiende la Dra. Rojas en Centro; el Dr. León, solo en Norte.
+    await run((tx) => setSpecialtyProfessionals(tx, ORG, OWNER, endodonciaId, [ROJAS, LEON]))
+    const person = await run((tx) => createContact(tx, ORG, { displayName: "Marta Quispe" }))
+    const endo = await run((tx) =>
+      issuePersonalLink(tx, ORG, { contactId: person.id, booking: true, serviceId: endoServiceId, branchId: centro }, { secretsKey: KEY }),
+    )
+    const list = await run((tx) => listBookingLinkProfessionals(tx, ORG, endo.token, { branchId: centro }))
+    expect(list.professionals.map((item) => item.id)).toEqual([ROJAS])
+    const rojas = list.professionals[0]!
+    expect(rojas.next).not.toBeNull()
+    expect(rojas.current).toBe(false)
+    expect(list.first).toEqual({ startsAt: rojas.next!.startsAt, professionalUserId: ROJAS })
+    expect(new Date(list.until).getTime() - Date.now()).toBeGreaterThan((NEXT_FREE_HORIZON_DAYS - 1) * 86_400_000)
+    const now = new Date()
+    const week = await run((tx) =>
+      listBookingLinkSlots(tx, ORG, endo.token, { branchId: centro, from: now.toISOString(), to: new Date(now.getTime() + 7 * 86_400_000).toISOString() }),
+    )
+    expect(week.slots[0]).toMatchObject({ startsAt: rojas.next!.startsAt, professionalUserId: ROJAS })
+
+    // Un servicio sin nadie adscrito: todos los que tienen horario en la sede, por nombre (León atiende en Norte).
+    const general = await run((tx) =>
+      issuePersonalLink(tx, ORG, { contactId: person.id, booking: true, serviceId: generalServiceId, branchId: centro }, { secretsKey: KEY }),
+    )
+    const all = await run((tx) => listBookingLinkProfessionals(tx, ORG, general.token, { branchId: centro }))
+    expect(all.professionals.map((item) => item.name)).toEqual(["Dr. Pérez", "Dra. Ríos", "Dra. Rojas"])
+    expect(all.professionals.every((item) => item.next !== null)).toBe(true)
+    const earliest = all.professionals.map((item) => item.next!.startsAt).sort()[0]
+    expect(all.first?.startsAt).toBe(earliest)
+
+    // Quien no tiene ningún horario libre en esas semanas sigue en la lista, sin próximo horario.
+    await run((tx) =>
+      createScheduleBlock(tx, ORG, OWNER, {
+        branchId: centro,
+        professionalUserId: RIOS,
+        startsAt: new Date(Date.now() - 86_400_000).toISOString(),
+        endsAt: new Date(Date.now() + (NEXT_FREE_HORIZON_DAYS + 7) * 86_400_000).toISOString(),
+      }),
+    )
+    const blocked = await run((tx) => listBookingLinkProfessionals(tx, ORG, general.token, { branchId: centro }))
+    expect(blocked.professionals.find((item) => item.id === RIOS)?.next).toBeNull()
+    expect(blocked.first?.professionalUserId).not.toBe(RIOS)
+    // El enlace es para Centro: otra sede no se pregunta.
+    await expect(run((tx) => listBookingLinkProfessionals(tx, ORG, general.token, { branchId: norte }))).rejects.toMatchObject({ status: 400 })
   })
 })

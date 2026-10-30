@@ -170,6 +170,30 @@ export function fetchBookingSlots(
   return publicFetch(`${base(slug)}/slots?${query.toString()}`)
 }
 
+export interface BookingProfessional {
+  id: string
+  name: string
+  /** Su primer horario libre en las próximas semanas; null si no tiene ninguno. */
+  next: { startsAt: string; endsAt: string } | null
+  /** Tiene hoy la cita que se está cambiando. */
+  current: boolean
+}
+
+export interface BookingProfessionals {
+  professionals: BookingProfessional[]
+  /** El primer horario libre de cualquiera de ellos. */
+  first: { startsAt: string; professionalUserId: string } | null
+  /** Hasta cuándo se buscó. */
+  until: string
+  timeZone: string
+}
+
+/** Con quién se puede reservar en la sede y el próximo horario libre de cada uno: lo entrega el servidor. */
+export function fetchBookingProfessionals(slug: string, token: string, branchId: string): Promise<{ data: BookingProfessionals }> {
+  const query = new URLSearchParams({ token, branchId })
+  return publicFetch(`${base(slug)}/professionals?${query.toString()}`)
+}
+
 export interface BookingRegistrationForm {
   /** El registro de pacientes vigente de la clínica: versión y aviso de privacidad. */
   config: RegistrationConfig

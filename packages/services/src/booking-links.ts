@@ -3,6 +3,7 @@ import { normalizePhone, type RegistrationAnswers, type RegistrationConfig } fro
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { organization, user } from "@odentia/db/schema/auth"
+import { professionalSchedule } from "@odentia/db/schema/availability"
 import { patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
@@ -27,6 +28,7 @@ import { listPatientsByContact, patientOrganizationToday, personIsTest } from ".
 import { scheduledItems } from "./plan-next.js"
 import { refreshConversationTier } from "./saas-actions.js"
 import { contactDecides } from "./responsibilities.js"
+import { attendingRule } from "./specialties.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
 
@@ -57,6 +59,8 @@ import { appointmentCalendarDownload } from "./appointment-calendar.js"
  */
 export const PERSONAL_LINK_TTL_DAYS = 7
 const SLOT_RANGE_DAYS = 7
+/** Hasta dónde se busca el próximo horario de cada profesional: las semanas que la página deja recorrer. */
+export const NEXT_FREE_HORIZON_DAYS = 56
 const TOKEN = /^[0-9a-f]{64}$/
 
 function hashToken(token: string): string {
@@ -289,6 +293,7 @@ interface ShownAppointment {
   id: string
   version: number
   branchId: string
+  professionalUserId: string
   status: string
   startsAt: Date
 }
@@ -307,6 +312,7 @@ async function shownAppointment(tx: Db, orgId: string, link: LinkRow, patientId:
     id: appointment.id,
     version: appointment.version,
     branchId: appointment.branchId,
+    professionalUserId: appointment.professionalUserId,
     status: appointment.status,
     startsAt: appointment.startsAt,
   }
@@ -620,6 +626,45 @@ export async function listWeekSlots(
   return { slots, timeZone, truncated }
 }
 
+/** Con qué reglas ofrece horarios el enlace en una sede. */
+interface LinkSlotRules {
+  /** Para reservar: su servicio, y con él quién lo atiende (ADR 0039). */
+  serviceId: string | null
+  /** Para cambiar su cita: lo que dura. */
+  durationMin: number | null
+  /** El enlace de una persona de prueba ve ocupadas también las otras pruebas (ADR 0094). */
+  forTest: boolean
+  /** Quien tiene hoy la cita que se cambia. */
+  currentProfessionalUserId: string | null
+}
+
+/**
+ * Las reglas de los horarios del enlace, las mismas para las horas y para el
+ * próximo horario de cada profesional. Para reservar, los de la sede elegida y
+ * su servicio; para cambiar su cita, solo los de su sede y con su duración;
+ * para lo aceptado de su presupuesto, lo que dura una cita en la sede.
+ */
+async function linkSlotRules(tx: Db, orgId: string, token: string, branchId: string): Promise<LinkSlotRules> {
+  const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
+  const forTest = await personIsTest(tx, orgId, link.row.contactId)
+  if (link.canBook) {
+    if (link.row.branchId && link.row.branchId !== branchId) throw validation("Este enlace es para otra sede")
+    return { serviceId: link.row.serviceId, durationMin: null, forTest, currentProfessionalUserId: null }
+  }
+  const current = link.appointment
+  if (current && isChangeable(current)) {
+    if (current.branchId !== branchId) throw validation("La cita es en otra sede")
+    const view = await appointmentView(tx, orgId, current.id)
+    return { serviceId: null, durationMin: view?.durationMin ?? null, forTest, currentProfessionalUserId: current.professionalUserId }
+  }
+  // Lo aceptado de un presupuesto se reserva desde el mismo enlace («Elegir horario»):
+  // solo quien decide por el paciente y mientras el enlace esté vigente.
+  if (link.patientId && link.decides && !link.expired && (await hasSchedulableItems(tx, orgId, link.patientId))) {
+    return { serviceId: null, durationMin: null, forTest, currentProfessionalUserId: null }
+  }
+  throw linkExpired()
+}
+
 /**
  * Horarios libres para el enlace. Para reservar, los de la sede elegida; para
  * cambiar su cita, solo los de su sede y con su duración.
@@ -630,29 +675,93 @@ export async function listBookingLinkSlots(
   token: string,
   input: { branchId: string; from: string; to: string },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
-  const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
-  // El enlace de una persona de prueba ve ocupadas también las otras pruebas (ADR 0094).
-  const forTest = await personIsTest(tx, orgId, link.row.contactId)
-  if (link.canBook) {
-    if (link.row.branchId && link.row.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
-    return listWeekSlots(tx, orgId, { ...input, serviceId: link.row.serviceId, forTest })
+  const rules = await linkSlotRules(tx, orgId, token, input.branchId)
+  return listWeekSlots(tx, orgId, { ...input, serviceId: rules.serviceId, durationMin: rules.durationMin, forTest: rules.forTest })
+}
+
+export interface BookingLinkProfessional {
+  id: string
+  name: string
+  /** Su primer horario libre en las próximas semanas; null si no tiene ninguno. */
+  next: { startsAt: string; endsAt: string } | null
+  /** Tiene hoy la cita que se está cambiando. */
+  current: boolean
+}
+
+export interface BookingLinkProfessionals {
+  /** Por nombre. */
+  professionals: BookingLinkProfessional[]
+  /** El primer horario libre de cualquiera de ellos («Cualquier profesional»). */
+  first: { startsAt: string; professionalUserId: string } | null
+  /** Hasta cuándo se buscó. */
+  until: string
+  timeZone: string
+}
+
+/**
+ * Con quién se puede reservar desde el enlace en una sede y el próximo
+ * horario libre de cada uno, aunque no sea esta semana. Son quienes tienen
+ * horario en la sede y, si su servicio tiene quien lo atienda, solo esas
+ * personas (`attendingRule`, ADR 0039); el horario sale de la Agenda
+ * (`listAvailableSlots`) con las mismas reglas que las horas del enlace: la
+ * página nunca calcula disponibilidad.
+ */
+export async function listBookingLinkProfessionals(
+  tx: Db,
+  orgId: string,
+  token: string,
+  input: { branchId: string },
+): Promise<BookingLinkProfessionals> {
+  const rules = await linkSlotRules(tx, orgId, token, input.branchId)
+  const now = new Date()
+  const until = new Date(now.getTime() + NEXT_FREE_HORIZON_DAYS * 86_400_000)
+  const attending = rules.serviceId ? await attendingRule(tx, orgId, { serviceId: rules.serviceId, branchId: input.branchId }) : null
+  const staff = await tx
+    .selectDistinct({ id: professionalSchedule.professionalUserId, name: user.name })
+    .from(professionalSchedule)
+    .innerJoin(user, eq(user.id, professionalSchedule.professionalUserId))
+    .where(
+      and(
+        eq(professionalSchedule.organizationId, orgId),
+        eq(professionalSchedule.branchId, input.branchId),
+        eq(professionalSchedule.isActive, true),
+        attending ? inArray(professionalSchedule.professionalUserId, attending.professionalUserIds) : undefined,
+      ),
+    )
+  const found = await listAvailableSlots(tx, orgId, {
+    branchId: input.branchId,
+    ...(rules.serviceId ? { serviceId: rules.serviceId } : {}),
+    ...(rules.durationMin ? { durationMin: rules.durationMin } : {}),
+    from: now.toISOString(),
+    to: until.toISOString(),
+    notBefore: now.toISOString(),
+    firstPerProfessional: true,
+    ...(rules.forTest ? { forTest: true } : {}),
+  })
+  const next = new Map(found.slots.map((slot) => [slot.professionalUserId, slot]))
+  const professionals = staff
+    .map((row) => {
+      const slot = next.get(row.id)
+      return {
+        id: row.id,
+        name: row.name,
+        next: slot ? { startsAt: slot.startsAt, endsAt: slot.endsAt } : null,
+        current: row.id === rules.currentProfessionalUserId,
+      }
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "es") || a.id.localeCompare(b.id))
+  // Los huecos llegan por hora: el primero es el de cualquiera.
+  const earliest = found.slots[0]
+  return {
+    professionals,
+    first: earliest ? { startsAt: earliest.startsAt, professionalUserId: earliest.professionalUserId } : null,
+    until: until.toISOString(),
+    timeZone: found.timeZone,
   }
-  const current = link.appointment
-  if (current && isChangeable(current)) {
-    if (current.branchId !== input.branchId) throw validation("La cita es en otra sede")
-    const view = await appointmentView(tx, orgId, current.id)
-    return listWeekSlots(tx, orgId, { ...input, durationMin: view?.durationMin ?? null, forTest })
-  }
-  // Lo aceptado de un presupuesto se reserva desde el mismo enlace («Elegir horario»):
-  // solo quien decide por el paciente y mientras el enlace esté vigente.
-  if (link.patientId && link.decides && !link.expired && (await hasSchedulableItems(tx, orgId, link.patientId))) {
-    return listWeekSlots(tx, orgId, { ...input, forTest })
-  }
-  throw linkExpired()
 }
 
 /** Tiene tratamientos aceptados por hacer: «Elegir horario» después de responder su presupuesto. */
-async function hasSchedulableItems(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+export async function hasSchedulableItems(tx: Db, orgId: string, patientId: string): Promise<boolean> {
   const [row] = await tx
     .select({ id: treatmentPlanItem.id })
     .from(treatmentPlanItem)

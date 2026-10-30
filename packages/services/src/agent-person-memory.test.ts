@@ -28,6 +28,7 @@ import {
   cancelBookingLinkAppointment,
   changeBookingLinkAppointment,
   createBookingLink,
+  listBookingLinkProfessionals,
   listBookingLinkSlots,
   reserveBookingLink,
   getBookingLinkRegistrationForm,
@@ -386,6 +387,9 @@ describe("reservar desde un enlace", () => {
     await expect(run((tx) =>
       reserveBookingLink(tx, ORG, link.token, { branchId: site!.id, startsAt: slots[1]!.startsAt, professionalUserId: professional }))).rejects.toMatchObject({ code: "BOOKING_LINK_USED" })
     expect((await run((tx) => getBookingLinkView(tx, ORG, link.token))).appointment).toMatchObject({ startsAt: chosen.startsAt, canChange: true, cancelled: false })
+    // Para cambiarla, «Con quién» marca a quien la tiene hoy.
+    const who = await run((tx) => listBookingLinkProfessionals(tx, ORG, link.token, { branchId: site!.id }))
+    expect(who.professionals).toEqual([expect.objectContaining({ id: professional, name: "Dra. Lucía Salas", current: true })])
     // El agente y quien tome el caso lo ven: queda anotado en el caso.
     const brief = await run((tx) => getCaseBrief(tx, ORG, eva.conversationId))
     expect(brief.known.map((item) => item.text).join(" ")).toContain("Reservó desde su enlace")
