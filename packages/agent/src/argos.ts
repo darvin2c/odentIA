@@ -427,8 +427,9 @@ function fieldsProblem(issues: z.ZodError["issues"], args: unknown): string {
  * terminó la respuesta y, sin herramienta, lo que devolvió tal cual (por
  * /v1/responses, cada parte: pensar, texto, llamadas; por Chat Completions, el
  * texto y las llamadas que no son JSON). Con una llamada que no cabe en su
- * esquema, en qué campos y sus argumentos. El modelo no ve personas
- * (`argosResultForModel`).
+ * esquema, en qué campos y sus argumentos. El modelo ve el resultado sin
+ * personas (`argosResultForModel`), pero también la pregunta: lo que escribe
+ * puede repetir un nombre que ella diga.
  */
 export function argosUnreadable(reply: AIMessage, call?: { name: string; args: unknown }, issues?: z.ZodError["issues"]): string {
   const meta = reply.response_metadata as { status?: unknown; finish_reason?: unknown; incomplete_details?: unknown; output?: unknown }
@@ -594,7 +595,8 @@ export interface ArgosDeps extends Pick<AgentRuntime, "platform" | "createModel"
   decisionModel?: DecisionModel | null
   /**
    * Cada vez que la base rechaza una consulta del modelo o su frase no se lee (para medir; no trae datos). Si el
-   * modelo respondió algo que no se lee, `unread` es lo que escribió (`argosUnreadable`), que tampoco: no ve personas.
+   * modelo respondió algo que no se lee, `unread` es lo que escribió (`argosUnreadable`): solo para medir, como
+   * `eval:argos`, porque puede repetir lo que dice la pregunta.
    */
   onProblem?: (problem: string, unread?: string) => void
   /** Cuánto piensa el modelo antes de escribir el plan (para medir); sin él, `ARGOS_REASONING`. */
