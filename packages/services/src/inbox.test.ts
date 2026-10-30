@@ -86,7 +86,7 @@ it("cada conversación trae su estado de atención y su cierre, y las vistas cue
     withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, input))
   const { items } = await list()
   const of = (id: string) => items.find((item) => item.id === id)?.attention
-  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false }
+  const base = { pendingContact: 0, handoffPriority: null, unanswered: false, awaitingPatientSince: null, nudgedAt: null, assignedName: null, teamLive: false, topics: [], unreachable: false, othersPhone: null }
   expect(of(waiting.id)).toEqual({ ...base, agentAttending: true, unanswered: true })
   expect(of(answered.id)).toEqual({ ...base, agentAttending: true, awaitingPatientSince: outAt.toISOString(), nudgedAt: "2026-10-15T12:00:00.000Z" })
   // Sus dos temas, el urgente primero; sin mensajes no hay mensaje citado.

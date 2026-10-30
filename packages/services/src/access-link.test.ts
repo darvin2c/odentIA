@@ -209,4 +209,44 @@ describe("enlace de acceso", () => {
     expect(fourth.status).toBe(429)
     expect(await fourth.json()).toMatchObject({ code: "ACCESS_LINK_TOO_MANY" })
   }, 60_000)
+
+  it("si el correo falla, responde igual que a un correo sin cuenta", async () => {
+    const email = "falla@sonrisa.test"
+    // El correo de verificación del alta sale; después el proveedor deja de responder.
+    let down = false
+    const failing = createAuth({
+      db: ownerDb,
+      ownerDb,
+      mailer: {
+        send: async () => {
+          if (down) throw new Error("el proveedor de correo no responde")
+        },
+      },
+      secret: "smoke-secret-que-supera-treinta-y-dos-bytes",
+      baseURL: API,
+      webURL: PANEL,
+      cookieDomain: "localhost",
+      trustedOrigins: [PANEL],
+      googleClientId: "",
+      googleClientSecret: "",
+      passwordBreachCheck: false,
+    })
+    const b = browser(failing)
+    expect(
+      (
+        await b.post("/sign-up/email", {
+          name: "Rosa Falla",
+          firstName: "Rosa",
+          email,
+          password: "clave-de-rosa-1",
+          termsVersion: LEGAL_VERSION,
+        })
+      ).status,
+    ).toBeLessThan(300)
+    down = true
+    const withAccount = await b.post("/access-link/request", { email })
+    const without = await b.post("/access-link/request", { email: "nadie-falla@sonrisa.test" })
+    expect([withAccount.status, without.status]).toEqual([200, 200])
+    expect(await withAccount.json()).toEqual(await without.json())
+  }, 60_000)
 })

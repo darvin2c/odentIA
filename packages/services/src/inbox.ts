@@ -1,6 +1,6 @@
 import type { Db } from "@odentia/db"
-import { type LastAgentAction, lastAgentActions } from "./agent-actions.js"
 import { sql } from "drizzle-orm"
+import { type LastAgentAction, lastAgentActions } from "./agent-actions.js"
 import type { ConversationCloseReason } from "./conversation-close.js"
 import {
   agentAttendingSql,
@@ -10,11 +10,11 @@ import {
   unansweredSql,
 } from "./conversation-state.js"
 import { type ConversationFilters, type ConversationListItem, conversationListItems, getConversationDetail } from "./conversations.js"
-import { countPersonViews, listPersonRows, personChannels } from "./inbox-person.js"
-import { TOPIC_KINDS, type TopicKind, topicIsUrgent } from "./topic-urgency.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { lateReplyOf } from "./held-replies.js"
+import { countPersonViews, listPersonRows, personChannels } from "./inbox-person.js"
 import { proposalPendingSql } from "./proposal-state.js"
+import { TOPIC_KINDS, type TopicKind, topicIsUrgent } from "./topic-urgency.js"
 import { webchatReplyRoutes } from "./webchat-reply.js"
 
 /**
@@ -55,6 +55,11 @@ export interface ConversationAttention {
    * pestaña, la respuesta no le llega. «Sin forma de avisarle».
    */
   unreachable: boolean
+  /**
+   * El WhatsApp que dejó ya es de otra persona de la clínica (`othersPhone`):
+   * no se usa hasta que el equipo confirme quién es. Al visitante no se le dijo.
+   */
+  othersPhone: string | null
 }
 
 /** Un tema sin resolver: lo que una persona del equipo tiene que contestar. */
@@ -113,6 +118,7 @@ const NO_ATTENTION: ConversationAttention = {
   teamLive: false,
   topics: [],
   unreachable: false,
+  othersPhone: null,
 }
 
 function iso(value: Date | string | null): string | null {
@@ -169,6 +175,7 @@ async function conversationAttention(
       teamLive: row.team_live === true,
       topics: [],
       unreachable: false,
+      othersPhone: null,
     })
     closure.set(
       row.id,
@@ -250,6 +257,7 @@ async function conversationAttention(
     if (!item || !row.webchat_contact || item.topics.length === 0) continue
     const routes = await webchatReplyRoutes(tx, orgId, row.webchat_contact)
     item.unreachable = !routes.whatsapp && !routes.correo
+    item.othersPhone = routes.othersPhone
   }
   return { attention, closure }
 }
