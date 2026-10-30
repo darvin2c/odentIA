@@ -211,7 +211,7 @@ describe("Deudas por páginas", () => {
   it("busca por nombre o documento, ordena por lo que se debe y resume la sede", async () => {
     const f = await clinicalFixture()
     const { branchId } = await seedBranch(f.run, f.actor)
-    const rosa = await secondPatient("Rosa Quispe Mamani", "45120987")
+    const rosa = await secondPatient("Rosa Quispe Mamani", "47031265")
     await f.run((tx) =>
       createCharge(tx, ...f.args, { description: "Endodoncia", amountCents: 60000, currency: "PEN", branchId }),
     )
@@ -228,7 +228,7 @@ describe("Deudas por páginas", () => {
     expect(all.summary).toMatchObject({ people: 2, totals: [{ currency: "PEN", cents: 80000 }] })
     expect(all.summary.over30.people).toBe(0)
     const rosaRow = all.data[1]
-    expect(rosaRow).toMatchObject({ dueCents: 20000, docNumber: "45120987", ageDays: 0, nextAppointmentAt: null })
+    expect(rosaRow).toMatchObject({ dueCents: 20000, docNumber: "47031265", ageDays: 0, nextAppointmentAt: null })
     expect(rosaRow?.items.map((item) => [item.description, item.outstandingCents])).toEqual([
       ["Resina compuesta", 15000],
       ["Profilaxis", 5000],
@@ -237,7 +237,7 @@ describe("Deudas por páginas", () => {
     const byName = await f.run((tx) => listDebts(tx, "org_a", { branchId, q: "rosa" }))
     expect(byName.data.map((row) => row.patientId)).toEqual([rosa.id])
     expect(byName.summary.people).toBe(2)
-    const byDocument = await f.run((tx) => listDebts(tx, "org_a", { branchId, q: "4512 0987" }))
+    const byDocument = await f.run((tx) => listDebts(tx, "org_a", { branchId, q: "4703 1265" }))
     expect(byDocument.data.map((row) => row.patientId)).toEqual([rosa.id])
     const old = await f.run((tx) => listDebts(tx, "org_a", { branchId, age: "30" }))
     expect(old.data).toEqual([])
