@@ -771,35 +771,64 @@ export interface PeriodontalClassification extends PeriodontalClassificationInpu
 }
 
 export function validatePeriodontalClassification(input: PeriodontalClassification): string[] {
-  const errors: string[] = []
+  return periodontalClassificationIssues(input).map((issue) => issue.message)
+}
+
+/** Un error de la clasificación con su dato (el nombre que tiene en el cuerpo). */
+export interface PeriodontalClassificationIssue {
+  field:
+    | "diagnosis"
+    | "stage"
+    | "grade"
+    | "extent"
+    | "status"
+    | "boneLossPercent"
+    | "teethLostToPeriodontitis"
+    | "cigarettesPerDay"
+    | "hba1c"
+  message: string
+}
+
+/** Lo mismo que `validatePeriodontalClassification`, cada error con su dato. */
+export function periodontalClassificationIssues(input: PeriodontalClassification): PeriodontalClassificationIssue[] {
+  const issues: PeriodontalClassificationIssue[] = []
+  const add = (field: PeriodontalClassificationIssue["field"], message: string) => issues.push({ field, message })
   if (!(PERIODONTAL_DIAGNOSES as readonly string[]).includes(input.diagnosis)) {
-    errors.push("Diagnóstico periodontal inválido")
-    return errors
+    add("diagnosis", "Diagnóstico periodontal inválido")
+    return issues
   }
   const isPeriodontitis = input.diagnosis === "periodontitis"
   if (isPeriodontitis) {
-    if (!(PERIODONTITIS_STAGES as readonly number[]).includes(input.stage as number)) errors.push("Falta el estadio (I a IV)")
-    if (!(PERIODONTITIS_GRADES as readonly string[]).includes(input.grade as string)) errors.push("Falta el grado (A, B o C)")
-    if (!(PERIODONTAL_EXTENTS as readonly string[]).includes(input.extent as string)) errors.push("Falta la extensión")
-    if (input.status != null && !(PERIODONTITIS_STATUSES as readonly string[]).includes(input.status)) errors.push("Estado inválido")
+    if (!(PERIODONTITIS_STAGES as readonly number[]).includes(input.stage as number)) add("stage", "Falta el estadio (I a IV)")
+    if (!(PERIODONTITIS_GRADES as readonly string[]).includes(input.grade as string)) add("grade", "Falta el grado (A, B o C)")
+    if (!(PERIODONTAL_EXTENTS as readonly string[]).includes(input.extent as string)) add("extent", "Falta la extensión")
+    if (input.status != null && !(PERIODONTITIS_STATUSES as readonly string[]).includes(input.status)) add("status", "Estado inválido")
   } else {
-    if (input.stage != null || input.grade != null) errors.push("El estadio y el grado son solo de la periodontitis")
-    if (input.status != null) errors.push("Estable, en remisión o inestable son solo de la periodontitis")
+    if (input.stage != null || input.grade != null)
+      add(input.stage != null ? "stage" : "grade", "El estadio y el grado son solo de la periodontitis")
+    if (input.status != null) add("status", "Estable, en remisión o inestable son solo de la periodontitis")
     if (input.diagnosis === "gingivitis" && !["localized", "generalized"].includes(input.extent as string)) {
-      errors.push("La gingivitis es localizada o generalizada")
+      add("extent", "La gingivitis es localizada o generalizada")
     }
-    if (input.diagnosis === "health" && input.extent != null) errors.push("La salud no lleva extensión")
+    if (input.diagnosis === "health" && input.extent != null) add("extent", "La salud no lleva extensión")
   }
-  const range = (value: number | null | undefined, min: number, max: number, label: string, integer = true) => {
+  const range = (
+    field: PeriodontalClassificationIssue["field"],
+    value: number | null | undefined,
+    min: number,
+    max: number,
+    integer = true,
+  ) => {
     if (value === null || value === undefined) return
-    if ((integer && !Number.isInteger(value)) || value < min || value > max) errors.push(`${label}: de ${min} a ${max}`)
+    if (integer && !Number.isInteger(value)) add(field, "Escribe un número entero, sin decimales.")
+    else if (value < min || value > max) add(field, `Escribe un valor de ${min} a ${max}.`)
   }
-  range(input.boneLossPercent, 0, 100, "Pérdida de hueso (%)")
-  range(input.teethLostToPeriodontitis, 0, 32, "Piezas perdidas por la enfermedad")
-  range(input.cigarettesPerDay, 0, 200, "Cigarrillos al día")
-  range(input.hba1c, 3, 20, "Hemoglobina glicada (%)", false)
-  if (input.hba1c != null && input.diabetes !== true) errors.push("La hemoglobina glicada va con diabetes")
-  return errors
+  range("boneLossPercent", input.boneLossPercent, 0, 100)
+  range("teethLostToPeriodontitis", input.teethLostToPeriodontitis, 0, 32)
+  range("cigarettesPerDay", input.cigarettesPerDay, 0, 200)
+  range("hba1c", input.hba1c, 3, 20, false)
+  if (input.hba1c != null && input.diabetes !== true) add("hba1c", "La hemoglobina glicada va con diabetes")
+  return issues
 }
 
 /** El diagnóstico en palabras: va en la nota del diagnóstico de la atención. */

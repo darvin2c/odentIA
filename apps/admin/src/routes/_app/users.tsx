@@ -1,9 +1,6 @@
 import {
   Badge,
   Button,
-  Field,
-  FieldError,
-  FieldLabel,
   Input,
   Select,
   SelectContent,
@@ -19,17 +16,21 @@ import {
   EmptyState,
   ErrorState,
   FormDrawer,
-  fieldErrorMessages,
   PageHeader,
   PageShell,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
 } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { ShieldAlert, UserSearch } from "lucide-react"
 import { useState } from "react"
 import { z } from "zod"
-import { ApiError, api } from "../../lib/api"
+import { api } from "../../lib/api"
 
 export const Route = createFileRoute("/_app/users")({
   component: UsersPage,
@@ -84,13 +85,21 @@ const userDetailSchema = userItemSchema.extend({
 type UserDetail = z.infer<typeof userDetailSchema>
 
 const recoverySchema = z.object({
-  email: z.string().trim().email("Correo inválido"),
+  email: z.string().trim().email("Correo inválido").max(320, "Escribe como mucho 320 caracteres"),
   kind: z.enum(["acceso", "propiedad"]),
-  description: z.string().trim().min(10, "Describe la evidencia"),
-  verifiedBy: z.string().trim().min(1, "Quién la verificó"),
-  verifiedAt: z.string().trim().min(1, "Cuándo se verificó"),
-  method: z.string().trim().min(5, "Cómo se verificó (un adjunto solo no basta)"),
-  organizationId: z.string(),
+  description: z.string().trim().min(10, "Describe la evidencia").max(2000, "Escribe como mucho 2000 caracteres"),
+  verifiedBy: z.string().trim().min(1, "Quién la verificó").max(200, "Escribe como mucho 200 caracteres"),
+  verifiedAt: z.string().trim().min(1, "Cuándo se verificó").max(100, "Escribe como mucho 100 caracteres"),
+  method: z
+    .string()
+    .trim()
+    .min(5, "Cómo se verificó (un adjunto solo no basta)")
+    .max(500, "Escribe como mucho 500 caracteres"),
+})
+
+/** El motivo de bloquear o cerrar una cuenta: los mismos límites que la ruta. */
+const reasonSchema = z.object({
+  reason: z.string().trim().min(10, "Escribe al menos 10 caracteres").max(500, "Escribe como mucho 500 caracteres"),
 })
 
 /** Cómo entra cada cuenta, en palabras: Better Auth llama «credential» a la contraseña. */
@@ -104,10 +113,6 @@ const STATUS_OPTIONS = [
   { value: "sin_clinica", label: "Sin clínica" },
 ] as const
 
-function messageOf(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? common.errors.generic
-  return error instanceof Error ? error.message : common.errors.generic
-}
 
 function UsersPage() {
   const queryClient = useQueryClient()
@@ -116,9 +121,7 @@ function UsersPage() {
   const [status, setStatus] = useState<string>("todos")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [blockOpen, setBlockOpen] = useState(false)
-  const [blockReason, setBlockReason] = useState("")
   const [closeOpen, setCloseOpen] = useState(false)
-  const [closeReason, setCloseReason] = useState("")
   const [recoveryOpen, setRecoveryOpen] = useState(false)
 
   const sessionQuery = useQuery({
@@ -153,7 +156,7 @@ function UsersPage() {
     mutationFn: (userId: string) =>
       api<unknown>(`/api/admin/organizations/users/${userId}/access-recovery`, { method: "POST" }),
     onSuccess: () => toast.success("Correo de recuperación enviado"),
-    onError: (error) => toast.error(messageOf(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
 
   const revokeMutation = useMutation({
@@ -166,7 +169,7 @@ function UsersPage() {
       toast.success("Sesiones revocadas")
       invalidate()
     },
-    onError: (error) => toast.error(messageOf(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
 
   const blockMutation = useMutation({
@@ -178,10 +181,8 @@ function UsersPage() {
     onSuccess: () => {
       toast.success("Cuenta bloqueada y sesiones cortadas")
       setBlockOpen(false)
-      setBlockReason("")
       invalidate()
     },
-    onError: (error) => toast.error(messageOf(error)),
   })
 
   const unblockMutation = useMutation({
@@ -191,7 +192,7 @@ function UsersPage() {
       toast.success("Bloqueo retirado")
       invalidate()
     },
-    onError: (error) => toast.error(messageOf(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
 
   const closeMutation = useMutation({
@@ -203,10 +204,8 @@ function UsersPage() {
     onSuccess: () => {
       toast.success("Cuenta cerrada (autoría conservada)")
       setCloseOpen(false)
-      setCloseReason("")
       invalidate()
     },
-    onError: (error) => toast.error(messageOf(error)),
   })
 
   interface RecoveryFormValues {
@@ -216,7 +215,6 @@ function UsersPage() {
     verifiedBy: string
     verifiedAt: string
     method: string
-    organizationId: string
   }
   const recoveryDefaults: RecoveryFormValues = {
     email: "",
@@ -225,36 +223,58 @@ function UsersPage() {
     verifiedBy: "",
     verifiedAt: "",
     method: "",
-    organizationId: "",
   }
-  const recoveryForm = useForm({
+  const recoveryForm = useAppForm({
     defaultValues: recoveryDefaults,
     validators: { onSubmit: recoverySchema },
-    onSubmit: async ({ value }) => {
-      try {
-        await api<unknown>("/api/admin/organizations/recovery-cases", {
-          method: "POST",
-          body: JSON.stringify({
-            email: value.email,
-            kind: value.kind,
-            evidence: {
-              description: value.description,
-              verifiedBy: value.verifiedBy,
-              verifiedAt: value.verifiedAt,
-              method: value.method,
-              ...(value.organizationId ? { organizationId: value.organizationId } : {}),
-            },
-          }),
-        })
-        toast.success("Caso de recuperación abierto")
-        setRecoveryOpen(false)
-        recoveryForm.reset()
-        invalidate()
-      } catch (error) {
-        toast.error(messageOf(error))
-      }
+    onSubmit: async ({ value, formApi }) => {
+      await api<unknown>("/api/admin/organizations/recovery-cases", {
+        method: "POST",
+        body: JSON.stringify({
+          email: value.email,
+          kind: value.kind,
+          evidence: {
+            description: value.description,
+            verifiedBy: value.verifiedBy,
+            verifiedAt: value.verifiedAt,
+            method: value.method,
+          },
+        }),
+      })
+      toast.success("Caso de recuperación abierto")
+      setRecoveryOpen(false)
+      formApi.reset()
+      invalidate()
     },
   })
+  // La ruta nombra la evidencia como `evidence.description`…; el formulario, sin prefijo.
+  const recoverySurface = useFormSurface(recoveryForm, {
+    fieldMap: (serverField) => serverField.replace(/^evidence\./, ""),
+  })
+
+  const blockForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value, formApi }) => {
+      if (!selectedId) return
+      await blockMutation.mutateAsync({ userId: selectedId, reason: value.reason.trim() })
+      formApi.reset()
+    },
+  })
+  const blockError = useFormSubmitError(blockForm)
+  const blockPending = useStore(blockForm.store, (state) => state.isSubmitting)
+
+  const closeForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value, formApi }) => {
+      if (!selectedId) return
+      await closeMutation.mutateAsync({ userId: selectedId, reason: value.reason.trim() })
+      formApi.reset()
+    },
+  })
+  const closeError = useFormSubmitError(closeForm)
+  const closePending = useStore(closeForm.store, (state) => state.isSubmitting)
 
   const items = listQuery.data?.items ?? []
   const detail: UserDetail | undefined = detailQuery.data
@@ -468,21 +488,17 @@ function UsersPage() {
         description="Corta todas las sesiones de inmediato con el motivo indicado. Las membresías y la autoría se conservan. Solo administración."
         confirmLabel="Bloquear"
         variant="destructive"
-        pending={blockMutation.isPending}
-        confirmDisabled={blockReason.trim().length < 10}
-        onConfirm={() => {
-          if (selectedId) blockMutation.mutate({ userId: selectedId, reason: blockReason.trim() })
+        pending={blockPending}
+        error={blockError}
+        onConfirm={() => void submitForm(blockForm)}
+        onClose={() => {
+          blockForm.reset()
+          setBlockOpen(false)
         }}
-        onClose={() => setBlockOpen(false)}
       >
-        <Field>
-          <FieldLabel htmlFor="block-reason">Motivo (mínimo 10 caracteres)</FieldLabel>
-          <Input
-            id="block-reason"
-            value={blockReason}
-            onChange={(event) => setBlockReason(event.target.value)}
-          />
-        </Field>
+        <blockForm.AppField name="reason">
+          {(field) => <field.TextField id="block-reason" label="Motivo (mínimo 10 caracteres)" maxLength={500} />}
+        </blockForm.AppField>
       </ConfirmDialog>
 
       <ConfirmDialog
@@ -491,126 +507,58 @@ function UsersPage() {
         description="Revoca sesiones, retira membresías y bloquea el acceso con el motivo del cierre. La autoría se conserva. Solo administración."
         confirmLabel="Cerrar cuenta"
         variant="destructive"
-        pending={closeMutation.isPending}
-        confirmDisabled={closeReason.trim().length < 10}
-        onConfirm={() => {
-          if (selectedId) closeMutation.mutate({ userId: selectedId, reason: closeReason.trim() })
+        pending={closePending}
+        error={closeError}
+        onConfirm={() => void submitForm(closeForm)}
+        onClose={() => {
+          closeForm.reset()
+          setCloseOpen(false)
         }}
-        onClose={() => setCloseOpen(false)}
       >
-        <Field>
-          <FieldLabel htmlFor="close-reason">Motivo (mínimo 10 caracteres)</FieldLabel>
-          <Input
-            id="close-reason"
-            value={closeReason}
-            onChange={(event) => setCloseReason(event.target.value)}
-          />
-        </Field>
+        <closeForm.AppField name="reason">
+          {(field) => <field.TextField id="close-reason" label="Motivo (mínimo 10 caracteres)" maxLength={500} />}
+        </closeForm.AppField>
       </ConfirmDialog>
 
       <FormDrawer
+        {...recoverySurface}
         open={recoveryOpen}
         onClose={() => setRecoveryOpen(false)}
         title="Abrir recuperación"
         description="Correo o propiedad con evidencia verificada explícita. Ejecutar exige dos aprobaciones (una de admin)."
-        isSubmitting={recoveryForm.state.isSubmitting}
         submitLabel="Abrir caso"
         cancelLabel={common.actions.cancel}
-        onSubmit={(event) => {
-          event.preventDefault()
-          void recoveryForm.handleSubmit()
-        }}
       >
         <div className="flex flex-col gap-4">
-          <recoveryForm.Field name="email">
+          <recoveryForm.AppField name="email">
+            {(field) => <field.TextField id="rec-email" label="Correo de la cuenta" type="email" maxLength={320} />}
+          </recoveryForm.AppField>
+          <recoveryForm.AppField name="kind">
             {(field) => (
-              <Field>
-                <FieldLabel htmlFor="rec-email">Correo de la cuenta</FieldLabel>
-                <Input
-                  id="rec-email"
-                  type="email"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
-              </Field>
+              <field.SelectField
+                id="rec-kind"
+                label="Tipo"
+                options={[
+                  { value: "acceso", label: "Recuperar acceso" },
+                  { value: "propiedad", label: "Disputa de propiedad" },
+                ]}
+              />
             )}
-          </recoveryForm.Field>
-          <recoveryForm.Field name="kind">
+          </recoveryForm.AppField>
+          <recoveryForm.AppField name="description">
+            {(field) => <field.TextField id="rec-desc" label="Evidencia presentada" maxLength={2000} />}
+          </recoveryForm.AppField>
+          <recoveryForm.AppField name="method">
+            {(field) => <field.TextField id="rec-method" label="Cómo se verificó la autoridad" maxLength={500} />}
+          </recoveryForm.AppField>
+          <recoveryForm.AppField name="verifiedBy">
+            {(field) => <field.TextField id="rec-by" label="Quién la verificó" maxLength={200} />}
+          </recoveryForm.AppField>
+          <recoveryForm.AppField name="verifiedAt">
             {(field) => (
-              <Field>
-                <FieldLabel htmlFor="rec-kind">Tipo</FieldLabel>
-                <Select<string>
-                  value={field.state.value}
-                  onValueChange={(next) => {
-                    if (next === "propiedad") field.handleChange("propiedad")
-                    else field.handleChange("acceso")
-                  }}
-                >
-                  <SelectTrigger id="rec-kind">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="acceso">Recuperar acceso</SelectItem>
-                    <SelectItem value="propiedad">Disputa de propiedad</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
+              <field.TextField id="rec-at" label="Cuándo se verificó" placeholder="2026-10-14 10:30" maxLength={100} />
             )}
-          </recoveryForm.Field>
-          <recoveryForm.Field name="description">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="rec-desc">Evidencia presentada</FieldLabel>
-                <Input
-                  id="rec-desc"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
-              </Field>
-            )}
-          </recoveryForm.Field>
-          <recoveryForm.Field name="method">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="rec-method">Cómo se verificó la autoridad</FieldLabel>
-                <Input
-                  id="rec-method"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
-              </Field>
-            )}
-          </recoveryForm.Field>
-          <recoveryForm.Field name="verifiedBy">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="rec-by">Quién la verificó</FieldLabel>
-                <Input
-                  id="rec-by"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
-              </Field>
-            )}
-          </recoveryForm.Field>
-          <recoveryForm.Field name="verifiedAt">
-            {(field) => (
-              <Field>
-                <FieldLabel htmlFor="rec-at">Cuándo se verificó</FieldLabel>
-                <Input
-                  id="rec-at"
-                  placeholder="2026-10-14 10:30"
-                  value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                />
-                <FieldError>{fieldErrorMessages(field.state.meta.errors)[0]}</FieldError>
-              </Field>
-            )}
-          </recoveryForm.Field>
+          </recoveryForm.AppField>
         </div>
       </FormDrawer>
     </PageShell>

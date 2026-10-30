@@ -194,7 +194,11 @@ it("la doble reserva de la misma unidad dental o profesional responde 409 APPOIN
         endsAt: OVERLAP_END,
       }),
     ),
-  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT", status: 409 })
+  ).rejects.toMatchObject({
+    code: "APPOINTMENT_CONFLICT",
+    status: 409,
+    fields: { roomId: "La unidad dental ya está ocupada en ese horario" },
+  })
   await expect(
     run((tx) =>
       createAppointment(tx, ORG, ACTOR, {
@@ -205,7 +209,11 @@ it("la doble reserva de la misma unidad dental o profesional responde 409 APPOIN
         endsAt: OVERLAP_END,
       }),
     ),
-  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT", status: 409 })
+  ).rejects.toMatchObject({
+    code: "APPOINTMENT_CONFLICT",
+    status: 409,
+    fields: { professionalUserId: "El profesional ya tiene otra cita en ese horario" },
+  })
   // Contigua: permitida.
   const contiguous = await run((tx) =>
     createAppointment(tx, ORG, ACTOR, {
@@ -223,7 +231,7 @@ it("los avisos de la agenda dicen lo que se reserva con la palabra del producto 
   const clash = { patientId, professionalUserId: PROFESSIONAL_2, roomId, startsAt: OVERLAP, endsAt: OVERLAP_END }
   const missingRoom = { patientId, professionalUserId: PROFESSIONAL, roomId: "00000000-0000-4000-8000-000000000000", startsAt: "2026-10-06T14:00:00Z", durationMin: 30 }
   await expect(run((tx) => createAppointment(tx, ORG, ACTOR, clash))).rejects.toMatchObject({
-    message: "El profesional o la unidad dental ya están ocupados en ese horario",
+    message: "La unidad dental ya está ocupada en ese horario",
   })
   await expect(run((tx) => createAppointment(tx, ORG, ACTOR, missingRoom))).rejects.toMatchObject({
     message: "Unidad dental no encontrada",
@@ -233,7 +241,7 @@ it("los avisos de la agenda dicen lo que se reserva con la palabra del producto 
     values (${ORG}, 'Clínica Agenda Svc', 'PE', 'PEN', 'America/Lima', 'es-PE', 'medical')`)
   try {
     await expect(run((tx) => createAppointment(tx, ORG, ACTOR, clash))).rejects.toMatchObject({
-      message: "El profesional o la sala ya están ocupados en ese horario",
+      message: "La sala ya está ocupada en ese horario",
     })
     await expect(run((tx) => createAppointment(tx, ORG, ACTOR, missingRoom))).rejects.toMatchObject({
       message: "Sala no encontrada",

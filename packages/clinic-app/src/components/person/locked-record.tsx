@@ -1,10 +1,19 @@
 import { documentText } from "@odentia/clinical"
-import { Badge, Button, Field, FieldDescription, FieldLabel, Textarea, toast } from "@odentia/ui"
-import { ErrorState, LoadingState, PageHeader, PageShell } from "@odentia/ui-patterns"
+import { Badge, Button, toast } from "@odentia/ui"
+import {
+  ErrorState,
+  LoadingState,
+  PageHeader,
+  PageShell,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Lock } from "lucide-react"
-import { useState } from "react"
+import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { formatDate } from "../../lib/clinical-journey"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
@@ -19,6 +28,17 @@ import {
 import { hcLabel } from "../../lib/patients"
 import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceButtons } from "../choice-buttons"
+
+/** Lo que exige `openLockedRecord`, dicho en su campo: el motivo y, con «Otro», cuál. */
+const openSchema = z
+  .object({
+    reason: z.custom<RecordOpeningReason | null>((value) => value !== null, "Elige el motivo"),
+    note: z.string().trim().max(500, "El motivo admite hasta 500 caracteres"),
+  })
+  .superRefine((value, ctx) => {
+    if (value.reason === "otro" && !value.note.trim())
+      ctx.addIssue({ code: "custom", path: ["note"], message: "Escribe el motivo" })
+  })
 
 /** ¿La página de la persona respondió que su historia está bloqueada? (423, solo a Administración). */
 export function isRecordLocked(error: unknown): boolean {
@@ -50,11 +70,14 @@ function recordLine(record: LockedRecordView): string {
 export function LockedRecordPage({ personId }: { personId: string }) {
   const queryClient = useQueryClient()
   const query = useQuery({ queryKey: lockedRecordKey(personId), queryFn: () => fetchLockedRecord(personId), retry: false })
-  const [reason, setReason] = useState<RecordOpeningReason | null>(null)
-  const [note, setNote] = useState("")
   const open = useMutation({
-    mutationFn: () => openLockedRecordApi(personId, { reason: reason as RecordOpeningReason, note: note.trim() || undefined }),
-    onSuccess: async (result) => {
+    mutationFn: (input: { reason: RecordOpeningReason; note?: string }) => openLockedRecordApi(personId, input),
+  })
+  const form = useAppForm({
+    defaultValues: { reason: null as RecordOpeningReason | null, note: "" },
+    validators: { onSubmit: openSchema },
+    onSubmit: async ({ value }) => {
+      const result = await open.mutateAsync({ reason: value.reason as RecordOpeningReason, note: value.note.trim() || undefined })
       toast.success(
         result.locked
           ? `Abierta para leer hasta las ${clock(result.openUntil)}`
@@ -64,6 +87,10 @@ export function LockedRecordPage({ personId }: { personId: string }) {
       await queryClient.invalidateQueries({ queryKey: lockedRecordKey(personId) })
     },
   })
+  const submit = useFormSubmit(form)
+  const submitError = useFormSubmitError(form)
+  const reason = useStore(form.store, (state) => state.values.reason)
+  const submitting = useStore(form.store, (state) => state.isSubmitting)
   if (query.isPending)
     return (
       <PageShell>
@@ -78,7 +105,6 @@ export function LockedRecordPage({ personId }: { personId: string }) {
     )
   const record = query.data
   const firstName = record.displayName.split(" ")[0] ?? record.displayName
-  const ready = reason !== null && (reason !== "otro" || note.trim() !== "")
   const opening = reason === "vuelve"
   return (
     <PageShell className="flex flex-col gap-6">
@@ -108,7 +134,12 @@ export function LockedRecordPage({ personId }: { personId: string }) {
         {record.request?.resolution ? <p className="text-muted-foreground">{record.request.resolution}</p> : null}
         {record.lockedByName ? <p className="text-muted-foreground">Lo hizo {record.lockedByName}.</p> : null}
       </section>
-      <section aria-labelledby="locked-open" className="flex max-w-3xl flex-col gap-4 rounded-xl border p-5 text-sm">
+      <form
+        noValidate
+        onSubmit={submit}
+        aria-labelledby="locked-open"
+        className="flex max-w-3xl flex-col gap-4 rounded-xl border p-5 text-sm"
+      >
         <div>
           <h2 id="locked-open" className="text-base font-semibold">
             Abrirla con motivo
@@ -117,38 +148,51 @@ export function LockedRecordPage({ personId }: { personId: string }) {
             Solo Administración. Queda en «Consultas a la historia» y en la Actividad del equipo, con quién y cuándo.
           </p>
         </div>
-        <Field>
-          <FieldLabel>Motivo</FieldLabel>
-          <ChoiceButtons
-            label="Motivo"
-            value={reason}
-            onChange={setReason}
-            columns={2}
-            options={RECORD_OPENING_REASONS.map((item) => ({
-              value: item.value,
-              label: item.value === "vuelve" ? `${firstName} vuelve a atenderse` : item.label,
-            }))}
-          />
-          <FieldDescription>
-            «Vuelve a atenderse» desbloquea la ficha entera: vuelve a ser paciente, con su historia de antes (lo borrado no
-            vuelve). Los otros motivos la abren para leer durante una hora, sin cambiar nada.
-          </FieldDescription>
-        </Field>
+        <form.AppField name="reason">
+          {(field) => (
+            <field.Group
+              legend="Motivo"
+              description="«Vuelve a atenderse» desbloquea la ficha entera: vuelve a ser paciente, con su historia de antes (lo borrado no vuelve). Los otros motivos la abren para leer durante una hora, sin cambiar nada."
+            >
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-label="Motivo"
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                  columns={2}
+                  options={RECORD_OPENING_REASONS.map((item) => ({
+                    value: item.value,
+                    label: item.value === "vuelve" ? `${firstName} vuelve a atenderse` : item.label,
+                  }))}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
         {reason === "otro" || reason === "autoridad" || reason === "reclamo" ? (
-          <Field>
-            <FieldLabel htmlFor="locked-note">{reason === "otro" ? "Escribe el motivo" : "Detalle (opcional)"}</FieldLabel>
-            <Textarea id="locked-note" rows={2} maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} />
-          </Field>
+          <form.AppField name="note">
+            {(field) => (
+              <field.TextareaField
+                label={reason === "otro" ? "Escribe el motivo" : "Detalle (opcional)"}
+                rows={2}
+                maxLength={500}
+              />
+            )}
+          </form.AppField>
         ) : null}
-        {open.error ? (
+        {submitError ? (
           <p role="alert" className="text-destructive">
-            {open.error instanceof ApiError ? open.error.shape.message : "No pudimos abrirla. Revisa tu conexión."}
+            {submitError}
           </p>
         ) : null}
-        <Button type="button" className="self-start" disabled={!ready || open.isPending} onClick={() => open.mutate()}>
+        <Button type="submit" className="self-start" disabled={submitting}>
           {opening ? "Desbloquear la historia" : "Abrir para leer"}
         </Button>
-      </section>
+      </form>
     </PageShell>
   )
 }

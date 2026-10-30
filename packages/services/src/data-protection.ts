@@ -13,7 +13,13 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { desc, eq, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
-import { documentFormat, DocumentKit, type DocumentClinic, SIZE, type Zone } from "./document-kit.js"
+import {
+  type DocumentClinic,
+  DocumentKit,
+  documentFormat,
+  SIZE,
+  type Zone,
+} from "./document-kit.js"
 import { clinicToday } from "./inventory-stock.js"
 import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE, orgProduct } from "./locale.js"
 
@@ -85,14 +91,23 @@ const CHANNEL_NAMES: Record<string, string> = {
   microsoft365: "Microsoft 365",
 }
 
-function processorRow(p: DataProcessor, detail: string | null, name = p.short): DataProtectionProcessor {
+function processorRow(
+  p: DataProcessor,
+  detail: string | null,
+  name = p.short,
+): DataProtectionProcessor {
   return { id: p.id, name, receives: p.receives, country: p.country, detail }
 }
 
 /** «3 oct 2026», en la zona y el idioma de la clínica. */
 function day(value: Date | string, zone: Zone): string {
   return new Date(value)
-    .toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "short", year: "numeric" })
+    .toLocaleDateString(zone.locale, {
+      timeZone: zone.timezone,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })
     .replaceAll(".", "")
 }
 
@@ -145,7 +160,10 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     group by provider`)
   const connected = new Map(connections.map((c) => [c.provider, c]))
   const agent = await getAgentConfig(tx, orgId)
-  const zone: Zone = { locale: responsible.locale || NEUTRAL_LOCALE, timezone: responsible.timezone || NEUTRAL_TIMEZONE }
+  const zone: Zone = {
+    locale: responsible.locale || NEUTRAL_LOCALE,
+    timezone: responsible.timezone || NEUTRAL_TIMEZONE,
+  }
 
   const [counts] = await tx.execute<{ novedades: number; people: number }>(sql`
     select
@@ -208,7 +226,10 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         if (agent.enabled || agent.clinicalAssistantEnabled) {
           // El modelo lo usan Recepción y el dictado; la decisión y la búsqueda, solo los agentes.
           if (p.id === "openai") {
-            const uses = [agent.enabled ? "agentes encendidos" : null, agent.clinicalAssistantEnabled ? "dictado encendido" : null]
+            const uses = [
+              agent.enabled ? "agentes encendidos" : null,
+              agent.clinicalAssistantEnabled ? "dictado encendido" : null,
+            ]
             inUse.push(processorRow(p, uses.filter(Boolean).join(" y ")))
           } else if (agent.enabled) inUse.push(processorRow(p, "agentes encendidos"))
         }
@@ -220,10 +241,15 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         const mine = p.use.providers.filter((provider) => connected.has(provider))
         if (mine.length === 0) break
         for (const provider of mine) usedProviders.add(provider)
-        const since = mine.map((provider) => connected.get(provider)!.since).sort((a, b) => +a - +b)[0]!
+        const since = mine
+          .map((provider) => connected.get(provider)!.since)
+          .sort((a, b) => +a - +b)[0]!
         const channels = mine.map((provider) => CHANNEL_NAMES[provider] ?? provider)
         const name = p.id === "meta" ? `${channels.join(", ")} (Meta)` : p.short
-        const account = p.id === "gmail" || p.id === "microsoft365" ? `${connected.get(mine[0]!)!.display_name} · ` : ""
+        const account =
+          p.id === "gmail" || p.id === "microsoft365"
+            ? `${connected.get(mine[0]!)!.display_name} · `
+            : ""
         inUse.push(processorRow(p, `${account}conectado el ${day(since, zone)}`, name))
         break
       }
@@ -257,7 +283,11 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     platform: productWords(await orgProduct(tx, orgId)).name,
     responsible: { ...responsible, missing },
     agreement: agreement
-      ? { version: agreement.version, acceptedAt: agreement.acceptedAt.toISOString(), acceptedByName: agreement.acceptedByName }
+      ? {
+          version: agreement.version,
+          acceptedAt: agreement.acceptedAt.toISOString(),
+          acceptedByName: agreement.acceptedByName,
+        }
       : null,
     activities,
     processors: { inUse, always, notUsed },
@@ -274,33 +304,55 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
 }
 
 /** «Registro de actividades de tratamiento»: el PDF de una página para la autoridad (tablero 10). */
-export async function renderDataProtectionPdf(view: DataProtectionView, clinic: DocumentClinic): Promise<Uint8Array> {
+export async function renderDataProtectionPdf(
+  view: DataProtectionView,
+  clinic: DocumentClinic,
+): Promise<Uint8Array> {
   const zone: Zone = clinic
   const title = "Registro de actividades de tratamiento"
   const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title, docLabel: title })
-  const section = (value: string) => kit.heading(value, { size: SIZE.h2small, before: 14, after: 4 })
+  const section = (value: string) =>
+    kit.heading(value, { size: SIZE.h2small, before: 14, after: 4 })
   kit.gap(20)
-  kit.titleWithDetails(title, [{ text: `Al ${day(new Date(), zone)}` }, { text: `Generado por ${view.platform}` }], SIZE.titleBudget)
+  kit.titleWithDetails(
+    title,
+    [{ text: `Al ${day(new Date(), zone)}` }, { text: `Generado por ${view.platform}` }],
+    SIZE.titleBudget,
+  )
   kit.gap(6)
   section("1. Responsable y encargado")
-  const fiscal = [view.responsible.fiscalDocType, view.responsible.fiscalDocNumber].filter(Boolean).join(" ")
-  kit.text(`Responsable: ${[view.responsible.legalName, fiscal].filter(Boolean).join(", ") || "sin datos"}.`)
+  const fiscal = [view.responsible.fiscalDocType, view.responsible.fiscalDocNumber]
+    .filter(Boolean)
+    .join(" ")
+  kit.text(
+    `Responsable: ${[view.responsible.legalName, fiscal].filter(Boolean).join(", ") || "sin datos"}.`,
+  )
   kit.text(
     view.agreement
       ? `Encargado: ${view.platform}, según el contrato de encargo aceptado el ${day(view.agreement.acceptedAt, zone)} (versión ${view.agreement.version}).`
       : `Encargado: ${view.platform}. El contrato de encargo aún no se aceptó.`,
   )
   section("2. Actividades")
-  kit.bullets(view.activities.map((a) => `${a.purpose}: ${a.data}. Permiso: ${a.basis}. Se guarda: ${a.keep.toLowerCase()}.`), { size: SIZE.dense })
-  section("3. Encargados y transferencias internacionales")
   kit.bullets(
-    [...view.processors.inUse, ...view.processors.always].map((p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`),
+    view.activities.map(
+      (a) => `${a.purpose}: ${a.data}. Permiso: ${a.basis}. Se guarda: ${a.keep.toLowerCase()}.`,
+    ),
     { size: SIZE.dense },
   )
-  kit.text("Los que están fuera del país son una transferencia internacional autorizada en el contrato de encargo.", {
-    size: SIZE.label,
-    tone: "gray",
-  })
+  section("3. Encargados y transferencias internacionales")
+  kit.bullets(
+    [...view.processors.inUse, ...view.processors.always].map(
+      (p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`,
+    ),
+    { size: SIZE.dense },
+  )
+  kit.text(
+    "Los que están fuera del país son una transferencia internacional autorizada en el contrato de encargo.",
+    {
+      size: SIZE.label,
+      tone: "gray",
+    },
+  )
   section("4. Cómo se protegen")
   kit.text(
     "Cada clínica ve solo sus datos; cada persona del equipo, solo lo que su rol permite. Las consultas a la historia clínica y los cambios quedan registrados. Conexiones cifradas y copias de seguridad diarias.",
@@ -321,7 +373,11 @@ export async function renderDataProtectionPdf(view: DataProtectionView, clinic: 
 }
 
 /** Cada descarga queda en la Actividad del equipo (decisión 6). */
-export async function recordDataProtectionDownload(tx: Db, orgId: string, actorUserId: string): Promise<void> {
+export async function recordDataProtectionDownload(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+): Promise<void> {
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,

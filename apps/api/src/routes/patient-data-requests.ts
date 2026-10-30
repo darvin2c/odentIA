@@ -1,4 +1,5 @@
 import { withOrgContext } from "@odentia/db"
+import { auditEvent } from "@odentia/db/schema/org"
 import {
   createDataRequest,
   DATA_REQUEST_CHANNELS,
@@ -18,7 +19,6 @@ import {
   sendPatientRecordCopy,
   verifyDataRequest,
 } from "@odentia/services"
-import { auditEvent } from "@odentia/db/schema/org"
 import { Hono } from "hono"
 import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
@@ -36,16 +36,34 @@ import { type CrmDeps, runService, serviceErrorResponse, validationError } from 
  */
 const createInput = z
   .object({
-    kind: z.enum(DATA_REQUEST_KINDS),
-    requesterContactId: z.uuid(),
-    channel: z.enum(DATA_REQUEST_CHANNELS),
-    requestedOn: z.iso.date().nullish(),
-    said: z.string().max(1000).nullish(),
+    kind: z.enum(DATA_REQUEST_KINDS, "Elige qué pide"),
+    requesterContactId: z.uuid("Elige quién lo pide"),
+    channel: z.enum(DATA_REQUEST_CHANNELS, "Elige por dónde llegó"),
+    requestedOn: z.iso.date("Cuándo lo pidió: fecha inválida").nullish(),
+    said: z.string().max(1000, "Lo que dijo admite hasta 1000 caracteres").nullish(),
   })
   .strict()
-const verifyInput = z.object({ how: z.enum(DATA_REQUEST_VERIFICATIONS) }).strict()
-const respondInput = z.object({ resolution: z.string().min(1).max(1000) }).strict()
-const denyInput = z.object({ reason: z.string().min(1).max(1000) }).strict()
+const verifyInput = z
+  .object({ how: z.enum(DATA_REQUEST_VERIFICATIONS, "Elige cómo comprobaste que es ella") })
+  .strict()
+const respondInput = z
+  .object({
+    resolution: z
+      .string()
+      .trim()
+      .min(1, "Escribe qué se entregó o qué se hizo")
+      .max(1000, "La respuesta admite hasta 1000 caracteres"),
+  })
+  .strict()
+const denyInput = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, "Escribe por qué se deniega")
+      .max(1000, "El motivo admite hasta 1000 caracteres"),
+  })
+  .strict()
 const sendInput = z.object({ connectionId: z.uuid() }).strict()
 
 export function createPatientDataRequestsRoute(deps: CrmDeps) {
@@ -63,14 +81,19 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     const parsed = createInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
-      withOrgContext(deps.db, orgId, (tx) => createDataRequest(tx, orgId, userId, c.req.param("id"), parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        createDataRequest(tx, orgId, userId, c.req.param("id"), parsed.data),
+      ),
     )
   })
 
   app.get("/:id/data-requests/:requestId/erase-preview", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.erase"))
-      return c.json(errorBody(c, "FORBIDDEN", "Solo Administración borra los datos de una persona"), 403)
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Solo Administración borra los datos de una persona"),
+        403,
+      )
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => erasurePreview(tx, orgId, c.req.param("id"))),
     )
@@ -81,12 +104,17 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
   app.post("/:id/data-requests/:requestId/erase", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "patients.erase"))
-      return c.json(errorBody(c, "FORBIDDEN", "Solo Administración borra los datos de una persona"), 403)
+      return c.json(
+        errorBody(c, "FORBIDDEN", "Solo Administración borra los datos de una persona"),
+        403,
+      )
     return runService(c, 200, async () => {
       const { request, attachmentKeys } = await withOrgContext(deps.db, orgId, (tx) =>
         eraseForDataRequest(tx, orgId, userId, c.req.param("id"), c.req.param("requestId")),
       )
-      await Promise.all(attachmentKeys.map((key) => deps.storage.deleteAttachment(key).catch(() => {})))
+      await Promise.all(
+        attachmentKeys.map((key) => deps.storage.deleteAttachment(key).catch(() => {})),
+      )
       return request
     })
   })
@@ -97,7 +125,14 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        verifyDataRequest(tx, orgId, userId, c.req.param("id"), c.req.param("requestId"), parsed.data),
+        verifyDataRequest(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("requestId"),
+          parsed.data,
+        ),
       ),
     )
   })
@@ -108,7 +143,14 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        respondDataRequest(tx, orgId, userId, c.req.param("id"), c.req.param("requestId"), parsed.data),
+        respondDataRequest(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("requestId"),
+          parsed.data,
+        ),
       ),
     )
   })
@@ -119,7 +161,14 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        denyDataRequest(tx, orgId, userId, c.req.param("id"), c.req.param("requestId"), parsed.data),
+        denyDataRequest(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("requestId"),
+          parsed.data,
+        ),
       ),
     )
   })
@@ -127,7 +176,9 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
   app.get("/:id/data-requests/:requestId/send-options", async (c) => {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => recordSendOptions(tx, orgId, c.req.param("id"), c.req.param("requestId"))),
+      withOrgContext(deps.db, orgId, (tx) =>
+        recordSendOptions(tx, orgId, c.req.param("id"), c.req.param("requestId")),
+      ),
     )
   })
 
@@ -138,9 +189,17 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        sendPatientRecordCopy(tx, orgId, userId, c.req.param("id"), c.req.param("requestId"), parsed.data, {
-          storage: deps.storage,
-        }),
+        sendPatientRecordCopy(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("requestId"),
+          parsed.data,
+          {
+            storage: deps.storage,
+          },
+        ),
       ),
     )
   })
@@ -158,25 +217,29 @@ export function createPatientDataRequestsRoute(deps: CrmDeps) {
     let files: Array<{ name: string; storageKey: string }>
     let generatedAt: Date
     try {
-      ;({ pdf, fhir, fileName, files, generatedAt } = await withOrgContext(deps.db, orgId, async (tx) => {
-        const record = await loadPatientRecord(tx, orgId, patientId)
-        // Cada descarga queda registrada, no solo la hora (la bitácora agrupa por hora).
-        await tx.insert(auditEvent).values({
-          organizationId: orgId,
-          actorUserId: userId,
-          action: "patient_record.downloaded",
-          entity: "patient",
-          entityId: patientId,
-          metadata: { patientId, documents: record.documents.length },
-        })
-        return {
-          pdf: await renderPatientRecordPdf(record, record.clinic),
-          fhir: JSON.stringify(patientRecordFhirBundle(record), null, 2),
-          fileName: patientRecordFileName(record, "zip"),
-          files: await patientRecordFiles(tx, orgId, record),
-          generatedAt: record.generatedAt,
-        }
-      }))
+      ;({ pdf, fhir, fileName, files, generatedAt } = await withOrgContext(
+        deps.db,
+        orgId,
+        async (tx) => {
+          const record = await loadPatientRecord(tx, orgId, patientId)
+          // Cada descarga queda registrada, no solo la hora (la bitácora agrupa por hora).
+          await tx.insert(auditEvent).values({
+            organizationId: orgId,
+            actorUserId: userId,
+            action: "patient_record.downloaded",
+            entity: "patient",
+            entityId: patientId,
+            metadata: { patientId, documents: record.documents.length },
+          })
+          return {
+            pdf: await renderPatientRecordPdf(record, record.clinic),
+            fhir: JSON.stringify(patientRecordFhirBundle(record), null, 2),
+            fileName: patientRecordFileName(record, "zip"),
+            files: await patientRecordFiles(tx, orgId, record),
+            generatedAt: record.generatedAt,
+          }
+        },
+      ))
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }

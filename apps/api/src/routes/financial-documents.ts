@@ -1,6 +1,4 @@
 import { withOrgContext } from "@odentia/db"
-import { Hono } from "hono"
-import { z } from "zod"
 import {
   generateConsentPdf,
   getDocumentSendOptions,
@@ -13,11 +11,13 @@ import {
   sendFinancialDocument,
   sendHealthDocument,
 } from "@odentia/services"
+import type { Context } from "hono"
+import { Hono } from "hono"
+import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
-import type { Context } from "hono"
 
 function forbid(c: Context) {
   return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a documentos económicos"), 403)
@@ -74,14 +74,18 @@ const sendInput = z
     documentType,
     documentId: z.uuid(),
     recipientContactId: z.uuid().nullish(),
-    connectionId: z.uuid(),
-    message: z.string().max(500).nullish(),
+    connectionId: z.uuid({ error: "Elige el canal de envío" }),
+    message: z.string().max(500, { error: "El mensaje admite hasta 500 caracteres" }).nullish(),
     savePreferredChannel: z.boolean().optional(),
     paper: z.enum(["A4", "Letter"]).nullish(),
     // Clave del intento: reenviar con la misma no manda el documento dos veces.
     requestId: z.uuid().nullish(),
     // Otro correo escrito en el momento: exige confirmación explícita de quien envía.
-    otherEmail: z.string().trim().max(200).nullish(),
+    otherEmail: z
+      .string()
+      .trim()
+      .max(200, { error: "El correo no tiene un formato válido" })
+      .nullish(),
     confirmOtherEmail: z.boolean().optional(),
   })
   .strict()
@@ -90,7 +94,11 @@ const recipientEmailInput = z
   .object({
     documentType,
     recipientContactId: z.uuid(),
-    email: z.string().trim().min(3).max(200),
+    email: z
+      .string()
+      .trim()
+      .min(3, { error: "El correo no tiene un formato válido" })
+      .max(200, { error: "El correo no tiene un formato válido" }),
   })
   .strict()
 
@@ -106,9 +114,9 @@ const healthSendInput = z
   .object({
     documentType: healthDocumentType,
     documentId: z.uuid(),
-    recipientContactId: z.uuid().nullish(),
-    connectionId: z.uuid(),
-    message: z.string().max(500).nullish(),
+    recipientContactId: z.uuid({ error: "Elige a quién enviarlo." }).nullish(),
+    connectionId: z.uuid({ error: "Elige por dónde enviarlo." }),
+    message: z.string().max(500, { error: "El mensaje admite hasta 500 caracteres." }).nullish(),
     requestId: z.uuid().nullish(),
   })
   .strict()
@@ -129,7 +137,9 @@ const refundPdfQuery = z.object({
   paper: z.enum(["A4", "Letter"]).optional(),
 })
 
-export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storage" | "secretsKey">) {
+export function createFinancialDocumentsRoute(
+  deps: Pick<CrmDeps, "db" | "storage" | "secretsKey">,
+) {
   const app = new Hono()
 
   app.get("/:id/financial-document-options", async (c) => {
@@ -162,7 +172,14 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     const patientId = c.req.param("id")
     try {
       const pdf = await withOrgContext(deps.db, orgId, (tx) =>
-        renderHealthDocumentPdf(tx, orgId, patientId, parsed.data.documentType, parsed.data.documentId, deps.storage),
+        renderHealthDocumentPdf(
+          tx,
+          orgId,
+          patientId,
+          parsed.data.documentType,
+          parsed.data.documentId,
+          deps.storage,
+        ),
       )
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "documentos" })
       return new Response(Buffer.from(pdf.bytes), {
@@ -328,7 +345,13 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const pdf = await withOrgContext(deps.db, orgId, (tx) =>
-        getRefundReceiptPdf(tx, orgId, c.req.param("id"), parsed.data.receiptId, parsed.data.paper ?? null),
+        getRefundReceiptPdf(
+          tx,
+          orgId,
+          c.req.param("id"),
+          parsed.data.receiptId,
+          parsed.data.paper ?? null,
+        ),
       )
       return c.body(Buffer.from(pdf.bytes), 200, {
         "Content-Type": "application/pdf",

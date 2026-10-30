@@ -14,11 +14,17 @@ import { clinicalOrder, consentDocument, medicalLeave } from "@odentia/db/schema
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { requirePatient } from "./patients.js"
-import { requireProfessionalSignature } from "./professional-profiles.js"
 import { productHooks } from "./products.js"
+import { requireProfessionalSignature } from "./professional-profiles.js"
 import { clinicOriginOf } from "./public-links.js"
 
-export const CHECKABLE_DOCUMENTS = ["prescription", "order", "medical_leave", "consent", "signed_odontogram"] as const
+export const CHECKABLE_DOCUMENTS = [
+  "prescription",
+  "order",
+  "medical_leave",
+  "consent",
+  "signed_odontogram",
+] as const
 export type CheckableDocument = (typeof CHECKABLE_DOCUMENTS)[number]
 
 export type DocumentCheckState = "vigente" | "anulado" | "revocado" | "vencido"
@@ -64,13 +70,22 @@ export function documentSecretsKey(): Buffer | null {
 
 function signature(secretsKey: Buffer, payload: string): string {
   // 128 bits bastan y dejan el QR legible: la dirección entera va en el código.
-  return createHmac("sha256", secretsKey).update(`comprobar-documento:${payload}`).digest().subarray(0, 16).toString("base64url")
+  return createHmac("sha256", secretsKey)
+    .update(`comprobar-documento:${payload}`)
+    .digest()
+    .subarray(0, 16)
+    .toString("base64url")
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Corto a propósito: tipo y uuid en binario, seguidos de la clínica. */
-export function documentCheckToken(secretsKey: Buffer, orgId: string, type: CheckableDocument, id: string): string {
+export function documentCheckToken(
+  secretsKey: Buffer,
+  orgId: string,
+  type: CheckableDocument,
+  id: string,
+): string {
   const payload = Buffer.concat([
     Buffer.from([CHECKABLE_DOCUMENTS.indexOf(type)]),
     Buffer.from(id.replaceAll("-", ""), "hex"),
@@ -105,7 +120,12 @@ export function readDocumentCheckToken(
  * enlace», con el dominio de su producto). Nula sin dirección pública ni clave:
  * entonces el papel sale sin QR y no promete nada.
  */
-export async function documentCheckUrl(tx: Db, orgId: string, type: CheckableDocument, id: string): Promise<string | null> {
+export async function documentCheckUrl(
+  tx: Db,
+  orgId: string,
+  type: CheckableDocument,
+  id: string,
+): Promise<string | null> {
   if (!checkKey) return null
   const origin = await clinicOriginOf(tx, orgId)
   return origin ? `${origin}/comprobar/${documentCheckToken(checkKey, orgId, type, id)}` : null
@@ -133,7 +153,13 @@ const ORDER_WORDS: Record<string, string> = {
   interconsulta: "Derivación",
 }
 
-async function factsOf(tx: Db, orgId: string, type: CheckableDocument, id: string, today: string): Promise<DocumentCheckFacts | null> {
+async function factsOf(
+  tx: Db,
+  orgId: string,
+  type: CheckableDocument,
+  id: string,
+  today: string,
+): Promise<DocumentCheckFacts | null> {
   if (type === "prescription") {
     const [row] = await tx
       .select()
@@ -150,7 +176,11 @@ async function factsOf(tx: Db, orgId: string, type: CheckableDocument, id: strin
       validUntil: row.validUntil,
       voidedAt: voided ? row.cancelledAt : null,
       signer: row.prescriberName
-        ? { name: row.prescriberName, title: row.prescriberTitle, registration: row.prescriberRegistration }
+        ? {
+            name: row.prescriberName,
+            title: row.prescriberTitle,
+            registration: row.prescriberRegistration,
+          }
         : null,
     }
   }
@@ -170,7 +200,9 @@ async function factsOf(tx: Db, orgId: string, type: CheckableDocument, id: strin
       issuedAt: row.issuedAt,
       validUntil: null,
       voidedAt: voided ? row.cancelledAt : null,
-      signer: row.signerName ? { name: row.signerName, title: row.signerTitle, registration: row.signerRegistration } : null,
+      signer: row.signerName
+        ? { name: row.signerName, title: row.signerTitle, registration: row.signerRegistration }
+        : null,
     }
   }
   if (type === "order") {
@@ -204,7 +236,8 @@ async function factsOf(tx: Db, orgId: string, type: CheckableDocument, id: strin
       .limit(1)
     // Un consentimiento sin firmar no es un documento que comprobar.
     if (!row || row.status === "pendiente") return null
-    const state: DocumentCheckState = row.status === "revocado" ? "revocado" : row.status === "anulado" ? "anulado" : "vigente"
+    const state: DocumentCheckState =
+      row.status === "revocado" ? "revocado" : row.status === "anulado" ? "anulado" : "vigente"
     return {
       patientId: row.patientId,
       state,
@@ -212,7 +245,13 @@ async function factsOf(tx: Db, orgId: string, type: CheckableDocument, id: strin
       issuedAt: row.signedAt,
       validUntil: null,
       voidedAt: state === "revocado" ? row.revokedAt : state === "anulado" ? row.updatedAt : null,
-      signer: row.informerName ? { name: row.informerName, title: row.informerTitle, registration: row.informerRegistration } : null,
+      signer: row.informerName
+        ? {
+            name: row.informerName,
+            title: row.informerTitle,
+            registration: row.informerRegistration,
+          }
+        : null,
     }
   }
   // Lo que solo existe en un producto lo responde ese producto.
@@ -221,9 +260,18 @@ async function factsOf(tx: Db, orgId: string, type: CheckableDocument, id: strin
 }
 
 /** Lo que responde la ruta pública; null si el documento ya no está. */
-export async function readDocumentCheck(tx: Db, orgId: string, type: CheckableDocument, id: string): Promise<DocumentCheck | null> {
+export async function readDocumentCheck(
+  tx: Db,
+  orgId: string,
+  type: CheckableDocument,
+  id: string,
+): Promise<DocumentCheck | null> {
   const [profile] = await tx
-    .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName, timezone: orgProfile.timezone })
+    .select({
+      tradeName: orgProfile.tradeName,
+      legalName: orgProfile.legalName,
+      timezone: orgProfile.timezone,
+    })
     .from(orgProfile)
     .where(eq(orgProfile.organizationId, orgId))
     .limit(1)
@@ -250,6 +298,9 @@ export async function readDocumentCheck(tx: Db, orgId: string, type: CheckableDo
     voidedAt: iso(facts.voidedAt),
     signer: facts.signer,
     patientInitials: patientInitials(person.displayName),
-    clinic: { name: profile.tradeName || profile.legalName || "", phone: branches.length === 1 ? (branches[0]?.phone ?? null) : null },
+    clinic: {
+      name: profile.tradeName || profile.legalName || "",
+      phone: branches.length === 1 ? (branches[0]?.phone ?? null) : null,
+    },
   }
 }

@@ -8,11 +8,12 @@ import { type CrmDeps, runService, validationError } from "./helpers.js"
 const reviseInput = z
   .object({
     encounterId: z.uuid(),
-    reason: z.string().trim().min(1).max(2000),
-    serviceId: z.uuid(),
-    toothNumber: z.number().int().nullish(),
+    reason: z.string().trim().min(1, "Indica el motivo de la revisión.").max(2000),
+    serviceId: z.uuid("Elige la nueva prestación."),
+    // La pieza es un número entero (sin decimales): el mensaje lo dice en el campo.
+    toothNumber: z.number().int("Indica la pieza con un número entero, sin decimales.").nullish(),
     surfaces: z.array(z.string()).max(5).nullish(),
-    quadrant: z.number().int().min(1).max(8).nullish(),
+    quadrant: z.number().int("Elige el cuadrante.").min(1, "Elige el cuadrante.").max(8, "Elige el cuadrante.").nullish(),
     arch: z.enum(["upper", "lower"]).nullish(),
     detail: z.string().max(4000).nullish(),
     diagnosisCode: z.string().max(10).nullish(),
@@ -21,7 +22,7 @@ const reviseInput = z
   .strict()
 const completeInput = z.object({ encounterId: z.uuid() }).strict()
 const reasonInput = z
-  .object({ encounterId: z.uuid().optional(), reason: z.string().trim().min(1).max(2000) })
+  .object({ encounterId: z.uuid().optional(), reason: z.string().trim().min(1, "Indica el motivo.").max(2000) })
   .strict()
 const resumeInput = z.object({ status: z.enum(["pendiente", "programado", "en_curso"]) }).strict()
 const itemParams = z.object({ id: z.uuid(), itemId: z.uuid() })

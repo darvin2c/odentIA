@@ -10,19 +10,21 @@
  * Dinero con `@odentia/clinical`; fecha y formato en la zona de la clínica.
  */
 import { documentText, formatMoney, ticketFooterLines, ticketUntaxedNote } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, cn, Field, FieldLabel, Skeleton, Textarea } from "@odentia/ui"
-import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, Skeleton } from "@odentia/ui"
+import { FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Check, CreditCard, Printer } from "lucide-react"
-import { useId, useState, type ReactNode } from "react"
-import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
+import { type ReactNode, useState } from "react"
+import { z } from "zod"
+import { useActiveBranch } from "../../lib/active-branch"
 import { apiFetchBytes } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { useActiveBranch } from "../../lib/active-branch"
-import { financeErrorMessage } from "../../lib/finance"
+import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
+  type CollectReceipt,
+  type CollectTicketRow,
   dayInTimezone,
   fetchPatientAccount3,
   fetchTicketReturnable,
@@ -31,13 +33,21 @@ import {
   formatTimeShortLocale,
   returnPdfPath,
   voidTicketApi,
-  type CollectReceipt,
-  type CollectTicketRow,
 } from "../../lib/finance-collect"
+import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { ReturnDrawer } from "./return-drawer"
 
 /** Tarjeta (UN/CEFACT 4461): anular o devolver se hace también en su terminal. */
 const CARD_TYPE_CODE = "48"
+const MAX_VOID_REASON = 2000
+
+const voidSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe el motivo de la anulación.")
+    .max(MAX_VOID_REASON, `Escribe el motivo en ${MAX_VOID_REASON} caracteres como mucho.`),
+})
 
 export function ticketDisplayNumber(number: number): string {
   return String(number).padStart(6, "0")
@@ -138,12 +148,9 @@ export function TicketView({
   /** Recién cobrado: si el comprobante salió solo por correo o qué hacer (decisión 20 v2). */
   receipt?: CollectReceipt | null
 }): React.JSX.Element {
-  const uid = useId()
   const canWrite = usePermission("finance.write")
   const canAdmin = usePermission("finance.admin")
   const [voidOpen, setVoidOpen] = useState(false)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [printing, setPrinting] = useState(false)
   const [printError, setPrintError] = useState<string | null>(null)
   // Anulación hecha en esta pantalla: se guarda con el ticket al que pertenece.
@@ -202,13 +209,16 @@ export function TicketView({
   const stillOwed = snapshot.remainingCents ?? remainingCents
   const untaxedNote = snapshot.taxes ? ticketUntaxedNote(snapshot.taxes) : null
   // Lo que deshace anular: los productos vuelven a la sede, los servicios quedan por cobrar.
-  const productLines = returnLines.filter((line) => line.kind === "producto" && line.paidCents === line.amountCents)
+  const productLines = returnLines.filter(
+    (line) => line.kind === "producto" && line.paidCents === line.amountCents,
+  )
   const serviceCents = returnLines
     .filter((line) => line.kind === "servicio")
     .reduce((sum, line) => sum + line.paidCents, 0)
   const paidByCard = methods.some((method) => method.typeCode === CARD_TYPE_CODE)
   const returnBranchId = sede.branchId ?? ticket.branchId
-  const returnBranchName = sede.branches.find((item) => item.id === returnBranchId)?.name ?? sedeName
+  const returnBranchName =
+    sede.branches.find((item) => item.id === returnBranchId)?.name ?? sedeName
 
   const issuedAt = new Date(ticket.createdAt)
   const issuedDate = Number.isNaN(issuedAt.getTime())
@@ -238,22 +248,28 @@ export function TicketView({
     : null
 
   const voidMutation = useMutation({
-    mutationFn: () => voidTicketApi(ticket.patientId, ticket.id, reason.trim()),
-    onSuccess: (result) => {
+    mutationFn: (reason: string) => voidTicketApi(ticket.patientId, ticket.id, reason),
+    onSuccess: (result, reason) => {
       setVoidedHere({
         ticketId: ticket.id,
-        reason: reason.trim(),
+        reason,
         reopenedCents: result.data.reopenedCents ?? 0,
         returnedProducts: result.data.returnedProducts ?? [],
       })
       setVoidOpen(false)
-      setReason("")
-      setError(null)
       onChanged()
     },
-    // El servidor decide: tras un cierre responde que solo administración anula.
-    onError: (err) => setError(financeErrorMessage(err)),
   })
+  // El motivo va en su campo; lo que decide el servidor (anulado, con
+  // devoluciones, tras un cierre solo administración) se dice junto a los botones.
+  const voidForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: voidSchema },
+    onSubmit: async ({ value }) => {
+      await voidMutation.mutateAsync(value.reason.trim())
+    },
+  })
+  const voidSurface = useFormSurface(voidForm, { formMessage: financeFormMessage })
 
   const print = async () => {
     if (printing) return
@@ -285,7 +301,10 @@ export function TicketView({
   return (
     <div className="flex flex-col gap-4">
       {voided ? (
-        <div role="status" className="flex flex-col gap-1 rounded-xl border border-destructive/40 bg-danger-soft px-3 py-2 text-sm">
+        <div
+          role="status"
+          className="flex flex-col gap-1 rounded-xl border border-destructive/40 bg-danger-soft px-3 py-2 text-sm"
+        >
           <p className="font-semibold text-destructive">Ticket anulado</p>
           <p>El ticket queda marcado y no se borra.</p>
           {justVoided && justVoided.returnedProducts.length > 0 ? (
@@ -294,9 +313,16 @@ export function TicketView({
               {justVoided.returnedProducts.map((item) => item.description).join(" y ")}.
             </p>
           ) : null}
-          {justVoided && paidByCard ? <p>Anula también la operación en el terminal de la tarjeta.</p> : null}
+          {justVoided && paidByCard ? (
+            <p>Anula también la operación en el terminal de la tarjeta.</p>
+          ) : null}
           {justVoided && onCollect ? (
-            <Button type="button" variant="outline" className="mt-1 min-h-10 self-start" onClick={onCollect}>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-1 min-h-10 self-start"
+              onClick={onCollect}
+            >
               Ir a Cobrar
             </Button>
           ) : null}
@@ -325,7 +351,12 @@ export function TicketView({
               </p>
             )}
             {receipt ? (
-              <p className={cn("break-words text-sm", receipt.sent ? "text-muted-foreground" : "font-medium")}>
+              <p
+                className={cn(
+                  "break-words text-sm",
+                  receipt.sent ? "text-muted-foreground" : "font-medium",
+                )}
+              >
                 {receipt.sent
                   ? `El comprobante salió por correo a ${receipt.email}. También queda en su enlace, en «Tus papeles».`
                   : `${receipt.text}.`}
@@ -358,7 +389,9 @@ export function TicketView({
         <div className="flex flex-col gap-0.5">
           <p className="break-words">Paciente: {person}</p>
           {document ? <p className="text-muted-foreground">{document}</p> : null}
-          {payerName && payerName !== person ? <p className="break-words">Pagó: {payerName}</p> : null}
+          {payerName && payerName !== person ? (
+            <p className="break-words">Pagó: {payerName}</p>
+          ) : null}
           {snapshot.issuer?.name ? (
             <p className="break-words text-muted-foreground">Caja: {snapshot.issuer.name}</p>
           ) : null}
@@ -393,9 +426,15 @@ export function TicketView({
             {snapshot.taxes.groups
               .filter((group) => group.taxCents > 0)
               .map((group) => (
-                <Row key={`${group.category}-${group.rateBps}`} label={group.label} value={plain(group.taxCents)} />
+                <Row
+                  key={`${group.category}-${group.rateBps}`}
+                  label={group.label}
+                  value={plain(group.taxCents)}
+                />
               ))}
-            {untaxedNote ? <span className="text-xs text-muted-foreground">{untaxedNote}</span> : null}
+            {untaxedNote ? (
+              <span className="text-xs text-muted-foreground">{untaxedNote}</span>
+            ) : null}
           </div>
         ) : null}
         <Row label="TOTAL" value={money(ticket.totalCents)} strong />
@@ -445,7 +484,8 @@ export function TicketView({
             <Row label="Le falta pagar" value={money(stillOwed)} strong />
             {(snapshot.pending ?? []).map((item) => (
               <span key={item.chargeId} className="text-xs text-muted-foreground">
-                {item.description}: pagó {plain(item.amountCents - item.remainingCents)} de {plain(item.amountCents)}
+                {item.description}: pagó {plain(item.amountCents - item.remainingCents)} de{" "}
+                {plain(item.amountCents)}
               </span>
             ))}
           </div>
@@ -486,7 +526,12 @@ export function TicketView({
               />
             ) : null}
             {onDone ? (
-              <Button type="button" variant="outline" className="min-h-10 min-w-0 flex-1" onClick={onDone}>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-10 min-w-0 flex-1"
+                onClick={onDone}
+              >
                 Listo
               </Button>
             ) : null}
@@ -500,8 +545,8 @@ export function TicketView({
         </p>
       ) : !voided && canWrite && !canVoid ? (
         <p role="note" className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-          La caja ya se cerró después de este ticket: solo administración puede anularlo. Si el paciente pide su dinero,
-          usa «Devolver».
+          La caja ya se cerró después de este ticket: solo administración puede anularlo. Si el
+          paciente pide su dinero, usa «Devolver».
         </p>
       ) : null}
 
@@ -512,7 +557,10 @@ export function TicketView({
               to="/patients/$patientId"
               params={{ patientId: ticket.patientId }}
               search={{ tab: "cuenta" }}
-              className={cn(buttonVariants({ variant: "link" }), "h-auto min-w-0 whitespace-normal px-0 text-left")}
+              className={cn(
+                buttonVariants({ variant: "link" }),
+                "h-auto min-w-0 whitespace-normal px-0 text-left",
+              )}
             >
               Abrir la cuenta de {person}
             </Link>
@@ -521,7 +569,12 @@ export function TicketView({
           )}
           <div className="flex flex-wrap gap-2">
             {canReturn ? (
-              <Button type="button" variant="outline" className="min-h-10" onClick={() => setReturnOpen(true)}>
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-10"
+                onClick={() => setReturnOpen(true)}
+              >
                 Devolver
               </Button>
             ) : null}
@@ -531,8 +584,7 @@ export function TicketView({
                 variant="ghost"
                 className="min-h-10 text-destructive hover:text-destructive"
                 onClick={() => {
-                  setReason("")
-                  setError(null)
+                  voidForm.reset()
                   setVoidOpen(true)
                 }}
               >
@@ -544,6 +596,7 @@ export function TicketView({
       ) : null}
 
       <FormDrawer
+        {...voidSurface}
         dock={false}
         open={voidOpen}
         title="Anular ticket"
@@ -555,23 +608,10 @@ export function TicketView({
             </p>
           </div>
         }
-        error={error}
-        isSubmitting={voidMutation.isPending}
         submitLabel="Anular ticket"
         cancelLabel="No anular"
         onClose={() => {
-          if (!voidMutation.isPending) {
-            setVoidOpen(false)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Escribe el motivo de la anulación.")
-            return
-          }
-          voidMutation.mutate()
+          if (!voidSurface.isSubmitting) setVoidOpen(false)
         }}
       >
         <div className="flex flex-col gap-5">
@@ -579,8 +619,8 @@ export function TicketView({
             <p className="text-sm font-semibold">Al anularlo</p>
             <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm">
               <li>
-                El ticket queda marcado como <strong className="font-semibold">anulado</strong>. No se
-                borra.
+                El ticket queda marcado como <strong className="font-semibold">anulado</strong>. No
+                se borra.
               </li>
               {returnable.data ? (
                 <>
@@ -639,25 +679,22 @@ export function TicketView({
             </ul>
           </div>
           {paidByCard ? (
-            <p role="note" className="flex items-start gap-2 rounded-xl bg-warning-soft px-3 py-2 text-sm">
+            <p
+              role="note"
+              className="flex items-start gap-2 rounded-xl bg-warning-soft px-3 py-2 text-sm"
+            >
               <CreditCard className="mt-0.5 size-4 shrink-0" aria-hidden />
-              Anula también la operación en el terminal de la tarjeta. Si el terminal ya cerró el día, ahí será una
-              devolución.
+              Anula también la operación en el terminal de la tarjeta. Si el terminal ya cerró el
+              día, ahí será una devolución.
             </p>
           ) : null}
           <p className="text-sm text-muted-foreground">
-            Anular es para un error al cobrar. Si el paciente devuelve algo o pide su dinero, usa «Devolver».
+            Anular es para un error al cobrar. Si el paciente devuelve algo o pide su dinero, usa
+            «Devolver».
           </p>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-motivo`}>Motivo</FieldLabel>
-            <Textarea
-              id={`${uid}-motivo`}
-              rows={3}
-              maxLength={2000}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
+          <voidForm.AppField name="reason">
+            {(field) => <field.TextareaField label="Motivo" rows={3} maxLength={MAX_VOID_REASON} />}
+          </voidForm.AppField>
           <p role="note" className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
             {closedAfter
               ? "La caja ya se cerró después de este cobro. Lo anulas como administración: ese cierre no cambia."

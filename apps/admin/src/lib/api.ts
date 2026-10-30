@@ -20,7 +20,7 @@ const errorSchema = z.object({
       code: z.string().optional(),
       message: z.string().optional(),
       request_id: z.string().optional(),
-      details: z.unknown().optional(),
+      fields: z.record(z.string(), z.string()).optional(),
     })
     .optional(),
 })

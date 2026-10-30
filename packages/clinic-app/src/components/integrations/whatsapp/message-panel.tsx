@@ -1,11 +1,12 @@
-import { Badge, Button, buttonVariants, cn, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, Textarea, toast } from "@odentia/ui"
+import { ConfirmDialog, FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { Check, TriangleAlert } from "lucide-react"
-import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react"
+import { type RefObject, useEffect, useId, useRef, useState } from "react"
 import { flushSync } from "react-dom"
-import { ApiError, apiFetch } from "../../../lib/api"
+import { z } from "zod"
+import { apiFetch } from "../../../lib/api"
 import {
   type ClinicMessage,
   dataToken,
@@ -30,8 +31,49 @@ const STATUS_NOTE: Record<StatusTone, NoteTone> = { ok: "ok", waiting: "waiting"
 const STATUS_BADGE = { ok: "soft", waiting: "warning", danger: "destructive", off: "secondary" } as const
 const SECTION_TITLE = "text-sm font-semibold"
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError && error.shape.message ? error.shape.message : fallback
+/** Topes de `clinic-messages.ts` (`MESSAGE_TITLE_MAX`, `MESSAGE_BUTTON_MAX`): los mismos que comprueba el servidor. */
+const TITLE_MAX = 60
+const BUTTON_MAX = 20
+
+/** Lo que se escribe: el texto con cada dato como su nombre entre corchetes. */
+interface MessageDraft {
+  title: string
+  body: string
+  buttonTitle: string
+}
+
+const EMPTY_DRAFT: MessageDraft = { title: "", body: "", buttonTitle: "" }
+
+/**
+ * Lo que se sabe sin preguntarle al servidor. Para qué sirve y el botón solo
+ * se escriben al crear; al editar valen siempre. Las reglas del texto son las
+ * del servidor: se comprueban mientras se escribe y al enviar (`onChangeAsync`).
+ */
+function draftSchema(creating: boolean) {
+  return z.object({
+    title: creating
+      ? z
+          .string()
+          .trim()
+          .min(1, "Escribe para qué sirve el mensaje.")
+          .max(TITLE_MAX, `«Para qué sirve» admite hasta ${TITLE_MAX} caracteres.`)
+      : z.string(),
+    body: z.string().trim().min(1, "Escribe el texto del mensaje."),
+    buttonTitle: creating
+      ? z.string().trim().max(BUTTON_MAX, `El botón admite hasta ${BUTTON_MAX} caracteres.`)
+      : z.string(),
+  })
+}
+
+/** Las comprobaciones que no pasan, cada una en el campo que hay que cambiar. */
+function failedChecks(check: MessageCheck): Partial<Record<keyof MessageDraft, { message: string }[]>> {
+  const fields: Partial<Record<keyof MessageDraft, { message: string }[]>> = {}
+  for (const item of check.checks) {
+    if (item.ok) continue
+    fields[item.field] ??= []
+    fields[item.field]?.push({ message: item.text })
+  }
+  return fields
 }
 
 /** El motivo llega con las palabras del servidor (o de WhatsApp): solo se le asegura el punto final. */
@@ -204,7 +246,8 @@ function MessageView({
  *
  * El texto se escribe con cada dato como su nombre entre corchetes; al servidor
  * viaja con los datos por nombre. Las reglas del texto no viven aquí: la
- * pantalla muestra las comprobaciones y la vista previa que devuelve el servidor.
+ * vista previa la arma el servidor y, al enviar, cada comprobación suya que no
+ * pasa se dice en su campo (para qué sirve, texto o botón).
  */
 export function WhatsAppMessagePanel({
   connectionId,
@@ -238,53 +281,31 @@ export function WhatsAppMessagePanel({
   const mode: "view" | "edit" = creating || editing ? "edit" : "view"
   const data = creating ? newData : (message?.variables ?? [])
 
-  // El borrador vive aquí: que la lista se actualice por debajo no lo toca.
-  const [draft, setDraft] = useState("")
-  const [opened, setOpened] = useState("")
-  const [title, setTitle] = useState("")
-  const [buttonTitle, setButtonTitle] = useState("")
+  // El borrador vive en el formulario: que la lista se actualice por debajo no lo toca.
+  // Los valores iniciales cambian solo al empezar a editar (`startEdit`).
+  const [initial, setInitial] = useState<MessageDraft>(EMPTY_DRAFT)
   const [notice, setNotice] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<"delete" | "revert" | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
   const editButton = useRef<HTMLButtonElement>(null)
   const top = useRef<HTMLDivElement>(null)
-  const textId = useId()
-  const titleId = useId()
-  const buttonId = useId()
+  const noticeId = useId()
 
-  const isDirty =
-    mode === "edit" && (creating ? [draft, title, buttonTitle].some((value) => value.trim() !== "") : draft !== opened)
-  const body = toServerBody(draft, data)
-
-  // Al pasar de ver a editar (o al volver), la superficie empieza arriba y el foco no se pierde
-  // con el botón que desaparece: va al texto o regresa a «Editar el texto».
-  const shownMode = useRef(mode)
-  useEffect(() => {
-    if (shownMode.current === mode) return
-    shownMode.current = mode
-    top.current?.closest("[data-slot=scroll-area-viewport]")?.scrollTo({ top: 0 })
-    if (mode === "edit") {
-      // El cursor empieza al final: ahí cae lo primero que se escriba o se ponga con un botón.
-      const end = textarea.current?.value.length ?? 0
-      textarea.current?.focus({ preventScroll: true })
-      textarea.current?.setSelectionRange(end, end)
-    } else editButton.current?.focus({ preventScroll: true })
-  }, [mode])
-
-  const request = JSON.stringify(creating ? { title, body, buttonTitle } : { messageId: message?.id, body })
-  const settled = useSettled(request, 400)
-  const checkQuery = useQuery({
-    queryKey: ["whatsapp-message-check", connectionId, settled],
-    queryFn: () => apiFetch<{ data: MessageCheck }>(`${base}/check`, { method: "POST", body: settled }),
-    // Uno nuevo no se comprueba hasta que haya algo escrito: no se abre con errores.
-    enabled: mode === "edit" && canWrite && (creating ? isDirty : true),
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-    retry: false,
-  })
-  const check = checkQuery.data?.data
-  const checkIsCurrent = settled === request && !checkQuery.isPlaceholderData && !checkQuery.isFetching
+  /** Lo que se le pregunta al servidor para comprobar el texto y armar la vista previa. */
+  function checkRequest(value: MessageDraft): string {
+    const body = toServerBody(value.body, data)
+    return JSON.stringify(
+      creating ? { title: value.title, body, buttonTitle: value.buttonTitle } : { messageId: message?.id, body },
+    )
+  }
+  function checkQueryOptions(request: string) {
+    return {
+      queryKey: ["whatsapp-message-check", connectionId, request],
+      queryFn: () => apiFetch<{ data: MessageCheck }>(`${base}/check`, { method: "POST", body: request }),
+      staleTime: 30_000,
+      retry: false,
+    }
+  }
 
   function store(item: ClinicMessage) {
     const key = whatsappMessagesKey(connectionId)
@@ -302,24 +323,26 @@ export function WhatsAppMessagePanel({
     void queryClient.invalidateQueries({ queryKey: ["connections"] })
   }
 
+  // Si WhatsApp o una regla del texto no lo aceptan, el servidor dice por qué y en qué campo.
   const save = useMutation({
-    mutationFn: () =>
-      creating
+    mutationFn: (value: MessageDraft) => {
+      const body = toServerBody(value.body, data)
+      return creating
         ? apiFetch<{ data: ClinicMessage }>(base, {
             method: "POST",
             body: JSON.stringify({
-              title: title.trim(),
+              title: value.title.trim(),
               body,
-              ...(buttonTitle.trim() ? { buttonTitle: buttonTitle.trim() } : {}),
+              ...(value.buttonTitle.trim() ? { buttonTitle: value.buttonTitle.trim() } : {}),
             }),
           })
         : apiFetch<{ data: ClinicMessage }>(`${base}/${encodeURIComponent(message?.id ?? "")}/text`, {
             method: "PUT",
             body: JSON.stringify({ body }),
-          }),
+          })
+    },
     onSuccess: ({ data: saved }) => {
       store(saved)
-      setError(null)
       setEditing(false)
       // Lo que pasó lo dice la respuesta: un texto nuevo entra a revisión; volver a uno que ya
       // estaba (desistir de un cambio, o el de odentIA ya aprobado) no pide otra.
@@ -330,9 +353,53 @@ export function WhatsAppMessagePanel({
       )
       if (creating) onCreated(saved)
     },
-    // Si WhatsApp o una regla del texto no lo aceptan, el servidor dice por qué.
-    onError: (failure) => setError(errorText(failure, "No pudimos guardar el mensaje. Vuelve a intentarlo.")),
   })
+
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: {
+      onSubmit: draftSchema(creating),
+      // Las reglas del texto son las del servidor, con sus frases: mientras se escribe, cada una que
+      // no pasa se dice en su campo (como antes la lista de comprobaciones) y al enviar se comprueban
+      // otra vez. Si no se pudo preguntar, no bloquea: al guardar el servidor comprueba de nuevo.
+      onChangeAsyncDebounceMs: 400,
+      onChangeAsync: async ({ value }) => {
+        const check = await queryClient.fetchQuery(checkQueryOptions(checkRequest(value))).catch(() => null)
+        return check && !check.data.ok ? { fields: failedChecks(check.data) } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value)
+    },
+  })
+  const surface = useFormSurface(form)
+  const values = useStore(form.store, (state) => state.values)
+  const hasText = [values.title, values.body, values.buttonTitle].some((value) => value.trim() !== "")
+
+  // Al pasar de ver a editar (o al volver), la superficie empieza arriba y el foco no se pierde
+  // con el botón que desaparece: va al texto o regresa a «Editar el texto».
+  const shownMode = useRef(mode)
+  useEffect(() => {
+    if (shownMode.current === mode) return
+    shownMode.current = mode
+    top.current?.closest("[data-slot=scroll-area-viewport]")?.scrollTo({ top: 0 })
+    if (mode === "edit") {
+      // El cursor empieza al final: ahí cae lo primero que se escriba o se ponga con un botón.
+      const end = textarea.current?.value.length ?? 0
+      textarea.current?.focus({ preventScroll: true })
+      textarea.current?.setSelectionRange(end, end)
+    } else editButton.current?.focus({ preventScroll: true })
+  }, [mode])
+
+  // La vista previa la arma el servidor mientras se escribe.
+  const settled = useSettled(checkRequest(values), 400)
+  const checkQuery = useQuery({
+    ...checkQueryOptions(settled),
+    // Uno nuevo no se comprueba hasta que haya algo escrito.
+    enabled: mode === "edit" && canWrite && (creating ? hasText : true),
+    placeholderData: keepPreviousData,
+  })
+  const check = checkQuery.data?.data
 
   const revert = useMutation({
     mutationFn: () =>
@@ -340,13 +407,8 @@ export function WhatsAppMessagePanel({
     onSuccess: ({ data: saved }) => {
       store(saved)
       setConfirming(null)
-      setError(null)
       setEditing(false)
       setNotice(saved.pending ? `El texto de ${appWords().name} entró a revisión de WhatsApp.` : `Listo: vuelve el texto de ${appWords().name}.`)
-    },
-    onError: (failure) => {
-      setConfirming(null)
-      setError(errorText(failure, `No pudimos volver al texto de ${appWords().name}. Vuelve a intentarlo.`))
     },
   })
 
@@ -364,17 +426,20 @@ export function WhatsAppMessagePanel({
       onClose()
     },
   })
-  const removeError = remove.isError
-    ? errorText(remove.error, "No pudimos eliminar el mensaje. Vuelve a intentarlo.")
-    : null
+
+  /** Abre una confirmación sin el error de un intento anterior. */
+  function ask(kind: "delete" | "revert") {
+    remove.reset()
+    revert.reset()
+    setConfirming(kind)
+  }
 
   function startEdit() {
     if (!message) return
     // Si hay un cambio en espera o rechazado, se sigue desde ese texto: es el último que escribió la clínica.
-    const text = toFieldText((message.pending ?? message.current).body, message.variables)
-    setDraft(text)
-    setOpened(text)
-    setError(null)
+    const opened = { ...EMPTY_DRAFT, body: toFieldText((message.pending ?? message.current).body, message.variables) }
+    setInitial(opened)
+    form.reset(opened)
     setNotice(null)
     setEditing(true)
   }
@@ -383,32 +448,26 @@ export function WhatsAppMessagePanel({
   function close() {
     if (editing && message) {
       setEditing(false)
-      setError(null)
       return
     }
     onClose()
   }
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (mode !== "edit" || !canWrite || !isDirty) return
-    setError(null)
-    save.mutate()
-  }
-
   function put(item: MessageData) {
-    const field = textarea.current
-    const end = draft.length
-    const next = insertAtCursor(draft, dataToken(item.label), field?.selectionStart ?? end, field?.selectionEnd ?? end)
+    const element = textarea.current
+    const text = form.getFieldValue("body")
+    const end = text.length
+    const next = insertAtCursor(text, dataToken(item.label), element?.selectionStart ?? end, element?.selectionEnd ?? end)
     // El texto se pinta antes de mover el cursor: queda justo después del dato y se sigue escribiendo ahí.
-    flushSync(() => setDraft(next.text))
-    field?.focus()
-    field?.setSelectionRange(next.cursor, next.cursor)
+    flushSync(() => form.setFieldValue("body", next.text))
+    element?.focus()
+    element?.setSelectionRange(next.cursor, next.cursor)
   }
 
   const busy = save.isPending || revert.isPending || remove.isPending
   const required = data.some((item) => item.required)
-  const editButtons = creating ? (buttonTitle.trim() ? [buttonTitle.trim()] : []) : (message?.buttons ?? []).map((button) => button.title)
+  const buttonTitle = values.buttonTitle.trim()
+  const editButtons = creating ? (buttonTitle ? [buttonTitle] : []) : (message?.buttons ?? []).map((button) => button.title)
   const previewParts = check?.previewParts ?? (message ? (message.pending ?? message.current).previewParts : [])
   // Mientras no cambie nada, el texto vigente sigue saliendo solo si está aprobado.
   const keepsSending = message?.current.status === "aprobada"
@@ -423,19 +482,17 @@ export function WhatsAppMessagePanel({
   return (
     <>
       <FormDrawer
+        {...surface}
         open
         onClose={close}
         title={heading}
         description={description}
-        onSubmit={submit}
-        isDirty={isDirty}
-        isSubmitting={save.isPending}
+        // Solo un borrador abierto tiene cambios que perder.
+        isDirty={mode === "edit" && surface.isDirty}
         isLoading={loading}
-        error={error}
         submitLabel="Enviar a revisión"
         cancelLabel={mode === "edit" ? "Cancelar" : "Cerrar"}
         hideSubmit={mode === "view" || !canWrite}
-        submitDisabled={!isDirty || (checkIsCurrent && check !== undefined && !check.ok)}
       >
         <div ref={top} />
         {mode === "view" && message ? (
@@ -449,16 +506,13 @@ export function WhatsAppMessagePanel({
               busy={busy}
               editRef={editButton}
               onEdit={startEdit}
-              onRevert={() => setConfirming("revert")}
-              onDelete={() => {
-                remove.reset()
-                setConfirming("delete")
-              }}
+              onRevert={() => ask("revert")}
+              onDelete={() => ask("delete")}
             />
           </div>
         ) : mode === "edit" ? (
           <div className="flex flex-col gap-5">
-            <div id={`${textId}-aviso`}>
+            <div id={noticeId}>
               {creating ? (
                 <Note tone="waiting" title="Al guardar, WhatsApp lo revisa">
                   <span>Puede tardar hasta un día. Mientras tanto no se ofrece en la Bandeja.</span>
@@ -475,70 +529,75 @@ export function WhatsAppMessagePanel({
             </div>
 
             {creating ? (
-              <Field>
-                <FieldLabel htmlFor={titleId}>Para qué sirve</FieldLabel>
-                <Input
-                  id={titleId}
-                  className="h-11 sm:h-9"
-                  value={title}
-                  aria-describedby={`${titleId}-ayuda`}
-                  onChange={(event) => setTitle(event.target.value)}
-                />
-                <FieldDescription id={`${titleId}-ayuda`}>
-                  Con este nombre lo elige tu equipo en la Bandeja. La persona no lo ve.
-                </FieldDescription>
-              </Field>
+              <form.AppField name="title">
+                {(field) => (
+                  <field.TextField
+                    label="Para qué sirve"
+                    description="Con este nombre lo elige tu equipo en la Bandeja. La persona no lo ve."
+                    inputClassName="h-11 sm:h-9"
+                    maxLength={TITLE_MAX}
+                  />
+                )}
+              </form.AppField>
             ) : null}
 
-            <Field>
-              <FieldLabel htmlFor={textId}>Texto</FieldLabel>
-              <Textarea
-                id={textId}
-                ref={textarea}
-                className="min-h-32"
-                value={draft}
-                aria-describedby={`${textId}-aviso ${textId}-ayuda`}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              {data.length > 0 ? (
-                <div role="group" aria-label="Datos que pone el sistema" className="flex flex-wrap gap-1.5">
-                  {data.map((item) => (
-                    <Button
-                      key={item.key}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-auto min-h-11 max-w-full shrink py-1.5 text-left whitespace-normal sm:min-h-8"
-                      onClick={() => put(item)}
-                    >
-                      Poner «{item.label}»
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-              <FieldDescription id={`${textId}-ayuda`}>
-                Lo que va entre corchetes lo pone el sistema al enviar; los botones de arriba lo ponen donde está el cursor.{" "}
-                {required
-                  ? "Se puede mover de sitio, no quitar: sin esos datos el mensaje no dice nada."
-                  : "Puedes usarlos o no."}
-              </FieldDescription>
-            </Field>
+            <form.AppField name="body">
+              {(field) => (
+                <field.Control
+                  label="Texto"
+                  description={
+                    <>
+                      Lo que va entre corchetes lo pone el sistema al enviar; los botones de arriba lo ponen donde está el
+                      cursor.{" "}
+                      {required
+                        ? "Se puede mover de sitio, no quitar: sin esos datos el mensaje no dice nada."
+                        : "Puedes usarlos o no."}
+                    </>
+                  }
+                >
+                  {(control) => (
+                    <>
+                      <Textarea
+                        {...control.props}
+                        ref={textarea}
+                        className="min-h-32"
+                        value={field.state.value}
+                        aria-describedby={[noticeId, control.describedBy].filter(Boolean).join(" ")}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      {data.length > 0 ? (
+                        <div role="group" aria-label="Datos que pone el sistema" className="flex flex-wrap gap-1.5">
+                          {data.map((item) => (
+                            <Button
+                              key={item.key}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-auto min-h-11 max-w-full shrink py-1.5 text-left whitespace-normal sm:min-h-8"
+                              onClick={() => put(item)}
+                            >
+                              Poner «{item.label}»
+                            </Button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
 
             {creating ? (
-              <Field>
-                <FieldLabel htmlFor={buttonId}>Botón de respuesta (opcional)</FieldLabel>
-                <Input
-                  id={buttonId}
-                  className="h-11 sm:h-9"
-                  value={buttonTitle}
-                  aria-describedby={`${buttonId}-ayuda`}
-                  onChange={(event) => setButtonTitle(event.target.value)}
-                />
-                <FieldDescription id={`${buttonId}-ayuda`}>
-                  Si lo pones, la persona responde con un toque y tu equipo puede seguir la conversación. Después de crear el
-                  mensaje no se cambia.
-                </FieldDescription>
-              </Field>
+              <form.AppField name="buttonTitle">
+                {(field) => (
+                  <field.TextField
+                    label="Botón de respuesta (opcional)"
+                    description="Si lo pones, la persona responde con un toque y tu equipo puede seguir la conversación. Después de crear el mensaje no se cambia."
+                    inputClassName="h-11 sm:h-9"
+                    maxLength={BUTTON_MAX}
+                  />
+                )}
+              </form.AppField>
             ) : editButtons.length > 0 ? (
               <section aria-label="Botones" className="flex flex-col gap-1.5">
                 <h3 className={SECTION_TITLE}>Botones</h3>
@@ -567,30 +626,6 @@ export function WhatsAppMessagePanel({
               )}
             </section>
 
-            {/* Las comprobaciones son las del servidor, con sus frases: las mismas que al guardar. */}
-            <div role="status" aria-label="Comprobaciones del texto">
-              {check ? (
-                <ul className="flex flex-col gap-1.5 rounded-xl bg-muted px-3.5 py-3 text-sm">
-                  {check.checks.map((item) => (
-                    <li key={item.text} className={cn("flex gap-2", item.ok ? "" : "font-medium text-destructive")}>
-                      {item.ok ? (
-                        <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-primary-soft-foreground" />
-                      ) : (
-                        <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-                      )}
-                      <span>{item.text}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : checkQuery.isFetching ? (
-                <p className="text-sm text-muted-foreground">Comprobando el texto…</p>
-              ) : checkQuery.isError ? (
-                <p className="text-sm text-muted-foreground">
-                  No pudimos comprobar el texto ahora. Al enviarlo a revisión se comprueba igual.
-                </p>
-              ) : null}
-            </div>
-
             <p className="text-sm text-muted-foreground">
               Si le agregas una oferta, WhatsApp puede contarlo como marketing y cobrarlo distinto.
             </p>
@@ -598,7 +633,7 @@ export function WhatsAppMessagePanel({
             {message && (message.canRevert || message.deletable) ? (
               <div className="flex flex-wrap gap-2 border-t pt-4">
                 {message.canRevert ? (
-                  <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-8" disabled={busy} onClick={() => setConfirming("revert")}>
+                  <Button type="button" variant="link" className="h-auto min-h-11 p-0 sm:min-h-8" disabled={busy} onClick={() => ask("revert")}>
                     Volver al texto de {appWords().name}
                   </Button>
                 ) : null}
@@ -608,10 +643,7 @@ export function WhatsAppMessagePanel({
                     variant="destructive"
                     className="min-h-11 sm:min-h-9"
                     disabled={busy}
-                    onClick={() => {
-                      remove.reset()
-                      setConfirming("delete")
-                    }}
+                    onClick={() => ask("delete")}
                   >
                     Eliminar
                   </Button>
@@ -631,6 +663,7 @@ export function WhatsAppMessagePanel({
         description={`Se deja de usar el texto que escribió la clínica. Si el de ${appWords().name} ya está aprobado, sale desde ahora; si no, WhatsApp lo revisa primero y mientras tanto sigue saliendo el actual.`}
         confirmLabel={`Volver al texto de ${appWords().name}`}
         pending={revert.isPending}
+        error={revert.isError ? submitErrorMessage(revert.error) : null}
       />
       <ConfirmDialog
         open={confirming === "delete"}
@@ -640,13 +673,8 @@ export function WhatsAppMessagePanel({
         description={`«${message?.title ?? ""}» dejará de ofrecerse en la Bandeja y se quitará de tu cuenta de WhatsApp. Lo que ya se envió sigue en sus conversaciones.`}
         confirmLabel="Eliminar"
         pending={remove.isPending}
-      >
-        {removeError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {removeError}
-          </p>
-        ) : null}
-      </ConfirmDialog>
+        error={remove.isError ? submitErrorMessage(remove.error) : null}
+      />
     </>
   )
 }

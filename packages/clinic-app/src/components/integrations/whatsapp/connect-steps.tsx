@@ -1,10 +1,12 @@
 import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import { SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, ChevronDown } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../../lib/api"
+import { type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { apiFetch } from "../../../lib/api"
 import type { ConnectionItem, OwnAppState } from "../../../lib/crm"
+import { channelFieldsSchema, connectionConfigField } from "../../../lib/integrations"
 import { PageDraftGuard } from "../../../lib/page-draft-guard"
 import {
   accountWords,
@@ -23,12 +25,8 @@ import { OwnAppGuide } from "./own-app-guide"
 import { OwnAppStatus } from "./own-app-status"
 import { appWords } from "../../../lib/product-words"
 
-/** El dato que corrige cada rechazo de las claves: el foco va a ese campo. */
-const FIELD_OF_ERROR: Record<string, string> = {
-  WHATSAPP_APP_SECRET_REJECTED: "appSecret",
-  WHATSAPP_TEMPORARY_KEY: "accessToken",
-  WHATSAPP_KEY_SCOPES: "accessToken",
-}
+/** Los cuatro datos, todos obligatorios. */
+const accountSchema = channelFieldsSchema(WHATSAPP_FIELDS)
 
 /** Tiempo esperando el primer mensaje antes de ofrecer qué revisar. */
 const FIRST_MESSAGE_HELP_MS = 3 * 60_000
@@ -115,11 +113,7 @@ function WhereToFind() {
 /** Paso 1 sin conexión: los cuatro datos y «Comprobar», que dice qué número encontró. */
 function AccountForm({ idPrefix, onCreated }: { idPrefix: string; onCreated: (created: ConnectResult) => void }) {
   const queryClient = useQueryClient()
-  const [values, setValues] = useState<Record<string, string>>({})
   const [shown, setShown] = useState<Record<string, boolean>>({})
-  const [missing, setMissing] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const isDirty = Object.values(values).some((value) => value.trim() !== "")
 
   const connect = useMutation({
     mutationFn: (config: Record<string, string>) =>
@@ -133,47 +127,37 @@ function AccountForm({ idPrefix, onCreated }: { idPrefix: string; onCreated: (cr
       onCreated(data)
       await queryClient.invalidateQueries({ queryKey: ["connections"] })
     },
-    // El servidor ya dice qué pasó y cómo arreglarlo; si es de una clave, el foco va a esa clave.
-    onError: (failure) => {
-      setError(
-        failure instanceof ApiError && failure.shape.message
-          ? failure.shape.message
-          : "No pudimos conectar WhatsApp. Revisa los datos y vuelve a intentarlo.",
-      )
-      const field = failure instanceof ApiError && failure.shape.code ? FIELD_OF_ERROR[failure.shape.code] : undefined
-      if (field) document.getElementById(`${idPrefix}-${field}`)?.focus()
-    },
   })
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    setError(null)
-    const config = Object.fromEntries(WHATSAPP_FIELDS.map((field) => [field.key, (values[field.key] ?? "").trim()] as const))
-    const empty = WHATSAPP_FIELDS.filter((field) => !config[field.key]).map((field) => field.key)
-    setMissing(empty)
-    if (empty.length === 0) connect.mutate(config)
-    // Lo que falta se dice en cada campo y el foco va al primero.
-    else document.getElementById(`${idPrefix}-${empty[0]}`)?.focus()
-  }
+  const form = useAppForm({
+    defaultValues: Object.fromEntries(WHATSAPP_FIELDS.map((field) => [field.key, ""])) as Record<string, string>,
+    validators: { onSubmit: accountSchema },
+    onSubmit: async ({ value }) => {
+      const config = Object.fromEntries(WHATSAPP_FIELDS.map((field) => [field.key, (value[field.key] ?? "").trim()]))
+      await connect.mutateAsync(config)
+    },
+  })
+  // El servidor dice qué dato no aceptó WhatsApp (`config.accessToken`…): se dice en ese campo.
+  const submit = useFormSubmit(form, { fieldMap: connectionConfigField })
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const isDirty = useStore(form.store, (state) => Object.values(state.values).some((value) => value.trim() !== ""))
 
   return (
     <form noValidate onSubmit={submit} className="flex flex-col gap-4">
       {/* Lo escrito se conserva: salir de la página pregunta antes. */}
-      <PageDraftGuard dirty={isDirty && !connect.isPending && !connect.isSuccess} />
+      <PageDraftGuard dirty={isDirty && !pending && !connect.isSuccess} />
       {WHATSAPP_FIELDS.map((field) => (
-        <AccountField
-          key={field.key}
-          id={`${idPrefix}-${field.key}`}
-          field={field}
-          value={values[field.key] ?? ""}
-          shown={Boolean(shown[field.key])}
-          error={missing.includes(field.key) ? "Escribe este dato." : null}
-          onChange={(value) => {
-            setValues((current) => ({ ...current, [field.key]: value }))
-            setMissing((current) => current.filter((key) => key !== field.key))
-          }}
-          onToggleShown={() => setShown((current) => ({ ...current, [field.key]: !current[field.key] }))}
-        />
+        <form.AppField key={field.key} name={field.key}>
+          {() => (
+            <AccountField
+              id={`${idPrefix}-${field.key}`}
+              field={field}
+              shown={Boolean(shown[field.key])}
+              onToggleShown={() => setShown((current) => ({ ...current, [field.key]: !current[field.key] }))}
+            />
+          )}
+        </form.AppField>
       ))}
       <WhereToFind />
       {error ? (
@@ -182,7 +166,7 @@ function AccountForm({ idPrefix, onCreated }: { idPrefix: string; onCreated: (cr
         </p>
       ) : null}
       <div className="flex flex-col gap-1.5">
-        <SubmitButton type="submit" pending={connect.isPending} className="h-11 self-start px-5">
+        <SubmitButton type="submit" pending={pending} className="h-11 self-start px-5">
           Comprobar
         </SubmitButton>
         <p className="text-sm text-muted-foreground">

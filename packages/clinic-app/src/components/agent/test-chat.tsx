@@ -10,11 +10,12 @@ import {
   Input,
   ScrollArea,
 } from "@odentia/ui"
-import { DataRefreshMarker } from "@odentia/ui-patterns"
+import { DataRefreshMarker, submitErrorMessage, submitForm, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ChevronRight, CircleAlert, CircleCheck, Ellipsis, SendHorizontal, X } from "lucide-react"
-import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from "react"
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import {
   ANSWER_CHECK_LABEL,
   type ProbarCreated,
@@ -23,9 +24,9 @@ import {
   type TestCaseItem,
 } from "../../lib/agent"
 import { useReceptionName } from "../../lib/agent-names"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { appWords } from "../../lib/product-words"
-import { mutationErrorMessage } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 
 /** Los mensajes para empezar, con lo que se pide en el producto de la app. */
 const starters = () => [
@@ -41,6 +42,13 @@ export const PROBAR_INPUT = "probar-mensaje"
 
 /** Mientras el agente atiende, se mira seguido; si no, no hace falta. */
 const POLL_MS = 1500
+
+const MESSAGE_CHARS = 2000
+
+/** Lo que admite `POST /api/agent/probar/messages`, con sus mismas palabras. */
+const messageSchema = z.object({
+  text: z.string().trim().min(1, "Escribe el mensaje del paciente.").max(MESSAGE_CHARS, `Escribe como mucho ${MESSAGE_CHARS} caracteres.`),
+})
 
 /**
  * «Probar» (ADR 0094): una conversación real con el agente, por el mismo
@@ -61,7 +69,6 @@ export function AgentTestChat({
 }) {
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
-  const [draft, setDraft] = useState("")
   /** Lo que se envió y aún no llegó de vuelta: se ve enseguida, como en cualquier chat. */
   const [sending, setSending] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
@@ -87,20 +94,31 @@ export function AgentTestChat({
         method: "POST",
         body: JSON.stringify({ text, clientMessageId: crypto.randomUUID() }),
       }),
-    onMutate: (text) => {
-      setSending(text)
-      setDraft("")
-    },
+    onMutate: (text) => setSending(text),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: PROBAR_KEY })
       void queryClient.invalidateQueries({ queryKey: ["agent-overview"] })
     },
-    // El mensaje sin enviar vuelve al campo para reintentar.
-    onError: (_error, text) => {
-      setSending(null)
-      setDraft(text)
+    onError: () => setSending(null),
+  })
+  const form = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: messageSchema },
+    onSubmit: async ({ value }) => {
+      const text = value.text.trim()
+      // Lo enviado se ve enseguida en la conversación, como en cualquier chat.
+      form.setFieldValue("text", "")
+      try {
+        await send.mutateAsync(text)
+      } catch (error) {
+        // El mensaje sin enviar vuelve al campo para reintentar.
+        form.setFieldValue("text", text)
+        throw error
+      }
     },
   })
+  const onSubmit = useFormSubmit(form)
+  const sendError = useFormSubmitError(form)
   // «Lo probaste» cuenta las respuestas del modelo, que llegan después del envío:
   // con cada respuesta nueva se vuelve a pedir el resumen del agente.
   const answered = state?.turns.length ?? 0
@@ -168,22 +186,8 @@ export function AgentTestChat({
     if (messageCount > 0 || typing) endRef.current?.scrollIntoView({ block: "end" })
   }, [messageCount, typing])
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    const text = draft.trim()
-    if (!text || send.isPending || sending) return
-    send.mutate(text)
-  }
-
   const empty = !state || (state.messages.length === 0 && !sending)
-  const error =
-    send.error instanceof ApiError
-      ? (send.error.shape.message ?? "No pudimos enviarlo")
-      : send.error
-        ? "No pudimos enviarlo. Vuelve a intentarlo."
-        : restart.error
-          ? mutationErrorMessage(restart.error)
-          : null
+  const error = sendError ?? (restart.isError ? submitErrorMessage(restart.error) : null)
   const saved = cases.data?.data.filter((item) => item.agent === "recepcion").length
 
   return (
@@ -270,9 +274,7 @@ export function AgentTestChat({
           {probar.isPending ? (
             <DataRefreshMarker message="Cargando la prueba…" />
           ) : probar.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {mutationErrorMessage(probar.error)}
-            </p>
+            <QueryErrorState error={probar.error} onRetry={() => void probar.refetch()} />
           ) : empty ? (
             <p className="m-auto max-w-64 text-center text-sm text-muted-foreground">
               {receptionName} te responde como a un paciente que escribe por el chat de tu sitio.
@@ -291,7 +293,7 @@ export function AgentTestChat({
           ) : null}
           {saveCase.isError ? (
             <p role="alert" className="text-xs text-destructive">
-              {mutationErrorMessage(saveCase.error)}
+              {submitErrorMessage(saveCase.error)}
             </p>
           ) : null}
           <div ref={endRef} />
@@ -317,7 +319,10 @@ export function AgentTestChat({
                     size="sm"
                     className="min-h-11 shrink-0 rounded-full sm:min-h-8"
                     disabled={send.isPending || Boolean(sending)}
-                    onClick={() => send.mutate(starter.text)}
+                    onClick={() => {
+                      form.setFieldValue("text", starter.text)
+                      void submitForm(form)
+                    }}
                   >
                     {starter.label}
                   </Button>
@@ -331,27 +336,32 @@ export function AgentTestChat({
             {error}
           </p>
         ) : null}
-        <form onSubmit={submit} className="flex items-center gap-2">
-          <label htmlFor={PROBAR_INPUT} className="sr-only">
-            Mensaje de prueba
-          </label>
-          <Input
-            ref={inputRef}
-            id={PROBAR_INPUT}
-            value={draft}
-            maxLength={2000}
-            autoComplete="off"
-            enterKeyHint="send"
-            className="h-11 min-w-0 flex-1 rounded-full border-0 bg-muted px-4"
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Escribe como paciente…"
-          />
+        <form noValidate onSubmit={onSubmit} className="flex items-start gap-2">
+          <form.AppField name="text">
+            {(field) => (
+              <field.Control id={PROBAR_INPUT} label="Mensaje de prueba" hideLabel className="min-w-0 flex-1">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    ref={inputRef}
+                    value={field.state.value}
+                    maxLength={MESSAGE_CHARS}
+                    autoComplete="off"
+                    enterKeyHint="send"
+                    className="h-11 min-w-0 flex-1 rounded-full border-0 bg-muted px-4"
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder="Escribe como paciente…"
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
           <Button
             type="submit"
             size="icon"
             className="size-11 shrink-0 rounded-full"
             aria-label="Enviar el mensaje de prueba"
-            disabled={!draft.trim() || send.isPending || Boolean(sending)}
+            disabled={send.isPending || Boolean(sending)}
           >
             <SendHorizontal aria-hidden />
           </Button>

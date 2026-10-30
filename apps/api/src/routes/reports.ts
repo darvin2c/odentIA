@@ -74,7 +74,7 @@ const reportQuery = z.object({
  */
 const argosInput = z
   .object({
-    text: z.string().trim().min(3, "Escribe tu pregunta").max(500, "La pregunta es demasiado larga"),
+    text: z.string().trim().min(3, "Escribe tu pregunta: al menos 3 caracteres.").max(500, "La pregunta es demasiado larga: como mucho 500 caracteres."),
     screen: reportQuery.optional(),
     previous: z.object({ text: z.string().trim().max(500), query: z.string().trim().max(4000) }).strict().nullable().optional(),
     /** La fila ya la decidió el buscador (D1): no se paga otra vez a Jev. */
@@ -130,7 +130,7 @@ async function sendCsv(c: Context, make: () => Promise<CsvFile>) {
       "cache-control": "no-store",
     })
   } catch (error) {
-    if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message), error.status)
+    if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
     throw error
   }
 }
@@ -242,7 +242,7 @@ export function createReportsRoute(deps: ReportsDeps) {
         const data = await ask((text) => void send({ step: text }))
         await send({ data })
       } catch (error) {
-        if (error instanceof ServiceError) await send({ ...errorBody(c, error.code, error.message), status: error.status })
+        if (error instanceof ServiceError) await send({ ...errorBody(c, error.code, error.message, error.fields), status: error.status })
         else {
           console.error(error)
           await send({ ...errorBody(c, "INTERNAL", "No se pudo responder. Prueba de nuevo."), status: 500 })

@@ -1,70 +1,87 @@
-import { Badge, Button, buttonVariants, cn, ScrollArea, Separator, Spinner, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, internationalText, LoadingState } from "@odentia/ui-patterns"
+import { Button, cn, ScrollArea, Spinner } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  DetailDrawer,
+  EmptyState,
+  internationalText,
+  LoadingState,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useBlocker } from "@tanstack/react-router"
-import {
-  Bot,
-  CheckCircle2,
-  Copy,
-  Plus,
-  RefreshCw,
-  UserPlus,
-  X,
-} from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { ChevronLeft, ChevronRight, Plus, RefreshCw, X } from "lucide-react"
+import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
+import { useReceptionName, withReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
-import { ACTION_LABEL, permissionForAction, proposalErrorMessage, type AgentProposal } from "../../lib/agent"
-import { channelIcon, channelLabel, identityText } from "../../lib/channels"
-import { timeAgo, usePermission, type OpportunityListItem, type TaskItem } from "../../lib/crm"
+import { channelLabel } from "../../lib/channels"
+import { type OpportunityListItem, type TaskItem, timeAgo, useCan } from "../../lib/crm"
 import {
   activityKindLabel,
-  agentNextSteps,
-  agentStateDescription,
-  agentStateLabel,
+  type CrmActivityItem,
+  type CrmNextAppointment,
+  createCrmNote,
   crmActivityQueryKey,
   crmContextQueryKey,
-  createCrmNote,
   fetchCrmActivityPage,
   fetchCrmContext,
   messagePermissionsSaid,
   nextAppointmentSaid,
-  type CrmActivityItem,
 } from "../../lib/crm-workspace"
+import { activeOrgLocale } from "../../lib/locale"
 import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
-import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
-import { dueWords, isOverdue } from "./crm-helpers"
+import type { PatientFull } from "../../lib/patients"
+import { usePerson } from "../../lib/people"
+import { amountFromCents } from "../../lib/workspace"
+import { productUi } from "../../product/product-ui"
 import { PersonMemoryDrawer } from "../agent/person-memory"
-import { useCompleteTask } from "./resolve-preview"
+import { CitasPanel } from "../patient/citas-panel"
+import { PersonData } from "../person/person-data"
+import { dueWords, isOverdue } from "./crm-helpers"
 import { OpportunityDrawer } from "./opportunity-drawer"
 import { OpportunityPanel } from "./opportunity-panel"
-import { TaskDrawer } from "./task-drawer"
-import { PersonLink } from "../person-link"
-import { activeOrgLocale } from "../../lib/locale"
-import { useReceptionName, withReceptionName } from "../../lib/agent-names"
-import { amountFromCents } from "../../lib/workspace"
 import { PhoneMatchPrompt } from "./phone-match"
+import { useCompleteTask } from "./resolve-preview"
+import { TaskDrawer } from "./task-drawer"
 
-export interface ContactWorkspaceProps {
+const AccountTab = lazy(() => import("../patient/account-tab").then((m) => ({ default: m.AccountTab })))
+const AntecedentesTab = lazy(() => import("../patient/antecedentes-tab").then((m) => ({ default: m.AntecedentesTab })))
+const DocumentosSection = lazy(() => import("../patient/documentos-panel").then((m) => ({ default: m.DocumentosSection })))
+const HistoriaTab = lazy(() => import("../patient/historia-tab").then((m) => ({ default: m.HistoriaTab })))
+const PlanTab = lazy(() => import("../patient/plan-tab").then((m) => ({ default: m.PlanTab })))
+
+export type ContextSection = "citas" | "plan" | "clinica" | "alertas" | "cobros" | "ventas" | "datos" | "notas"
+
+/** Lo que entrega el servidor: quién es y una línea por cada sección que este rol puede abrir. */
+interface ConversationContext {
   contactId: string
-  conversationId?: string
-  onRefresh?: () => void
-  onClose?: () => void
-  /** Informa a la bandeja si hay borrador sin guardar (para guardar el cierre del panel). */
-  onDraftChange?: (dirty: boolean) => void
-  /**
-   * Dentro del cajón estándar (Bandeja en el celular): sin su propia tarjeta ni
-   * su botón de cerrar, que los pone el cajón.
-   */
-  bare?: boolean
+  patientId: string | null
+  name: string
+  phone: string | null
+  email: string | null
+  nextAppointment: CrmNextAppointment | null
+  lines: Partial<Record<"plan" | "alertas" | "cobros" | "ventas" | "datos" | "recuerda", string>>
+  attention: Array<"alertas" | "cobros" | "datos">
 }
 
+export const conversationContextKey = (conversationId: string) => ["conversation-context", conversationId] as const
 
-
-const RELATIONSHIP_LABEL: Record<string, string> = {
-  self: "Es el paciente",
-  guardian: "Tutor",
-  family: "Familiar",
-  other: "Otro vínculo",
+/**
+ * Importe de una oportunidad con su moneda. Llega en la unidad menor de esa
+ * moneda: los decimales los pone ella (ISO 4217), no una división fija.
+ */
+function money(amountCents: number | null, currency: string): string {
+  if (amountCents === null) return "Sin monto"
+  try {
+    return amountFromCents(String(amountCents), currency).toLocaleString(activeOrgLocale(), { style: "currency", currency })
+  } catch {
+    // Moneda que este navegador no reconoce: no se inventa cuántos decimales tiene.
+    return "Monto no disponible"
+  }
 }
 
 const ACTIVITY_STATUS_LABEL: Record<string, string> = {
@@ -76,86 +93,43 @@ const ACTIVITY_STATUS_LABEL: Record<string, string> = {
   normal: "Prioridad normal", urgent: "Prioridad urgente",
 }
 
-/**
- * Importe de una oportunidad con su moneda. Llega en la unidad menor de esa
- * moneda: los decimales los pone ella (ISO 4217), no una división fija.
- */
-function money(amountCents: number | null, currency: string): string {
-  if (amountCents === null) return "Sin monto"
-  try {
-    return amountFromCents(String(amountCents), currency).toLocaleString(activeOrgLocale(), {
-      style: "currency",
-      currency,
-    })
-  } catch {
-    // Moneda que este navegador no reconoce: no se inventa cuántos decimales tiene.
-    return "Monto no disponible"
-  }
+export interface ContactWorkspaceProps {
+  conversationId: string
+  /** La sección abierta: la pide también una tarjeta del hilo. */
+  section: ContextSection | null
+  onSectionChange: (section: ContextSection | null) => void
+  onRefresh?: () => void
+  onClose?: () => void
+  /** Informa a la bandeja si hay borrador sin guardar (para guardar el cierre del panel). */
+  onDraftChange?: (dirty: boolean) => void
+  /** Dentro del cajón estándar: sin su propia tarjeta ni su botón de cerrar, que los pone el cajón. */
+  bare?: boolean
 }
 
 /**
- * Panel contextual del contacto para la bandeja (Diseño 1-4/6/9 y D03):
- * persona, estado de atención del agente, pacientes, oportunidades,
- * seguimientos y bitácora unificada. Toda acción llama a la API real con
- * permisos del servidor; jamás muestra datos clínicos ni contactos falsos.
+ * «Contexto» de la Bandeja: una fila por sección, con lo que hay dentro en una
+ * línea. Tocar una fila entra a esa sección en el mismo panel, con los mismos
+ * componentes de la página de la persona y sus permisos; lo que necesita ancho
+ * (historia, odontograma, documentos) se abre grande. Sin salir de la Bandeja.
  */
-export function ContactWorkspace({
-  contactId,
-  conversationId,
-  onRefresh,
-  onClose,
-  onDraftChange,
-  bare = false,
-}: ContactWorkspaceProps) {
+export function ContactWorkspace({ conversationId, section, onSectionChange, onRefresh, onClose, onDraftChange, bare = false }: ContactWorkspaceProps) {
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
-  const canRead = usePermission("crm.read")
-  const canWriteNote = usePermission("crm.write")
-  const canWriteConv = usePermission("conversations.write")
-  const canReadTasks = usePermission("tasks.read")
-  const canWriteTasks = usePermission("tasks.write")
-  // Puerta de decisiones del agente: agent.decide (recepción lo tiene; sin
-  // agent.read ni agent.write). El dominio por acción se exige aparte.
-  const canDecide = usePermission("agent.decide")
-  const canReadAgent = usePermission("agent.read")
-  const canWriteAppointments = usePermission("appointments.write")
-  const canReadAppointments = usePermission("appointments.read")
-  const canRegister = usePermission("patients.write")
-
-  const [tab, setTab] = useState("resumen")
+  const can = useCan()
   const [memoryOpen, setMemoryOpen] = useState(false)
-  const [note, setNote] = useState("")
-  const [noteOk, setNoteOk] = useState(false)
-  // Resultado persistente de la última confirmación registrada: la lista solo
-  // trae propuestas pendientes, así que un outcome fallido/expirado se muestra
-  // aquí, hasta cambiar de contacto o registrar otra.
-  const [outcome, setOutcome] = useState<AgentProposal | null>(null)
-  // La oportunidad se abre al lado, sin salir del caso (ADR 0028).
-  const [oppPanel, setOppPanel] = useState<string | null>(null)
-  const [oppDrawer, setOppDrawer] = useState<{ open: boolean; opportunityId?: string }>({
-    open: false,
-  })
-  const [taskDrawer, setTaskDrawer] = useState<{ open: boolean; opportunityId?: string }>({
-    open: false,
-  })
-  const [regLink, setRegLink] = useState<{ url: string; expiresAt: string } | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [wide, setWide] = useState<{ id: string; label: string } | null>(null)
+  const [noteDirty, setNoteDirty] = useState(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const idsRef = useRef({ contactId, conversationId: conversationId ?? null })
-  idsRef.current = { contactId, conversationId: conversationId ?? null }
   const onRefreshRef = useRef(onRefresh)
   onRefreshRef.current = onRefresh
-  const onDraftChangeRef = useRef(onDraftChange)
-  onDraftChangeRef.current = onDraftChange
-  const noteDirty = note.trim().length > 0
   const noteDirtyRef = useRef(noteDirty)
   noteDirtyRef.current = noteDirty
-  const convRef = useRef(conversationId ?? null)
-  convRef.current = conversationId ?? null
+  const convRef = useRef(conversationId)
+  convRef.current = conversationId
 
   // Borrador local sin storage: cambiar de hilo, cerrar el contexto móvil o
   // salir de la bandeja con borrador bloquea la navegación del router y pide
-  // confirmación real. Drawers y tabs son estado local y nunca navegan.
+  // confirmación real. Drawers y secciones son estado local y nunca navegan.
   const draftBlocker = useBlocker({
     disabled: !noteDirty,
     enableBeforeUnload: false,
@@ -172,97 +146,35 @@ export function ContactWorkspace({
       return currentSearch.contexto === true && nextSearch.contexto !== true
     },
   })
-  const navBlocked = draftBlocker.status === "blocked"
-
-  // La bandeja centraliza el guard del cierre del panel en escritorio (estado
-  // local que no navega y el bloqueador no puede interceptar).
   useEffect(() => {
-    onDraftChangeRef.current?.(noteDirty)
-  }, [noteDirty])
-
-  // Al cambiar de contacto se vuelve a Resumen y se limpia el borrador (solo
-  // ocurre tras confirmar el bloqueo o al entrar al caso); el foco cae en el
-  // nombre para lectores de pantalla.
-  useEffect(() => {
-    setTab("resumen")
-    setNote("")
-    setNoteOk(false)
-    setRegLink(null)
-    setCopied(false)
-    setOutcome(null)
-    headingRef.current?.focus()
-  }, [contactId])
-
+    onDraftChange?.(noteDirty)
+  }, [noteDirty, onDraftChange])
   // Recargar o cerrar la pestaña con borrador pide confirmación del navegador.
   useEffect(() => {
     if (!noteDirty) return
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-    }
+    const handler = (event: BeforeUnloadEvent) => event.preventDefault()
     window.addEventListener("beforeunload", handler)
     return () => window.removeEventListener("beforeunload", handler)
   }, [noteDirty])
 
-  const contextQuery = useQuery({
-    queryKey: crmContextQueryKey(contactId, conversationId),
-    queryFn: () => fetchCrmContext(contactId, conversationId),
-    enabled: canRead,
+  const query = useQuery({
+    queryKey: conversationContextKey(conversationId),
+    queryFn: () => apiFetch<{ data: ConversationContext }>(`/api/conversations/${conversationId}/context`),
   })
-  const workspace = contextQuery.data?.data ?? null
-
-  const activityQuery = useInfiniteQuery({
-    queryKey: crmActivityQueryKey(contactId),
-    queryFn: ({ pageParam }) => fetchCrmActivityPage(contactId, pageParam),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.nextCursor,
-    enabled: canRead,
-  })
-
-  const oppsQuery = useInfiniteQuery({
-    queryKey: ["crm-opportunities", contactId],
-    queryFn: ({ pageParam }) =>
-      apiFetch<{ data: OpportunityListItem[]; nextCursor: string | null }>(
-        `/api/opportunities?contactId=${encodeURIComponent(contactId)}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`,
-      ),
-    initialPageParam: "",
-    getNextPageParam: (last) => last.nextCursor,
-    enabled: canRead,
-  })
-
-  const pendingIds = workspace?.agent.pendingProposalIds ?? []
-  const proposalsQuery = useQuery({
-    queryKey: ["agent-proposals", "workspace", conversationId ?? "todas"],
-    queryFn: () =>
-      apiFetch<{ data: AgentProposal[] }>(
-        `/api/agent/proposals?status=propuesta${conversationId ? `&conversationId=${encodeURIComponent(conversationId)}` : ""}`,
-      ),
-    enabled: (canDecide || canReadAgent) && pendingIds.length > 0,
-  })
+  const context = query.data?.data ?? null
+  const contactId = context?.contactId ?? null
 
   const handleOrgEvent = useCallback(
     (kind: string, data: unknown) => {
       // El acuse de un mensaje no cambia el contexto de la persona.
       if (isReceiptOnly(kind, data)) return
-      const ids = idsRef.current
-      void queryClient.invalidateQueries({ queryKey: ["crm-context", ids.contactId] })
-      void queryClient.invalidateQueries({ queryKey: ["crm-activity", ids.contactId] })
-      void queryClient.invalidateQueries({ queryKey: ["crm-opportunities", ids.contactId] })
-      void queryClient.invalidateQueries({ queryKey: ["agent-proposals"] })
-      if (kind === "stream.reconnected") {
-        void queryClient.invalidateQueries({ queryKey: ["conversations"] })
-        if (ids.conversationId) {
-          void queryClient.invalidateQueries({
-            queryKey: ["conversation", ids.conversationId],
-          })
-        }
-        void queryClient.invalidateQueries({ queryKey: ["tasks"] })
-        void queryClient.invalidateQueries({ queryKey: ["agent-proposals"] })
-        onRefreshRef.current?.()
+      for (const key of ["conversation-context", "crm-context", "crm-activity", "crm-opportunities"]) {
+        void queryClient.invalidateQueries({ queryKey: [key] })
       }
+      if (kind === "stream.reconnected") onRefreshRef.current?.()
     },
     [queryClient],
   )
-
   useOrgEvents(
     [
       "message.created",
@@ -271,8 +183,6 @@ export function ContactWorkspace({
       "contact.updated",
       "opportunity.updated",
       "task.updated",
-      "agent.proposal.created",
-      "agent.proposal.decided",
       "agent.proposal.executed",
       "agent.handoff.created",
       // La próxima cita cambia con la Agenda, el agente o el enlace de reserva.
@@ -282,89 +192,15 @@ export function ContactWorkspace({
     handleOrgEvent,
   )
 
-  const invalidateWorkspace = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["crm-context", contactId] })
-    void queryClient.invalidateQueries({ queryKey: ["crm-activity", contactId] })
-    void queryClient.invalidateQueries({ queryKey: ["crm-opportunities", contactId] })
-    void queryClient.invalidateQueries({ queryKey: ["tasks"] })
-    void queryClient.invalidateQueries({ queryKey: ["agent-proposals"] })
-    onRefreshRef.current?.()
-  }, [queryClient, contactId])
-
-  // «Tomar», «Devolver a Sofi» y «Resolver» viven solo en la cabecera del
-  // hilo, con una sola regla: «Contexto» no los repite.
-
-  // La confirmación del interlocutor registra evidencia real por /confirm. Un
-  // stale llega como 200 fallida: se guarda el outcome tipado y se muestra
-  // fuera de la lista, porque la lista solo trae pendientes.
-  const confirmMutation = useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ data: AgentProposal }>(`/api/agent/proposals/${id}/confirm`, {
-        method: "POST",
-        body: JSON.stringify({ contactId }),
-      }),
-    onSuccess: (result) => {
-      setOutcome(result.data)
-      invalidateWorkspace()
-    },
-  })
-
-
-  const taskMutation = useMutation({
-    mutationFn: (input: { id: string; status: string }) =>
-      apiFetch(`/api/tasks/${input.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: input.status }),
-      }),
-    onSuccess: () => invalidateWorkspace(),
-  })
-  const completion = useCompleteTask(() => invalidateWorkspace())
-
-  const noteMutation = useMutation({
-    mutationFn: (body: string) =>
-      createCrmNote(contactId, { body, conversationId: conversationId ?? undefined }),
-    onSuccess: () => {
-      setNote("")
-      setNoteOk(true)
-      invalidateWorkspace()
-    },
-  })
-
-  const registrationMutation = useMutation({
-    // Con su propia ficha registra a un familiar; sin ella recibe «Su enlace»: elige su cita y deja sus datos (ADR 0037).
-    mutationFn: (familiar: boolean) =>
-      familiar ? createRegistrationLink(contactId, conversationId ?? "") : createPersonalLinkForContact(contactId, conversationId ?? ""),
-    onSuccess: (result) => {
-      setRegLink(result.data)
-      setCopied(false)
-      // Se copia al tiro; si el navegador no deja, queda el enlace a la vista con «Copiar».
-      void navigator.clipboard?.writeText(result.data.url).then(
-        () => setCopied(true),
-        () => undefined,
-      )
-    },
-  })
-
-  if (!canRead) {
-    return (
-      <EmptyState title="Sin acceso" description="Sin permiso de lectura del CRM." />
-    )
-  }
-
-  if (contextQuery.isLoading) {
-    return <LoadingState className="min-h-0 flex-1" message="Cargando contexto…" />
-  }
-
-  if (contextQuery.isError || !workspace) {
+  if (query.isLoading) return <LoadingState className="min-h-0 flex-1" message="Cargando contexto…" />
+  if (query.isError || !context || !contactId) {
     return (
       <div className="flex flex-col gap-2 p-4">
         <p className="text-sm text-destructive" role="alert">
-          {contextQuery.error instanceof ApiError
-            ? (contextQuery.error.shape.message ?? "No se pudo cargar el contexto")
-            : "No se pudo cargar el contexto del contacto."}
+          {query.error instanceof ApiError ? (query.error.shape.message ?? "No se pudo cargar el contexto") : "No se pudo cargar el contexto de la persona."}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="w-fit" onClick={() => void contextQuery.refetch()}>
+          <Button variant="outline" size="sm" className="w-fit" onClick={() => void query.refetch()}>
             <RefreshCw className="size-3.5" />
             Reintentar
           </Button>
@@ -378,755 +214,535 @@ export function ContactWorkspace({
     )
   }
 
-  const agent = workspace.agent
-  const contact = workspace.contact.contact
-  const identities = workspace.contact.identities
-  const patients = workspace.contact.patients
-  // Ya tiene su ficha: el enlace de registro es para un familiar, nunca para sí misma.
-  const ownRecord = patients.some((link) => link.relationship === "self")
-  // «Reservar cita» de la persona: su ficha si ya es paciente; si aún no lo es,
-  // la Agenda crea su ficha mínima unida a ella. Quien solo lleva a otros
-  // (un padre) reserva desde cada paciente, más abajo.
-  const selfPatient = patients.find((link) => link.relationship === "self")
-  const bookTarget: { patientId?: string } | null = selfPatient
-    ? { patientId: selfPatient.id }
-    : patients.length === 0
-      ? {}
-      : null
-  const tasks: TaskItem[] = canReadTasks ? workspace.tasks : []
-  const opps = oppsQuery.data?.pages.flatMap((page) => page.data) ?? []
-  const activity = activityQuery.data?.pages.flatMap((page) => page.data) ?? []
-  const proposals = (proposalsQuery.data?.data ?? []).filter((p) =>
-    pendingIds.length === 0 ? true : pendingIds.includes(p.id),
-  )
-  const outcomeConv = outcome?.conversationId ?? conversationId ?? null
-  const outcomeError = outcome ? proposalErrorMessage(outcome) : null
-  // Puerta agent.decide más dominio por acción (el servidor responde 403 o
-  // 409 con el motivo exacto, que se muestra tal cual).
-  const hasActionPermission = (action: string): boolean => {
-    const needed = permissionForAction(action)
-    if (needed === "appointments.write") return canWriteAppointments
-    if (needed === "conversations.write") return canWriteConv
-    return canWriteNote
-  }
-  const mutationError =
-    confirmMutation.error instanceof ApiError
-          ? (confirmMutation.error.shape.message ?? "No se pudo registrar la confirmación")
-          : taskMutation.error instanceof ApiError
-            ? (taskMutation.error.shape.message ?? "No se pudo actualizar la tarea")
-            : noteMutation.error instanceof ApiError
-              ? (noteMutation.error.shape.message ?? "No se pudo guardar la nota")
-              : registrationMutation.error instanceof ApiError
-                ? (registrationMutation.error.shape.message ?? "No se pudo crear el enlace")
-                : completion.error
+  const { lines, patientId } = context
+  const warn = (id: "alertas" | "cobros" | "datos") => context.attention.includes(id)
+  const next = context.nextAppointment
+  // Cada fila, solo para quien puede abrirla: la misma regla que la página de la persona. Lo que el servidor no dice, no se escribe.
+  const rows: Array<{ id: ContextSection | "recuerda"; label: string; line: string; warn?: boolean }> = [
+    ...(can("appointments.read")
+      ? [{ id: "citas" as const, label: "Citas", line: next ? `Próxima: ${nextAppointmentSaid(next, activeOrgLocale(), context.name)}` : "Sin próxima cita" }]
+      : []),
+    ...(patientId && lines.plan ? [{ id: "plan" as const, label: "Plan y presupuesto", line: lines.plan }] : []),
+    ...(patientId && lines.alertas
+      ? [can("clinical.read")
+          ? { id: "clinica" as const, label: "Clínica", line: lines.alertas, warn: warn("alertas") }
+          : { id: "alertas" as const, label: "Alergias y alertas", line: lines.alertas, warn: warn("alertas") }]
+      : []),
+    ...(patientId && lines.cobros ? [{ id: "cobros" as const, label: "Cobros", line: lines.cobros, warn: warn("cobros") }] : []),
+    ...(lines.ventas ? [{ id: "ventas" as const, label: "Oportunidades y tareas", line: lines.ventas }] : []),
+    ...(lines.datos ? [{ id: "datos" as const, label: "Datos", line: lines.datos, warn: warn("datos") }] : []),
+    ...(lines.recuerda ? [{ id: "recuerda" as const, label: `Lo que recuerda ${receptionName}`, line: lines.recuerda }] : []),
+    ...(can("crm.read") ? [{ id: "notas" as const, label: "Notas y actividad", line: "Lo que anotó el equipo y lo que pasó" }] : []),
+  ]
+  const current = rows.find((row) => row.id === section) ?? null
 
   return (
     // El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa.
-    <ScrollArea className={bare ? "min-h-0 flex-1" : "elevated min-h-0 flex-1 rounded-xl border bg-card"}>
-    <section aria-label="Contexto del contacto" className="flex flex-col gap-3 p-4">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <h2
-            ref={headingRef}
-            tabIndex={-1}
-            className="truncate text-base font-semibold outline-none"
-          >
-            {contact.displayName}
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            {[contact.phone ? internationalText(contact.phone) : null, contact.email].filter(Boolean).join(" · ") ||
-              "Sin datos de contacto"}
-          </p>
+    <div className={bare ? "flex min-h-0 flex-1 flex-col" : "elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"}>
+      <section aria-label="Contexto del contacto" className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2.5">
+          {current ? (
+            <Button variant="ghost" size="icon-sm" aria-label="Volver al contexto" className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8" onClick={() => onSectionChange(null)}>
+              <ChevronLeft className="size-4" />
+            </Button>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            <h2 ref={headingRef} tabIndex={-1} className="truncate text-[15px] font-bold outline-none">
+              {current ? current.label : context.name}
+            </h2>
+            <p className="truncate text-xs text-muted-foreground">
+              {current ? context.name : [context.phone ? internationalText(context.phone) : null, context.email].filter(Boolean).join(" · ") || "Sin datos de contacto"}
+            </p>
+          </div>
+          {can("patients.read") && (can("crm.read") || patientId) ? (
+            <Link to="/people/$personId" params={{ personId: contactId }} className="shrink-0 px-1 text-[13px] font-medium text-primary hover:underline">
+              Su página
+            </Link>
+          ) : null}
+          {onClose ? (
+            <Button variant="ghost" size="icon-sm" className="min-h-11 min-w-11 sm:min-h-8 sm:min-w-8" aria-label="Cerrar contexto" onClick={onClose}>
+              <X className="size-4" />
+            </Button>
+          ) : null}
         </div>
-        <Link
-          to="/people/$personId"
-          params={{ personId: contactId }}
-          className="shrink-0 text-xs text-primary hover:underline"
-        >
-          Ver su página
-        </Link>
-        {onClose && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            aria-label="Cerrar contexto"
-          >
-            <X className="size-4" />
-          </Button>
-        )}
-      </div>
-
-      {mutationError && (
-        <p className="text-sm text-destructive" role="alert">
-          {mutationError}
-        </p>
-      )}
-      {completion.dialog}
-      {conversationId ? <PhoneMatchPrompt conversationId={conversationId} /> : null}
-
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList aria-label="Secciones del contexto">
-          <TabsTrigger value="resumen">Resumen</TabsTrigger>
-          <TabsTrigger value="actividad">Actividad</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="resumen" className="flex flex-col gap-4">
-          {/* Lo que recepción necesita para darle una cita, sin salir del hilo. */}
-          <div className="flex flex-col gap-2">
-            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
-              {canReadAppointments ? (
-                <>
-                  <dt className="text-muted-foreground">Próxima cita</dt>
-                  <dd className="font-medium">
-                    {workspace.nextAppointment ? (
-                      <Link
-                        to="/agenda"
-                        search={{ appointmentId: workspace.nextAppointment.id }}
-                        className="hover:underline"
-                      >
-                        {nextAppointmentSaid(workspace.nextAppointment, activeOrgLocale(), contact.displayName)}
-                      </Link>
-                    ) : (
-                      "Ninguna"
-                    )}
-                  </dd>
-                </>
-              ) : null}
-              <dt className="text-muted-foreground">Mensajes</dt>
-              <dd className="font-medium">{messagePermissionsSaid(workspace.messages)}</dd>
-            </dl>
-            {canWriteAppointments && bookTarget ? (
-              <Link
-                to="/agenda"
-                search={{
-                  ...(bookTarget.patientId ? { patientId: bookTarget.patientId } : {}),
-                  contactId,
-                  conversationId,
-                }}
-                className={cn(buttonVariants({ size: "sm" }), "min-h-11 w-fit sm:min-h-9")}
-              >
-                Reservar cita
-              </Link>
-            ) : null}
-            {canWriteAppointments && patients.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {contact.displayName.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y
-                teléfono, y lo que falte queda pendiente en su página.
-              </p>
-            ) : null}
-          </div>
-          {/* Resultado persistente de la última decisión: visible aunque la
-              propuesta salga de pendientes o cambie el estado del agente. */}
-          {outcome && (outcome.status === "fallida" || outcome.status === "expirada") && (
-            <div className="flex flex-col gap-1 rounded-md border border-destructive/30 bg-danger-soft p-3" role="alert">
-              <p className="text-sm font-medium">
-                {ACTION_LABEL[outcome.action] ?? outcome.action}: no se pudo ejecutar
-              </p>
-              {outcomeError && <p className="text-xs text-destructive">{outcomeError}</p>}
-              <p className="text-xs text-muted-foreground">
-                Realiza la acción manualmente desde el caso.
-              </p>
-              <span className="flex flex-wrap gap-2">
-                {outcomeConv && (
-                  <Link
-                    to="/inbox"
-                    search={{ conversation: outcomeConv }}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Abrir hilo
-                  </Link>
-                )}
-                <Button variant="ghost" size="sm" className="w-fit" onClick={() => setOutcome(null)}>
-                  Descartar
-                </Button>
-              </span>
-            </div>
-          )}
-          {/* Estado de atención del agente */}
-          <div className="flex flex-col gap-2 rounded-md border p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Bot className="size-4 text-muted-foreground" aria-hidden />
-              <Badge variant="secondary">{agentStateLabel(agent.state, receptionName)}</Badge>
-              {pendingIds.length > 0 && (
-                <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                  {pendingIds.length === 1 ? "1 cita espera su sí" : `${pendingIds.length} citas esperan su sí`}
-                  {conversationId ? (
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      className="h-auto min-h-11 p-0 text-xs sm:min-h-0"
-                      onClick={() => {
-                        const band = document.getElementById("cita-espera")
-                        band?.scrollIntoView({ block: "center", behavior: "smooth" })
-                        band?.focus()
-                      }}
-                    >
-                      Ver en la conversación
-                    </Button>
-                  ) : null}
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">{agentStateDescription(agent, receptionName)}</p>
-            <ul className="flex flex-col gap-1">
-              {agentNextSteps(agent, receptionName).map((step) => (
-                <li key={step} className="flex items-center gap-1.5 text-sm">
-                  <CheckCircle2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  {step}
-                </li>
-              ))}
-            </ul>
-            <Button variant="link" size="sm" className="h-auto min-h-11 w-fit p-0 sm:min-h-8" onClick={() => setMemoryOpen(true)}>
-              Lo que recuerda {receptionName}
-            </Button>
-            {/* Lo que espera el sí del interlocutor: el equipo solo registra una
-                confirmación que ya dio en el chat (agent.decide más el dominio del
-                acto); sin decide solo se ve el estado mínimo. */}
-            {/* Se ve con cualquier estado (el orden es el de la Bandeja): la cita espera el sí aunque la lleve una persona. */}
-            {agent.awaitingContact && (
-              <div className="flex flex-col gap-2 border-t pt-2">
-                {!canDecide ? (
-                  <p className="text-xs text-muted-foreground">
-                    Una cita espera el sí de {contact.displayName.split(/\s+/)[0]}.
-                  </p>
-                ) : proposalsQuery.isLoading && proposals.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Cargando propuestas…</p>
-                ) : proposalsQuery.isError && proposals.length === 0 ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs text-destructive" role="alert">
-                      {proposalsQuery.error instanceof ApiError
-                        ? (proposalsQuery.error.shape.message ?? "No se pudieron cargar las propuestas")
-                        : "No se pudieron cargar las propuestas."}
-                    </p>
-                    <Button variant="ghost" size="sm" onClick={() => void proposalsQuery.refetch()}>
-                      Reintentar
-                    </Button>
-                  </div>
-                ) : proposals.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    Las propuestas ya fueron atendidas o no están visibles.
-                  </p>
-                ) : (
-                  <>
-                    {proposalsQuery.isError ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xs text-destructive" role="alert">
-                          No se pudieron actualizar las propuestas; se conservan las cargadas.
-                        </p>
-                        <Button variant="ghost" size="sm" onClick={() => void proposalsQuery.refetch()}>
-                          Reintentar
-                        </Button>
-                      </div>
-                    ) : null}
-                  {proposals.map((p) => {
-                    const allowed = canDecide && hasActionPermission(p.action)
-                    const ctx = p.context
-                    const ctxLine = ctx
-                      ? [
-                          ctx.patientName ?? ctx.contactName,
-                          ctx.opportunityTitle,
-                          ctx.branchName,
-                          ctx.professionalName,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                      : ""
-                    const cardError = proposalErrorMessage(p)
-                    return (
-                      <div key={p.id} className="flex flex-col gap-1 rounded-md bg-muted/40 p-2">
-                        <p className="text-sm font-medium">{ACTION_LABEL[p.action] ?? p.action}</p>
-                        {p.reason && <p className="text-xs text-muted-foreground">{p.reason}</p>}
-                        {ctxLine && <p className="text-xs text-muted-foreground">{ctxLine}</p>}
-                        {ctx.beforeSummary && (
-                          <p className="text-xs text-muted-foreground">
-                            Al proponer: {ctx.beforeSummary}
-                          </p>
-                        )}
-                        {ctx.currentSummary ? <p className="text-xs">Hoy: {ctx.currentSummary}</p> : null}
-                        <p className="text-xs font-medium">{ctx.afterSummary}</p>
-                        {ctx.isStale === true && p.status === "propuesta" && (
-                          <p className="text-xs text-warning" role="status">
-                            La situación cambió desde la propuesta: revisa el estado del caso antes de decidir.
-                          </p>
-                        )}
-                        {cardError && (
-                          <p className="text-xs text-destructive" role="alert">
-                            {cardError}
-                          </p>
-                        )}
-                        {(p.status === "fallida" || p.status === "expirada") && (
-                          <p className="text-xs text-muted-foreground">
-                            Esta propuesta ya no se puede ejecutar: realiza la acción manualmente desde el caso.
-                          </p>
-                        )}
-                        {p.mode === "directo" && (
-                          <p className="text-xs text-muted-foreground">
-                            Se ejecuta sin intervención del equipo.
-                          </p>
-                        )}
-                        {/* Registrar el sí que ya dio va solo en la franja de la conversación, donde se ve lo que dijo. */}
-                        {p.mode === "confirmar_usuario" && (
-                          <p className="text-xs text-muted-foreground">
-                            Espera el sí de {contact.displayName.split(/\s+/)[0]} en esta conversación; el equipo no la aprueba.
-                          </p>
-                        )}
-                      </div>
-                    )
-                  })}</>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Procedencia: identidades multicanal del contacto */}
-          <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold">Canales</h3>
-            {identities.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Sin identidades vinculadas.</p>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {identities.map((ident) => {
-                  const Icon = channelIcon(ident.channel)
-                  return (
-                    <li key={ident.id} className="flex items-center gap-1.5 text-sm">
-                      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="font-medium">{channelLabel(ident.channel)}</span>
-                      <span className="truncate text-muted-foreground">
-                        {identityText(ident)}
-                      </span>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Pacientes vinculados, «Su enlace» y el registro de un familiar */}
-          <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold">Pacientes</h3>
-            {patients.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Aún no es paciente. Con «Su enlace» elige su cita y deja sus datos; o se registra al reservarle una cita.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {patients.map((link) => (
-                  <li key={link.id} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="min-w-0">
-                      <span className="font-medium">{link.displayName}</span>{" "}
-                      <span className="text-xs text-muted-foreground">
-                        · {RELATIONSHIP_LABEL[link.relationship] ?? link.relationship}
-                        {link.isPreferred ? " · Preferido" : ""}
-                      </span>
-                    </span>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      <PersonLink patientId={link.id} className="text-xs text-primary hover:underline">
-                        Abrir su página
-                      </PersonLink>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {/* Quien ya tiene su ficha no se registra otra vez: su enlace es para un familiar. */}
-            {canRegister && (
-              <div className="flex flex-col gap-1.5">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-fit"
-                  disabled={!conversationId || registrationMutation.isPending}
-                  // El enlace ya preparado se vuelve a copiar: tocar dos veces no crea otro.
-                  onClick={() =>
-                    regLink
-                      ? void navigator.clipboard?.writeText(regLink.url).then(() => setCopied(true), () => undefined)
-                      : registrationMutation.mutate(ownRecord)
-                  }
-                  title={
-                    !conversationId
-                      ? "Abre el contexto desde una conversación para generar el enlace"
-                      : ownRecord
-                        ? "Copia un enlace para que registre a su hijo o a un familiar"
-                        : "Copia su enlace: elige su cita y deja sus datos"
-                  }
-                >
-                  <UserPlus className="size-3.5" />
-                  {registrationMutation.isPending ? "Preparando…" : ownRecord ? "Copiar enlace de registro" : "Copiar su enlace"}
-                </Button>
-                {regLink && (
-                  <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 p-2 text-xs">
-                    <span className="min-w-0 flex-1 truncate" title={regLink.url}>
-                      {regLink.url}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(regLink.url)
-                          setCopied(true)
-                        } catch {
-                          // El operador copia manualmente desde el texto visible.
-                        }
-                      }}
-                    >
-                      <Copy className="size-3.5" />
-                      {copied ? "Copiado" : "Copiar"}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Oportunidades paginadas + crear/editar sin reselección */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">Oportunidades</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setOppDrawer({ open: true })}
-              >
-                <Plus className="size-3.5" />
-                Nueva
-              </Button>
-            </div>
-            {oppsQuery.isLoading && opps.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Cargando oportunidades…</p>
-            ) : oppsQuery.isError && opps.length === 0 ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-xs text-destructive" role="alert">
-                  No se pudieron cargar las oportunidades.
-                </p>
-                <Button variant="ghost" size="sm" onClick={() => void oppsQuery.refetch()}>
-                  Reintentar
-                </Button>
-              </div>
-            ) : opps.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Sin oportunidades para este contacto.</p>
-            ) : (
-              <>
-                {oppsQuery.isError ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs text-destructive" role="alert">
-                      No se pudieron actualizar las oportunidades; se conservan las cargadas.
-                    </p>
-                    <Button variant="ghost" size="sm" onClick={() => void oppsQuery.refetch()}>
-                      Reintentar
-                    </Button>
-                  </div>
-                ) : null}
-              <ul className="flex flex-col gap-1.5">
-                {opps.map((opp) => (
-                  <li
-                    key={opp.id}
-                    className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{opp.title}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {opp.status === "won" ? "Ganada" : opp.status === "lost" ? "Perdida" : opp.stageName} · {money(opp.amountCents, opp.currency)}
-                        {opp.nextTask ? ` · ${opp.nextTask.title}${opp.nextTask.dueAt ? ` · ${dueWords(opp.nextTask.dueAt)}` : ""}` : ""}
-                      </span>
-                      {opp.why ? <span className="block truncate text-xs text-muted-foreground">{opp.why}</span> : null}
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => setOppPanel(opp.id)}>
-                        Abrir
-                      </Button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              </>
-            )}
-            {oppsQuery.hasNextPage && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="self-center"
-                disabled={oppsQuery.isFetchingNextPage}
-                onClick={() => void oppsQuery.fetchNextPage()}
-              >
-                {oppsQuery.isFetchingNextPage ? (
-                  <>
-                    <Spinner className="size-6" aria-hidden />
-                    Cargar más
-                  </>
-                ) : (
-                  "Cargar más"
-                )}
-              </Button>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Tareas: completar sin salir del caso */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">Tareas</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setTaskDrawer({ open: true })}
-              >
-                <Plus className="size-3.5" />
-                Nueva tarea
-              </Button>
-            </div>
-            {!canReadTasks ? (
-              <p className="text-xs text-muted-foreground">Sin permiso de lectura de tareas.</p>
-            ) : tasks.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Sin tareas abiertas para este contacto.</p>
-            ) : (
-              <ul className="flex flex-col gap-1.5">
-                {tasks.map((task) => {
-                  const done = task.status === "done"
-                  const overdue = !done && isOverdue(task.dueAt)
-                  return (
-                    <li
-                      key={task.id}
-                      className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm"
-                    >
-                      <span className="min-w-0">
-                        <span className={`block truncate ${done ? "line-through" : ""}`}>
-                          {task.title}
-                        </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {[task.opportunityTitle, task.dueAt ? `vence ${dueWords(task.dueAt)}` : null]
-                            .filter(Boolean)
-                            .join(" · ") || "Sin vencimiento"}
-                          {overdue ? " · vencida" : ""}
-                        </span>
-                      </span>
-                      {canWriteTasks && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={taskMutation.isPending || completion.pendingId !== null}
-                          onClick={() =>
-                            // Completar la de un caso del agente muestra antes lo mismo que «Resolver».
-                            done ? taskMutation.mutate({ id: task.id, status: "open" }) : void completion.complete(task.id)
-                          }
-                        >
-                          {done ? "Reabrir" : "Completar"}
-                        </Button>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Nota operativa real */}
-          {canWriteNote && (
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold">Nota operativa</h3>
-              <Textarea
-                aria-label="Nota operativa"
-                rows={2}
-                placeholder="Registra un dato operativo del caso…"
-                value={note}
-                onChange={(e) => {
-                  setNote(e.target.value)
-                  setNoteOk(false)
-                }}
-              />
-              {noteOk && (
-                <p className="text-xs text-success" role="status">
-                  Nota guardada en la bitácora.
-                </p>
-              )}
-              {noteDirty && !noteMutation.isPending && (
-                <p className="text-xs text-warning" role="status">
-                  Borrador sin guardar: cambiar de hilo o salir pedirá confirmación. Guárdalo o descártalo.
-                </p>
-              )}
-              <span className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className="w-fit"
-                  disabled={note.trim().length === 0 || noteMutation.isPending}
-                  onClick={() => noteMutation.mutate(note.trim())}
-                >
-                  {noteMutation.isPending ? (
-                    <>
-                      <Spinner className="size-6" aria-hidden />
-                      Guardar nota
-                    </>
-                  ) : (
-                    "Guardar nota"
-                  )}
-                </Button>
-                {noteDirty && !noteMutation.isPending && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-fit"
-                    onClick={() => {
-                      setNote("")
-                      setNoteOk(false)
-                    }}
-                  >
-                    Descartar
-                  </Button>
-                )}
-              </span>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="actividad" className="flex flex-col gap-2">
-          {activityQuery.isLoading && activity.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Cargando actividad…</p>
-          ) : activityQuery.isError && activity.length === 0 ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-destructive" role="alert">
-                No se pudo cargar la bitácora.
-              </p>
-              <Button variant="ghost" size="sm" onClick={() => void activityQuery.refetch()}>
-                Reintentar
-              </Button>
-            </div>
-          ) : activity.length === 0 ? (
-            <EmptyState
-              title="Sin actividad"
-              description="Mensajes, notas, tareas y movimientos del caso aparecen aquí."
-            />
-          ) : (
+        <ScrollArea className="min-h-0 flex-1">
+          {!current ? (
             <>
-              {activityQuery.isError ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-xs text-destructive" role="alert">
-                    No se pudo actualizar la bitácora; se conserva la actividad cargada.
-                  </p>
-                  <Button variant="ghost" size="sm" onClick={() => void activityQuery.refetch()}>
-                    Reintentar
-                  </Button>
-                </div>
-              ) : null}
-              <ol className="flex flex-col gap-2">
-                {activity.map((item) => (
-                  <ActivityRow key={item.id} item={item} />
+              <PhoneMatchPrompt conversationId={conversationId} />
+              <ul className="flex flex-col divide-y border-b">
+                {rows.map((row) => (
+                  <li key={row.id}>
+                    <button
+                      type="button"
+                      className="flex min-h-11 w-full items-center gap-2 px-3.5 py-2.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                      onClick={() => (row.id === "recuerda" ? setMemoryOpen(true) : onSectionChange(row.id))}
+                    >
+                      <span className="flex min-w-0 flex-1 flex-col gap-px">
+                        <span className="text-sm font-semibold">{row.label}</span>
+                        <span className={cn("truncate text-[13px]", row.warn ? "text-warning" : "text-muted-foreground")}>{row.line}</span>
+                      </span>
+                      <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                    </button>
+                  </li>
                 ))}
-              </ol>
+              </ul>
             </>
+          ) : (
+            <div className="flex flex-col gap-3 p-3.5 [&_[class*=grid-cols]]:!grid-cols-1">
+              <Suspense fallback={<LoadingState message="Cargando…" />}>
+                {current.id === "citas" ? <CitasSection context={context} conversationId={conversationId} /> : null}
+                {current.id === "plan" && patientId ? <PlanTab patientId={patientId} patientName={context.name} /> : null}
+                {current.id === "alertas" ? <p className={cn("text-sm", warn("alertas") ? "text-warning" : "text-muted-foreground")}>{lines.alertas}</p> : null}
+                {current.id === "clinica" ? <ClinicaSection line={lines.alertas ?? ""} warn={warn("alertas")} onOpen={setWide} /> : null}
+                {current.id === "cobros" && patientId ? <AccountTab patientId={patientId} part="cuenta" /> : null}
+                {current.id === "ventas" ? <VentasSection contactId={contactId} conversationId={conversationId} /> : null}
+                {current.id === "datos" ? <DatosSection contactId={contactId} patientId={patientId} /> : null}
+                {current.id === "notas" ? <NotasSection contactId={contactId} conversationId={conversationId} onDirtyChange={setNoteDirty} /> : null}
+              </Suspense>
+            </div>
           )}
-          {activityQuery.hasNextPage && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="self-center"
-              disabled={activityQuery.isFetchingNextPage}
-              onClick={() => void activityQuery.fetchNextPage()}
-            >
-              {activityQuery.isFetchingNextPage ? (
-                <>
-                  <Spinner className="size-6" aria-hidden />
-                  Cargar anteriores
-                </>
-              ) : (
-                "Cargar anteriores"
-              )}
-            </Button>
-          )}
-        </TabsContent>
-      </Tabs>
-
+        </ScrollArea>
+      </section>
       <PersonMemoryDrawer
         contactId={memoryOpen ? contactId : null}
-        name={contact.displayName}
-        canWrite={canWriteNote || canWriteConv}
+        name={context.name}
+        canWrite={can("crm.write") || can("conversations.write")}
         onClose={() => setMemoryOpen(false)}
       />
+      {patientId ? <WideSection open={wide} patientId={patientId} name={context.name} onClose={() => setWide(null)} /> : null}
       <ConfirmDialog
-        open={navBlocked}
+        open={draftBlocker.status === "blocked"}
         title="Salir sin guardar la nota"
         description="La nota operativa no se guardó y se perderá al cambiar de hilo o salir. ¿Continuar?"
         confirmLabel="Salir sin guardar"
         variant="default"
-        onClose={() => { if (draftBlocker.status === "blocked") draftBlocker.reset() }}
-        onConfirm={() => { if (draftBlocker.status === "blocked") draftBlocker.proceed() }}
+        onClose={() => {
+          if (draftBlocker.status === "blocked") draftBlocker.reset()
+        }}
+        onConfirm={() => {
+          if (draftBlocker.status === "blocked") draftBlocker.proceed()
+        }}
       />
-      {/* Drawers de CrmScreens con el caso ya fijado: no se reselecciona. */}
+    </div>
+  )
+}
+
+/** Sus citas y «Reservar cita»: quien aún no es paciente se reserva con su ficha mínima (la crea la Agenda). */
+function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
+  const can = useCan()
+  const { patientId, contactId, name } = context
+  return (
+    <>
+      {can("appointments.write") ? (
+        <Link
+          to="/agenda"
+          search={{ ...(patientId ? { patientId } : {}), contactId, conversationId }}
+          className="w-fit rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+        >
+          Reservar cita
+        </Link>
+      ) : null}
+      {patientId ? (
+        <CitasPanel patientId={patientId} patientName={name} />
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {name.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y teléfono, y lo que falte queda pendiente en su página.
+        </p>
+      )}
+    </>
+  )
+}
+
+/** Lo clínico: lo que entra en el panel y, en grande, lo que necesita ancho. Abrirlo deja su traza, como en su página. */
+function ClinicaSection({ line, warn, onOpen }: { line: string; warn: boolean; onOpen: (section: { id: string; label: string }) => void }) {
+  const own = productUi().record.sections.filter((item) => !item.parent)
+  const sections = [
+    { id: "antecedentes", label: "Antecedentes" },
+    ...own.map((item) => ({ id: item.id, label: item.label })),
+    { id: "historia", label: "Historia" },
+    { id: "documentos", label: "Documentos" },
+  ]
+  return (
+    <>
+      <p className={cn("text-sm", warn ? "text-warning" : "text-muted-foreground")}>{line}</p>
+      <ul className="flex flex-col divide-y rounded-lg border">
+        {sections.map((item) => (
+          <li key={item.id}>
+            <button
+              type="button"
+              className="flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm font-medium outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              onClick={() => onOpen(item)}
+            >
+              {item.label}
+              <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
+/** Historia, odontograma y documentos, grandes y encima de la Bandeja: cerrarlos vuelve a la conversación. */
+function WideSection({ open, patientId, name, onClose }: { open: { id: string; label: string } | null; patientId: string; name: string; onClose: () => void }) {
+  const own = open ? productUi().record.sections.find((item) => item.id === open.id) : undefined
+  const record = useQuery({
+    queryKey: ["patient", patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: Boolean(own),
+    retry: false,
+  })
+  const content = (): ReactNode => {
+    if (!open) return null
+    if (open.id === "antecedentes") return <AntecedentesTab patientId={patientId} />
+    if (open.id === "historia") return <HistoriaTab patientId={patientId} onOdontogramSelect={() => undefined} />
+    if (open.id === "documentos") return <DocumentosSection patientId={patientId} />
+    if (!own) return null
+    return own.render({ patientId, record: record.data?.data ?? null, place: undefined, opened: undefined, openSection: () => undefined })
+  }
+  return (
+    <DetailDrawer
+      open={open !== null}
+      onClose={onClose}
+      size="xl"
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(60rem,calc(100vw-2rem))]"
+      title={open ? `${open.label} de ${name}` : ""}
+      closeLabel="Volver a la conversación"
+    >
+      <Suspense fallback={<LoadingState message="Cargando…" />}>{content()}</Suspense>
+    </DetailDrawer>
+  )
+}
+
+function DatosSection({ contactId, patientId }: { contactId: string; patientId: string | null }) {
+  const can = useCan()
+  const person = usePerson(contactId, can("patients.read"))
+  const detail = useQuery({
+    queryKey: ["patient", patientId],
+    queryFn: () => apiFetch<{ data: PatientFull }>(`/api/patients/${patientId}`),
+    enabled: Boolean(patientId),
+    retry: false,
+  })
+  const crm = useQuery({
+    queryKey: crmContextQueryKey(contactId, undefined),
+    queryFn: () => fetchCrmContext(contactId),
+    enabled: can("crm.read"),
+  })
+  const page = person.data?.data
+  if (person.isLoading) return <LoadingState message="Cargando datos…" />
+  return (
+    <>
+      {crm.data ? <p className="text-[13px] text-muted-foreground">Mensajes: {messagePermissionsSaid(crm.data.data.messages)}</p> : null}
+      {page ? <PersonData person={page} detail={detail.data?.data} /> : null}
+    </>
+  )
+}
+
+/** Oportunidades y tareas de la persona: abrir, crear y completar sin salir del caso. */
+function VentasSection({ contactId, conversationId }: { contactId: string; conversationId: string }) {
+  const can = useCan()
+  const queryClient = useQueryClient()
+  const canReadTasks = can("tasks.read")
+  const canWriteTasks = can("tasks.write")
+  const [oppPanel, setOppPanel] = useState<string | null>(null)
+  const [oppDrawer, setOppDrawer] = useState(false)
+  const [taskDrawer, setTaskDrawer] = useState(false)
+  const refresh = () => {
+    for (const key of ["crm-context", "crm-opportunities", "conversation-context", "tasks", "conversations"]) {
+      void queryClient.invalidateQueries({ queryKey: [key] })
+    }
+  }
+  const context = useQuery({
+    queryKey: crmContextQueryKey(contactId, conversationId),
+    queryFn: () => fetchCrmContext(contactId, conversationId),
+  })
+  const oppsQuery = useInfiniteQuery({
+    queryKey: ["crm-opportunities", contactId],
+    queryFn: ({ pageParam }) =>
+      apiFetch<{ data: OpportunityListItem[]; nextCursor: string | null }>(
+        `/api/opportunities?contactId=${encodeURIComponent(contactId)}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`,
+      ),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.nextCursor,
+  })
+  const taskMutation = useMutation({
+    mutationFn: (input: { id: string; status: string }) =>
+      apiFetch(`/api/tasks/${input.id}`, { method: "PATCH", body: JSON.stringify({ status: input.status }) }),
+    onSuccess: refresh,
+  })
+  const completion = useCompleteTask(refresh)
+  const opps = oppsQuery.data?.pages.flatMap((page) => page.data) ?? []
+  const tasks: TaskItem[] = canReadTasks ? (context.data?.data.tasks ?? []) : []
+  // Las acciones sueltas de la tarea dicen su fallo arriba, también sin red.
+  const error = taskMutation.error ? submitErrorMessage(taskMutation.error) : completion.error
+  return (
+    <>
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {completion.dialog}
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Oportunidades</h3>
+        <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setOppDrawer(true)}>
+          <Plus className="size-3.5" />
+          Nueva
+        </Button>
+      </div>
+      {oppsQuery.isLoading ? (
+        <p className="text-xs text-muted-foreground">Cargando oportunidades…</p>
+      ) : oppsQuery.isError ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs text-destructive" role="alert">
+            No se pudieron cargar las oportunidades.
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => void oppsQuery.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : opps.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Sin oportunidades para este contacto.</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {opps.map((opp) => (
+            <li key={opp.id} className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{opp.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {opp.status === "won" ? "Ganada" : opp.status === "lost" ? "Perdida" : opp.stageName} · {money(opp.amountCents, opp.currency)}
+                  {opp.nextTask ? ` · ${opp.nextTask.title}${opp.nextTask.dueAt ? ` · ${dueWords(opp.nextTask.dueAt)}` : ""}` : ""}
+                </span>
+                {opp.why ? <span className="block truncate text-xs text-muted-foreground">{opp.why}</span> : null}
+              </span>
+              <Button variant="ghost" size="sm" className="min-h-11 shrink-0 sm:min-h-8" onClick={() => setOppPanel(opp.id)}>
+                Abrir
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {oppsQuery.hasNextPage ? (
+        <Button variant="ghost" size="sm" className="self-center" disabled={oppsQuery.isFetchingNextPage} onClick={() => void oppsQuery.fetchNextPage()}>
+          {oppsQuery.isFetchingNextPage ? <Spinner className="size-4" aria-hidden /> : null}
+          Cargar más
+        </Button>
+      ) : null}
+      <div className="flex items-center justify-between gap-2 border-t pt-3">
+        <h3 className="text-sm font-semibold">Tareas</h3>
+        {canWriteTasks ? (
+          <Button variant="outline" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setTaskDrawer(true)}>
+            <Plus className="size-3.5" />
+            Nueva tarea
+          </Button>
+        ) : null}
+      </div>
+      {!canReadTasks ? (
+        <p className="text-xs text-muted-foreground">Sin permiso de lectura de tareas.</p>
+      ) : tasks.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Sin tareas abiertas para este contacto.</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {tasks.map((task) => {
+            const done = task.status === "done"
+            const overdue = !done && isOverdue(task.dueAt)
+            return (
+              <li key={task.id} className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                <span className="min-w-0">
+                  <span className={`block truncate ${done ? "line-through" : ""}`}>{task.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {[task.opportunityTitle, task.dueAt ? `vence ${dueWords(task.dueAt)}` : null].filter(Boolean).join(" · ") || "Sin vencimiento"}
+                    {overdue ? " · vencida" : ""}
+                  </span>
+                </span>
+                {canWriteTasks ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 shrink-0 sm:min-h-8"
+                    disabled={taskMutation.isPending || completion.pendingId !== null}
+                    onClick={() =>
+                      // Completar la de un caso del agente muestra antes lo mismo que «Resolver».
+                      done ? taskMutation.mutate({ id: task.id, status: "open" }) : void completion.complete(task.id)
+                    }
+                  >
+                    {done ? "Reabrir" : "Completar"}
+                  </Button>
+                ) : null}
+              </li>
+            )
+          })}
+        </ul>
+      )}
       <OpportunityDrawer
-        open={oppDrawer.open}
+        open={oppDrawer}
         contactId={contactId}
         conversationId={conversationId}
-        opportunityId={oppDrawer.opportunityId}
-        onClose={() => setOppDrawer({ open: false })}
+        onClose={() => setOppDrawer(false)}
         onSaved={() => {
-          setOppDrawer({ open: false })
-          invalidateWorkspace()
+          setOppDrawer(false)
+          refresh()
         }}
       />
       <OpportunityPanel opportunityId={oppPanel} onClose={() => setOppPanel(null)} />
       <TaskDrawer
-        open={taskDrawer.open}
+        open={taskDrawer}
         contactId={contactId}
         conversationId={conversationId}
-        opportunityId={taskDrawer.opportunityId}
-        onClose={() => setTaskDrawer({ open: false })}
+        onClose={() => setTaskDrawer(false)}
         onSaved={() => {
-          setTaskDrawer({ open: false })
-          invalidateWorkspace()
+          setTaskDrawer(false)
+          refresh()
         }}
       />
-    </section>
-    </ScrollArea>
+    </>
+  )
+}
+
+/** El mismo límite que `POST /api/crm/contacts/:id/notes`. */
+const NOTE_MAX_LENGTH = 2000
+
+const noteSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, "Escribe la nota.")
+    .max(NOTE_MAX_LENGTH, `La nota admite hasta ${NOTE_MAX_LENGTH} caracteres.`),
+})
+
+/** Nota operativa y bitácora: lo demás que pasó con la persona. Lo que hizo el agente ya está en el hilo. */
+function NotasSection({ contactId, conversationId, onDirtyChange }: { contactId: string; conversationId: string; onDirtyChange: (dirty: boolean) => void }) {
+  const can = useCan()
+  const queryClient = useQueryClient()
+  const [noteOk, setNoteOk] = useState(false)
+  // El error de la nota lo dice su campo (o, si no es del campo, junto al botón).
+  const noteMutation = useMutation({
+    mutationFn: (body: string) => createCrmNote(contactId, { body, conversationId }),
+  })
+  const noteForm = useAppForm({
+    defaultValues: { body: "" },
+    validators: { onSubmit: noteSchema },
+    onSubmit: async ({ value }) => {
+      await noteMutation.mutateAsync(value.body.trim())
+      noteForm.reset({ body: "" })
+      setNoteOk(true)
+      void queryClient.invalidateQueries({ queryKey: ["crm-activity", contactId] })
+    },
+  })
+  const submitNote = useFormSubmit(noteForm)
+  const noteError = useFormSubmitError(noteForm)
+  const notePending = useStore(noteForm.store, (state) => state.isSubmitting)
+  const dirty = useStore(noteForm.store, (state) => state.values.body.trim().length > 0)
+  useEffect(() => {
+    onDirtyChange(dirty)
+  }, [dirty, onDirtyChange])
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange])
+  const activityQuery = useInfiniteQuery({
+    queryKey: crmActivityQueryKey(contactId),
+    queryFn: ({ pageParam }) => fetchCrmActivityPage(contactId, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+  })
+  const activity = activityQuery.data?.pages.flatMap((page) => page.data) ?? []
+  return (
+    <>
+      {can("crm.write") ? (
+        <form noValidate onSubmit={submitNote} className="flex flex-col gap-2">
+          <noteForm.AppField name="body" listeners={{ onChange: () => setNoteOk(false) }}>
+            {(field) => (
+              <field.TextareaField
+                label="Nota operativa"
+                hideLabel
+                rows={2}
+                maxLength={NOTE_MAX_LENGTH}
+                placeholder="Registra un dato operativo del caso…"
+              />
+            )}
+          </noteForm.AppField>
+          {noteOk ? (
+            <p className="text-xs text-success" role="status">
+              Nota guardada en la bitácora.
+            </p>
+          ) : null}
+          {noteError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {noteError}
+            </p>
+          ) : null}
+          {dirty && !notePending ? (
+            <p className="text-xs text-warning" role="status">
+              Borrador sin guardar: cambiar de hilo o salir pedirá confirmación. Guárdalo o descártalo.
+            </p>
+          ) : null}
+          <span className="flex flex-wrap gap-2">
+            <Button type="submit" size="sm" className="min-h-11 w-fit sm:min-h-8" disabled={notePending}>
+              {notePending ? <Spinner className="size-4" aria-hidden /> : null}
+              Guardar nota
+            </Button>
+            {dirty && !notePending ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="min-h-11 w-fit sm:min-h-8"
+                onClick={() => {
+                  noteForm.reset({ body: "" })
+                  setNoteOk(false)
+                }}
+              >
+                Descartar
+              </Button>
+            ) : null}
+          </span>
+        </form>
+      ) : null}
+      {activityQuery.isLoading && activity.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Cargando actividad…</p>
+      ) : activityQuery.isError && activity.length === 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs text-destructive" role="alert">
+            No se pudo cargar la bitácora.
+          </p>
+          <Button variant="ghost" size="sm" onClick={() => void activityQuery.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      ) : activity.length === 0 ? (
+        <EmptyState title="Sin actividad" description="Mensajes, notas, tareas y movimientos del caso aparecen aquí." />
+      ) : (
+        <ol className="flex flex-col gap-2 border-t pt-3">
+          {activity.map((item) => (
+            <ActivityRow key={item.id} item={item} />
+          ))}
+        </ol>
+      )}
+      {activityQuery.hasNextPage ? (
+        <Button variant="ghost" size="sm" className="self-center" disabled={activityQuery.isFetchingNextPage} onClick={() => void activityQuery.fetchNextPage()}>
+          {activityQuery.isFetchingNextPage ? <Spinner className="size-4" aria-hidden /> : null}
+          Cargar anteriores
+        </Button>
+      ) : null}
+    </>
   )
 }
 
 function ActivityRow({ item }: { item: CrmActivityItem }) {
   const receptionName = useReceptionName()
   return (
-    <li className="flex flex-col gap-1 rounded-md border p-2.5">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="secondary">{activityKindLabel(item.kind, receptionName)}</Badge>
-        <span className="text-xs text-muted-foreground">{timeAgo(item.at)}</span>
-        {item.channel && (
-          <span className="text-xs text-muted-foreground">· {channelLabel(item.channel)}</span>
-        )}
-        {item.actorName && (
-          <span className="text-xs text-muted-foreground">· {item.actorName}</span>
-        )}
-        {item.status && !item.status.startsWith("opportunity.") && (
-          <span className="text-xs text-muted-foreground">· {ACTIVITY_STATUS_LABEL[item.status] ?? "Estado registrado"}</span>
-        )}
-      </div>
+    <li className="flex flex-col gap-0.5 rounded-md border p-2.5">
       <p className="text-sm font-medium">{withReceptionName(item.title, receptionName)}</p>
-      {item.body && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{withReceptionName(item.body, receptionName)}</p>}
-      <div className="flex flex-wrap gap-3">
-        {item.conversationId && (
-          <Link
-            to="/inbox"
-            search={{ conversation: item.conversationId }}
-            className="text-xs text-primary hover:underline"
-          >
-            Ver hilo
-          </Link>
-        )}
-        {item.opportunityId && (
-          <Link
-            to="/pipeline"
-            search={{ oportunidad: item.opportunityId }}
-            className="text-xs text-primary hover:underline"
-          >
-            Ver oportunidad
-          </Link>
-        )}
-      </div>
+      {item.body ? <p className="whitespace-pre-wrap text-sm text-muted-foreground">{withReceptionName(item.body, receptionName)}</p> : null}
+      <p className="text-xs text-muted-foreground">
+        {[
+          activityKindLabel(item.kind, receptionName),
+          timeAgo(item.at),
+          item.channel ? channelLabel(item.channel) : null,
+          item.actorName,
+          item.status && !item.status.startsWith("opportunity.") ? (ACTIVITY_STATUS_LABEL[item.status] ?? "Estado registrado") : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
     </li>
   )
 }

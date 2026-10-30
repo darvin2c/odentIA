@@ -1,10 +1,10 @@
 import {
   CORE_VITAL_KEYS,
   DENTAL_IMAGING_TYPES,
-  SUGGESTED_CONSENT_TEMPLATES,
   diagnosisCodeLabel,
   findingDiagnosisCode,
   isDiagnosisSystem,
+  SUGGESTED_CONSENT_TEMPLATES,
 } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { encounterPlanItem, treatmentPlanItem } from "@odentia/db/schema/clinical"
@@ -32,6 +32,10 @@ import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm"
 import { notFound } from "../errors.js"
 import type { TimelineItem } from "../patient-history.js"
 import { DENTAL_PRESCRIBING, type DiagnosisCandidate, type ProductHooks } from "../product-hooks.js"
+import { dentalCatalog } from "./catalog.js"
+import { DENTAL_DICTATION } from "./dictation.js"
+import { dentalExamination } from "./examination.js"
+import { dentalInterview } from "./interview.js"
 import {
   type ClosingOdontogram,
   closingOdontogramOf,
@@ -42,10 +46,6 @@ import {
 } from "./odontogram.js"
 import { latestPeriodontalBrief, periodontalBriefsByEncounter } from "./periodontal.js"
 import { findingsOf, linkPlanItemFinding, withPlanItemDental } from "./plan-finding.js"
-import { dentalCatalog } from "./catalog.js"
-import { DENTAL_DICTATION } from "./dictation.js"
-import { dentalExamination } from "./examination.js"
-import { dentalInterview } from "./interview.js"
 import { dentalProductSite, siteColumns } from "./site.js"
 import { drawTreatedFinding, voidLeftFindings } from "./treated-findings.js"
 
@@ -316,7 +316,8 @@ export const dentalHooks: ProductHooks = {
 
   planPhases: TREATMENT_PHASES,
   phaseFor: (kind) => phaseForKind(kind),
-  phaseWords: (phase) => TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
+  phaseWords: (phase) =>
+    TREATMENT_PHASE_LABELS[phase as keyof typeof TREATMENT_PHASE_LABELS] ?? null,
 
   // El odontograma firmado no cambia ni se anula: si existe, está vigente.
   async documentCheck(tx, orgId, type, id) {
@@ -334,7 +335,11 @@ export const dentalHooks: ProductHooks = {
       issuedAt: row.createdAt,
       validUntil: null,
       voidedAt: null,
-      signer: { name: row.examinerName, title: row.examinerTitle, registration: row.registrationNumber },
+      signer: {
+        name: row.examinerName,
+        title: row.examinerTitle,
+        registration: row.registrationNumber,
+      },
     }
   },
 

@@ -1,5 +1,10 @@
 import { withOrgContext } from "@odentia/db"
-import { getDataProtectionView, loadDocumentClinic, recordDataProtectionDownload, renderDataProtectionPdf } from "@odentia/services"
+import {
+  getDataProtectionView,
+  loadDocumentClinic,
+  recordDataProtectionDownload,
+  renderDataProtectionPdf,
+} from "@odentia/services"
 import { Hono } from "hono"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
@@ -21,7 +26,9 @@ export function createDataProtectionRoute(deps: CrmDeps) {
 
   app.get("/", async (c) => {
     const { orgId } = orgContextOf(c)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getDataProtectionView(tx, orgId)))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getDataProtectionView(tx, orgId)),
+    )
   })
 
   // «Descargar para la autoridad»: con la fecha del día y sin guardar copia; la descarga queda en la auditoría.
@@ -30,7 +37,10 @@ export function createDataProtectionRoute(deps: CrmDeps) {
     try {
       const pdf = await withOrgContext(deps.db, orgId, async (tx) => {
         await recordDataProtectionDownload(tx, orgId, userId)
-        return renderDataProtectionPdf(await getDataProtectionView(tx, orgId), await loadDocumentClinic(tx, orgId))
+        return renderDataProtectionPdf(
+          await getDataProtectionView(tx, orgId),
+          await loadDocumentClinic(tx, orgId),
+        )
       })
       return c.body(Buffer.from(pdf), 200, {
         "Content-Type": "application/pdf",

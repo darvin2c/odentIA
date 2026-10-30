@@ -1,3 +1,4 @@
+import { patientGuideSchema } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
 import { PRICE_DISCLOSURES } from "@odentia/db/schema/clinical"
 import {
@@ -5,16 +6,16 @@ import {
   getService,
   getTemplate,
   getTemplatePatientGuide,
-  listMostUsedServices,
   listMaterialProducts,
+  listMostUsedServices,
   listServiceMaterials,
   listServices,
   listTemplates,
   MATERIAL_QUANTITY_MAX,
   PRICE_DISCLOSURE_BATCH,
   quickAddServices,
-  searchOfficialCodes,
   SERVICE_MATERIALS_MAX,
+  searchOfficialCodes,
   serviceMaterialSummaries,
   setServiceMaterials,
   setServicesPriceDisclosure,
@@ -23,7 +24,6 @@ import {
 } from "@odentia/services"
 import { Hono } from "hono"
 import { z } from "zod"
-import { patientGuideSchema } from "@odentia/clinical"
 import { canAccess, canAccessAny, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
@@ -51,7 +51,12 @@ const offersQuery = z
     ids: z
       .string()
       .max(3800)
-      .transform((value) => value.split(",").map((id) => id.trim()).filter(Boolean))
+      .transform((value) =>
+        value
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean),
+      )
       .pipe(z.array(z.string().uuid()).min(1).max(100))
       .optional(),
     cursor: z.string().max(500).optional(),
@@ -85,22 +90,49 @@ const officialCodesQuery = z
   })
   .strict()
 
+/**
+ * Lo que se dice de cada dato de un servicio, en la voz de su formulario (el
+ * tarifario y el cajón «servicio propio» de la biblioteca), junto a su campo.
+ */
+const serviceName = z
+  .string()
+  .trim()
+  .min(1, { error: "Escribe el nombre del servicio." })
+  .max(200, { error: "Escribe como mucho 200 caracteres." })
+const serviceSpecialtyId = z.string().uuid({ error: "Elige una especialidad de la clínica" })
+const serviceScope = z
+  .string({ error: "Elige dónde se hace el servicio" })
+  .trim()
+  .min(1, { error: "Elige dónde se hace el servicio" })
+  .max(20, { error: "Elige dónde se hace el servicio" })
+const servicePriceCents = z
+  .number({ error: "Indica el precio (usa 0 si va incluido sin costo)" })
+  .int({ error: "El precio no es un importe válido" })
+  .min(0, { error: "El precio no puede ser negativo" })
+  .max(2147483647, { error: "El precio es demasiado alto" })
+const serviceDurationMin = z
+  .number({ error: "Duración: minutos enteros entre 1 y 1440" })
+  .int({ error: "Duración: minutos enteros entre 1 y 1440" })
+  .min(1, { error: "Duración: minutos enteros entre 1 y 1440" })
+  .max(1440, { error: "Duración: minutos enteros entre 1 y 1440" })
+const serviceEvaluationId = z.string().uuid({ error: "Elige la evaluación de la lista" })
+
 const createInput = z
   .object({
     templateId: z.string().uuid().nullish(),
-    name: z.string().trim().min(1).max(200).nullish(),
-    specialtyId: z.string().uuid().nullish(),
-    scope: z.string().trim().min(1).max(20).nullish(),
+    name: serviceName.nullish(),
+    specialtyId: serviceSpecialtyId.nullish(),
+    scope: serviceScope.nullish(),
     code: z.string().max(40).nullish(),
-    priceCents: z.number().int().min(0).max(2147483647),
+    priceCents: servicePriceCents,
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
       .nullish(),
-    durationMin: z.number().int().min(1).max(1440).nullish(),
+    durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).nullish(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).nullish(),
-    evaluationServiceId: z.string().uuid().nullish(),
+    evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
     officialCode: officialCodeInput,
     isActive: z.boolean().optional(),
@@ -112,32 +144,53 @@ const patchInput = z
     // Guardar la explicación es revisarla: queda quién y cuándo. Nula la quita.
     patientGuide: patientGuideSchema.nullish(),
     templateId: z.string().uuid().nullish(),
-    name: z.string().trim().min(1).max(200).optional(),
-    specialtyId: z.string().uuid().optional(),
-    scope: z.string().trim().min(1).max(20).optional(),
+    name: serviceName.optional(),
+    specialtyId: serviceSpecialtyId.optional(),
+    scope: serviceScope.optional(),
     code: z.string().max(40).nullish(),
-    priceCents: z.number().int().min(0).max(2147483647).optional(),
+    priceCents: servicePriceCents.optional(),
     currency: z
       .string()
       .regex(/^[A-Z]{3}$/)
       .optional(),
-    durationMin: z.number().int().min(1).max(1440).nullish(),
+    durationMin: serviceDurationMin.nullish(),
     billingMode: z.enum(["treatment", "session"]).optional(),
     priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
-    evaluationServiceId: z.string().uuid().nullish(),
+    evaluationServiceId: serviceEvaluationId.nullish(),
     leavesFinding: leavesFindingInput.nullish(),
     officialCode: officialCodeInput,
     isActive: z.boolean().optional(),
   })
   .strict()
 
+/** Lo que se dice de cada dato de una fila de «Agregar servicios», en la voz de la pantalla. */
+const batchName = z
+  .string({ error: "Ponle un nombre" })
+  .trim()
+  .min(1, { error: "Ponle un nombre" })
+  .max(200, { error: "Máximo 200 caracteres" })
+const batchPrice = z
+  .number({ error: "Pon el precio (0 si no tiene costo)" })
+  .int({ error: "El precio va en la unidad menor de la moneda, sin decimales" })
+  .min(0, { error: "El precio no puede ser negativo" })
+  .max(2147483647, { error: "El precio es demasiado alto" })
+const batchBillingMode = z
+  .enum(["treatment", "session"], { error: "Elige cómo se cobra" })
+  .nullish()
+const batchDuration = z
+  .number({ error: "Minutos enteros entre 1 y 1440" })
+  .int({ error: "Minutos enteros entre 1 y 1440" })
+  .min(1, { error: "Minutos enteros entre 1 y 1440" })
+  .max(1440, { error: "Minutos enteros entre 1 y 1440" })
+  .nullish()
+
 const templateItemShape = {
-  templateId: z.string().uuid(),
+  templateId: z.uuid({ error: "Elige el tratamiento de la biblioteca" }),
   /** Nombre con el que la clínica lo ofrece; sin él, el de la biblioteca. */
-  name: z.string().trim().min(1).max(200).nullish(),
-  priceCents: z.number().int().min(0).max(2147483647),
-  billingMode: z.enum(["treatment", "session"]).nullish(),
-  durationMin: z.number().int().min(1).max(1440).nullish(),
+  name: batchName.nullish(),
+  priceCents: batchPrice,
+  billingMode: batchBillingMode,
+  durationMin: batchDuration,
 }
 
 /** «Agregar servicios»: de la biblioteca y propios, guardados en un solo acto. */
@@ -145,27 +198,36 @@ const batchInput = z
   .object({
     items: z
       .array(
-        z.discriminatedUnion("kind", [
-          z.object({ kind: z.literal("template"), ...templateItemShape }).strict(),
-          z
-            .object({
-              kind: z.literal("custom"),
-              name: z.string().trim().min(1).max(200),
-              specialtyId: z.string().uuid(),
-              scope: z.string().trim().min(1).max(20),
-              priceCents: z.number().int().min(0).max(2147483647),
-              billingMode: z.enum(["treatment", "session"]).nullish(),
-              durationMin: z.number().int().min(1).max(1440).nullish(),
-              leavesFinding: leavesFindingInput.nullish(),
-              officialCode: officialCodeInput,
-            })
-            .strict(),
-        ]),
+        z.discriminatedUnion(
+          "kind",
+          [
+            z.object({ kind: z.literal("template"), ...templateItemShape }).strict(),
+            z
+              .object({
+                kind: z.literal("custom"),
+                name: batchName,
+                specialtyId: z.uuid({ error: "Elige la especialidad" }),
+                scope: z
+                  .string({ error: "Elige dónde se hace" })
+                  .trim()
+                  .min(1, { error: "Elige dónde se hace" })
+                  .max(20, { error: "Elige dónde se hace" }),
+                priceCents: batchPrice,
+                billingMode: batchBillingMode,
+                durationMin: batchDuration,
+                leavesFinding: leavesFindingInput.nullish(),
+                officialCode: officialCodeInput,
+              })
+              .strict(),
+          ],
+          { error: "Cada servicio es de la biblioteca o propio" },
+        ),
+        { error: "Elige al menos un servicio con su precio" },
       )
-      .min(1)
-      .max(100),
+      .min(1, { error: "Elige al menos un servicio con su precio" })
+      .max(100, { error: "Guarda como mucho 100 servicios a la vez" }),
     /** «¿Cómo dice el agente estos precios?»: una sola respuesta para todo lo que se agrega. */
-    priceDisclosure: z.enum(PRICE_DISCLOSURES).optional(),
+    priceDisclosure: z.enum(PRICE_DISCLOSURES, { error: "Elige cómo dice los precios" }).optional(),
   })
   .strict()
 
@@ -198,11 +260,15 @@ const materialsInput = z
               .number({ error: "Escribe cuánto se usa cada vez" })
               .int({ error: "La cantidad es un número entero" })
               .min(1, { error: `La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}` })
-              .max(MATERIAL_QUANTITY_MAX, { error: `La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}` }),
+              .max(MATERIAL_QUANTITY_MAX, {
+                error: `La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}`,
+              }),
           })
           .strict(),
       )
-      .max(SERVICE_MATERIALS_MAX, { error: `Un servicio admite hasta ${SERVICE_MATERIALS_MAX} materiales` }),
+      .max(SERVICE_MATERIALS_MAX, {
+        error: `Un servicio admite hasta ${SERVICE_MATERIALS_MAX} materiales`,
+      }),
   })
   .strict()
 
@@ -292,7 +358,10 @@ export function createServicesRoute(deps: CrmDeps) {
   app.get("/without-materials", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "inventory.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar los materiales"), 403)
+      return c.json(
+        errorBody(c, "FORBIDDEN", "No tienes permiso para configurar los materiales"),
+        403,
+      )
     }
     const parsed = withoutMaterialsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -307,7 +376,10 @@ export function createServicesRoute(deps: CrmDeps) {
   app.get("/material-products", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["inventory.write", "clinical.write"])) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para configurar los materiales"), 403)
+      return c.json(
+        errorBody(c, "FORBIDDEN", "No tienes permiso para configurar los materiales"),
+        403,
+      )
     }
     const parsed = materialProductsQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -327,7 +399,9 @@ export function createServicesRoute(deps: CrmDeps) {
     if (!serviceId.success) return c.json(errorBody(c, "NOT_FOUND", "Servicio no encontrado"), 404)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        listServiceMaterials(tx, orgId, serviceId.data, { prices: canAccess(memberRole, "inventory.read") }),
+        listServiceMaterials(tx, orgId, serviceId.data, {
+          prices: canAccess(memberRole, "inventory.read"),
+        }),
       ),
     )
   })
@@ -384,7 +458,9 @@ export function createServicesRoute(deps: CrmDeps) {
     const parsed = officialCodesQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
-      const page = await withOrgContext(deps.db, orgId, (tx) => searchOfficialCodes(tx, orgId, parsed.data))
+      const page = await withOrgContext(deps.db, orgId, (tx) =>
+        searchOfficialCodes(tx, orgId, parsed.data),
+      )
       return c.json(page)
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
@@ -397,7 +473,9 @@ export function createServicesRoute(deps: CrmDeps) {
     if (!canAccess(memberRole, "catalog.read")) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getTemplatePatientGuide(tx, c.req.param("id"))))
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) => getTemplatePatientGuide(tx, c.req.param("id"))),
+    )
   })
 
   app.get("/templates/:id", async (c) => {
@@ -406,7 +484,9 @@ export function createServicesRoute(deps: CrmDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver los servicios"), 403)
     }
     try {
-      const data = await withOrgContext(deps.db, orgId, (tx) => getTemplate(tx, orgId, c.req.param("id")))
+      const data = await withOrgContext(deps.db, orgId, (tx) =>
+        getTemplate(tx, orgId, c.req.param("id")),
+      )
       return c.json({ data })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
@@ -436,7 +516,9 @@ export function createServicesRoute(deps: CrmDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 201, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        quickAddServices(tx, orgId, userId, parsed.data.items, { priceDisclosure: parsed.data.priceDisclosure }),
+        quickAddServices(tx, orgId, userId, parsed.data.items, {
+          priceDisclosure: parsed.data.priceDisclosure,
+        }),
       ),
     )
   })
@@ -449,7 +531,9 @@ export function createServicesRoute(deps: CrmDeps) {
     const parsed = priceDisclosureInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => setServicesPriceDisclosure(tx, orgId, userId, parsed.data)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        setServicesPriceDisclosure(tx, orgId, userId, parsed.data),
+      ),
     )
   })
 
@@ -492,7 +576,9 @@ export function createServicesRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
         updateService(tx, orgId, userId, c.req.param("id"), {
-          ...(parsed.data.patientGuide !== undefined ? { patientGuide: parsed.data.patientGuide } : {}),
+          ...(parsed.data.patientGuide !== undefined
+            ? { patientGuide: parsed.data.patientGuide }
+            : {}),
           templateId: parsed.data.templateId,
           name: parsed.data.name,
           specialtyId: parsed.data.specialtyId,

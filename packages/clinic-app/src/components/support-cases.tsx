@@ -1,15 +1,115 @@
-import { ExpandableText } from "@odentia/ui-patterns"
-import { Button, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import { ExpandableText, submitErrorMessage, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { Button, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@odentia/ui"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Paperclip } from "lucide-react"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { ApiError, apiFetch, apiUpload } from "../lib/api"
+import { apiFetch, apiUpload } from "../lib/api"
 import { API_URL } from "../lib/auth-client"
 import { orgSlugFromHostname, requestHostname } from "../lib/host"
-import { mutationErrorMessage } from "../lib/query-error"
 import { useMyRole } from "../lib/crm"
 import { appWords } from "../lib/product-words"
+
+/** Lo que admite `POST /api/help/cases/:id/attachments` (`SUPPORT_ATTACHMENT_MAX_BYTES`). */
+const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+const ATTACHMENT_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"]
+
+/** Lo que se dice de un archivo antes de subirlo, con las palabras del servidor; nada si se puede subir. */
+function attachmentProblem(file: File): string | null {
+  if (!ATTACHMENT_TYPES.includes(file.type)) return "El archivo no es válido: se admite JPG, PNG, WebP o PDF reales"
+  if (file.size > ATTACHMENT_MAX_BYTES) return "El archivo no puede superar 10 MB"
+  return null
+}
+
+/** La respuesta en el caso, con los límites y palabras de la ruta. */
+const replySchema = z.object({
+  body: z.string().trim().min(1, "Escribe tu respuesta.").max(4000, "Escribe como mucho 4000 caracteres."),
+})
+
+/** Cuánto dura el acceso diagnóstico: las opciones que admite la ruta (5 a 60 minutos). */
+const MINUTES_OPTIONS = [
+  { value: "15", label: "15 minutos" },
+  { value: "30", label: "30 minutos" },
+  { value: "60", label: "1 hora" },
+] as const
+const grantSchema = z.object({
+  minutes: z.enum(["15", "30", "60"], "Elige por cuánto tiempo."),
+})
+
+/**
+ * Responder en un caso abierto. Cada caso guarda su borrador (`drafts`): no se
+ * envía el texto de un caso en otro ni se pierde al cambiar.
+ */
+function CaseReplyForm({
+  caseId,
+  drafts,
+  onSend,
+}: {
+  caseId: string
+  drafts: Record<string, string>
+  onSend: (body: string) => Promise<unknown>
+}) {
+  const form = useAppForm({
+    defaultValues: { body: drafts[caseId] ?? "" },
+    validators: { onSubmit: replySchema },
+    onSubmit: async ({ value }) => {
+      await onSend(value.body.trim())
+      drafts[caseId] = ""
+      form.reset({ body: "" })
+    },
+  })
+  const onSubmit = useFormSubmit(form)
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  return (
+    <form noValidate onSubmit={onSubmit} className="flex flex-col gap-2">
+      <form.AppField
+        name="body"
+        listeners={{
+          onChange: ({ value }) => {
+            drafts[caseId] = value
+          },
+        }}
+      >
+        {(field) => (
+          <field.Control label="Tu respuesta a soporte" hideLabel id="soporte-respuesta">
+            {(control) => (
+              <InputGroup className="border-input bg-card">
+                <InputGroupTextarea
+                  {...control.props}
+                  rows={1}
+                  maxLength={4000}
+                  className="max-h-32 min-h-11"
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  placeholder="Responde a soporte…"
+                />
+                <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
+                  <InputGroupButton
+                    type="submit"
+                    variant="default"
+                    size="sm"
+                    className="min-h-11 px-4 sm:min-h-9"
+                    disabled={pending}
+                    aria-busy={pending}
+                  >
+                    Enviar
+                  </InputGroupButton>
+                </InputGroupAddon>
+              </InputGroup>
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </form>
+  )
+}
 
 const supportStatus = z.enum(["abierto", "en_atencion", "esperando_clinica", "resuelto"])
 type SupportStatus = z.infer<typeof supportStatus>
@@ -76,8 +176,9 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
     if (initialCaseId) sectionRef.current?.scrollIntoView({ block: "start" })
   }, [initialCaseId])
   // Borrador por caso: no se envía el texto de un caso en otro ni se pierde al cambiar.
-  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({})
-  const [minutes, setMinutes] = useState("30")
+  const replyDrafts = useRef<Record<string, string>>({})
+  // Lo que se dice del archivo elegido antes de subirlo (tamaño, tipo).
+  const [fileProblem, setFileProblem] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const cases = useQuery({
@@ -103,10 +204,7 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
     retry: false,
     mutationFn: (input: { id: string; body: string }) =>
       apiFetch(`/api/help/cases/${input.id}/messages`, { method: "POST", body: JSON.stringify({ body: input.body }) }),
-    onSuccess: (_data, input) => {
-      setReplyDrafts((current) => ({ ...current, [input.id]: "" }))
-      invalidate()
-    },
+    onSuccess: invalidate,
   })
   const reopen = useMutation({
     retry: false,
@@ -124,16 +222,23 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
   })
   const grant = useMutation({
     retry: false,
-    mutationFn: () => {
-      const parsed = Number.parseInt(minutes, 10)
-      const value = Number.isInteger(parsed) && parsed >= 5 && parsed <= 60 ? parsed : 30
-      return apiFetch(`/api/help/cases/${selectedId}/grants`, {
+    mutationFn: (minutes: number) =>
+      apiFetch(`/api/help/cases/${selectedId}/grants`, {
         method: "POST",
-        body: JSON.stringify({ minutes: value }),
-      })
-    },
+        body: JSON.stringify({ minutes }),
+      }),
     onSuccess: invalidate,
   })
+  const grantForm = useAppForm({
+    defaultValues: { minutes: "30" as string },
+    validators: { onSubmit: grantSchema },
+    onSubmit: async ({ value }) => {
+      await grant.mutateAsync(Number.parseInt(value.minutes, 10))
+    },
+  })
+  const onGrantSubmit = useFormSubmit(grantForm)
+  const grantError = useFormSubmitError(grantForm)
+  const granting = useStore(grantForm.store, (state) => state.isSubmitting)
   const revoke = useMutation({
     retry: false,
     mutationFn: (grantId: string) =>
@@ -152,18 +257,17 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
   const items = [...(cases.data ?? [])].sort((a, b) => Number(b.unread) - Number(a.unread))
   const kase = detail.data ?? null
   const activeGrant = kase?.grants.find((item) => item.active) ?? null
-
-  function submitReply(event: FormEvent) {
-    event.preventDefault()
-    if (selectedId === null) return
-    const body = (replyDrafts[selectedId] ?? "").trim()
-    if (body.length > 0 && !sendReply.isPending) sendReply.mutate({ id: selectedId, body })
-  }
+  const resolved = kase?.status === "resuelto"
+  // Lo que se dice junto a «Adjuntar»: el archivo elegido o lo que respondió el servidor al subirlo.
+  const attachError = fileProblem ?? (upload.isError ? submitErrorMessage(upload.error) : null)
 
   const markedRef = useRef<string | null>(null)
 
   function openCase(id: string) {
     markedRef.current = null
+    setFileProblem(null)
+    upload.reset()
+    grantForm.reset()
     setSelectedId(id)
   }
 
@@ -305,55 +409,31 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                 </ul>
               ) : null}
 
-              {kase.status === "resuelto" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="min-h-11 self-start sm:min-h-9"
-                  disabled={reopen.isPending}
-                  onClick={() => reopen.mutate()}
-                >
-                  Reabrir el caso
-                </Button>
+              {resolved ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="min-h-11 self-start sm:min-h-9"
+                    disabled={reopen.isPending}
+                    onClick={() => reopen.mutate()}
+                  >
+                    Reabrir el caso
+                  </Button>
+                  {reopen.isError ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {submitErrorMessage(reopen.error)}
+                    </p>
+                  ) : null}
+                </>
               ) : (
-                <form onSubmit={submitReply}>
-                  <FieldLabel htmlFor="soporte-respuesta" className="sr-only">
-                    Tu respuesta a soporte
-                  </FieldLabel>
-                  <InputGroup className="border-input bg-card">
-                    <InputGroupTextarea
-                      id="soporte-respuesta"
-                      rows={1}
-                      maxLength={4000}
-                      className="max-h-32 min-h-11"
-                      value={selectedId === null ? "" : (replyDrafts[selectedId] ?? "")}
-                      onChange={(event) => {
-                        if (selectedId === null) return
-                        const id = selectedId
-                        setReplyDrafts((current) => ({ ...current, [id]: event.target.value }))
-                      }}
-                      placeholder="Responde a soporte…"
-                    />
-                    <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
-                      <InputGroupButton
-                        type="submit"
-                        variant="default"
-                        size="sm"
-                        className="min-h-11 px-4 sm:min-h-9"
-                        disabled={selectedId === null || (replyDrafts[selectedId] ?? "").trim().length === 0 || sendReply.isPending}
-                        aria-busy={sendReply.isPending}
-                      >
-                        Enviar
-                      </InputGroupButton>
-                    </InputGroupAddon>
-                  </InputGroup>
-                </form>
+                <CaseReplyForm
+                  key={kase.id}
+                  caseId={kase.id}
+                  drafts={replyDrafts.current}
+                  onSend={(body) => sendReply.mutateAsync({ id: kase.id, body })}
+                />
               )}
-              {sendReply.isError || reopen.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {mutationErrorMessage(sendReply.error ?? reopen.error)}
-                </p>
-              ) : null}
 
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -364,8 +444,12 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                   aria-label="Adjuntar archivo al caso"
                   onChange={(event) => {
                     const file = event.target.files?.[0]
-                    if (file) upload.mutate(file)
                     event.target.value = ""
+                    if (!file) return
+                    const problem = attachmentProblem(file)
+                    setFileProblem(problem)
+                    if (problem) upload.reset()
+                    else upload.mutate(file)
                   }}
                 />
                 <Button
@@ -373,82 +457,100 @@ export function SupportCasesSection({ initialCaseId = null }: { initialCaseId?: 
                   variant="outline"
                   size="sm"
                   className="min-h-11 sm:min-h-9"
-                  disabled={upload.isPending || kase.status === "resuelto"}
+                  disabled={upload.isPending || resolved}
                   aria-busy={upload.isPending}
+                  aria-invalid={attachError ? true : undefined}
+                  aria-describedby={resolved ? "soporte-adjunto-motivo" : attachError ? "soporte-adjunto-error" : undefined}
                   onClick={() => fileRef.current?.click()}
                 >
                   <Paperclip className="size-4" aria-hidden />
                   {upload.isPending ? "Subiendo…" : "Adjuntar (JPG, PNG, WebP o PDF, máx. 10 MB)"}
                 </Button>
               </div>
-              {upload.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {mutationErrorMessage(upload.error)}
+              {resolved ? (
+                <p id="soporte-adjunto-motivo" className="text-sm text-muted-foreground">
+                  Para adjuntar archivos, reabre el caso.
+                </p>
+              ) : attachError ? (
+                <p id="soporte-adjunto-error" role="alert" className="text-sm text-destructive">
+                  {attachError}
                 </p>
               ) : null}
 
-              {canGrant ? <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
-                <p className="font-bold">Acceso diagnóstico de soporte</p>
-                {activeGrant ? (
-                  <>
-                    <p>
-                      Soporte puede ver el diagnóstico de tu clínica hasta el{" "}
-                      {new Date(activeGrant.expiresAt).toLocaleString()}. Solo configuración operacional, nunca tus
-                      pacientes ni secretos.
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="min-h-11 self-start sm:min-h-9"
-                      disabled={revoke.isPending}
-                      onClick={() => revoke.mutate(activeGrant.id)}
-                    >
-                      Revocar ahora
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-muted-foreground">
-                      Si soporte lo necesita, puedes autorizar que vea el diagnóstico de tu clínica (configuración,
-                      nunca pacientes ni secretos). Eliges por cuánto tiempo, máximo 1 hora, y lo revocas cuando
-                      quieras. Solo quien es propietario o administra la clínica puede autorizarlo.
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <FieldLabel htmlFor="soporte-minutos">Duración</FieldLabel>
-                      <Select
-                        value={minutes}
-                        items={{ 15: "15 minutos", 30: "30 minutos", 60: "1 hora" }}
-                        onValueChange={(value) => setMinutes(value ?? "30")}
-                      >
-                        <SelectTrigger id="soporte-minutos" className="w-44">
-                          <SelectValue placeholder="30 minutos" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="15">15 minutos</SelectItem>
-                          <SelectItem value="30">30 minutos</SelectItem>
-                          <SelectItem value="60">1 hora</SelectItem>
-                        </SelectContent>
-                      </Select>
+              {!canGrant ? (
+                <p className="text-sm text-muted-foreground">Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte.</p>
+              ) : resolved && !activeGrant ? (
+                <p className="text-sm text-muted-foreground">
+                  El caso está resuelto: si soporte necesita ver el diagnóstico de tu clínica, reábrelo y autoriza el acceso.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-sm">
+                  <p className="font-bold">Acceso diagnóstico de soporte</p>
+                  {activeGrant ? (
+                    <>
+                      <p>
+                        Soporte puede ver el diagnóstico de tu clínica hasta el{" "}
+                        {new Date(activeGrant.expiresAt).toLocaleString()}. Solo configuración operacional, nunca tus
+                        pacientes ni secretos.
+                      </p>
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="min-h-11 sm:min-h-9"
-                        disabled={grant.isPending}
-                        onClick={() => grant.mutate()}
+                        className="min-h-11 self-start sm:min-h-9"
+                        disabled={revoke.isPending}
+                        onClick={() => revoke.mutate(activeGrant.id)}
                       >
-                        Autorizar acceso
+                        Revocar ahora
                       </Button>
-                    </div>
-                  </>
-                )}
-                {grant.isError || revoke.isError ? (
-                  <p role="alert" className="text-sm text-destructive">
-                    {mutationErrorMessage(grant.error ?? revoke.error)}
-                  </p>
-                ) : null}
-              </div> : <p className="text-sm text-muted-foreground">Solo quien administra la clínica puede autorizar acceso diagnóstico a soporte.</p>}
+                      {revoke.isError ? (
+                        <p role="alert" className="text-sm text-destructive">
+                          {submitErrorMessage(revoke.error)}
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-muted-foreground">
+                        Si soporte lo necesita, puedes autorizar que vea el diagnóstico de tu clínica (configuración,
+                        nunca pacientes ni secretos). Eliges por cuánto tiempo, máximo 1 hora, y lo revocas cuando
+                        quieras. Solo quien es propietario o administra la clínica puede autorizarlo.
+                      </p>
+                      <form noValidate onSubmit={onGrantSubmit} className="flex flex-col gap-1.5">
+                        <div className="flex flex-wrap items-end gap-2">
+                          <grantForm.AppField name="minutes">
+                            {(field) => (
+                              <field.SelectField
+                                label="Duración"
+                                id="soporte-minutos"
+                                className="w-auto"
+                                triggerClassName="w-44"
+                                options={MINUTES_OPTIONS}
+                                placeholder="30 minutos"
+                              />
+                            )}
+                          </grantForm.AppField>
+                          <Button
+                            type="submit"
+                            variant="outline"
+                            size="sm"
+                            className="min-h-11 sm:min-h-9"
+                            disabled={granting}
+                            aria-busy={granting}
+                          >
+                            Autorizar acceso
+                          </Button>
+                        </div>
+                        {grantError ? (
+                          <p role="alert" className="text-sm text-destructive">
+                            {grantError}
+                          </p>
+                        ) : null}
+                      </form>
+                    </>
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { GENERAL_PERMISSION_QUESTION } from "@odentia/services"
+import { GENERAL_PERMISSION_QUESTION, generalPermissionWords } from "@odentia/services"
 import { describe, expect, it } from "vitest"
 import { attentionLines, attentionProgress, fitHistory, formulasIn, HISTORY_CHARS, HISTORY_HEAD, nameQuestionsIn } from "./attention"
 
@@ -96,6 +96,31 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     expect(attentionLines(later, "Sofi")[0]).toBe("Ya le respondiste en esta atención: no te presentes ni vuelvas a saludar; ve directo a lo que pide.")
   })
 
+  it("el enlace con la hora que ya le dio no se repite: el turno lo dice; el de otra atención no cuenta (ADR 0109)", () => {
+    const out = (body: string, minutes: number) => ({ direction: "out", senderKind: "agent", body, createdAt: at(minutes) })
+    const link = "https://norte.odentia.test/reserva?sede=s1&con=u1&hora=2026-11-03T14%3A00%3A00.000Z&token={{su-enlace:0b6f8a52-1c2d-4e3f-8a9b-0c1d2e3f4a5b}}"
+    const given = attentionProgress({
+      items: [
+        out(`Para reservarte el martes 3, confirma tus datos aquí (1 minuto): ${link}`, 2),
+        { direction: "in", senderKind: "contact", body: "¿y por aquí no se puede?", createdAt: at(3) },
+      ],
+      startedAt,
+      state: empty,
+      promotions: [],
+    })
+    expect(given.pickLinks).toEqual(["2026-11-03T14:00:00.000Z"])
+    expect(attentionLines(given, "Sofi").join("\n")).toContain("Ya le diste en esta atención su enlace con la hora que eligió: no se lo vuelvas a mandar")
+    // La agenda que acompaña a los horarios no trae hora; lo de otra atención tampoco cuenta.
+    const agenda = attentionProgress({
+      items: [out("La agenda completa: https://norte.odentia.test/reserva?token={{su-enlace:0b6f8a52-1c2d-4e3f-8a9b-0c1d2e3f4a5b}}", 2), out(link, -600)],
+      startedAt,
+      state: empty,
+      promotions: [],
+    })
+    expect(agenda.pickLinks).toEqual([])
+    expect(attentionLines(agenda, "Sofi").join("\n")).not.toContain("Ya le diste en esta atención su enlace")
+  })
+
   it("la promoción que ya nombró, aunque fuera en negrita, queda dicha; la de otra atención no", () => {
     const progress = attentionProgress({
       items: [
@@ -134,6 +159,11 @@ describe("cómo va la atención, contado por el código (ADR 0104)", () => {
     const untold = attentionProgress({ items: [out(GENERAL_PERMISSION_QUESTION, 4)], startedAt, state: booked, promotions: [] })
     expect(untold.doneTold).toBe(false)
     expect(attentionLines(untold, "Sofi").join("\n")).toContain("pero todavía no se lo dijiste")
+    // La pregunta sale con el nombre de la clínica y su trato: de tú o de usted, tampoco cuenta.
+    for (const treatment of ["tu", "usted"] as const) {
+      const question = generalPermissionWords("Clínica Sonríe", treatment).question
+      expect(attentionProgress({ items: [out(question, 4)], startedAt, state: booked, promotions: [] }).doneTold).toBe(false)
+    }
     expect(attentionProgress({ items: [out("Listo, quedó reservada.", 4)], startedAt, state: booked, promotions: [] }).doneTold).toBe(true)
     // Lo hecho en la atención anterior no es de esta.
     const before = attentionProgress({ items: [], startedAt, state: { ...empty, recent: [proposal("ejecutada", -600)] }, promotions: [] })

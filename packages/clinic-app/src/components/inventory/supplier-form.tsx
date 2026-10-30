@@ -4,28 +4,17 @@
  * se elige de la lista del país de la clínica (`supplierDocChoices`): se guarda
  * su código y no se escribe a mano.
  */
-import {
-  Button,
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  Input,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { FormDrawer, isValidE164, PhoneInput, regionCountry, toE164 } from "@odentia/ui-patterns"
+import { Button, Collapsible, CollapsibleContent, CollapsibleTrigger, FieldGroup, toast } from "@odentia/ui"
+import { FormDrawer, isValidE164, regionCountry, toE164, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import * as React from "react"
+import { z } from "zod"
 import {
   createSupplier,
-  inventoryErrorMessage,
   inventoryKeys,
+  inventoryUnconfirmedMessage,
   type SupplierBody,
   type SupplierItem,
   supplierDocChoices,
@@ -43,16 +32,29 @@ function phoneValue(phone: string | null | undefined): string | null {
   return toE164(phone, regionCountry())
 }
 
-type FieldKey = "name" | "phone" | "doc" | "email" | "address"
+// Los mismos topes que la ruta (`supplierInput`).
+const supplierSchema = z
+  .object({
+    name: z.string().trim().min(1, "Escribe el nombre o la razón social.").max(200, "El nombre admite hasta 200 caracteres."),
+    phone: z.string().nullable(),
+    docType: z.string(),
+    docNumber: z.string().trim().max(50, "El número admite hasta 50 caracteres."),
+    email: z
+      .string()
+      .trim()
+      .max(200, "El correo admite hasta 200 caracteres.")
+      .refine((value) => !value || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), "Escribe un correo válido, como ventas@proveedor.com."),
+    address: z.string().trim().max(500, "La dirección admite hasta 500 caracteres."),
+  })
+  .superRefine((value, ctx) => {
+    if (value.docNumber && !value.docType.trim())
+      ctx.addIssue({ code: "custom", path: ["docType"], message: "Elige el tipo de documento junto con su número." })
+  })
 
-function fieldOfMessage(message: string): FieldKey | null {
-  if (/documento/i.test(message)) return "doc"
-  if (/correo/i.test(message)) return "email"
-  if (/teléfono/i.test(message)) return "phone"
-  if (/dirección/i.test(message)) return "address"
-  if (/nombre/i.test(message)) return "name"
-  return null
-}
+type SupplierValues = z.input<typeof supplierSchema>
+
+/** Lo que va plegado en «Más datos»: con un error ahí, se abre. */
+const MORE_FIELDS = ["docType", "docNumber", "email", "address"] as const
 
 export function SupplierFormDrawer({
   supplier,
@@ -64,22 +66,16 @@ export function SupplierFormDrawer({
   onSaved?: (saved: SupplierItem) => void
 }) {
   const queryClient = useQueryClient()
-  const ids = React.useId()
   const profile = useClinicalProfile()
-  const [initial] = React.useState(() => ({
-      name: supplier?.name ?? "",
-      phone: phoneValue(supplier?.phone),
-      docType: supplier?.docType?.trim().toLocaleUpperCase("es") ?? "",
-      docNumber: supplier?.docNumber ?? "",
-      email: supplier?.email ?? "",
-      address: supplier?.address ?? "",
+  const [initial] = React.useState<SupplierValues>(() => ({
+    name: supplier?.name ?? "",
+    phone: phoneValue(supplier?.phone),
+    docType: supplier?.docType?.trim().toLocaleUpperCase("es") ?? "",
+    docNumber: supplier?.docNumber ?? "",
+    email: supplier?.email ?? "",
+    address: supplier?.address ?? "",
   }))
-  const [values, setValues] = React.useState(initial)
-  const [errors, setErrors] = React.useState<Partial<Record<FieldKey, string>>>({})
-  const [formError, setFormError] = React.useState<string | null>(null)
   const [moreOpen, setMoreOpen] = React.useState(Boolean(supplier?.docNumber || supplier?.email || supplier?.address))
-  const set = <K extends keyof typeof initial>(key: K, value: (typeof initial)[K]) => setValues((current) => ({ ...current, [key]: value }))
-  const dirty = JSON.stringify(values) !== JSON.stringify(initial)
   // La lista del país; un tipo antiguo que no está en ella se conserva tal cual.
   const typeOptions = supplierDocChoices(profile, initial.docType || null)
 
@@ -91,83 +87,71 @@ export function SupplierFormDrawer({
       onSaved?.({ ...saved, orders: supplier?.orders ?? 0 })
       onClose()
     },
-    onError: (error) => {
-      const message = inventoryErrorMessage(error, { repeatable: Boolean(supplier) })
-      const field = isAmbiguousMutationError(error) ? null : fieldOfMessage(message)
-      if (field) {
-        setErrors({ [field]: message })
-        if (field !== "name" && field !== "phone") setMoreOpen(true)
-        setFormError(null)
-      } else setFormError(message)
+  })
+  // Crear sin clave: tras una respuesta que no llegó, otro envío podría duplicarlo.
+  const blocked = !supplier && isAmbiguousMutationError(mutation.error)
+
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: supplierSchema },
+    onSubmit: async ({ value }) => {
+      const next: SupplierBody = {
+        name: value.name.trim(),
+        phone: value.phone,
+        docType: value.docType || null,
+        docNumber: value.docNumber.trim() || null,
+        email: value.email.trim() || null,
+        address: value.address.trim() || null,
+      }
+      // Al editar viaja solo lo que cambió: un teléfono viejo que el campo no lee no se borra.
+      const body: SupplierBody = supplier
+        ? Object.fromEntries(
+            Object.entries(next).filter(([key, item]) => item !== (key === "phone" ? initial.phone : (initial[key as keyof SupplierValues] || null))),
+          )
+        : next
+      await mutation.mutateAsync(body)
     },
   })
+  const surface = useFormSurface(form, { formMessage: (error) => inventoryUnconfirmedMessage(error, { repeatable: Boolean(supplier) }) })
 
-  function submit(event: React.FormEvent) {
-    event.preventDefault()
-    if (mutation.isPending || (!supplier && isAmbiguousMutationError(mutation.error))) return
-    const found: Partial<Record<FieldKey, string>> = {}
-    if (!values.name.trim()) found.name = "Escribe el nombre o la razón social."
-    if (values.docNumber.trim() && !values.docType.trim()) found.doc = "Elige el tipo de documento junto con su número."
-    if (values.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) found.email = "Escribe un correo válido, como ventas@proveedor.com."
-    setErrors(found)
-    if (Object.keys(found).length > 0) {
-      if (found.doc || found.email) setMoreOpen(true)
-      return
-    }
-    const next: SupplierBody = {
-      name: values.name.trim(),
-      phone: values.phone,
-      docType: values.docType || null,
-      docNumber: values.docNumber.trim() || null,
-      email: values.email.trim() || null,
-      address: values.address.trim() || null,
-    }
-    // Al editar viaja solo lo que cambió: un teléfono viejo que el campo no lee no se borra.
-    const body: SupplierBody = supplier
-      ? Object.fromEntries(
-          Object.entries(next).filter(([key, value]) => value !== (key === "phone" ? initial.phone : (initial[key as keyof typeof initial] || null))),
-        )
-      : next
-    setFormError(null)
-    mutation.mutate(body)
-  }
-
-  const errorOf = (key: FieldKey) => (errors[key] ? <FieldError>{errors[key]}</FieldError> : null)
+  // Un error de lo plegado (del cliente o del servidor) abre «Más datos»: nunca queda escondido.
+  const hiddenError = useStore(form.store, (state) =>
+    MORE_FIELDS.some((name) => Object.values(state.fieldMeta[name]?.errorMap ?? {}).some(Boolean)),
+  )
+  React.useEffect(() => {
+    if (hiddenError) setMoreOpen(true)
+  }, [hiddenError])
 
   return (
     <FormDrawer
+      {...surface}
       open
       onClose={onClose}
       title={supplier ? "Editar proveedor" : "Nuevo proveedor"}
-      error={formError}
-      isDirty={dirty}
-      isSubmitting={mutation.isPending}
-      submitDisabled={!supplier && isAmbiguousMutationError(mutation.error)}
+      submitDisabled={blocked}
+      // Mientras no se pueda volver a guardar, el porqué sigue a la vista aunque se escriba.
+      error={blocked ? inventoryUnconfirmedMessage(mutation.error, { repeatable: false }) : surface.error}
+      // Enter tampoco reenvía: el aviso de que no se pudo confirmar sigue a la vista.
+      onSubmit={(event) => (blocked ? event.preventDefault() : surface.onSubmit(event))}
       submitLabel="Guardar"
       cancelLabel="Cancelar"
-      onSubmit={submit}
     >
       <FieldGroup>
-        <Field data-invalid={errors.name ? true : undefined}>
-          <FieldLabel htmlFor={`${ids}-nombre`}>Nombre o razón social</FieldLabel>
-          <Input
-            id={`${ids}-nombre`}
-            autoFocus={!supplier}
-            maxLength={200}
-            value={values.name}
-            aria-invalid={errors.name ? true : undefined}
-            onChange={(event) => set("name", event.target.value)}
-          />
-          {errorOf("name")}
-        </Field>
-        <Field data-invalid={errors.phone ? true : undefined}>
-          <FieldLabel htmlFor={`${ids}-telefono`}>
-            Celular o teléfono <Optional />
-          </FieldLabel>
-          <PhoneInput id={`${ids}-telefono`} value={values.phone} invalid={Boolean(errors.phone)} aria-describedby={`${ids}-telefono-ayuda`} onChange={(next) => set("phone", next)} />
-          <FieldDescription id={`${ids}-telefono-ayuda`}>Para «Copiar el pedido» y escribirle.</FieldDescription>
-          {errorOf("phone")}
-        </Field>
+        <form.AppField name="name">
+          {(field) => <field.TextField label="Nombre o razón social" autoFocus={!supplier} maxLength={200} />}
+        </form.AppField>
+        <form.AppField name="phone">
+          {(field) => (
+            <field.PhoneField
+              label={
+                <>
+                  Celular o teléfono <Optional />
+                </>
+              }
+              description="Para «Copiar el pedido» y escribirle."
+            />
+          )}
+        </form.AppField>
 
         <Collapsible className="flex flex-col gap-4" open={moreOpen} onOpenChange={setMoreOpen}>
           <CollapsibleTrigger
@@ -178,61 +162,61 @@ export function SupplierFormDrawer({
               </Button>
             }
           />
-          <CollapsibleContent className="flex flex-col gap-6">
+          {/* Montado aunque esté plegado: lo que el servidor diga de estos campos llega a ellos. */}
+          <CollapsibleContent keepMounted className="flex flex-col gap-6">
             {/* Ancho para «Carné de extranjería» o «Documento tributario» sin cortarse. */}
             <div className="grid gap-4 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
-              <Field data-invalid={errors.doc ? true : undefined}>
-                <FieldLabel htmlFor={`${ids}-tipo`}>Documento</FieldLabel>
-                <ChoiceSelect
-                  id={`${ids}-tipo`}
-                  value={values.docType}
-                  placeholder="Tipo"
-                  aria-invalid={Boolean(errors.doc)}
-                  onChange={(event) => set("docType", event.target.value)}
-                >
-                  <option value="">Sin documento</option>
-                  {typeOptions.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
-                  ))}
-                </ChoiceSelect>
-              </Field>
-              <Field data-invalid={errors.doc ? true : undefined}>
-                <FieldLabel htmlFor={`${ids}-numero`}>Número</FieldLabel>
-                <Input
-                  id={`${ids}-numero`}
-                  maxLength={50}
-                  inputMode="numeric"
-                  value={values.docNumber}
-                  aria-invalid={errors.doc ? true : undefined}
-                  onChange={(event) => set("docNumber", event.target.value)}
-                />
-                {errorOf("doc")}
-              </Field>
+              <form.AppField name="docType">
+                {(field) => (
+                  <field.Control label="Documento">
+                    {(control) => (
+                      <ChoiceSelect
+                        {...control.props}
+                        value={field.state.value}
+                        placeholder="Tipo"
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      >
+                        <option value="">Sin documento</option>
+                        {typeOptions.map((type) => (
+                          <option key={type.value} value={type.value}>
+                            {type.label}
+                          </option>
+                        ))}
+                      </ChoiceSelect>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+              <form.AppField name="docNumber">
+                {(field) => <field.TextField label="Número" maxLength={50} inputMode="numeric" />}
+              </form.AppField>
             </div>
-            <Field data-invalid={errors.email ? true : undefined}>
-              <FieldLabel htmlFor={`${ids}-correo`}>
-                Correo <Optional />
-              </FieldLabel>
-              <Input
-                id={`${ids}-correo`}
-                type="email"
-                maxLength={200}
-                autoComplete="off"
-                value={values.email}
-                aria-invalid={errors.email ? true : undefined}
-                onChange={(event) => set("email", event.target.value)}
-              />
-              {errorOf("email")}
-            </Field>
-            <Field data-invalid={errors.address ? true : undefined}>
-              <FieldLabel htmlFor={`${ids}-direccion`}>
-                Dirección <Optional />
-              </FieldLabel>
-              <Textarea id={`${ids}-direccion`} maxLength={500} value={values.address} onChange={(event) => set("address", event.target.value)} />
-              {errorOf("address")}
-            </Field>
+            <form.AppField name="email">
+              {(field) => (
+                <field.TextField
+                  label={
+                    <>
+                      Correo <Optional />
+                    </>
+                  }
+                  type="email"
+                  maxLength={200}
+                  autoComplete="off"
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="address">
+              {(field) => (
+                <field.TextareaField
+                  label={
+                    <>
+                      Dirección <Optional />
+                    </>
+                  }
+                  maxLength={500}
+                />
+              )}
+            </form.AppField>
           </CollapsibleContent>
         </Collapsible>
       </FieldGroup>

@@ -168,7 +168,7 @@ test("whatsapp: se conecta con los datos de la app de Meta en tres pasos que se 
   await expect(connected).toContainText("Ya recibe mensajes.")
   // Al conectar se piden los trece mensajes de odentIA: los diez del agente y los tres que envía el equipo
   // («Retomar la conversación», «Presupuesto listo» y «Su enlace»).
-  await expect(connected).toContainText("16 mensajes están en revisión de WhatsApp.")
+  await expect(connected).toContainText("17 mensajes están en revisión de WhatsApp.")
   await expect(connected).toContainText("WhatsApp pide una forma de pago en tu cuenta para enviar mensajes aprobados")
   await expect(connected.getByRole("link", { name: /Abrir mi cuenta de Meta/ })).toHaveAttribute("href", /^https:\/\/business\.facebook\.com\//)
   await expect(finishing).toHaveCount(0)
@@ -285,13 +285,13 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   const messages = page.getByRole("region", { name: "Mensajes", exact: true })
   const byAgent = messages.getByRole("group", { name: "Los envía Argos" })
   const byTeam = messages.getByRole("group", { name: "Los envía tu equipo desde la Bandeja" })
-  // Uno por línea que escribe y los cuatro avisos de «Recordar la cita» (reservada, reservada con datos que
-  // faltan, cambio de fecha, cancelada).
-  await expect(byAgent.getByRole("listitem")).toHaveCount(12)
+  // Uno por línea que escribe, los cuatro avisos de «Recordar la cita» (reservada, reservada con datos que
+  // faltan, cambio de fecha, cancelada) y los recordatorios con datos que faltan y de una cita ya confirmada.
+  await expect(byAgent.getByRole("listitem")).toHaveCount(13)
   // «Retomar una oportunidad» viene escrito como los demás del agente.
   await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("En revisión")
   await expect(byTeam.getByRole("listitem")).toHaveCount(4)
-  await expect(messages).toContainText("2 aprobados · 14 en revisión")
+  await expect(messages).toContainText("2 aprobados · 15 en revisión")
   // Nadie lee ni escribe nombres técnicos.
   await expect(messages).not.toContainText(/odentia_|plantilla|template/i)
   const reminder = byAgent.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })
@@ -313,7 +313,7 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   // «Ver la línea» lleva a Agente: quien administra puede abrirla.
   await expect(panel.getByRole("link", { name: "Ver la línea", exact: true })).toHaveAttribute("href", /\/agent\/administrador\?linea=recordatorio_cita$/)
 
-  // --- Editar: cada dato se ve como su nombre entre corchetes; las comprobaciones son las del servidor ---
+  // --- Editar: cada dato se ve como su nombre entre corchetes; las comprobaciones del servidor se dicen en su campo ---
   await panel.getByRole("button", { name: "Editar el texto", exact: true }).click()
   const editor = surface(page, { name: "Editar «Recordar la cita»", exact: true })
   const text = editor.getByLabel("Texto", { exact: true })
@@ -323,19 +323,23 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   await expect(editor).toContainText("Al guardar, WhatsApp lo revisa de nuevo")
   await expect(editor).toContainText("Mientras tanto sigue saliendo el texto actual.")
   const original = await text.inputValue()
-  const checks = editor.getByRole("status", { name: "Comprobaciones del texto" })
-  await expect(checks).toContainText("Bien: están los tres datos.")
   const send = editor.getByRole("button", { name: "Enviar a revisión", exact: true })
-  // Sin cambios no hay nada que enviar.
-  await expect(send).toBeDisabled()
-  // Quitar un dato lo dice con la frase del servidor y no deja enviarlo.
+  // Sin cambios no hay nada que enviar: el servidor lo dice junto al texto.
+  await send.click()
+  await expect(text).toHaveAttribute("aria-invalid", "true")
+  await expect(editor).toContainText("Ese es el texto que ya tiene.")
+  // Quitar un dato lo dice con la frase del servidor, junto al texto, y no lo envía.
   await text.fill(original.replace("[Clínica y sede]", "la clínica"))
-  await expect(checks).toContainText("Falta el dato «Clínica y sede».")
-  await expect(send).toBeDisabled()
+  await expect(text).not.toHaveAttribute("aria-invalid", "true")
+  await send.click()
+  await expect(text).toHaveAttribute("aria-invalid", "true")
+  await expect(editor).toContainText("Falta el dato «Clínica y sede».")
   // «Poner…» lo devuelve donde está el cursor.
   await editor.getByRole("button", { name: "Poner «Clínica y sede»", exact: true }).click()
   await expect(text).toBeFocused()
   await expect(text).toHaveValue(/\[Clínica y sede\]/)
+  // Escribir (o poner el dato) borra el error del campo.
+  await expect(text).not.toHaveAttribute("aria-invalid", "true")
   // Cancelar con cambios pregunta antes y, si se desiste, el borrador sigue ahí.
   await editor.getByRole("button", { name: "Cancelar", exact: true }).click()
   const leave = page.getByRole("alertdialog", { name: "¿Salir sin guardar?" })
@@ -345,7 +349,6 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
 
   const changed = original.replace("Te recordamos", "Le recordamos")
   await text.fill(changed)
-  await expect(checks).toContainText("Bien: están los tres datos.")
   await expect(editor.getByRole("region", { name: "Así le llegará" })).toContainText("Le recordamos")
   await send.click()
 
@@ -384,7 +387,6 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   ])
   await ownText.pressSequentially(". Tu trabajo ya llegó a la clínica. Escríbenos y coordinamos tu cita.")
   await creator.getByLabel("Botón de respuesta (opcional)", { exact: true }).fill("Quiero mi cita")
-  await expect(creator.getByRole("status", { name: "Comprobaciones del texto" })).toContainText("Bien:")
   await creator.getByRole("button", { name: "Enviar a revisión", exact: true }).click()
 
   const own = byTeam.getByRole("listitem").filter({ hasText: "Tu trabajo ya está listo" })
@@ -513,17 +515,18 @@ test("bandeja: pasadas las 24 horas lo dice antes de escribir, ofrece el mensaje
   await expect(notice).toContainText("WhatsApp solo deja enviarle un mensaje aprobado")
   await expect(page.getByLabel("Mensaje", { exact: true })).toHaveCount(0)
 
-  // Los mensajes se eligen por lo que dicen, con los datos de esa persona ya puestos.
+  // Los mensajes se eligen por lo que dicen, con los datos de esa persona ya puestos. La lista se abre al pedirla.
+  await page.getByRole("button", { name: "Elegir un mensaje aprobado" }).click()
   const options = page.getByRole("radiogroup", { name: "Elige el mensaje" })
   const resume = options.getByRole("radio", { name: /Retomar la conversación/ })
   await expect(options.getByRole("radio")).toHaveCount(1)
   await expect(resume).toBeChecked()
-  await expect(options).toContainText("para continuar con tu consulta. ¿Seguimos por aquí?")
-  await expect(options).toContainText("Sí, continuemos")
+  await expect(page.getByText(/para continuar con tu consulta\. ¿Seguimos por aquí\?/).first()).toBeVisible()
+  await expect(page.getByText("Sí, continuemos").first()).toBeVisible()
   // Ni nombres técnicos ni «parámetros»: ningún dato se pide a quien envía.
-  await expect(options).not.toContainText(/odentia_|\{\{|plantilla/i)
+  await expect(page.locator("main")).not.toContainText(/odentia_|\{\{/)
   await expect(page.getByPlaceholder(/parámetros/i)).toHaveCount(0)
-  await expect(options.getByRole("textbox")).toHaveCount(0)
+  await expect(page.getByRole("textbox", { name: /de «Retomar la conversación»/ })).toHaveCount(0)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja-ventana-cerrada", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -578,12 +581,12 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
 
   const none = page.getByRole("status").filter({ hasText: "Aún no se le puede escribir" })
   await expect(none).toContainText("«Retomar la conversación» está en revisión")
-  await expect(page.getByRole("radiogroup", { name: "Elige el mensaje" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Elegir un mensaje aprobado" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Enviar mensaje", exact: true })).toHaveCount(0)
   await info.attach("bandeja-sin-mensaje-aprobado", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await none.getByRole("link", { name: "Ver los mensajes", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/whatsapp"))
-  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("16 en revisión")
+  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("17 en revisión")
 
   // Recepción atiende conversaciones pero no abre Configuración: lee a quién avisar, sin enlace.
   await fixtureDb

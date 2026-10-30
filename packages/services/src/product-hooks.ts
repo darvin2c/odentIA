@@ -13,8 +13,8 @@ import {
 import type { Db } from "@odentia/db"
 import type { DictationKind } from "@odentia/db/schema/clinical"
 import type { SQL } from "drizzle-orm"
-import { validation } from "./errors.js"
 import type { DocumentCheckFacts } from "./document-check.js"
+import { validation } from "./errors.js"
 import type { TimelineItem } from "./patient-history.js"
 import { NO_CATALOG, type ProductCatalog } from "./product-catalog.js"
 
@@ -94,7 +94,9 @@ export interface ProductSite {
    * Las marcas de estos sitios en la grilla del producto, para la hoja del presupuesto
    * (odentIA: las piezas FDI). Sin él, o sin ninguna marca, no hay grilla.
    */
-  chart?(rows: SiteColumns[]): { label: string; rows: Array<Array<{ label: string; marked: boolean }>> } | null
+  chart?(
+    rows: SiteColumns[],
+  ): { label: string; rows: Array<Array<{ label: string; marked: boolean }>> } | null
   /** El sitio como `bodySite` de FHIR para la exportación de la historia; null sin sitio. */
   bodySite(row: SiteColumns): { text: string } | null
   /** Lo que se le dice a quien manda un sitio suelto que no vale («Pieza FDI inválida: 19»). */
@@ -224,7 +226,9 @@ export interface ProductInterview {
 
 /** Lo que se respondió de un grupo, sin lo vacío. */
 export function answeredOf(group: Record<string, unknown> | undefined): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(group ?? {}).filter(([, value]) => value !== "" && value !== undefined))
+  return Object.fromEntries(
+    Object.entries(group ?? {}).filter(([, value]) => value !== "" && value !== undefined),
+  )
 }
 
 /** La entrevista común: los antecedentes personales que declaró, con sus mismas claves. */
@@ -289,7 +293,10 @@ export interface ProductDictation {
   /** Lo que el producto lee una vez para revisar sus sugerencias (odentIA: si el país exige la variante del hallazgo). */
   context(tx: Db, orgId: string): Promise<unknown>
   /** El «dónde» dictado de un diagnóstico o una indicación, en los valores del sistema; `invalid`: por qué no vale. */
-  normalizeSite(payload: Record<string, unknown>): { payload: Record<string, unknown>; invalid: string | null }
+  normalizeSite(payload: Record<string, unknown>): {
+    payload: Record<string, unknown>
+    invalid: string | null
+  }
   /** El «dónde» en palabras («Pieza 16 · cara oclusal»); vacío sin sitio. */
   siteWords(payload: Record<string, unknown>): string
   /**
@@ -298,7 +305,11 @@ export interface ProductDictation {
    * `done` es lo que se hizo hoy: eso sí necesita su sitio, así que lo que falta
    * la deja por revisar, con la pregunta.
    */
-  fitToScope(payload: Record<string, unknown>, scope: string | null, done?: boolean): DictationPrepared
+  fitToScope(
+    payload: Record<string, unknown>,
+    scope: string | null,
+    done?: boolean,
+  ): DictationPrepared
   /** Revisa una sugerencia de una clase propia, ya validada con su operación. */
   prepare(
     tx: Db,
@@ -315,7 +326,12 @@ export interface ProductDictation {
   /** Lo que hace iguales dos sugerencias pendientes de una clase (odentIA: pieza, hallazgo y caras); null si no se comparan. */
   sameKey(kind: DictationKind, payload: Record<string, unknown>): string | null
   /** Confirma una sugerencia de una clase propia con la operación de siempre; devuelve lo que creó. */
-  confirm(tx: Db, moment: EncounterMoment, kind: DictationKind, payload: Record<string, unknown>): Promise<string | null>
+  confirm(
+    tx: Db,
+    moment: EncounterMoment,
+    kind: DictationKind,
+    payload: Record<string, unknown>,
+  ): Promise<string | null>
 }
 
 export interface ProductHooks {
@@ -384,7 +400,12 @@ export interface ProductHooks {
    * Lo que un documento que solo existe en este producto dice al comprobarlo con su
    * QR (odentIA: el odontograma firmado). Sin él, ese documento no se comprueba.
    */
-  documentCheck?(tx: Db, orgId: string, type: string, id: string): Promise<DocumentCheckFacts | null>
+  documentCheck?(
+    tx: Db,
+    orgId: string,
+    type: string,
+    id: string,
+  ): Promise<DocumentCheckFacts | null>
   /** Cuántas caras admite un tratamiento de la biblioteca (odentIA: su regla dental); null si no dice. */
   templateSurfaceLimits(
     tx: Db,

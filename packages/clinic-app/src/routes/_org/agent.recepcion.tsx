@@ -24,6 +24,7 @@ import {
   SideColumn,
   type SideColumnWidth,
   SideDockPortal,
+  submitErrorMessage,
   useDetailMode,
   useSideColumnWidth,
   useSideDock,
@@ -55,7 +56,7 @@ import { AGENT_NAME_REASONS, RECEPTION_DEFAULT_NAME, useReceptionName } from "..
 import { apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
 import { useOrgProfile } from "../../lib/org"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 
 export const Route = createFileRoute("/_org/agent/recepcion")({
   component: ReceptionPage,
@@ -169,6 +170,7 @@ function FunctionRow({
   note,
   canWrite,
   busy,
+  error,
   onToggle,
   onEditNote,
 }: {
@@ -177,6 +179,8 @@ function FunctionRow({
   note: string | undefined
   canWrite: boolean
   busy: boolean
+  /** Por qué no se guardó el último cambio de este interruptor. */
+  error: string | null
   onToggle: (next: boolean) => void
   onEditNote: () => void
 }) {
@@ -203,9 +207,21 @@ function FunctionRow({
               <Lock className="size-3.5" aria-hidden /> Siempre
             </span>
           ) : (
-            <Switch checked={on} disabled={!canWrite || busy} aria-label={fn.label} onCheckedChange={onToggle} />
+            <Switch
+              checked={on}
+              disabled={!canWrite || busy}
+              aria-label={fn.label}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? `funcion-${fn.id}-error` : undefined}
+              onCheckedChange={onToggle}
+            />
           )}
         </div>
+        {error ? (
+          <p id={`funcion-${fn.id}-error`} role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
         <CollapsibleContent>
           <div className="mt-1 flex flex-col gap-3 rounded-xl bg-muted/60 p-4 text-sm">
             {steps.length > 0 ? (
@@ -318,7 +334,8 @@ function ReceptionPage() {
   // Los interruptores guardan al momento; mientras viaja se muestra lo pedido.
   const toggleFunction = useMutation({
     retry: false,
-    mutationFn: (disabledFunctions: string[]) =>
+    // `fnId` solo dice qué fila se tocó: su error se pinta en ella.
+    mutationFn: ({ disabledFunctions }: { fnId: string; disabledFunctions: string[] }) =>
       apiFetch("/api/agent/config", { method: "PUT", body: JSON.stringify({ disabledFunctions }) }),
     onSettled: refresh,
   })
@@ -360,7 +377,8 @@ function ReceptionPage() {
     )
   }
 
-  const disabled = toggleFunction.isPending && toggleFunction.variables ? toggleFunction.variables : config.disabledFunctions
+  const disabled =
+    toggleFunction.isPending && toggleFunction.variables ? toggleFunction.variables.disabledFunctions : config.disabledFunctions
   const closeAfter = `A las ${count(config.closeAfterHours, "hora", "horas")} sin respuesta`
   const voice = [
     `Se presenta como ${config.personaName?.trim() || receptionName}`,
@@ -502,20 +520,23 @@ function ReceptionPage() {
                   note={config.functionNotes[fn.id]}
                   canWrite={canWrite}
                   busy={toggleFunction.isPending}
+                  error={
+                    toggleFunction.isError && toggleFunction.variables?.fnId === fn.id
+                      ? submitErrorMessage(toggleFunction.error)
+                      : null
+                  }
                   onToggle={(next) =>
-                    toggleFunction.mutate(
-                      next ? config.disabledFunctions.filter((id) => id !== fn.id) : [...config.disabledFunctions, fn.id],
-                    )
+                    toggleFunction.mutate({
+                      fnId: fn.id,
+                      disabledFunctions: next
+                        ? config.disabledFunctions.filter((id) => id !== fn.id)
+                        : [...config.disabledFunctions, fn.id],
+                    })
                   }
                   onEditNote={() => setNoteFor(fn)}
                 />
               ))}
             </ul>
-            {toggleFunction.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {mutationErrorMessage(toggleFunction.error)}
-              </p>
-            ) : null}
             <p className="text-sm text-muted-foreground max-sm:hidden">
               Los pasos son los mismos que usa tu equipo. Tú eliges qué funciones tiene; antes de una cita siempre confirma el paciente.
             </p>
@@ -708,7 +729,7 @@ function ReceptionPage() {
       >
         {turnOff.isError ? (
           <p role="alert" className="text-sm text-destructive">
-            {mutationErrorMessage(turnOff.error)}
+            {submitErrorMessage(turnOff.error)}
           </p>
         ) : null}
       </ConfirmDialog>

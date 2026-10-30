@@ -2,7 +2,7 @@ import type { Db } from "@odentia/db"
 import { agentConfig } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { eq } from "drizzle-orm"
-import { validation } from "./errors.js"
+import { invalidField, validation } from "./errors.js"
 import { findOrgLocale } from "./locale.js"
 import {
   isOpportune,
@@ -42,20 +42,24 @@ export const DEFAULT_WRITING_HOURS: WritingWeek = [
   [[480, 840]],
 ]
 
-/** Valida y ordena una semana; lanza un error de validación con lo que está mal. */
+/**
+ * Valida y ordena una semana; lanza un error de validación con lo que está mal,
+ * señalando el día (`week[d]`) o el tramo (`week[d][i]`) como van en el cuerpo.
+ */
 export function normalizeWritingWeek(value: unknown): WritingWeek {
   if (!Array.isArray(value) || value.length !== 7) throw validation("El horario de recontacto va por los siete días de la semana")
   return value.map((day, weekday) => {
-    if (!Array.isArray(day)) throw validation("Cada día del horario es una lista de tramos")
-    if (day.length > MAX_RANGES_PER_DAY) throw validation(`Como mucho ${MAX_RANGES_PER_DAY} tramos por día`)
-    const ranges = day.map((range): MinuteRange => {
-      if (!Array.isArray(range) || range.length !== 2) throw validation("Cada tramo tiene un inicio y un fin")
+    if (!Array.isArray(day)) throw invalidField(`week[${weekday}]`, "Cada día del horario es una lista de tramos.")
+    if (day.length > MAX_RANGES_PER_DAY) throw invalidField(`week[${weekday}]`, `Como mucho ${MAX_RANGES_PER_DAY} tramos por día.`)
+    const ranges = day.map((range, index): MinuteRange => {
+      const field = `week[${weekday}][${index}]`
+      if (!Array.isArray(range) || range.length !== 2) throw invalidField(field, "Cada tramo tiene un inicio y un fin.")
       const [start, end] = range as unknown[]
-      if (!Number.isInteger(start) || !Number.isInteger(end)) throw validation("Las horas van en minutos enteros")
+      if (!Number.isInteger(start) || !Number.isInteger(end)) throw invalidField(field, "Las horas van en minutos enteros.")
       const from = start as number
       const until = end as number
       if (from < 0 || until > 1440 || until <= from) {
-        throw validation(`El tramo del día ${weekday} debe terminar después de empezar, dentro del mismo día`)
+        throw invalidField(field, "Este tramo debe terminar después de empezar, dentro del mismo día.")
       }
       return [from, until]
     })

@@ -12,43 +12,49 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { ApiError } from "../../lib/api"
+import type { ClinicalOrder } from "../../lib/clinical-forms"
 import {
   type ConsentDocument,
   consentSignatureWords,
+  FORM_RESPONSE_STATUS_LABELS,
   fetchConsents,
   fetchFormResponses,
   fetchFormTemplates,
   fetchOrders,
-  FORM_RESPONSE_STATUS_LABELS,
+  sendConsentByLink,
 } from "../../lib/clinical-forms"
-import { fetchPrescriptionDetail, fetchPrescriptions, type Prescription } from "../../lib/clinical-journey"
-import type { ClinicalOrder } from "../../lib/clinical-forms"
-import type { MedicalLeave } from "../../lib/medical-leaves"
-import { sendConsentByLink } from "../../lib/clinical-forms"
-import { usePermission } from "../../lib/crm"
 import {
-  type ConsentNeed,
-  fetchConsentNeeds,
-  prepareConsents,
-} from "../../lib/encounter-documents"
+  fetchPrescriptionDetail,
+  fetchPrescriptions,
+  type Prescription,
+} from "../../lib/clinical-journey"
+import { usePermission } from "../../lib/crm"
+import { type ConsentNeed, fetchConsentNeeds, prepareConsents } from "../../lib/encounter-documents"
+import type { MedicalLeave } from "../../lib/medical-leaves"
+import { fetchMedicalLeaves } from "../../lib/medical-leaves"
 import type { Encounter, EncounterDetail, PatientFull, PlanItem } from "../../lib/patients"
+import { productUi } from "../../product/product-ui"
 import { RecetasPanel } from "./clinical-panels"
+import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen, PaperSignDrawer } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { DocumentOpenButton } from "./document-open-button"
+import { ConsentPaper, MedicalLeavePaper, OrderPaper, PrescriptionPaper } from "./document-papers"
 import { DocumentUploadDialog } from "./document-upload-dialog"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
-import { ConsentPaper, MedicalLeavePaper, OrderPaper, PrescriptionPaper } from "./document-papers"
-import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
 import { NewMedicalLeaveDrawer } from "./medical-leave"
-import { fetchMedicalLeaves } from "../../lib/medical-leaves"
-import { productUi } from "../../product/product-ui"
-import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
+import { NewOrderDrawer, OrderRow } from "./ordenes-tab"
 
 const errorMessage = (e: unknown, fallback: string) =>
   e instanceof ApiError ? (e.shape.message ?? fallback) : fallback
 
-export type NewDocumentKind = "receta" | "descanso" | "consentimiento" | "orden" | "formulario" | "archivo"
+export type NewDocumentKind =
+  | "receta"
+  | "descanso"
+  | "consentimiento"
+  | "orden"
+  | "formulario"
+  | "archivo"
 
 const NEW_DOCUMENT_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
   { kind: "receta", label: "Receta" },
@@ -62,7 +68,9 @@ const NEW_DOCUMENT_OPTIONS: Array<{ kind: NewDocumentKind; label: string }> = [
 export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: string }> {
   if (!productUi().documents.medicalLeave) return NEW_DOCUMENT_OPTIONS
   return NEW_DOCUMENT_OPTIONS.flatMap((option) =>
-    option.kind === "receta" ? [option, { kind: "descanso" as const, label: "Descanso médico" }] : [option],
+    option.kind === "receta"
+      ? [option, { kind: "descanso" as const, label: "Descanso médico" }]
+      : [option],
   )
 }
 
@@ -72,7 +80,11 @@ export function newDocumentOptions(): Array<{ kind: NewDocumentKind; label: stri
  * formularios, imágenes y archivos. Una sola lectura para el bloque, su
  * resumen y el cierre: React Query comparte las consultas.
  */
-export function useEncounterDocuments(patientId: string, encounterId: string, detail: EncounterDetail) {
+export function useEncounterDocuments(
+  patientId: string,
+  encounterId: string,
+  detail: EncounterDetail,
+) {
   const canRead = usePermission("clinical.read")
   const needs = useQuery({
     queryKey: ["consent-needs", patientId, encounterId],
@@ -105,12 +117,18 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
     enabled: canRead && productUi().documents.medicalLeave,
   })
   const ownConsents = (consents.data?.data ?? []).filter(
-    (doc) => doc.encounterId === encounterId && (doc.status === "pendiente" || doc.status === "firmado"),
+    (doc) =>
+      doc.encounterId === encounterId && (doc.status === "pendiente" || doc.status === "firmado"),
   )
   // El PDF de un consentimiento firmado y la foto de una hoja en papel ya están
   // en su consentimiento: no salen dos veces.
   const consentFileIds = new Set(
-    (consents.data?.data ?? []).flatMap((doc) => [doc.pdfDocumentId, doc.revokePdfDocumentId, doc.paperDocumentId].filter(Boolean) as string[]),
+    (consents.data?.data ?? []).flatMap(
+      (doc) =>
+        [doc.pdfDocumentId, doc.revokePdfDocumentId, doc.paperDocumentId].filter(
+          Boolean,
+        ) as string[],
+    ),
   )
   const files = detail.documents.filter((doc) => !doc.retiredAt && !consentFileIds.has(doc.id))
   const ownOrders = (orders.data?.data ?? []).filter((order) => order.encounterId === encounterId)
@@ -137,7 +155,12 @@ export function useEncounterDocuments(patientId: string, encounterId: string, de
     leaves: ownLeaves,
     files,
     total:
-      ownConsents.length + ownOrders.length + ownPrescriptions.length + ownLeaves.length + ownForms.length + files.length,
+      ownConsents.length +
+      ownOrders.length +
+      ownPrescriptions.length +
+      ownLeaves.length +
+      ownForms.length +
+      files.length,
     isLoading: needs.isPending || consents.isPending,
   }
 }
@@ -230,7 +253,12 @@ export function EncounterDocumentsBlock({
     onSuccess: async (result) => {
       await refresh()
       const created = result.data.created.map((row) => row.id)
-      if (created.length > 0) toast.success(created.length === 1 ? "Consentimiento preparado" : `${created.length} consentimientos preparados`)
+      if (created.length > 0)
+        toast.success(
+          created.length === 1
+            ? "Consentimiento preparado"
+            : `${created.length} consentimientos preparados`,
+        )
     },
     onError: (e) => toast.error(errorMessage(e, "No se pudo preparar el consentimiento")),
   })
@@ -238,7 +266,10 @@ export function EncounterDocumentsBlock({
   // Lo registrado y su diagnóstico, para llenar lo que se crea desde aquí.
   const activeProcedures = detail.procedures.filter((proc) => !proc.voidedAt)
   const procedureRef = activeProcedures
-    .map((proc) => `${proc.description}${proc.toothNumber != null ? ` · pieza ${proc.toothNumber}` : ""}`)
+    .map(
+      (proc) =>
+        `${proc.description}${proc.toothNumber != null ? ` · pieza ${proc.toothNumber}` : ""}`,
+    )
     .join(", ")
     .slice(0, 500)
   const firstActive = (detail.diagnoses ?? []).find((dx) => !dx.voidedAt)
@@ -297,7 +328,12 @@ export function EncounterDocumentsBlock({
               Por {[...new Set(docs.toPrepare.flatMap((need) => need.services))].join(", ")}
             </span>
           </div>
-          <Button type="button" size="sm" disabled={disabled || prepare.isPending} onClick={() => prepare.mutate(undefined)}>
+          <Button
+            type="button"
+            size="sm"
+            disabled={disabled || prepare.isPending}
+            onClick={() => prepare.mutate(undefined)}
+          >
             {prepare.isPending ? "Preparando…" : "Preparar"}
           </Button>
         </section>
@@ -314,11 +350,18 @@ export function EncounterDocumentsBlock({
               Esta clínica aún no publicó el consentimiento de «{need.title}»
             </span>
             <span className="text-xs text-muted-foreground">
-              Fírmalo en papel y sube la foto; quien configura lo verá en «Te espera» para publicarlo.
+              Fírmalo en papel y sube la foto; quien configura lo verá en «Te espera» para
+              publicarlo.
             </span>
           </div>
           {canWrite ? (
-            <Button type="button" size="sm" variant="outline" disabled={disabled} onClick={() => setPaperFor(need)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={disabled}
+              onClick={() => setPaperFor(need)}
+            >
               Subir la hoja firmada
             </Button>
           ) : null}
@@ -330,14 +373,24 @@ export function EncounterDocumentsBlock({
           <li className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">
-                {pendingTitles.length === 1 ? "Consentimiento" : "Consentimientos"} · {pendingTitles.join(" y ")}
+                {pendingTitles.length === 1 ? "Consentimiento" : "Consentimientos"} ·{" "}
+                {pendingTitles.join(" y ")}
               </span>
               <span className="text-xs text-muted-foreground">
-                {pendingTitles.length === 1 ? `Falta la firma de ${who}` : `Faltan las firmas de ${who}`}
+                {pendingTitles.length === 1
+                  ? `Falta la firma de ${who}`
+                  : `Faltan las firmas de ${who}`}
               </span>
             </div>
             <div className="flex items-center gap-1">
-              <Button type="button" size="sm" disabled={disabled} onClick={() => setSigning(docs.pendingSignatures.filter((doc) => !doc.personSignedAt))}>
+              <Button
+                type="button"
+                size="sm"
+                disabled={disabled}
+                onClick={() =>
+                  setSigning(docs.pendingSignatures.filter((doc) => !doc.personSignedAt))
+                }
+              >
                 Firmar ahora
               </Button>
               <RowActions
@@ -357,7 +410,11 @@ export function EncounterDocumentsBlock({
                                 return refresh()
                               })
                               .catch((error: unknown) =>
-                                toast.error(error instanceof ApiError ? (error.shape.message ?? "No se pudo enviar") : "No se pudo enviar"),
+                                toast.error(
+                                  error instanceof ApiError
+                                    ? (error.shape.message ?? "No se pudo enviar")
+                                    : "No se pudo enviar",
+                                ),
                               ),
                         },
                       ]),
@@ -381,7 +438,10 @@ export function EncounterDocumentsBlock({
         {docs.pendingSignatures
           .filter((doc) => doc.linkSentAt || doc.personSignedAt)
           .map((doc) => (
-            <li key={`enlace-${doc.id}`} className="flex flex-wrap items-center justify-between gap-3 p-3">
+            <li
+              key={`enlace-${doc.id}`}
+              className="flex flex-wrap items-center justify-between gap-3 p-3"
+            >
               <div className="flex min-w-0 flex-col">
                 <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
                 <span className="text-xs text-muted-foreground">{consentLinkWords(doc)}</span>
@@ -395,7 +455,9 @@ export function EncounterDocumentsBlock({
             <li key={doc.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
               <div className="flex min-w-0 flex-col">
                 <span className="text-sm font-medium">Consentimiento · {doc.titleSnapshot}</span>
-                <span className="text-xs text-muted-foreground">Firmado · {consentSignatureWords(doc)}</span>
+                <span className="text-xs text-muted-foreground">
+                  Firmado · {consentSignatureWords(doc)}
+                </span>
               </div>
               <Button
                 type="button"
@@ -425,7 +487,9 @@ export function EncounterDocumentsBlock({
           <li key={leave.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium">Descanso médico N.º {leave.leaveNumber}</span>
-              <span className="text-xs text-muted-foreground">{medicalLeaveWords(leave.startsOn, leave.days)}</span>
+              <span className="text-xs text-muted-foreground">
+                {medicalLeaveWords(leave.startsOn, leave.days)}
+              </span>
             </div>
             <Button
               type="button"
@@ -441,8 +505,12 @@ export function EncounterDocumentsBlock({
         {docs.forms.map((form) => (
           <li key={form.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
-              <span className="text-sm font-medium">Formulario · {form.templateTitle ?? "Formulario"}</span>
-              <span className="text-xs text-muted-foreground">{FORM_RESPONSE_STATUS_LABELS[form.status]}</span>
+              <span className="text-sm font-medium">
+                Formulario · {form.templateTitle ?? "Formulario"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {FORM_RESPONSE_STATUS_LABELS[form.status]}
+              </span>
             </div>
             <Button type="button" size="sm" variant="outline" onClick={() => setOpenForm(form.id)}>
               {form.status === "borrador" ? "Completar" : "Ver"}
@@ -453,7 +521,9 @@ export function EncounterDocumentsBlock({
           <li key={file.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
             <div className="flex min-w-0 flex-col">
               <span className="break-words text-sm font-medium">{file.label}</span>
-              <span className="text-xs text-muted-foreground">Imagen o archivo de esta atención</span>
+              <span className="text-xs text-muted-foreground">
+                Imagen o archivo de esta atención
+              </span>
             </div>
             <DocumentOpenButton patientId={patientId} documentId={file.id} label="Ver" />
           </li>
@@ -599,7 +669,10 @@ export function EncounterDocumentsBlock({
       ) : viewing?.kind === "prescription" ? (
         <PrescriptionPaper
           patientId={patientId}
-          prescription={docs.prescriptions.find((rx) => rx.id === viewing.prescription.id) ?? viewing.prescription}
+          prescription={
+            docs.prescriptions.find((rx) => rx.id === viewing.prescription.id) ??
+            viewing.prescription
+          }
           onClose={() => setViewing(null)}
           onChanged={refresh}
         />
@@ -699,7 +772,14 @@ function FormDetail({
       description="Se guarda solo mientras lo completas."
       onClose={onClose}
     >
-      {response ? <ResponseDetail key={response.id} response={response} canWrite={canWrite} onChanged={onChanged} /> : null}
+      {response ? (
+        <ResponseDetail
+          key={response.id}
+          response={response}
+          canWrite={canWrite}
+          onChanged={onChanged}
+        />
+      ) : null}
     </DetailDrawer>
   )
 }

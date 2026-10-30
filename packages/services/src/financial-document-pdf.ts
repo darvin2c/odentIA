@@ -14,16 +14,21 @@ import { and, eq } from "drizzle-orm"
 import type { TicketTaxes } from "./clinic-taxes.js"
 import { loadFrozenDocumentClinic } from "./document-clinic.js"
 import {
+  type DocumentClinic,
+  DocumentKit,
   dayTimeWords,
   dayWords,
-  DocumentKit,
-  type DocumentClinic,
-  shortDayTime,
   SIZE,
+  shortDayTime,
   ticketFormat,
 } from "./document-kit.js"
 import { requirePatient } from "./patients.js"
-import { getPaymentReturn, getRefundReceipt, getTicketReceipt, type TicketFrozen } from "./payments.js"
+import {
+  getPaymentReturn,
+  getRefundReceipt,
+  getTicketReceipt,
+  type TicketFrozen,
+} from "./payments.js"
 
 export { ticketFormat } from "./document-kit.js"
 
@@ -97,7 +102,10 @@ export async function buildTicketSnapshot(
   const { ticket } = receipt
   const frozen = ticket.snapshot as TicketFrozen
   const org: DocOrg = {
-    ...(await loadFrozenDocumentClinic(tx, orgId, { clinic: frozen.clinic, branch: frozen.branch ?? null })),
+    ...(await loadFrozenDocumentClinic(tx, orgId, {
+      clinic: frozen.clinic,
+      branch: frozen.branch ?? null,
+    })),
     currency: ticket.currency,
     ticketFooter: frozen.notice,
   }
@@ -112,7 +120,8 @@ export async function buildTicketSnapshot(
     payerName = payer?.displayName ?? null
   }
   const docType = frozen.patient.docType === undefined ? patientRow.docType : frozen.patient.docType
-  const docNumber = frozen.patient.docNumber === undefined ? patientRow.docNumber : frozen.patient.docNumber
+  const docNumber =
+    frozen.patient.docNumber === undefined ? patientRow.docNumber : frozen.patient.docNumber
   const lines = frozen.lines ?? []
   const advance = lines.find((line) => line.chargeId === null) ?? null
   return {
@@ -153,7 +162,12 @@ export async function buildTicketSnapshot(
 }
 
 /** Una fila de texto e importe, con letra del cuerpo del ticket. */
-function moneyRow(kit: DocumentKit, label: string, amount: string, options: { strong?: boolean } = {}) {
+function moneyRow(
+  kit: DocumentKit,
+  label: string,
+  amount: string,
+  options: { strong?: boolean } = {},
+) {
   const face = options.strong ? ("sansSemi" as const) : ("sans" as const)
   const size = kit.thermal ? SIZE.second : SIZE.table
   kit.spread({ text: label, face, size }, { text: amount, face, size }, { size, leading: 1.45 })
@@ -173,7 +187,8 @@ function ticketTotals(kit: DocumentKit, snap: TicketSnapshot, money: (cents: num
   if (snap.taxes) {
     // Como una boleta: lo cobrado hoy sin impuesto y el impuesto de cada tasa.
     moneyRow(kit, "Subtotal", money(snap.taxes.subtotalCents))
-    for (const group of snap.taxes.groups.filter((item) => item.taxCents > 0)) moneyRow(kit, group.label, money(group.taxCents))
+    for (const group of snap.taxes.groups.filter((item) => item.taxCents > 0))
+      moneyRow(kit, group.label, money(group.taxCents))
     const note = ticketUntaxedNote(snap.taxes)
     if (note) smallNote(kit, note)
   }
@@ -192,22 +207,35 @@ function howPaid(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) 
     moneyRow(kit, method.label, money(method.amountCents))
     if (method.reference) smallNote(kit, `Operación ${method.reference}`)
   }
-  if (snap.creditAppliedCents > 0) moneyRow(kit, "Saldo a favor usado", money(snap.creditAppliedCents))
+  if (snap.creditAppliedCents > 0)
+    moneyRow(kit, "Saldo a favor usado", money(snap.creditAppliedCents))
   if (snap.cashReceivedCents != null) moneyRow(kit, "Recibido", money(snap.cashReceivedCents))
-  if (snap.changeCents != null && snap.changeCents > 0) moneyRow(kit, "Vuelto", money(snap.changeCents))
+  if (snap.changeCents != null && snap.changeCents > 0)
+    moneyRow(kit, "Vuelto", money(snap.changeCents))
 }
 
 /** Lo que falta del tratamiento va aparte del pago, con su nombre, y solo si falta algo. */
 function stillOwed(kit: DocumentKit, snap: TicketSnapshot, money: (cents: number) => string) {
   if (snap.remainingCents == null || snap.remainingCents <= 0 || snap.lines.length === 0) return
   // En la hoja, «Le falta pagar» ya es el título de la sección.
-  moneyRow(kit, kit.thermal ? "Le falta pagar" : "Por este tratamiento", money(snap.remainingCents), { strong: true })
+  moneyRow(
+    kit,
+    kit.thermal ? "Le falta pagar" : "Por este tratamiento",
+    money(snap.remainingCents),
+    { strong: true },
+  )
   for (const item of snap.pending ?? []) {
-    smallNote(kit, `${item.description}: pagó ${money(item.amountCents - item.remainingCents)} de ${money(item.amountCents)}`)
+    smallNote(
+      kit,
+      `${item.description}: pagó ${money(item.amountCents - item.remainingCents)} de ${money(item.amountCents)}`,
+    )
   }
 }
 
-export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | null): Promise<Uint8Array> {
+export async function renderTicketPdf(
+  snap: TicketSnapshot,
+  paper?: string | null,
+): Promise<Uint8Array> {
   const org = snap.org
   const money = (cents: number) => formatMoney(cents, snap.currency, org.locale)
   const label = `Ticket N.º ${snap.numberLabel}`
@@ -222,17 +250,29 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
   const voided = () => {
     if (snap.status !== "anulado") return
     kit.gap(8)
-    kit.stateBox({ kind: "alert", title: "ANULADO", detail: snap.voidReason ? `Motivo: ${snap.voidReason}` : null })
+    kit.stateBox({
+      kind: "alert",
+      title: "ANULADO",
+      detail: snap.voidReason ? `Motivo: ${snap.voidReason}` : null,
+    })
   }
   if (kit.thermal) {
     kit.gap(8)
-    kit.spread({ text: "Ticket", face: "serif", size: SIZE.h2small }, { text: `N.º ${snap.numberLabel}`, face: "sansBold", size: SIZE.table }, { size: SIZE.table, leading: 1.3 })
+    kit.spread(
+      { text: "Ticket", face: "serif", size: SIZE.h2small },
+      { text: `N.º ${snap.numberLabel}`, face: "sansBold", size: SIZE.table },
+      { size: SIZE.table, leading: 1.3 },
+    )
     kit.text(shortDayTime(snap.paidAt, org), { size: SIZE.label, leading: 1.4 })
     voided()
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, snap.patientName], { size: SIZE.second, leading: 1.4 })
+    kit.text([{ text: "Paciente: ", face: "sansSemi" }, snap.patientName], {
+      size: SIZE.second,
+      leading: 1.4,
+    })
     if (snap.patientDoc) kit.text(snap.patientDoc, { size: SIZE.label, leading: 1.4 })
-    if (snap.payerName && snap.payerName !== snap.patientName) kit.text(`Pagó: ${snap.payerName}`, { size: SIZE.label, leading: 1.4 })
+    if (snap.payerName && snap.payerName !== snap.patientName)
+      kit.text(`Pagó: ${snap.payerName}`, { size: SIZE.label, leading: 1.4 })
     if (snap.issuerName) kit.text(`Caja: ${snap.issuerName}`, { size: SIZE.label, leading: 1.4 })
     thermalRule(kit)
     for (const line of snap.lines) {
@@ -241,7 +281,8 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
       if (line.promotion) smallNote(kit, `Promoción: ${line.promotion}`)
       kit.gap(3)
     }
-    if (snap.advanceCents != null) moneyRow(kit, "Adelanto (queda como saldo a favor)", money(snap.advanceCents))
+    if (snap.advanceCents != null)
+      moneyRow(kit, "Adelanto (queda como saldo a favor)", money(snap.advanceCents))
     thermalRule(kit)
     ticketTotals(kit, snap, money)
     thermalRule(kit)
@@ -253,12 +294,20 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
     return kit.finish()
   }
   kit.gap(22)
-  kit.titleWithDetails("Ticket", [{ text: `N.º ${snap.numberLabel}`, strong: true }, { text: dayTimeWords(snap.paidAt, org) }])
+  kit.titleWithDetails("Ticket", [
+    { text: `N.º ${snap.numberLabel}`, strong: true },
+    { text: dayTimeWords(snap.paidAt, org) },
+  ])
   voided()
   kit.gap(16)
   kit.facts(
     [
-      { label: "Paciente", value: snap.patientName, strong: true, ...(snap.patientDoc ? { sub: snap.patientDoc } : {}) },
+      {
+        label: "Paciente",
+        value: snap.patientName,
+        strong: true,
+        ...(snap.patientDoc ? { sub: snap.patientDoc } : {}),
+      },
       ...(snap.payerName ? [{ label: "Pagó", value: snap.payerName, strong: true }] : []),
       ...(snap.issuerName ? [{ label: "Caja", value: snap.issuerName, strong: true }] : []),
     ],
@@ -273,12 +322,30 @@ export async function renderTicketPdf(snap: TicketSnapshot, paper?: string | nul
       ...snap.lines.map((line) => [
         [
           { inlines: line.description, face: "sansMedium" as const },
-          ...(line.ofCents != null ? [{ inlines: `Paga una parte: cuesta ${money(line.ofCents)}`, size: SIZE.second, tone: "gray" as const }] : []),
-          ...(line.promotion ? [{ inlines: `Promoción: ${line.promotion}`, size: SIZE.second, tone: "gray" as const }] : []),
+          ...(line.ofCents != null
+            ? [
+                {
+                  inlines: `Paga una parte: cuesta ${money(line.ofCents)}`,
+                  size: SIZE.second,
+                  tone: "gray" as const,
+                },
+              ]
+            : []),
+          ...(line.promotion
+            ? [
+                {
+                  inlines: `Promoción: ${line.promotion}`,
+                  size: SIZE.second,
+                  tone: "gray" as const,
+                },
+              ]
+            : []),
         ],
         money(line.amountCents),
       ]),
-      ...(snap.advanceCents != null ? [["Adelanto (queda como saldo a favor)", money(snap.advanceCents)]] : []),
+      ...(snap.advanceCents != null
+        ? [["Adelanto (queda como saldo a favor)", money(snap.advanceCents)]]
+        : []),
     ],
   })
   kit.gap(8)
@@ -307,7 +374,10 @@ export async function getRefundReceiptPdf(
   paper?: string | null,
 ): Promise<{ bytes: Uint8Array; filename: string }> {
   const frozen = await getRefundReceipt(tx, orgId, patientId, receiptId)
-  const org = await loadFrozenDocumentClinic(tx, orgId, { clinic: frozen.clinic, branch: frozen.branch })
+  const org = await loadFrozenDocumentClinic(tx, orgId, {
+    clinic: frozen.clinic,
+    branch: frozen.branch,
+  })
   const money = (cents: number) => formatMoney(cents, frozen.currency, org.locale)
   const title = "Constancia de devolución"
   const kit = await DocumentKit.open(org, ticketFormat(org, paper), {
@@ -317,15 +387,21 @@ export async function getRefundReceiptPdf(
     legalNote: ticketFooterLines(null).join(" "),
     createdAt: new Date(frozen.refundedAt),
   })
-  const patientDoc = frozen.patient.docNumber ? `${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}` : null
+  const patientDoc = frozen.patient.docNumber
+    ? `${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}`
+    : null
   if (kit.thermal) {
     kit.gap(8)
     kit.text(title, { face: "serif", size: SIZE.h2small, leading: 1.25 })
     kit.text(shortDayTime(frozen.refundedAt, org), { size: SIZE.label, leading: 1.4 })
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, frozen.patient.displayName], { size: SIZE.second, leading: 1.4 })
+    kit.text([{ text: "Paciente: ", face: "sansSemi" }, frozen.patient.displayName], {
+      size: SIZE.second,
+      leading: 1.4,
+    })
     if (patientDoc) kit.text(patientDoc, { size: SIZE.label, leading: 1.4 })
-    if (frozen.issuer.name) kit.text(`Caja: ${frozen.issuer.name}`, { size: SIZE.label, leading: 1.4 })
+    if (frozen.issuer.name)
+      kit.text(`Caja: ${frozen.issuer.name}`, { size: SIZE.label, leading: 1.4 })
     thermalRule(kit)
     kit.total("Devuelto de su saldo a favor", money(frozen.amountCents))
     kit.gap(4)
@@ -338,7 +414,12 @@ export async function getRefundReceiptPdf(
     kit.gap(16)
     kit.facts(
       [
-        { label: "Paciente", value: frozen.patient.displayName, strong: true, ...(patientDoc ? { sub: patientDoc } : {}) },
+        {
+          label: "Paciente",
+          value: frozen.patient.displayName,
+          strong: true,
+          ...(patientDoc ? { sub: patientDoc } : {}),
+        },
         ...(frozen.issuer.name ? [{ label: "Caja", value: frozen.issuer.name, strong: true }] : []),
       ],
       3,
@@ -351,8 +432,14 @@ export async function getRefundReceiptPdf(
       plain: true,
       rows: [
         [
-          [{ inlines: "Se devolvió por", face: "sansSemi" as const }, { inlines: frozen.methodName, tone: "soft" as const }],
-          [{ inlines: "Motivo", face: "sansSemi" as const }, { inlines: frozen.reason, tone: "soft" as const }],
+          [
+            { inlines: "Se devolvió por", face: "sansSemi" as const },
+            { inlines: frozen.methodName, tone: "soft" as const },
+          ],
+          [
+            { inlines: "Motivo", face: "sansSemi" as const },
+            { inlines: frozen.reason, tone: "soft" as const },
+          ],
         ],
       ],
       size: SIZE.table,
@@ -379,7 +466,10 @@ export async function renderReturnPdf(
 ): Promise<{ bytes: Uint8Array; filename: string; numberLabel: string; tradeName: string }> {
   const row = await getPaymentReturn(tx, orgId, patientId, returnId)
   const frozen = row.snapshot
-  const org = await loadFrozenDocumentClinic(tx, orgId, { clinic: frozen.clinic, branch: frozen.branch })
+  const org = await loadFrozenDocumentClinic(tx, orgId, {
+    clinic: frozen.clinic,
+    branch: frozen.branch,
+  })
   const money = (cents: number) => formatMoney(cents, row.currency, org.locale)
   const numberLabel = String(row.returnNumber).padStart(6, "0")
   const ticketLabel = String(frozen.ticket.number).padStart(6, "0")
@@ -391,35 +481,63 @@ export async function renderReturnPdf(
     legalNote: ticketFooterLines(frozen.notice).join(" "),
     createdAt: row.createdAt,
   })
-  const patientDoc = frozen.patient.docNumber ? `${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}` : null
+  const patientDoc = frozen.patient.docNumber
+    ? `${frozen.patient.docType ?? "Doc."} ${frozen.patient.docNumber}`
+    : null
   if (kit.thermal) {
     kit.gap(8)
-    kit.spread({ text: "Devolución", face: "serif", size: SIZE.h2small }, { text: `N.º ${numberLabel}`, face: "sansBold", size: SIZE.table }, { size: SIZE.table, leading: 1.3 })
+    kit.spread(
+      { text: "Devolución", face: "serif", size: SIZE.h2small },
+      { text: `N.º ${numberLabel}`, face: "sansBold", size: SIZE.table },
+      { size: SIZE.table, leading: 1.3 },
+    )
     kit.text(shortDayTime(row.createdAt, org), { size: SIZE.label, leading: 1.4 })
-    kit.text(`Del ticket N.º ${ticketLabel} del ${dayWords(frozen.ticket.createdAt, org)}`, { size: SIZE.label, leading: 1.4 })
+    kit.text(`Del ticket N.º ${ticketLabel} del ${dayWords(frozen.ticket.createdAt, org)}`, {
+      size: SIZE.label,
+      leading: 1.4,
+    })
     thermalRule(kit)
-    kit.text([{ text: "Paciente: ", face: "sansSemi" }, frozen.patient.displayName], { size: SIZE.second, leading: 1.4 })
+    kit.text([{ text: "Paciente: ", face: "sansSemi" }, frozen.patient.displayName], {
+      size: SIZE.second,
+      leading: 1.4,
+    })
     if (patientDoc) kit.text(patientDoc, { size: SIZE.label, leading: 1.4 })
-    if (frozen.issuer.name) kit.text(`Caja: ${frozen.issuer.name}`, { size: SIZE.label, leading: 1.4 })
+    if (frozen.issuer.name)
+      kit.text(`Caja: ${frozen.issuer.name}`, { size: SIZE.label, leading: 1.4 })
     thermalRule(kit)
     for (const line of frozen.lines) {
       moneyRow(kit, line.description, money(line.amountCents))
-      if (line.kind === "producto" && line.backToStock === false) smallNote(kit, "No volvió a la venta")
+      if (line.kind === "producto" && line.backToStock === false)
+        smallNote(kit, "No volvió a la venta")
     }
     thermalRule(kit)
     kit.total("TOTAL DEVUELTO", money(row.totalCents))
-    if (frozen.payout.kind === "pagado") moneyRow(kit, frozen.payout.methodName, money(row.totalCents))
+    if (frozen.payout.kind === "pagado")
+      moneyRow(kit, frozen.payout.methodName, money(row.totalCents))
     else kit.text("Queda como saldo a favor del paciente.", { size: SIZE.second, leading: 1.4 })
     kit.text(`Motivo: ${frozen.reason}`, { size: SIZE.second, leading: 1.4 })
     if (frozen.payout.kind === "pagado") kit.signLine("Recibí conforme: nombre y firma")
   } else {
     kit.gap(22)
-    kit.titleWithDetails("Devolución", [{ text: `N.º ${numberLabel}`, strong: true }, { text: dayTimeWords(row.createdAt, org) }])
+    kit.titleWithDetails("Devolución", [
+      { text: `N.º ${numberLabel}`, strong: true },
+      { text: dayTimeWords(row.createdAt, org) },
+    ])
     kit.gap(16)
     kit.facts(
       [
-        { label: "Paciente", value: frozen.patient.displayName, strong: true, ...(patientDoc ? { sub: patientDoc } : {}) },
-        { label: "Del ticket", value: `N.º ${ticketLabel}`, strong: true, sub: dayWords(frozen.ticket.createdAt, org) },
+        {
+          label: "Paciente",
+          value: frozen.patient.displayName,
+          strong: true,
+          ...(patientDoc ? { sub: patientDoc } : {}),
+        },
+        {
+          label: "Del ticket",
+          value: `N.º ${ticketLabel}`,
+          strong: true,
+          sub: dayWords(frozen.ticket.createdAt, org),
+        },
         ...(frozen.issuer.name ? [{ label: "Caja", value: frozen.issuer.name, strong: true }] : []),
       ],
       3,
@@ -448,9 +566,18 @@ export async function renderReturnPdf(
       rows: [
         [
           frozen.payout.kind === "pagado"
-            ? [{ inlines: "Se devolvió por", face: "sansSemi" as const }, { inlines: frozen.payout.methodName, tone: "soft" as const }]
-            : [{ inlines: "Se devolvió como", face: "sansSemi" as const }, { inlines: "Saldo a favor del paciente", tone: "soft" as const }],
-          [{ inlines: "Motivo", face: "sansSemi" as const }, { inlines: frozen.reason, tone: "soft" as const }],
+            ? [
+                { inlines: "Se devolvió por", face: "sansSemi" as const },
+                { inlines: frozen.payout.methodName, tone: "soft" as const },
+              ]
+            : [
+                { inlines: "Se devolvió como", face: "sansSemi" as const },
+                { inlines: "Saldo a favor del paciente", tone: "soft" as const },
+              ],
+          [
+            { inlines: "Motivo", face: "sansSemi" as const },
+            { inlines: frozen.reason, tone: "soft" as const },
+          ],
         ],
       ],
     })
@@ -459,5 +586,10 @@ export async function renderReturnPdf(
       kit.signLine("Recibí conforme: nombre y firma", "Fecha")
     }
   }
-  return { bytes: await kit.finish(), filename: `Devolucion-${numberLabel}.pdf`, numberLabel, tradeName: org.tradeName }
+  return {
+    bytes: await kit.finish(),
+    filename: `Devolucion-${numberLabel}.pdf`,
+    numberLabel,
+    tradeName: org.tradeName,
+  }
 }

@@ -35,7 +35,10 @@ function ConsentPrintPage() {
   if (!found)
     return (
       <PageShell>
-        <EmptyState title="No encontramos este consentimiento" description="Puede que este enlace sea de otra persona o ya no exista." />
+        <EmptyState
+          title="No encontramos este consentimiento"
+          description="Puede que este enlace sea de otra persona o ya no exista."
+        />
       </PageShell>
     )
   return <ConsentPaper page document={found} />

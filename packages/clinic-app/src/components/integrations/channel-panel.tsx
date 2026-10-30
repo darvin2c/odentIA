@@ -1,19 +1,31 @@
-import { Alert, AlertDescription, AlertTitle, Badge, Button, Field, FieldDescription, FieldError, FieldLabel, Input } from "@odentia/ui"
-import { ConfirmDialog, DetailField, DetailList, FormDrawer } from "@odentia/ui-patterns"
+import { Alert, AlertDescription, AlertTitle, Badge, Button, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  DetailField,
+  DetailList,
+  FormDrawer,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { type FormEvent, useEffect, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import type { ConnectionItem } from "../../lib/crm"
 import {
   CHANNEL_SETUP,
   type ChannelField,
   type ChannelRow,
+  channelFieldsSchema,
+  connectionConfigField,
   DISCONNECT_CONSEQUENCE,
   INTEGRATIONS,
   type PanelChannel,
   secretFields,
 } from "../../lib/integrations"
 import { appWords } from "../../lib/product-words"
+import { AccountField } from "./whatsapp/account-field"
 
 /** La cuenta que el proveedor reconoce con unos datos; cada parte puede faltar. */
 interface ProviderAccount {
@@ -46,8 +58,13 @@ interface ConnectionTest {
 
 const STATUS_BADGE = { ok: "soft", off: "secondary", attention: "warning" } as const
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
+/** «Cambiar la clave»: basta con la que cambió; vacías todas, no hay nada que guardar. */
+function changedKeysSchema(fields: ChannelField[]) {
+  return z.record(z.string(), z.string()).superRefine((values, context) => {
+    if (fields.some((field) => (values[field.key] ?? "").trim() !== "")) return
+    const message = fields.length > 1 ? "Escribe al menos una de las claves." : "Escribe este dato."
+    for (const field of fields) context.addIssue({ code: "custom", path: [field.key], message })
+  })
 }
 
 /** La cuenta que encontró el proveedor, con las palabras que entregue; `null` si no dijo ninguna. */
@@ -124,10 +141,7 @@ export function ChannelPanel({
   const active = connection?.status === "active"
 
   const [view, setView] = useState<"detail" | "key">("detail")
-  const [values, setValues] = useState<Record<string, string>>({})
   const [shown, setShown] = useState<Record<string, boolean>>({})
-  const [invalid, setInvalid] = useState<string[]>([])
-  const [formError, setFormError] = useState<string | null>(null)
   /** Recién conectado: qué cuenta encontró y la clave de verificación que acaba de generarse. */
   const [created, setCreated] = useState<{ account: string | null; verifyToken: string | null } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -137,16 +151,9 @@ export function ChannelPanel({
   const connecting = connection === null && !loading
   const editing = connecting || view === "key"
   const fields = connecting ? setup.fields : secretFields(channel)
-  const isDirty = editing && Object.values(values).some((value) => value.trim() !== "")
+  const emptyValues = Object.fromEntries(setup.fields.map((field) => [field.key, ""])) as Record<string, string>
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["connections"] })
-
-  function resetForm() {
-    setValues({})
-    setShown({})
-    setInvalid([])
-    setFormError(null)
-  }
 
   // La dirección y su clave son de quien administra la configuración: el servidor no las entrega a nadie más.
   const showsSetup = setup.pasteAddress && connection !== null && canWrite
@@ -170,7 +177,6 @@ export function ChannelPanel({
       setCreated({ account: accountWords(data.account), verifyToken: data.webhookSecret ?? null })
       onConnected(data.id)
     },
-    onError: (error) => setFormError(errorText(error, `No pudimos conectar ${name}. Revisa los datos y vuelve a intentarlo.`)),
   })
 
   const changeKey = useMutation({
@@ -183,7 +189,6 @@ export function ChannelPanel({
       setNotice("Clave cambiada. La conexión y sus conversaciones siguen siendo las mismas.")
       setView("detail")
     },
-    onError: (error) => setFormError(errorText(error, "No pudimos cambiar la clave. Revísala y vuelve a intentarlo.")),
   })
 
   const test = useMutation({
@@ -197,7 +202,7 @@ export function ChannelPanel({
       )
       void refresh()
     },
-    onError: (error) => setTested({ ok: false, text: errorText(error, `${name} no respondió. Vuelve a intentarlo en un momento.`) }),
+    onError: (error) => setTested({ ok: false, text: submitErrorMessage(error) }),
   })
 
   const setStatus = useMutation({
@@ -211,29 +216,26 @@ export function ChannelPanel({
       setNotice(next === "disable" ? `${name} quedó desconectado.` : `${name} volvió a conectarse.`)
     },
   })
-  const statusError = setStatus.isError ? errorText(setStatus.error, "No pudimos hacer el cambio. Vuelve a intentarlo.") : null
+  const statusError = setStatus.isError ? submitErrorMessage(setStatus.error) : null
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    // En el detalle no hay nada que enviar: Enter en un dato de solo lectura no hace nada.
-    if (!editing) return
-    setFormError(null)
-    const filled = Object.fromEntries(
-      fields.map((field) => [field.key, (values[field.key] ?? "").trim()] as const).filter(([, value]) => value !== ""),
-    )
-    if (connecting) {
-      const missing = fields.filter((field) => !filled[field.key]).map((field) => field.key)
-      setInvalid(missing)
-      if (missing.length === 0) connect.mutate(filled)
-      return
-    }
-    // Al cambiar la clave solo viaja lo que se escribió: lo demás se conserva.
-    if (Object.keys(filled).length === 0) {
-      setInvalid(fields.map((field) => field.key))
-      return
-    }
-    setInvalid([])
-    changeKey.mutate(filled)
+  const form = useAppForm({
+    defaultValues: emptyValues,
+    validators: { onSubmit: connecting ? channelFieldsSchema(fields) : changedKeysSchema(fields) },
+    onSubmit: async ({ value }) => {
+      const filled = Object.fromEntries(
+        fields.map((field) => [field.key, (value[field.key] ?? "").trim()] as const).filter(([, text]) => text !== ""),
+      )
+      // Al cambiar la clave solo viaja lo que se escribió: lo demás se conserva.
+      if (connecting) await connect.mutateAsync(filled)
+      else await changeKey.mutateAsync(filled)
+    },
+  })
+  // El servidor dice qué dato no aceptó el proveedor (`config.pageId`…): se dice en ese campo.
+  const surface = useFormSurface(form, { fieldMap: connectionConfigField })
+
+  function resetForm() {
+    form.reset(emptyValues)
+    setShown({})
   }
 
   /** «Cancelar» en el cambio de clave vuelve al detalle; en lo demás cierra el panel. */
@@ -246,51 +248,19 @@ export function ChannelPanel({
     onClose()
   }
 
-  const renderField = (field: ChannelField) => {
-    const id = `integracion-${channel}-${field.key}`
-    const isInvalid = invalid.includes(field.key)
-    const optional = !connecting && fields.length > 1
-    return (
-      <Field key={field.key} data-invalid={isInvalid || undefined}>
-        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
-        <div className="flex gap-2">
-          <Input
-            id={id}
-            type={field.secret && !shown[field.key] ? "password" : "text"}
-            autoComplete="off"
-            spellCheck={false}
-            aria-invalid={isInvalid || undefined}
-            aria-describedby={`${id}-ayuda`}
-            className="min-w-0 flex-1"
-            value={values[field.key] ?? ""}
-            onChange={(event) => {
-              setValues((current) => ({ ...current, [field.key]: event.target.value }))
-              setInvalid((current) => current.filter((key) => key !== field.key))
-            }}
-          />
-          {field.secret ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="shrink-0"
-              aria-pressed={Boolean(shown[field.key])}
-              aria-label={`${shown[field.key] ? "Ocultar" : "Ver"} ${field.label.toLowerCase()}`}
-              onClick={() => setShown((current) => ({ ...current, [field.key]: !current[field.key] }))}
-            >
-              {shown[field.key] ? "Ocultar" : "Ver"}
-            </Button>
-          ) : null}
-        </div>
-        <FieldDescription id={`${id}-ayuda`}>
-          {field.hint}
-          {optional ? " Déjala vacía si no cambió." : ""}
-        </FieldDescription>
-        {isInvalid ? (
-          <FieldError>{optional ? "Escribe al menos una de las claves." : "Escribe este dato."}</FieldError>
-        ) : null}
-      </Field>
-    )
-  }
+  const renderField = (field: ChannelField) => (
+    <form.AppField key={field.key} name={field.key}>
+      {() => (
+        <AccountField
+          id={`integracion-${channel}-${field.key}`}
+          field={field}
+          shown={Boolean(shown[field.key])}
+          extraHint={!connecting && fields.length > 1 ? "Déjala vacía si no cambió." : undefined}
+          onToggleShown={() => setShown((current) => ({ ...current, [field.key]: !current[field.key] }))}
+        />
+      )}
+    </form.AppField>
+  )
 
   const webhookUrl = setupQuery.data?.data.webhookUrl ?? connection?.webhookUrl ?? null
   const verifyToken = setupQuery.data?.data.verifyToken ?? created?.verifyToken ?? null
@@ -310,11 +280,13 @@ export function ChannelPanel({
         onClose={close}
         title={title}
         description={description}
-        onSubmit={submit}
-        isDirty={isDirty}
-        isSubmitting={connect.isPending || changeKey.isPending}
+        // En el detalle no hay nada que enviar: Enter en un dato de solo lectura no hace nada.
+        onSubmit={editing ? surface.onSubmit : (event) => event.preventDefault()}
+        isDirty={editing && surface.isDirty}
+        isSubmitting={surface.isSubmitting}
         isLoading={loading}
-        error={editing ? formError : statusError}
+        // Con «Desconectar» abierto, su error se dice en el diálogo (no detrás).
+        error={editing ? surface.error : confirming ? null : statusError}
         submitLabel={connecting ? "Conectar" : "Guardar la clave"}
         cancelLabel={editing ? "Cancelar" : "Cerrar"}
         hideSubmit={!editing || !canWrite}
@@ -457,12 +429,16 @@ export function ChannelPanel({
 
       <ConfirmDialog
         open={confirming}
-        onClose={() => setConfirming(false)}
+        onClose={() => {
+          setConfirming(false)
+          setStatus.reset()
+        }}
         onConfirm={() => setStatus.mutate("disable")}
         title={`Desconectar ${name}`}
         description={DISCONNECT_CONSEQUENCE[channel]}
         confirmLabel="Desconectar"
         pending={setStatus.isPending}
+        error={statusError}
       />
     </>
   )

@@ -5,7 +5,7 @@ import { medicalLeave } from "@odentia/db/schema/clinical-forms"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
@@ -50,11 +50,11 @@ export async function createMedicalLeave(
 ): Promise<MedicalLeaveRow> {
   await requirePatient(tx, orgId, patientId)
   if (!Number.isInteger(input.days) || input.days < 1 || input.days > MEDICAL_LEAVE_MAX_DAYS)
-    throw validation(`Los días de descanso van de 1 a ${MEDICAL_LEAVE_MAX_DAYS}`)
+    throw invalidField("days", `Los días de descanso van de 1 a ${MEDICAL_LEAVE_MAX_DAYS}.`)
   const today = await clinicToday(tx, orgId)
   const startsOn = input.startsOn ?? today
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startsOn) || Number.isNaN(Date.parse(startsOn)))
-    throw validation("El primer día va como fecha AAAA-MM-DD")
+    throw invalidField("startsOn", "Elige el primer día del descanso en el calendario.")
   if (input.encounterId) {
     const [visit] = await tx
       .select({ status: encounter.status })
@@ -72,14 +72,16 @@ export async function createMedicalLeave(
   }
   // Sin la autorización de la persona, el diagnóstico no se guarda: no hay nada que filtrar después.
   const diagnosis = input.showDiagnosis
-    ? await resolveOptionalDiagnosisCode(tx, orgId, {
-        code: input.diagnosisCode?.trim() || null,
-        system: input.diagnosisSystem,
-      })
+    ? await resolveOptionalDiagnosisCode(
+        tx,
+        orgId,
+        { code: input.diagnosisCode?.trim() || null, system: input.diagnosisSystem },
+        "diagnosisCode",
+      )
     : { diagnosisSystem: null, diagnosisCode: null }
   const notes = input.notes?.trim() || null
   if (notes && notes.length > 2000)
-    throw validation("Las indicaciones tienen hasta 2000 caracteres")
+    throw invalidField("notes", "Escribe como mucho 2000 caracteres.")
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   const [counter] = await tx
     .insert(orgCounter)
@@ -158,7 +160,8 @@ export async function cancelMedicalLeave(
   input: { reason: string },
 ): Promise<MedicalLeaveRow> {
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!reason || reason.length > 2000)
+    throw invalidField("reason", "Escribe el motivo, como mucho 2000 caracteres.")
   const [current] = await tx
     .select()
     .from(medicalLeave)
@@ -240,7 +243,9 @@ export async function getMedicalLeavePrint(tx: Db, orgId: string, patientId: str
   // Un menor no se representa solo: el papel nombra a quien lo representa hoy.
   const age = await patientAge(tx, orgId, patientId)
   const guardian = age.isMinor
-    ? (await listDecisionRecipients(tx, orgId, patientId)).find((row) => row.relation === "representante_legal")
+    ? (await listDecisionRecipients(tx, orgId, patientId)).find(
+        (row) => row.relation === "representante_legal",
+      )
     : null
   return {
     leave,

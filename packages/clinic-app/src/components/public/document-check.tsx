@@ -1,5 +1,5 @@
 import { buttonVariants, cn } from "@odentia/ui"
-import { Ban, CircleCheck, CircleHelp, Clock, Phone, type LucideIcon } from "lucide-react"
+import { Ban, CircleCheck, CircleHelp, Clock, type LucideIcon, Phone } from "lucide-react"
 import type { DocumentCheck, DocumentCheckState } from "../../lib/document-check"
 
 /** «30 de octubre de 2026». Una fecha sin hora se dice tal cual, sin que la zona la mueva. */

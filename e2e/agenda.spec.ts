@@ -18,7 +18,7 @@ async function openBooking(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Nueva cita" }).click()
   await expect(
     page
-      .getByRole("region", { name: /^Horas del/ })
+      .getByRole("group", { name: /^Horas del/ })
       .getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / }),
   ).toBeVisible()
 }
@@ -208,7 +208,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   await openBooking(page)
   await page.getByLabel("Paciente", { exact: true }).fill("Mica")
   await page.getByRole("option", { name: /Micaela Ríos/ }).click()
-  const hours = page.getByRole("region", { name: /^Horas del/ })
+  const hours = page.getByRole("group", { name: /^Horas del/ })
   await expect(hours).toBeVisible()
   // Con el día casi acabado no cabe una cita entera: se pasa a la semana siguiente.
   if (lima(new Date().toISOString()).hour >= 18) {
@@ -263,7 +263,7 @@ test("agenda: reservar un hueco real, confirmarlo y encontrarlo al buscar", asyn
   // está la cita y el bloque ya viene puesto en el hueco que le sigue.
   const booked = await appointmentOf()
   await page.getByRole("button", { name: "Reprogramar" }).click()
-  const moveHours = page.getByRole("region", { name: /^Horas del/ })
+  const moveHours = page.getByRole("group", { name: /^Horas del/ })
   await expect(moveHours.getByText(/^Ahora está aquí, \d\d:\d\d$/)).toBeVisible()
   await expect(moveHours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })).toBeVisible()
   // Ni duración ni lista de profesionales: eso ya estaba decidido.
@@ -651,19 +651,27 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   await page.getByLabel("Teléfono", { exact: true }).fill("+51999123456")
   // Dice lo que de verdad pasa: lo que pide la clínica queda pendiente en su página.
   await expect(page.getByText("Con esto basta para la cita. Lo que la clínica pide (fecha de nacimiento) queda pendiente en su página.")).toBeVisible()
-  // El aviso previo que pide WhatsApp para los mensajes de su cita (ADR 0040).
-  await expect(page.getByText("Díselo: «Te avisaremos por WhatsApp sobre tus citas.»")).toBeVisible()
-  // Lo único que pide permiso, opcional: lo que dijo por teléfono.
-  await expect(page.getByText("¿Acepta recibir novedades y promociones de la clínica?")).toBeVisible()
-  await page.getByRole("button", { name: "Sí, aceptó por teléfono" }).click()
-  await expect(page.getByRole("button", { name: "Sí, aceptó por teléfono" })).toHaveAttribute("aria-pressed", "true")
+  // El aviso previo que pide WhatsApp para los mensajes de su cita (ADR 0040): se le dice y queda guardado.
+  await expect(page.getByText("Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»")).toBeVisible()
+  // Lo único que se le pregunta: novedades y promociones, sin nada marcado y con «Sí» primero.
+  const promotions = page.getByRole("group", { name: /^¿Acepta recibir novedades y promociones( de .+)? por WhatsApp\?$/ })
+  await expect(promotions).toBeVisible()
+  await expect(promotions.getByRole("button").first()).toHaveAccessibleName("Sí, aceptó por teléfono")
+  await expect(promotions.getByRole("button", { name: "Sí, aceptó por teléfono" })).toHaveAttribute("aria-pressed", "false")
   // Una semana después el día entero está libre, sea la hora que sea hoy.
   await page.getByRole("button", { name: "Semana siguiente" }).click()
-  const hours = page.getByRole("region", { name: /^Horas del/ })
+  const hours = page.getByRole("group", { name: /^Horas del/ })
   const block = hours.getByRole("button", { name: /^De \d\d:\d\d a \d\d:\d\d con / })
   // El bloque toma la duración regular recién configurada.
   await expect(block).toHaveAccessibleName(/^De 09:00 a 09:30 con /)
   await expect(page.getByRole("button", { name: /^Dura 30 min\./ })).toBeVisible()
+  // Sin su respuesta no se guarda: se pide junto a la pregunta.
+  await page.getByRole("button", { name: /^Registrar y reservar / }).click()
+  await expect(page.getByText("Pregúntale y elige una opción.")).toBeVisible()
+  await expect(promotions.getByRole("button", { name: "Sí, aceptó por teléfono" })).toBeFocused()
+  await promotions.getByRole("button", { name: "Sí, aceptó por teléfono" }).click()
+  await expect(promotions.getByRole("button", { name: "Sí, aceptó por teléfono" })).toHaveAttribute("aria-pressed", "true")
+  await expect(page.getByText("Pregúntale y elige una opción.")).toHaveCount(0)
   await shot("nueva-cita-paciente-nuevo")
   await page.getByRole("button", { name: /^Registrar y reservar / }).click()
   const grid = page.getByRole("region", { name: /^Agenda del/ })
@@ -682,6 +690,8 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
     page, "GET", `/api/agent/admin/people/${rosaPerson.personId}/permissions`, owner.org.slug,
   )
   expect(said.find((row) => row.purpose === "novedades")).toMatchObject({ granted: true, source: "telefono" })
+  // Se le dijo que le escribirían por WhatsApp sobre su cita: queda guardado, por teléfono.
+  expect(said.find((row) => row.purpose === "recordatorio")).toMatchObject({ granted: true, source: "telefono" })
   const rosaFicha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${people[0]!.id}`, owner.org.slug)
   expect(rosaFicha.patient).toMatchObject({ birthDate: null, identityNeedsReview: false })
 
@@ -694,7 +704,10 @@ test("agenda: duración de una cita regular, paciente nuevo y urgencia fuera de 
   // Encima de su propia cita no deja reservar.
   await block.press("ArrowUp")
   await expect(page.getByText(/ya está ocupado/)).toBeVisible()
-  await expect(page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ })).toBeDisabled()
+  // Reservar ahí no envía nada: lo dice junto a las horas y marca el bloque.
+  await page.getByRole("button", { name: /^Reservar (hoy|mañana|el )/ }).click()
+  await expect(page.getByRole("alert").filter({ hasText: /ya está ocupado/ })).toBeVisible()
+  await expect(block).toHaveAttribute("aria-invalid", "true")
   // Antes de que abra, sí: como urgencia.
   for (let step = 0; step < 5; step++) await block.press("ArrowUp")
   await expect(block).toHaveAccessibleName(/^De 08:00 a 08:30 con /)

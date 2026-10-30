@@ -1,6 +1,5 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import * as React from "react"
-import { common } from "../common.js"
 import {
   type CountryCode,
   countryOptions,
@@ -16,6 +15,11 @@ export interface CountrySelectProps {
   disabled?: boolean
   /** Para asociar la etiqueta de la pantalla (`FieldLabel htmlFor`). */
   id?: string
+  /** Nombre accesible cuando la pantalla no le pone etiqueta visible («País»). */
+  "aria-label"?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  onBlur?: () => void
 }
 
 /**
@@ -29,6 +33,10 @@ export function CountrySelect({
   countries,
   disabled = false,
   id,
+  "aria-label": ariaLabel,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
 }: CountrySelectProps) {
   const options = React.useMemo(
     () => countryOptions(value || regionCountry(), countries),
@@ -43,7 +51,14 @@ export function CountrySelect({
       }}
       disabled={disabled}
     >
-      <SelectTrigger id={id} aria-label={common.phone.country} className="w-28 shrink-0">
+      <SelectTrigger
+        id={id}
+        aria-label={ariaLabel}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
+        onBlur={onBlur}
+        className="w-28 shrink-0"
+      >
         <SelectValue>
           {(selected: CountryCode) => `${selected} +${getCountryCallingCode(selected)}`}
         </SelectValue>

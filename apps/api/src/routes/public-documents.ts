@@ -1,7 +1,7 @@
+import { getConnInfo } from "@hono/node-server/conninfo"
 import { withOrgContext } from "@odentia/db"
 import { readDocumentCheck, readDocumentCheckToken } from "@odentia/services"
-import { getConnInfo } from "@hono/node-server/conninfo"
-import { Hono, type Context } from "hono"
+import { type Context, Hono } from "hono"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService } from "./helpers.js"
 
@@ -36,7 +36,8 @@ export function createPublicDocumentsRoute(deps: {
     const now = Date.now()
     if (buckets.size >= MAX_BUCKETS) {
       for (const [key, bucket] of buckets) if (bucket.resetAt <= now) buckets.delete(key)
-      if (buckets.size >= MAX_BUCKETS) return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
+      if (buckets.size >= MAX_BUCKETS)
+        return c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
     }
     const key = address(c) ?? "shared"
     const bucket = buckets.get(key)
@@ -45,7 +46,9 @@ export function createPublicDocumentsRoute(deps: {
       return null
     }
     bucket.count += 1
-    return bucket.count > MAX_PER_WINDOW ? c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429) : null
+    return bucket.count > MAX_PER_WINDOW
+      ? c.json(errorBody(c, "RATE_LIMITED", "Intenta nuevamente más tarde"), 429)
+      : null
   }
 
   app.use("*", async (c, next) => {
@@ -54,7 +57,9 @@ export function createPublicDocumentsRoute(deps: {
     c.header("X-Robots-Tag", "noindex")
     await next()
   })
-  app.onError((_error, c) => c.json(errorBody(c, "INTERNAL", "No pudimos completar la solicitud"), 500))
+  app.onError((_error, c) =>
+    c.json(errorBody(c, "INTERNAL", "No pudimos completar la solicitud"), 500),
+  )
 
   app.get("/:token", async (c) => {
     const throttled = limited(c)
@@ -62,7 +67,9 @@ export function createPublicDocumentsRoute(deps: {
     const missing = () => c.json(errorBody(c, "NOT_FOUND", "Documento no disponible"), 404)
     const read = readDocumentCheckToken(deps.secretsKey, c.req.param("token"))
     if (!read) return missing()
-    const check = await withOrgContext(deps.db, read.orgId, (tx) => readDocumentCheck(tx, read.orgId, read.type, read.id))
+    const check = await withOrgContext(deps.db, read.orgId, (tx) =>
+      readDocumentCheck(tx, read.orgId, read.type, read.id),
+    )
     if (!check) return missing()
     return runService(c, 200, async () => check)
   })

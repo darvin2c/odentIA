@@ -38,7 +38,14 @@ export function configureDocumentLogos(reader: LogoReader | null): void {
 
 /** PNG o JPG por su firma, no por la extensión. Otro formato (WebP) no se embebe. */
 export function logoKindOf(bytes: Uint8Array): DocumentLogo["kind"] | null {
-  if (bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "png"
+  if (
+    bytes.length > 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  )
+    return "png"
   if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "jpg"
   return null
 }
@@ -49,7 +56,11 @@ async function readLogo(orgId: string, url: string | null): Promise<DocumentLogo
   if (cached && (cached.logo || cached.until > Date.now())) return cached.logo
   let logo: DocumentLogo | null = null
   try {
-    const bytes = await logoReader.readPublicObject(url, clinicLogoFolder(orgId), AbortSignal.timeout(LOGO_TIMEOUT_MS))
+    const bytes = await logoReader.readPublicObject(
+      url,
+      clinicLogoFolder(orgId),
+      AbortSignal.timeout(LOGO_TIMEOUT_MS),
+    )
     const kind = bytes ? logoKindOf(bytes) : null
     logo = bytes && kind ? { bytes, kind } : null
   } catch {
@@ -61,7 +72,11 @@ async function readLogo(orgId: string, url: string | null): Promise<DocumentLogo
 }
 
 async function clinicLogoOf(tx: Db, orgId: string): Promise<DocumentLogo | null> {
-  const [row] = await tx.select({ logo: organization.logo }).from(organization).where(eq(organization.id, orgId)).limit(1)
+  const [row] = await tx
+    .select({ logo: organization.logo })
+    .from(organization)
+    .where(eq(organization.id, orgId))
+    .limit(1)
   return readLogo(orgId, row?.logo ?? null)
 }
 
@@ -70,8 +85,15 @@ async function clinicLogoOf(tx: Db, orgId: string): Promise<DocumentLogo | null>
  * tiene una sola, lleva su nombre, dirección y teléfono; con varias, los de la clínica.
  */
 export async function loadDocumentClinic(tx: Db, orgId: string): Promise<DocumentClinic> {
-  const [profile] = await tx.select().from(orgProfile).where(eq(orgProfile.organizationId, orgId)).limit(1)
-  if (!profile) throw validation("La organización no tiene perfil regional: configúralo antes de generar documentos")
+  const [profile] = await tx
+    .select()
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  if (!profile)
+    throw validation(
+      "La organización no tiene perfil regional: configúralo antes de generar documentos",
+    )
   const branches = await tx
     .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
     .from(branch)
@@ -83,7 +105,10 @@ export async function loadDocumentClinic(tx: Db, orgId: string): Promise<Documen
     legalName: profile.legalName || null,
     fiscalDocType: profile.fiscalDocType,
     fiscalDocNumber: profile.fiscalDocNumber,
-    address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? profile.fiscalAddress ?? null,
+    address:
+      (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ??
+      profile.fiscalAddress ??
+      null,
     phone: only?.phone ?? null,
     branchName: only?.name ?? null,
     logo: await clinicLogoOf(tx, orgId),
@@ -120,7 +145,8 @@ export async function loadFrozenDocumentClinic(
     tradeName: clinic.tradeName || clinic.legalName,
     legalName: clinic.legalName || null,
     fiscalDocType: clinic.fiscalDocType === undefined ? today.fiscalDocType : clinic.fiscalDocType,
-    fiscalDocNumber: clinic.fiscalDocNumber === undefined ? today.fiscalDocNumber : clinic.fiscalDocNumber,
+    fiscalDocNumber:
+      clinic.fiscalDocNumber === undefined ? today.fiscalDocNumber : clinic.fiscalDocNumber,
     address: clinic.fiscalAddress ?? today.address,
     phone,
     branchName: frozen.branch?.name ?? null,

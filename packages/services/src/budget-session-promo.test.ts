@@ -5,6 +5,7 @@
  */
 import { sql } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import {
   adjustBudgetLines,
   createBudget,
@@ -15,10 +16,10 @@ import {
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { addEncounterProcedure, finalizeEncounter } from "./encounters.js"
-import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { addPlanItem } from "./plan.js"
 import { createPromotion } from "./promotions.js"
 import { ownerDb, setupTestDb } from "./test-setup.js"
+
 setupTestDb()
 
 const DAY = 24 * 60 * 60 * 1000
@@ -77,11 +78,17 @@ async function promoBudget(mode: "fixed" | "from", promoCents: number) {
 it("lo que se cobra por sesión se presupuesta por su total y se cobra una visita cada vez", async () => {
   const { f, item, budget } = await sessionBudget(18, 15000)
   // 18 visitas de 150: el paciente ve 2 700, no 150.
-  expect(budget.items[0]).toMatchObject({ priceCents: 15000, sessionsPlanned: 18, lineTotalCents: 270000 })
+  expect(budget.items[0]).toMatchObject({
+    priceCents: 15000,
+    sessionsPlanned: 18,
+    lineTotalCents: 270000,
+  })
   expect(budget.totalCents).toBe(270000)
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   const accepted = await f.run((tx) =>
-    decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }),
+    decideBudget(tx, ...f.args, budget.id, {
+      decisions: [{ planItemId: item.id, decision: "aceptado" }],
+    }),
   )
   expect(accepted.acceptedCents).toBe(270000)
 
@@ -93,7 +100,12 @@ it("lo que se cobra por sesión se presupuesta por su total y se cobra una visit
 
   // La hoja lo explica: precio por visita, visitas previstas y total.
   const sheet = await f.run((tx) => getBudgetPrintPayload(tx, f.args[0], f.args[2], budget.id))
-  expect(sheet.lines[0]).toMatchObject({ unitCents: 15000, units: 18, totalCents: 270000, billingMode: "session" })
+  expect(sheet.lines[0]).toMatchObject({
+    unitCents: 15000,
+    units: 18,
+    totalCents: 270000,
+    billingMode: "session",
+  })
   expect(sheet.totalCents).toBe(270000)
   const snap = await f.run((tx) => buildBudgetSnapshot(tx, f.args[0], f.args[2], budget.id))
   const pdf = await renderBudgetPdf(snap)
@@ -104,7 +116,9 @@ it("las visitas previstas se fijan al presupuestar y solo en lo que se cobra por
   const { f, item, budget } = await sessionBudget(1, 15000)
   expect(budget.totalCents).toBe(15000)
   const adjusted = await f.run((tx) =>
-    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, sessionsPlanned: 12 }] }),
+    adjustBudgetLines(tx, ...f.args, budget.id, {
+      lines: [{ planItemId: item.id, sessionsPlanned: 12 }],
+    }),
   )
   expect(adjusted.items[0]).toMatchObject({ sessionsPlanned: 12, lineTotalCents: 180000 })
   expect(adjusted.totalCents).toBe(180000)
@@ -122,11 +136,15 @@ it("las visitas previstas se fijan al presupuestar y solo en lo que se cobra por
 it("una promoción que terminó no impide cerrar la atención ni cambia lo acordado", async () => {
   const { f, promo, item, budget } = await promoBudget("fixed", 79000)
   await f.run((tx) =>
-    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, promotionId: promo.id }] }),
+    adjustBudgetLines(tx, ...f.args, budget.id, {
+      lines: [{ planItemId: item.id, promotionId: promo.id }],
+    }),
   )
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   await f.run((tx) =>
-    decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }),
+    decideBudget(tx, ...f.args, budget.id, {
+      decisions: [{ planItemId: item.id, decision: "aceptado" }],
+    }),
   )
   // El paciente aceptó a tiempo y vuelve cuando la promoción ya terminó.
   await expirePromotion(promo.id)
@@ -134,13 +152,18 @@ it("una promoción que terminó no impide cerrar la atención ni cambia lo acord
   await f.ready(f.encounter.id)
   const closed = await f.run((tx) => finalizeEncounter(tx, ...f.args, f.encounter.id))
   expect(closed.charges).toHaveLength(1)
-  expect(closed.charges[0]).toMatchObject({ amountCents: 79000, promotionName: "Sonrisa de octubre" })
+  expect(closed.charges[0]).toMatchObject({
+    amountCents: 79000,
+    promotionName: "Sonrisa de octubre",
+  })
 })
 
 it("un borrador no se entrega con una promoción que ya terminó", async () => {
   const { f, promo, item, budget } = await promoBudget("fixed", 79000)
   await f.run((tx) =>
-    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, promotionId: promo.id }] }),
+    adjustBudgetLines(tx, ...f.args, budget.id, {
+      lines: [{ planItemId: item.id, promotionId: promo.id }],
+    }),
   )
   await expirePromotion(promo.id)
   await expect(f.run((tx) => deliverBudget(tx, ...f.args, budget.id))).rejects.toMatchObject({
@@ -148,7 +171,9 @@ it("un borrador no se entrega con una promoción que ya terminó", async () => {
   })
   // Quitarla devuelve la tarifa, sin pedir motivo, y entonces sí se entrega.
   const restored = await f.run((tx) =>
-    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, promotionId: null }] }),
+    adjustBudgetLines(tx, ...f.args, budget.id, {
+      lines: [{ planItemId: item.id, promotionId: null }],
+    }),
   )
   expect(restored.items[0]).toMatchObject({
     promotionId: null,
@@ -166,11 +191,15 @@ it("lo acordado por encima de la tarifa se cobra completo al atender", async () 
   const { f, item, budget } = await promoBudget("fixed", 79000)
   // Sin promoción: se acuerda un precio mayor que la tarifa (120 000).
   await f.run((tx) =>
-    adjustBudgetLines(tx, ...f.args, budget.id, { lines: [{ planItemId: item.id, priceCents: 135000 }] }),
+    adjustBudgetLines(tx, ...f.args, budget.id, {
+      lines: [{ planItemId: item.id, priceCents: 135000 }],
+    }),
   )
   await f.run((tx) => deliverBudget(tx, ...f.args, budget.id))
   await f.run((tx) =>
-    decideBudget(tx, ...f.args, budget.id, { decisions: [{ planItemId: item.id, decision: "aceptado" }] }),
+    decideBudget(tx, ...f.args, budget.id, {
+      decisions: [{ planItemId: item.id, decision: "aceptado" }],
+    }),
   )
   await f.run((tx) => addEncounterProcedure(tx, ...f.args, f.encounter.id, { planItemId: item.id }))
   await f.ready(f.encounter.id)
@@ -178,5 +207,9 @@ it("lo acordado por encima de la tarifa se cobra completo al atender", async () 
   expect(closed.charges.map((charge) => charge.amountCents)).toEqual([135000])
   // La hoja no imprime un «descuento negativo».
   const sheet = await f.run((tx) => getBudgetPrintPayload(tx, f.args[0], f.args[2], budget.id))
-  expect(sheet.lines[0]).toMatchObject({ listTotalCents: 135000, totalCents: 135000, discountCents: 0 })
+  expect(sheet.lines[0]).toMatchObject({
+    listTotalCents: 135000,
+    totalCents: 135000,
+    discountCents: 0,
+  })
 })

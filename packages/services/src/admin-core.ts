@@ -22,7 +22,7 @@ import {
 import { account as authAccount, session, user } from "@odentia/db/schema/auth"
 import { generateRandomString, type SecretConfig, symmetricEncrypt } from "better-auth/crypto"
 import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm"
-import { ServiceError } from "./errors.js"
+import { invalidField, ServiceError } from "./errors.js"
 
 /** Actor interno verificado por el guard (sesión + staff activo + MFA). */
 export interface AdminActor {
@@ -240,10 +240,9 @@ export async function inviteAdminStaff(
   acceptUrlFor: (token: string) => string,
 ): Promise<AdminInvitationCreated> {
   if (actor.role !== "admin") throw forbidden("Solo administración puede invitar personal")
-  if (!isAdminRole(input.role)) throw new ServiceError("VALIDATION", 400, "Rol interno inválido")
+  if (!isAdminRole(input.role)) throw invalidField("role", "Rol interno inválido")
   const email = normalizeStaffEmail(input.email)
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
-    throw new ServiceError("VALIDATION", 400, "Correo inválido")
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw invalidField("email", "Correo inválido")
   const [existingUser] = await ownerDb
     .select({ id: user.id })
     .from(user)
@@ -256,7 +255,9 @@ export async function inviteAdminStaff(
       .where(eq(adminStaff.userId, existingUser.id))
       .limit(1)
     if (existingStaff?.active)
-      throw new ServiceError("ALREADY_STAFF", 409, "Esa cuenta ya es personal activo")
+      throw new ServiceError("ALREADY_STAFF", 409, "Esa cuenta ya es personal activo", {
+        email: "Esa cuenta ya es personal activo",
+      })
   }
   const token = randomBytes(32).toString("hex")
   const expiresAt = new Date(Date.now() + ADMIN_INVITATION_TTL_MS)
@@ -303,8 +304,7 @@ export async function resendAdminInvitation(
   acceptUrlFor: (token: string) => string,
 ): Promise<AdminInvitationCreated> {
   if (actor.role !== "admin") throw forbidden("Solo administración gestiona invitaciones")
-  if (reason.trim().length < 8)
-    throw new ServiceError("VALIDATION", 400, "El motivo es obligatorio (mínimo 8 caracteres)")
+  if (reason.trim().length < 8) throw invalidField("reason", "El motivo es obligatorio (mínimo 8 caracteres)")
   const [invitation] = await ownerDb
     .select()
     .from(adminInvitation)
@@ -486,8 +486,7 @@ export async function setAdminStaffActive(
 ): Promise<void> {
   if (actor.role !== "admin") throw forbidden("Solo administración cambia el estado del personal")
   if (actor.userId === targetUserId) throw forbidden("Tu estado solo lo cambia otro admin")
-  if (reason.trim().length < 8)
-    throw new ServiceError("VALIDATION", 400, "El motivo es obligatorio (mínimo 8 caracteres)")
+  if (reason.trim().length < 8) throw invalidField("reason", "El motivo es obligatorio (mínimo 8 caracteres)")
   await withAdminStaffLock(ownerDb, async (tx) => {
     const actorRow = await tx
       .select({ role: adminStaff.role, active: adminStaff.active })
@@ -1021,8 +1020,7 @@ export async function adminResetStaffFactor(
   if (actor.role !== "admin") throw forbidden("Solo administración resetea factores")
   if (actor.userId === targetUserId)
     throw forbidden("Tu factor se revoca con tu contraseña, no con reset")
-  if (reason.trim().length < 8)
-    throw new ServiceError("VALIDATION", 400, "El motivo es obligatorio (mínimo 8 caracteres)")
+  if (reason.trim().length < 8) throw invalidField("reason", "El motivo es obligatorio (mínimo 8 caracteres)")
   await ownerDb.transaction(async (tx) => {
     const [target] = await tx
       .select({ userId: adminStaff.userId })

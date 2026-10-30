@@ -159,8 +159,29 @@
     {
       "idx": 22,
       "version": "7",
-      "when": 1793385709650,
-      "tag": "0022_documentos_formales",
+      "when": 1793385077540,
+      "tag": "0022_acciones_del_agente",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793385092067,
+      "tag": "0023_acciones_del_agente_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793390257419,
+      "tag": "0024_enlace_para_alguien_nuevo",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793397717076,
+      "tag": "0025_documentos_formales",
       "breakpoints": true
     }
   ]

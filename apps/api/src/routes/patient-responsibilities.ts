@@ -5,8 +5,19 @@ import { orgContextOf } from "../lib/context.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 import { confirmPendingRepresentative, listResponsibilities, grantResponsibility, revokeResponsibility } from "@odentia/services"
 
-const createInput = z.object({contactId:z.uuid(),kind:z.enum(["representante_legal","autorizado_informacion","responsable_economico"]),startsAt:z.iso.date(),endsAt:z.iso.date().nullish(),evidenceDocumentId:z.uuid().nullish(),notes:z.string().max(4000).nullish()}).strict()
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const createInput = z
+  .object({
+    contactId: z.uuid("Elige a la persona"),
+    kind: z.enum(["representante_legal", "autorizado_informacion", "responsable_economico"], "Elige la responsabilidad"),
+    startsAt: z.iso.date("Elige desde cuándo está vigente"),
+    endsAt: z.iso.date("Elige hasta cuándo está vigente").nullish(),
+    evidenceDocumentId: z.uuid("Elige un documento de la lista").nullish(),
+    notes: z.string().max(4000).nullish(),
+  })
+  .strict()
+const reasonInput = z
+  .object({ reason: z.string().trim().min(1, "Escribe el motivo de la revocación").max(2000) })
+  .strict()
 
 export function createPatientResponsibilitiesRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()

@@ -7,20 +7,14 @@
  * en este navegador aunque se cierre la ventana. Es un cajón ancho: la tabla
  * necesita espacio.
  */
-import {
-  Button,
-  Checkbox,
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { DataTable, FormDrawer } from "@odentia/ui-patterns"
+import { Button, FieldGroup, Textarea, toast } from "@odentia/ui"
+import { DataTable, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import * as React from "react"
+import { z } from "zod"
+import { ApiError } from "../../lib/api"
 import {
   formatWhole,
   type ImportPreviewRow,
@@ -28,6 +22,7 @@ import {
   importProducts,
   inventoryErrorMessage,
   inventoryKeys,
+  inventoryUnconfirmedMessage,
   newKey,
   previewImport,
   unitsText,
@@ -75,11 +70,23 @@ function writeDraft(key: string, draft: PasteDraft) {
   }
 }
 
+const pasteSchema = z.object({
+  text: z.string().refine((text) => text.trim() !== "", "Pega aquí las columnas de tu hoja."),
+  header: z.boolean(),
+  columns: z
+    .array(z.custom<PasteColumn>())
+    .refine((columns) => columns.includes("nombre") && columns.includes("hay"), "Elige qué columna es el nombre y cuál es lo que hay."),
+  // Lo que se decidió de cada fila parecida: siempre pasa (sin decidir, la fila no se envía).
+  decisions: z.custom<Record<number, Decision>>(),
+})
+
 /** Una fila de la tabla: lo pegado tal cual y lo que el servidor dice de ella. */
 interface Row {
   index: number
   input: ImportRowInput
   review: ImportPreviewRow | undefined
+  /** Lo que dijo el servidor de esta fila al agregar la lista. */
+  rejected: string | undefined
 }
 
 export function PasteListDrawer({ onClose }: { onClose: () => void }) {
@@ -87,20 +94,86 @@ export function PasteListDrawer({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
   const ids = React.useId()
   const storageKey = `odentia:inventario:lista:${branchId}`
-  const [draft, setDraft] = React.useState<PasteDraft>(() => readDraft(storageKey))
+  const [initial] = React.useState<PasteDraft>(() => readDraft(storageKey))
   const [changing, setChanging] = React.useState(false)
   const [key, setKey] = React.useState(newKey)
+  // Lo que el servidor rechazó al agregar, por fila de la tabla: se dice en su «Estado».
+  const [rejected, setRejected] = React.useState<Record<number, string>>({})
+
+  const save = useMutation({
+    mutationFn: (rows: ImportRowInput[]) => importProducts(branchId, rows, key),
+  })
+
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: pasteSchema },
+    onSubmit: async ({ value }) => {
+      setRejected({})
+      if (ready.length === 0) throw new Error("No hay filas listas para agregar: revisa las de la tabla.")
+      // Las filas enviadas son solo las listas: `rows[i]` del servidor es `ready[i]`.
+      const sentRows = ready
+      const left = pending
+      let result: { created: number; updated: number }
+      try {
+        result = await save.mutateAsync(
+          sentRows.map((row) => ({
+            ...row.input,
+            productId: row.review?.status === "parecido" && value.decisions[row.index] === "mismo" ? (row.review.similarTo?.id ?? null) : null,
+          })),
+        )
+      } catch (error) {
+        if (!(error instanceof ApiError)) throw error
+        const marked: Record<number, string> = {}
+        for (const [name, reason] of Object.entries(error.shape.fields ?? {})) {
+          const at = /^rows\[(\d+)\]/.exec(name)?.[1]
+          const row = at === undefined ? undefined : sentRows[Number(at)]
+          if (row) marked[row.index] = reason
+        }
+        if (Object.keys(marked).length === 0) throw error
+        setRejected(marked)
+        // Junto a los botones, la fila con su número en la hoja («Fila 7: Falta el nombre»); el motivo, también en su «Estado».
+        throw new Error(error.shape.message || "No se agregó la lista: revisa las filas marcadas.")
+      }
+      setKey(newKey())
+      writeDraft(storageKey, EMPTY)
+      const parts = [
+        result.created > 0 ? `se agregaron ${formatWhole(result.created)} ${result.created === 1 ? "producto" : "productos"}` : null,
+        result.updated > 0 ? `se puso lo que hay de ${formatWhole(result.updated)} que ya ${result.updated === 1 ? "estaba" : "estaban"}` : null,
+      ].filter(Boolean)
+      const sentence = parts.length > 0 ? parts.join(" y ") : "no cambió nada"
+      toast.success(
+        `En ${branchName} ${sentence}.${left > 0 ? (left === 1 ? " Quedó 1 fila por revisar: corrígela en tu hoja y pégala otra vez." : ` Quedaron ${formatWhole(left)} filas por revisar: corrígelas en tu hoja y pégalas otra vez.`) : ""}`,
+      )
+      void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
+      onClose()
+    },
+    // Las columnas van plegadas en «Cambiar columnas»: con su error, se abren.
+    onSubmitInvalid: ({ formApi }) => {
+      if (formApi.getFieldMeta("columns")?.errors.length) setChanging(true)
+    },
+  })
+  const surface = useFormSurface(form, { formMessage: (error) => inventoryUnconfirmedMessage(error) })
+
+  const draft = useStore(form.store, (state) => state.values)
   React.useEffect(() => writeDraft(storageKey, draft), [storageKey, draft])
 
   const sheet = React.useMemo(() => splitSheet(draft.text), [draft.text])
-  const inputs = React.useMemo(() => sheetRows(sheet, draft.header, draft.columns), [sheet, draft.header, draft.columns])
+  // Cada fila lleva su número en la hoja pegada: el servidor la nombra así.
+  const inputs = React.useMemo(
+    () => sheetRows(sheet, draft.header, draft.columns).map((input, index) => ({ ...input, line: index + 1 + (draft.header ? 1 : 0) })),
+    [sheet, draft.header, draft.columns],
+  )
   const mapped = draft.columns.includes("nombre") && draft.columns.includes("hay")
   const tooMany = sheet.length - (draft.header ? 1 : 0) > PASTE_MAX_ROWS
 
   const setText = (text: string) => {
     const rows = splitSheet(text)
     const guessed = guessColumns(rows)
-    setDraft({ text, header: guessed.header, columns: guessed.columns, decisions: {} })
+    form.setFieldValue("text", text)
+    form.setFieldValue("header", guessed.header)
+    form.setFieldValue("columns", guessed.columns)
+    form.setFieldValue("decisions", {})
+    setRejected({})
     setChanging(false)
   }
 
@@ -119,47 +192,22 @@ export function PasteListDrawer({ onClose }: { onClose: () => void }) {
     staleTime: 60_000,
   })
   const reviews = preview.data && settled === requestKey ? preview.data.rows : []
-  const rows: Row[] = inputs.map((input, index) => ({ index, input, review: reviews[index] }))
+  const rows: Row[] = inputs.map((input, index) => ({ index, input, review: reviews[index], rejected: rejected[index] }))
   const decide = React.useCallback(
-    (index: number, decision: Decision | undefined) =>
-      setDraft((current) => {
-        const decisions = { ...current.decisions }
-        if (decision) decisions[index] = decision
-        else delete decisions[index]
-        return { ...current, decisions }
-      }),
-    [],
+    (index: number, decision: Decision | undefined) => {
+      const decisions = { ...form.getFieldValue("decisions") }
+      if (decision) decisions[index] = decision
+      else delete decisions[index]
+      form.setFieldValue("decisions", decisions)
+    },
+    [form],
   )
   const readyOf = (row: Row) =>
-    row.review !== undefined && (row.review.status === "nuevo" || row.review.status === "existe" || (row.review.status === "parecido" && draft.decisions[row.index] !== undefined))
+    row.rejected === undefined &&
+    row.review !== undefined &&
+    (row.review.status === "nuevo" || row.review.status === "existe" || (row.review.status === "parecido" && draft.decisions[row.index] !== undefined))
   const ready = rows.filter(readyOf)
   const pending = rows.length - ready.length
-
-  const save = useMutation({
-    mutationFn: () =>
-      importProducts(
-        branchId,
-        ready.map((row) => ({
-          ...row.input,
-          productId: row.review?.status === "parecido" && draft.decisions[row.index] === "mismo" ? (row.review.similarTo?.id ?? null) : null,
-        })),
-        key,
-      ),
-    onSuccess: (result) => {
-      setKey(newKey())
-      writeDraft(storageKey, EMPTY)
-      const parts = [
-        result.created > 0 ? `se agregaron ${formatWhole(result.created)} ${result.created === 1 ? "producto" : "productos"}` : null,
-        result.updated > 0 ? `se puso lo que hay de ${formatWhole(result.updated)} que ya ${result.updated === 1 ? "estaba" : "estaban"}` : null,
-      ].filter(Boolean)
-      const sentence = parts.length > 0 ? parts.join(" y ") : "no cambió nada"
-      toast.success(
-        `En ${branchName} ${sentence}.${pending > 0 ? (pending === 1 ? " Quedó 1 fila por revisar: corrígela en tu hoja y pégala otra vez." : ` Quedaron ${formatWhole(pending)} filas por revisar: corrígelas en tu hoja y pégalas otra vez.`) : ""}`,
-      )
-      void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
-      onClose()
-    },
-  })
 
   const columns = React.useMemo<ColumnDef<Row>[]>(
     () => [
@@ -217,47 +265,45 @@ export function PasteListDrawer({ onClose }: { onClose: () => void }) {
 
   return (
     <FormDrawer
+      {...surface}
       open
       dock={false}
       onClose={onClose}
       className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(60rem,calc(100vw-2rem))]"
       title="Pegar tu lista"
       description={`${branchName} · Copia las columnas de tu hoja y pégalas aquí.`}
-      error={save.error ? inventoryErrorMessage(save.error) : !mapped && sheet.length > 0 ? "Elige qué columna es el nombre y cuál es lo que hay: «Cambiar columnas»." : null}
-      isSubmitting={save.isPending}
-      submitDisabled={ready.length === 0 || !mapped || preview.isFetching}
+      // Mientras el servidor revisa la lista no se sabe qué filas están listas; la tabla dice «Revisando la lista…».
+      submitDisabled={preview.isFetching}
       submitLabel={ready.length === 1 ? "Agregar 1 producto" : `Agregar ${formatWhole(ready.length)} productos`}
       cancelLabel="Cancelar"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (save.isPending || ready.length === 0) return
-        save.mutate()
-      }}
     >
       <FieldGroup className="gap-5">
         {draft.text.trim() === "" ? (
-          <Field>
-            <FieldLabel htmlFor={`${ids}-pegar`}>Pega aquí tu lista</FieldLabel>
-            <Textarea
-              id={`${ids}-pegar`}
-              rows={8}
-              autoFocus
-              placeholder={"Nombre\tUnidad\tHay\tMínimo\nGuantes de nitrilo\tcaja de 100\t11\t10"}
-              aria-describedby={`${ids}-pegar-ayuda`}
-              value={draft.text}
-              onPaste={(event) => {
-                const text = event.clipboardData.getData("text/plain")
-                if (!text) return
-                event.preventDefault()
-                setText(text)
-              }}
-              onChange={(event) => setText(event.target.value)}
-            />
-            <FieldDescription id={`${ids}-pegar-ayuda`}>
-              Selecciona en tu hoja las columnas Nombre y Hay (y, si las tienes, Unidad y Mínimo), cópialas y pégalas con Ctrl+V. Lo demás (código, proveedor, precio) se completa
-              después o llega con la primera compra.
-            </FieldDescription>
-          </Field>
+          <form.AppField name="text">
+            {(field) => (
+              <field.Control
+                label="Pega aquí tu lista"
+                description="Selecciona en tu hoja las columnas Nombre y Hay (y, si las tienes, Unidad y Mínimo), cópialas y pégalas con Ctrl+V. Lo demás (código, proveedor, precio) se completa después o llega con la primera compra."
+              >
+                {(control) => (
+                  <Textarea
+                    {...control.props}
+                    rows={8}
+                    autoFocus
+                    placeholder={"Nombre\tUnidad\tHay\tMínimo\nGuantes de nitrilo\tcaja de 100\t11\t10"}
+                    value={field.state.value}
+                    onPaste={(event) => {
+                      const text = event.clipboardData.getData("text/plain")
+                      if (!text) return
+                      event.preventDefault()
+                      setText(text)
+                    }}
+                    onChange={(event) => setText(event.target.value)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : (
           <div className="flex flex-col gap-2 rounded-md bg-muted/50 px-3 py-2.5 text-sm">
             <strong>Pegado de tu hoja: {formatWhole(sheet.length - (draft.header ? 1 : 0))} filas</strong>
@@ -276,44 +322,62 @@ export function PasteListDrawer({ onClose }: { onClose: () => void }) {
 
         {changing && draft.text.trim() !== "" ? (
           <div className="flex flex-col gap-3 rounded-md border p-3">
-            <Field orientation="horizontal">
-              <Checkbox id={`${ids}-titulos`} checked={draft.header} onCheckedChange={(checked) => setDraft((current) => ({ ...current, header: checked === true, decisions: {} }))} />
-              <FieldLabel htmlFor={`${ids}-titulos`} className="font-normal">
-                La primera fila son los títulos
-              </FieldLabel>
-            </Field>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {draft.columns.map((column, index) => {
-                const sample = sheet[0]?.[index] ?? ""
-                return (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: una columna de la hoja es su lugar.
-                  <Field key={index} className="gap-1">
-                    <FieldLabel htmlFor={`${ids}-columna-${index}`}>
-                      Columna {index + 1}
-                      {sample ? <span className="truncate font-normal text-muted-foreground">«{sample}»</span> : null}
-                    </FieldLabel>
-                    <ChoiceSelect
-                      id={`${ids}-columna-${index}`}
-                      value={column}
-                      onChange={(event) =>
-                        setDraft((current) => {
-                          const next = event.target.value as PasteColumn
-                          // Cada significado va en una sola columna: la que lo tenía queda sin usar.
-                          const columns = current.columns.map((value, at) => (at === index ? next : value === next && next !== "ignorar" ? "ignorar" : value))
-                          return { ...current, columns, decisions: {} }
-                        })
-                      }
-                    >
-                      {PASTE_COLUMN_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </ChoiceSelect>
-                  </Field>
-                )
-              })}
-            </div>
+            {/* Otra fila de títulos cambia qué fila es cuál: lo decidido se vuelve a preguntar. */}
+            <form.AppField name="header" listeners={{ onChange: () => form.setFieldValue("decisions", {}) }}>
+              {(field) => <field.CheckboxField label="La primera fila son los títulos" />}
+            </form.AppField>
+            <form.AppField name="columns" mode="array">
+              {(list) => (
+                <list.Group legend="Qué dice cada columna" className="gap-3">
+                  {(group) => (
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {list.state.value.map((_, index) => {
+                        const sample = sheet[0]?.[index] ?? ""
+                        return (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: una columna de la hoja es su lugar.
+                          <form.AppField key={index} name={`columns[${index}]`}>
+                            {(field) => (
+                              <field.Control
+                                id={`${ids}-columna-${index}`}
+                                className="gap-1"
+                                label={
+                                  <>
+                                    Columna {index + 1}
+                                    {sample ? <span className="truncate font-normal text-muted-foreground">«{sample}»</span> : null}
+                                  </>
+                                }
+                              >
+                                {(control) => (
+                                  <ChoiceSelect
+                                    {...control.props}
+                                    aria-invalid={group.invalid || control.invalid || undefined}
+                                    aria-describedby={[control.describedBy, group.invalid ? group.describedBy : null].filter(Boolean).join(" ") || undefined}
+                                    value={field.state.value}
+                                    onChange={(event) => {
+                                      const next = event.target.value as PasteColumn
+                                      // Cada significado va en una sola columna: la que lo tenía queda sin usar.
+                                      const current = form.getFieldValue("columns")
+                                      list.handleChange(current.map((value, at) => (at === index ? next : value === next && next !== "ignorar" ? "ignorar" : value)))
+                                      form.setFieldValue("decisions", {})
+                                    }}
+                                  >
+                                    {PASTE_COLUMN_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>
+                                        {option.label}
+                                      </option>
+                                    ))}
+                                  </ChoiceSelect>
+                                )}
+                              </field.Control>
+                            )}
+                          </form.AppField>
+                        )
+                      })}
+                    </div>
+                  )}
+                </list.Group>
+              )}
+            </form.AppField>
           </div>
         ) : null}
 
@@ -341,6 +405,7 @@ export function PasteListDrawer({ onClose }: { onClose: () => void }) {
 
 function RowState({ row, decision, onDecide }: { row: Row; decision: Decision | undefined; onDecide: (decision: Decision | undefined) => void }) {
   const review = row.review
+  if (row.rejected) return <Chip tone="bad">{row.rejected}</Chip>
   if (!review) return <span className="text-xs text-muted-foreground">Revisando…</span>
   if (review.status === "invalido") return <Chip tone="bad">{review.reason ?? "No sirve"}</Chip>
   if (review.status === "existe") return <Chip tone="soft">Ya está: se pone lo que hay</Chip>

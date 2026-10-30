@@ -20,7 +20,7 @@ import { getMessagePermissions } from "./automation.js"
 import { messageWithoutTextWords } from "./message-words.js"
 import { NEUTRAL_TIMEZONE } from "./locale.js"
 import { getContact, requireContact, type ContactFull } from "./contacts.js"
-import { notFound, validation } from "./errors.js"
+import { invalidField, notFound, validation } from "./errors.js"
 import {
   agentAttendingSql,
   handoffOpenExistsSql,
@@ -108,7 +108,7 @@ export interface CrmContactWorkspace {
  * La próxima cita en pie de los pacientes de esta persona (ella misma o a
  * quien lleva): cuándo, dónde y con quién. Se calcula al leer.
  */
-async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Promise<CrmNextAppointment | null> {
+export async function nextAppointmentOf(tx: Db, orgId: string, contactId: string): Promise<CrmNextAppointment | null> {
   const [row] = await tx
     .select({
       id: appointment.id,
@@ -898,7 +898,7 @@ export async function listContactActivity(
  * resueltos igual que listTasks. Sin límite silencioso: son todas las
  * abiertas del contacto.
  */
-async function listContactTasks(tx: Db, orgId: string, contactId: string): Promise<TaskItem[]> {
+export async function listContactTasks(tx: Db, orgId: string, contactId: string): Promise<TaskItem[]> {
   const convIds = await contactConversationIds(tx, orgId, contactId)
   const scope = [eq(crmTask.contactId, contactId)]
   if (convIds.length > 0) scope.push(inArray(crmTask.conversationId, convIds))
@@ -1026,8 +1026,8 @@ export async function createContactNote(
   actor: { userId: string | null },
 ): Promise<CrmActivityItem> {
   const body = input.body?.trim() ?? ""
-  if (!body) throw validation("El cuerpo de la nota es obligatorio")
-  if (body.length > NOTE_MAX_LENGTH) throw validation(`La nota supera ${NOTE_MAX_LENGTH} caracteres`)
+  if (!body) throw invalidField("body", "Escribe la nota.")
+  if (body.length > NOTE_MAX_LENGTH) throw invalidField("body", `La nota admite hasta ${NOTE_MAX_LENGTH} caracteres.`)
   await requireContact(tx, orgId, contactId)
   let conversationId: string | null = null
   if (input.conversationId !== undefined && input.conversationId !== null) {

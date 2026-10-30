@@ -15,13 +15,23 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
   useIsMobile,
 } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer, LoadingState } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  FormDrawer,
+  LoadingState,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useId, useMemo, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { formatDate, formatDateTime } from "../../lib/clinical-journey"
 import { timeAgo, usePermission } from "../../lib/crm"
@@ -50,7 +60,7 @@ import {
   type ImageAdjustments,
   ImageCompare,
 } from "./image-viewer"
-import { TagsInput } from "./tags-input"
+import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "./tags-input"
 import { TomographyDetail } from "./tomography-detail"
 import { TomographyViewer } from "./tomography-viewer"
 import { PlacesField } from "../../product/site-fields"
@@ -59,6 +69,67 @@ import { PlacesField } from "../../product/site-fields"
 const SIGNED_URL_STALE_MS = 10 * 60 * 1000
 /** Los vínculos del detalle llevan a otra pantalla: enlaces con aspecto de botón, no botones. */
 const linkButton = buttonVariants({ size: "sm", variant: "outline" })
+
+/** Mismo tope que `POST …/documents/:documentId/retire`. */
+const MAX_RETIRE_REASON = 2000
+const retireSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe el motivo del retiro.")
+    .max(MAX_RETIRE_REASON, `El motivo admite hasta ${MAX_RETIRE_REASON} caracteres.`),
+})
+
+/** Los topes de `POST …/documents/:documentId/context`; los vínculos se eligen de listas. */
+const contextSchema = z.object({
+  encounterId: z.string(),
+  planItemId: z.string(),
+  links: z.object({
+    budgetId: z.string(),
+    followUpId: z.string(),
+    prescriptionId: z.string(),
+    paymentId: z.string(),
+    encounterProcedureId: z.string(),
+  }),
+  toothNumbers: z.array(z.number().int()).max(52, "Elige como mucho 52."),
+  tags: z.array(z.string()).max(100, "Escribe como mucho 100 etiquetas."),
+})
+
+function contextValues(doc: DocView): z.infer<typeof contextSchema> {
+  return {
+    encounterId: doc.encounterId ?? "",
+    planItemId: doc.planItemId ?? "",
+    links: {
+      budgetId: doc.budgetId ?? "",
+      followUpId: doc.followUpId ?? "",
+      prescriptionId: doc.prescriptionId ?? "",
+      paymentId: doc.paymentId ?? "",
+      encounterProcedureId: doc.encounterProcedureId ?? "",
+    } satisfies DocumentLinkValue,
+    toothNumbers: doc.toothNumbers,
+    tags: doc.tags,
+  }
+}
+
+const LINK_FIELDS: Record<string, true> = {
+  budgetId: true,
+  followUpId: true,
+  prescriptionId: true,
+  paymentId: true,
+  encounterProcedureId: true,
+}
+
+/** El servidor nombra cada vínculo y cada pieza/etiqueta; en pantalla son un control por grupo. */
+function contextFieldName(serverField: string): string | undefined {
+  if (LINK_FIELDS[serverField]) return "links"
+  if (serverField.startsWith("toothNumbers")) return "toothNumbers"
+  if (serverField.startsWith("tags")) return "tags"
+  return undefined
+}
+
+function isStaleVersion(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.shape.code === "STALE_VERSION"
+}
 
 /** Alias local: el listado ya trae el contexto vigente fusionado (tipos comunes de Main). */
 type DocView = PatientDocument
@@ -350,10 +421,22 @@ function DocumentViewer({
   const [adjustments, setAdjustments] = useState<ImageAdjustments>(DEFAULT_ADJUSTMENTS)
   const [compareId, setCompareId] = useState<string>("")
   const [retireOpen, setRetireOpen] = useState(false)
-  const [retireReason, setRetireReason] = useState("")
   const [actionPending, setActionPending] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const retireId = useId()
+  const retireForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: retireSchema },
+    onSubmit: async ({ value }) => {
+      await apiFetch(`/api/patients/${patientId}/documents/${doc.id}/retire`, {
+        method: "POST",
+        body: JSON.stringify({ reason: value.reason.trim() }),
+      })
+      setRetireOpen(false)
+      await onRetired()
+    },
+  })
+  const retireError = useFormSubmitError(retireForm)
+  const retirePending = useStore(retireForm.store, (state) => state.isSubmitting)
   const compareSelectId = useId()
   // biome-ignore lint/correctness/useExhaustiveDependencies: otro archivo empieza sin ajustes.
   useEffect(() => {
@@ -382,7 +465,7 @@ function DocumentViewer({
       await after()
       return true
     } catch (e) {
-      setActionError(e instanceof ApiError ? (e.shape.message ?? e.message) : "No se pudo guardar.")
+      setActionError(submitErrorMessage(e))
       return false
     } finally {
       setActionPending(false)
@@ -783,7 +866,7 @@ function DocumentViewer({
               variant="outline"
               className="text-destructive"
               onClick={() => {
-                setRetireReason("")
+                retireForm.reset({ reason: "" })
                 setRetireOpen(true)
               }}
             >
@@ -802,39 +885,23 @@ function DocumentViewer({
         title="Retirar archivo"
         description={`Sale de Documentos, ${productUi().site ? "de la historia por pieza" : "de la historia"} y del resumen. No se borra: queda en «Retirados» con tu nombre, la fecha y el motivo. No se puede deshacer.`}
         confirmLabel="Retirar"
-        pending={actionPending}
-        confirmDisabled={!retireReason.trim()}
-        onClose={() => setRetireOpen(false)}
-        onConfirm={() =>
-          void runAction(
-            () =>
-              apiFetch(`/api/patients/${patientId}/documents/${doc.id}/retire`, {
-                method: "POST",
-                body: JSON.stringify({ reason: retireReason.trim() }),
-              }),
-            async () => {
-              setRetireOpen(false)
-              await onRetired()
-            },
-          )
-        }
+        pending={retirePending}
+        error={retireError}
+        onClose={() => {
+          if (!retirePending) setRetireOpen(false)
+        }}
+        onConfirm={() => void submitForm(retireForm)}
       >
-        <Field>
-          <FieldLabel htmlFor={retireId}>Motivo</FieldLabel>
-          <Textarea
-            id={retireId}
-            aria-required="true"
-            value={retireReason}
-            maxLength={2000}
-            placeholder="p. ej. Subida al paciente equivocado"
-            onChange={(e) => setRetireReason(e.currentTarget.value)}
-          />
-        </Field>
-        {actionError && (
-          <p role="alert" className="text-sm text-destructive">
-            {actionError}
-          </p>
-        )}
+        <retireForm.AppField name="reason">
+          {(field) => (
+            <field.TextareaField
+              label="Motivo"
+              aria-required
+              maxLength={MAX_RETIRE_REASON}
+              placeholder="p. ej. Subida al paciente equivocado"
+            />
+          )}
+        </retireForm.AppField>
       </ConfirmDialog>
     </div>
   )
@@ -868,15 +935,62 @@ function ContextDrawer({
   const queryClient = useQueryClient()
   const canRead = usePermission("clinical.read")
   const previewQuery = useSignedUrl(patientId, doc.id, "thumb")
-  const [encounterChoice, setEncounterChoice] = useState<string>(doc.encounterId ?? "")
-  const [planChoice, setPlanChoice] = useState<string>(doc.planItemId ?? "")
-  const [links, setLinks] = useState<DocumentLinkValue>({
-    budgetId: doc.budgetId ?? "",
-    followUpId: doc.followUpId ?? "",
-    prescriptionId: doc.prescriptionId ?? "",
-    paymentId: doc.paymentId ?? "",
-    encounterProcedureId: doc.encounterProcedureId ?? "",
+  const [expectedVersion, setExpectedVersion] = useState(doc.contextVersion)
+  const [conflict, setConflict] = useState(false)
+  const [reloading, setReloading] = useState(false)
+  const [reloadError, setReloadError] = useState<string | null>(null)
+  const form = useAppForm({
+    defaultValues: contextValues(doc),
+    validators: { onSubmit: contextSchema },
+    onSubmit: async ({ value }) => {
+      if (disabled) return
+      await beforeWrite?.()
+      let updated: { data: DocView }
+      try {
+        updated = await apiFetch<{ data: DocView }>(
+          `/api/patients/${patientId}/documents/${doc.id}/context`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              expectedVersion,
+              encounterId: value.encounterId || null,
+              planItemId: value.planItemId || null,
+              budgetId: value.links.budgetId || null,
+              encounterProcedureId: value.links.encounterProcedureId || null,
+              followUpId: value.links.followUpId || null,
+              prescriptionId: value.links.prescriptionId || null,
+              paymentId: value.links.paymentId || null,
+              toothNumbers: value.toothNumbers,
+              tags: value.tags,
+            }),
+          },
+        )
+      } catch (err) {
+        // Solo la versión desactualizada es conflicto: otro 409 (archivo retirado) dice lo suyo.
+        if (isStaleVersion(err)) {
+          setConflict(true)
+          await queryClient.invalidateQueries({ queryKey: ["patient-documents", patientId] })
+          await queryClient.invalidateQueries({
+            queryKey: ["patient-document-context", patientId, doc.id],
+          })
+        }
+        throw err
+      }
+      await onSaved(updated.data)
+    },
   })
+  const surface = useFormSurface(form, {
+    fieldMap: contextFieldName,
+    formMessage: (err) =>
+      isStaleVersion(err)
+        ? "Otro usuario actualizó el contexto mientras editabas. Tus cambios se conservan: recarga la revisión vigente y vuelve a guardar."
+        : undefined,
+  })
+  const pending = surface.isSubmitting || reloading
+  useEffect(() => {
+    onPendingChange?.(pending)
+  }, [pending, onPendingChange])
+  const encounterChoice = useStore(form.store, (state) => state.values.encounterId)
   const procedureQuery = useQuery({
     queryKey: ["encounter-procedures", patientId, doc.encounterId, encounterChoice],
     queryFn: () =>
@@ -886,18 +1000,11 @@ function ContextDrawer({
     enabled: open && encounterChoice !== "" && canRead,
   })
   const procedures = procedureQuery.data?.data.procedures ?? []
-  const [teeth, setTeeth] = useState<number[]>(doc.toothNumbers)
-  const [tags, setTags] = useState<string[]>(doc.tags)
-  const [expectedVersion, setExpectedVersion] = useState(doc.contextVersion)
-  const [serverError, setServerError] = useState<string | null>(null)
-  const [conflict, setConflict] = useState(false)
-  const [pending, setPending] = useState(false)
-  const encounterChoiceId = useId()
-  const planChoiceId = useId()
+  const site = productUi().site
 
   const reloadRevision = async () => {
-    setPending(true)
-    onPendingChange?.(true)
+    setReloading(true)
+    setReloadError(null)
     try {
       await queryClient.invalidateQueries({ queryKey: ["patient-documents", patientId] })
       await queryClient.invalidateQueries({
@@ -906,95 +1013,33 @@ function ContextDrawer({
       const body = await apiFetch<{ data: DocView[] }>(`/api/patients/${patientId}/documents`)
       queryClient.setQueryData(["patient-documents", patientId], body)
       const fresh = body.data.find((d) => d.id === doc.id)
-      if (!fresh) throw new Error("El archivo ya no está disponible.")
-      setEncounterChoice(fresh.encounterId ?? "")
-      setPlanChoice(fresh.planItemId ?? "")
-      setLinks({
-        budgetId: fresh.budgetId ?? "",
-        followUpId: fresh.followUpId ?? "",
-        prescriptionId: fresh.prescriptionId ?? "",
-        paymentId: fresh.paymentId ?? "",
-        encounterProcedureId: fresh.encounterProcedureId ?? "",
-      })
-      setTeeth(fresh.toothNumbers)
-      setTags(fresh.tags)
+      if (!fresh) {
+        setReloadError("El archivo ya no está disponible.")
+        return
+      }
+      form.reset(contextValues(fresh))
       setExpectedVersion(fresh.contextVersion)
       setConflict(false)
-      setServerError(null)
     } catch (err) {
-      setServerError(
-        err instanceof Error ? err.message : "No se pudo recargar la revisión vigente.",
-      )
+      setReloadError(submitErrorMessage(err))
     } finally {
-      setPending(false)
-      onPendingChange?.(false)
-    }
-  }
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (pending || disabled) return
-    setServerError(null)
-    setPending(true)
-    onPendingChange?.(true)
-    try {
-      await beforeWrite?.()
-      const updated = await apiFetch<{ data: DocView }>(
-        `/api/patients/${patientId}/documents/${doc.id}/context`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            expectedVersion,
-            encounterId: encounterChoice || null,
-            planItemId: planChoice || null,
-            budgetId: links.budgetId || null,
-            encounterProcedureId: links.encounterProcedureId || null,
-            followUpId: links.followUpId || null,
-            prescriptionId: links.prescriptionId || null,
-            paymentId: links.paymentId || null,
-            toothNumbers: teeth,
-            tags,
-          }),
-        },
-      )
-      await onSaved(updated.data)
-    } catch (err) {
-      if (err instanceof ApiError && (err.shape.code === "STALE_VERSION" || err.status === 409)) {
-        setConflict(true)
-        setServerError(
-          "Otro usuario actualizó el contexto mientras editabas. Tus cambios se conservan: recarga la revisión vigente y vuelve a guardar.",
-        )
-        await queryClient.invalidateQueries({ queryKey: ["patient-documents", patientId] })
-        await queryClient.invalidateQueries({
-          queryKey: ["patient-document-context", patientId, doc.id],
-        })
-      } else {
-        setServerError(
-          err instanceof ApiError
-            ? (err.shape.message ?? "No se pudo guardar la revisión de contexto.")
-            : "No se pudo guardar la revisión de contexto.",
-        )
-      }
-    } finally {
-      setPending(false)
-      onPendingChange?.(false)
+      setReloading(false)
     }
   }
 
   return (
     <FormDrawer
+      {...surface}
       className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(72rem,calc(100vw-2rem))]"
       open={open}
       onClose={() => {
         if (!pending) onOpenChange(false)
       }}
-      title={`${productUi().site ? "Piezas y vínculos" : "Vínculos"} · ${doc.label}`}
+      title={`${site ? "Piezas y vínculos" : "Vínculos"} · ${doc.label}`}
       description={`Se guarda como una versión nueva (ahora v${expectedVersion}); el archivo no cambia.`}
-      onSubmit={(e) => void onSubmit(e)}
       isSubmitting={pending}
       submitDisabled={disabled}
       submitLabel="Guardar"
-      error={serverError}
     >
       <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="sticky top-0 rounded-md border bg-background p-3">
@@ -1042,70 +1087,149 @@ function ContextDrawer({
               >
                 Recargar revisión
               </Button>
+              {reloadError && (
+                <p role="alert" className="w-full text-sm text-destructive">
+                  {reloadError}
+                </p>
+              )}
             </div>
           )}
-          <Field>
-            <FieldLabel htmlFor={encounterChoiceId}>Atención</FieldLabel>
-            <Select
-              items={Object.fromEntries(encounters.map((e) => [e.id, encounterLabel(e)] as const))}
-              value={encounterChoice}
-              onValueChange={(v) => setEncounterChoice(v ?? "")}
-            >
-              <SelectTrigger id={encounterChoiceId} aria-label="Atención vinculada">
-                <SelectValue placeholder="General (sin atención)" />
-              </SelectTrigger>
-              <SelectContent>
-                {encounters.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {encounterLabel(e)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {encounterChoice && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setEncounterChoice("")}
+          <form.AppField name="encounterId">
+            {(field) => (
+              <field.Control label="Atención">
+                {(control) => (
+                  <>
+                    <Select
+                      items={Object.fromEntries(
+                        encounters.map((e) => [e.id, encounterLabel(e)] as const),
+                      )}
+                      value={field.state.value}
+                      onValueChange={(v) => field.handleChange(v ?? "")}
+                    >
+                      <SelectTrigger {...control.props}>
+                        <SelectValue placeholder="General (sin atención)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {encounters.map((e) => (
+                          <SelectItem key={e.id} value={e.id}>
+                            {encounterLabel(e)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {field.state.value && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => field.handleChange("")}
+                      >
+                        Quitar vínculo a atención
+                      </Button>
+                    )}
+                  </>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="planItemId">
+            {(field) => (
+              <field.Control label="Tratamiento">
+                {(control) => (
+                  <>
+                    <Select
+                      items={Object.fromEntries(
+                        planItems.map((p) => [p.id, planItemLabel(p)] as const),
+                      )}
+                      value={field.state.value}
+                      onValueChange={(v) => field.handleChange(v ?? "")}
+                    >
+                      <SelectTrigger {...control.props}>
+                        <SelectValue placeholder="Sin tratamiento" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {planItems.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {planItemLabel(p)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {field.state.value && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => field.handleChange("")}
+                      >
+                        Quitar vínculo a tratamiento
+                      </Button>
+                    )}
+                  </>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          <form.AppField name="links">
+            {(field) => (
+              <field.Group legend={<span className="sr-only">Otros vínculos</span>}>
+                {(control) => (
+                  <DocumentLinkSelects
+                    patientId={patientId}
+                    value={field.state.value}
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    procedures={procedures}
+                    onChange={(patch) => field.handleChange({ ...field.state.value, ...patch })}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
+          {site ? (
+            <form.AppField name="toothNumbers">
+              {(field) => (
+                <field.Group legend={site.placesLabel}>
+                  {(control) => (
+                    <PlacesField
+                      value={field.state.value}
+                      onChange={field.handleChange}
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                    />
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
+          ) : null}
+          <form.AppField name="tags">
+            {(field) => (
+              <field.Control
+                label={
+                  <>
+                    Etiquetas <TagsCount count={field.state.value.length} />
+                  </>
+                }
+                description={TAGS_INPUT_HELP}
               >
-                Quitar vínculo a atención
-              </Button>
+                {(control) => (
+                  <TagsInput
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                    suggestions={suggestions}
+                  />
+                )}
+              </field.Control>
             )}
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={planChoiceId}>Tratamiento</FieldLabel>
-            <Select
-              items={Object.fromEntries(planItems.map((p) => [p.id, planItemLabel(p)] as const))}
-              value={planChoice}
-              onValueChange={(v) => setPlanChoice(v ?? "")}
-            >
-              <SelectTrigger id={planChoiceId} aria-label="Tratamiento vinculado">
-                <SelectValue placeholder="Sin tratamiento" />
-              </SelectTrigger>
-              <SelectContent>
-                {planItems.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {planItemLabel(p)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {planChoice && (
-              <Button type="button" size="sm" variant="ghost" onClick={() => setPlanChoice("")}>
-                Quitar vínculo a tratamiento
-              </Button>
-            )}
-          </Field>
-          <DocumentLinkSelects
-            patientId={patientId}
-            value={links}
-            idPrefix={`${planChoiceId}-links`}
-            procedures={procedures}
-            onChange={(patch) => setLinks((current) => ({ ...current, ...patch }))}
-          />
-          <PlacesField value={teeth} onChange={setTeeth} />
-          <TagsInput value={tags} onChange={setTags} suggestions={suggestions} />
+          </form.AppField>
         </fieldset>
       </div>
     </FormDrawer>

@@ -6,8 +6,9 @@
  * atención, «Plan y controles» e Inicio: una sola operación.
  */
 import { Button, toast } from "@odentia/ui"
-import type { ComponentProps } from "react"
+import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { ComponentProps } from "react"
 import { useRef, useState } from "react"
 import {
   fetchBudgetSendPreview,
@@ -16,7 +17,6 @@ import {
   sendBudgetApi,
 } from "../../../lib/budgets"
 import { usePermission } from "../../../lib/crm"
-import { mutationMessage } from "./budget-parts"
 import { BudgetReviewDrawer } from "./budget-review"
 
 /** Lo que dice el aviso cuando sale: «Enviado a Lucía por WhatsApp». */
@@ -83,7 +83,7 @@ export function BudgetSendButton({
       )
       onSent?.(result.data)
     },
-    onError: (err) => setError(mutationMessage(err)),
+    onError: (err) => setError(submitErrorMessage(err)),
   })
   if (!canSend) return null
   const data = preview.data?.data
@@ -112,7 +112,7 @@ export function BudgetSendButton({
             setError(null)
             void Promise.resolve(beforeSend?.())
               .then(() => setReviewing(true))
-              .catch((cause: unknown) => setError(mutationMessage(cause)))
+              .catch((cause: unknown) => setError(submitErrorMessage(cause)))
           }}
         >
           Revisar antes
@@ -140,7 +140,7 @@ export function BudgetSendButton({
       ) : null}
       {preview.isError ? (
         <span role="alert" className="text-xs text-destructive">
-          {mutationMessage(preview.error)}
+          {submitErrorMessage(preview.error)}
         </span>
       ) : null}
       {error ? (

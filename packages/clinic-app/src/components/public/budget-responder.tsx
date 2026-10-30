@@ -1,5 +1,5 @@
 import type { PatientGuide } from "@odentia/clinical"
-import { Checkbox, RadioGroup, RadioGroupItem } from "@odentia/ui"
+import { Checkbox, FieldLegend, FieldSet, RadioGroup, RadioGroupItem } from "@odentia/ui"
 import { SubmitButton } from "@odentia/ui-patterns"
 import { Check, ChevronDown, Minus } from "lucide-react"
 import { type ReactNode, useState } from "react"
@@ -17,7 +17,12 @@ export interface BudgetAnswer {
 function civilDay(value: string, locale: string | null): string {
   const date = new Date(`${value}T12:00:00Z`)
   if (!Number.isFinite(date.getTime())) return value
-  return date.toLocaleDateString(locale?.trim() || undefined, { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
+  return date.toLocaleDateString(locale?.trim() || undefined, {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  })
 }
 
 /** Plegado accesible y nativo, con su alto táctil: se abre con Enter o tocándolo. */
@@ -26,7 +31,10 @@ function Fold({ title, children }: { title: string; children: ReactNode }) {
     <details className="group rounded-xl border bg-card text-sm">
       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 font-medium [&::-webkit-details-marker]:hidden">
         {title}
-        <ChevronDown aria-hidden className="size-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+        <ChevronDown
+          aria-hidden
+          className="size-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+        />
       </summary>
       <div className="flex flex-col gap-2 px-3 pb-3 text-muted-foreground">{children}</div>
     </details>
@@ -40,7 +48,10 @@ function Text({ children }: { children: string }) {
 /** Lo que dice cada línea de cómo se hace; sin explicación no hay nada que desplegar. */
 function lineGuideRows(guide: PatientGuide | null | undefined): Array<[string, string]> {
   if (!guide) return []
-  const visits = [guide.visits ? `${guide.visits} ${guide.visits === "1" ? "visita" : "visitas"}` : null, guide.visitLength]
+  const visits = [
+    guide.visits ? `${guide.visits} ${guide.visits === "1" ? "visita" : "visitas"}` : null,
+    guide.visitLength,
+  ]
     .filter(Boolean)
     .join(" de ")
   const rows: Array<[string, string | undefined]> = [
@@ -75,16 +86,28 @@ export function BudgetResponder({
 }) {
   const several = budget.options.length > 1
   const chosen = budget.options.find((option) => option.decision === "elegida") ?? null
-  const recommended = budget.options.find((option) => option.isRecommended) ?? budget.options[0] ?? null
-  const [pickedOptionId, setPickedOptionId] = useState<string | null>(chosen?.id ?? (several ? (recommended?.id ?? null) : null))
-  const viewedOption = chosen ?? budget.options.find((option) => option.id === pickedOptionId) ?? recommended
-  const lines = viewedOption ? budget.items.filter((item) => item.optionId === viewedOption.id) : budget.items
+  const recommended =
+    budget.options.find((option) => option.isRecommended) ?? budget.options[0] ?? null
+  const [pickedOptionId, setPickedOptionId] = useState<string | null>(
+    chosen?.id ?? (several ? (recommended?.id ?? null) : null),
+  )
+  const viewedOption =
+    chosen ?? budget.options.find((option) => option.id === pickedOptionId) ?? recommended
+  const lines = viewedOption
+    ? budget.items.filter((item) => item.optionId === viewedOption.id)
+    : budget.items
   const open = (decision: string) => decision !== "aceptado" && decision !== "rechazado"
   // Por omisión todo marcado: lo habitual es aceptar lo que propone su odontólogo.
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set())
-  const accepted = (planItemId: string, decision: string) => (open(decision) ? !unchecked.has(planItemId) : decision === "aceptado")
-  const money = (cents: number | null, plain = false) => formatPortalMoney(cents, budget.currency, budget.locale, plain)
-  const acceptedCents = lines.reduce((sum, item) => sum + (accepted(item.planItemId, item.decision) ? (item.lineTotalCents ?? 0) : 0), 0)
+  const accepted = (planItemId: string, decision: string) =>
+    open(decision) ? !unchecked.has(planItemId) : decision === "aceptado"
+  const money = (cents: number | null, plain = false) =>
+    formatPortalMoney(cents, budget.currency, budget.locale, plain)
+  const acceptedCents = lines.reduce(
+    (sum, item) =>
+      sum + (accepted(item.planItemId, item.decision) ? (item.lineTotalCents ?? 0) : 0),
+    0,
+  )
   const totalCents = several && viewedOption ? viewedOption.totalCents : budget.totalCents
   const anyOpen = lines.some((item) => open(item.decision))
   const hasSessions = lines.some((item) => item.billingMode === "session")
@@ -93,11 +116,20 @@ export function BudgetResponder({
       optionId: several ? (viewedOption?.id ?? null) : null,
       decisions: lines
         .filter((item) => open(item.decision))
-        .map((item) => ({ planItemId: item.planItemId, decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado" })),
+        .map((item) => ({
+          planItemId: item.planItemId,
+          decision: unchecked.has(item.planItemId) ? "pospuesto" : "aceptado",
+        })),
     })
-  const noneMarked = lines.filter((item) => open(item.decision)).every((item) => unchecked.has(item.planItemId))
+  const noneMarked = lines
+    .filter((item) => open(item.decision))
+    .every((item) => unchecked.has(item.planItemId))
   const label =
-    several && !chosen && viewedOption ? `Elijo la ${viewedOption.label.toLowerCase()}` : noneMarked ? "Lo dejo para después" : "Acepto lo marcado"
+    several && !chosen && viewedOption
+      ? `Elijo la ${viewedOption.label.toLowerCase()}`
+      : noneMarked
+        ? "Lo dejo para después"
+        : "Acepto lo marcado"
 
   // Lo que se reparte en el tiempo o avisa, una vez por tratamiento que lo traiga.
   const guided = lines.filter((item) => item.patientGuide)
@@ -110,7 +142,9 @@ export function BudgetResponder({
     <div className="flex flex-col gap-4">
       {/* Quién: lo dice la cabecera de cada página, con el nombre de la clínica. */}
       {budget.validUntil ? (
-        <p className="text-sm text-muted-foreground">Vigente hasta el {civilDay(budget.validUntil, budget.locale)}</p>
+        <p className="text-sm text-muted-foreground">
+          Vigente hasta el {civilDay(budget.validUntil, budget.locale)}
+        </p>
       ) : null}
       {budget.findings ? (
         <section aria-label="Lo que encontramos" className="flex flex-col gap-1 text-sm">
@@ -118,12 +152,14 @@ export function BudgetResponder({
           <Text>{budget.findings}</Text>
         </section>
       ) : null}
-      {budget.proposal || guided.length > 0 ? <h3 className="text-sm font-semibold">Lo que te proponemos</h3> : null}
+      {budget.proposal || guided.length > 0 ? (
+        <h3 className="text-sm font-semibold">Lo que te proponemos</h3>
+      ) : null}
       {budget.proposal ? <p className="text-sm whitespace-pre-wrap">{budget.proposal}</p> : null}
 
       {several && !chosen ? (
-        <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
-          <legend className="mb-2 p-0 text-sm font-semibold">Elige una</legend>
+        <FieldSet className="gap-2">
+          <FieldLegend className="mb-2 text-sm font-semibold">Elige una</FieldLegend>
           <RadioGroup
             value={pickedOptionId ?? ""}
             onValueChange={(value) => {
@@ -159,8 +195,10 @@ export function BudgetResponder({
               </label>
             ))}
           </RadioGroup>
-          <p className="text-sm text-muted-foreground">Dentro de la opción, puedes dejar algo para después.</p>
-        </fieldset>
+          <p className="text-sm text-muted-foreground">
+            Dentro de la opción, puedes dejar algo para después.
+          </p>
+        </FieldSet>
       ) : several && viewedOption ? (
         <p className="text-sm font-semibold">Elegiste la {viewedOption.label.toLowerCase()}</p>
       ) : null}
@@ -179,7 +217,11 @@ export function BudgetResponder({
                   : "Se paga en cada visita"
               : null,
             item.promotionName ? `Promoción: ${item.promotionName}` : null,
-            !checked ? (item.decision === "rechazado" ? "No lo aceptaste" : "Lo dejo para después") : null,
+            !checked
+              ? item.decision === "rechazado"
+                ? "No lo aceptaste"
+                : "Lo dejo para después"
+              : null,
           ]
             .filter(Boolean)
             .join(" · ")
@@ -204,18 +246,26 @@ export function BudgetResponder({
                 ) : (
                   <Minus className="size-4 text-muted-foreground" aria-label="No aceptado" />
                 )}
-                <label htmlFor={isOpen ? id : undefined} className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center">
+                <label
+                  htmlFor={isOpen ? id : undefined}
+                  className="flex min-h-11 min-w-0 flex-1 cursor-pointer flex-col justify-center"
+                >
                   <span className="font-medium">{item.title}</span>
                   {detail ? <span className="text-muted-foreground">{detail}</span> : null}
                 </label>
-                <span className="whitespace-nowrap font-medium tabular-nums">{money(item.lineTotalCents, true)}</span>
+                <span className="whitespace-nowrap font-medium tabular-nums">
+                  {money(item.lineTotalCents, true)}
+                </span>
               </div>
               {guideRows.length > 0 ? (
                 // Fuera de la etiqueta de la casilla: tocarlo no marca ni desmarca.
                 <details className="group mt-1 pl-7">
                   <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-primary [&::-webkit-details-marker]:hidden">
                     Cómo es este tratamiento
-                    <ChevronDown aria-hidden className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+                    <ChevronDown
+                      aria-hidden
+                      className="size-4 transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                    />
                   </summary>
                   <dl className="flex flex-col gap-1.5 pb-1 text-muted-foreground">
                     {guideRows.map(([term, text]) => (
@@ -236,14 +286,17 @@ export function BudgetResponder({
         Aceptas {money(acceptedCents)} de {money(totalCents)}
       </p>
       {hasSessions ? (
-        <p className="text-sm text-muted-foreground">No lo pagas todo desde el primer día: lo que se cobra por visita se paga en cada visita.</p>
+        <p className="text-sm text-muted-foreground">
+          No lo pagas todo desde el primer día: lo que se cobra por visita se paga en cada visita.
+        </p>
       ) : null}
 
       {excludes.length > 0 ? (
         <Fold title="Qué no incluye">
           {excludes.map((item) => (
             <p key={item.planItemId}>
-              <span className="font-medium text-foreground">{item.title}:</span> {item.patientGuide?.excludes}
+              <span className="font-medium text-foreground">{item.title}:</span>{" "}
+              {item.patientGuide?.excludes}
             </p>
           ))}
         </Fold>
@@ -268,7 +321,8 @@ export function BudgetResponder({
         <Fold title="Señales de alarma">
           {warnings.map((item) => (
             <p key={item.planItemId} className="whitespace-pre-wrap">
-              <span className="font-medium text-foreground">{item.title}:</span> {item.patientGuide?.warnings}
+              <span className="font-medium text-foreground">{item.title}:</span>{" "}
+              {item.patientGuide?.warnings}
             </p>
           ))}
         </Fold>
@@ -302,7 +356,13 @@ export function BudgetResponder({
         </p>
       ) : null}
       {anyOpen ? (
-        <SubmitButton type="button" className="min-h-11 w-full" pending={pending} disabled={several && !viewedOption} onClick={answer}>
+        <SubmitButton
+          type="button"
+          className="min-h-11 w-full"
+          pending={pending}
+          disabled={several && !viewedOption}
+          onClick={answer}
+        >
           {label}
         </SubmitButton>
       ) : null}

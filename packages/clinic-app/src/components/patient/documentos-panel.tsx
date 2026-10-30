@@ -1,3 +1,4 @@
+import { formatMoney, medicalLeaveWords } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -17,6 +18,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
+  BedDouble,
   ChevronDown,
   ClipboardList,
   FileSpreadsheet,
@@ -26,11 +28,11 @@ import {
   ListChecks,
   type LucideIcon,
   Pill,
-  BedDouble,
   Signature,
 } from "lucide-react"
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
+import { useBudgetPapers } from "../../lib/budget-papers"
 import { type BudgetWithTotals, budgetNumberLabel, valueOption } from "../../lib/budgets"
 import {
   type ClinicalOrder,
@@ -62,6 +64,8 @@ import {
   visibleDocumentFilters,
 } from "../../lib/document-list"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
+import { fetchMedicalLeaves, type MedicalLeave } from "../../lib/medical-leaves"
+import { useOrgProfile } from "../../lib/org"
 import { type DocumentFilter, documentFilters } from "../../lib/patient-areas"
 import {
   ageFrom,
@@ -70,20 +74,13 @@ import {
   type PatientFull,
   type PlanItem,
 } from "../../lib/patients"
-import { formatMoney } from "@odentia/clinical"
-import { useOrgProfile } from "../../lib/org"
+import { productUi } from "../../product/product-ui"
+import { PlaceSelect } from "../../product/site-fields"
 import { RecetasPanel } from "./clinical-panels"
 import { ConsentLinkActions, consentLinkWords } from "./consent-link-actions"
 import { ConsentSigningScreen } from "./consent-signing"
 import { NewConsentDrawer } from "./consentimientos-tab"
 import { categoryLabel, formatTakenAt, imageTypeLabel, takenAt } from "./document-labels"
-import { DocumentUploadDialog } from "./document-upload-dialog"
-import {
-  DocumentViewerHost,
-  isImageDoc,
-  usePatientEncounters,
-  useSignedUrl,
-} from "./document-viewer"
 import {
   BudgetPaper,
   ConsentPaper,
@@ -91,20 +88,30 @@ import {
   OrderPaper,
   PrescriptionPaper,
 } from "./document-papers"
-import { useBudgetPapers } from "../../lib/budget-papers"
+import { DocumentUploadDialog } from "./document-upload-dialog"
+import {
+  DocumentViewerHost,
+  isImageDoc,
+  usePatientEncounters,
+  useSignedUrl,
+} from "./document-viewer"
 import { type NewDocumentKind, newDocumentOptions } from "./encounter-documents"
-import { NewMedicalLeaveDrawer } from "./medical-leave"
-import { fetchMedicalLeaves, type MedicalLeave } from "../../lib/medical-leaves"
-import { medicalLeaveWords } from "@odentia/clinical"
 import { NewResponseDrawer, ResponseDetail } from "./formularios-tab"
+import { NewMedicalLeaveDrawer } from "./medical-leave"
 import { NewOrderDrawer, OrderResultDrawer } from "./ordenes-tab"
 import { budgetStatusTone } from "./plan/budget-parts"
 import { imagingFacts, useImagingState } from "./tomography-detail"
-import { productUi } from "../../product/product-ui"
-import { PlaceSelect } from "../../product/site-fields"
 
 /** «producto»: un papel propio del producto (odentIA: el odontograma firmado). */
-type Kind = "archivo" | "receta" | "descanso" | "orden" | "formulario" | "consentimiento" | "presupuesto" | "producto"
+type Kind =
+  | "archivo"
+  | "receta"
+  | "descanso"
+  | "orden"
+  | "formulario"
+  | "consentimiento"
+  | "presupuesto"
+  | "producto"
 type Tone = "success" | "warning" | "outline" | "secondary" | "destructive" | "default"
 
 /** El filtro de tipo de cada papel; el de un archivo depende de qué es (`fileFilter`). */
@@ -127,7 +134,6 @@ const ICON_OF_KIND: Record<Exclude<Kind, "archivo">, LucideIcon> = {
   presupuesto: FileSpreadsheet,
   producto: FileText,
 }
-
 
 /** La acción de una fila: la única que se ofrece a la vista. */
 type RowAction =
@@ -511,10 +517,15 @@ export function DocumentosSection({
         retired: false,
         title: `Descanso médico N.º ${leave.leaveNumber}`,
         detail: `${formatDate(leave.issuedAt)} · ${
-          leave.status === "anulado" ? (leave.cancelReason ?? "Anulado") : medicalLeaveWords(leave.startsOn, leave.days)
+          leave.status === "anulado"
+            ? (leave.cancelReason ?? "Anulado")
+            : medicalLeaveWords(leave.startsOn, leave.days)
         }`,
         date: leave.issuedAt,
-        status: leave.status === "anulado" ? { label: "Anulado", tone: "outline" } : { label: "Emitido", tone: "success" },
+        status:
+          leave.status === "anulado"
+            ? { label: "Anulado", tone: "outline" }
+            : { label: "Emitido", tone: "success" },
         needsAction: false,
         action: { type: "ver" },
         open: { kind: "descanso", leave },
@@ -621,7 +632,9 @@ export function DocumentosSection({
         title: `${budgetNumberLabel(budget.budgetNumber)}${budget.title ? ` · ${budget.title}` : ""}`,
         detail: [
           formatDate(date),
-          total != null && orgCurrencyLocale ? formatMoney(total, budget.currency, orgCurrencyLocale) : null,
+          total != null && orgCurrencyLocale
+            ? formatMoney(total, budget.currency, orgCurrencyLocale)
+            : null,
         ]
           .filter(Boolean)
           .join(" · "),
@@ -749,9 +762,9 @@ export function DocumentosSection({
 
   // Solo los filtros que filtran algo (decisión 8); sin ninguno, tampoco «Todo».
   const chipIds = visibleDocumentFilters(
-    documentFilters().filter((option) => option.id !== productKind?.filter || own.query !== null).map(
-      (option) => option.id,
-    ),
+    documentFilters()
+      .filter((option) => option.id !== productKind?.filter || own.query !== null)
+      .map((option) => option.id),
     new Set(current.map((row) => row.filter)),
     pendingCount,
     current.length,
@@ -855,8 +868,10 @@ export function DocumentosSection({
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <p aria-live="polite" className="tabular-nums">
                 {countWords(visible.length, filter, {
-                  place: tooth != null ? productUi().site?.placeName(tooth).toLowerCase() : undefined,
-                  nouns: productKind && productKind.filter === filter ? productKind.nouns : undefined,
+                  place:
+                    tooth != null ? productUi().site?.placeName(tooth).toLowerCase() : undefined,
+                  nouns:
+                    productKind && productKind.filter === filter ? productKind.nouns : undefined,
                 })}
               </p>
               {narrowed ? (
@@ -940,7 +955,9 @@ export function DocumentosSection({
                           title={row.title}
                           detail={row.detail}
                           // Un papel del producto se ve con su acción (odentIA: «Ver» su hoja).
-                          onOpen={row.open.kind === "producto" ? undefined : () => setOpened(row.open)}
+                          onOpen={
+                            row.open.kind === "producto" ? undefined : () => setOpened(row.open)
+                          }
                           status={row.status}
                           action={actionButton(row)}
                         />
@@ -1287,7 +1304,10 @@ function OpenedDocument({
       return (
         <ConsentPaper
           key={opened.consent.id}
-          document={(consents.data?.data ?? []).find((row) => row.id === opened.consent.id) ?? opened.consent}
+          document={
+            (consents.data?.data ?? []).find((row) => row.id === opened.consent.id) ??
+            opened.consent
+          }
           onClose={onClose}
           onChanged={onChanged}
         />
@@ -1296,7 +1316,9 @@ function OpenedDocument({
       return (
         <OrderPaper
           key={opened.order.id}
-          order={(orders.data?.data ?? []).find((row) => row.id === opened.order.id) ?? opened.order}
+          order={
+            (orders.data?.data ?? []).find((row) => row.id === opened.order.id) ?? opened.order
+          }
           onClose={onClose}
           onChanged={onChanged}
         />
@@ -1307,7 +1329,8 @@ function OpenedDocument({
           key={opened.prescription.id}
           patientId={patientId}
           prescription={
-            (prescriptions.data?.data ?? []).find((row) => row.id === opened.prescription.id) ?? opened.prescription
+            (prescriptions.data?.data ?? []).find((row) => row.id === opened.prescription.id) ??
+            opened.prescription
           }
           onClose={onClose}
           onChanged={onChanged}
@@ -1318,7 +1341,9 @@ function OpenedDocument({
         <MedicalLeavePaper
           key={opened.leave.id}
           patientId={patientId}
-          leave={(leaves.data?.data ?? []).find((row) => row.id === opened.leave.id) ?? opened.leave}
+          leave={
+            (leaves.data?.data ?? []).find((row) => row.id === opened.leave.id) ?? opened.leave
+          }
           onClose={onClose}
           onChanged={onChanged}
         />
@@ -1337,7 +1362,10 @@ function OpenedDocument({
         <DetailDrawer open title={opened.response.templateTitle ?? "Formulario"} onClose={onClose}>
           <ResponseDetail
             key={opened.response.id}
-            response={(forms.data?.data ?? []).find((row) => row.id === opened.response.id) ?? opened.response}
+            response={
+              (forms.data?.data ?? []).find((row) => row.id === opened.response.id) ??
+              opened.response
+            }
             canWrite={canWrite}
             onChanged={onChanged}
           />

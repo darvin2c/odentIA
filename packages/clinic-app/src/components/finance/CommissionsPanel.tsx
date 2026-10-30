@@ -17,11 +17,6 @@ import {
   Badge,
   Button,
   cn,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  Input,
   Skeleton,
   Table,
   TableBody,
@@ -29,7 +24,6 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  Textarea,
   toast,
 } from "@odentia/ui"
 import {
@@ -38,8 +32,12 @@ import {
   FormDrawer,
   LoadingState,
   PersonAvatar,
+  useAppForm,
+  useFormSurface,
 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { z } from "zod"
+import { useStore } from "@tanstack/react-form"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Check, ChevronRight, Percent, Plus } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
@@ -68,9 +66,9 @@ import {
   type YearMonth,
 } from "../../lib/commissions"
 import { useOrgMembers, usePermission } from "../../lib/crm"
-import { financeErrorMessage } from "../../lib/finance"
+import { financeFormMessage } from "../../lib/finance"
 import { useOrgEvents } from "../../lib/org-events"
-import { isAmbiguousMutationError, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { ChoiceSelect } from "../ui/choice-select"
 
 // La ruta de Comisiones lo importa desde aquí.
@@ -96,14 +94,6 @@ const commissionKeys = {
   payments: (userId: string, period: YearMonth) =>
     ["commissions", "payments", userId, period.year, period.month] as const,
   mine: (period: YearMonth) => ["commissions", "mine", period.year, period.month] as const,
-}
-
-/** Sin respuesta no se sabe si el servidor llegó a guardar: no se invita a repetir a ciegas. */
-function mutationError(error: unknown): string {
-  if (isAmbiguousMutationError(error)) {
-    return "No pudimos confirmar si se guardó. Revisa cómo quedó antes de volver a intentarlo, para no registrarlo dos veces."
-  }
-  return financeErrorMessage(error)
 }
 
 function countLabel(count: number, one: string, many: string): string {
@@ -664,35 +654,43 @@ function RateDrawer({
   locale: string
 }) {
   const queryClient = useQueryClient()
-  const fieldId = useId()
   const initial = currentRateBps > 0 ? percentInput(currentRateBps, locale) : ""
-  const [userId, setUserId] = useState("")
-  const [percent, setPercent] = useState(initial)
-  const [percentError, setPercentError] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  // Cada apertura parte del porcentaje vigente.
-  useEffect(() => {
-    if (!open) return
-    setUserId("")
-    setPercent(initial)
-    setPercentError(null)
-    setError(null)
-  }, [open, initial])
-
-  const target = professional?.userId ?? userId
-  const mutation = useMutation({
-    mutationFn: (rateBps: number) => setCommissionRateApi({ professionalUserId: target, rateBps }),
-    onSuccess: () => {
+  const form = useAppForm({
+    defaultValues: { professionalUserId: professional?.userId ?? "", percent: initial },
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (!value.professionalUserId) fields.professionalUserId = "Elige a la persona"
+        if (rateBpsFromPercent(value.percent) === null)
+          fields.percent = "Escribe un porcentaje entre 0 y 100, con dos decimales como máximo."
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await setCommissionRateApi({
+        professionalUserId: value.professionalUserId,
+        rateBps: rateBpsFromPercent(value.percent) ?? 0,
+      })
       void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
       toast.success("Porcentaje guardado")
       onClose()
     },
-    onError: (err) => setError(mutationError(err)),
   })
+  const surface = useFormSurface(form, {
+    formMessage: financeFormMessage,
+    fieldMap: { rateBps: "percent" },
+  })
+
+  // Cada apertura parte del porcentaje vigente.
+  const professionalId = professional?.userId ?? ""
+  useEffect(() => {
+    if (!open) return
+    form.reset({ professionalUserId: professionalId, percent: initial })
+  }, [open, initial, professionalId, form])
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={onClose}
       title={currentRateBps > 0 ? "Cambiar el porcentaje" : "Fijar un porcentaje"}
@@ -701,60 +699,47 @@ function RateDrawer({
           ? `Lo que le corresponde a ${professional.name} de lo cobrado por lo que atendió.`
           : "Lo que le corresponde a la persona de lo cobrado por lo que atendió."
       }
-      error={error}
-      isDirty={percent !== initial || userId !== ""}
-      isSubmitting={mutation.isPending}
       submitLabel="Guardar"
-      submitDisabled={!target}
-      onSubmit={(event) => {
-        event.preventDefault()
-        const rateBps = rateBpsFromPercent(percent)
-        if (rateBps === null) {
-          setPercentError("Escribe un porcentaje entre 0 y 100, con dos decimales como máximo.")
-          return
-        }
-        setPercentError(null)
-        setError(null)
-        mutation.mutate(rateBps)
-      }}
     >
       <div className="flex flex-col gap-4">
         {professional ? null : (
-          <Field>
-            <FieldLabel htmlFor={`${fieldId}-prof`}>Profesional</FieldLabel>
-            <ChoiceSelect
-              id={`${fieldId}-prof`}
-              value={userId}
-              placeholder="Elige a la persona"
-              required
-              onChange={(event) => setUserId(event.target.value)}
-            >
-              {candidates.map((candidate) => (
-                <option key={candidate.userId} value={candidate.userId}>
-                  {candidate.name}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
+          <form.AppField name="professionalUserId">
+            {(field) => (
+              <field.Control label="Profesional">
+                {(control) => (
+                  <ChoiceSelect
+                    id={control.id}
+                    name={control.name}
+                    value={field.state.value}
+                    placeholder="Elige a la persona"
+                    required
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  >
+                    {candidates.map((candidate) => (
+                      <option key={candidate.userId} value={candidate.userId}>
+                        {candidate.name}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         )}
-        <Field data-invalid={percentError ? true : undefined}>
-          <FieldLabel htmlFor={`${fieldId}-rate`}>Porcentaje de lo cobrado (%)</FieldLabel>
-          <Input
-            id={`${fieldId}-rate`}
-            inputMode="decimal"
-            autoComplete="off"
-            className="w-32"
-            value={percent}
-            aria-invalid={percentError ? true : undefined}
-            aria-describedby={`${fieldId}-rate-help`}
-            onChange={(event) => setPercent(event.target.value)}
-          />
-          <FieldDescription id={`${fieldId}-rate-help`}>
-            Se aplica a lo que aún no se ha pagado. Lo ya pagado conserva el porcentaje con que se
-            pagó.
-          </FieldDescription>
-          {percentError ? <FieldError>{percentError}</FieldError> : null}
-        </Field>
+        <form.AppField name="percent">
+          {(field) => (
+            <field.TextField
+              label="Porcentaje de lo cobrado (%)"
+              description="Se aplica a lo que aún no se ha pagado. Lo ya pagado conserva el porcentaje con que se pagó."
+              inputMode="decimal"
+              autoComplete="off"
+              inputClassName="w-32"
+            />
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
@@ -777,96 +762,103 @@ function PayDrawer({
 }) {
   const queryClient = useQueryClient()
   const sede = useActiveBranch()
-  const fieldId = useId()
-  const [branchId, setBranchId] = useState("")
-  const [notes, setNotes] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const defaultBranch = sede.branchId ?? sede.branches[0]?.id ?? ""
-
-  // La sede activa es la propuesta; si llega tarde no pisa lo ya elegido.
-  useEffect(() => {
-    if (open && !branchId && defaultBranch) setBranchId(defaultBranch)
-  }, [open, branchId, defaultBranch])
-  useEffect(() => {
-    if (open) return
-    setBranchId("")
-    setNotes("")
-    setError(null)
-  }, [open])
+  const pickBranch = sede.branches.length > 1
 
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
     void queryClient.invalidateQueries({ queryKey: ["finance-expenses"] })
     void queryClient.invalidateQueries({ queryKey: ["monthly-finance-result"] })
   }
-  const mutation = useMutation({
-    mutationFn: () =>
-      payMonthCommissionApi({
-        ...period,
-        professionalUserId: detail.professionalUserId,
-        branchId,
-        expectedCents: detail.pendingCents,
-        ...(notes.trim() ? { notes: notes.trim() } : {}),
-      }),
-    onSuccess: (result) => {
-      refresh()
-      // Se dice lo que el servidor pagó de verdad, no lo que mostraba la pantalla.
-      toast.success(
-        `Pago registrado: ${formatMoney(result.data.settlement.commissionCents, result.data.settlement.currency, detail.locale)}`,
-      )
-      onClose()
+  const form = useAppForm({
+    defaultValues: { branchId: "", notes: "" },
+    validators: {
+      onSubmit: ({ value }) =>
+        pickBranch && !value.branchId
+          ? { fields: { branchId: "Elige la sede del gasto." } }
+          : undefined,
     },
-    onError: (err) => {
-      setError(mutationError(err))
-      refresh()
+    onSubmit: async ({ value }) => {
+      try {
+        const notes = value.notes.trim()
+        const result = await payMonthCommissionApi({
+          ...period,
+          professionalUserId: detail.professionalUserId,
+          branchId: value.branchId,
+          expectedCents: detail.pendingCents,
+          ...(notes ? { notes } : {}),
+        })
+        refresh()
+        // Se dice lo que el servidor pagó de verdad, no lo que mostraba la pantalla.
+        toast.success(
+          `Pago registrado: ${formatMoney(result.data.settlement.commissionCents, result.data.settlement.currency, detail.locale)}`,
+        )
+        onClose()
+      } catch (err) {
+        refresh()
+        throw err
+      }
     },
   })
+  const surface = useFormSurface(form, { formMessage: financeFormMessage })
+  const branchId = useStore(form.store, (state) => state.values.branchId)
+
+  // La sede activa es la propuesta; si llega tarde no pisa lo ya elegido.
+  useEffect(() => {
+    if (open && !form.getFieldValue("branchId") && defaultBranch)
+      form.setFieldValue("branchId", defaultBranch, { dontUpdateMeta: true })
+  }, [open, defaultBranch, form])
+  useEffect(() => {
+    if (open) return
+    form.reset({ branchId: "", notes: "" })
+  }, [open, form])
 
   const amount = formatMoney(detail.pendingCents, detail.currency, detail.locale)
   const branchName = sede.branches.find((branch) => branch.id === branchId)?.name ?? ""
 
   return (
     <FormDrawer
+      {...surface}
       dock={false}
       open={open}
       onClose={onClose}
       title="Registrar el pago"
       description={`${amount} a ${name} por ${monthLabel(period, detail.locale).toLocaleLowerCase(detail.locale)}.`}
-      error={error}
-      isDirty={notes.trim() !== ""}
-      isSubmitting={mutation.isPending}
       submitLabel={`Registrar el pago de ${amount}`}
-      submitDisabled={!branchId}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!branchId) return
-        setError(null)
-        mutation.mutate()
-      }}
+      // Sin ninguna sede no hay dónde registrar el gasto; el motivo está a la vista.
+      submitDisabled={!pickBranch && !branchId}
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Queda como gasto de Personal y los cobros de este pago dejan de estar por pagar. Si te
           equivocas, puedes anular el pago con su motivo.
         </p>
-        {sede.branches.length > 1 ? (
-          <Field>
-            <FieldLabel htmlFor={`${fieldId}-branch`}>Sede del gasto</FieldLabel>
-            <ChoiceSelect
-              id={`${fieldId}-branch`}
-              value={branchId}
-              placeholder="Elige la sede"
-              required
-              onChange={(event) => setBranchId(event.target.value)}
-            >
-              {sede.branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </ChoiceSelect>
-            <FieldDescription>El gasto se registra en esta sede.</FieldDescription>
-          </Field>
+        {pickBranch ? (
+          <form.AppField name="branchId">
+            {(field) => (
+              <field.Control label="Sede del gasto" description="El gasto se registra en esta sede.">
+                {(control) => (
+                  <ChoiceSelect
+                    id={control.id}
+                    name={control.name}
+                    value={field.state.value}
+                    placeholder="Elige la sede"
+                    required
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  >
+                    {sede.branches.map((branch) => (
+                      <option key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : branchName ? (
           <p className="text-sm">El gasto se registra en la sede {branchName}.</p>
         ) : (
@@ -874,16 +866,9 @@ function PayDrawer({
             No hay una sede activa donde registrar el gasto.
           </p>
         )}
-        <Field>
-          <FieldLabel htmlFor={`${fieldId}-notes`}>Nota (opcional)</FieldLabel>
-          <Textarea
-            id={`${fieldId}-notes`}
-            rows={2}
-            maxLength={2000}
-            value={notes}
-            onChange={(event) => setNotes(event.target.value)}
-          />
-        </Field>
+        <form.AppField name="notes">
+          {(field) => <field.TextareaField label="Nota (opcional)" rows={2} maxLength={2000} />}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
@@ -905,36 +890,34 @@ function VoidPaymentDrawer({
   timeZone: string
 }) {
   const queryClient = useQueryClient()
-  const fieldId = useId()
-  const [reason, setReason] = useState("")
-  const [reasonError, setReasonError] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const open = payment !== null
-
-  useEffect(() => {
-    if (open) return
-    setReason("")
-    setReasonError(null)
-    setError(null)
-  }, [open])
 
   const refresh = (): void => {
     void queryClient.invalidateQueries({ queryKey: commissionKeys.all })
     void queryClient.invalidateQueries({ queryKey: ["finance-expenses"] })
     void queryClient.invalidateQueries({ queryKey: ["monthly-finance-result"] })
   }
-  const mutation = useMutation({
-    mutationFn: () => voidCommissionPaymentApi(payment?.id ?? "", reason.trim()),
-    onSuccess: () => {
-      refresh()
-      toast.success("Pago anulado: sus cobros vuelven a quedar por pagar")
-      onClose()
-    },
-    onError: (err) => {
-      setError(mutationError(err))
-      refresh()
+  const form = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: voidReasonSchema },
+    onSubmit: async ({ value }) => {
+      try {
+        await voidCommissionPaymentApi(payment?.id ?? "", value.reason.trim())
+        refresh()
+        toast.success("Pago anulado: sus cobros vuelven a quedar por pagar")
+        onClose()
+      } catch (err) {
+        refresh()
+        throw err
+      }
     },
   })
+  const surface = useFormSurface(form, { formMessage: financeFormMessage })
+
+  useEffect(() => {
+    if (open) return
+    form.reset({ reason: "" })
+  }, [open, form])
 
   // El texto conserva el último pago mientras el cajón termina de cerrarse.
   const shown = useRef(payment)
@@ -945,48 +928,37 @@ function VoidPaymentDrawer({
 
   return (
     <FormDrawer
+      {...surface}
       dock={false}
       open={open}
       onClose={onClose}
       title="Anular pago"
       description={`El pago de ${amount}${paidOn} a ${name}.`}
-      error={error}
-      isDirty={reason.trim() !== ""}
-      isSubmitting={mutation.isPending}
       submitLabel="Anular pago"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!reason.trim()) {
-          setReasonError("Indica el motivo de la anulación.")
-          return
-        }
-        setReasonError(null)
-        setError(null)
-        mutation.mutate()
-      }}
     >
       <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">
           Se anula el pago y su gasto de Personal. Sus cobros vuelven a quedar por pagar. La
           anulación queda registrada con su motivo.
         </p>
-        <Field data-invalid={reasonError ? true : undefined}>
-          <FieldLabel htmlFor={`${fieldId}-reason`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${fieldId}-reason`}
-            rows={3}
-            maxLength={2000}
-            aria-required
-            value={reason}
-            aria-invalid={reasonError ? true : undefined}
-            onChange={(event) => setReason(event.target.value)}
-          />
-          {reasonError ? <FieldError>{reasonError}</FieldError> : null}
-        </Field>
+        <form.AppField name="reason">
+          {(field) => (
+            <field.TextareaField label="Motivo" rows={3} maxLength={2000} aria-required />
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
 }
+
+/** Los mismos límites que `POST /api/commissions/payments/:id/void`. */
+const voidReasonSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Indica el motivo de la anulación.")
+    .max(2000, "Escribe el motivo en 2000 caracteres como máximo."),
+})
 
 // --- Mis comisiones (cada profesional, primero en teléfono) ----------------------------
 

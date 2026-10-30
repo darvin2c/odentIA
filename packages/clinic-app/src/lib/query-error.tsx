@@ -21,16 +21,3 @@ export function QueryErrorState({ error, onRetry, notFound = "El recurso solicit
 export function isAmbiguousMutationError(error: unknown): boolean {
   return error != null && (!(error instanceof ApiError) || error.status >= 500 || error.status === 408)
 }
-
-export function mutationErrorMessage(error: unknown): string | null {
-  if (error == null) return null
-  if (isAmbiguousMutationError(error)) return "No pudimos confirmar el resultado. Conservamos los campos; consulta el estado actual antes de iniciar otra operación para evitar duplicados."
-  if (error instanceof ApiError) {
-    if (error.status === 403) return "No tienes permiso para guardar estos cambios. Solicita acceso a la administración; los campos se conservan."
-    if (error.status === 401) return "Tu sesión venció. Conserva los datos e inicia sesión antes de continuar."
-    if (error.status === 404) return "El registro ya no está disponible. Consulta la lista actual antes de continuar; los campos se conservan."
-    if (error.status === 409) return "Los datos entran en conflicto con el estado actual. Consulta el registro y revisa los campos antes de guardar."
-    if (error.status === 429) return "Hay demasiadas solicitudes. Espera un momento antes de volver a guardar; los campos se conservan."
-  }
-  return "No se guardaron los cambios. Revisa los campos y las selecciones antes de volver a guardar."
-}

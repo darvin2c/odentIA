@@ -1,24 +1,25 @@
 import type { PatientGuide } from "@odentia/clinical"
+import { Button, FieldGroup, FieldLegend, FieldSet, Skeleton, toast } from "@odentia/ui"
 import {
-  Button,
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-  Input,
-  Skeleton,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { DatePickerButton, ErrorState, FormDrawer, regionToday } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+  DatePickerButton,
+  ErrorState,
+  FormDrawer,
+  regionToday,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../../lib/api"
 import {
   type BudgetPresentation,
   type BudgetPresentationBody,
+  type BudgetWithTotals,
   budgetNumberLabel,
   fetchBudgetDetail,
   fetchBudgetPresentation,
@@ -26,16 +27,23 @@ import {
   sendBudgetApi,
   updateBudgetPresentation,
 } from "../../../lib/budgets"
-import { usePermission } from "../../../lib/crm"
-import { apiFetch } from "../../../lib/api"
 import { formatDate } from "../../../lib/clinical-journey"
+import { usePermission } from "../../../lib/crm"
 import { fetchPatientDiagnoses, type PatientDiagnosis } from "../../../lib/encounters"
 import type { PlanItem } from "../../../lib/patients"
 import { productUi } from "../../../product/product-ui"
-import { GuideFields, GuideSummary, hasGuide } from "../../service-guide"
+import {
+  type GuideDraft,
+  GuideFields,
+  GuideSummary,
+  guideDraftOf,
+  guideFromDraft,
+  guideSchema,
+  hasGuide,
+  sameGuide,
+} from "../../service-guide"
 import { DocumentPaperPanel } from "../document-paper-panel"
 import { useBudgetSendPreview } from "./budget-send"
-import { mutationMessage } from "./budget-parts"
 
 /** Lo que dice el aviso cuando sale: la misma frase de `BudgetSendButton`. */
 function sentWords(name: string, channel: "whatsapp" | "email", via: string): string {
@@ -46,10 +54,84 @@ function sentWords(name: string, channel: "whatsapp" | "email", via: string): st
     : `Enviado a ${first} ${where}, con el PDF`
 }
 
-interface OptionDraft {
-  name: string
-  pros: string
-  cons: string
+const textLimit = (limit: number) =>
+  z.string().max(limit, `Escribe como mucho ${limit} caracteres.`)
+
+/** Los mismos límites que `budgetPresentationInput` de la API. */
+const reviewSchema = z.object({
+  findings: textLimit(4000),
+  proposal: textLimit(4000),
+  validUntil: z.string(),
+  options: z.array(
+    z.object({
+      id: z.string(),
+      name: textLimit(120),
+      pros: textLimit(1000),
+      cons: textLimit(1000),
+    }),
+  ),
+  lines: z.array(z.object({ id: z.string(), own: guideSchema.nullable() })),
+})
+type ReviewValues = z.infer<typeof reviewSchema>
+
+function valuesOf(data: BudgetPresentation): ReviewValues {
+  return {
+    findings: data.findings ?? "",
+    proposal: data.proposal ?? "",
+    validUntil: data.validUntil ?? "",
+    options: data.options.map((option) => ({
+      id: option.id,
+      name: option.name ?? "",
+      pros: option.pros ?? "",
+      cons: option.cons ?? "",
+    })),
+    lines: data.lines.map((line) => ({
+      id: line.id,
+      own: line.patientGuide ? guideDraftOf(line.patientGuide) : null,
+    })),
+  }
+}
+
+/**
+ * Solo lo que cambió. `findings` se compara con lo guardado: confirmar es también
+ * aceptar el texto propuesto. Quien no lee la clínica nunca lo envía.
+ */
+export function reviewBody(
+  data: BudgetPresentation,
+  value: ReviewValues,
+  canClinical: boolean,
+): BudgetPresentationBody {
+  const body: BudgetPresentationBody = {}
+  if (canClinical && value.findings.trim() !== (data.findings ?? ""))
+    body.findings = value.findings.trim() || null
+  if (value.proposal.trim() !== (data.proposal ?? "")) body.proposal = value.proposal.trim() || null
+  if (value.validUntil !== (data.validUntil ?? "")) body.validUntil = value.validUntil || null
+  const options = value.options.filter((row) => {
+    const saved = data.options.find((option) => option.id === row.id)
+    return (
+      row.name.trim() !== (saved?.name ?? "") ||
+      row.pros.trim() !== (saved?.pros ?? "") ||
+      row.cons.trim() !== (saved?.cons ?? "")
+    )
+  })
+  if (options.length > 0) {
+    body.options = options.map((row) => ({
+      optionId: row.id,
+      name: row.name.trim() || null,
+      pros: row.pros.trim() || null,
+      cons: row.cons.trim() || null,
+    }))
+  }
+  const lines = value.lines.filter(
+    (row) => !sameGuide(row.own, data.lines.find((line) => line.id === row.id)?.patientGuide),
+  )
+  if (lines.length > 0) {
+    body.lines = lines.map((row) => ({
+      lineId: row.id,
+      patientGuide: row.own ? guideFromDraft(row.own) : null,
+    }))
+  }
+  return body
 }
 
 /**
@@ -85,8 +167,8 @@ export function proposedFindings(
  * «Revisar y enviar»: lo que le llega a la persona, antes de que le llegue. Lo
  * encontrado (solo a quien lee la clínica), lo propuesto, la vigencia, la
  * explicación de cada línea y las opciones; «Antes de enviar» avisa sin trabar.
- * Enviar y «Ver el PDF» guardan primero: un error no pierde lo escrito. Fuera
- * de borrador, lo entregado se ve y no cambia.
+ * Enviar y «Ver el PDF» guardan primero: un error no pierde lo escrito y se dice
+ * en su campo. Fuera de borrador, lo entregado se ve y no cambia.
  */
 export function BudgetReviewDrawer({
   patientId,
@@ -102,11 +184,6 @@ export function BudgetReviewDrawer({
   /** Lo que hay que guardar antes (el borrador de la atención). */
   beforeSend?: () => Promise<void>
 }) {
-  const queryClient = useQueryClient()
-  const canWrite = usePermission("budgets.write")
-  const canSend = usePermission("budgets.send")
-  const canClinical = usePermission("clinical.read")
-  const canEditService = usePermission("settings.write")
   const presentation = useQuery({
     queryKey: ["budget-presentation", patientId, budgetId],
     queryFn: () => fetchBudgetPresentation(patientId, budgetId),
@@ -116,6 +193,78 @@ export function BudgetReviewDrawer({
     queryKey: ["budget", patientId, budgetId],
     queryFn: () => fetchBudgetDetail(patientId, budgetId),
   })
+  const data = presentation.data?.data
+  const budgetData = budget.data?.data
+  if (data && budgetData) {
+    return (
+      <ReviewForm
+        key={budgetId}
+        patientId={patientId}
+        budgetId={budgetId}
+        data={data}
+        budget={budgetData}
+        onClose={onClose}
+        onSent={onSent}
+        beforeSend={beforeSend}
+      />
+    )
+  }
+  const failed = presentation.isError ? presentation.error : budget.isError ? budget.error : null
+  return (
+    <FormDrawer
+      open
+      dock={false}
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
+      title="Revisar y enviar"
+      hideSubmit
+      cancelLabel="Cerrar"
+      onClose={onClose}
+      onSubmit={(event) => event.preventDefault()}
+    >
+      {failed ? (
+        <ErrorState
+          title="No pudimos cargar el presupuesto"
+          message={submitErrorMessage(failed)}
+          onRetry={() => {
+            void presentation.refetch()
+            void budget.refetch()
+          }}
+        />
+      ) : (
+        <div className="flex flex-col gap-3" role="status" aria-label="Cargando…">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
+        </div>
+      )}
+    </FormDrawer>
+  )
+}
+
+function ReviewForm({
+  patientId,
+  budgetId,
+  data,
+  budget,
+  onClose,
+  onSent,
+  beforeSend,
+}: {
+  patientId: string
+  budgetId: string
+  data: BudgetPresentation
+  budget: BudgetWithTotals
+  onClose: () => void
+  onSent?: () => void
+  beforeSend?: () => Promise<void>
+}) {
+  const queryClient = useQueryClient()
+  const canWrite = usePermission("budgets.write")
+  const canSend = usePermission("budgets.send")
+  const canClinical = usePermission("clinical.read")
+  const canEditService = usePermission("settings.write")
+  const draft = data.status === "borrador"
+  const editable = canWrite && draft
+  const sendable = canSend && draft
   // Los diagnósticos que ya conoce el Plan: los lee quien lee la clínica.
   const planItems = useQuery({
     queryKey: ["plan-items", patientId],
@@ -127,31 +276,80 @@ export function BudgetReviewDrawer({
     queryFn: () => fetchPatientDiagnoses(patientId),
     enabled: canClinical,
   })
-  const preview = useBudgetSendPreview(
-    patientId,
-    budgetId,
-    presentation.data?.data.status === "borrador",
-  )
-  const data = presentation.data?.data
-  const editable = canWrite && data?.status === "borrador"
+  const preview = useBudgetSendPreview(patientId, budgetId, draft)
+  const blocked = preview.data?.data.blocked ?? null
 
-  // `undefined`: como está guardado. Lo escrito vive aquí y sobrevive a un error.
-  const [findings, setFindings] = useState<string | undefined>(undefined)
-  const [proposal, setProposal] = useState<string | undefined>(undefined)
-  const [validUntil, setValidUntil] = useState<string | null | undefined>(undefined)
-  const [options, setOptions] = useState<Record<string, OptionDraft>>({})
-  /** El ajuste de cada línea: un texto propio o null para quitarlo. */
-  const [lineGuides, setLineGuides] = useState<Record<string, PatientGuide | null>>({})
+  const requestId = useRef<string>(crypto.randomUUID())
+  /** Qué sigue a guardar: enviar, ver el PDF o nada. */
+  const intent = useRef<"send" | "pdf" | "save">("save")
+  /** Qué fila del formulario es cada una de las que viajaron: el servidor las señala por su lugar. */
+  const sent = useRef<{ options: number[]; lines: number[] }>({ options: [], lines: [] })
   const [openLine, setOpenLine] = useState<string | null>(null)
   const [viewingPdf, setViewingPdf] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [pdfRevision, setPdfRevision] = useState(0)
-  const requestId = useRef<string>(crypto.randomUUID())
 
+  const initial = useMemo(() => valuesOf(data), [data])
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: reviewSchema },
+    onSubmit: async ({ value }) => {
+      const body = editable ? reviewBody(data, value, canClinical) : {}
+      sent.current = {
+        options: (body.options ?? []).map((row) =>
+          value.options.findIndex((option) => option.id === row.optionId),
+        ),
+        lines: (body.lines ?? []).map((row) =>
+          value.lines.findIndex((line) => line.id === row.lineId),
+        ),
+      }
+      if (intent.current === "send") await beforeSend?.()
+      if (Object.keys(body).length > 0) {
+        const result = await updateBudgetPresentation(patientId, budgetId, body)
+        queryClient.setQueryData(["budget-presentation", patientId, budgetId], result)
+        setOpenLine(null)
+        setPdfRevision((revision) => revision + 1)
+        await queryClient.invalidateQueries({ queryKey: ["budgets", patientId] })
+      }
+      if (intent.current === "pdf") {
+        setViewingPdf(true)
+        return
+      }
+      if (intent.current === "send") {
+        const result = await sendBudgetApi(patientId, budgetId, { requestId: requestId.current })
+        requestId.current = crypto.randomUUID()
+        toast.success(sentWords(result.data.recipientName, result.data.channel, result.data.via))
+        await Promise.all(
+          [...PLAN_QUERY_KEYS, "budget-send-preview"].map((key) =>
+            queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+          ),
+        )
+        onSent?.()
+      } else {
+        toast.success("Guardado")
+      }
+      onClose()
+    },
+  })
+  /** `lines[0].patientGuide.how` del cuerpo → la fila del formulario donde se escribió. */
+  const fieldMap = (serverField: string): string | undefined => {
+    const line = /^lines\[(\d+)\]\.patientGuide\.?(.*)$/.exec(serverField)
+    if (line) {
+      const at = sent.current.lines[Number(line[1])]
+      return at === undefined ? undefined : `lines[${at}].own${line[2] ? `.${line[2]}` : ""}`
+    }
+    const option = /^options\[(\d+)\]\.(.+)$/.exec(serverField)
+    if (option) {
+      const at = sent.current.options[Number(option[1])]
+      return at === undefined ? undefined : `options[${at}].${option[2]}`
+    }
+    return undefined
+  }
+  const surface = useFormSurface(form, { fieldMap })
+
+  // Lo encontrado vacío se propone con los diagnósticos, una vez y sin contar como cambio.
   const proposedText = useMemo(
     () =>
-      // Solo en borrador: de lo entregado se muestra lo que se entregó, no una propuesta.
-      data?.status === "borrador" && canClinical && !data.findings
+      draft && canClinical && !data.findings
         ? proposedFindings(
             data.lines,
             planItems.data?.data ?? [],
@@ -159,457 +357,288 @@ export function BudgetReviewDrawer({
             (tooth) => productUi().site?.placeName(tooth),
           )
         : "",
-    [data, canClinical, planItems.data, diagnoses.data],
+    [draft, canClinical, data, planItems.data, diagnoses.data],
   )
-  const findingsValue = findings ?? data?.findings ?? proposedText
-  const userEdited =
-    findings !== undefined ||
-    proposal !== undefined ||
-    validUntil !== undefined ||
-    Object.keys(options).length > 0 ||
-    Object.keys(lineGuides).length > 0
+  const [proposedTaken, setProposedTaken] = useState(false)
+  useEffect(() => {
+    if (proposedTaken || !proposedText || form.state.values.findings) return
+    form.setFieldValue("findings", proposedText, { dontUpdateMeta: true })
+    setProposedTaken(true)
+  }, [proposedText, proposedTaken, form])
 
-  /** Solo lo que cambió: confirmar es también aceptar el texto propuesto de lo encontrado. */
-  const pendingBody = (): BudgetPresentationBody | null => {
-    if (!data || !editable) return null
-    const body: BudgetPresentationBody = {}
-    if (canClinical && findingsValue.trim() !== (data.findings ?? ""))
-      body.findings = findingsValue.trim() || null
-    if (proposal !== undefined && proposal.trim() !== (data.proposal ?? ""))
-      body.proposal = proposal.trim() || null
-    if (validUntil !== undefined && validUntil !== data.validUntil) body.validUntil = validUntil
-    const optionRows = Object.entries(options).map(([optionId, draft]) => ({
-      optionId,
-      name: draft.name.trim() || null,
-      pros: draft.pros.trim() || null,
-      cons: draft.cons.trim() || null,
-    }))
-    if (optionRows.length > 0) body.options = optionRows
-    const lineRows = Object.entries(lineGuides).map(([lineId, patientGuide]) => ({
-      lineId,
-      patientGuide,
-    }))
-    if (lineRows.length > 0) body.lines = lineRows
-    return Object.keys(body).length > 0 ? body : null
+  const findingsValue = useStore(form.store, (state) => state.values.findings)
+  const dated = useStore(form.store, (state) => state.values.validUntil)
+  const lineValues = useStore(form.store, (state) => state.values.lines)
+  const several = data.options.length > 1
+  const busy = surface.isSubmitting
+
+  const ownOf = (lineId: string): GuideDraft | null =>
+    lineValues.find((row) => row.id === lineId)?.own ?? null
+  const shownGuide = (line: BudgetPresentation["lines"][number]): PatientGuide | null => {
+    const own = ownOf(line.id)
+    return (own ? guideFromDraft(own) : null) ?? line.serviceGuide
   }
-
-  const save = async () => {
-    const body = pendingBody()
-    if (!body) return
-    const result = await updateBudgetPresentation(patientId, budgetId, body)
-    queryClient.setQueryData(["budget-presentation", patientId, budgetId], result)
-    setFindings(undefined)
-    setProposal(undefined)
-    setValidUntil(undefined)
-    setOptions({})
-    setLineGuides({})
-    setOpenLine(null)
-    setPdfRevision((value) => value + 1)
-    await queryClient.invalidateQueries({ queryKey: ["budgets", patientId] })
-  }
-
-  const refresh = () =>
-    Promise.all(
-      [...PLAN_QUERY_KEYS, "budget-send-preview"].map((key) =>
-        queryClient.invalidateQueries({ queryKey: [key, patientId] }),
-      ),
-    )
-
-  const saveMutation = useMutation({
-    mutationFn: save,
-    onSuccess: () => {
-      setError(null)
-      setViewingPdf(true)
-    },
-    onError: (cause) => setError(mutationMessage(cause)),
-  })
-  const sendMutation = useMutation({
-    mutationFn: async () => {
-      await beforeSend?.()
-      await save()
-      return sendBudgetApi(patientId, budgetId, { requestId: requestId.current })
-    },
-    onSuccess: async (result) => {
-      requestId.current = crypto.randomUUID()
-      setError(null)
-      toast.success(sentWords(result.data.recipientName, result.data.channel, result.data.via))
-      await refresh()
-      onSent?.()
-      onClose()
-    },
-    onError: (cause) => setError(mutationMessage(cause)),
-  })
-  const saveOnly = useMutation({
-    mutationFn: save,
-    onSuccess: () => {
-      setError(null)
-      toast.success("Guardado")
-      onClose()
-    },
-    onError: (cause) => setError(mutationMessage(cause)),
-  })
-
-  const blocked = preview.data?.data.blocked ?? null
-  const sendable = canSend && data?.status === "borrador"
-  const busy = sendMutation.isPending || saveMutation.isPending || saveOnly.isPending
-  const missing = (data?.lines ?? []).filter(
-    (line) =>
-      !(lineGuides[line.id] !== undefined
-        ? lineGuides[line.id]
-        : (line.patientGuide ?? line.serviceGuide)),
-  )
+  const missing = data.lines.filter((line) => !shownGuide(line))
   const serviceOf = (line: BudgetPresentation["lines"][number]) =>
-    budget.data?.data.items.find(
+    budget.items.find(
       (item) => item.planItemId === line.planItemId && item.optionId === line.optionId,
     )?.serviceId ?? null
-  const dated = validUntil !== undefined ? validUntil : (data?.validUntil ?? null)
-  const several = (data?.options.length ?? 0) > 1
-
-  const optionDraft = (option: BudgetPresentation["options"][number]): OptionDraft =>
-    options[option.id] ?? {
-      name: option.name ?? "",
-      pros: option.pros ?? "",
-      cons: option.cons ?? "",
-    }
-  const changeOption = (
-    option: BudgetPresentation["options"][number],
-    patch: Partial<OptionDraft>,
-  ) => setOptions((current) => ({ ...current, [option.id]: { ...optionDraft(option), ...patch } }))
 
   return (
     <>
       <FormDrawer
+        {...surface}
         open
         dock={false}
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
-        title={data?.status === "borrador" ? "Revisar y enviar" : "Lo que se le explicó"}
-        description={
-          budget.data
-            ? `${budgetNumberLabel(budget.data.data.budgetNumber)} · ${budget.data.data.stateText}`
-            : undefined
-        }
-        isSubmitting={busy}
-        isDirty={userEdited}
-        error={error}
+        title={draft ? "Revisar y enviar" : "Lo que se le explicó"}
+        description={`${budgetNumberLabel(budget.budgetNumber)} · ${budget.stateText}`}
         hideSubmit={!(sendable || editable)}
         cancelLabel={sendable || editable ? undefined : "Cerrar"}
         submitLabel={sendable ? (preview.data?.data.label ?? "Enviar") : "Guardar"}
         submitDisabled={sendable ? preview.isPending || blocked != null : false}
-        secondaryAction={
-          data
-            ? {
-                label: "Ver el PDF",
-                disabled: busy,
-                onClick: () => {
-                  setError(null)
-                  if (editable) saveMutation.mutate()
-                  else setViewingPdf(true)
-                },
-              }
-            : undefined
-        }
+        secondaryAction={{
+          label: "Ver el PDF",
+          disabled: busy,
+          onClick: () => {
+            if (!editable) {
+              setViewingPdf(true)
+              return
+            }
+            intent.current = "pdf"
+            void submitForm(form, { fieldMap })
+          },
+        }}
         onClose={onClose}
         onSubmit={(event) => {
-          event.preventDefault()
-          setError(null)
-          if (sendable) sendMutation.mutate()
-          else if (editable) saveOnly.mutate()
+          intent.current = sendable ? "send" : "save"
+          surface.onSubmit(event)
         }}
       >
-        {presentation.isError ? (
-          <ErrorState
-            title="No pudimos cargar el presupuesto"
-            message={mutationMessage(presentation.error)}
-            onRetry={() => void presentation.refetch()}
-          />
-        ) : !data ? (
-          <div className="flex flex-col gap-3" role="status" aria-label="Cargando…">
-            <Skeleton className="h-24 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        ) : (
-          <FieldGroup>
-            {canClinical ? (
-              <Field>
-                <FieldLabel htmlFor="review-findings">Lo que encontramos</FieldLabel>
-                <Textarea
+        <FieldGroup>
+          {canClinical ? (
+            <form.AppField name="findings">
+              {(field) => (
+                <field.TextareaField
                   id="review-findings"
+                  label="Lo que encontramos"
                   rows={3}
                   maxLength={4000}
                   readOnly={!editable}
-                  value={findingsValue}
-                  onChange={(event) => setFindings(event.target.value)}
+                  description={
+                    editable && !data.findings && proposedTaken && findingsValue === proposedText
+                      ? "Armado con los diagnósticos de los tratamientos. Revísalo y escríbelo en palabras de la persona: se guarda al enviar o al ver el PDF."
+                      : undefined
+                  }
                 />
-                {editable && !data.findings && findings === undefined && proposedText ? (
-                  <FieldDescription>
-                    Armado con los diagnósticos de los tratamientos. Revísalo y escríbelo en
-                    palabras de la persona: se guarda al enviar o al ver el PDF.
-                  </FieldDescription>
-                ) : null}
-              </Field>
-            ) : data.hasFindings ? (
-              <p className="text-sm text-muted-foreground">
-                «Lo que encontramos» lo escribe y lo lee quien atiende: esa parte no te corresponde.
-              </p>
-            ) : null}
+              )}
+            </form.AppField>
+          ) : data.hasFindings ? (
+            <p className="text-sm text-muted-foreground">
+              «Lo que encontramos» lo escribe y lo lee quien atiende: esa parte no te corresponde.
+            </p>
+          ) : null}
 
-            <Field>
-              <FieldLabel htmlFor="review-proposal">Lo que le proponemos</FieldLabel>
-              <Textarea
+          <form.AppField name="proposal">
+            {(field) => (
+              <field.TextareaField
                 id="review-proposal"
+                label="Lo que le proponemos"
                 rows={3}
                 maxLength={4000}
                 readOnly={!editable}
-                value={proposal ?? data.proposal ?? ""}
-                onChange={(event) => setProposal(event.target.value)}
               />
-            </Field>
+            )}
+          </form.AppField>
 
-            <Field>
-              <span className="text-sm font-medium">Vigente hasta</span>
-              {editable ? (
-                <DatePickerButton
-                  aria-label="Vigente hasta"
-                  value={dated ?? ""}
-                  min={regionToday()}
-                  emptyLabel="Sin fecha"
-                  onChange={(value) => setValidUntil(value || null)}
-                />
-              ) : (
-                <p className="text-sm">{dated ? formatDate(dated) : "Sin fecha"}</p>
-              )}
-            </Field>
-
-            <FieldSet>
-              <FieldLegend>Lo que se haría</FieldLegend>
-              <ul className="flex flex-col divide-y rounded-lg border">
-                {data.lines.map((line) => {
-                  const own =
-                    lineGuides[line.id] !== undefined ? lineGuides[line.id] : line.patientGuide
-                  const shown = own ?? line.serviceGuide
-                  const editing = openLine === line.id
-                  return (
-                    <li key={line.id} className="flex flex-col gap-2 p-3 text-sm">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="min-w-0 font-medium break-words">
-                          {line.title}
-                          {several ? (
-                            <span className="font-normal text-muted-foreground">
-                              {" "}
-                              · {data.options.find((option) => option.id === line.optionId)?.label}
-                            </span>
-                          ) : null}
-                        </span>
-                        {editable ? (
-                          <div className="flex flex-wrap items-center gap-2">
-                            {!editing ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setOpenLine(line.id)}
-                              >
-                                Cambiar solo para este paciente
-                              </Button>
-                            ) : null}
-                            {own ? (
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setLineGuides((current) => ({ ...current, [line.id]: null }))
-                                  setOpenLine(null)
-                                }}
-                              >
-                                Quitar el ajuste
-                              </Button>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                      {editing ? (
-                        <GuideFields
-                          idPrefix={`linea-${line.id}`}
-                          value={own ?? line.serviceGuide ?? {}}
-                          onChange={(next) =>
-                            setLineGuides((current) => ({ ...current, [line.id]: next }))
-                          }
-                        />
-                      ) : hasGuide(shown) ? (
-                        <>
-                          {own ? (
-                            <span className="text-xs text-muted-foreground">
-                              Ajustado para este paciente
-                            </span>
-                          ) : null}
-                          <GuideSummary guide={shown} />
-                        </>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          Sin explicación: sale solo con su nombre y precio.
-                        </span>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            </FieldSet>
-
-            {several
-              ? data.options.map((option) => {
-                  const draft = optionDraft(option)
-                  return (
-                    <FieldSet key={option.id}>
-                      <FieldLegend>{option.label}</FieldLegend>
-                      <FieldGroup>
-                        <Field>
-                          <FieldLabel htmlFor={`option-${option.id}-name`}>Nombre</FieldLabel>
-                          <Input
-                            id={`option-${option.id}-name`}
-                            maxLength={120}
-                            readOnly={!editable}
-                            value={draft.name}
-                            onChange={(event) => changeOption(option, { name: event.target.value })}
-                          />
-                        </Field>
-                        <Field>
-                          <FieldLabel htmlFor={`option-${option.id}-pros`}>A favor</FieldLabel>
-                          <Textarea
-                            id={`option-${option.id}-pros`}
-                            rows={2}
-                            maxLength={1000}
-                            readOnly={!editable}
-                            value={draft.pros}
-                            onChange={(event) => changeOption(option, { pros: event.target.value })}
-                          />
-                        </Field>
-                        <Field>
-                          <FieldLabel htmlFor={`option-${option.id}-cons`}>A considerar</FieldLabel>
-                          <Textarea
-                            id={`option-${option.id}-cons`}
-                            rows={2}
-                            maxLength={1000}
-                            readOnly={!editable}
-                            value={draft.cons}
-                            onChange={(event) => changeOption(option, { cons: event.target.value })}
-                          />
-                        </Field>
-                      </FieldGroup>
-                    </FieldSet>
-                  )
-                })
-              : null}
-
-            {data.status === "borrador" ? (
-              <section
-                aria-label="Antes de enviar"
-                className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm"
-              >
-                <h3 className="font-medium">Antes de enviar</h3>
-                <ul className="flex flex-col gap-1.5">
-                  {dated ? null : (
-                    <li>No tiene fecha de vigencia: el papel no dirá hasta cuándo vale.</li>
+          {editable ? (
+            <form.AppField name="validUntil">
+              {(field) => (
+                <field.Control label="Vigente hasta">
+                  {(control) => (
+                    <DatePickerButton
+                      {...control.props}
+                      value={field.state.value}
+                      min={regionToday()}
+                      emptyLabel="Sin fecha"
+                      onChange={field.handleChange}
+                    />
                   )}
-                  {missing.map((line) => {
-                    const serviceId = serviceOf(line)
-                    return (
-                      <li key={line.id}>
-                        «{line.title}» no tiene explicación todavía.{" "}
-                        {serviceId && canEditService ? (
-                          <Link
-                            to="/services"
-                            search={{ q: line.title } as never}
-                            className="font-medium text-primary underline-offset-4 hover:underline"
-                          >
-                            Ir al servicio
-                          </Link>
+                </field.Control>
+              )}
+            </form.AppField>
+          ) : (
+            <div className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">Vigente hasta</span>
+              <span>{dated ? formatDate(dated) : "Sin fecha"}</span>
+            </div>
+          )}
+
+          <FieldSet>
+            <FieldLegend>Lo que se haría</FieldLegend>
+            <ul className="flex flex-col divide-y rounded-lg border">
+              {data.lines.map((line, index) => {
+                const own = ownOf(line.id)
+                const shown = shownGuide(line)
+                const editing = openLine === line.id
+                return (
+                  <li key={line.id} className="flex flex-col gap-2 p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="min-w-0 font-medium break-words">
+                        {line.title}
+                        {several ? (
+                          <span className="font-normal text-muted-foreground">
+                            {" "}
+                            · {data.options.find((option) => option.id === line.optionId)?.label}
+                          </span>
                         ) : null}
-                      </li>
-                    )
-                  })}
-                  {dated && missing.length === 0 ? (
-                    <li>Todo tiene su explicación y su fecha.</li>
-                  ) : null}
-                  {blocked ? <li>{blocked}</li> : null}
-                </ul>
-                <p className="text-muted-foreground">
-                  <strong className="font-medium text-foreground">
-                    Quién ve los diagnósticos.
-                  </strong>{" "}
-                  La propia persona y su representante legal reciben el presupuesto completo. Si lo
-                  imprime quien no lee la historia o lo recibe otra persona, sale sin «Lo que
-                  encontramos» ni las alergias.
-                </p>
-              </section>
-            ) : null}
-          </FieldGroup>
-        )}
+                      </span>
+                      {editable ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {!editing ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                if (!own) {
+                                  form.setFieldValue(
+                                    `lines[${index}].own`,
+                                    guideDraftOf(line.serviceGuide),
+                                  )
+                                }
+                                setOpenLine(line.id)
+                              }}
+                            >
+                              Cambiar solo para este paciente
+                            </Button>
+                          ) : null}
+                          {own ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                form.setFieldValue(`lines[${index}].own`, null)
+                                setOpenLine(null)
+                              }}
+                            >
+                              Quitar el ajuste
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    {editing && own ? (
+                      <GuideFields
+                        form={form}
+                        fields={`lines[${index}].own` as never}
+                        idPrefix={`linea-${line.id}`}
+                      />
+                    ) : hasGuide(shown) ? (
+                      <>
+                        {own ? (
+                          <span className="text-xs text-muted-foreground">
+                            Ajustado para este paciente
+                          </span>
+                        ) : null}
+                        <GuideSummary guide={shown} />
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Sin explicación: sale solo con su nombre y precio.
+                      </span>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </FieldSet>
+
+          {several
+            ? data.options.map((option, index) => (
+                <FieldSet key={option.id}>
+                  <FieldLegend>{option.label}</FieldLegend>
+                  <FieldGroup>
+                    <form.AppField name={`options[${index}].name`}>
+                      {(field) => (
+                        <field.TextField label="Nombre" maxLength={120} readOnly={!editable} />
+                      )}
+                    </form.AppField>
+                    <form.AppField name={`options[${index}].pros`}>
+                      {(field) => (
+                        <field.TextareaField
+                          label="A favor"
+                          rows={2}
+                          maxLength={1000}
+                          readOnly={!editable}
+                        />
+                      )}
+                    </form.AppField>
+                    <form.AppField name={`options[${index}].cons`}>
+                      {(field) => (
+                        <field.TextareaField
+                          label="A considerar"
+                          rows={2}
+                          maxLength={1000}
+                          readOnly={!editable}
+                        />
+                      )}
+                    </form.AppField>
+                  </FieldGroup>
+                </FieldSet>
+              ))
+            : null}
+
+          {draft ? (
+            <section
+              aria-label="Antes de enviar"
+              className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 text-sm"
+            >
+              <h3 className="font-medium">Antes de enviar</h3>
+              <ul className="flex flex-col gap-1.5">
+                {dated ? null : (
+                  <li>No tiene fecha de vigencia: el papel no dirá hasta cuándo vale.</li>
+                )}
+                {missing.map((line) => (
+                  <li key={line.id}>
+                    «{line.title}» no tiene explicación todavía.{" "}
+                    {serviceOf(line) && canEditService ? (
+                      <Link
+                        to="/services"
+                        search={{ q: line.title } as never}
+                        className="font-medium text-primary underline-offset-4 hover:underline"
+                      >
+                        Ir al servicio
+                      </Link>
+                    ) : null}
+                  </li>
+                ))}
+                {dated && missing.length === 0 ? (
+                  <li>Todo tiene su explicación y su fecha.</li>
+                ) : null}
+                {blocked ? <li>{blocked}</li> : null}
+              </ul>
+              <p className="text-muted-foreground">
+                <strong className="font-medium text-foreground">Quién ve los diagnósticos.</strong>{" "}
+                La propia persona y su representante legal reciben el presupuesto completo. Si lo
+                imprime quien no lee la historia o lo recibe otra persona, sale sin «Lo que
+                encontramos» ni las alergias.
+              </p>
+            </section>
+          ) : null}
+        </FieldGroup>
       </FormDrawer>
-      {viewingPdf && budget.data ? (
+      {viewingPdf ? (
         <DocumentPaperPanel
           patientId={patientId}
           type="budget"
           documentId={budgetId}
-          title={budgetNumberLabel(budget.data.data.budgetNumber)}
+          title={budgetNumberLabel(budget.budgetNumber)}
           status="Lo mismo que recibirá en su PDF. Verlo no le envía nada."
           send={null}
           revision={`revision-${pdfRevision}`}
           onClose={() => setViewingPdf(false)}
-        />
-      ) : null}
-    </>
-  )
-}
-
-/** El botón «Revisar y enviar»: abre la revisión, sin enviar nada todavía. */
-export function BudgetReviewButton({
-  patientId,
-  budgetId,
-  label = "Revisar y enviar",
-  size,
-  variant,
-  beforeOpen,
-  onSent,
-}: {
-  patientId: string
-  budgetId: string
-  label?: string
-  size?: React.ComponentProps<typeof Button>["size"]
-  variant?: React.ComponentProps<typeof Button>["variant"]
-  /** Lo que hay que guardar antes de leerlo (el borrador de la atención). */
-  beforeOpen?: () => Promise<void>
-  onSent?: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  return (
-    <>
-      <Button
-        type="button"
-        size={size}
-        variant={variant}
-        onClick={() => {
-          setError(null)
-          void Promise.resolve(beforeOpen?.())
-            .then(() => setOpen(true))
-            .catch((cause: unknown) => setError(mutationMessage(cause)))
-        }}
-      >
-        {label}
-      </Button>
-      {error ? (
-        <span role="alert" className="text-xs text-destructive">
-          {error}
-        </span>
-      ) : null}
-      {open ? (
-        <BudgetReviewDrawer
-          patientId={patientId}
-          budgetId={budgetId}
-          beforeSend={beforeOpen}
-          onSent={onSent}
-          onClose={() => setOpen(false)}
         />
       ) : null}
     </>

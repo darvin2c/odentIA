@@ -9,10 +9,10 @@ import { channelConnection } from "@odentia/db/schema/crm"
 import { expect, it } from "vitest"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { getDataProtectionView, renderDataProtectionPdf } from "./data-protection.js"
-import { loadDocumentClinic } from "./document-clinic.js"
 import { createDataRequest } from "./data-requests.js"
-import { ownerDb, setupTestDb } from "./test-setup.js"
+import { loadDocumentClinic } from "./document-clinic.js"
 import { setTestPatientIdentity } from "./test-patient.js"
+import { ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -25,7 +25,9 @@ it("lista lo que la clínica usa, lo que odentIA usa siempre y los pedidos del a
   expect(before.processors.always.map((p) => p.id)).toEqual(
     expect.arrayContaining(["servidor", "cloudflare", "correo", "geoapify"]),
   )
-  expect(before.activities.map((a) => a.id)).toEqual(expect.arrayContaining(["atender", "citas", "cobrar", "novedades"]))
+  expect(before.activities.map((a) => a.id)).toEqual(
+    expect.arrayContaining(["atender", "citas", "cobrar", "novedades"]),
+  )
 
   await ownerDb.insert(channelConnection).values({
     organizationId: "org_a",
@@ -55,6 +57,9 @@ it("lista lo que la clínica usa, lo que odentIA usa siempre y los pedidos del a
   expect(view.requests.received).toBe(before.requests.received + 1)
   expect(view.requests.pending).toBe(before.requests.pending + 1)
 
-  const pdf = await renderDataProtectionPdf(view, await run((tx) => loadDocumentClinic(tx, "org_a")))
+  const pdf = await renderDataProtectionPdf(
+    view,
+    await run((tx) => loadDocumentClinic(tx, "org_a")),
+  )
   expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-")
 })

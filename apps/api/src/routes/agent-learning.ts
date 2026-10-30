@@ -28,19 +28,20 @@ import { modelProblemResponse } from "../lib/agent-model.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
+// Los mensajes son los de la pantalla y los del servicio: el que valide primero dice lo mismo.
 const correctionInput = z
   .object({
     reviewItemId: z.string().uuid().optional(),
     traceId: z.string().uuid().optional(),
-    failure: z.enum(["dato_equivocado", "falto_dato", "tono", "no_debio_responder", "otra_cosa"]),
-    correctedReply: z.string().max(2000).optional(),
+    failure: z.enum(["dato_equivocado", "falto_dato", "tono", "no_debio_responder", "otra_cosa"], { error: "Elige qué falló" }),
+    correctedReply: z.string().max(2000, "La respuesta admite hasta 2000 caracteres").optional(),
   })
   .refine((input) => Boolean(input.reviewItemId) !== Boolean(input.traceId), "Indica una sola respuesta que corregir")
 
 const lessonPatch = z.object({
-  title: z.string().min(1).max(200).optional(),
-  body: z.string().min(1).max(2000).optional(),
-  kind: z.enum(["respuesta_oficial", "regla", "ejemplo"]).optional(),
+  title: z.string().min(1, "El título es obligatorio").max(200, "El título admite hasta 200 caracteres").optional(),
+  body: z.string().min(1, "El texto es obligatorio").max(2000, "El texto admite hasta 2000 caracteres").optional(),
+  kind: z.enum(["respuesta_oficial", "regla", "ejemplo"], { error: "Elige qué clase de lección es" }).optional(),
   knowledgeEntryId: z.null().optional(),
 })
 
@@ -48,7 +49,9 @@ const caseInput = z.object({ question: z.string().trim().min(1).max(2000), expec
 
 const withdrawInput = z.object({ withdrawCase: z.boolean().optional() })
 
-const guidanceInput = z.object({ body: z.string().trim().min(1).max(2000) })
+const guidanceInput = z.object({
+  body: z.string().trim().min(1, "Escribe qué debe saber el agente").max(2000, "Como mucho 2000 caracteres"),
+})
 const approveInput = z.object({ replaceId: z.string().uuid().optional() })
 
 export interface AgentLearningDeps extends CrmDeps {

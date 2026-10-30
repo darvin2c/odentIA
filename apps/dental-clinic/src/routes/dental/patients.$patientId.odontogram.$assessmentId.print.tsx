@@ -1,14 +1,18 @@
+import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
+import { hcLabel } from "@odentia/clinic-app/lib/patients"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import { Button } from "@odentia/ui"
 import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { OdontogramDocument } from "../../components/dental/odontogram-document"
-import { SheetLetterhead, SheetPageStyle, SheetSignature } from "../../components/dental/odontogram-sheet"
+import {
+  SheetLetterhead,
+  SheetPageStyle,
+  SheetSignature,
+} from "../../components/dental/odontogram-sheet"
 import { fetchSignedOdontogramPrint } from "../../lib/dental/odontogram"
-import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
-import { hcLabel } from "@odentia/clinic-app/lib/patients"
-import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/$assessmentId/print")({
   component: SignedOdontogramPrintPage,
@@ -43,7 +47,9 @@ function SignedOdontogramPrintPage() {
     <PageShell className="flex flex-col gap-4">
       <SheetPageStyle />
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
-        <p className="text-sm text-muted-foreground">Odontograma firmado. Usa «Imprimir» para llevarlo en papel.</p>
+        <p className="text-sm text-muted-foreground">
+          Odontograma firmado. Usa «Imprimir» para llevarlo en papel.
+        </p>
         <Button type="button" onClick={() => window.print()}>
           Imprimir
         </Button>

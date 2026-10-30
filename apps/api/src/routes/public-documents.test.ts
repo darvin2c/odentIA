@@ -8,13 +8,25 @@ const KEY = Buffer.alloc(32, 3)
 /** Sin base a propósito: lo que no pasa la firma no llega a tocarla. */
 function app() {
   const route = new Hono()
-  route.route("/", createPublicDocumentsRoute({ db: {} as never, secretsKey: KEY, remoteAddress: () => "198.51.100.7" }))
+  route.route(
+    "/",
+    createPublicDocumentsRoute({
+      db: {} as never,
+      secretsKey: KEY,
+      remoteAddress: () => "198.51.100.7",
+    }),
+  )
   return route
 }
 
 describe("comprobar un documento", () => {
   it("un token inválido o alterado es el mismo 404, sin caché", async () => {
-    const good = documentCheckToken(KEY, "org_a", "prescription", "11111111-1111-4111-8111-111111111111")
+    const good = documentCheckToken(
+      KEY,
+      "org_a",
+      "prescription",
+      "11111111-1111-4111-8111-111111111111",
+    )
     const route = app()
     const bodies = new Set<string>()
     for (const token of ["basura", `${good}x`, `x${good}`, good.split(".")[0]!]) {

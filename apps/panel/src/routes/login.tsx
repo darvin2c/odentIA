@@ -1,10 +1,20 @@
 import { Field, FieldError, FieldGroup, FieldLabel, Input, Separator } from "@odentia/ui"
-import { AuthSplit, fieldErrorMessages, PasswordInput, SubmitButton } from "@odentia/ui-patterns"
-import { useForm } from "@tanstack/react-form"
+import {
+  AuthSplit,
+  PasswordInput,
+  SubmitButton,
+  useAppForm,
+  useFieldContext,
+  useFieldControl,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { authClient } from "../lib/auth-client"
+import { AUTH_NETWORK, authError, authErrorMessage, authFailureOf, authFormMessage } from "../lib/auth-error"
 import { AuthAlert, AuthLegal, WelcomeAside } from "../lib/auth-screens"
 import { countdown } from "../lib/countdown"
 import { GoogleAuthButton } from "../lib/google-auth"
@@ -30,20 +40,27 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 })
 
-const credentials = z.object({
-  email: z.string().email("Escribe un correo válido, como nombre@clinica.com"),
-  password: z.string().min(1, "Escribe tu contraseña"),
-})
+const email = z.string().email("Escribe un correo válido, como nombre@clinica.com")
+const password = z.string().min(1, "Escribe tu contraseña")
+const credentials = z.object({ email, password })
+// Con la persona recordada el correo no se muestra: no se valida lo que no se puede corregir.
+const knownCredentials = z.object({ email: z.string(), password })
 
 const twoFactorRedirect = z.looseObject({ twoFactorRedirect: z.boolean().optional() })
 
-type LoginProblem = "credentials" | "unverified" | "too-many" | "network" | null
+/** Lo que se dice con su propio aviso (enlaces, reenviar); lo demás va junto al botón. */
+type LoginProblem = "credentials" | "unverified" | "too-many" | "blocked" | null
+
+/** Id del aviso de cada problema, para el `aria-describedby` de los campos. */
+const PROBLEM_ID = "login-problem"
 
 /**
  * Entrar (lienzo «Acceso a odentIA», tablero 2, y «Entrar: dos fondos»,
  * prueba 2): saluda según la hora y, si este navegador recuerda a la persona,
  * la llama por su nombre, muestra su clínica y solo pide la contraseña. Los
- * errores quedan junto al campo y dicen qué hacer.
+ * errores quedan junto al campo y dicen qué hacer. Credenciales: un solo
+ * mensaje neutro (no revela si la cuenta existe); la cuenta bloqueada se dice
+ * porque el servidor solo lo responde tras validar la contraseña.
  */
 function LoginPage() {
   const navigate = useNavigate()
@@ -52,44 +69,42 @@ function LoginPage() {
   const [problem, setProblem] = useState<LoginProblem>(null)
   const hello = greeting()
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { email: known?.email ?? "", password: "" },
-    validators: { onSubmit: credentials },
+    validators: { onSubmit: known ? knownCredentials : credentials },
     onSubmit: async ({ value }) => {
       setProblem(null)
-      let code: string | undefined
-      let status: number | undefined
-      let needsTwoFactor = false
-      let signedUser: { name: string; email: string; firstName?: string | null } | undefined
-      try {
-        const result = await authClient.signIn.email({
-          email: value.email,
-          password: value.password,
-        })
-        code = result.error?.code
-        status = result.error?.status
-        if (result.error) {
-          setProblem(
-            code === "EMAIL_NOT_VERIFIED"
-              ? "unverified"
-              : status === 429
+      const result = await authClient.signIn.email({ email: value.email, password: value.password })
+      if (result.error) {
+        const { code, status } = authFailureOf(result.error)
+        const kind: LoginProblem =
+          code === "EMAIL_NOT_VERIFIED"
+            ? "unverified"
+            : code === "ACCOUNT_BLOCKED"
+              ? "blocked"
+              : status === 429 || code === "ACCOUNT_TEMPORARILY_LOCKED"
                 ? "too-many"
-                : "credentials",
-          )
+                : status >= 500
+                  ? null
+                  : "credentials"
+        if (kind) {
+          setProblem(kind)
           return
         }
-        const redirect = twoFactorRedirect.safeParse(result.data)
-        needsTwoFactor = redirect.success && redirect.data.twoFactorRedirect === true
-        signedUser = (result.data as { user?: typeof signedUser } | null)?.user
-      } catch {
-        setProblem("network")
-        return
+        throw authError(result.error)
       }
-      if (needsTwoFactor) {
+      const redirect = twoFactorRedirect.safeParse(result.data)
+      if (redirect.success && redirect.data.twoFactorRedirect === true) {
         await navigate({ to: "/two-factor", search: next ? { next } : {} })
         return
       }
-      const { data: orgs } = await authClient.organization.list()
+      const signedUser = (result.data as { user?: { name: string; email: string; firstName?: string | null } } | null)
+        ?.user
+      // Ya entró: si no se pueden leer sus clínicas, la portada decide.
+      const orgs = await authClient.organization
+        .list()
+        .then(({ data }) => data)
+        .catch(() => null)
       if (signedUser) {
         rememberUser({
           email: signedUser.email,
@@ -103,9 +118,12 @@ function LoginPage() {
         window.location.assign(target)
         return
       }
-      await navigate({ to: orgs && orgs.length > 0 ? "/" : "/onboarding" })
+      await navigate({ to: orgs && orgs.length === 0 ? "/onboarding" : "/" })
     },
   })
+  const onSubmit = useFormSubmit(form, { formMessage: authFormMessage })
+  const submitError = useFormSubmitError(form)
+  const typedEmail = useStore(form.store, (state) => state.values.email)
 
   const notMe = () => {
     forgetUser()
@@ -113,6 +131,9 @@ function LoginPage() {
     setProblem(null)
     form.reset({ email: "", password: "" })
   }
+
+  // El aviso de credenciales habla del correo y de la contraseña: los dos quedan marcados.
+  const credentialsWrong = problem === "credentials"
 
   return (
     <AuthSplit
@@ -156,9 +177,7 @@ function LoginPage() {
         )
       }
     >
-      {bloqueada === 1 ? (
-        <AuthAlert>Tu cuenta está bloqueada. Escribe a soporte para revisarla.</AuthAlert>
-      ) : null}
+      {bloqueada === 1 && problem !== "blocked" ? <AuthAlert>{BLOCKED_TEXT}</AuthAlert> : null}
       {oauth2fa === 1 ? (
         <p
           role="alert"
@@ -178,13 +197,7 @@ function LoginPage() {
           </div>
         </div>
       )}
-      <form
-        noValidate
-        onSubmit={(event) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
-      >
+      <form noValidate onSubmit={onSubmit}>
         <FieldGroup className="gap-4">
           {known ? (
             // El gestor de contraseñas necesita el usuario aunque no se muestre.
@@ -197,67 +210,42 @@ function LoginPage() {
               hidden
             />
           ) : (
-            <form.Field name="email">
+            <form.AppField name="email">
               {(field) => (
-                <Field>
-                  <FieldLabel htmlFor="email">Correo</FieldLabel>
-                  <Input
-                    id="email"
-                    aria-invalid={field.state.meta.errors.length > 0 || undefined}
-                    aria-describedby={field.state.meta.errors.length ? "email-error" : undefined}
-                    type="email"
-                    inputMode="email"
-                    autoComplete="username"
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError id="email-error">
-                    {fieldErrorMessages(field.state.meta.errors)[0] ?? null}
-                  </FieldError>
-                </Field>
+                <field.Control label="Correo" id="email">
+                  {(control) => (
+                    <Input
+                      {...control.props}
+                      aria-invalid={control.invalid || credentialsWrong || undefined}
+                      aria-describedby={describedBy(control.describedBy, credentialsWrong)}
+                      type="email"
+                      inputMode="email"
+                      autoComplete="username"
+                      value={field.state.value}
+                      onChange={(event) => {
+                        field.handleChange(event.target.value)
+                        if (credentialsWrong) setProblem(null)
+                      }}
+                    />
+                  )}
+                </field.Control>
               )}
-            </form.Field>
+            </form.AppField>
           )}
-          <form.Field name="password">
-            {(field) => {
-              const fieldError = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  {/* Rejilla: el enlace se ve junto a la etiqueta pero en el teclado va después del campo. */}
-                  <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-2">
-                    <FieldLabel htmlFor="password" className="col-start-1 row-start-1">
-                      Contraseña
-                    </FieldLabel>
-                    <div className="col-span-2 row-start-2">
-                      <PasswordInput
-                        id="password"
-                        value={field.state.value}
-                        onChange={(v) => {
-                          field.handleChange(v)
-                          if (problem === "credentials") setProblem(null)
-                        }}
-                        autoComplete="current-password"
-                        autoFocus={!!known}
-                        invalid={!!fieldError || problem === "credentials"}
-                        describedBy={fieldError || problem ? "password-error" : undefined}
-                      />
-                    </div>
-                    <FieldError id="password-error" className="col-span-2 row-start-3">
-                      {fieldError ?? null}
-                    </FieldError>
-                    <Link
-                      to="/forgot-password"
-                      search={() => ({ email: form.getFieldValue("email") || undefined })}
-                      className="col-start-2 row-start-1 text-sm font-medium text-primary underline"
-                    >
-                      ¿Olvidaste tu contraseña?
-                    </Link>
-                  </div>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <LoginProblemNotice problem={problem} email={form.getFieldValue("email")} />
+          <form.AppField name="password">
+            {() => (
+              <LoginPassword
+                autoFocus={!!known}
+                credentialsWrong={credentialsWrong}
+                onType={() => {
+                  if (credentialsWrong) setProblem(null)
+                }}
+                forgotEmail={typedEmail}
+              />
+            )}
+          </form.AppField>
+          <LoginProblemNotice problem={problem} email={typedEmail} />
+          {submitError ? <AuthAlert>{submitError}</AuthAlert> : null}
           <form.Subscribe selector={(state) => state.isSubmitting}>
             {(isSubmitting) => (
               <SubmitButton type="submit" pending={isSubmitting} className="w-full">
@@ -271,10 +259,77 @@ function LoginPage() {
   )
 }
 
+const BLOCKED_TEXT = "Tu cuenta está bloqueada. Escribe a soporte para revisarla."
+
+/** Suma el aviso de credenciales a lo que ya describe el campo. */
+function describedBy(own: string | undefined, credentialsWrong: boolean): string | undefined {
+  return [own, credentialsWrong ? PROBLEM_ID : null].filter(Boolean).join(" ") || undefined
+}
+
+/**
+ * La contraseña con «¿Olvidaste tu contraseña?» junto a la etiqueta (en el
+ * teclado va después del campo): por eso pinta su propio `Field` con el
+ * estado de `form.AppField`.
+ */
+function LoginPassword({
+  autoFocus,
+  credentialsWrong,
+  onType,
+  forgotEmail,
+}: {
+  autoFocus: boolean
+  credentialsWrong: boolean
+  onType: () => void
+  forgotEmail: string
+}) {
+  const field = useFieldContext<string>()
+  const { control, errors, errorId } = useFieldControl({ id: "password", hasDescription: false })
+  return (
+    <Field data-invalid={control.invalid || credentialsWrong || undefined}>
+      {/* Rejilla: el enlace se ve junto a la etiqueta pero en el teclado va después del campo. */}
+      <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-2">
+        <FieldLabel htmlFor={control.id} className="col-start-1 row-start-1">
+          Contraseña
+        </FieldLabel>
+        <div className="col-span-2 row-start-2">
+          <PasswordInput
+            id={control.id}
+            value={field.state.value}
+            onChange={(next) => {
+              field.handleChange(next)
+              onType()
+            }}
+            onBlur={control.onBlur}
+            autoComplete="current-password"
+            autoFocus={autoFocus}
+            invalid={control.invalid || credentialsWrong}
+            describedBy={describedBy(control.describedBy, credentialsWrong)}
+          />
+        </div>
+        {control.invalid ? (
+          <FieldError
+            id={errorId}
+            className="col-span-2 row-start-3"
+            errors={errors.map((message) => ({ message }))}
+          />
+        ) : null}
+        <Link
+          to="/forgot-password"
+          search={() => ({ email: forgotEmail || undefined })}
+          className="col-start-2 row-start-1 text-sm font-medium text-primary underline"
+        >
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </div>
+    </Field>
+  )
+}
+
 /** Qué pasó al entrar y cómo seguir; el correo sin verificar trae el reenvío ahí mismo. */
 function LoginProblemNotice({ problem, email }: { problem: LoginProblem; email: string }) {
   const [wait, setWait] = useState(0)
   const [sent, setSent] = useState(false)
+  const [resendError, setResendError] = useState<string | null>(null)
   useEffect(() => {
     if (wait <= 0) return
     const t = window.setTimeout(() => setWait((w) => w - 1), 1000)
@@ -284,7 +339,7 @@ function LoginProblemNotice({ problem, email }: { problem: LoginProblem; email: 
   if (!problem) return null
   if (problem === "credentials")
     return (
-      <AuthAlert id="password-error">
+      <AuthAlert id={PROBLEM_ID}>
         El correo o la contraseña no coinciden. Revísalos o{" "}
         <Link
           to="/forgot-password"
@@ -298,7 +353,7 @@ function LoginProblemNotice({ problem, email }: { problem: LoginProblem; email: 
     )
   if (problem === "too-many")
     return (
-      <AuthAlert>
+      <AuthAlert id={PROBLEM_ID}>
         Hiciste varios intentos seguidos. Espera unos minutos o{" "}
         <Link
           to="/forgot-password"
@@ -310,14 +365,9 @@ function LoginProblemNotice({ problem, email }: { problem: LoginProblem; email: 
         .
       </AuthAlert>
     )
-  if (problem === "network")
-    return (
-      <AuthAlert>
-        No pudimos conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.
-      </AuthAlert>
-    )
+  if (problem === "blocked") return <AuthAlert id={PROBLEM_ID}>{BLOCKED_TEXT}</AuthAlert>
   return (
-    <AuthAlert>
+    <AuthAlert id={PROBLEM_ID}>
       <span className="flex flex-col gap-2">
         <span>
           Tu correo aún no está verificado. Abre el enlace que te enviamos{sent ? " de nuevo" : ""}.
@@ -327,16 +377,27 @@ function LoginProblemNotice({ problem, email }: { problem: LoginProblem; email: 
           className="self-start font-semibold underline disabled:no-underline disabled:opacity-60"
           disabled={wait > 0}
           onClick={async () => {
-            await authClient.sendVerificationEmail({
-              email,
-              callbackURL: `${window.location.origin}/`,
-            })
+            setResendError(null)
+            try {
+              const { error } = await authClient.sendVerificationEmail({
+                email,
+                callbackURL: `${window.location.origin}/`,
+              })
+              if (error) {
+                setResendError(authErrorMessage(error))
+                return
+              }
+            } catch {
+              setResendError(AUTH_NETWORK)
+              return
+            }
             setSent(true)
             setWait(60)
           }}
         >
           {wait > 0 ? `Reenviar en ${countdown(wait)}` : "Reenviar el enlace"}
         </button>
+        {resendError ? <span>{resendError}</span> : null}
       </span>
     </AuthAlert>
   )

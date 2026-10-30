@@ -1,4 +1,4 @@
-import { Button, toast } from "@odentia/ui"
+import { Button } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
 import { useState } from "react"
 import { DemoFields, DemoStage, demoSubmit, useDemoWizard } from "../story-fixtures.js"
@@ -9,7 +9,8 @@ import { FormPanel } from "./form-panel.js"
  * en producción lo aporta `MasterDetail` según `panelSize`; aquí cada story
  * fija el suyo para comparar compacto, dos columnas y wizard.
  *
- * El feedback de guardado es por toast (éxito y error), como en el platform.
+ * Guardar bien se confirma con un toast. Un error se dice en el formulario: el
+ * de un campo junto a él (`useAppForm`) y lo demás junto a los botones.
  */
 const meta = {
   title: "Patrones/FormPanel",
@@ -129,7 +130,6 @@ export const FalloDeGuardado: Story = {
           onSubmit={(event) => {
             event.preventDefault()
             setError("No se pudo guardar: la sesión expiró.")
-            toast.error("No se pudo guardar. Inténtalo de nuevo.")
           }}
         >
           <DemoFields />

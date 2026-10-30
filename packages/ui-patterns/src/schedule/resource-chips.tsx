@@ -2,7 +2,8 @@
  * Fichas de recurso: de quién es la agenda que se está viendo. Una fila que se
  * desplaza de lado, con las iniciales de color de cada profesional o unidad dental.
  * Es la forma de cambiar de recurso en teléfono, donde solo cabe uno, y de
- * elegir «con quién» al reservar.
+ * elegir «con quién» al reservar. No pinta etiqueta: en un formulario la pone la
+ * pantalla (`FieldSet` + `FieldLegend` o `field.Group`); suelto, `aria-label`.
  */
 
 import { cn } from "@odentia/ui"
@@ -17,8 +18,15 @@ export interface ScheduleResourceChipsProps {
   onChange: (id: string | null) => void
   /** Rótulo de la ficha que no elige a nadie («Todos», «Cualquiera»). */
   allLabel?: string
-  /** Nombre accesible del grupo («Profesionales»). */
-  label: string
+  /** Nombre accesible del grupo cuando no hay leyenda que lo nombre («Profesionales»). */
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  /** Del grupo. */
+  id?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  /** Al salir el foco del grupo. */
+  onBlur?: () => void
   /** En formularios las fichas saltan de línea en vez de desplazarse. */
   wrap?: boolean
   /** Texto de la ficha cuando el nombre completo no cabe («Ana»). Las iniciales no cambian. */
@@ -31,16 +39,33 @@ export function ScheduleResourceChips({
   value,
   onChange,
   allLabel,
-  label,
+  "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
+  id,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
   wrap = false,
   formatLabel,
   className,
 }: ScheduleResourceChipsProps) {
-  const chip = "flex h-11 shrink-0 items-center gap-2 rounded-full border text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+  const chip = "flex h-11 shrink-0 items-center gap-2 rounded-full border text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring aria-invalid:border-destructive"
   const on = "border-primary bg-primary-soft font-bold text-primary-soft-foreground ring-1 ring-primary"
   const off = "border-border bg-card font-semibold hover:border-primary"
   return (
     <fieldset
+      id={id}
+      aria-label={ariaLabel}
+      aria-labelledby={labelledBy}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      onBlur={
+        onBlur
+          ? (event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
       className={cn(
         "flex min-w-0 gap-2 border-0 p-0",
         wrap
@@ -49,11 +74,11 @@ export function ScheduleResourceChips({
         className,
       )}
     >
-      <legend className="sr-only">{label}</legend>
       {allLabel ? (
         <button
           type="button"
           aria-pressed={value === null}
+          aria-invalid={invalid || undefined}
           onClick={() => onChange(null)}
           className={cn(chip, "px-4", value === null ? on : off)}
         >
@@ -67,6 +92,7 @@ export function ScheduleResourceChips({
             key={resource.id}
             type="button"
             aria-pressed={chosen}
+            aria-invalid={invalid || undefined}
             title={resource.warning ?? (formatLabel ? resource.label : undefined)}
             onClick={() => onChange(resource.id)}
             className={cn(chip, "pr-3.5 pl-1.5", chosen ? on : off)}

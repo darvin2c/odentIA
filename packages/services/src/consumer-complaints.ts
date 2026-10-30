@@ -13,7 +13,7 @@ import { type MailTemplate, renderEmail } from "@odentia/mail"
 import { and, asc, count, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm"
 import { z } from "zod"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { issueFields, notFound, ServiceError, validation } from "./errors.js"
 import { addPeruBusinessDays, limaDate, peruBusinessDaysBetween } from "./peru-business-days.js"
 
 /**
@@ -674,7 +674,7 @@ export async function respondConsumerComplaint(
   assertStaff(actor)
   const parsed = consumerComplaintResponseSchema.safeParse(input)
   if (!parsed.success) {
-    throw validation(parsed.error.issues[0]?.message ?? "Revisa la respuesta")
+    throw validation(parsed.error.issues[0]?.message ?? "Revisa la respuesta", issueFields(parsed.error.issues))
   }
   if (!UUID.test(id)) throw notFound("Hoja de reclamación")
   const updated = await tx

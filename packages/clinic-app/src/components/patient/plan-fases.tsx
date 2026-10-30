@@ -1,24 +1,13 @@
 import {
   diagnosisCodeLabel,
 } from "@odentia/clinical"
-import {
-  Badge,
-  Button,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { Badge, Button } from "@odentia/ui"
+import { FormDrawer, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowDown, ArrowUp } from "lucide-react"
 import { useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { fetchTreatmentPlans, planDecisionLabel } from "../../lib/budgets"
 import { NEXT_ACTION_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
@@ -137,8 +126,7 @@ function PlanPhasesGroup({
       setError(null)
       return queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
     },
-    onError: (cause) =>
-      setError(cause instanceof ApiError ? (cause.shape.message ?? cause.message) : String(cause)),
+    onError: (cause) => setError(submitErrorMessage(cause)),
   })
 
   const active = items.filter((item) => !["cancelado", "reemplazado"].includes(item.status))
@@ -296,92 +284,69 @@ function PlanningDrawer({
   item: PlanItem
   onClose: () => void
 }) {
-  const uid = useId()
   const queryClient = useQueryClient()
   const { phases, defaultPhase } = productUi().plan
-  const [phase, setPhase] = useState<string>(item.phase ?? defaultPhase)
-  const [sessions, setSessions] = useState(String(item.plannedSessions ?? 1))
   const done = item.sessionsDone ?? 0
-  const sessionsNumber = Number(sessions)
-  const sessionsValid =
-    Number.isInteger(sessionsNumber) && sessionsNumber >= Math.max(1, done) && sessionsNumber <= 60
+  const least = Math.max(1, done)
+  const sessionsRule =
+    done > 0 ? `Ya se hicieron ${plural(done, "sesión", "sesiones")}: no pueden preverse menos.` : "Entre 1 y 60."
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (body: { phase: string; plannedSessions: number }) =>
       apiFetch(`/api/patients/${patientId}/plan/items/${item.id}/planning`, {
         method: "PATCH",
-        body: JSON.stringify({ phase, plannedSessions: sessionsNumber }),
+        body: JSON.stringify(body),
       }),
-    onSuccess: async () => {
+  })
+  const form = useAppForm({
+    defaultValues: { phase: item.phase ?? defaultPhase, plannedSessions: String(item.plannedSessions ?? 1) },
+    validators: {
+      onSubmit: z.object({
+        phase: z.string().refine((value) => phases.some((option) => option.key === value), "Elige una fase."),
+        plannedSessions: z.string().refine((value) => {
+          const sessions = /^\d{1,2}$/.test(value.trim()) ? Number(value.trim()) : Number.NaN
+          return Number.isInteger(sessions) && sessions >= least && sessions <= 60
+        }, `Escribe un número de sesiones entre ${least} y 60.`),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({ phase: value.phase, plannedSessions: Number(value.plannedSessions.trim()) })
       await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
       onClose()
     },
   })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open
       title="Planificar tratamiento"
       description={`${item.title}${site(item)}`}
       onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (sessionsValid) save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty={phase !== (item.phase ?? defaultPhase) || sessions !== String(item.plannedSessions ?? 1)}
-      submitDisabled={!sessionsValid}
       submitLabel="Guardar planificación"
-      error={
-        save.error instanceof ApiError
-          ? (save.error.shape.message ?? "No se pudo guardar.")
-          : save.error
-            ? "No se pudo guardar."
-            : null
-      }
     >
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`${uid}-phase`}>Fase</FieldLabel>
-          <Select
-            value={phase}
-            items={Object.fromEntries(phases.map((option) => [option.key, option.label]))}
-            onValueChange={(value) => {
-              if (value) setPhase(value)
-            }}
-          >
-            <SelectTrigger id={`${uid}-phase`}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {phases.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldDescription>
-            Al cambiar de fase, el tratamiento pasa al final de la nueva.
-          </FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-sessions`}>Sesiones previstas</FieldLabel>
-          <Input
-            id={`${uid}-sessions`}
-            type="number"
-            inputMode="numeric"
-            min={Math.max(1, done)}
-            max={60}
-            className="w-28"
-            value={sessions}
-            aria-invalid={!sessionsValid}
-            onChange={(event) => setSessions(event.target.value)}
-          />
-          <FieldDescription>
-            {done > 0
-              ? `Ya se hicieron ${plural(done, "sesión", "sesiones")}: no pueden preverse menos.`
-              : "Entre 1 y 60."}
-          </FieldDescription>
-        </Field>
+        <form.AppField name="phase">
+          {(field) => (
+            <field.SelectField
+              label="Fase"
+              description="Al cambiar de fase, el tratamiento pasa al final de la nueva."
+              options={phases.map((option) => ({ value: option.key, label: option.label }))}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="plannedSessions">
+          {(field) => (
+            <field.TextField
+              label="Sesiones previstas"
+              description={sessionsRule}
+              type="number"
+              inputMode="numeric"
+              min={least}
+              max={60}
+              inputClassName="w-28"
+            />
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )

@@ -25,7 +25,9 @@ const plain: PortalBudget = {
   acceptedByName: null,
   decisionNote: null,
   stateText: "Enviado · espera respuesta",
-  options: [{ id: "o1", label: "Opción A", isRecommended: true, decision: "pendiente", totalCents: 65000 }],
+  options: [
+    { id: "o1", label: "Opción A", isRecommended: true, decision: "pendiente", totalCents: 65000 },
+  ],
   items: [
     {
       planItemId: "i1",
@@ -48,7 +50,9 @@ const plain: PortalBudget = {
 }
 
 const html = (budget: PortalBudget) =>
-  renderToStaticMarkup(<BudgetResponder budget={budget} pending={false} error={null} onAnswer={() => {}} />)
+  renderToStaticMarkup(
+    <BudgetResponder budget={budget} pending={false} error={null} onAnswer={() => {}} />,
+  )
 
 describe("BudgetResponder", () => {
   it("sin explicación se ve como antes: nombre, precio y su respuesta, sin secciones vacías", () => {

@@ -70,7 +70,10 @@ export interface OrgProfile {
 /** Las dos cifras de impuesto que valen hoy para la clínica (o null si su país no tiene impuesto que separar). */
 export function orgTaxesOf(profile: OrgProfile | null | undefined): OrgTaxes | null {
   if (!profile) return null
-  const rate = (category: string | null | undefined, bps: number | null | undefined): TaxRate | null =>
+  const rate = (
+    category: string | null | undefined,
+    bps: number | null | undefined,
+  ): TaxRate | null =>
     category && bps != null ? { category: category as TaxCategory, rateBps: bps } : null
   return resolveOrgTaxes(
     profile.countryCode,
@@ -164,9 +167,13 @@ export function useClinicalProfile(): ClinicalCountryProfile {
  * La lista de diagnósticos con la que trabaja la clínica (decisión 26): la
  * guardada o, sin ella, la que recomienda su país. La misma regla que el servidor.
  */
-export function effectiveDiagnosisSystem(profile: Pick<OrgProfile, "diagnosisSystem" | "countryCode"> | null | undefined): DiagnosisSystemInfo {
+export function effectiveDiagnosisSystem(
+  profile: Pick<OrgProfile, "diagnosisSystem" | "countryCode"> | null | undefined,
+): DiagnosisSystemInfo {
   const saved = profile?.diagnosisSystem
-  const key = isDiagnosisSystem(saved) ? saved : clinicalProfileFor(profile?.countryCode).diagnosis.recommended
+  const key = isDiagnosisSystem(saved)
+    ? saved
+    : clinicalProfileFor(profile?.countryCode).diagnosis.recommended
   return DIAGNOSIS_SYSTEM_INFO[key]
 }
 
@@ -176,11 +183,16 @@ export function useDiagnosisSystem(): DiagnosisSystemInfo {
 }
 
 /** Cambia la lista de la clínica: los diagnósticos nuevos se eligen en ella; nada se reescribe. */
-export async function saveDiagnosisSystem(diagnosisSystem: string): Promise<{ diagnosisSystem: string }> {
-  const { data } = await apiFetch<{ data: { diagnosisSystem: string } }>("/api/org-profile/diagnosis-system", {
-    method: "PUT",
-    body: JSON.stringify({ diagnosisSystem }),
-  })
+export async function saveDiagnosisSystem(
+  diagnosisSystem: string,
+): Promise<{ diagnosisSystem: string }> {
+  const { data } = await apiFetch<{ data: { diagnosisSystem: string } }>(
+    "/api/org-profile/diagnosis-system",
+    {
+      method: "PUT",
+      body: JSON.stringify({ diagnosisSystem }),
+    },
+  )
   return data
 }
 

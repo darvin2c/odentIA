@@ -4,28 +4,73 @@
  * precios; el dictado sigue agregando tratamientos al plan.
  */
 import { formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { Button, Checkbox, cn, Field, FieldDescription, FieldGroup, FieldLabel, Input } from "@odentia/ui"
-import { FormDrawer, SubmitButton } from "@odentia/ui-patterns"
-import { type ReactNode, useId, useState } from "react"
+import { Button, Checkbox, cn, FieldGroup, FieldLabel } from "@odentia/ui"
+import {
+  applySubmitError,
+  clearSubmitErrors,
+  FormDrawer,
+  focusFirstInvalid,
+  SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { type ReactNode, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import type { AdjustBudgetLineBody, BudgetLine, BudgetOption, BudgetWithTotals } from "../../../lib/budgets"
 import type { PlanItem } from "../../../lib/patients"
 import type { Promotion } from "../../../lib/promotions"
 import {
-  billingNote,
   BudgetTotals,
+  billingNote,
   hasFixedPromotion,
   isBelowTariff,
   isSessionLine,
   type Money,
-  mutationMessage,
   sessionExplanation,
   treatmentSiteLabel,
 } from "./budget-parts"
 
-interface LineEdit {
-  price?: string
-  sessions?: string
+/** Lo escrito de una línea, con el nombre que tiene en el cuerpo de `…/lines`. */
+interface DraftRow {
+  planItemId: string
+  priceCents: string
+  sessionsPlanned: string
 }
+
+interface DraftValues {
+  lines: DraftRow[]
+  /** Motivo común del ajuste de precio. */
+  reason: string
+}
+
+interface DraftIssue {
+  path: Array<string | number>
+  message: string
+}
+
+/** Lo que se guarda (`lines`), la fila del formulario de cada uno (`at`) y lo que falta corregir. */
+interface DraftPatch {
+  lines: AdjustBudgetLineBody[]
+  at: number[]
+  issues: DraftIssue[]
+}
+
+const draftShape = z.object({
+  lines: z.array(z.object({ planItemId: z.string(), priceCents: z.string(), sessionsPlanned: z.string() })),
+  reason: z.string(),
+})
+
+const discountSchema = z.object({
+  percent: z
+    .string()
+    .trim()
+    .refine((text) => /^\d{1,3}$/.test(text) && Number(text) >= 1 && Number(text) <= 100, "Escribe un porcentaje del 1 al 100."),
+  reason: z.string().trim().min(1, "Escribe el motivo del descuento.").max(500, "Escribe como mucho 500 caracteres."),
+})
 
 /**
  * Precio de referencia de una línea: su tarifa o, con promoción «desde», el
@@ -48,7 +93,8 @@ function lineReference(line: BudgetLine, promotions: Promotion[]): number | null
  * promociones ofrecidas y un motivo común para lo que baja de su referencia.
  * Lo escrito se conserva hasta guardar; aplicar o quitar una promoción se
  * guarda en el momento. Con varias opciones, cada una se edita aparte: sus
- * líneas, su total y sus tratamientos.
+ * líneas, su total y sus tratamientos. Cada error se dice en la línea y el
+ * dato que hay que corregir, también los del servidor (`lines[i].priceCents`).
  */
 export function BudgetDraftEditor({
   budget,
@@ -85,27 +131,19 @@ export function BudgetDraftEditor({
   addable: PlanItem[]
   addItems: (itemIds: string[]) => Promise<unknown>
   removeItems: (itemIds: string[]) => Promise<unknown>
-  onDeliver: (pendingLines: AdjustBudgetLineBody[]) => void
+  /** Guarda lo pendiente y entrega; rechaza si lo pendiente no se pudo guardar (se dice en cada línea). */
+  onDeliver: (pendingLines: AdjustBudgetLineBody[]) => Promise<void>
   actionAlert: ReactNode
   /** «Enviar por WhatsApp»: recibe cómo guardar antes lo escrito. */
   sendAction?: (beforeSend: () => Promise<void>) => ReactNode
   secondaryActions: ReactNode
 }): React.JSX.Element {
-  const uid = useId()
-  const [edits, setEdits] = useState<Record<string, LineEdit>>({})
-  /** `null`: el motivo no se ha tocado y vale el que ya tienen las líneas. */
-  const [reason, setReason] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  /** Aplicar o quitar una promoción, incluir o quitar un tratamiento: la acción en curso. */
   const [pending, setPending] = useState<string | null>(null)
-
+  /** El rechazo de una acción suelta, junto a su línea (`planItemId`) o a «Otros tratamientos» (`add`). */
+  const [actionError, setActionError] = useState<{ at: string; message: string } | null>(null)
   const [discountOpen, setDiscountOpen] = useState(false)
-  const [discountPercent, setDiscountPercent] = useState("")
-  const [discountReason, setDiscountReason] = useState("")
-  const [discountError, setDiscountError] = useState<string | null>(null)
-
-  const savedReason = lines.find((line) => line.priceReason)?.priceReason ?? ""
-  const reasonText = reason ?? savedReason
-  const reasonTouched = reason !== null
 
   const inputValue = (cents: number | null, currency: string): string => {
     if (cents == null) return ""
@@ -115,57 +153,63 @@ export function BudgetDraftEditor({
       return ""
     }
   }
-  const setEdit = (planItemId: string, patch: LineEdit) =>
-    setEdits((current) => ({ ...current, [planItemId]: { ...current[planItemId], ...patch } }))
-  /** Tras cambiar el precio en el servidor, lo escrito para ese precio ya no vale. */
-  const dropPriceEdits = (planItemIds: string[]) =>
-    setEdits((current) => {
-      const next = { ...current }
-      for (const id of planItemIds) {
-        if (next[id]) next[id] = { sessions: next[id].sessions }
-      }
-      return next
-    })
+  const savedVisits = (line: BudgetLine): string => (line.sessionsPlanned == null ? "" : String(line.sessionsPlanned))
+  const savedReason = lines.find((line) => line.priceReason)?.priceReason ?? ""
+  /** Lo guardado, como se escribe en el formulario. */
+  const saved: DraftValues = {
+    lines: lines.map((line) => ({
+      planItemId: line.planItemId,
+      priceCents: inputValue(line.priceCents, line.currency),
+      sessionsPlanned: savedVisits(line),
+    })),
+    reason: savedReason,
+  }
 
-  /** Lo que cambió frente a lo guardado, o el motivo por el que aún no se puede guardar. */
-  const buildPatch = (): { lines: AdjustBudgetLineBody[] } | { error: string } => {
-    const reasonValue = reasonText.trim()
+  /** Lo que cambió frente a lo guardado y lo que aún impide guardarlo, cada cosa en su campo. */
+  const analyze = (values: DraftValues): DraftPatch => {
+    const reasonValue = values.reason.trim()
+    const reasonTouched = values.reason !== savedReason
     const changes: AdjustBudgetLineBody[] = []
+    const at: number[] = []
+    const issues: DraftIssue[] = []
+    if (reasonValue.length > 500) issues.push({ path: ["reason"], message: "Escribe como mucho 500 caracteres." })
     for (const line of lines) {
-      const edit = edits[line.planItemId] ?? {}
+      const index = values.lines.findIndex((row) => row.planItemId === line.planItemId)
+      const row = values.lines[index]
+      if (!row) continue
       const body: AdjustBudgetLineBody = { planItemId: line.planItemId, optionId: option.id }
       let changed = false
       let price = line.priceCents
+      const visitsText = row.sessionsPlanned.trim()
+      const visitsEdited = isSessionLine(line) && visitsText !== savedVisits(line)
 
-      if (edit.price !== undefined && !hasFixedPromotion(line)) {
-        const text = edit.price.trim()
+      if (!hasFixedPromotion(line)) {
+        const text = row.priceCents.trim()
         if (text === "") {
-          if (line.priceCents != null) {
-            return { error: `Escribe el precio acordado de «${line.title}».` }
+          // Sin precio no se guarda nada de la línea: tampoco sus visitas.
+          if (line.priceCents != null || visitsEdited) {
+            issues.push({ path: ["lines", index, "priceCents"], message: "Escribe el precio acordado." })
           }
-        } else {
-          let parsed: number
+        } else if (text !== inputValue(line.priceCents, line.currency)) {
           try {
-            parsed = parseMoney(text, line.currency, locale)
+            const parsed = parseMoney(text, line.currency, locale)
+            if (parsed !== line.priceCents) {
+              body.priceCents = parsed
+              changed = true
+            }
+            price = parsed
           } catch (err) {
             const detail = err instanceof Error ? err.message : "Importe inválido"
-            return { error: `«${line.title}»: ${detail}.` }
+            issues.push({ path: ["lines", index, "priceCents"], message: `${detail}.` })
           }
-          if (parsed !== line.priceCents) {
-            body.priceCents = parsed
-            changed = true
-          }
-          price = parsed
         }
       }
 
-      if (edit.sessions !== undefined && isSessionLine(line)) {
-        const text = edit.sessions.trim()
-        const visits = /^\d{1,3}$/.test(text) ? Number(text) : Number.NaN
+      if (visitsEdited) {
+        const visits = /^\d{1,3}$/.test(visitsText) ? Number(visitsText) : Number.NaN
         if (!Number.isInteger(visits) || visits < 1 || visits > 200) {
-          return { error: `Las visitas previstas de «${line.title}» van de 1 a 200.` }
-        }
-        if (visits !== line.sessionsPlanned) {
+          issues.push({ path: ["lines", index, "sessionsPlanned"], message: "Escribe de 1 a 200 visitas." })
+        } else if (visits !== line.sessionsPlanned) {
           body.sessionsPlanned = visits
           changed = true
         }
@@ -185,11 +229,13 @@ export function BudgetDraftEditor({
           const wanted = reasonTouched ? reasonValue : (line.priceReason ?? reasonValue)
           if (!wanted) {
             const floor = line.promotionId ? "del mínimo de la promoción" : "del precio normal"
-            return {
-              error: `Escribe el motivo del ajuste: «${line.title}» queda por debajo ${floor}.`,
+            if (!issues.some((issue) => issue.path[0] === "reason")) {
+              issues.push({
+                path: ["reason"],
+                message: `Escribe el motivo del ajuste: «${line.title}» queda por debajo ${floor}.`,
+              })
             }
-          }
-          if (wanted !== (line.priceReason ?? "")) {
+          } else if (wanted !== (line.priceReason ?? "")) {
             body.reason = wanted
             changed = true
           }
@@ -199,122 +245,163 @@ export function BudgetDraftEditor({
         }
       }
 
-      if (changed) changes.push(body)
+      if (changed) {
+        changes.push(body)
+        at.push(index)
+      }
     }
-    return { lines: changes }
+    return { lines: changes, at, issues }
   }
 
-  const patch = buildPatch()
-  const dirty = "error" in patch || patch.lines.length > 0
-  const blocked = disabled || pending != null
+  /** La fila del formulario de cada línea del último envío: el servidor la nombra por su lugar en el cuerpo. */
+  const sentAt = useRef<number[]>([])
+  const fieldMap = (key: string): string | undefined => {
+    const match = /^lines\[(\d+)\]\.(\w+)$/.exec(key)
+    if (!match) return undefined
+    if (match[2] === "reason") return "reason"
+    const index = sentAt.current[Number(match[1])]
+    if (index === undefined) return ""
+    if (match[2] === "priceCents" || match[2] === "promotionFinalPriceCents") return `lines[${index}].priceCents`
+    if (match[2] === "sessionsPlanned") return `lines[${index}].sessionsPlanned`
+    return ""
+  }
+
+  // Los valores de partida se fijan una vez; lo que cambia en el servidor entra por `rebase`.
+  const [initial] = useState<DraftValues>(saved)
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: {
+      onSubmit: draftShape.superRefine((value, ctx) => {
+        for (const issue of analyze(value).issues) ctx.addIssue({ code: "custom", path: issue.path, message: issue.message })
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      const patch = analyze(value)
+      if (patch.lines.length === 0) return
+      sentAt.current = patch.at
+      await saveLines(patch.lines)
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+  const saving = useStore(form.store, (state) => state.isSubmitting)
+  const formError = useFormSubmitError(form)
+
+  // Al cambiar lo guardado (guardar, promoción, descuento, otra línea), cada
+  // campo toma el valor nuevo salvo lo que se escribió aquí sobre un valor
+  // que no cambió en el servidor.
+  const savedKey = JSON.stringify(saved)
+  const lastSaved = useRef(saved)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `saved` se rehace en cada render; reaplica lo guardado solo cuando cambia su contenido (`savedKey`), no en cada render.
+  useEffect(() => {
+    const before = lastSaved.current
+    lastSaved.current = saved
+    const current = form.state.values
+    const keep = (now: string | undefined, was: string | undefined, next: string): string =>
+      now !== undefined && was !== undefined && now !== was && was === next ? now : next
+    const rows = saved.lines.map((row) => {
+      const was = before.lines.find((entry) => entry.planItemId === row.planItemId)
+      const now = current.lines.find((entry) => entry.planItemId === row.planItemId)
+      return {
+        planItemId: row.planItemId,
+        priceCents: keep(now?.priceCents, was?.priceCents, row.priceCents),
+        sessionsPlanned: keep(now?.sessionsPlanned, was?.sessionsPlanned, row.sessionsPlanned),
+      }
+    })
+    const quiet = { dontUpdateMeta: true, dontValidate: true }
+    form.setFieldValue("lines", rows, quiet)
+    form.setFieldValue("reason", keep(current.reason, before.reason, saved.reason), quiet)
+  }, [savedKey])
+
+  const patch = analyze(values)
+  const dirty = patch.issues.length > 0 || patch.lines.length > 0
+
+  const [discountDefaults, setDiscountDefaults] = useState({ percent: "", reason: "" })
+  const discountForm = useAppForm({
+    defaultValues: discountDefaults,
+    validators: { onSubmit: discountSchema },
+    onSubmit: async ({ value }) => {
+      const percent = Number(value.percent.trim())
+      const motive = value.reason.trim()
+      // El porcentaje se reparte aquí, sobre la tarifa de cada línea y en enteros
+      // de la unidad menor de la moneda; el servidor guarda ese precio con el
+      // motivo común y devuelve los totales.
+      const discounted: AdjustBudgetLineBody[] = lines.flatMap((line) => {
+        const base = line.tariffPriceCents ?? line.priceCents
+        if (line.promotionId != null || base == null) return []
+        return [
+          {
+            planItemId: line.planItemId,
+            optionId: option.id,
+            priceCents: Math.round((base * (100 - percent)) / 100),
+            reason: motive,
+          },
+        ]
+      })
+      if (discounted.length === 0) {
+        throw new Error("Ningún tratamiento admite el descuento: todos tienen una promoción o les falta el precio.")
+      }
+      await saveLines(discounted)
+      setDiscountOpen(false)
+    },
+  })
+  // Del descuento solo el motivo es un campo: lo demás del servidor se dice junto a los botones.
+  const discountSurface = useFormSurface(discountForm, {
+    fieldMap: (key) => (/^lines\[\d+\]\.reason$/.test(key) ? "reason" : ""),
+  })
+
+  const blocked = disabled || pending != null || saving || discountSurface.isSubmitting
   // En una revisión los tratamientos se eligen al crearla (misma regla del servidor).
   const canChangeItems = !budget.supersedesBudgetId
 
-  const handleSave = async () => {
-    if ("error" in patch) {
-      setError(patch.error)
-      return
-    }
-    if (patch.lines.length === 0) return
-    setError(null)
-    setPending("save")
-    try {
-      await saveLines(patch.lines)
-      setEdits({})
-      setReason(null)
-    } catch (err) {
-      setError(mutationMessage(err))
-    } finally {
-      setPending(null)
-    }
-  }
-
+  /**
+   * Imprimir y entregar: si algo de lo escrito no vale, se dice en su campo y
+   * no se entrega. La pestaña del PDF se abre dentro del clic (después, el
+   * navegador la bloquea), por eso lo escrito se comprueba aquí sin esperar.
+   */
   const handleDeliver = () => {
-    if ("error" in patch) {
-      setError(patch.error)
+    const current = analyze(form.state.values)
+    if (current.issues.length > 0) {
+      void submitForm(form, { fieldMap, root: rootRef.current })
       return
     }
-    setError(null)
-    onDeliver(patch.lines)
+    clearSubmitErrors(form)
+    sentAt.current = current.at
+    onDeliver(current.lines).catch((err: unknown) => {
+      applySubmitError(form, err, { fieldMap })
+      focusFirstInvalid(rootRef.current)
+    })
   }
 
-  /** Antes de enviar se guarda lo escrito; si algo no se puede guardar, no se envía. */
+  /** Antes de enviar se guarda lo escrito; si algo no se puede guardar, se dice en su campo y no se envía. */
   const saveBeforeSend = async () => {
-    if ("error" in patch) {
-      setError(patch.error)
-      throw new Error(patch.error)
-    }
-    if (patch.lines.length === 0) return
-    await saveLines(patch.lines)
-    setEdits({})
-    setReason(null)
+    const ok = await submitForm(form, { fieldMap, root: rootRef.current })
+    if (!ok) throw new Error("Corrige lo marcado en el borrador antes de enviarlo.")
   }
 
-  /** Aplicar o quitar una promoción: se guarda en el momento, línea por línea. */
-  const runPromotion = async (key: string, body: AdjustBudgetLineBody) => {
-    setError(null)
+  /** Una acción que se guarda en el momento; su rechazo se dice junto a ella. */
+  const runAction = async (key: string, at: string, action: () => Promise<unknown>) => {
+    setActionError(null)
     setPending(key)
     try {
-      await saveLines([body])
-      dropPriceEdits([body.planItemId])
+      await action()
     } catch (err) {
-      setError(mutationMessage(err))
+      setActionError({ at, message: submitErrorMessage(err) })
     } finally {
       setPending(null)
     }
   }
 
-  const submitDiscount = async () => {
-    const text = discountPercent.trim()
-    const percent = /^\d{1,3}$/.test(text) ? Number(text) : Number.NaN
-    if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
-      setDiscountError("Escribe un porcentaje del 1 al 100.")
-      return
-    }
-    const motive = discountReason.trim()
-    if (!motive) {
-      setDiscountError("Escribe el motivo del descuento.")
-      return
-    }
-    // El porcentaje se reparte aquí, sobre la tarifa de cada línea y en enteros
-    // de la unidad menor de la moneda; el servidor guarda ese precio con el
-    // motivo común y devuelve los totales.
-    const discounted: AdjustBudgetLineBody[] = lines.flatMap((line) => {
-      const base = line.tariffPriceCents ?? line.priceCents
-      if (line.promotionId != null || base == null) return []
-      return [
-        {
-          planItemId: line.planItemId,
-          optionId: option.id,
-          priceCents: Math.round((base * (100 - percent)) / 100),
-          reason: motive,
-        },
-      ]
-    })
-    if (discounted.length === 0) {
-      setDiscountError(
-        "Ningún tratamiento admite el descuento: todos tienen una promoción o les falta el precio.",
-      )
-      return
-    }
-    setDiscountError(null)
-    setPending("discount")
-    try {
-      await saveLines(discounted)
-      dropPriceEdits(discounted.map((line) => line.planItemId))
-      setReason(null)
-      setDiscountOpen(false)
-    } catch (err) {
-      setDiscountError(mutationMessage(err))
-    } finally {
-      setPending(null)
-    }
+  const openDiscount = () => {
+    const next = { percent: "", reason: form.state.values.reason }
+    setDiscountDefaults(next)
+    discountForm.reset(next)
+    setDiscountOpen(true)
   }
 
   const note = sessionExplanation(lines, money)
 
   return (
-    <>
+    <div ref={rootRef} className="contents">
       <div className="flex flex-col rounded-xl border">
         <div
           aria-hidden="true"
@@ -326,7 +413,7 @@ export function BudgetDraftEditor({
         </div>
         <ul aria-label="Tratamientos del presupuesto" className="flex flex-col divide-y">
           {lines.map((line) => {
-            const edit = edits[line.planItemId] ?? {}
+            const index = values.lines.findIndex((row) => row.planItemId === line.planItemId)
             const fixed = hasFixedPromotion(line)
             const session = isSessionLine(line)
             const below = isBelowTariff(line)
@@ -346,7 +433,7 @@ export function BudgetDraftEditor({
               : `Precio acordado de ${line.title}`
             return (
               <li key={line.id} className="flex flex-col gap-2 px-3 py-3">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1fr)_6rem_8rem]">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1fr)_6rem_8rem]">
                   <div className="flex min-w-0 items-start gap-3">
                     {/* Casilla de los tableros: desmarcarla quita el tratamiento del borrador. */}
                     {canChangeItems ? (
@@ -357,17 +444,9 @@ export function BudgetDraftEditor({
                         aria-label={`Incluir ${line.title}`}
                         onCheckedChange={(next) => {
                           if (next === true) return
-                          setError(null)
-                          setPending(`drop:${line.planItemId}`)
-                          removeItems([line.planItemId])
-                            .then(() =>
-                              setEdits((current) => {
-                                const { [line.planItemId]: _gone, ...rest } = current
-                                return rest
-                              }),
-                            )
-                            .catch((err: unknown) => setError(mutationMessage(err)))
-                            .finally(() => setPending(null))
+                          void runAction(`drop:${line.planItemId}`, line.planItemId, () =>
+                            removeItems([line.planItemId]),
+                          )
                         }}
                       />
                     ) : null}
@@ -408,43 +487,37 @@ export function BudgetDraftEditor({
                     <span className="justify-self-end text-right font-semibold tabular-nums">
                       {money.plain(line.priceCents, line.currency)}
                     </span>
-                  ) : (
-                    <Input
-                      aria-label={priceLabel}
-                      inputMode="decimal"
-                      autoComplete="off"
-                      className="w-28 justify-self-end text-right font-semibold tabular-nums"
-                      disabled={blocked}
-                      value={edit.price ?? inputValue(line.priceCents, line.currency)}
-                      onChange={(event) =>
-                        setEdit(line.planItemId, { price: event.currentTarget.value })
-                      }
-                    />
-                  )}
+                  ) : index >= 0 ? (
+                    <form.AppField name={`lines[${index}].priceCents`}>
+                      {(field) => (
+                        <field.TextField
+                          label={priceLabel}
+                          hideLabel
+                          inputMode="decimal"
+                          autoComplete="off"
+                          className="w-32 justify-self-end text-right"
+                          inputClassName="w-28 self-end text-right font-semibold tabular-nums"
+                          disabled={blocked}
+                        />
+                      )}
+                    </form.AppField>
+                  ) : null}
                 </div>
 
-                {session ? (
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                    <FieldLabel
-                      htmlFor={`${uid}-visits-${line.id}`}
-                      className="text-sm text-muted-foreground"
-                    >
-                      Visitas previstas
-                    </FieldLabel>
-                    <Input
-                      id={`${uid}-visits-${line.id}`}
-                      inputMode="numeric"
-                      autoComplete="off"
-                      className="w-16 text-center font-semibold tabular-nums"
-                      disabled={blocked}
-                      value={
-                        edit.sessions ??
-                        (line.sessionsPlanned == null ? "" : String(line.sessionsPlanned))
-                      }
-                      onChange={(event) =>
-                        setEdit(line.planItemId, { sessions: event.currentTarget.value })
-                      }
-                    />
+                {session && index >= 0 ? (
+                  <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                    <form.AppField name={`lines[${index}].sessionsPlanned`}>
+                      {(field) => (
+                        <field.TextField
+                          label="Visitas previstas"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          className="w-auto"
+                          inputClassName="w-16 text-center font-semibold tabular-nums"
+                          disabled={blocked}
+                        />
+                      )}
+                    </form.AppField>
                     <span className="ml-auto text-sm">
                       <span className="text-muted-foreground">Total de la línea </span>
                       <span className="font-semibold tabular-nums">
@@ -468,11 +541,9 @@ export function BudgetDraftEditor({
                         pending={pending === `remove:${line.planItemId}`}
                         disabled={blocked}
                         onClick={() =>
-                          void runPromotion(`remove:${line.planItemId}`, {
-                            planItemId: line.planItemId,
-                            optionId: option.id,
-                            promotionId: null,
-                          })
+                          void runAction(`remove:${line.planItemId}`, line.planItemId, () =>
+                            saveLines([{ planItemId: line.planItemId, optionId: option.id, promotionId: null }]),
+                          )
                         }
                       >
                         Quitar
@@ -509,17 +580,18 @@ export function BudgetDraftEditor({
                           pending={pending === key}
                           disabled={blocked}
                           onClick={() =>
-                            void runPromotion(
-                              key,
-                              item.mode === "fixed"
-                                ? { planItemId: line.planItemId, optionId: option.id, promotionId: promo.id }
-                                : {
-                                    planItemId: line.planItemId,
-                                    optionId: option.id,
-                                    promotionId: promo.id,
-                                    // Con «desde», el precio editable empieza en el mínimo anunciado.
-                                    promotionFinalPriceCents: item.priceCents,
-                                  },
+                            void runAction(key, line.planItemId, () =>
+                              saveLines([
+                                item.mode === "fixed"
+                                  ? { planItemId: line.planItemId, optionId: option.id, promotionId: promo.id }
+                                  : {
+                                      planItemId: line.planItemId,
+                                      optionId: option.id,
+                                      promotionId: promo.id,
+                                      // Con «desde», el precio editable empieza en el mínimo anunciado.
+                                      promotionFinalPriceCents: item.priceCents,
+                                    },
+                              ]),
                             )
                           }
                         >
@@ -533,6 +605,11 @@ export function BudgetDraftEditor({
                     )
                   })
                 )}
+                {actionError?.at === line.planItemId ? (
+                  <p role="alert" className="text-sm text-destructive">
+                    {actionError.message}
+                  </p>
+                ) : null}
               </li>
             )
           })}
@@ -555,11 +632,7 @@ export function BudgetDraftEditor({
                 aria-label={`Incluir ${item.title}`}
                 onCheckedChange={(next) => {
                   if (next !== true) return
-                  setError(null)
-                  setPending(`add:${item.id}`)
-                  addItems([item.id])
-                    .catch((err: unknown) => setError(mutationMessage(err)))
-                    .finally(() => setPending(null))
+                  void runAction(`add:${item.id}`, "add", () => addItems([item.id]))
                 }}
               />
               <span className="min-w-0 flex-1">
@@ -571,6 +644,11 @@ export function BudgetDraftEditor({
               </span>
             </FieldLabel>
           ))}
+          {actionError?.at === "add" ? (
+            <p role="alert" className="text-sm text-destructive">
+              {actionError.message}
+            </p>
+          ) : null}
         </fieldset>
       ) : null}
 
@@ -596,26 +674,20 @@ export function BudgetDraftEditor({
             variant="link"
             className="h-auto self-start p-0"
             disabled={blocked}
-            onClick={() => {
-              setDiscountPercent("")
-              setDiscountReason(reasonText)
-              setDiscountError(null)
-              setDiscountOpen(true)
-            }}
+            onClick={openDiscount}
           >
             Aplicar un descuento a todo
           </Button>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-reason`}>Motivo del ajuste de precio</FieldLabel>
-            <Input
-              id={`${uid}-reason`}
-              value={reasonText}
-              maxLength={500}
-              disabled={blocked}
-              onChange={(event) => setReason(event.currentTarget.value)}
-            />
-            <FieldDescription>Se pide solo cuando un precio baja del precio normal.</FieldDescription>
-          </Field>
+          <form.AppField name="reason">
+            {(field) => (
+              <field.TextField
+                label="Motivo del ajuste de precio"
+                description="Se pide solo cuando un precio baja del precio normal."
+                maxLength={500}
+                disabled={blocked}
+              />
+            )}
+          </form.AppField>
         </div>
         <BudgetTotals
           option={option}
@@ -632,75 +704,70 @@ export function BudgetDraftEditor({
         </p>
       ) : null}
       {note ? <p className="text-sm text-muted-foreground">{note}</p> : null}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
       {actionAlert}
 
-      <div className="flex flex-wrap items-start gap-2 border-t pt-4">
-        {sendAction ? sendAction(saveBeforeSend) : null}
-        <SubmitButton
-          variant={sendAction ? "outline" : "default"}
-          pending={delivering}
-          disabled={blocked}
-          onClick={handleDeliver}
-        >
-          Imprimir y entregar
-        </SubmitButton>
-        <SubmitButton
-          variant="outline"
-          pending={pending === "save"}
-          disabled={blocked || !dirty}
-          onClick={() => void handleSave()}
-        >
-          Guardar borrador
-        </SubmitButton>
-        {secondaryActions}
+      <div className="flex flex-col gap-2 border-t pt-4">
+        {formError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {formError}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-start gap-2">
+          {sendAction ? sendAction(saveBeforeSend) : null}
+          <SubmitButton
+            variant={sendAction ? "outline" : "default"}
+            pending={delivering}
+            disabled={blocked}
+            onClick={handleDeliver}
+          >
+            Imprimir y entregar
+          </SubmitButton>
+          <SubmitButton
+            variant="outline"
+            pending={saving}
+            disabled={blocked || !dirty}
+            onClick={() => void submitForm(form, { fieldMap, root: rootRef.current })}
+          >
+            Guardar borrador
+          </SubmitButton>
+          {secondaryActions}
+        </div>
       </div>
 
       {discountOpen ? (
         <FormDrawer
+          {...discountSurface}
           open={discountOpen}
           title="Aplicar un descuento a todo"
           description="Baja el mismo porcentaje a cada tratamiento, calculado sobre su precio normal. Los que tienen una promoción no cambian."
-          error={discountError}
-          isSubmitting={pending === "discount"}
           submitLabel="Aplicar descuento"
           onClose={() => {
-            if (pending !== "discount") setDiscountOpen(false)
-          }}
-          onSubmit={(event) => {
-            event.preventDefault()
-            void submitDiscount()
+            if (!discountSurface.isSubmitting) setDiscountOpen(false)
           }}
         >
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor={`${uid}-discount-percent`}>Descuento, en porcentaje</FieldLabel>
-              <Input
-                id={`${uid}-discount-percent`}
-                inputMode="numeric"
-                autoComplete="off"
-                value={discountPercent}
-                onChange={(event) => setDiscountPercent(event.currentTarget.value)}
-              />
-              <FieldDescription>Un número del 1 al 100.</FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor={`${uid}-discount-reason`}>Motivo del descuento</FieldLabel>
-              <Input
-                id={`${uid}-discount-reason`}
-                value={discountReason}
-                maxLength={500}
-                onChange={(event) => setDiscountReason(event.currentTarget.value)}
-              />
-              <FieldDescription>Queda anotado en cada tratamiento que baja.</FieldDescription>
-            </Field>
+            <discountForm.AppField name="percent">
+              {(field) => (
+                <field.TextField
+                  label="Descuento, en porcentaje"
+                  description="Un número del 1 al 100."
+                  inputMode="numeric"
+                  autoComplete="off"
+                />
+              )}
+            </discountForm.AppField>
+            <discountForm.AppField name="reason">
+              {(field) => (
+                <field.TextField
+                  label="Motivo del descuento"
+                  description="Queda anotado en cada tratamiento que baja."
+                  maxLength={500}
+                />
+              )}
+            </discountForm.AppField>
           </FieldGroup>
         </FormDrawer>
       ) : null}
-    </>
+    </div>
   )
 }

@@ -37,6 +37,7 @@ import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCa
 import { setAppointmentStatus } from "./appointments.js"
 import {
   APPOINTMENT_DATA_NOTICE_KEY,
+  REMINDER_CONFIRMED_KEY,
   REMINDER_DATA_KEY,
   APPOINTMENT_NOTICE_KEYS,
   type AppointmentNoticeKey,
@@ -47,15 +48,13 @@ import {
   optInReply,
   optOutReply,
   SWITCHABLE_PURPOSES,
-  GENERAL_PERMISSION_NO,
-  GENERAL_PERMISSION_QUESTION,
-  GENERAL_PERMISSION_YES,
   generalPermissionButtons,
+  generalPermissionWords,
   isAppointmentNotice,
   parseReplyId,
   withLinkLine,
 } from "./automation-messages.js"
-import { type ComposedMessage, composeJobMessage, routeMessage } from "./automation-routing.js"
+import { clinicName, type ComposedMessage, composeJobMessage, previewMessageRoute, routeMessage } from "./automation-routing.js"
 import { permissionRefusal, writingTimeFor } from "./message-gate.js"
 import { consentStatusOf, mayWriteFirst } from "./message-permission.js"
 import { issuePersonalLink } from "./booking-links.js"
@@ -71,7 +70,7 @@ import {
   templateReasonWords,
 } from "./clinic-messages.js"
 import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conversations.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { lapsedToInvite, recordInvitation } from "./return-invites.js"
@@ -119,6 +118,19 @@ export interface LineConfig {
 }
 
 export const TASK_NOTE_CHARS = 160
+
+/**
+ * Lo que se dice de un ajuste de línea fuera de rango, por su nombre en el
+ * cuerpo de PATCH `/api/agent/admin/lines/:key`: lo mismo en la ruta, aquí y
+ * en la pantalla.
+ */
+export const LINE_SETTING_MESSAGES = {
+  days: "El plazo va de 1 a 365 días.",
+  hoursBefore: "El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes.",
+  delayHours: "La espera va de 1 a 72 horas.",
+  hour: "La hora va de 0 a 23.",
+  taskNote: `La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres.`,
+} as const
 
 /** Los tiempos vigentes de una línea, para decirlos con las palabras del catálogo. */
 export function lineTiming(rule: Pick<RuleRow, "config"> | null, extra: LineTiming = {}): LineTiming {
@@ -284,46 +296,46 @@ export async function setLine(
   let enabled = input.enabled ?? was.enabled
   if (!agentPart && !teamPart) {
     if (input.enabled === true) {
-      throw validation("Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
+      throw invalidField("enabled", "Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
     }
     enabled = false
   }
   const config: LineConfig = { ...was.config }
   if (input.days !== undefined) {
-    if (line.defaultDays === null) throw validation(`«${line.name}» no tiene un plazo en días`)
+    if (line.defaultDays === null) throw invalidField("days", `«${line.name}» no tiene un plazo en días`)
     if (input.days === null) delete config.days
     else {
-      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw validation("El plazo va de 1 a 365 días")
+      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw invalidField("days", LINE_SETTING_MESSAGES.days)
       config.days = input.days
     }
   }
   if (input.hoursBefore !== undefined) {
-    if (kind !== "recordatorio_cita") throw validation(`«${line.name}» no se ajusta por horas`)
+    if (kind !== "recordatorio_cita") throw invalidField("hoursBefore", `«${line.name}» no se ajusta por horas`)
     const hours = [...new Set(input.hoursBefore)].sort((a, b) => b - a)
     if (hours.length < 1 || hours.length > 3 || hours.some((h) => !Number.isInteger(h) || h < 1 || h > 168)) {
-      throw validation("El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes")
+      throw invalidField("hoursBefore", LINE_SETTING_MESSAGES.hoursBefore)
     }
     config.hoursBefore = hours
   }
   if (input.delayHours !== undefined) {
-    if (line.delayHours === undefined) throw validation(`«${line.name}» no espera horas`)
+    if (line.delayHours === undefined) throw invalidField("delayHours", `«${line.name}» no espera horas`)
     if (input.delayHours === null) delete config.delayHours
     else {
-      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw validation("La espera va de 1 a 72 horas")
+      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw invalidField("delayHours", LINE_SETTING_MESSAGES.delayHours)
       config.delayHours = input.delayHours
     }
   }
   if (input.hour !== undefined) {
-    if (!line.hourAdjustable) throw validation(`«${line.name}» no tiene una hora de salida que se pueda fijar`)
+    if (!line.hourAdjustable) throw invalidField("hour", `«${line.name}» no tiene una hora de salida que se pueda fijar`)
     if (input.hour === null) delete config.hour
     else {
-      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw validation("La hora va de 0 a 23")
+      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw invalidField("hour", LINE_SETTING_MESSAGES.hour)
       config.hour = input.hour
     }
   }
   if (input.taskNote !== undefined) {
     const note = input.taskNote?.replace(/\s+/g, " ").trim() ?? ""
-    if (note.length > TASK_NOTE_CHARS) throw validation(`La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres`)
+    if (note.length > TASK_NOTE_CHARS) throw invalidField("taskNote", LINE_SETTING_MESSAGES.taskNote)
     if (note) config.taskNote = note
     else delete config.taskNote
   }
@@ -673,6 +685,19 @@ async function generalPermissionAsked(tx: Db, orgId: string, contactId: string):
 }
 
 /**
+ * La pregunta de novedades y sus respuestas con el nombre de la clínica y su
+ * trato (`agent_config.treatment`): de usted solo si la clínica trata de usted.
+ */
+async function generalPermissionWordsOf(tx: Db, orgId: string): Promise<ReturnType<typeof generalPermissionWords>> {
+  const [cfg] = await tx
+    .select({ treatment: agentConfig.treatment })
+    .from(agentConfig)
+    .where(eq(agentConfig.organizationId, orgId))
+    .limit(1)
+  return generalPermissionWords(await clinicName(tx, orgId), cfg?.treatment === "usted" ? "usted" : "tu")
+}
+
+/**
  * Tras reservar en la conversación, el agente pregunta una sola vez por persona
  * si se le pueden enviar novedades y promociones (`novedades`, el único tipo de
  * mensaje que pide permiso; ADR 0030). No pregunta si ya lo dio o lo negó, ni si ya se le
@@ -708,7 +733,7 @@ export async function askGeneralPermissionAfterBooking(
   await sendOutbound(tx, orgId, {
     conversationId: input.conversationId,
     senderKind: "agent",
-    content: { type: "text", text: GENERAL_PERMISSION_QUESTION, buttons: generalPermissionButtons(thread.contactId) },
+    content: { type: "text", text: (await generalPermissionWordsOf(tx, orgId)).question, buttons: generalPermissionButtons(thread.contactId) },
   })
   await audit(tx, orgId, null, "automation_consent.asked", thread.contactId, { purpose: "novedades", conversationId: input.conversationId })
   return true
@@ -1692,6 +1717,55 @@ async function dataNoticeFor(
   }
 }
 
+/**
+ * El recordatorio sin «Confirmar» cuando todas las citas del mensaje ya están
+ * confirmadas (ADR 0109): con «Cambiar mi cita», el botón de su enlace, donde la
+ * cambia o la cancela. Nulo: sale el de siempre. Por WhatsApp, a quien no
+ * escribió en las últimas 24 horas, sale solo con su plantilla aprobada: si no,
+ * vale más el recordatorio aprobado de siempre que el correo. Sin dirección
+ * pública no hay enlace: sale como respuesta o por correo sin esa línea, nunca
+ * como plantilla, que lleva el botón.
+ */
+async function confirmedReminderFor(
+  tx: Db,
+  orgId: string,
+  group: JobRow[],
+  contactId: string,
+  usual: AutomationMessage,
+  deps: DeliverDeps,
+): Promise<{ spec: AutomationMessage; link: { token: string; url: string } | null } | null> {
+  const ids = group.map((item) => item.appointmentId).filter((id): id is string => !!id)
+  const [lead] = group
+  if (!lead?.appointmentId || ids.length !== group.length) return null
+  const rows = await tx
+    .select({ status: appointment.status, patientId: appointment.patientId, id: appointment.id })
+    .from(appointment)
+    .where(and(eq(appointment.organizationId, orgId), inArray(appointment.id, ids)))
+  if (rows.length !== new Set(ids).size || rows.some((row) => row.status !== "confirmada")) return null
+  const spec = await currentAutomationMessage(tx, orgId, REMINDER_CONFIRMED_KEY)
+  const route = await previewMessageRoute(tx, orgId, contactId, spec)
+  if (!("via" in route)) return null
+  if (route.via === "correo") {
+    const usualRoute = await previewMessageRoute(tx, orgId, contactId, usual)
+    if ("via" in usualRoute && usualRoute.via === "plantilla") return null
+  }
+  const patientId = rows.find((row) => row.id === lead.appointmentId)?.patientId ?? null
+  let link: { token: string; url: string } | null = null
+  if (patientId && publicLinksConfigured()) {
+    const issued = await issuePersonalLink(
+      tx,
+      orgId,
+      { contactId, patientId, appointmentId: lead.appointmentId },
+      { secretsKey: deps.secretsKey },
+    )
+    // En el mensaje no queda el token: lo pone el worker al enviarlo.
+    const url = await personalLinkMessageUrl(tx, orgId, issued.linkId)
+    if (url) link = { token: personalLinkRef(issued.linkId), url }
+  }
+  if (route.via === "plantilla" && !link) return null
+  return { spec, link }
+}
+
 export interface DeliverDeps {
   secretsKey: Buffer
   /** Para adjuntar la invitación de calendario a los avisos de cita por correo; sin él, va solo el texto. */
@@ -1847,11 +1921,12 @@ const GROUP_WINDOW_MS = 30 * 60_000
 function emailBody(
   message: ComposedMessage,
   clinic: string,
-  links: { appointments: { confirm: string; cancel: string }[]; optOut: string | null; choose: string | null },
+  links: { appointments: { confirm: string | null; cancel: string }[]; optOut: string | null; choose: string | null },
 ): string {
   const lines = links.appointments.map((link, index) => {
     const which = links.appointments.length > 1 ? `Cita ${index + 1}. ` : ""
-    return `${which}Para confirmar: ${link.confirm}\n${which}Si no podrás ir: ${link.cancel}`
+    const confirm = link.confirm ? `${which}Para confirmar: ${link.confirm}\n` : ""
+    return `${confirm}${which}Si no podrás ir: ${link.cancel}`
   })
   const actions = lines.length > 0 ? `\n\n${lines.join("\n")}` : ""
   const footer = links.choose
@@ -2409,16 +2484,23 @@ export async function deliverJob(
 
   // El texto y la plantilla son los vigentes de la clínica, iguales para las tres vías.
   let spec = await currentAutomationMessageOf(tx, orgId, job.kind)
+  // La cita ya confirmada no pide «Confirmar» (ADR 0109): sale el recordatorio con
+  // «Cambiar mi cita», que es su enlace y abre antes lo que le falte de sus datos.
+  const confirmed =
+    spec && job.kind === "recordatorio_cita" ? await confirmedReminderFor(tx, orgId, group, contactId, spec, deps) : null
+  if (confirmed) spec = confirmed.spec
   // A quien le faltan datos, el aviso de reserva lleva «Su enlace» para
   // completarlos antes de venir (ADR 0037): el mismo aviso, no un segundo mensaje.
   // Igual el recordatorio de la cita: lleva «Completar mis datos» mientras falten (fase 3).
   const withData =
-    spec && job.kind === "aviso_cita_reservada"
-      ? await dataNoticeFor(tx, orgId, job, contactId, deps)
-      : spec && job.kind === "recordatorio_cita"
-        ? await dataNoticeFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
-        : null
-  let link = withData?.link ?? null
+    confirmed
+      ? null
+      : spec && job.kind === "aviso_cita_reservada"
+        ? await dataNoticeFor(tx, orgId, job, contactId, deps)
+        : spec && job.kind === "recordatorio_cita"
+          ? await dataNoticeFor(tx, orgId, job, contactId, deps, REMINDER_DATA_KEY)
+          : null
+  let link = confirmed?.link ?? withData?.link ?? null
   // El título de la línea con su enlace, cuando el texto es el de siempre (respuesta o correo del recordatorio).
   let linkTitle: { title: string } | undefined
   if (spec && withData) {
@@ -2476,7 +2558,8 @@ export async function deliverJob(
             if (!item.appointmentId) continue
             const link = { jobId: item.id, appointmentId: item.appointmentId, contactId, ttlHours: 72, now }
             links.appointments.push({
-              confirm: publicLink(base, "c", await createLinkToken(tx, orgId, { purpose: "confirm", ...link })),
+              // Una cita ya confirmada no tiene nada que confirmar (ADR 0109).
+              confirm: confirmed ? null : publicLink(base, "c", await createLinkToken(tx, orgId, { purpose: "confirm", ...link })),
               cancel: publicLink(base, "c", await createLinkToken(tx, orgId, { purpose: "cancel", ...link })),
             })
           }
@@ -3376,10 +3459,11 @@ export async function handleAutomationReply(
     const outcome = await answerGeneralPermission(tx, orgId, { conversationId: input.conversationId, granted })
     if (outcome === "no_preguntado") return false
     if (outcome === "guardado") {
+      const words = await generalPermissionWordsOf(tx, orgId)
       await sendOutbound(tx, orgId, {
         conversationId: input.conversationId,
         senderKind: "agent",
-        content: { type: "text", text: granted ? GENERAL_PERMISSION_YES : GENERAL_PERMISSION_NO },
+        content: { type: "text", text: granted ? words.yes : words.no },
       })
     }
     return true

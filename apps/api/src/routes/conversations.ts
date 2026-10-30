@@ -16,6 +16,8 @@ import {
   getInboxConversationDetail,
   getResolvePreview,
   listApprovedMessages,
+  getConversationContext,
+  listAgentActions,
   listInboxConversations,
   listPersonMessages,
   markRead,
@@ -101,7 +103,7 @@ export function createConversationsRoute(deps: CrmDeps) {
   })
 
   app.get("/", async (c) => {
-    const { orgId, userId } = orgContextOf(c)
+    const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = listQuery.safeParse(c.req.query())
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const { mine, ...filters } = parsed.data
@@ -109,7 +111,12 @@ export function createConversationsRoute(deps: CrmDeps) {
       const { items, nextCursor } = await withOrgContext(deps.db, orgId, (tx) =>
         listInboxConversations(tx, orgId, { ...filters, ...(mine ? { mineOf: userId } : {}) }),
       )
-      return c.json({ data: items, nextCursor })
+      // Quien no ve al agente sabe que hizo algo, no el detalle de lo que propuso.
+      const seesAgent = canAccess(memberRole, "agent.read") || canAccess(memberRole, "agent.decide")
+      return c.json({
+        data: seesAgent ? items : items.map((item) => ({ ...item, lastAction: item.lastAction ? { ...item.lastAction, what: null } : null })),
+        nextCursor,
+      })
     } catch (e) {
       return serviceErrorResponse(c, e) ?? Promise.reject(e)
     }
@@ -131,6 +138,31 @@ export function createConversationsRoute(deps: CrmDeps) {
     const { orgId } = orgContextOf(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => getInboxConversationDetail(tx, orgId, c.req.param("id"))),
+    )
+  })
+
+  // Lo que hizo el agente con esta persona: lo que cada rol no puede ver queda en una línea sin detalle.
+  app.get("/:id/agent-actions", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        listAgentActions(tx, orgId, c.req.param("id"), {
+          appointments: canAccess(memberRole, "appointments.read"),
+          budgets: canAccess(memberRole, "budgets.read"),
+          crm: canAccess(memberRole, "crm.read"),
+          agent: canAccess(memberRole, "agent.read") || canAccess(memberRole, "agent.decide"),
+        }),
+      ),
+    )
+  })
+
+  // «Contexto»: quién es y una línea por cada sección que este rol puede abrir.
+  app.get("/:id/context", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    return runService(c, 200, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        getConversationContext(tx, orgId, c.req.param("id"), (permission) => canAccess(memberRole, permission)),
+      ),
     )
   })
 
@@ -441,7 +473,12 @@ export function createConversationsRoute(deps: CrmDeps) {
     )
   })
 
-  const blockInput = z.object({ reason: z.enum(BLOCK_REASONS), note: z.string().trim().min(1).max(500) }).strict()
+  const blockInput = z
+    .object({
+      reason: z.enum(BLOCK_REASONS, { error: "Elige el motivo del bloqueo." }),
+      note: z.string().trim().min(1, "Escribe qué pasó.").max(500, "Escribe como mucho 500 caracteres."),
+    })
+    .strict()
 
   // Bloquear y desbloquear: solo quien maneja los contactos (recepción, dueño y administración).
   app.post("/:id/block", async (c) => {

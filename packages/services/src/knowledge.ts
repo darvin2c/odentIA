@@ -17,7 +17,7 @@ import { and, asc, count, desc, eq, gt, inArray, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { branchDirectionsWriter, branchShortLinkWriter } from "./branches.js"
-import { branchNotFound, notFound, validation } from "./errors.js"
+import { branchNotFound, invalidField, notFound, validation } from "./errors.js"
 import { getOrgLocale, NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
 import { listPaymentMethods } from "./payment-methods.js"
 import { listClinicPromotionSummaries } from "./promotions.js"
@@ -139,10 +139,11 @@ function assertStatus(status: string): asserts status is KnowledgeStatus {
   if (!(STATUSES as readonly string[]).includes(status)) throw validation("status debe ser borrador|publicada")
 }
 
-function cleanText(value: string | undefined, field: string, max: number): string {
+/** Texto obligatorio con tope: el error va al dato del cuerpo (`title`, `body`). */
+function cleanText(value: string | undefined, field: "title" | "body", empty: string, max: number): string {
   const text = value?.trim() ?? ""
-  if (!text) throw validation(`${field} es obligatorio`)
-  if (text.length > max) throw validation(`${field} supera ${max} caracteres`)
+  if (!text) throw invalidField(field, empty)
+  if (text.length > max) throw invalidField(field, `Escribe como mucho ${max} caracteres.`)
   return text
 }
 
@@ -172,13 +173,13 @@ function cleanAskForms(value: unknown, title: string): string[] {
     if (typeof raw !== "string") throw validation("Cada forma de preguntar debe ser texto")
     const form = raw.replace(/\s+/g, " ").trim()
     if (!form) continue
-    if (form.length > ASK_FORM_CHARS) throw validation(`Cada forma de preguntar admite hasta ${ASK_FORM_CHARS} caracteres`)
+    if (form.length > ASK_FORM_CHARS) throw invalidField("askForms", `Cada forma de preguntar admite hasta ${ASK_FORM_CHARS} caracteres.`)
     const key = normalizeForSearch(form)
     if (!key || seen.has(key)) continue
     seen.add(key)
     forms.push(form)
   }
-  if (forms.length > ASK_FORM_LIMIT) throw validation(`Hasta ${ASK_FORM_LIMIT} formas de preguntar por respuesta`)
+  if (forms.length > ASK_FORM_LIMIT) throw invalidField("askForms", `Escribe hasta ${ASK_FORM_LIMIT} formas de preguntar, una por línea.`)
   return forms
 }
 
@@ -190,7 +191,7 @@ function cleanBasicKey(value: string | null | undefined): string | null {
 
 function assertValidity(validFrom: string | null, validUntil: string | null): void {
   if (validFrom && validUntil && validUntil < validFrom) {
-    throw validation("La vigencia termina antes de empezar")
+    throw invalidField("validUntil", "La vigencia termina antes de empezar.")
   }
 }
 
@@ -234,8 +235,8 @@ export async function createKnowledgeEntry(
   input: KnowledgeEntryInput,
 ): Promise<KnowledgeEntryItem> {
   assertKind(input.kind)
-  const title = cleanText(input.title, "El título", 200)
-  const body = cleanText(input.body, "El contenido", 8000)
+  const title = cleanText(input.title, "title", "Escribe la pregunta.", 200)
+  const body = cleanText(input.body, "body", "Escribe la respuesta.", 8000)
   const validFrom = cleanDate(input.validFrom, "validFrom")
   const validUntil = cleanDate(input.validUntil, "validUntil")
   assertValidity(validFrom, validUntil)
@@ -311,8 +312,8 @@ export async function updateKnowledgeEntry(
     .limit(1)
   if (!locked) throw notFound("Entrada de conocimiento")
   const current = locked
-  const title = input.title === undefined ? current.title : cleanText(input.title, "El título", 200)
-  const body = input.body === undefined ? current.body : cleanText(input.body, "El contenido", 8000)
+  const title = input.title === undefined ? current.title : cleanText(input.title, "title", "Escribe la pregunta.", 200)
+  const body = input.body === undefined ? current.body : cleanText(input.body, "body", "Escribe la respuesta.", 8000)
   const validFrom = input.validFrom === undefined ? current.validFrom : cleanDate(input.validFrom, "validFrom")
   const validUntil = input.validUntil === undefined ? current.validUntil : cleanDate(input.validUntil, "validUntil")
   assertValidity(validFrom, validUntil)

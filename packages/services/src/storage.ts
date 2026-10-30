@@ -78,7 +78,10 @@ export interface Storage {
    * Tamaño y primeros bytes de un objeto, para comprobar lo que subió el
    * navegador; null si no existe.
    */
-  probeAttachment?(objectKey: string, firstBytes: number): Promise<{ size: number; head: Uint8Array } | null>
+  probeAttachment?(
+    objectKey: string,
+    firstBytes: number,
+  ): Promise<{ size: number; head: Uint8Array } | null>
   /** Guarda un objeto en una clave ya reservada (la semilla de las tomografías). */
   putAttachmentAt?(objectKey: string, bytes: Uint8Array, contentType: string): Promise<void>
   /** Contenido de un objeto como flujo, para descargas largas sin cargarlo en memoria. */
@@ -161,7 +164,9 @@ export function createStorage(env: StorageEnv): Storage {
       if (!url.startsWith(publicPrefix)) return null
       const key = url.slice(publicPrefix.length)
       if (!isInAvatarFolder(key, folder)) return null
-      const out = await client.send(new GetObjectCommand({ Bucket: env.avatarsBucket, Key: key }), { abortSignal: signal })
+      const out = await client.send(new GetObjectCommand({ Bucket: env.avatarsBucket, Key: key }), {
+        abortSignal: signal,
+      })
       return out.Body ? out.Body.transformToByteArray() : null
     },
     async getAttachment(objectKey) {
@@ -174,7 +179,11 @@ export function createStorage(env: StorageEnv): Storage {
     async uploadUrl(objectKey, contentType, ttlSeconds = 900) {
       return getSignedUrl(
         client,
-        new PutObjectCommand({ Bucket: env.attachmentsBucket, Key: objectKey, ContentType: contentType }),
+        new PutObjectCommand({
+          Bucket: env.attachmentsBucket,
+          Key: objectKey,
+          ContentType: contentType,
+        }),
         { expiresIn: ttlSeconds },
       )
     },
@@ -189,7 +198,9 @@ export function createStorage(env: StorageEnv): Storage {
         )
         const head = out.Body ? await out.Body.transformToByteArray() : new Uint8Array()
         // «bytes 0-131/245760»: el total va después de la barra.
-        const total = Number(out.ContentRange?.split("/")[1] ?? out.ContentLength ?? head.byteLength)
+        const total = Number(
+          out.ContentRange?.split("/")[1] ?? out.ContentLength ?? head.byteLength,
+        )
         return { size: Number.isFinite(total) ? total : head.byteLength, head }
       } catch (error) {
         const name = (error as { name?: string }).name

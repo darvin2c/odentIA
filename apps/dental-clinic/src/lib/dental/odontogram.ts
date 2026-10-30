@@ -4,14 +4,15 @@
  * atención que cambió el gráfico y, para lo judicial, lo personal y el
  * reingreso, «Firmar odontograma». Fuera de Perú se imprime una hoja neutra.
  */
+
+import { apiFetch } from "@odentia/clinic-app/lib/api"
+import type { SiteFinding } from "@odentia/clinic-app/lib/patients"
 import {
   activeFindingsAsOf,
   type FindingDetails,
   type ManualOdontogramPurpose,
   type SignedOdontogramPurpose,
 } from "@odentia/dental"
-import { apiFetch } from "@odentia/clinic-app/lib/api"
-import type { SiteFinding } from "@odentia/clinic-app/lib/patients"
 
 /** Un hallazgo del odontograma, con lo propio de odentIA (sus detalles, su revisión, lo que lo dejó). */
 export interface OdontogramEntry extends SiteFinding {
@@ -127,7 +128,9 @@ function base(patientId: string): string {
   return `/api/patients/${patientId}/odontogram`
 }
 
-export function fetchSignedOdontograms(patientId: string): Promise<{ data: OdontogramAssessment[] }> {
+export function fetchSignedOdontograms(
+  patientId: string,
+): Promise<{ data: OdontogramAssessment[] }> {
   return apiFetch<{ data: OdontogramAssessment[] }>(`${base(patientId)}/assessments`)
 }
 

@@ -25,7 +25,7 @@ import { encounter, encounterDictationSuggestion, serviceCatalog } from "@odenti
 import { product, serviceMaterial, stockMovement } from "@odentia/db/schema/inventory"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, eq, inArray, sql } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
   clinicToday,
   consumeFefo,
@@ -44,8 +44,8 @@ export const MATERIAL_QUANTITY_MAX = 9999
 
 type Can = (permission: string) => boolean
 
-function conflict(code: string, message: string): ServiceError {
-  return new ServiceError(code, 409, message)
+function conflict(code: string, message: string, field?: string): ServiceError {
+  return new ServiceError(code, 409, message, field ? { [field]: message } : undefined)
 }
 
 function forbidden(message: string): ServiceError {
@@ -226,13 +226,18 @@ export async function setServiceMaterials(
   if (!Array.isArray(items)) throw validation("Indica los materiales del servicio")
   if (items.length > SERVICE_MATERIALS_MAX)
     throw validation(`Un servicio admite hasta ${SERVICE_MATERIALS_MAX} materiales`)
+  // Cada fila dice lo suyo (`items[i].quantity`, `items[i].productId`): la pantalla lo pinta en esa fila.
   const seen = new Set<string>()
-  for (const item of items) {
+  const rowErrors: Record<string, string> = {}
+  items.forEach((item, index) => {
     if (!Number.isSafeInteger(item.quantity) || item.quantity < 1 || item.quantity > MATERIAL_QUANTITY_MAX)
-      throw validation(`La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}`)
-    if (seen.has(item.productId)) throw validation("Un producto va una sola vez en los materiales: suma las cantidades")
+      rowErrors[`items[${index}].quantity`] = `La cantidad de cada material va de 1 a ${MATERIAL_QUANTITY_MAX}`
+    if (seen.has(item.productId))
+      rowErrors[`items[${index}].productId`] = "Un producto va una sola vez en los materiales: suma las cantidades"
     seen.add(item.productId)
-  }
+  })
+  const firstRowError = Object.values(rowErrors)[0]
+  if (firstRowError) throw validation(firstRowError, rowErrors)
   // Serializa dos guardados del mismo servicio.
   await tx
     .select({ id: serviceCatalog.id })
@@ -252,18 +257,28 @@ export async function setServiceMaterials(
         .where(and(eq(product.organizationId, orgId), inArray(product.id, ids)))
     : []
   const byId = new Map(products.map((row) => [row.id, row]))
-  for (const item of items) {
+  // Todas las filas que no se aceptan, cada una en su `items[i].productId`; el código es el de la primera.
+  const rejected: ServiceError[] = []
+  const rejectedFields: Record<string, string> = {}
+  for (const [index, item] of items.entries()) {
     const found = byId.get(item.productId)
-    if (!found) throw notFound("Producto")
-    if (before.has(item.productId)) continue
-    if (!found.isActive)
-      throw conflict("PRODUCT_INACTIVE", `«${found.name}» está desactivado: actívalo en Inventario para usarlo en un servicio`)
-    if (!found.usedInCare)
-      throw conflict(
-        "PRODUCT_NOT_FOR_CARE",
-        `«${found.name}» no se usa en las atenciones: márcalo así en Inventario para agregarlo a un servicio`,
-      )
+    if (found && before.has(item.productId)) continue
+    const problem = !found
+      ? notFound("Producto")
+      : !found.isActive
+        ? conflict("PRODUCT_INACTIVE", `«${found.name}» está desactivado: actívalo en Inventario para usarlo en un servicio`)
+        : !found.usedInCare
+          ? conflict(
+              "PRODUCT_NOT_FOR_CARE",
+              `«${found.name}» no se usa en las atenciones: márcalo así en Inventario para agregarlo a un servicio`,
+            )
+          : null
+    if (!problem) continue
+    rejected.push(problem)
+    rejectedFields[`items[${index}].productId`] = problem.message
   }
+  const first = rejected[0]
+  if (first) throw new ServiceError(first.code, first.status, first.message, rejectedFields)
   const gone = current.filter((row) => !seen.has(row.productId)).map((row) => row.productId)
   if (gone.length)
     await tx
@@ -799,7 +814,7 @@ export async function correctEncounterMaterial(
 ): Promise<EncounterMaterials & { changed: number; replayed: boolean }> {
   const quantity = input.quantity
   if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > MATERIAL_QUANTITY_MAX)
-    throw validation(`Lo usado va de 0 a ${MATERIAL_QUANTITY_MAX}`)
+    throw invalidField("quantity", `Lo usado va de 0 a ${MATERIAL_QUANTITY_MAX}`)
   const key = input.idempotencyKey?.trim()
   if (!key || key.length > 120) throw validation("Falta la clave del formulario: vuelve a abrirlo")
   const row = await encounterRowOf(tx, orgId, patientId, encounterId, true)
@@ -820,7 +835,11 @@ export async function correctEncounterMaterial(
   if (prior.length > 0) {
     // El mismo formulario otra vez: si ya quedó en lo pedido, es el reintento.
     if (used !== quantity)
-      throw conflict("CONFLICT", "Esto ya se registró con otros datos. Cierra y vuelve a abrir para registrarlo de nuevo.")
+      throw conflict(
+        "CONFLICT",
+        "Esto ya se registró con otros datos. Cierra y vuelve a abrir para registrarlo de nuevo.",
+        "quantity",
+      )
     return done(-prior.reduce((sum, movement) => sum + movement.quantityDelta, 0), true)
   }
   const [item] = await tx
@@ -843,9 +862,13 @@ export async function correctEncounterMaterial(
   }
   if (delta > 0) {
     if (!item.isActive)
-      throw conflict("PRODUCT_INACTIVE", `«${item.name}» está desactivado: actívalo en Inventario para registrar más`)
+      throw conflict("PRODUCT_INACTIVE", `«${item.name}» está desactivado: actívalo en Inventario para registrar más`, "productId")
     if (!item.usedInCare)
-      throw conflict("PRODUCT_NOT_FOR_CARE", `«${item.name}» no se usa en las atenciones: márcalo así en Inventario para registrarlo`)
+      throw conflict(
+        "PRODUCT_NOT_FOR_CARE",
+        `«${item.name}» no se usa en las atenciones: márcalo así en Inventario para registrarlo`,
+        "productId",
+      )
     const store = await defaultWarehouse(tx, orgId, row.branchId)
     await consumeFefo(tx, orgId, {
       productId: item.id,

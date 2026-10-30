@@ -8,12 +8,13 @@
  * «Descargar» y «Abrir…» los entrega el servidor; aquí solo se dibujan. La conversación vive en el panel mientras dura
  * la sesión (D4): el texto de las preguntas no se guarda (D2).
  */
-import { Badge, Button, buttonVariants, cn, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, ScrollArea, toast } from "@odentia/ui"
-import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn, InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupTextarea, ScrollArea, toast } from "@odentia/ui"
+import { AgentMark, BarList, ColumnChart, DetailDrawer, SubmitButton, submitErrorMessage, useAppForm, useFormSubmit } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi, Link } from "@tanstack/react-router"
 import { ArrowRight, Check, Download, LoaderCircle, Pin, Search } from "lucide-react"
-import { type FormEvent, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError } from "../../lib/api"
 import { ADMIN_NAME } from "../../lib/agent-names"
 import {
@@ -40,7 +41,6 @@ import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { askHelp, canOpenHref } from "../../lib/global-search"
 import { useOrgLocale } from "../../lib/locale"
-import { mutationErrorMessage } from "../../lib/query-error"
 import type { ReportQuery } from "../../lib/reports"
 import { PINS_KEY } from "../../lib/reports-ask"
 import { openAppointmentAnywhere, useAppointmentSaved } from "../agenda/schedule-host"
@@ -53,6 +53,31 @@ const SAMPLES = ["¿Cuánto cobramos este mes?", "¿Qué pacientes tienen saldos
 const ANSWER = "flex min-w-0 flex-col gap-3 rounded-2xl rounded-bl-md border bg-card px-3.5 py-3 text-sm"
 /** Filas de la tabla a la vista; el resto con «Ver las N». */
 const ROWS_SHOWN = 10
+/** Lo que admite `POST /api/reports/argos` por pregunta (y por la anterior que viaja con ella). */
+const QUESTION_MAX = 500
+
+/** La pregunta, con los mismos límites y palabras que la ruta. */
+const questionSchema = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(3, "Escribe tu pregunta: al menos 3 caracteres.")
+    .max(QUESTION_MAX, "La pregunta es demasiado larga: como mucho 500 caracteres."),
+})
+
+/** Una caja de pregunta: valida al enviar, entrega el texto limpio y queda vacía. */
+function useQuestionForm(onAsk: (text: string) => boolean | undefined) {
+  const form = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: questionSchema },
+    onSubmit: ({ value }) => {
+      if (onAsk(value.text.trim()) === false) return
+      form.reset()
+    },
+  })
+  return form
+}
+type QuestionForm = ReturnType<typeof useQuestionForm>
 
 interface Exchange {
   id: number
@@ -317,7 +342,6 @@ function ArgosAnswer({
       result?.kind === "respuesta"
         ? downloadArgos(result.questionId, input.option, input.title, { ...choiceOf(result.period), ...(exchange.patientId ? { patientId: exchange.patientId } : {}) })
         : Promise.resolve(),
-    onError: (error) => toast.error(mutationErrorMessage(error)),
   })
   if (result?.kind !== "respuesta") return null
   // Dos pacientes que se llaman igual (D23): primero se elige; elegir vuelve a calcular sin el modelo.
@@ -440,7 +464,12 @@ function ArgosAnswer({
       </div>
       {pin.isError ? (
         <p role="alert" className="text-[13px] text-destructive">
-          {mutationErrorMessage(pin.error)}
+          {submitErrorMessage(pin.error)}
+        </p>
+      ) : null}
+      {download.isError ? (
+        <p role="alert" className="text-[13px] text-destructive">
+          {submitErrorMessage(download.error)}
         </p>
       ) : null}
       {result.options.length > 0 ? (
@@ -480,12 +509,15 @@ function ArgosAllowanceCard({
   exchange,
   allowance,
   adding,
+  addError,
   onAdd,
   onDecline,
 }: {
   exchange: Exchange
   allowance: ArgosAllowance | undefined
   adding: boolean
+  /** Por qué no se sumaron (en esta tarjeta), con el texto del servidor. */
+  addError: string | null
   onAdd: () => void
   onDecline: () => void
 }) {
@@ -533,13 +565,18 @@ function ArgosAllowanceCard({
       {canAdd && allowance?.packPrice && !exchange.declined ? (
         <>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" className="min-h-11 sm:min-h-9" disabled={adding} aria-busy={adding} onClick={onAdd}>
+            <Button type="button" size="sm" className="min-h-11 sm:min-h-9" disabled={adding} aria-busy={adding} aria-describedby={addError ? `argos-sumar-${exchange.id}-error` : undefined} onClick={onAdd}>
               {adding ? "Sumando…" : `Sumar ${allowance.packQuestions} · ${allowance.packPrice}`}
             </Button>
             <Button type="button" variant="outline" size="sm" className="min-h-11 sm:min-h-9" disabled={adding} onClick={onDecline}>
               Ahora no
             </Button>
           </div>
+          {addError ? (
+            <p id={`argos-sumar-${exchange.id}-error`} role="alert" className="text-[13px] text-destructive">
+              {addError}
+            </p>
+          ) : null}
           <p className="text-[12px] text-muted-foreground">
             Se suma a tu factura de {allowance.month}. Para que se sumen solas,{" "}
             <Link to="/settings/plan" className="text-primary underline underline-offset-4">
@@ -622,7 +659,11 @@ export function ArgosPanel() {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [exchanges, setExchanges] = useState<Exchange[]>([])
-  const [draft, setDraft] = useState("")
+  // La caja del pie; el envío llega a la conversación, donde se dice lo que pase con la pregunta.
+  const askForm = useQuestionForm((text) => {
+    if (ask.isPending) return false
+    push(text, { screen: screen?.query })
+  })
   const next = useRef(1)
   const end = useRef<HTMLDivElement>(null)
   // El periodo y la sede de Reportes siguen valiendo para lo que se escribe después en el panel (D7),
@@ -656,7 +697,6 @@ export function ArgosPanel() {
         : undefined
       pushRef.current(exchange.question, { screen: exchange.screen, ...(exchange.routed ? { routed: true } : {}), ...(note ? { note } : {}) })
     },
-    onError: (error) => toast.error(mutationErrorMessage(error) ?? "No se pudieron sumar las preguntas."),
   })
 
   // Otro periodo o sede (D9): la misma consulta en el servidor, sin el modelo. Lo de antes queda hasta que llega lo nuevo.
@@ -699,7 +739,7 @@ export function ArgosPanel() {
       previous:
         previous?.result?.kind === "respuesta"
           ? viewed
-            ? { text: `${previous.question} (${viewed.label})`, query: viewed.query }
+            ? { text: `${previous.question} (${viewed.label})`.slice(0, QUESTION_MAX), query: viewed.query }
             : { text: previous.question, query: previous.result.query }
           : null,
       ...(options.routed ? { routed: true } : {}),
@@ -732,11 +772,11 @@ export function ArgosPanel() {
       const question = detail?.question?.trim() ?? ""
       setScreen(detail?.screen ? { query: detail.screen, label: detail.screenLabel ?? "" } : null)
       if (question.length >= 3) pushRef.current(question, { screen: detail?.screen, ...(detail?.routed ? { routed: true } : {}) })
-      else setDraft(question)
+      else askForm.setFieldValue("text", question)
     }
     window.addEventListener(ASK_ARGOS_EVENT, onAsk)
     return () => window.removeEventListener(ASK_ARGOS_EVENT, onAsk)
-  }, [])
+  }, [askForm])
 
   const last = exchanges[exchanges.length - 1]
   const lastAsked = last?.question
@@ -754,13 +794,6 @@ export function ArgosPanel() {
 
   if (!allowed || !open) return null
   const pending = ask.isPending
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    const text = draft.trim()
-    if (text.length < 3 || pending) return
-    push(text, { screen: screen?.query })
-    setDraft("")
-  }
   // Un solo aviso para el lector de pantalla con lo último que pasó, no la conversación entera.
   const live = !last
     ? ""
@@ -787,7 +820,7 @@ export function ArgosPanel() {
       }
       onClose={() => setOpen(false)}
       footer={
-        <ArgosAsk screen={screen} onDropScreen={() => setScreen(null)} draft={draft} onDraft={setDraft} pending={pending} onSubmit={submit} />
+        <ArgosAsk screen={screen} onDropScreen={() => setScreen(null)} form={askForm} pending={pending} />
       }
     >
       <div className="flex flex-col gap-4">
@@ -831,6 +864,7 @@ export function ArgosPanel() {
                     exchange={exchange}
                     allowance={allowance.data}
                     adding={addPack.isPending}
+                    addError={addPack.isError && addPack.variables?.id === exchange.id ? submitErrorMessage(addPack.error) : null}
                     onAdd={() => addPack.mutate(exchange)}
                     onDecline={() => update(exchange.id, { declined: true })}
                   />
@@ -867,18 +901,15 @@ export function ArgosPanel() {
 function ArgosAsk({
   screen,
   onDropScreen,
-  draft,
-  onDraft,
+  form,
   pending,
-  onSubmit,
 }: {
   screen: { label: string } | null
   onDropScreen: () => void
-  draft: string
-  onDraft: (value: string) => void
+  form: QuestionForm
   pending: boolean
-  onSubmit: (event: FormEvent) => void
 }) {
+  const onSubmit = useFormSubmit(form)
   return (
     <div className="flex w-full min-w-0 flex-col gap-2">
       {screen ? (
@@ -891,40 +922,45 @@ function ArgosAsk({
           </Button>
         </div>
       ) : null}
-      <form onSubmit={onSubmit}>
-        <FieldLabel htmlFor="argos-otra" className="sr-only">
-          Escribe otra pregunta
-        </FieldLabel>
-        <InputGroup className="border-input bg-card">
-          <InputGroupTextarea
-            id="argos-otra"
-            rows={1}
-            maxLength={500}
-            className="max-h-32 min-h-11"
-            value={draft}
-            onChange={(event) => onDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                event.currentTarget.form?.requestSubmit()
-              }
-            }}
-            placeholder="Escribe otra pregunta"
-          />
-          <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
-            <InputGroupButton
-              type="submit"
-              variant="default"
-              size="icon-sm"
-              className="size-11 rounded-xl sm:size-9"
-              aria-label="Preguntar"
-              disabled={draft.trim().length < 3 || pending}
-              aria-busy={pending}
-            >
-              <ArrowRight aria-hidden />
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
+      <form noValidate onSubmit={onSubmit}>
+        <form.AppField name="text">
+          {(field) => (
+            <field.Control label="Escribe otra pregunta" hideLabel id="argos-otra">
+              {(control) => (
+                <InputGroup className="border-input bg-card">
+                  <InputGroupTextarea
+                    {...control.props}
+                    rows={1}
+                    maxLength={QUESTION_MAX}
+                    className="max-h-32 min-h-11"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault()
+                        event.currentTarget.form?.requestSubmit()
+                      }
+                    }}
+                    placeholder="Escribe otra pregunta"
+                  />
+                  <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
+                    <InputGroupButton
+                      type="submit"
+                      variant="default"
+                      size="icon-sm"
+                      className="size-11 rounded-xl sm:size-9"
+                      aria-label="Preguntar"
+                      disabled={pending}
+                      aria-busy={pending}
+                    >
+                      <ArrowRight aria-hidden />
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </form>
       <p className="text-[13px] text-muted-foreground">Ve lo mismo que tú. Nunca cambia nada.</p>
     </div>
@@ -937,42 +973,44 @@ function ArgosAsk({
  */
 export function ArgosReportField({ query, label, enabled }: { query: ReportQuery; label?: string | undefined; enabled: boolean | undefined }) {
   const canAgent = usePermission("agent.write")
-  const [draft, setDraft] = useState("")
   const off = enabled === false
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    const text = draft.trim()
-    if (text.length < 3 || off) return
+  const form = useQuestionForm((text) => {
+    if (off) return false
     openArgos({ question: text, screen: query, ...(label ? { screenLabel: label } : {}) })
-    setDraft("")
-  }
+  })
+  const onSubmit = useFormSubmit(form)
   return (
     <div className="flex min-w-0 flex-[1_1_22rem] flex-col gap-1 sm:max-w-xl md:ml-auto">
-      <form onSubmit={submit} className="min-w-0">
-        <FieldLabel htmlFor="argos-pregunta" className="sr-only">
-          Pregúntale a {ADMIN_NAME}
-        </FieldLabel>
-        <InputGroup className={cn("border-primary bg-card", off && "border-input opacity-70")}>
-          <InputGroupAddon className="pl-2">
-            <AgentMark size="sm" />
-          </InputGroupAddon>
-          <InputGroupInput
-            id="argos-pregunta"
-            className="min-h-11"
-            maxLength={500}
-            value={draft}
-            disabled={off}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder={`Pregúntale a ${ADMIN_NAME}: ¿qué se vendió más este mes?`}
-          />
-          <InputGroupAddon align="inline-end" className="pr-1.5">
-            <InputGroupButton type="submit" variant="default" size="sm" className="min-h-11 rounded-lg px-3 sm:min-h-8" disabled={off || draft.trim().length < 3}>
-              <Search aria-hidden className="sm:hidden" />
-              <span className="hidden sm:inline">Preguntar</span>
-              <span className="sr-only sm:hidden">Preguntar</span>
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
+      <form noValidate onSubmit={onSubmit} className="min-w-0">
+        <form.AppField name="text">
+          {(field) => (
+            <field.Control label={`Pregúntale a ${ADMIN_NAME}`} hideLabel id="argos-pregunta">
+              {(control) => (
+                <InputGroup className={cn("border-primary bg-card", off && "border-input opacity-70")}>
+                  <InputGroupAddon className="pl-2">
+                    <AgentMark size="sm" />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    {...control.props}
+                    className="min-h-11"
+                    maxLength={QUESTION_MAX}
+                    value={field.state.value}
+                    disabled={off}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder={`Pregúntale a ${ADMIN_NAME}: ¿qué se vendió más este mes?`}
+                  />
+                  <InputGroupAddon align="inline-end" className="pr-1.5">
+                    <InputGroupButton type="submit" variant="default" size="sm" className="min-h-11 rounded-lg px-3 sm:min-h-8" disabled={off}>
+                      <Search aria-hidden className="sm:hidden" />
+                      <span className="hidden sm:inline">Preguntar</span>
+                      <span className="sr-only sm:hidden">Preguntar</span>
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </form>
       {off ? (
         <p className="text-[13px] text-muted-foreground">

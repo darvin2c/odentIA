@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { centsToMajor, majorToCents } from "./money"
+import { centsToMajor, majorToCents, readMajor } from "./money"
 
 describe("montos escritos en Plan y pagos (issue 36)", () => {
   it("se leen con los separadores de la clínica, los mismos con que se muestran", () => {
@@ -15,6 +15,12 @@ describe("montos escritos en Plan y pagos (issue 36)", () => {
     expect(majorToCents("0", "USD", "es-PE")).toBeNull()
     expect(majorToCents("diez", "USD", "es-PE")).toBeNull()
     expect(majorToCents("10.555", "USD", "es-PE")).toBeNull()
+  })
+
+  it("dice por qué no vale lo escrito, no solo que no vale", () => {
+    expect(readMajor("10.555", "USD", "es-PE")).toEqual({ ok: false, error: "Esta moneda admite hasta 2 decimales." })
+    expect(readMajor("0", "USD", "es-PE")).toEqual({ ok: false, error: "El importe debe ser mayor que cero." })
+    expect(readMajor("12,50", "USD", "es-CO")).toEqual({ ok: true, cents: 1250 })
   })
 
   it("lo guardado vuelve al campo en el mismo formato", () => {

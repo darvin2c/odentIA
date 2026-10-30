@@ -661,6 +661,8 @@ interface JobView extends Record<string, unknown> {
   message_status: string | null
   conversation_id: string | null
   appointment_status: string | null
+  /** El recordatorio de la cita y ella se confirmó después de enviarlo. */
+  confirmed_after: boolean
   replied: boolean
   booked: boolean
   task_status: string | null
@@ -669,13 +671,24 @@ interface JobView extends Record<string, unknown> {
   task_settled: string | null
 }
 
+/**
+ * El recordatorio de la cita logró que la confirmara: se confirmó después de enviarlo. La que ya
+ * estaba confirmada (desde el ADR 0109, la que elige la propia persona nace así) no cuenta. Toda
+ * confirmación pasa por `setAppointmentStatus`, que la deja en la auditoría.
+ */
+const CONFIRMED_AFTER_REMINDER = sql`(j.kind = 'recordatorio_cita' and a.status = 'confirmada' and exists (
+  select 1 from audit_event e
+  where e.organization_id = j.organization_id and e.entity = 'appointment' and e.entity_id = a.id::text
+    and e.action = 'appointment.status_confirmada' and e.created_at >= coalesce(m.created_at, j.scheduled_for)))`
+
 /** Consulta común de «qué pasó»: el caso con lo que se sabe de su mensaje, su cita y su tarea. */
 function jobsQuery(orgId: string, where: SQL, limit: number): SQL {
   return sql`
     select j.id, j.kind, j.status, j.cause, j.via, j.last_error, j.updated_at, j.scheduled_for,
            j.patient_id, j.contact_id, coalesce(pp.display_name, c.display_name) as name,
            m.status as message_status, m.conversation_id,
-           a.status as appointment_status, t.status as task_status, t.area as task_area, t.settled_reason as task_settled,
+           a.status as appointment_status, ${CONFIRMED_AFTER_REMINDER} as confirmed_after,
+           t.status as task_status, t.area as task_area, t.settled_reason as task_settled,
            (m.id is not null and exists (select 1 from message r
               where r.conversation_id = m.conversation_id and r.organization_id = j.organization_id
                 and r.direction = 'in' and r.created_at > m.created_at)) as replied,
@@ -700,7 +713,7 @@ function describeJob(row: JobView, zone: OrgLocale): Pick<AdminPersonRow, "outco
   const resolved = row.task_settled ? `Se cerró sola: ${row.task_settled.replace(/\.$/, "")}.` : "Una persona ya lo resolvió."
   const taskTeam = row.task_area && row.task_area in TASK_AREA_LABELS ? TASK_AREA_LABELS[row.task_area as keyof typeof TASK_AREA_LABELS].team : "una persona"
   if (row.status === "enviado") {
-    if (row.kind === "recordatorio_cita" && row.appointment_status === "confirmada") return { outcome: "confirmo", text: `Confirmó, ${via}.`, fix: null, cause: null }
+    if (row.confirmed_after) return { outcome: "confirmo", text: `Confirmó, ${via}.`, fix: null, cause: null }
     // Un aviso de cita no busca que reserve otra: solo se dice si llegó.
     if (row.kind !== "recordatorio_cita" && !isAppointmentNotice(row.kind) && row.booked) return { outcome: "reservo", text: "Reservó otra cita.", fix: null, cause: null }
     if (row.replied) return { outcome: "respondio", text: `Respondió ${via}. La conversación sigue con Sofi.`, fix: null, cause: null }
@@ -772,7 +785,7 @@ async function weekOf(tx: Db, orgId: string, days = 7): Promise<Map<string, Line
       count(*) filter (where j.status in ('enviado', 'tarea', 'fallido', 'omitido'))::int as cases,
       count(*) filter (where j.status = 'enviado')::int as messages,
       count(*) filter (where j.status = 'enviado' and (
-        (j.kind = 'recordatorio_cita' and a.status = 'confirmada')
+        ${CONFIRMED_AFTER_REMINDER}
         or exists (select 1 from message r where r.conversation_id = m.conversation_id and r.organization_id = j.organization_id
                      and r.direction = 'in' and r.created_at > m.created_at)
         or (j.kind <> 'recordatorio_cita' and j.patient_id is not null and exists (select 1 from appointment n

@@ -1,5 +1,5 @@
 import type { Db } from "@odentia/db"
-import { ServiceError, type Storage } from "@odentia/services"
+import { issueFields, ServiceError, type Storage } from "@odentia/services"
 import type { Context } from "hono"
 import type { ZodIssue } from "zod"
 import { errorBody } from "../lib/error.js"
@@ -14,8 +14,13 @@ export interface CrmDeps {
   webhookBaseUrl: string
 }
 
-export function validationError(c: Context, issues: ZodIssue[]) {
-  return c.json(errorBody(c, "VALIDATION", issues[0]?.message ?? "Datos inválidos"), 400)
+/**
+ * Cuerpo que no cumple el esquema de la ruta: el primer mensaje y, en `fields`,
+ * el de cada dato con problema (por su ruta en el cuerpo), para que la
+ * pantalla lo diga junto a su campo.
+ */
+export function validationError(c: Context, issues: readonly ZodIssue[]) {
+  return c.json(errorBody(c, "VALIDATION", issues[0]?.message ?? "Revisa los datos marcados.", issueFields(issues)), 400)
 }
 
 /**
@@ -27,7 +32,7 @@ export async function runService<T>(c: Context, status: 200 | 201, fn: () => Pro
     return c.json({ data: await fn() }, status)
   } catch (e) {
     if (e instanceof ServiceError) {
-      return c.json(errorBody(c, e.code, e.message), e.status)
+      return c.json(errorBody(c, e.code, e.message, e.fields), e.status)
     }
     throw e
   }
@@ -36,7 +41,7 @@ export async function runService<T>(c: Context, status: 200 | 201, fn: () => Pro
 /** Mapea ServiceError a respuesta HTTP; resto de errores suben al onError (500). */
 export function serviceErrorResponse(c: Context, e: unknown): Response | null {
   if (e instanceof ServiceError) {
-    return c.json(errorBody(c, e.code, e.message), e.status)
+    return c.json(errorBody(c, e.code, e.message, e.fields), e.status)
   }
   return null
 }

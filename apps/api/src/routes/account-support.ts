@@ -34,13 +34,19 @@ export interface AccountSupportDeps {
 }
 
 const accessInput = z.object({
-  question: z.string().trim().min(3).max(500),
-  detail: z.string().max(500).optional(),
+  question: z
+    .string()
+    .trim()
+    .min(3, "Cuenta qué pasa con al menos 3 caracteres.")
+    .max(500, "Escribe como mucho 500 caracteres."),
+  detail: z.string().max(500, "Escribe como mucho 500 caracteres.").optional(),
 })
-const messageInput = z.object({ body: z.string().trim().min(1).max(4000) })
+const messageInput = z.object({
+  body: z.string().trim().min(1, "Escribe tu respuesta.").max(4000, "Escribe como mucho 4000 caracteres."),
+})
 const grantInput = z.object({
   organizationId: z.string(),
-  minutes: z.number().int().min(5).max(60).optional(),
+  minutes: z.number().int("El acceso se autoriza entre 5 y 60 minutos.").min(5, "El acceso se autoriza entre 5 y 60 minutos.").max(60, "El acceso se autoriza entre 5 y 60 minutos.").optional(),
 })
 const revokeInput = z.object({ grantId: z.uuid() })
 
@@ -116,7 +122,7 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
     const caseId = c.req.param("id")
     const declaredSize = Number(c.req.header("content-length") ?? 0)
     if (Number.isFinite(declaredSize) && declaredSize > SUPPORT_ATTACHMENT_MAX_BYTES + 65_536) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 413)
+      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB", { file: "El archivo no puede superar 10 MB" }), 413)
     }
     const kase = await getAccountSupportCase(deps.ownerDb, userId, caseId).catch(() => null)
     if (!kase || kase.status === "resuelto") {
@@ -132,17 +138,19 @@ export function createAccountSupportRoute(deps: AccountSupportDeps) {
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
     if (!(file instanceof File)) {
-      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
+      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo", { file: "Adjunta un archivo" }), 400)
     }
     if (file.size > SUPPORT_ATTACHMENT_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB"), 400)
+      return c.json(errorBody(c, "VALIDATION", "El archivo no puede superar 10 MB", { file: "El archivo no puede superar 10 MB" }), 400)
     }
     const bytes = new Uint8Array(await file.arrayBuffer())
     let sniffed: { mimeType: string; ext: string }
     try {
       sniffed = sniffFileContent(bytes, file.type)
     } catch (e) {
-      return serviceErrorResponse(c, e) ?? Promise.reject(e)
+      // Tipo no admitido o contenido que no coincide: se dice junto a «Adjuntar».
+      if (e instanceof ServiceError) return c.json(errorBody(c, e.code, e.message, e.fields ?? { file: e.message }), e.status)
+      throw e
     }
     let ref: { objectKey: string }
     try {

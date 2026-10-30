@@ -5,7 +5,9 @@ import { PrescriptionPaper } from "../../components/patient/document-papers"
 import { fetchPrescriptionDetail } from "../../lib/clinical-journey"
 import { QueryErrorState } from "../../lib/query-error"
 
-export const Route = createFileRoute("/_org/patients/$patientId/prescriptions/$prescriptionId/print")({
+export const Route = createFileRoute(
+  "/_org/patients/$patientId/prescriptions/$prescriptionId/print",
+)({
   component: PrescriptionPrintPage,
 })
 
@@ -35,7 +37,10 @@ function PrescriptionPrintPage() {
   if (!found)
     return (
       <PageShell>
-        <EmptyState title="No encontramos esta receta" description="Puede que este enlace sea de otra persona o ya no exista." />
+        <EmptyState
+          title="No encontramos esta receta"
+          description="Puede que este enlace sea de otra persona o ya no exista."
+        />
       </PageShell>
     )
   return <PrescriptionPaper page patientId={patientId} prescription={found} />

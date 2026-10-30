@@ -1,11 +1,11 @@
+import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
+import type { ProductPapers } from "@odentia/clinic-app/product/product-ui"
 import { SIGNED_ODONTOGRAM_PURPOSE_LABELS } from "@odentia/dental"
 import { buttonVariants } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
 import { fetchSignedOdontograms } from "../../lib/dental/odontogram"
 import { useDentalProfile } from "../../lib/dental/profile"
-import type { ProductPapers } from "@odentia/clinic-app/product/product-ui"
 
 /**
  * El odontograma firmado en Documentos (NTS 188; ADR 0036): solo en clínicas

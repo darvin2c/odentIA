@@ -1,6 +1,6 @@
-import { Badge, Button, Skeleton } from "@odentia/ui"
+import { Badge, Button, Field, FieldLabel, Skeleton } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
-import { useId } from "react"
+import { type FocusEvent, useId } from "react"
 import { apiFetch } from "../../lib/api"
 import { type DiagnosisOption, DiagnosisSearch } from "./diagnosis-search"
 
@@ -45,7 +45,8 @@ export function diagnosisSuggestionsKey(
  * el odontograma, los más usados en la clínica y el buscador de toda la lista
  * de la clínica. En la mayoría de las atenciones basta el paso 1 o el 2. Lo
  * que se propone lo decide el servidor (`/api/diagnosis-codes/suggestions`).
- * Elegir una propuesta devuelve también su pieza y sus caras.
+ * Elegir una propuesta devuelve también su pieza y sus caras. No pinta título
+ * propio: la pantalla lo nombra (`FieldSet` + `FieldLegend` o `field.Group`).
  */
 export function DiagnosisPicker({
   patientId,
@@ -55,6 +56,10 @@ export function DiagnosisPicker({
   system = null,
   onChange,
   disabled = false,
+  id: idProp,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
 }: {
   patientId: string
   encounterId: string | null
@@ -66,8 +71,15 @@ export function DiagnosisPicker({
     site?: { toothNumber: number | null; surfaces: string[] },
   ) => void
   disabled?: boolean
+  /** Va al buscador, el enfocable principal. */
+  id?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  /** Al salir del grupo entero. */
+  onBlur?: () => void
 }) {
-  const headingId = useId()
+  const fallbackId = useId()
+  const searchId = idProp ?? fallbackId
   const params = new URLSearchParams()
   params.set("patientId", patientId)
   if (encounterId) params.set("encounterId", encounterId)
@@ -93,14 +105,20 @@ export function DiagnosisPicker({
   const isChosen = (option: DiagnosisOption) =>
     option.code === value && (system ?? data?.system) === option.system
 
+  // `onBlur` solo al salir del grupo, no al pasar de un paso a otro.
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!onBlur || event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    onBlur()
+  }
+
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 id={headingId} className="text-sm font-medium">
-          Diagnóstico
-        </h3>
-        {data ? <Badge variant="outline">{data.systemTitle} · lista de la clínica</Badge> : null}
-      </div>
+    // biome-ignore lint/a11y/noStaticElementInteractions: solo escucha cuándo el foco sale de lo que tiene dentro, para dar el campo por visitado.
+    <div className="flex flex-col gap-4" onBlur={handleBlur}>
+      {data ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{data.systemTitle} · lista de la clínica</Badge>
+        </div>
+      ) : null}
 
       {suggestions.isPending ? (
         <div
@@ -180,17 +198,22 @@ export function DiagnosisPicker({
         </div>
       ) : null}
 
-      <DiagnosisSearch
-        label={
-          searchStep > 1 ? `${searchStep} · Buscar en toda la lista` : "Buscar en toda la lista"
-        }
-        value={value}
-        system={system}
-        disabled={disabled}
-        onChange={(code, description, nextSystem) =>
-          onChange({ code, description, system: nextSystem })
-        }
-      />
-    </section>
+      <Field>
+        <FieldLabel htmlFor={searchId}>
+          {searchStep > 1 ? `${searchStep} · Buscar en toda la lista` : "Buscar en toda la lista"}
+        </FieldLabel>
+        <DiagnosisSearch
+          id={searchId}
+          invalid={invalid}
+          aria-describedby={describedBy}
+          value={value}
+          system={system}
+          disabled={disabled}
+          onChange={(code, description, nextSystem) =>
+            onChange({ code, description, system: nextSystem })
+          }
+        />
+      </Field>
+    </div>
   )
 }

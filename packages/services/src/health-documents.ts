@@ -20,30 +20,36 @@ import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
-import { notFound, ServiceError, validation } from "./errors.js"
 import {
-  deliverDocumentPdf,
+  ORDER_KIND_WORDS,
+  renderMedicalLeavePdf,
+  renderOrderPdf,
+  renderPrescriptionPdf,
+} from "./clinical-papers.js"
+import { renderConsentPaperPdf } from "./consent-pdf.js"
+import { type CheckableDocument, documentCheckUrl } from "./document-check.js"
+import { loadDocumentClinic } from "./document-clinic.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import {
   type DocumentChannelOption,
+  deliverDocumentPdf,
   documentChannelsFor,
   requireDocumentConnection,
   type SendDeps,
 } from "./financial-documents.js"
-import { requirePatient } from "./patients.js"
-import { ORDER_KIND_WORDS, renderMedicalLeavePdf, renderOrderPdf, renderPrescriptionPdf } from "./clinical-papers.js"
-import { renderConsentPaperPdf } from "./consent-pdf.js"
-import { type CheckableDocument, documentCheckUrl } from "./document-check.js"
-import { loadDocumentClinic } from "./document-clinic.js"
-import { getPrescriptionPrint } from "./prescriptions.js"
 import { getMedicalLeavePrint } from "./medical-leaves.js"
-import type { Storage } from "./storage.js"
+import { requirePatient } from "./patients.js"
+import { getPrescriptionPrint } from "./prescriptions.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
+import type { Storage } from "./storage.js"
 import { sendPersonalLink } from "./su-enlace.js"
 
 export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent", "medical_leave"] as const
 export type HealthDocumentType = (typeof HEALTH_DOCUMENT_TYPES)[number]
 
 function assertHealthType(value: string): HealthDocumentType {
-  if ((HEALTH_DOCUMENT_TYPES as readonly string[]).includes(value)) return value as HealthDocumentType
+  if ((HEALTH_DOCUMENT_TYPES as readonly string[]).includes(value))
+    return value as HealthDocumentType
   throw validation("Documento inválido: receta, orden, consentimiento o descanso médico")
 }
 
@@ -55,24 +61,36 @@ export type HealthDocumentRecipient = DecisionRecipient
  * edad y su representante legal vigente. Un menor no lo recibe en su propio
  * chat, y al cumplir 18 deja de recibirlo quien lo representó de niño.
  */
-export function listHealthDocumentRecipients(tx: Db, orgId: string, patientId: string): Promise<HealthDocumentRecipient[]> {
+export function listHealthDocumentRecipients(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<HealthDocumentRecipient[]> {
   return listDecisionRecipients(tx, orgId, patientId)
 }
 
 /** WhatsApp primero; sin WhatsApp, el correo. Ningún otro canal lleva papeles de salud. */
 /** Lo que dice la opción de WhatsApp de una receta pasadas las 24 horas. */
-export const RECIPE_BY_LINK = "Pasaron 24 horas: le llega «Su enlace» y descarga la receta en «Tus papeles»"
+export const RECIPE_BY_LINK =
+  "Pasaron 24 horas: le llega «Su enlace» y descarga la receta en «Tus papeles»"
 
 /**
  * Una receta fuera de las 24 horas de WhatsApp no espera a que la persona
  * escriba: sale «Su enlace» (ya aprobado) y la receta queda en «Tus papeles».
  */
 function viaPersonalLink(option: DocumentChannelOption): DocumentChannelOption {
-  if (option.channel !== "whatsapp" || option.usable || !option.reason?.startsWith("Fuera de la ventana")) return option
+  if (
+    option.channel !== "whatsapp" ||
+    option.usable ||
+    !option.reason?.startsWith("Fuera de la ventana")
+  )
+    return option
   return { ...option, usable: true, reason: RECIPE_BY_LINK }
 }
 
-export function proposeHealthChannel<T extends { channel: string; usable: boolean }>(options: T[]): T | null {
+export function proposeHealthChannel<T extends { channel: string; usable: boolean }>(
+  options: T[],
+): T | null {
   return (
     options.find((o) => o.channel === "whatsapp" && o.usable) ??
     options.find((o) => o.channel === "email" && o.usable) ??
@@ -108,12 +126,18 @@ async function loadHealthMeta(
 ): Promise<HealthDocumentMeta> {
   if (type === "prescription") {
     const print = await getPrescriptionPrint(tx, orgId, patientId, documentId)
-    if (print.prescription.status !== "emitida") throw validation("La receta está anulada: no se envía")
-    return { label: `Receta N.º ${print.prescription.prescriptionNumber}`, own: "tu receta", other: "la receta" }
+    if (print.prescription.status !== "emitida")
+      throw validation("La receta está anulada: no se envía")
+    return {
+      label: `Receta N.º ${print.prescription.prescriptionNumber}`,
+      own: "tu receta",
+      other: "la receta",
+    }
   }
   if (type === "medical_leave") {
     const print = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
-    if (print.leave.status !== "emitido") throw validation("El descanso médico está anulado: no se envía")
+    if (print.leave.status !== "emitido")
+      throw validation("El descanso médico está anulado: no se envía")
     return {
       label: `Descanso médico N.º ${print.leave.leaveNumber}`,
       own: "tu descanso médico",
@@ -162,7 +186,8 @@ export async function getHealthDocumentSendOptions(
   const recipients = await listHealthDocumentRecipients(tx, orgId, patientId)
   const document = { type, label: meta.label }
   const recipient =
-    (input.recipientContactId && recipients.find((r) => r.contactId === input.recipientContactId)) ||
+    (input.recipientContactId &&
+      recipients.find((r) => r.contactId === input.recipientContactId)) ||
     recipients.find((r) => r.isDefault) ||
     null
   if (!recipient) {
@@ -194,7 +219,12 @@ export async function getHealthDocumentSendOptions(
     channels,
     proposed,
     document,
-    message: proposeHealthMessage(meta, recipient, person.displayName, profile?.tradeName || profile?.legalName || ""),
+    message: proposeHealthMessage(
+      meta,
+      recipient,
+      person.displayName,
+      profile?.tradeName || profile?.legalName || "",
+    ),
     printOnly: proposed
       ? null
       : `${recipient.displayName} no tiene WhatsApp ni correo por donde enviarlo: solo se puede imprimir`,
@@ -266,17 +296,28 @@ export async function renderHealthDocumentPdf(
   }
   // Se envía el PDF que se guardó al firmar, no uno nuevo: es el de la huella (#47).
   if (!doc.pdfDocumentId || !doc.pdfSha256)
-    throw new ServiceError("CONSENT_PDF_MISSING", 409, "El consentimiento aún no tiene su PDF guardado")
-  if (!storage.getAttachment) throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo leer el PDF guardado")
+    throw new ServiceError(
+      "CONSENT_PDF_MISSING",
+      409,
+      "El consentimiento aún no tiene su PDF guardado",
+    )
+  if (!storage.getAttachment)
+    throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo leer el PDF guardado")
   const [file] = await tx
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
-    .where(and(eq(patientDocument.id, doc.pdfDocumentId), eq(patientDocument.organizationId, orgId)))
+    .where(
+      and(eq(patientDocument.id, doc.pdfDocumentId), eq(patientDocument.organizationId, orgId)),
+    )
     .limit(1)
   if (!file) throw notFound("PDF del consentimiento")
   const bytes = await storage.getAttachment(file.storageKey)
   if (createHash("sha256").update(bytes).digest("hex") !== doc.pdfSha256)
-    throw new ServiceError("CONSENT_PDF_ALTERED", 409, "El PDF guardado no coincide con su huella: no se envía")
+    throw new ServiceError(
+      "CONSENT_PDF_ALTERED",
+      409,
+      "El PDF guardado no coincide con su huella: no se envía",
+    )
   return {
     bytes,
     filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
@@ -316,7 +357,7 @@ export async function sendHealthDocument(
   deps: SendDeps & { secretsKey?: Buffer },
 ): Promise<SendHealthDocumentResult> {
   const type = assertHealthType(input.documentType)
-  if (!input.connectionId) throw validation("Elige por dónde enviarlo")
+  if (!input.connectionId) throw invalidField("connectionId", "Elige por dónde enviarlo")
   const meta = await loadHealthMeta(tx, orgId, input.patientId, type, input.documentId)
   if (input.requestId) {
     await tx.execute(
@@ -341,7 +382,11 @@ export async function sendHealthDocument(
         recipientName?: string
       }
       if (sent.documentId !== input.documentId)
-        throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave de envío ya se usó con otro documento")
+        throw new ServiceError(
+          "REQUEST_ID_CONFLICT",
+          409,
+          "Esa clave de envío ya se usó con otro documento",
+        )
       return {
         conversationId: sent.conversationId ?? "",
         messageId: previous.entityId ?? "",
@@ -357,15 +402,14 @@ export async function sendHealthDocument(
     ? recipients.find((r) => r.contactId === input.recipientContactId)
     : recipients.find((r) => r.isDefault)
   if (!recipient) {
-    throw new ServiceError(
-      "DOCUMENT_RECIPIENT_NOT_AUTHORIZED",
-      403,
-      "Un papel de salud solo se envía a la propia persona o a su representante legal",
-    )
+    const message = "Un papel de salud solo se envía a la propia persona o a su representante legal"
+    throw new ServiceError("DOCUMENT_RECIPIENT_NOT_AUTHORIZED", 403, message, {
+      recipientContactId: message,
+    })
   }
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
-    throw validation("Un papel de salud se envía por WhatsApp o por correo")
+    throw invalidField("connectionId", "Un papel de salud se envía por WhatsApp o por correo")
   // Receta pasadas las 24 horas: «Su enlace» y la descarga en «Tus papeles» (decisión 8).
   if (type === "prescription" && conn.channel === "whatsapp" && deps.secretsKey) {
     const { channels } = await documentChannelsFor(tx, orgId, recipient)
@@ -406,9 +450,17 @@ export async function sendHealthDocument(
       }
     }
   }
-  const rendered = await renderHealthDocumentPdf(tx, orgId, input.patientId, type, input.documentId, deps.storage)
+  const rendered = await renderHealthDocumentPdf(
+    tx,
+    orgId,
+    input.patientId,
+    type,
+    input.documentId,
+    deps.storage,
+  )
   const message = input.message?.trim()
-  if (message && message.length > 500) throw validation("El mensaje admite hasta 500 caracteres")
+  if (message && message.length > 500)
+    throw invalidField("message", "El mensaje admite hasta 500 caracteres")
   const person = await requirePatient(tx, orgId, input.patientId)
   const [profile] = await tx
     .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })

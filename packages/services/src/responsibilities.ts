@@ -4,23 +4,29 @@ import { patient, patientContact, patientDocument, patientResponsibility } from 
 import { contact } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq, isNull, lte, gte, or } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { endPairAccess } from "./pair-access.js"
 import { patientOrganizationToday, requirePatient } from "./patients.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 export { RESPONSIBILITY_KINDS } from "@odentia/clinical"
 
-function validDate(value: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw validation("Fecha inválida: usa AAAA-MM-DD")
+/** `field`: el nombre de la fecha en el cuerpo, para decir el rechazo junto a ella. */
+function validDate(value: string, field: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) throw invalidField(field, "Fecha inválida: usa AAAA-MM-DD")
   return value
 }
 
-export async function requireLinkedActiveContact(tx: Db, orgId: string, patientId: string, contactId: string) {
+/** `field`: el nombre del contacto en el cuerpo de la petición, para decir el rechazo junto a él. */
+export async function requireLinkedActiveContact(tx: Db, orgId: string, patientId: string, contactId: string, field?: string) {
   const [row] = await tx.select({ contact, relationship: patientContact.relationship }).from(patientContact)
     .innerJoin(contact, and(eq(contact.id, patientContact.contactId), eq(contact.organizationId, patientContact.organizationId)))
     .where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, contactId), eq(contact.isActive, true)))
-  if (!row) throw notFound("Contacto activo vinculado al paciente")
+  if (!row) {
+    const error = notFound("Contacto activo vinculado al paciente")
+    if (field) error.fields = { [field]: error.message }
+    throw error
+  }
   return row
 }
 
@@ -80,20 +86,21 @@ function currentRepresentationSql(
  * un menor termina al cumplir 18: después solo cuenta la que se registró
  * siendo ya mayor de edad (la de un adulto que la necesita). Un familiar, un
  * autorizado de información o «otro» nunca deciden. La edad se cuenta con el
- * día de la clínica.
+ * día de la clínica. `field`: el nombre del dato en el cuerpo de la petición,
+ * para que la pantalla diga el rechazo junto a quien se eligió.
  */
-export async function requireDecisionContact(tx: Db, orgId: string, patientId: string, contactId: string) {
-  const linked = await requireLinkedActiveContact(tx, orgId, patientId, contactId)
+export async function requireDecisionContact(tx: Db, orgId: string, patientId: string, contactId: string, field?: string) {
+  const notAuthorized = (message: string) =>
+    new ServiceError("DECISION_CONTACT_NOT_AUTHORIZED", 409, message, field ? { [field]: message } : undefined)
+  const linked = await requireLinkedActiveContact(tx, orgId, patientId, contactId, field)
   const age = await patientAge(tx, orgId, patientId)
   if (linked.relationship === "self") {
-    if (age.isMinor) {
-      throw new ServiceError("DECISION_CONTACT_NOT_AUTHORIZED", 409, "Es menor de edad: decide su representante legal vigente")
-    }
+    if (age.isMinor) throw notAuthorized("Es menor de edad: decide su representante legal vigente")
     return linked.contact
   }
   const [responsibility] = await tx.select({ id: patientResponsibility.id }).from(patientResponsibility)
     .where(and(currentRepresentationSql(orgId, patientId, age), eq(patientResponsibility.contactId, contactId))).for("share")
-  if (!responsibility) throw new ServiceError("DECISION_CONTACT_NOT_AUTHORIZED", 409, "El contacto no es paciente ni representante legal vigente")
+  if (!responsibility) throw notAuthorized("El contacto no es paciente ni representante legal vigente")
   return linked.contact
 }
 
@@ -164,19 +171,26 @@ export interface GrantResponsibilityInput {
 export async function grantResponsibility(tx: Db, orgId: string, actorUserId: string | null, patientId: string, input: GrantResponsibilityInput) {
   await requirePatient(tx, orgId, patientId)
   // Serializa asignaciones concurrentes con la misma persona y rol.
-  const linked = await requireLinkedActiveContact(tx, orgId, patientId, input.contactId)
-  if (linked.relationship === "self" && input.kind === "representante_legal") throw validation("El propio paciente no puede ser su representante legal")
+  const linked = await requireLinkedActiveContact(tx, orgId, patientId, input.contactId, "contactId")
+  if (linked.relationship === "self" && input.kind === "representante_legal") throw invalidField("contactId", "El propio paciente no puede ser su representante legal")
   await tx.select({ id: patientContact.id }).from(patientContact).where(and(eq(patientContact.organizationId, orgId), eq(patientContact.patientId, patientId), eq(patientContact.contactId, linked.contact.id))).for("update")
-  if (!(RESPONSIBILITY_KINDS as readonly string[]).includes(input.kind)) throw validation("Responsabilidad inválida")
-  const startsAt = validDate(input.startsAt)
-  const endsAt = input.endsAt ? validDate(input.endsAt) : null
-  if (endsAt && endsAt < startsAt) throw validation("La fecha final no puede preceder a la inicial")
+  if (!(RESPONSIBILITY_KINDS as readonly string[]).includes(input.kind)) throw invalidField("kind", "Responsabilidad inválida")
+  const startsAt = validDate(input.startsAt, "startsAt")
+  const endsAt = input.endsAt ? validDate(input.endsAt, "endsAt") : null
+  if (endsAt && endsAt < startsAt) throw invalidField("endsAt", "La fecha final no puede preceder a la inicial")
   if (input.evidenceDocumentId) {
     const [doc] = await tx.select({ id: patientDocument.id }).from(patientDocument).where(and(eq(patientDocument.id, input.evidenceDocumentId), eq(patientDocument.organizationId, orgId), eq(patientDocument.patientId, patientId)))
-    if (!doc) throw notFound("Documento del paciente")
+    if (!doc) {
+      const error = notFound("Documento del paciente")
+      error.fields = { evidenceDocumentId: error.message }
+      throw error
+    }
   }
   const [existing] = await tx.select({ id: patientResponsibility.id }).from(patientResponsibility).where(and(eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId), eq(patientResponsibility.contactId, input.contactId), eq(patientResponsibility.kind, input.kind), isNull(patientResponsibility.revokedAt)))
-  if (existing) throw new ServiceError("RESPONSIBILITY_EXISTS", 409, "La responsabilidad ya está asignada; revócala antes de sustituirla")
+  if (existing) {
+    const message = "La responsabilidad ya está asignada; revócala antes de sustituirla"
+    throw new ServiceError("RESPONSIBILITY_EXISTS", 409, message, { kind: message })
+  }
   const [row] = await tx.insert(patientResponsibility).values({ ...input, startsAt, endsAt, organizationId: orgId, patientId, createdBy: actorUserId }).returning()
   await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action: "patient.responsibility_granted", entity: "patient_responsibility", entityId: row.id, metadata: { patientId, contactId: input.contactId, kind: input.kind } })
   return row
@@ -184,7 +198,7 @@ export async function grantResponsibility(tx: Db, orgId: string, actorUserId: st
 
 export async function revokeResponsibility(tx: Db, orgId: string, actorUserId: string, patientId: string, id: string, input: { reason: string }) {
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const where = and(eq(patientResponsibility.id, id), eq(patientResponsibility.organizationId, orgId), eq(patientResponsibility.patientId, patientId))
   const [current] = await tx.select().from(patientResponsibility).where(where).for("update")
   if (!current) throw notFound("Responsabilidad")

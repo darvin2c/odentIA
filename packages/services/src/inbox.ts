@@ -1,4 +1,5 @@
 import type { Db } from "@odentia/db"
+import { type LastAgentAction, lastAgentActions } from "./agent-actions.js"
 import { sql } from "drizzle-orm"
 import type { ConversationCloseReason } from "./conversation-close.js"
 import {
@@ -97,6 +98,8 @@ export interface InboxConversationItem extends ConversationListItem {
   channels: string[]
   /** Sus conversaciones: abrir cualquiera es abrir esta fila. */
   conversationIds: string[]
+  /** Lo último que hizo el agente, si la persona no volvió a escribir después. */
+  lastAction: LastAgentAction | null
 }
 
 const NO_ATTENTION: ConversationAttention = {
@@ -261,6 +264,7 @@ export async function listInboxConversations(
   const ids = rows.map((row) => row.id)
   const listed = new Map((await conversationListItems(tx, orgId, ids)).map((item) => [item.id, item]))
   const state = await conversationAttention(tx, orgId, ids, now ?? new Date())
+  const actions = await lastAgentActions(tx, orgId, rows.flatMap((row) => row.conversationIds))
   const items: InboxConversationItem[] = []
   for (const row of rows) {
     const item = listed.get(row.id)
@@ -273,6 +277,10 @@ export async function listInboxConversations(
       closure: state.closure.get(item.id) ?? null,
       channels: row.channels,
       conversationIds: row.conversationIds,
+      lastAction: row.conversationIds.reduce<LastAgentAction | null>((latest, id) => {
+        const action = actions.get(id)
+        return action && (!latest || latest.at < action.at) ? action : latest
+      }, null),
     })
   }
   return { items, nextCursor }

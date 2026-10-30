@@ -1,10 +1,17 @@
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@odentia/ui"
-import { SubmitButton } from "@odentia/ui-patterns"
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@odentia/ui"
+import { SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { apiFetchBytes } from "../../../lib/api"
 import { budgetPdfUrl, deliverBudgetApi, PLAN_QUERY_KEYS } from "../../../lib/budgets"
-import { mutationMessage } from "./budget-parts"
 import { BudgetSendButton } from "./budget-send"
 
 /**
@@ -46,7 +53,7 @@ export function BudgetShowActions({
         made = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }))
         if (alive) setPdf(made)
       } catch (err) {
-        if (alive) setError(mutationMessage(err))
+        if (alive) setError(submitErrorMessage(err))
       }
     })()
     return () => {
@@ -68,14 +75,20 @@ export function BudgetShowActions({
       await beforeWrite()
       await apiFetchBytes(budgetPdfUrl(patientId, budgetId))
       await deliverBudgetApi(patientId, budgetId)
-      const url = URL.createObjectURL(new Blob([await apiFetchBytes(budgetPdfUrl(patientId, budgetId))], { type: "application/pdf" }))
+      const url = URL.createObjectURL(
+        new Blob([await apiFetchBytes(budgetPdfUrl(patientId, budgetId))], {
+          type: "application/pdf",
+        }),
+      )
       if (win && !win.closed) win.location.href = url
       else window.open(url, "_blank", "noopener")
       setOpen(false)
-      await Promise.all(PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })))
+      await Promise.all(
+        PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      )
     } catch (err) {
       if (win && !win.closed) win.close()
-      setError(mutationMessage(err))
+      setError(submitErrorMessage(err))
     } finally {
       setPrinting(false)
     }
@@ -84,10 +97,22 @@ export function BudgetShowActions({
   return (
     <>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" size="sm" className="min-h-11 sm:min-h-8" onClick={() => setOpen(true)}>
+        <Button
+          type="button"
+          size="sm"
+          className="min-h-11 sm:min-h-8"
+          onClick={() => setOpen(true)}
+        >
           Mostrar a {firstName}
         </Button>
-        <SubmitButton type="button" size="sm" variant="outline" className="min-h-11 sm:min-h-8" pending={printing} onClick={() => void print()}>
+        <SubmitButton
+          type="button"
+          size="sm"
+          variant="outline"
+          className="min-h-11 sm:min-h-8"
+          pending={printing}
+          onClick={() => void print()}
+        >
           Imprimir
         </SubmitButton>
       </div>
@@ -100,7 +125,9 @@ export function BudgetShowActions({
         <DialogContent className="flex h-[92dvh] w-[96vw] max-w-5xl flex-col gap-3 sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>Presupuesto para {patientName}</DialogTitle>
-            <DialogDescription>Lo mismo que recibirá en su PDF. Mostrarlo no le envía nada: sigue en borrador.</DialogDescription>
+            <DialogDescription>
+              Lo mismo que recibirá en su PDF. Mostrarlo no le envía nada: sigue en borrador.
+            </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-hidden rounded-lg border bg-muted/30">
             {pdf ? (
@@ -117,10 +144,21 @@ export function BudgetShowActions({
             <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
               Cerrar
             </Button>
-            <SubmitButton type="button" variant="outline" pending={printing} onClick={() => void print()}>
+            <SubmitButton
+              type="button"
+              variant="outline"
+              pending={printing}
+              onClick={() => void print()}
+            >
               Imprimir
             </SubmitButton>
-            <BudgetSendButton patientId={patientId} budgetId={budgetId} beforeSend={beforeWrite} onSent={() => setOpen(false)} reviewable />
+            <BudgetSendButton
+              patientId={patientId}
+              budgetId={budgetId}
+              beforeSend={beforeWrite}
+              onSent={() => setOpen(false)}
+              reviewable
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -5,12 +5,17 @@
  * franja de avisos se abre igual, con «+10» y «+25» para subirlo sin hacer la
  * cuenta (ADR 0065).
  */
-import { Button, Input, Label } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
-import { useEffect, useState } from "react"
-import { centsToMajor, formatPlanMoney, majorToCents } from "./money"
+import { Button } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { useEffect } from "react"
+import { z } from "zod"
+import { centsToMajor, formatPlanMoney, majorToCents, readMajor } from "./money"
 import { useReceptionName } from "../../lib/agent-names"
 import { useSaasTerms } from "../../lib/billing"
+
+/** El servidor nombra el presupuesto por lo que guarda (`capCents`); la pantalla, por lo que se escribe. */
+const CAP_FIELD_MAP = { capCents: "cap" }
 
 export function SpendCapDrawer({
   open,
@@ -30,49 +35,54 @@ export function SpendCapDrawer({
 }) {
   const receptionName = useReceptionName()
   const terms = useSaasTerms().data
-  const [text, setText] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const saved = currentCents === null ? "" : centsToMajor(currentCents, currency)
+  const form = useAppForm({
+    defaultValues: { cap: saved },
+    validators: {
+      // Vacío quita el presupuesto; lo escrito tiene que ser un importe.
+      onSubmit: z.object({
+        cap: z.string().superRefine((value, ctx) => {
+          if (!value.trim()) return
+          const reading = readMajor(value, currency)
+          if (!reading.ok) ctx.addIssue({ code: "custom", message: reading.error })
+        }),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await onSave(value.cap.trim() ? majorToCents(value.cap, currency) : null)
+      onClose()
+    },
+  })
+  // Al abrir, lo guardado: el borrador anterior no se arrastra.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir; lo guardado que llegue después no pisa lo que se escribe.
   useEffect(() => {
-    if (open) {
-      setText(currentCents === null ? "" : centsToMajor(currentCents, currency))
-      setError(null)
-    }
-  }, [open, currentCents, currency])
+    if (open) form.reset({ cap: saved })
+  }, [open])
+  const surface = useFormSurface(form, { fieldMap: CAP_FIELD_MAP })
+  const text = useStore(form.store, (state) => state.values.cap)
   const cents = text.trim() ? majorToCents(text, currency) : null
   const money = (value: number) => formatPlanMoney(value, currency)
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (text.trim() && cents === null) {
-      setError("Escribe un importe válido, por ejemplo 1000")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    try {
-      await onSave(cents)
-      onClose()
-    } catch {
-      setError("No se pudo guardar el presupuesto. Reintenta en un momento.")
-    } finally {
-      setSaving(false)
-    }
-  }
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={onClose}
       title="Presupuesto del mes"
       description="Lo que tus agentes pueden gastar al mes por encima de tu crédito. Al llegar no empiezan trabajo nuevo con cobro; lo que ya empezó se termina y se cobra. El almacenamiento va aparte."
-      onSubmit={submit}
-      isDirty={text !== (currentCents === null ? "" : centsToMajor(currentCents, currency))}
-      isSubmitting={saving}
-      error={error}
       submitLabel="Guardar presupuesto"
     >
       <div className="flex flex-col gap-2">
-        <Label htmlFor="spend-cap">Presupuesto mensual ({currency}, sin impuestos)</Label>
-        <Input id="spend-cap" inputMode="decimal" autoComplete="off" value={text} onChange={(event) => setText(event.target.value)} placeholder="Sin presupuesto" />
+        <form.AppField name="cap">
+          {(field) => (
+            <field.TextField
+              id="spend-cap"
+              label={`Presupuesto mensual (${currency}, sin impuestos)`}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="Sin presupuesto"
+            />
+          )}
+        </form.AppField>
         {currentCents !== null ? (
           <fieldset className="flex flex-wrap gap-2">
             <legend className="sr-only">Subir el presupuesto</legend>
@@ -83,7 +93,7 @@ export function SpendCapDrawer({
                 variant="outline"
                 size="sm"
                 className="min-h-11 sm:min-h-8"
-                onClick={() => setText(centsToMajor((cents ?? currentCents) + step, currency))}
+                onClick={() => form.setFieldValue("cap", centsToMajor((cents ?? currentCents) + step, currency))}
               >
                 +{money(step)}
               </Button>

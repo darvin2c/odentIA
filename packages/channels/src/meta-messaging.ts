@@ -26,8 +26,8 @@ import type {
   OutboundMessage,
   WebhookParseResult,
 } from "./protocol.js"
-import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
-import { metaGraphVersion } from "./meta-graph.js"
+import { ConnectionRejectedError, ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
+import { graphRejectedPart, metaGraphVersion } from "./meta-graph.js"
 
 const GRAPH_HOST = "https://graph.facebook.com"
 const IG_HOST = "https://graph.instagram.com"
@@ -412,8 +412,9 @@ export const messengerAdapter: ChannelAdapter = {
       {},
       deps,
     )
+    if (status >= 500) throw new Error(`Messenger no respondió al comprobar la página: ${graphError(status, json)}`)
     if (status >= 400 || !json || typeof json !== "object" || !("id" in json)) {
-      throw new Error("Messenger validate falló: token o página inválida")
+      throw new ConnectionRejectedError("Messenger validate falló: token o página inválida", graphRejectedPart(json))
     }
     const id = typeof json.id === "string" ? json.id : cfg.pageId
     const name = "name" in json && typeof json.name === "string" ? json.name : id
@@ -476,8 +477,9 @@ export const instagramAdapter: ChannelAdapter = {
       deps,
       `${IG_HOST}/${metaGraphVersion()}`,
     )
+    if (status >= 500) throw new Error(`Instagram no respondió al comprobar la cuenta: ${graphError(status, json)}`)
     if (status >= 400 || !json || typeof json !== "object" || !("id" in json)) {
-      throw new Error("Instagram validate falló: token o cuenta inválido")
+      throw new ConnectionRejectedError("Instagram validate falló: token o cuenta inválido", graphRejectedPart(json))
     }
     const id = typeof json.id === "string" ? json.id : cfg.instagramId
     const username =

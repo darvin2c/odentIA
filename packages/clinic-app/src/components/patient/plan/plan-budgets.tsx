@@ -11,20 +11,26 @@ import {
   Badge,
   Button,
   ButtonGroup,
-  Checkbox,
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-  Field,
   FieldGroup,
-  FieldLabel,
-  Input,
-  Textarea,
 } from "@odentia/ui"
-import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  LoadingState,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown } from "lucide-react"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetchBytes } from "../../../lib/api"
 import {
   type AdjustBudgetLineBody,
@@ -50,7 +56,10 @@ import {
 import { useMemberName, usePermission } from "../../../lib/crm"
 import { useOrgEvents } from "../../../lib/org-events"
 import type { PlanItem } from "../../../lib/patients"
+import { appWords } from "../../../lib/product-words"
 import { fetchPromotions } from "../../../lib/promotions"
+import { productUi } from "../../../product/product-ui"
+import { openBookingAnywhere } from "../../agenda/schedule-host"
 import { BudgetDraftEditor } from "./budget-draft-editor"
 import {
   AMOUNT_PENDING,
@@ -58,7 +67,6 @@ import {
   BudgetTotals,
   budgetStatusTone,
   type Money,
-  mutationMessage,
   SessionNote,
   treatmentSiteLabel,
   useBudgetFormat,
@@ -66,27 +74,32 @@ import {
 import { BudgetResponse } from "./budget-response"
 import { BudgetReviewDrawer } from "./budget-review"
 import { BudgetSendButton } from "./budget-send"
-import { appWords } from "../../../lib/product-words"
-import { productUi } from "../../../product/product-ui"
-import { openBookingAnywhere } from "../../agenda/schedule-host"
 
 /** Lo que ya no es vigente: se ve en «Anteriores». */
 const PAST = ["cancelado", "sustituido"]
 
 /** Escrituras del presupuesto con sus invalidaciones (y la guarda de la atención, si la hay). */
-function useBudgetWrites(patientId: string, guard?: { disabled?: boolean; beforeWrite?: () => Promise<void> }) {
+function useBudgetWrites(
+  patientId: string,
+  guard?: { disabled?: boolean; beforeWrite?: () => Promise<void> },
+) {
   const queryClient = useQueryClient()
   return async <T,>(operation: () => Promise<T>): Promise<T> => {
     if (guard?.disabled) throw new Error("Espera a que termine el guardado de la atención.")
     await guard?.beforeWrite?.()
     const result = await operation()
-    await Promise.all(PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })))
+    await Promise.all(
+      PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+    )
     return result
   }
 }
 
 /** Ítems que pueden entrar a un presupuesto nuevo: sin presupuesto vigente, o que no se aceptaron. */
-export function quotableItems(items: PlanItem[], budgetsById: Map<string, BudgetWithTotals>): PlanItem[] {
+export function quotableItems(
+  items: PlanItem[],
+  budgetsById: Map<string, BudgetWithTotals>,
+): PlanItem[] {
   return items.filter((item) => {
     if (["realizado", "cancelado", "reemplazado"].includes(item.status)) return false
     if (item.priceCents == null) return false
@@ -129,22 +142,27 @@ export function PlanBudgets({
     enabled: canWrite && canCatalog,
   })
   useOrgEvents(["budget.updated", "encounter.finalized", "patient.account.updated"], () => {
-    for (const key of PLAN_QUERY_KEYS) void queryClient.invalidateQueries({ queryKey: [key, patientId] })
+    for (const key of PLAN_QUERY_KEYS)
+      void queryClient.invalidateQueries({ queryKey: [key, patientId] })
   })
   const budgets = useMemo(() => budgetsQuery.data?.data ?? [], [budgetsQuery.data])
   const budgetsById = useMemo(() => new Map(budgets.map((b) => [b.id, b])), [budgets])
   const current = budgets
     .filter((budget) => !PAST.includes(budget.status))
     .sort((a, b) => order(a) - order(b) || b.budgetNumber - a.budgetNumber)
-  const past = budgets.filter((budget) => PAST.includes(budget.status)).sort((a, b) => b.budgetNumber - a.budgetNumber)
+  const past = budgets
+    .filter((budget) => PAST.includes(budget.status))
+    .sort((a, b) => b.budgetNumber - a.budgetNumber)
   const quotable = planItems ? quotableItems(planItems, budgetsById) : []
-  const draft = current.find((budget) => budget.status === "borrador" && !budget.supersedesBudgetId) ?? null
+  const draft =
+    current.find((budget) => budget.status === "borrador" && !budget.supersedesBudgetId) ?? null
   const runWrite = useBudgetWrites(patientId)
   const [prepareError, setPrepareError] = useState<string | null>(null)
   const prepare = useMutation({
-    mutationFn: () => runWrite(() => createBudgetApi(patientId, { itemIds: quotable.map((item) => item.id) })),
+    mutationFn: () =>
+      runWrite(() => createBudgetApi(patientId, { itemIds: quotable.map((item) => item.id) })),
     onSuccess: () => setPrepareError(null),
-    onError: (err) => setPrepareError(mutationMessage(err)),
+    onError: (err) => setPrepareError(submitErrorMessage(err)),
   })
 
   if (budgetsQuery.isPending) return <LoadingState message="Cargando presupuestos…" />
@@ -191,7 +209,9 @@ export function PlanBudgets({
             addable={budget === draft ? quotableForDraft(budget, planItems ?? [], quotable) : []}
             defaultOpen={budget.id === focusBudgetId || budget.id === respondBudgetId}
             respond={budget.id === respondBudgetId}
-            scheduleItemIds={scheduleItemIds.filter((id) => budget.items.some((line) => line.planItemId === id))}
+            scheduleItemIds={scheduleItemIds.filter((id) =>
+              budget.items.some((line) => line.planItemId === id),
+            )}
             onSchedule={onSchedule}
             runWrite={runWrite}
           />
@@ -199,7 +219,13 @@ export function PlanBudgets({
       )}
       {current.length > 0 && canPrepare && !draft ? (
         <div>
-          <Button type="button" size="sm" variant="outline" disabled={prepare.isPending} onClick={() => prepare.mutate()}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={prepare.isPending}
+            onClick={() => prepare.mutate()}
+          >
             Preparar presupuesto con lo pendiente ({quotable.length})
           </Button>
         </div>
@@ -259,7 +285,11 @@ function order(budget: BudgetWithTotals): number {
 }
 
 /** En el borrador puede entrar lo cotizable y, en otra opción, lo que ya está en él. */
-function quotableForDraft(budget: BudgetWithTotals, items: PlanItem[], quotable: PlanItem[]): PlanItem[] {
+function quotableForDraft(
+  budget: BudgetWithTotals,
+  items: PlanItem[],
+  quotable: PlanItem[],
+): PlanItem[] {
   const inBudget = items.filter((item) => item.budgetId === budget.id)
   return [...quotable, ...inBudget]
 }
@@ -315,7 +345,8 @@ function BudgetCard({
   const editable = isDraft && canWrite
   const value = valueOption(budget)
   const [optionId, setOptionId] = useState<string | null>(null)
-  const option = budget.options.find((row) => row.id === optionId) ?? value ?? budget.options[0] ?? null
+  const option =
+    budget.options.find((row) => row.id === optionId) ?? value ?? budget.options[0] ?? null
   const lines = option ? optionLines(budget, option.id) : budget.items
   const several = budget.options.length > 1
   const [actionError, setActionError] = useState<string | null>(null)
@@ -333,13 +364,13 @@ function BudgetCard({
       if (input.action === "duplicate") setOptionId(result.data.options.at(-1)?.id ?? null)
       if (input.action === "remove") setOptionId(null)
     },
-    onError: (err) => setActionError(mutationMessage(err)),
+    onError: (err) => setActionError(submitErrorMessage(err)),
   })
   const cancelMutation = useMutation({
     mutationFn: () => runWrite(() => cancelBudgetApi(patientId, budget.id)),
     onSuccess: () => setCancelOpen(false),
     onError: (err) => {
-      setActionError(mutationMessage(err))
+      setActionError(submitErrorMessage(err))
       setCancelOpen(false)
     },
   })
@@ -365,19 +396,30 @@ function BudgetCard({
     setPrinting(true)
     setActionError(null)
     try {
-      if (pendingLines.length > 0) await runWrite(() => adjustBudgetLinesApi(patientId, budget.id, { lines: pendingLines }))
+      if (pendingLines.length > 0)
+        await runWrite(() => adjustBudgetLinesApi(patientId, budget.id, { lines: pendingLines }))
+    } catch (err) {
+      // Lo escrito no se guardó: el borrador lo dice en cada línea y no se entrega.
+      if (win && !win.closed) win.close()
+      setPrinting(false)
+      throw err
+    }
+    try {
       await apiFetchBytes(budgetPdfUrl(patientId, budget.id))
       if (isDraft) await runWrite(() => deliverBudgetApi(patientId, budget.id))
       openPdfBytes(win, await apiFetchBytes(budgetPdfUrl(patientId, budget.id)))
     } catch (err) {
       if (win && !win.closed) win.close()
-      setActionError(mutationMessage(err))
+      setActionError(submitErrorMessage(err))
     } finally {
       setPrinting(false)
     }
   }
 
-  const accepted = budget.acceptedCents != null && budget.acceptedCents > 0 && ["aceptado", "parcial"].includes(budget.status)
+  const accepted =
+    budget.acceptedCents != null &&
+    budget.acceptedCents > 0 &&
+    ["aceptado", "parcial"].includes(budget.status)
   const summary = [
     `N.º ${budget.budgetNumber}${budget.revisionNumber && budget.revisionNumber > 1 ? ` · revisión ${budget.revisionNumber}` : ""}`,
     day(budget.presentedAt ?? budget.createdAt),
@@ -387,7 +429,9 @@ function BudgetCard({
         ? AMOUNT_PENDING
         : money(budget.totalCents, budget.currency),
   ].join(" · ")
-  const stateLine = accepted ? `${budget.stateText} · ${money(budget.acceptedCents, budget.currency)}` : budget.stateText
+  const stateLine = accepted
+    ? `${budget.stateText} · ${money(budget.acceptedCents, budget.currency)}`
+    : budget.stateText
   const answerable = BUDGET_ANSWERABLE_STATUSES.includes(budget.status)
 
   // La acción principal según el estado (tablero 3, «Un solo nombre para cada estado»).
@@ -398,7 +442,12 @@ function BudgetCard({
       </Button>
     ) : null
   ) : answerable && budget.awaitsAnswer ? (
-    <Button type="button" size="sm" variant={open ? "outline" : "default"} onClick={() => setOpen(true)}>
+    <Button
+      type="button"
+      size="sm"
+      variant={open ? "outline" : "default"}
+      onClick={() => setOpen(true)}
+    >
       ¿Qué respondió?
     </Button>
   ) : scheduleItemIds.length > 0 ? (
@@ -408,7 +457,8 @@ function BudgetCard({
       onClick={() =>
         onSchedule(
           scheduleItemIds,
-          budget.items.find((line) => scheduleItemIds.includes(line.planItemId) && line.serviceId)?.serviceId ?? null,
+          budget.items.find((line) => scheduleItemIds.includes(line.planItemId) && line.serviceId)
+            ?.serviceId ?? null,
         )
       }
     >
@@ -428,16 +478,26 @@ function BudgetCard({
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant={budgetStatusTone(budget.status)}>{stateLine}</Badge>
             {budget.createdBy ? (
-              <span className="text-xs text-muted-foreground">Preparó {memberName(budget.createdBy)}</span>
+              <span className="text-xs text-muted-foreground">
+                Preparó {memberName(budget.createdBy)}
+              </span>
             ) : null}
             {budget.seenInPortalAt ? (
-              <span className="text-xs text-muted-foreground">Lo vio en el portal el {day(budget.seenInPortalAt)}</span>
+              <span className="text-xs text-muted-foreground">
+                Lo vio en el portal el {day(budget.seenInPortalAt)}
+              </span>
             ) : null}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {primary}
-          <Button type="button" size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen(!open)}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
             {open ? "Ocultar" : "Ver"}
           </Button>
         </div>
@@ -462,7 +522,11 @@ function BudgetCard({
                       >
                         {row.label}
                         {row.isRecommended ? " · recomendada" : ""}
-                        {row.decision === "elegida" ? " · elegida" : row.decision === "no_elegida" ? " · no elegida" : ""}
+                        {row.decision === "elegida"
+                          ? " · elegida"
+                          : row.decision === "no_elegida"
+                            ? " · no elegida"
+                            : ""}
                         {` · ${row.totalCents == null ? "…" : money(row.totalCents, budget.currency)}`}
                       </Button>
                     ))}
@@ -476,7 +540,9 @@ function BudgetCard({
                         variant="link"
                         className="h-auto p-0"
                         disabled={optionMutation.isPending || budget.supersedesBudgetId != null}
-                        onClick={() => optionMutation.mutate({ action: "duplicate", optionId: option.id })}
+                        onClick={() =>
+                          optionMutation.mutate({ action: "duplicate", optionId: option.id })
+                        }
                       >
                         Duplicar como otra opción
                       </Button>
@@ -487,7 +553,9 @@ function BudgetCard({
                         variant="link"
                         className="h-auto p-0"
                         disabled={optionMutation.isPending}
-                        onClick={() => optionMutation.mutate({ action: "recommend", optionId: option.id })}
+                        onClick={() =>
+                          optionMutation.mutate({ action: "recommend", optionId: option.id })
+                        }
                       >
                         Marcar como recomendada
                       </Button>
@@ -498,7 +566,9 @@ function BudgetCard({
                         variant="link"
                         className="h-auto p-0 text-destructive"
                         disabled={optionMutation.isPending}
-                        onClick={() => optionMutation.mutate({ action: "remove", optionId: option.id })}
+                        onClick={() =>
+                          optionMutation.mutate({ action: "remove", optionId: option.id })
+                        }
                       >
                         Quitar la {option.label.toLowerCase()}
                       </Button>
@@ -507,8 +577,8 @@ function BudgetCard({
                 ) : null}
                 {several ? (
                   <p className="text-xs text-muted-foreground">
-                    Cada opción tiene su propio total: nunca se suman. La persona elige una; mientras decide, vale la
-                    recomendada.
+                    Cada opción tiene su propio total: nunca se suman. La persona elige una;
+                    mientras decide, vale la recomendada.
                   </p>
                 ) : null}
               </div>
@@ -537,17 +607,23 @@ function BudgetCard({
                 money={money}
                 disabled={printing || optionMutation.isPending}
                 delivering={printing}
-                saveLines={(patch) => runWrite(() => adjustBudgetLinesApi(patientId, budget.id, { lines: patch }))}
+                saveLines={(patch) =>
+                  runWrite(() => adjustBudgetLinesApi(patientId, budget.id, { lines: patch }))
+                }
                 addable={
                   budget.supersedesBudgetId
                     ? []
                     : addable.filter((item) => !lines.some((line) => line.planItemId === item.id))
                 }
-                addItems={(itemIds) => runWrite(() => addBudgetItemsApi(patientId, budget.id, itemIds, option.id))}
-                removeItems={(itemIds) =>
-                  runWrite(() => removeBudgetItemsApi(patientId, budget.id, itemIds, several ? option.id : null))
+                addItems={(itemIds) =>
+                  runWrite(() => addBudgetItemsApi(patientId, budget.id, itemIds, option.id))
                 }
-                onDeliver={(pending) => void deliverPrint(pending)}
+                removeItems={(itemIds) =>
+                  runWrite(() =>
+                    removeBudgetItemsApi(patientId, budget.id, itemIds, several ? option.id : null),
+                  )
+                }
+                onDeliver={(pending) => deliverPrint(pending)}
                 actionAlert={
                   actionError ? (
                     <p role="alert" className="text-sm text-destructive">
@@ -557,15 +633,32 @@ function BudgetCard({
                 }
                 sendAction={
                   canSend
-                    ? (beforeSend) => <BudgetSendButton patientId={patientId} budgetId={budget.id} beforeSend={beforeSend} reviewable />
+                    ? (beforeSend) => (
+                        <BudgetSendButton
+                          patientId={patientId}
+                          budgetId={budget.id}
+                          beforeSend={beforeSend}
+                          reviewable
+                        />
+                      )
                     : undefined
                 }
                 secondaryActions={
                   <>
-                    <Button type="button" variant="outline" disabled={printing} onClick={() => setEditOpen(true)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={printing}
+                      onClick={() => setEditOpen(true)}
+                    >
                       Título y notas
                     </Button>
-                    <Button type="button" variant="outline" disabled={printing} onClick={() => setCancelOpen(true)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={printing}
+                      onClick={() => setCancelOpen(true)}
+                    >
                       Anular presupuesto
                     </Button>
                   </>
@@ -577,7 +670,11 @@ function BudgetCard({
                   lines={lines}
                   money={money}
                   showAnswers={!isDraft}
-                  label={several && option ? `Tratamientos de la ${option.label.toLowerCase()}` : undefined}
+                  label={
+                    several && option
+                      ? `Tratamientos de la ${option.label.toLowerCase()}`
+                      : undefined
+                  }
                 />
                 {option ? (
                   <BudgetTotals
@@ -603,14 +700,19 @@ function BudgetCard({
                     />
                   ) : null}
                   {canSend ? (
-                    <SubmitButton variant="outline" pending={printing} onClick={() => void deliverPrint()}>
+                    <SubmitButton
+                      variant="outline"
+                      pending={printing}
+                      onClick={() => void deliverPrint()}
+                    >
                       {isDraft ? "Imprimir y entregar" : "Imprimir"}
                     </SubmitButton>
                   ) : null}
                   <Button type="button" variant="outline" onClick={() => setReviewOpen(true)}>
                     Lo que se le explicó
                   </Button>
-                  {canWrite && ["presentado", "aceptado", "parcial", "pospuesto"].includes(budget.status) ? (
+                  {canWrite &&
+                  ["presentado", "aceptado", "parcial", "pospuesto"].includes(budget.status) ? (
                     <Button type="button" variant="outline" onClick={() => setReviseOpen(true)}>
                       Crear revisión
                     </Button>
@@ -625,13 +727,14 @@ function BudgetCard({
             )}
             {isDraft ? (
               <p className="text-xs text-muted-foreground">
-                Sale por WhatsApp si la persona lo tiene; si no, por correo. Al enviarlo o imprimirlo queda entregado,
-                y aquí mismo se anota qué respondió.
+                Sale por WhatsApp si la persona lo tiene; si no, por correo. Al enviarlo o
+                imprimirlo queda entregado, y aquí mismo se anota qué respondió.
               </p>
             ) : null}
           </div>
 
-          {!isDraft && (BUDGET_ANSWERABLE_STATUSES.includes(budget.status) || budget.decidedAt != null) ? (
+          {!isDraft &&
+          (BUDGET_ANSWERABLE_STATUSES.includes(budget.status) || budget.decidedAt != null) ? (
             <BudgetResponse
               patientId={patientId}
               budget={budget}
@@ -646,7 +749,11 @@ function BudgetCard({
       ) : null}
 
       {reviewOpen ? (
-        <BudgetReviewDrawer patientId={patientId} budgetId={budget.id} onClose={() => setReviewOpen(false)} />
+        <BudgetReviewDrawer
+          patientId={patientId}
+          budgetId={budget.id}
+          onClose={() => setReviewOpen(false)}
+        />
       ) : null}
       {editOpen ? (
         <EditBudgetDrawer
@@ -661,7 +768,12 @@ function BudgetCard({
           onClose={() => setReviseOpen(false)}
           onSubmit={(itemIds, reason) =>
             runWrite(() =>
-              reviseBudgetApi(patientId, budget.id, { itemIds, reason, title: budget.title, notes: budget.notes ?? null }),
+              reviseBudgetApi(patientId, budget.id, {
+                itemIds,
+                reason,
+                title: budget.title,
+                notes: budget.notes ?? null,
+              }),
             )
           }
         />
@@ -682,6 +794,15 @@ function BudgetCard({
   )
 }
 
+const editSchema = z.object({
+  title: z
+    .string()
+    .trim()
+    .min(1, "Escribe un título para el presupuesto.")
+    .max(200, "Escribe como mucho 200 caracteres."),
+  notes: z.string().max(4000, "Escribe como mucho 4000 caracteres."),
+})
+
 function EditBudgetDrawer({
   budget,
   onClose,
@@ -691,59 +812,57 @@ function EditBudgetDrawer({
   onClose: () => void
   onSubmit: (body: { title?: string; notes?: string | null }) => Promise<unknown>
 }): React.JSX.Element {
-  const uid = useId()
-  const [title, setTitle] = useState(budget.title)
-  const [notes, setNotes] = useState(budget.notes ?? "")
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  // Los valores de partida se fijan al abrir: lo que llegue después no pisa lo escrito.
+  const [initial] = useState(() => ({ title: budget.title, notes: budget.notes ?? "" }))
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: editSchema },
+    onSubmit: async ({ value }) => {
+      const nextTitle = value.title.trim()
+      await onSubmit({
+        ...(nextTitle === budget.title ? {} : { title: nextTitle }),
+        notes: value.notes.trim() === "" ? null : value.notes.trim(),
+      })
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open
       title="Título y notas del presupuesto"
       description="Salen en la hoja que recibe la persona."
-      error={error}
-      isSubmitting={pending}
-      isDirty={title !== budget.title || notes !== (budget.notes ?? "")}
       submitLabel="Guardar"
       onClose={() => {
-        if (!pending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        const nextTitle = title.trim()
-        if (!nextTitle) {
-          setError("Escribe un título para el presupuesto.")
-          return
-        }
-        setPending(true)
-        onSubmit({
-          ...(nextTitle === budget.title ? {} : { title: nextTitle }),
-          notes: notes.trim() === "" ? null : notes.trim(),
-        })
-          .then(onClose)
-          .catch((err: unknown) => setError(mutationMessage(err)))
-          .finally(() => setPending(false))
+        if (!surface.isSubmitting) onClose()
       }}
     >
       <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-title`}>Título</FieldLabel>
-          <Input id={`${uid}-title`} value={title} maxLength={200} onChange={(e) => setTitle(e.currentTarget.value)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-notes`}>Notas</FieldLabel>
-          <Textarea
-            id={`${uid}-notes`}
-            value={notes}
-            rows={3}
-            maxLength={4000}
-            onChange={(e) => setNotes(e.currentTarget.value)}
-          />
-        </Field>
+        <form.AppField name="title">
+          {(field) => <field.TextField label="Título" maxLength={200} />}
+        </form.AppField>
+        <form.AppField name="notes">
+          {(field) => <field.TextareaField label="Notas" rows={3} maxLength={4000} />}
+        </form.AppField>
       </FieldGroup>
     </FormDrawer>
   )
 }
+
+const reviseSchema = z.object({
+  items: z
+    .array(z.object({ planItemId: z.string(), include: z.boolean() }))
+    .refine(
+      (items) => items.some((item) => item.include),
+      "Elige al menos un tratamiento para la revisión.",
+    ),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Indica el motivo de la revisión.")
+    .max(2000, "Escribe como mucho 2000 caracteres."),
+})
 
 function ReviseBudgetDrawer({
   budget,
@@ -754,67 +873,76 @@ function ReviseBudgetDrawer({
   onClose: () => void
   onSubmit: (itemIds: string[], reason: string) => Promise<unknown>
 }): React.JSX.Element {
-  const uid = useId()
   const value = valueOption(budget)
-  const lines = value ? optionLines(budget, value.id) : budget.items
-  const [itemIds, setItemIds] = useState(() => lines.map((line) => line.planItemId))
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  // Las líneas y lo marcado se fijan al abrir.
+  const [lines] = useState(() => (value ? optionLines(budget, value.id) : budget.items))
+  const [initial] = useState(() => ({
+    items: lines.map((line) => ({ planItemId: line.planItemId, include: true })),
+    reason: "",
+  }))
+  /** La fila de cada tratamiento enviado: el servidor lo nombra por su lugar en `itemIds`. */
+  const sentAt = useRef<number[]>([])
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: reviseSchema },
+    onSubmit: async ({ value: values }) => {
+      const at = values.items.flatMap((item, index) => (item.include ? [index] : []))
+      sentAt.current = at
+      await onSubmit(
+        values.items.filter((item) => item.include).map((item) => item.planItemId),
+        values.reason.trim(),
+      )
+      onClose()
+    },
+  })
+  // `itemIds[2]` es la casilla de ese tratamiento; `itemIds` (lo que se quitó), la lista entera.
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => {
+      if (key === "itemIds") return "items"
+      const match = /^itemIds\[(\d+)\]$/.exec(key)
+      if (!match) return undefined
+      const index = sentAt.current[Number(match[1])]
+      return index === undefined ? "items" : `items[${index}].include`
+    },
+  })
   return (
     <FormDrawer
+      {...surface}
       open
       title="Crear revisión del presupuesto"
       description="La revisión conserva el número y lo versiona: el anterior queda «Reemplazado». No se puede retirar una línea ya hecha, con cargo o con pago aplicado."
-      error={error}
-      isSubmitting={pending}
       submitLabel="Crear revisión"
       onClose={() => {
-        if (!pending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (itemIds.length === 0) {
-          setError("Elige al menos un tratamiento para la revisión.")
-          return
-        }
-        if (!reason.trim()) {
-          setError("Indica el motivo de la revisión.")
-          return
-        }
-        setPending(true)
-        onSubmit(itemIds, reason.trim())
-          .then(onClose)
-          .catch((err: unknown) => setError(mutationMessage(err)))
-          .finally(() => setPending(false))
+        if (!surface.isSubmitting) onClose()
       }}
     >
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium">Tratamientos de la revisión</legend>
-        {lines.map((line) => (
-          <FieldLabel key={line.id} className="flex items-start gap-2 text-sm font-normal">
-            <Checkbox
-              checked={itemIds.includes(line.planItemId)}
-              aria-label={line.title}
-              onCheckedChange={() =>
-                setItemIds((current) =>
-                  current.includes(line.planItemId)
-                    ? current.filter((id) => id !== line.planItemId)
-                    : [...current, line.planItemId],
+      <form.AppField name="items" mode="array">
+        {(list) => (
+          <list.Group legend="Tratamientos de la revisión">
+            {() =>
+              lines.map((line, index) => {
+                const site = treatmentSiteLabel(line)
+                // Ya se atendió (o se está atendiendo): la revisión no la retira.
+                const executed = line.itemStatus === "en_curso" || line.itemStatus === "realizado"
+                return (
+                  <form.AppField key={line.id} name={`items[${index}].include`}>
+                    {(field) => (
+                      <field.CheckboxField
+                        label={`${line.title}${site ? ` · ${site}` : ""}`}
+                        description={executed ? "Ya se atendió: no se puede retirar." : undefined}
+                        disabled={executed || surface.isSubmitting}
+                      />
+                    )}
+                  </form.AppField>
                 )
-              }
-            />
-            <span>
-              {line.title}
-              {treatmentSiteLabel(line) ? ` · ${treatmentSiteLabel(line)}` : ""}
-            </span>
-          </FieldLabel>
-        ))}
-      </fieldset>
-      <Field>
-        <FieldLabel htmlFor={`${uid}-reason`}>Motivo de la revisión</FieldLabel>
-        <Textarea id={`${uid}-reason`} maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} />
-      </Field>
+              })
+            }
+          </list.Group>
+        )}
+      </form.AppField>
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField label="Motivo de la revisión" maxLength={2000} />}
+      </form.AppField>
     </FormDrawer>
   )
 }
@@ -822,6 +950,11 @@ function ReviseBudgetDrawer({
 /** Abre «Nueva cita» al lado, con la persona, el servicio y lo aceptado ya puestos: nadie sale de la ficha. */
 export function useScheduleAccepted(patient: { id: string; name: string }) {
   return (planItemIds: string[], serviceId?: string | null) => {
-    openBookingAnywhere({ patient, lockedPatient: true, planItemIds, ...(serviceId ? { serviceId } : {}) })
+    openBookingAnywhere({
+      patient,
+      lockedPatient: true,
+      planItemIds,
+      ...(serviceId ? { serviceId } : {}),
+    })
   }
 }

@@ -56,6 +56,8 @@ import {
   ScheduleToolbar,
   ScheduleWeekOverview,
   scheduleToneAt,
+  submitErrorMessage,
+  isUnconfirmedSubmit,
   subtractRanges,
   useListSearch,
   useMediaQuery,
@@ -86,7 +88,7 @@ import { BookingDrawer, type BookingSeed } from "../../components/agenda/booking
 import { ScheduleDrawer } from "../../components/agenda/schedule-editor"
 import { RoomForm } from "../../components/agenda/room-form"
 import { useAppointmentArrival } from "../../components/agenda/arrival"
-import { dayShort, errorMessage, shortName } from "../../components/agenda/shared"
+import { dayShort, shortName } from "../../components/agenda/shared"
 import { useAttendAppointment } from "../../components/patient/new-encounter-button"
 import { MyCalendarDrawer } from "../../components/agenda/my-calendar-drawer"
 import { BranchSwitcher } from "../../components/branch-switcher"
@@ -105,6 +107,17 @@ import { useMyUserId, usePermission } from "../../lib/crm"
 import { fetchCrmContext } from "../../lib/crm-workspace"
 import { activeOrgTimeZone } from "../../lib/locale"
 import { appWords, upperFirst } from "../../lib/product-words"
+
+/**
+ * Por qué no se movió, estiró o cambió de estado una cita: el motivo del
+ * servidor (choque, bloqueo, versión vieja) o, sin respuesta, que la agenda
+ * recargada muestra cómo quedó. No hay campos: se dice una vez, en el aviso.
+ */
+function rejectionSaid(error: unknown): string {
+  return isUnconfirmedSubmit(error)
+    ? "No pudimos confirmar el cambio. La agenda muestra cómo quedó; revísala antes de repetirlo."
+    : submitErrorMessage(error)
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -670,7 +683,7 @@ function AgendaPage() {
       await invalidate()
     },
     onError: async (error) => {
-      toast.error(errorMessage(error))
+      toast.error(rejectionSaid(error))
       await invalidate()
     },
   })
@@ -701,7 +714,7 @@ function AgendaPage() {
     },
     // El servicio rechazó el hueco: se dice por qué y la cita vuelve a su sitio.
     onError: async (error) => {
-      toast.error(errorMessage(error))
+      toast.error(rejectionSaid(error))
       await invalidate()
     },
   })
@@ -1217,7 +1230,7 @@ function AgendaPage() {
                     </Button>
                   ) : null}
                   <ScheduleResourceChips
-                    label={resourceTitle}
+                    aria-label={resourceTitle}
                     wrap
                     resources={phoneResources}
                     formatLabel={(item) => (group === "rooms" ? item.label : shortName(item.label))}

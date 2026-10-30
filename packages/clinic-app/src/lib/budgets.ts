@@ -38,7 +38,13 @@ export type BudgetStatus =
 export const BUDGET_ANSWERABLE_STATUSES: readonly string[] = ["presentado", "parcial", "pospuesto"]
 
 /** Estados en los que el presupuesto se puede enviar (o reenviar). */
-export const BUDGET_SENDABLE_STATUSES: readonly string[] = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"]
+export const BUDGET_SENDABLE_STATUSES: readonly string[] = [
+  "borrador",
+  "presentado",
+  "pospuesto",
+  "parcial",
+  "aceptado",
+]
 
 export type PlanDecision =
   | "pendiente"
@@ -164,7 +170,10 @@ export function valueOption(budget: Pick<BudgetWithTotals, "options">): BudgetOp
 }
 
 /** Las líneas de una opción. */
-export function optionLines(budget: Pick<BudgetWithTotals, "items">, optionId: string): BudgetLine[] {
+export function optionLines(
+  budget: Pick<BudgetWithTotals, "items">,
+  optionId: string,
+): BudgetLine[] {
   return budget.items.filter((line) => line.optionId === optionId)
 }
 
@@ -403,7 +412,13 @@ export interface BudgetPresentation {
   hasFindings: boolean
   proposal: string | null
   validUntil: string | null
-  options: Array<{ id: string; label: string; name: string | null; pros: string | null; cons: string | null }>
+  options: Array<{
+    id: string
+    label: string
+    name: string | null
+    pros: string | null
+    cons: string | null
+  }>
   lines: Array<{
     id: string
     optionId: string
@@ -419,12 +434,22 @@ export interface BudgetPresentationBody {
   findings?: string | null
   proposal?: string | null
   validUntil?: string | null
-  options?: Array<{ optionId: string; name?: string | null; pros?: string | null; cons?: string | null }>
+  options?: Array<{
+    optionId: string
+    name?: string | null
+    pros?: string | null
+    cons?: string | null
+  }>
   lines?: Array<{ lineId: string; patientGuide: PatientGuide | null }>
 }
 
-export function fetchBudgetPresentation(patientId: string, budgetId: string): Promise<{ data: BudgetPresentation }> {
-  return apiFetch<{ data: BudgetPresentation }>(`${budgetsBase(patientId)}/${budgetId}/presentation`)
+export function fetchBudgetPresentation(
+  patientId: string,
+  budgetId: string,
+): Promise<{ data: BudgetPresentation }> {
+  return apiFetch<{ data: BudgetPresentation }>(
+    `${budgetsBase(patientId)}/${budgetId}/presentation`,
+  )
 }
 
 /** Solo en borrador: lo entregado no cambia (409 `BUDGET_STATUS`). */
@@ -433,10 +458,13 @@ export function updateBudgetPresentation(
   budgetId: string,
   body: BudgetPresentationBody,
 ): Promise<{ data: BudgetPresentation }> {
-  return apiFetch<{ data: BudgetPresentation }>(`${budgetsBase(patientId)}/${budgetId}/presentation`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  })
+  return apiFetch<{ data: BudgetPresentation }>(
+    `${budgetsBase(patientId)}/${budgetId}/presentation`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    },
+  )
 }
 
 /** Documento PDF del servidor (mismo que se envía al paciente). */

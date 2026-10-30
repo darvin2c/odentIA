@@ -110,6 +110,13 @@ test("la reserva por enlace dice cómo llegar a la sede", async ({ owner, fixtur
     region: "PE-LMA",
     googlePlaceId: "fake-place",
   })
+  // Con horarios libres: «Cómo llegar» va en «Revisa y reserva», debajo de la sede de la cita elegida.
+  await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+    branchId: owner.branchId,
+    professionalUserId: owner.user.id,
+    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
+  }, 200)
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
     submissionId: crypto.randomUUID(),
     answers: { demographics: { displayName: "Rosa Quispe", docType: "DNI", docNumber: "45678123" }, respondent: "staff", privacyAccepted: false },
@@ -129,8 +136,13 @@ test("la reserva por enlace dice cómo llegar a la sede", async ({ owner, fixtur
   try {
     const visitor = await anon.newPage()
     await gotoHydrated(visitor, tenant(org.slug, `/reserva?token=${token}`))
-    await expect(visitor.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
-    const howTo = visitor.getByRole("link", { name: "Cómo llegar" })
+    await expect(visitor.getByRole("heading", { level: 1, name: "Reserva tu cita" })).toBeVisible()
+    // Los 7 días siguientes siempre tienen horarios: los de hoy dependen de la hora en que corre la prueba.
+    await visitor.getByRole("button", { name: "Los 7 días siguientes", exact: true }).click()
+    await visitor.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
+    await visitor.getByRole("button", { name: /^Continuar · / }).click()
+    await expect(visitor.getByRole("heading", { name: "Revisa y reserva" })).toBeVisible()
+    const howTo = visitor.getByRole("region", { name: "Tu cita" }).getByRole("link", { name: "Cómo llegar" })
     await expect(howTo).toBeVisible()
     await expect(howTo).toHaveAttribute("href", /google\.com\/maps\/search\/\?api=1&query=.*query_place_id=fake-place/)
     await visitor.screenshot({ path: testInfo.outputPath("reserva-como-llegar.png") })

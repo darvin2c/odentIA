@@ -70,7 +70,10 @@ export const diagnosisCodeRelease = catalogSchema.table(
   },
   (table) => [
     primaryKey({ columns: [table.systemKey, table.edition] }),
-    check("diagnosis_code_release_sha_check", sql`${table.sourceSha256} IS NULL OR ${table.sourceSha256} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "diagnosis_code_release_sha_check",
+      sql`${table.sourceSha256} IS NULL OR ${table.sourceSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
   ],
 )
 
@@ -238,7 +241,10 @@ export const patient = pgTable(
       "patient_referral_kind_check",
       sql`${table.referralKind} IS NULL OR ${table.referralKind} IN ('recomendacion','redes_sociales','google_mapas','paso_por_aqui','convenio','otro')`,
     ),
-    check("patient_referral_source_check", sql`${table.referralSource} IS NULL OR ${table.referralKind} = 'otro'`),
+    check(
+      "patient_referral_source_check",
+      sql`${table.referralSource} IS NULL OR ${table.referralKind} = 'otro'`,
+    ),
     check(
       "patient_asa_class_check",
       sql`${table.asaClass} IS NULL OR ${table.asaClass} IN ('I','II','III','IV','V','VI')`,
@@ -297,7 +303,10 @@ export const patientContact = pgTable(
       sql`${table.relationship} IN ('self','guardian','family','other')`,
     ),
     check("patient_contact_detail_check", sql`length(${table.relationshipDetail}) <= 100`),
-    check("patient_contact_emergency_check", sql`NOT (${table.isEmergency} AND ${table.relationship} = 'self')`),
+    check(
+      "patient_contact_emergency_check",
+      sql`NOT (${table.isEmergency} AND ${table.relationship} = 'self')`,
+    ),
     check(
       "patient_contact_kinship_check",
       sql`${table.kinship} IS NULL OR ${table.kinship} IN ('MTH','FTH','CHILD','SPS','DOMPART','SIB','MGRPRN','PGRPRN','GRNDCHILD','AUNT','UNCLE','COUSN','FAMMEMB','FRND','NBOR')`,
@@ -692,13 +701,7 @@ export const clinicalAccessLog = pgTable(
     }),
     primaryKey({
       name: "clinical_access_log_pkey",
-      columns: [
-        table.organizationId,
-        table.patientId,
-        table.bucket,
-        table.userId,
-        table.resource,
-      ],
+      columns: [table.organizationId, table.patientId, table.bucket, table.userId, table.resource],
     }),
   ],
 )
@@ -742,13 +745,20 @@ export const patientDataRequest = pgTable(
     foreignKey({
       name: "patient_data_request_requester_fk",
       columns: [table.organizationId, table.patientId, table.requesterContactId],
-      foreignColumns: [patientContact.organizationId, patientContact.patientId, patientContact.contactId],
+      foreignColumns: [
+        patientContact.organizationId,
+        patientContact.patientId,
+        patientContact.contactId,
+      ],
     }),
     index("patient_data_request_org_patient_idx").on(table.organizationId, table.patientId),
     index("patient_data_request_org_pending_idx")
       .on(table.organizationId, table.dueOn)
       .where(sql`${table.status} = 'pendiente'`),
-    check("patient_data_request_kind_check", sql`${table.kind} IN ('copia','corregir','mensajes','borrar')`),
+    check(
+      "patient_data_request_kind_check",
+      sql`${table.kind} IN ('copia','corregir','mensajes','borrar')`,
+    ),
     check(
       "patient_data_request_channel_check",
       sql`${table.channel} IN ('clinica','whatsapp','correo','portal')`,
@@ -794,9 +804,19 @@ export const patientRecordOpening = pgTable(
       columns: [table.organizationId, table.patientId],
       foreignColumns: [patient.organizationId, patient.id],
     }),
-    index("patient_record_opening_org_patient_idx").on(table.organizationId, table.patientId, table.userId),
-    check("patient_record_opening_reason_check", sql`${table.reason} IN ('autoridad','reclamo','otro')`),
-    check("patient_record_opening_note_check", sql`${table.reason} <> 'otro' OR ${table.note} IS NOT NULL`),
+    index("patient_record_opening_org_patient_idx").on(
+      table.organizationId,
+      table.patientId,
+      table.userId,
+    ),
+    check(
+      "patient_record_opening_reason_check",
+      sql`${table.reason} IN ('autoridad','reclamo','otro')`,
+    ),
+    check(
+      "patient_record_opening_note_check",
+      sql`${table.reason} <> 'otro' OR ${table.note} IS NOT NULL`,
+    ),
   ],
 )
 
@@ -852,7 +872,11 @@ export const encounter = pgTable(
   },
   (table) => [
     index("encounter_org_patient_idx").on(table.organizationId, table.patientId),
-    uniqueIndex("encounter_org_patient_id_uidx").on(table.organizationId, table.patientId, table.id),
+    uniqueIndex("encounter_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
+    ),
     uniqueIndex("encounter_patient_open_uidx").on(table.patientId).where(sql`status = 'borrador'`),
     uniqueIndex("encounter_appointment_active_uidx")
       .on(table.organizationId, table.appointmentId)
@@ -965,7 +989,11 @@ export const encounterSite = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex("encounter_site_encounter_site_uidx").on(table.encounterId, table.siteSystem, table.siteCode),
+    uniqueIndex("encounter_site_encounter_site_uidx").on(
+      table.encounterId,
+      table.siteSystem,
+      table.siteCode,
+    ),
   ],
 )
 
@@ -1123,7 +1151,11 @@ export const treatmentTemplateCode = catalogSchema.table(
       foreignColumns: [procedureCode.systemKey, procedureCode.code, procedureCode.version],
     }),
     index("treatment_template_code_reverse_idx").on(table.systemKey, table.code, table.version),
-    uniqueIndex("treatment_template_code_list_uidx").on(table.templateId, table.systemKey, table.version),
+    uniqueIndex("treatment_template_code_list_uidx").on(
+      table.templateId,
+      table.systemKey,
+      table.version,
+    ),
   ],
 )
 
@@ -1190,7 +1222,9 @@ export const serviceCatalog = pgTable(
      */
     priceDisclosure: text("price_disclosure").notNull().default("evaluacion"),
     /** La evaluación que ofrece el agente cuando el precio no es exacto. */
-    evaluationServiceId: uuid("evaluation_service_id").references((): AnyPgColumn => serviceCatalog.id),
+    evaluationServiceId: uuid("evaluation_service_id").references(
+      (): AnyPgColumn => serviceCatalog.id,
+    ),
     /**
      * La explicación del servicio para el paciente, de la clínica: empieza vacía,
      * y sin ella el servicio sale solo con nombre y precio.
@@ -1225,8 +1259,14 @@ export const serviceCatalog = pgTable(
       sql`(${table.procedureSystem} IS NULL) = (${table.procedureCode} IS NULL) AND (${table.procedureCode} IS NULL) = (${table.procedureVersion} IS NULL) AND (${table.procedureCode} IS NULL OR ${table.templateId} IS NULL)`,
     ),
     check("service_catalog_price_check", sql`${table.priceCents} >= 0`),
-    check("service_catalog_billing_mode_check", sql`${table.billingMode} IN ('treatment','session')`),
-    check("service_catalog_price_disclosure_check", sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`),
+    check(
+      "service_catalog_billing_mode_check",
+      sql`${table.billingMode} IN ('treatment','session')`,
+    ),
+    check(
+      "service_catalog_price_disclosure_check",
+      sql`${table.priceDisclosure} IN ('exacto','desde','evaluacion')`,
+    ),
   ],
 )
 
@@ -1362,7 +1402,11 @@ export const treatmentBudget = pgTable(
     index("treatment_budget_org_patient_idx").on(table.organizationId, table.patientId),
     index("treatment_budget_org_plan_idx").on(table.organizationId, table.planId),
     uniqueIndex("treatment_budget_org_id_uidx").on(table.organizationId, table.id),
-    uniqueIndex("treatment_budget_org_patient_id_uidx").on(table.organizationId, table.patientId, table.id),
+    uniqueIndex("treatment_budget_org_patient_id_uidx").on(
+      table.organizationId,
+      table.patientId,
+      table.id,
+    ),
     // Un solo borrador por persona: el de una revisión va aparte (se elige al crearla).
     uniqueIndex("treatment_budget_one_draft_uidx")
       .on(table.organizationId, table.patientId)
@@ -1399,7 +1443,11 @@ export const treatmentBudgetOption = pgTable(
   (table) => [
     foreignKey({
       columns: [table.organizationId, table.patientId, table.budgetId],
-      foreignColumns: [treatmentBudget.organizationId, treatmentBudget.patientId, treatmentBudget.id],
+      foreignColumns: [
+        treatmentBudget.organizationId,
+        treatmentBudget.patientId,
+        treatmentBudget.id,
+      ],
       name: "treatment_budget_option_budget_fk",
     }),
     uniqueIndex("treatment_budget_option_org_budget_id_uidx").on(
@@ -1729,18 +1777,9 @@ export const imagingStudy = pgTable(
       table.studyInstanceUid,
     ),
     check("imaging_study_file_count_check", sql`${table.fileCount} BETWEEN 1 AND 5000`),
-    check(
-      "imaging_study_total_bytes_check",
-      sql`${table.totalBytes} BETWEEN 1 AND 1073741824`,
-    ),
-    check(
-      "imaging_study_slice_count_check",
-      sql`${table.sliceCount} BETWEEN 1 AND 20000`,
-    ),
-    check(
-      "imaging_study_uid_check",
-      sql`char_length(${table.studyInstanceUid}) BETWEEN 1 AND 64`,
-    ),
+    check("imaging_study_total_bytes_check", sql`${table.totalBytes} BETWEEN 1 AND 1073741824`),
+    check("imaging_study_slice_count_check", sql`${table.sliceCount} BETWEEN 1 AND 20000`),
+    check("imaging_study_uid_check", sql`char_length(${table.studyInstanceUid}) BETWEEN 1 AND 64`),
   ],
 )
 
@@ -1979,7 +2018,22 @@ export const clinicalFollowUp = pgTable(
  * los signos vitales, el examen por sistemas y el descanso médico de latidIA
  * (issue 229, entrega 10).
  */
-export const DICTATION_KINDS = ["nota", "diagnostico", "plan", "control", "odontograma", "receta", "signos", "examen", "descanso", "alergia", "procedimiento", "cita", "presupuesto", "material"] as const
+export const DICTATION_KINDS = [
+  "nota",
+  "diagnostico",
+  "plan",
+  "control",
+  "odontograma",
+  "receta",
+  "signos",
+  "examen",
+  "descanso",
+  "alergia",
+  "procedimiento",
+  "cita",
+  "presupuesto",
+  "material",
+] as const
 export type DictationKind = (typeof DICTATION_KINDS)[number]
 
 /**
@@ -2018,8 +2072,15 @@ export const encounterDictationSuggestion = pgTable(
     ...timestamps,
   },
   (table) => [
-    index("encounter_dictation_suggestion_idx").on(table.organizationId, table.encounterId, table.status),
-    check("encounter_dictation_suggestion_kind_check", sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material')`),
+    index("encounter_dictation_suggestion_idx").on(
+      table.organizationId,
+      table.encounterId,
+      table.status,
+    ),
+    check(
+      "encounter_dictation_suggestion_kind_check",
+      sql`${table.kind} IN ('nota','diagnostico','plan','control','odontograma','receta','signos','examen','descanso','alergia','procedimiento','cita','presupuesto','material')`,
+    ),
     check(
       "encounter_dictation_suggestion_status_check",
       sql`${table.status} IN ('lista','por_revisar','confirmada','descartada')`,
@@ -2418,7 +2479,6 @@ export const paymentReturn = pgTable(
     ),
   ],
 )
-
 
 export const patientResponsibility = pgTable(
   "patient_responsibility",

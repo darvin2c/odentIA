@@ -1,8 +1,18 @@
-import { Badge, Button, Field, FieldLabel, Input } from "@odentia/ui"
-import { DatePickerButton, FormDrawer, internationalText, LoadingState } from "@odentia/ui-patterns"
+import { normalizeTags } from "@odentia/clinical"
+import { Badge, Button } from "@odentia/ui"
+import {
+  DatePickerButton,
+  FormDrawer,
+  internationalText,
+  LoadingState,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useMemo, useState } from "react"
+import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { type ContactFull, type FieldDef, useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
@@ -10,13 +20,66 @@ import { sexLabel } from "../../lib/patient-overview"
 import type { PatientFull } from "../../lib/patients"
 import type { PersonPage } from "../../lib/people"
 import { documentLine } from "../../lib/person-data"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { FiliacionPanel } from "../patient/filiacion-panel"
 import { FiliacionSectionDrawer, type FiliacionSectionKey } from "../patient/filiacion-section-drawer"
 import { MessagePermissionsSection } from "../patient/message-permissions-section"
 import { PhoneWhatsAppNote } from "./phone-whatsapp"
-import { TagsInput } from "../patient/tags-input"
-import { ChoiceSelect } from "../ui/choice-select"
+import { TAGS_INPUT_HELP, TagsCount, TagsInput } from "../patient/tags-input"
+
+/** Las mismas reglas de `normalizeTags` que aplica la ruta, dichas en el campo. */
+const tagsSchema = z.object({
+  tags: z.array(z.string()).superRefine((tags, ctx) => {
+    try {
+      normalizeTags(tags)
+    } catch (error) {
+      ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Revisa las etiquetas" })
+    }
+  }),
+})
+
+/** Lo guardado de cada campo propio, como texto para su control. */
+function customFieldsDraft(defs: FieldDef[], saved: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    defs.map((def) => {
+      const value = saved[def.key]
+      return [def.key, value === undefined || value === null ? "" : String(value)]
+    }),
+  )
+}
+
+/** Un número escrito con coma o punto decimal; `null` si no es un número. */
+function numberOf(raw: string): number | null {
+  const value = Number(raw.trim().replace(",", "."))
+  return Number.isFinite(value) ? value : null
+}
+
+/**
+ * Lo que se envía de cada campo propio: vacío es `null` (el servidor lo
+ * quita) y un número va como número, como exige `sanitizeCustomFields`.
+ */
+function customFieldsBody(defs: FieldDef[], draft: Record<string, string>): Record<string, unknown> {
+  return Object.fromEntries(
+    defs.map((def) => {
+      const raw = draft[def.key] ?? ""
+      if (!raw.trim()) return [def.key, null]
+      return [def.key, def.type === "number" ? numberOf(raw) : raw]
+    }),
+  )
+}
+
+/** Un número que no lo es se dice en su campo, en vez de perderse al guardar. */
+function customFieldsSchema(defs: FieldDef[]) {
+  return z.object({
+    customFields: z.record(z.string(), z.string()).superRefine((draft, ctx) => {
+      for (const def of defs) {
+        const raw = draft[def.key] ?? ""
+        if (def.type === "number" && raw.trim() && numberOf(raw) === null)
+          ctx.addIssue({ code: "custom", path: [def.key], message: "Escribe un número, como 12 o 3.5" })
+      }
+    }),
+  })
+}
 
 const PREFERRED_LABELS: Record<string, string> = {
   email: "Correo",
@@ -154,9 +217,6 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
   const canConfigure = usePermission("settings.read") || canWrite
   const queryClient = useQueryClient()
   const [open, setOpen] = useState<"preferido" | "etiquetas" | "campos" | null>(null)
-  const [draftPreferred, setDraftPreferred] = useState("")
-  const [draftTags, setDraftTags] = useState<string[]>([])
-  const [draftCustom, setDraftCustom] = useState<Record<string, unknown>>({})
   const contact = useQuery({
     queryKey: ["contact", person.id],
     queryFn: () => apiFetch<{ data: ContactFull }>(`/api/contacts/${person.id}`),
@@ -176,6 +236,36 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
       ),
     enabled: open === "preferido",
   })
+  const defs = fields.data?.data ?? []
+  const patch = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch(`/api/contacts/${person.id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  })
+  const saved = async (body: Record<string, unknown>) => {
+    await patch.mutateAsync(body)
+    setOpen(null)
+    void queryClient.invalidateQueries({ queryKey: ["contact", person.id] })
+    void queryClient.invalidateQueries({ queryKey: ["people"] })
+  }
+  const preferredForm = useAppForm({
+    defaultValues: { preferredChannel: "" },
+    onSubmit: ({ value }) => saved({ preferredChannel: value.preferredChannel || null }),
+  })
+  const tagsForm = useAppForm({
+    defaultValues: { tags: [] as string[] },
+    validators: { onSubmit: tagsSchema },
+    onSubmit: ({ value }) => saved({ tags: value.tags }),
+  })
+  const customForm = useAppForm({
+    defaultValues: { customFields: {} as Record<string, string> },
+    validators: { onSubmit: customFieldsSchema(defs) },
+    // Vaciar un dato lo quita (null): una cadena vacía no es número, fecha ni opción.
+    onSubmit: ({ value }) => saved({ customFields: customFieldsBody(defs, value.customFields) }),
+  })
+  const preferredSurface = useFormSurface(preferredForm)
+  const tagsSurface = useFormSurface(tagsForm)
+  const customSurface = useFormSurface(customForm)
+  const draftPreferred = useStore(preferredForm.store, (state) => state.values.preferredChannel)
   const connected = useMemo(() => {
     const channels = [
       ...new Set(
@@ -185,24 +275,11 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
     if (draftPreferred && !channels.includes(draftPreferred)) channels.unshift(draftPreferred)
     return channels
   }, [connections.data, draftPreferred])
-  const patch = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      apiFetch(`/api/contacts/${person.id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => {
-      setOpen(null)
-      void queryClient.invalidateQueries({ queryKey: ["contact", person.id] })
-      void queryClient.invalidateQueries({ queryKey: ["people"] })
-    },
-  })
   if (!canRead) return null
   const data = contact.data?.data.contact
-  const defs = fields.data?.data ?? []
   const custom = data?.customFields ?? {}
   const close = () => {
-    if (!patch.isPending) {
-      setOpen(null)
-      patch.reset()
-    }
+    if (!patch.isPending) setOpen(null)
   }
   return (
     <Card title="Para ventas y mensajes">
@@ -224,8 +301,7 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
                     size="sm"
                     variant="link"
                     onClick={() => {
-                      patch.reset()
-                      setDraftPreferred(data.preferredChannel ?? "")
+                      preferredForm.reset({ preferredChannel: data.preferredChannel ?? "" })
                       setOpen("preferido")
                     }}
                   >
@@ -250,8 +326,7 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
                     size="sm"
                     variant="link"
                     onClick={() => {
-                      patch.reset()
-                      setDraftTags(data.tags)
+                      tagsForm.reset({ tags: data.tags })
                       setOpen("etiquetas")
                     }}
                   >
@@ -272,8 +347,7 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
                   size="sm"
                   variant="outline"
                   onClick={() => {
-                    patch.reset()
-                    setDraftCustom({ ...custom })
+                    customForm.reset({ customFields: customFieldsDraft(defs, custom) })
                     setOpen("campos")
                   }}
                 >
@@ -308,107 +382,93 @@ function PersonCrmCard({ person }: { person: PersonPage }) {
         </div>
       )}
       <FormDrawer
+        {...preferredSurface}
         open={open === "preferido"}
         onClose={close}
         title="Medio preferido para avisos"
         description="Solo los medios que la clínica tiene conectados. Si nadie lo eligió, se usa el de su última conversación; los documentos van por correo si tiene uno."
         submitLabel="Guardar"
-        isSubmitting={patch.isPending}
-        error={patch.error ? mutationErrorMessage(patch.error) : null}
-        onSubmit={(event) => {
-          event.preventDefault()
-          patch.mutate({ preferredChannel: draftPreferred || null })
-        }}
       >
-        <Field>
-          <FieldLabel htmlFor="person-preferred">Medio preferido</FieldLabel>
-          <ChoiceSelect
-            id="person-preferred"
-            value={draftPreferred}
-            onChange={(event) => setDraftPreferred(event.target.value)}
-          >
-            <option value="">Sin preferencia</option>
-            {connected.map((channel) => (
-              <option key={channel} value={channel}>
-                {PREFERRED_LABELS[channel] ?? channel}
-              </option>
-            ))}
-          </ChoiceSelect>
-        </Field>
+        <preferredForm.AppField name="preferredChannel">
+          {(field) => (
+            <field.SelectField
+              label="Medio preferido"
+              options={[
+                { value: "", label: "Sin preferencia" },
+                ...connected.map((channel) => ({ value: channel, label: PREFERRED_LABELS[channel] ?? channel })),
+              ]}
+            />
+          )}
+        </preferredForm.AppField>
       </FormDrawer>
       <FormDrawer
+        {...tagsSurface}
         open={open === "etiquetas"}
         onClose={close}
         title="Editar etiquetas"
         submitLabel="Guardar"
-        isSubmitting={patch.isPending}
-        error={patch.error ? mutationErrorMessage(patch.error) : null}
-        onSubmit={(event) => {
-          event.preventDefault()
-          patch.mutate({ tags: draftTags })
-        }}
       >
-        <Field>
-          <FieldLabel>Etiquetas</FieldLabel>
-          <TagsInput value={draftTags} onChange={setDraftTags} />
-        </Field>
+        <tagsForm.AppField name="tags">
+          {(field) => (
+            <field.Control
+              label={
+                <>
+                  Etiquetas <TagsCount count={field.state.value.length} />
+                </>
+              }
+              description={TAGS_INPUT_HELP}
+            >
+              {(control) => (
+                <TagsInput
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  onChange={field.handleChange}
+                />
+              )}
+            </field.Control>
+          )}
+        </tagsForm.AppField>
       </FormDrawer>
       <FormDrawer
+        {...customSurface}
         open={open === "campos"}
         onClose={close}
         title="Editar campos propios"
         submitLabel="Guardar"
-        isSubmitting={patch.isPending}
-        error={patch.error ? mutationErrorMessage(patch.error) : null}
-        onSubmit={(event) => {
-          event.preventDefault()
-          patch.mutate({ customFields: draftCustom })
-        }}
       >
         <div className="flex flex-col gap-4">
-          {defs.map((def) => {
-            const id = `person-field-${def.key}`
-            const value = draftCustom[def.key]
-            const set = (next: unknown) => setDraftCustom((prev) => ({ ...prev, [def.key]: next }))
-            return (
-              <Field key={def.key}>
-                <FieldLabel htmlFor={id}>{def.label}</FieldLabel>
-                {def.type === "select" ? (
-                  <ChoiceSelect
-                    id={id}
-                    value={typeof value === "string" ? value : ""}
-                    onChange={(event) => set(event.target.value)}
-                  >
-                    <option value="">Sin dato</option>
-                    {(def.options ?? []).map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </ChoiceSelect>
+          {defs.map((def) => (
+            <customForm.AppField key={def.key} name={`customFields.${def.key}`}>
+              {(field) =>
+                def.type === "select" ? (
+                  <field.SelectField
+                    label={def.label}
+                    options={[
+                      { value: "", label: "Sin dato" },
+                      ...(def.options ?? []).map((option) => ({ value: option, label: option })),
+                    ]}
+                  />
                 ) : def.type === "date" ? (
-                  <DatePickerButton
-                    id={id}
-                    className="w-56"
-                    value={typeof value === "string" ? value : ""}
-                    emptyLabel="Sin dato"
-                    // Sin fecha viaja como null: el servidor la quita (una cadena vacía no es fecha).
-                    onChange={(next) => set(next || null)}
-                  />
+                  <field.Control label={def.label}>
+                    {(control) => (
+                      <DatePickerButton
+                        {...control.props}
+                        className="w-56"
+                        value={field.state.value ?? ""}
+                        emptyLabel="Sin dato"
+                        onChange={(next) => field.handleChange(next)}
+                      />
+                    )}
+                  </field.Control>
                 ) : (
-                  <Input
-                    id={id}
-                    inputMode={def.type === "number" ? "decimal" : undefined}
-                    value={value === undefined || value === null ? "" : String(value)}
-                    onChange={(event) => {
-                      const raw = event.target.value
-                      set(def.type === "number" ? (raw === "" ? "" : Number(raw)) : raw)
-                    }}
-                  />
-                )}
-              </Field>
-            )
-          })}
+                  <field.TextField label={def.label} inputMode={def.type === "number" ? "decimal" : undefined} />
+                )
+              }
+            </customForm.AppField>
+          ))}
         </div>
       </FormDrawer>
     </Card>

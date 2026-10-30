@@ -1,3 +1,4 @@
+import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import {
   conditionLabel,
   FDI_ADULT_ROWS,
@@ -9,7 +10,6 @@ import {
 } from "@odentia/dental"
 import { type ReactNode, useId } from "react"
 import type { OdontogramEntry } from "../../lib/dental/odontogram"
-import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 
 export interface OdontogramDocumentProps {
   entries: OdontogramEntry[]

@@ -1,20 +1,30 @@
 import { medicalLeaveWords } from "@odentia/clinical"
-import { Button, Field, FieldLabel, Textarea, toast } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, FormDrawer, type RowActionItem } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Button, toast } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  DetailDrawer,
+  FormDrawer,
+  type RowActionItem,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
-import { useId, useState } from "react"
-import { ApiError } from "../../lib/api"
+import { useState } from "react"
+import { z } from "zod"
 import {
   BUDGET_SENDABLE_STATUSES,
-  budgetNumberLabel,
   type BudgetWithTotals,
+  budgetNumberLabel,
 } from "../../lib/budgets"
 import {
-  cancelConsent,
   type ClinicalOrder,
   CONSENT_STATUS_LABELS,
   type ConsentDocument,
+  cancelConsent,
   consentSignatureWords,
   fetchConsentHistory,
   ORDER_KIND_TITLES,
@@ -23,9 +33,8 @@ import {
 import {
   cancelPrescriptionApi,
   formatDate,
-  mutationMessage,
-  type Prescription,
   PRESCRIPTION_STATUS_LABELS,
+  type Prescription,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
@@ -67,6 +76,14 @@ function useRefreshPapers(patientId: string, onChanged?: () => void | Promise<vo
   }
 }
 
+const reasonSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Indica el motivo de la anulación.")
+    .max(2000, "Escribe como mucho 2000 caracteres."),
+})
+
 /** Anular con motivo: la receta o el descanso conservan su contenido y quedan con sello. */
 function CancelWithReason({
   title,
@@ -81,48 +98,31 @@ function CancelWithReason({
   onClose: () => void
   onDone: () => void | Promise<void>
 }) {
-  const uid = useId()
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const cancel = useMutation({
-    mutationFn: () => mutationFn(reason.trim()),
-    onSuccess: async () => {
+  const form = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value }) => {
+      await mutationFn(value.reason.trim())
       await onDone()
       onClose()
     },
-    onError: (cause) => setError(mutationMessage(cause)),
   })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       dock={false}
       open
       title={title}
       description={description}
-      error={error}
-      isSubmitting={cancel.isPending}
       submitLabel={title}
       onClose={() => {
-        if (!cancel.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!reason.trim()) {
-          setError("Indica el motivo de la anulación.")
-          return
-        }
-        setError(null)
-        cancel.mutate()
+        if (!surface.isSubmitting) onClose()
       }}
     >
-      <Field>
-        <FieldLabel htmlFor={`${uid}-reason`}>Motivo de anulación</FieldLabel>
-        <Textarea
-          id={`${uid}-reason`}
-          maxLength={2000}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </Field>
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField label="Motivo de anulación" maxLength={2000} />}
+      </form.AppField>
     </FormDrawer>
   )
 }
@@ -412,31 +412,34 @@ export function ConsentPaper({
 }: PaperSurface & { document: ConsentDocument }) {
   const canWrite = usePermission("clinical.write")
   const refresh = useRefreshPapers(document.patientId, onChanged)
-  const cancelId = useId()
   const [sending, setSending] = useState(false)
   const [signing, setSigning] = useState(false)
   const [paperOpen, setPaperOpen] = useState(false)
   const [revokeOpen, setRevokeOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
-  const [cancelReason, setCancelReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const pending = document.status === "pendiente"
   const signed = document.status === "firmado"
-  const cancel = useMutation({
-    mutationFn: () => cancelConsent(document.id, cancelReason.trim()),
-    onSuccess: async () => {
+  const cancelForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: {
+      onSubmit: z.object({
+        reason: z
+          .string()
+          .trim()
+          .min(1, "Escribe el motivo")
+          .max(2000, "Escribe como mucho 2000 caracteres."),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      await cancelConsent(document.id, value.reason.trim())
       setCancelOpen(false)
       toast.success("Consentimiento anulado")
       await refresh()
     },
-    onError: (cause) =>
-      setError(
-        cause instanceof ApiError
-          ? (cause.shape.message ?? "No se pudo anular")
-          : "No se pudo anular",
-      ),
   })
+  const cancelError = useFormSubmitError(cancelForm)
+  const cancelPending = useStore(cancelForm.store, (state) => state.isSubmitting)
   const menu: RowActionItem[] = [
     // Si ya lo firmó desde su enlace, solo falta confirmarlo: no se firma dos veces.
     ...(canWrite && pending && !document.personSignedAt
@@ -453,8 +456,7 @@ export function ConsentPaper({
             label: "Anular pendiente…",
             tone: "danger" as const,
             onSelect: () => {
-              setCancelReason("")
-              setError(null)
+              cancelForm.reset()
               setCancelOpen(true)
             },
           },
@@ -568,27 +570,23 @@ export function ConsentPaper({
         title="Anular consentimiento pendiente"
         description="Desaparece de los pendientes y no cuenta como consentimiento. Queda en la historia con el motivo."
         confirmLabel="Anular"
-        pending={cancel.isPending}
-        confirmDisabled={!cancelReason.trim()}
-        onClose={() => setCancelOpen(false)}
-        onConfirm={() => cancel.mutate()}
+        pending={cancelPending}
+        error={cancelError}
+        onClose={() => {
+          if (!cancelPending) setCancelOpen(false)
+        }}
+        onConfirm={() => void submitForm(cancelForm)}
       >
-        <Field>
-          <FieldLabel htmlFor={cancelId}>Motivo</FieldLabel>
-          <Textarea
-            id={cancelId}
-            aria-required="true"
-            value={cancelReason}
-            maxLength={2000}
-            onChange={(event) => setCancelReason(event.target.value)}
-            placeholder="p. ej. Plantilla equivocada"
-          />
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-        </Field>
+        <cancelForm.AppField name="reason">
+          {(field) => (
+            <field.TextareaField
+              label="Motivo"
+              aria-required
+              maxLength={2000}
+              placeholder="p. ej. Plantilla equivocada"
+            />
+          )}
+        </cancelForm.AppField>
       </ConfirmDialog>
     </DocumentPaperPanel>
   )

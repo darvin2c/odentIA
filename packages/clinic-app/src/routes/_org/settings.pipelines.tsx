@@ -1,14 +1,15 @@
-import { Field, FieldDescription, FieldError, FieldLabel, Input, toast } from "@odentia/ui"
-import { DataTable, DataTableSkeleton, FormDrawer, PageHeader, RowActions } from "@odentia/ui-patterns"
+import { toast } from "@odentia/ui"
+import { DataTable, DataTableSkeleton, FormDrawer, PageHeader, RowActions, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { type FormEvent, useId, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
 import { ChoiceSelect } from "../../components/ui/choice-select"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { type Pipeline, SALE_MOMENT_HINT, type Stage, usePermission } from "../../lib/crm"
 
 export const Route = createFileRoute("/_org/settings/pipelines")({
@@ -18,9 +19,13 @@ export const Route = createFileRoute("/_org/settings/pipelines")({
 const TITLE = "Etapas de venta"
 const SUBTITLE = "Los cuatro pasos por los que avanza sola cada oportunidad. Puedes cambiarles el nombre."
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
-}
+const stageSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Escribe el nombre del paso")
+    .max(120, "El nombre del paso no puede superar 120 caracteres"),
+})
 
 /**
  * Etapas de venta (ADR 0028): cuatro pasos fijos —Interesado, Evaluación
@@ -156,50 +161,27 @@ function RenameStageForm({
   onClose: () => void
   onSaved: () => void
 }) {
-  const ids = useId()
-  const [name, setName] = useState(stage.name)
-  const [nameError, setNameError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (value: string) => apiFetch(`/api/pipelines/stages/${stage.id}`, { method: "PATCH", body: JSON.stringify({ name: value }) }),
-    onSuccess: (_result, value) => {
-      toast.success(`Paso «${value}» guardado`)
+  })
+  const form = useAppForm({
+    defaultValues: { name: stage.name },
+    validators: { onSubmit: stageSchema },
+    onSubmit: async ({ value }) => {
+      const name = value.name.trim()
+      await save.mutateAsync(name)
+      toast.success(`Paso «${name}» guardado`)
       onSaved()
     },
   })
-  const isDirty = name !== stage.name
-  useReportDirty(isDirty, onDirtyChange)
+  const surface = useFormSurface(form)
+  useReportDirty(surface.isDirty, onDirtyChange)
   return (
-    <FormDrawer
-      open
-      onClose={onClose}
-      title="Cambiar el nombre del paso"
-      isDirty={isDirty}
-      isSubmitting={save.isPending}
-      error={save.isError ? errorText(save.error, "No pudimos guardar el nombre. Vuelve a intentarlo.") : null}
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault()
-        const trimmed = name.trim()
-        if (!trimmed) {
-          setNameError("Escribe el nombre del paso")
-          return
-        }
-        setNameError(null)
-        save.mutate(trimmed)
-      }}
-    >
+    <FormDrawer {...surface} open onClose={onClose} title="Cambiar el nombre del paso">
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`${ids}-nombre`}>Nombre</FieldLabel>
-          <Input
-            id={`${ids}-nombre`}
-            value={name}
-            maxLength={120}
-            aria-invalid={nameError ? true : undefined}
-            onChange={(event) => setName(event.target.value)}
-          />
-          {nameError ? <FieldError>{nameError}</FieldError> : null}
-          <FieldDescription>{SALE_MOMENT_HINT[stage.moment]}</FieldDescription>
-        </Field>
+        <form.AppField name="name">
+          {(field) => <field.TextField label="Nombre" maxLength={120} description={SALE_MOMENT_HINT[stage.moment]} />}
+        </form.AppField>
       </div>
     </FormDrawer>
   )

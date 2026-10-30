@@ -1,10 +1,13 @@
+import { patientGuideSchema } from "@odentia/clinical"
 import { withOrgContext } from "@odentia/db"
-import { Hono } from "hono"
-import { z } from "zod"
 import {
-  type BudgetLineWithStatus,
   addBudgetItems,
   adjustBudgetLines,
+  BUDGET_OPTION_NAME_MAX,
+  BUDGET_OPTION_TEXT_MAX,
+  BUDGET_TEXT_MAX,
+  type BudgetLineWithStatus,
+  budgetsSeenInPortal,
   cancelBudget,
   createBudget,
   decideBudget,
@@ -12,10 +15,6 @@ import {
   duplicateBudgetOption,
   getBudgetDetail,
   getBudgetPresentation,
-  BUDGET_OPTION_NAME_MAX,
-  BUDGET_OPTION_TEXT_MAX,
-  BUDGET_TEXT_MAX,
-  budgetsSeenInPortal,
   listBudgets,
   operationBodySchema,
   previewBudgetSend,
@@ -27,11 +26,12 @@ import {
   updateBudgetDraft,
   updateBudgetPresentation,
 } from "@odentia/services"
-import { patientGuideSchema } from "@odentia/clinical"
+import type { Context } from "hono"
+import { Hono } from "hono"
+import { z } from "zod"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
-import type { Context } from "hono"
 
 function forbid(c: Context) {
   return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a presupuestos"), 403)
@@ -91,9 +91,12 @@ const budgetDecisionInput = operationBodySchema("presupuesto.respuesta")
 // Una sola declaración para la pantalla y el agente (`reenviar_presupuesto`).
 const budgetSendInput = operationBodySchema("presupuesto.reenviar")
 
-const budgetRevisionInput = budgetCreateInput.omit({ planId: true }).extend({
-  reason: z.string().trim().min(1).max(2000),
-}).strict()
+const budgetRevisionInput = budgetCreateInput
+  .omit({ planId: true })
+  .extend({
+    reason: z.string().trim().min(1).max(2000),
+  })
+  .strict()
 
 const budgetPresentationInput = z
   .object({
@@ -154,7 +157,10 @@ const budgetLinesInput = z
  * - caja, como documento económico: tratamiento, precio, decisión y estado,
  *   sin pieza, superficies, cuadrante, arcada ni códigos.
  */
-function economicView<T extends { items: BudgetLineWithStatus[] }>(memberRole: string, budget: T): T {
+function economicView<T extends { items: BudgetLineWithStatus[] }>(
+  memberRole: string,
+  budget: T,
+): T {
   if (canAccess(memberRole, "clinical.read")) return budget
   const asPerson = canAccess(memberRole, "budgets.send")
   return {
@@ -189,11 +195,24 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     const planId = c.req.query("planId") || undefined
     return runService(c, 200, async () => {
       const { budgets, seen } = await withOrgContext(deps.db, orgId, async (tx) => {
-        const list = await listBudgets(tx, orgId, patientId, planId, { memberRole, actorUserId: userId })
+        const list = await listBudgets(tx, orgId, patientId, planId, {
+          memberRole,
+          actorUserId: userId,
+        })
         // «Lo vio en el portal el …», del registro de accesos (decisión 9).
-        return { budgets: list, seen: await budgetsSeenInPortal(tx, orgId, list.map((budget) => budget.id)) }
+        return {
+          budgets: list,
+          seen: await budgetsSeenInPortal(
+            tx,
+            orgId,
+            list.map((budget) => budget.id),
+          ),
+        }
       })
-      return budgets.map((budget) => ({ ...economicView(memberRole, budget), seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null }))
+      return budgets.map((budget) => ({
+        ...economicView(memberRole, budget),
+        seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null,
+      }))
     })
   })
 
@@ -214,13 +233,22 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     const { orgId, userId, memberRole } = orgContextOf(c)
     return runService(c, 200, async () => {
       const { budget, seen } = await withOrgContext(deps.db, orgId, async (tx) => {
-        const detail = await getBudgetDetail(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
-          memberRole,
-          actorUserId: userId,
-        })
+        const detail = await getBudgetDetail(
+          tx,
+          orgId,
+          c.req.param("id"),
+          c.req.param("budgetId"),
+          {
+            memberRole,
+            actorUserId: userId,
+          },
+        )
         return { budget: detail, seen: await budgetsSeenInPortal(tx, orgId, [detail.id]) }
       })
-      return { ...economicView(memberRole, budget), seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null }
+      return {
+        ...economicView(memberRole, budget),
+        seenInPortalAt: seen.get(budget.id)?.toISOString() ?? null,
+      }
     })
   })
 
@@ -244,10 +272,18 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        updateBudgetPresentation(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
-          memberRole,
-          clinicalAccess: canAccess(memberRole, "clinical.read"),
-        }),
+        updateBudgetPresentation(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("budgetId"),
+          parsed.data,
+          {
+            memberRole,
+            clinicalAccess: canAccess(memberRole, "clinical.read"),
+          },
+        ),
       ),
     )
   })
@@ -279,9 +315,17 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        adjustBudgetLines(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
-          memberRole,
-        }),
+        adjustBudgetLines(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("budgetId"),
+          parsed.data,
+          {
+            memberRole,
+          },
+        ),
       ),
     )
   })
@@ -309,9 +353,17 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        removeBudgetItems(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
-          memberRole,
-        }),
+        removeBudgetItems(
+          tx,
+          orgId,
+          userId,
+          c.req.param("id"),
+          c.req.param("budgetId"),
+          parsed.data,
+          {
+            memberRole,
+          },
+        ),
       ),
     )
   })
@@ -321,7 +373,9 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     if (!canAccess(memberRole, "budgets.send")) return forbid(c)
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) =>
-        deliverBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), { memberRole }),
+        deliverBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), {
+          memberRole,
+        }),
       ),
     )
   })
@@ -374,9 +428,17 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
       if (!canAccess(memberRole, "budgets.write")) return forbid(c)
       return runService(c, 200, () =>
         withOrgContext(deps.db, orgId, (tx) =>
-          operation(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), c.req.param("optionId"), {
-            memberRole,
-          }),
+          operation(
+            tx,
+            orgId,
+            userId,
+            c.req.param("id"),
+            c.req.param("budgetId"),
+            c.req.param("optionId"),
+            {
+              memberRole,
+            },
+          ),
         ),
       )
     })
@@ -409,13 +471,18 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
     )
   })
 
-  app.post("/:id/budgets/:budgetId/revise", async c => {
+  app.post("/:id/budgets/:budgetId/revise", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "budgets.write")) return forbid(c)
     const parsed = budgetRevisionInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () => withOrgContext(deps.db, orgId, tx =>
-      reviseBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, { memberRole })))
+    return runService(c, 201, () =>
+      withOrgContext(deps.db, orgId, (tx) =>
+        reviseBudget(tx, orgId, userId, c.req.param("id"), c.req.param("budgetId"), parsed.data, {
+          memberRole,
+        }),
+      ),
+    )
   })
 
   return app

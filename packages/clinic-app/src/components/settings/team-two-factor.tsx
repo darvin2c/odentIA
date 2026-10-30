@@ -1,9 +1,19 @@
-import { Badge, Button, Checkbox, Field, FieldError, FieldLabel, Input, Skeleton, toast } from "@odentia/ui"
+import { Badge, Button, Skeleton, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ConfirmDialog, common, FormDrawer } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  FormDrawer,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { panelUrl } from "../../lib/host"
 import { appRoleLabel } from "../../lib/product-words"
 
@@ -33,10 +43,6 @@ export function useTeamTwoFactor(enabled: boolean) {
   })
 }
 
-function errorText(error: unknown): string {
-  return error instanceof ApiError ? (error.shape.message ?? common.errors.generic) : common.errors.generic
-}
-
 /** Lo que dice la columna de cada persona: con palabras, no solo con color. */
 export function TwoFactorBadge({ enabled }: { enabled: boolean | undefined }) {
   if (enabled === undefined) return <span className="text-muted-foreground">—</span>
@@ -58,7 +64,7 @@ export function TeamTwoFactorCard({ canManage, myUserId }: { canManage: boolean;
       toast.success("El equipo ya no tiene que usarla")
       await queryClient.invalidateQueries({ queryKey: TEAM_TWO_FACTOR_KEY })
     },
-    onError: (error) => toast.error(errorText(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   if (query.isPending) return <Skeleton className="h-20 w-full rounded-xl" />
   if (query.isError) return null
@@ -100,11 +106,13 @@ export function TeamTwoFactorCard({ canManage, myUserId }: { canManage: boolean;
 /** Antes de pedirla: a quién le falta y qué le pasará. Quien la pide, ya la tiene. */
 function RequireTwoFactorDrawer({ missing, meEnabled, onClose }: { missing: TeamTwoFactorMember[]; meEnabled: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [notify, setNotify] = useState(true)
-  const save = useMutation({
-    mutationFn: () =>
-      apiFetch<{ data: { notified: number } }>("/api/team/two-factor", { method: "PUT", body: JSON.stringify({ required: true, notify }) }),
-    onSuccess: async ({ data }) => {
+  const form = useAppForm({
+    defaultValues: { notify: true },
+    onSubmit: async ({ value }) => {
+      const { data } = await apiFetch<{ data: { notified: number } }>("/api/team/two-factor", {
+        method: "PUT",
+        body: JSON.stringify({ required: true, notify: value.notify }),
+      })
       toast.success(
         data.notified > 0
           ? `Listo: el equipo entra con verificación en dos pasos. Avisamos por correo a ${data.notified === 1 ? "1 persona" : `${data.notified} personas`}.`
@@ -114,20 +122,21 @@ function RequireTwoFactorDrawer({ missing, meEnabled, onClose }: { missing: Team
       onClose()
     },
   })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open
       onClose={onClose}
       title="Pedir verificación en dos pasos"
       description="Desde ahora nadie del equipo entra a la clínica solo con su contraseña: también con el código de una app de su teléfono."
       onSubmit={(event) => {
-        event.preventDefault()
-        if (meEnabled) save.mutate()
+        // Sin tenerla uno mismo no se pide: el pie lo dice y no hay nada que enviar.
+        if (meEnabled) surface.onSubmit(event)
+        else event.preventDefault()
       }}
-      isSubmitting={save.isPending}
       submitDisabled={!meEnabled}
       submitLabel="Pedirla desde ahora"
-      error={save.isError ? errorText(save.error) : null}
     >
       {meEnabled ? (
         <div className="flex flex-col gap-5 text-sm">
@@ -152,13 +161,15 @@ function RequireTwoFactorDrawer({ missing, meEnabled, onClose }: { missing: Team
             <p className="text-muted-foreground">Todo el equipo ya la tiene activa: nadie notará el cambio.</p>
           )}
           {missing.length > 0 ? (
-            <div className="flex items-start gap-2.5">
-              <Checkbox id="notify-two-factor" className="mt-0.5" checked={notify} onCheckedChange={(checked) => setNotify(checked === true)} />
-              <label htmlFor="notify-two-factor" className="flex flex-col gap-0.5">
-                <span className="font-medium">Avisarles ahora por correo</span>
-                <span className="text-muted-foreground">Con los pasos y la app que necesitan, para que no los tome por sorpresa en plena atención.</span>
-              </label>
-            </div>
+            <form.AppField name="notify">
+              {(field) => (
+                <field.CheckboxField
+                  id="notify-two-factor"
+                  label="Avisarles ahora por correo"
+                  description="Con los pasos y la app que necesitan, para que no los tome por sorpresa en plena atención."
+                />
+              )}
+            </form.AppField>
           ) : null}
           <p className="rounded-xl bg-muted px-3.5 py-3 text-muted-foreground">Se puede apagar cuando quieras y queda en Actividad del equipo.</p>
         </div>
@@ -174,52 +185,52 @@ function RequireTwoFactorDrawer({ missing, meEnabled, onClose }: { missing: Team
   )
 }
 
+/** El motivo: los mismos límites que la ruta, con el mínimo dicho. */
+const resetSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(3, "Escribe el motivo con al menos 3 caracteres.")
+    .max(500, "Escribe el motivo en 500 caracteres como mucho."),
+})
+
 /** Restablecer la de alguien que perdió el teléfono y sus códigos, con su motivo. */
 export function ResetTwoFactorDialog({ member, onClose }: { member: { userId: string; name: string } | null; onClose: () => void }) {
   const queryClient = useQueryClient()
-  const [reason, setReason] = useState("")
-  const [touched, setTouched] = useState(false)
-  const reset = useMutation({
-    mutationFn: (target: { userId: string }) =>
-      apiFetch(`/api/team/two-factor/${encodeURIComponent(target.userId)}/reset`, { method: "POST", body: JSON.stringify({ reason: reason.trim() }) }),
-    onSuccess: async () => {
-      toast.success(`Verificación de ${member?.name ?? ""} restablecida: la activará de nuevo al entrar`)
+  const form = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: resetSchema },
+    onSubmit: async ({ value }) => {
+      if (!member) return
+      await apiFetch(`/api/team/two-factor/${encodeURIComponent(member.userId)}/reset`, {
+        method: "POST",
+        body: JSON.stringify({ reason: value.reason.trim() }),
+      })
+      toast.success(`Verificación de ${member.name} restablecida: la activará de nuevo al entrar`)
       await queryClient.invalidateQueries({ queryKey: TEAM_TWO_FACTOR_KEY })
       close()
     },
   })
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
   const close = () => {
-    setReason("")
-    setTouched(false)
-    reset.reset()
+    form.reset()
     onClose()
   }
-  const short = reason.trim().length < 3
   return (
     <ConfirmDialog
       open={member !== null}
       onClose={close}
-      onConfirm={() => {
-        setTouched(true)
-        if (member && !short) reset.mutate(member)
-      }}
+      onConfirm={() => void submitForm(form)}
       title={`Restablecer la verificación de ${member?.name ?? ""}`}
       description={`Úsalo solo si ${member?.name ?? ""} perdió su teléfono y sus códigos de respaldo, y lo confirmaste en persona o por teléfono. Se borran su app vinculada y sus códigos, se cierran sus sesiones, y al entrar la activará de nuevo. Queda en Actividad del equipo con tu nombre y el motivo.`}
       confirmLabel="Restablecer"
-      pending={reset.isPending}
-      error={reset.isError ? errorText(reset.error) : null}
+      pending={pending}
+      error={error}
     >
-      <Field>
-        <FieldLabel htmlFor="reset-two-factor-reason">Motivo</FieldLabel>
-        <Input
-          id="reset-two-factor-reason"
-          value={reason}
-          aria-invalid={touched && short ? true : undefined}
-          aria-describedby={touched && short ? "reset-two-factor-reason-error" : undefined}
-          onChange={(event) => setReason(event.target.value)}
-        />
-        {touched && short ? <FieldError id="reset-two-factor-reason-error">Escribe el motivo</FieldError> : null}
-      </Field>
+      <form.AppField name="reason">
+        {(field) => <field.TextareaField id="reset-two-factor-reason" label="Motivo" maxLength={500} />}
+      </form.AppField>
     </ConfirmDialog>
   )
 }

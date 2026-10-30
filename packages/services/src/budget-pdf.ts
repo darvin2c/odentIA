@@ -7,8 +7,9 @@
  * Un borrador lleva marca BORRADOR, sin QR ni firma: generar la vista previa nunca lo
  * presenta como entregado. Entregar es un cambio explícito (`deliverBudget`).
  */
-import { budgetAnswerText, formatMoney, type PatientGuide } from "@odentia/clinical"
+
 import { canAccess } from "@odentia/auth/permissions"
+import { budgetAnswerText, formatMoney, type PatientGuide } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   type BudgetPrintLine,
@@ -19,14 +20,14 @@ import {
 import { credentialOf } from "./clinical-papers.js"
 import {
   ageWords,
+  type Block,
+  type Cell,
   chartNumber,
+  type DocumentClinic,
+  DocumentKit,
   dayTimeWords,
   dayWords,
   documentFormat,
-  DocumentKit,
-  type Block,
-  type Cell,
-  type DocumentClinic,
   SIZE,
 } from "./document-kit.js"
 import { listDecisionRecipients } from "./responsibilities.js"
@@ -54,9 +55,12 @@ export async function buildBudgetSnapshot(
   actor: { actorUserId?: string; memberRole?: string; recipientContactId?: string | null } = {},
 ): Promise<BudgetSnapshot> {
   const toAuthorized = actor.recipientContactId
-    ? (await listDecisionRecipients(tx, orgId, patientId)).some((row) => row.contactId === actor.recipientContactId)
+    ? (await listDecisionRecipients(tx, orgId, patientId)).some(
+        (row) => row.contactId === actor.recipientContactId,
+      )
     : false
-  const clinicalAccess = toAuthorized || (!!actor.memberRole && canAccess(actor.memberRole, "clinical.read"))
+  const clinicalAccess =
+    toAuthorized || (!!actor.memberRole && canAccess(actor.memberRole, "clinical.read"))
   const payload = await getBudgetPrintPayload(tx, orgId, patientId, budgetId, {
     ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
     ...(actor.memberRole ? { memberRole: actor.memberRole } : {}),
@@ -100,7 +104,9 @@ function rangeWords(range: { min: number; max: number } | null): string {
 }
 
 function addRanges(lines: BudgetPrintLine[]): { min: number; max: number } | null {
-  const ranges = lines.map(visitRange).filter((range): range is { min: number; max: number } => range !== null)
+  const ranges = lines
+    .map(visitRange)
+    .filter((range): range is { min: number; max: number } => range !== null)
   if (ranges.length === 0) return null
   return ranges.reduce((sum, range) => ({ min: sum.min + range.min, max: sum.max + range.max }))
 }
@@ -113,7 +119,8 @@ function upperFirstWord(text: string): string {
 function lineMeta(line: BudgetPrintLine): string {
   const planned = plannedVisits(line)
   const visits = line.guide?.visits ?? (planned ? String(planned) : null)
-  const length = line.guide?.visitLength ?? (line.durationMin ? `${line.durationMin} minutos` : null)
+  const length =
+    line.guide?.visitLength ?? (line.durationMin ? `${line.durationMin} minutos` : null)
   const plural = visits && !/^1$/.test(visits.trim()) ? "visitas" : "visita"
   const visitWords = visits ? `${visits} ${plural}${length ? ` de ${length}` : ""}` : length
   return [line.detail ? upperFirstWord(line.detail) : null, visitWords].filter(Boolean).join(" · ")
@@ -126,9 +133,17 @@ function guideBlocks(guide: PatientGuide | null): Block[] {
   return [
     ...(guide.how ? [{ inlines: guide.how, size: SIZE.dense, leading: 1.42, gapBefore: 2.5 }] : []),
     ...(guide.includes
-      ? [{ inlines: [{ text: "Incluye: ", face: "sansSemi" as const }, guide.includes], ...small, gapBefore: 1.5 }]
+      ? [
+          {
+            inlines: [{ text: "Incluye: ", face: "sansSemi" as const }, guide.includes],
+            ...small,
+            gapBefore: 1.5,
+          },
+        ]
       : []),
-    ...(guide.aftercare ? [{ inlines: [{ text: "Después: ", face: "sansSemi" as const }, guide.aftercare], ...small }] : []),
+    ...(guide.aftercare
+      ? [{ inlines: [{ text: "Después: ", face: "sansSemi" as const }, guide.aftercare], ...small }]
+      : []),
   ]
 }
 
@@ -148,13 +163,17 @@ function beforeDeciding(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPri
     const titles = unique(snap.consents.map((consent) => consent.title))
     cells.push({
       title: "Riesgos principales",
-      body: [...risks, `Antes de empezar los verá con su profesional y firmará su consentimiento: ${titles.join(", ")}.`],
+      body: [
+        ...risks,
+        `Antes de empezar los verá con su profesional y firmará su consentimiento: ${titles.join(", ")}.`,
+      ],
     })
   }
   if (excludes.length > 0) cells.push({ title: "Qué no incluye", body: excludes })
   if (snap.terms.change) cells.push({ title: words.change, body: snap.terms.change })
   if (snap.terms.payment) {
-    const methods = snap.paymentMethods.length > 0 ? ` Aceptamos ${listWords(snap.paymentMethods)}.` : ""
+    const methods =
+      snap.paymentMethods.length > 0 ? ` Aceptamos ${listWords(snap.paymentMethods)}.` : ""
     cells.push({ title: "Cómo se paga", body: `${snap.terms.payment}${methods}` })
   }
   const schedule = lines.flatMap((line) => line.guide?.schedule ?? [])
@@ -165,16 +184,29 @@ function beforeDeciding(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPri
       columns: [{ label: "Cuándo", width: 120 }, { label: "Qué" }],
       size: SIZE.dense,
       rowPad: 4.5,
-      rows: schedule.map((step) => [[{ inlines: step.when, face: "sansSemi" as const }], step.what]),
+      rows: schedule.map((step) => [
+        [{ inlines: step.when, face: "sansSemi" as const }],
+        step.what,
+      ]),
     })
   }
   if (cells.length > 0) {
-    kit.heading("Lo que debe saber antes de decidir", { size: SIZE.h2, before: 16, after: 8, keep: 60 })
+    kit.heading("Lo que debe saber antes de decidir", {
+      size: SIZE.h2,
+      before: 16,
+      after: 8,
+      keep: 60,
+    })
     kit.grid(cells)
   }
   if (warnings.length > 0) {
     kit.gap(4)
-    kit.panel({ title: "Vaya a emergencia o llámenos si tiene", body: warnings.join(" "), thickness: 1.5, size: SIZE.dense })
+    kit.panel({
+      title: "Vaya a emergencia o llámenos si tiene",
+      body: warnings.join(" "),
+      thickness: 1.5,
+      size: SIZE.dense,
+    })
   }
   if (snap.notes) {
     kit.gap(6)
@@ -189,11 +221,18 @@ function listWords(items: string[]): string {
 }
 
 /** «Su decisión»: el QR de su enlace, las casillas y las firmas; o lo que ya respondió. */
-function yourDecision(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPrintLine[], money: (cents: number | null) => string) {
+function yourDecision(
+  kit: DocumentKit,
+  snap: BudgetSnapshot,
+  lines: BudgetPrintLine[],
+  money: (cents: number | null) => string,
+) {
   const zone = snap.org
   const hasOptions = snap.options.length > 1
   // El teléfono no se parte en dos líneas.
-  const phone = snap.org.phone ? ` ¿Dudas? Llámenos al ${snap.org.phone.replaceAll(" ", "\u00a0")}.` : ""
+  const phone = snap.org.phone
+    ? ` ¿Dudas? Llámenos al ${snap.org.phone.replaceAll(" ", "\u00a0")}.`
+    : ""
   // La decisión va entera en una página si cabe: casillas y firma no se separan.
   const needed = 190 + (hasOptions ? 40 : lines.length * 24) + (snap.personalLinkUrl ? 76 : 0)
   if (kit.room() < needed && needed <= kit.freshPageRoom()) kit.newPage()
@@ -213,9 +252,17 @@ function yourDecision(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPrint
     })
     kit.gap(8)
     kit.table({
-      columns: [{ label: snap.words.item }, { label: "Importe", width: 80, align: "right" }, { label: "Su respuesta", width: 110, align: "right" }],
+      columns: [
+        { label: snap.words.item },
+        { label: "Importe", width: 80, align: "right" },
+        { label: "Su respuesta", width: 110, align: "right" },
+      ],
       size: SIZE.dense,
-      rows: lines.map((line) => [lineLabel(line), money(line.totalCents), budgetAnswerText(line.decision)]),
+      rows: lines.map((line) => [
+        lineLabel(line),
+        money(line.totalCents),
+        budgetAnswerText(line.decision),
+      ]),
     })
     return
   }
@@ -224,7 +271,9 @@ function yourDecision(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPrint
   if (canAnswer && snap.personalLinkUrl) {
     kit.qrPanel({
       url: snap.personalLinkUrl,
-      title: hasOptions ? "Elija desde su celular, sin imprimir" : "Responda desde su celular, sin imprimir",
+      title: hasOptions
+        ? "Elija desde su celular, sin imprimir"
+        : "Responda desde su celular, sin imprimir",
       body: hasOptions
         ? `Escanee el código, revise las opciones y elija una.${phone}`
         : `Escanee el código, revise el presupuesto y responda.${phone}`,
@@ -232,12 +281,15 @@ function yourDecision(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPrint
     kit.gap(9)
   }
   if (hasOptions) {
-    kit.text(
-      [{ text: "O hágalo aquí: ", face: "sansSemi" }, "marque una casilla y firme."],
-      { size: SIZE.second, tone: "soft" },
-    )
+    kit.text([{ text: "O hágalo aquí: ", face: "sansSemi" }, "marque una casilla y firme."], {
+      size: SIZE.second,
+      tone: "soft",
+    })
     kit.gap(7)
-    kit.choiceRow("Elijo la opción", [...snap.options.map((option) => option.label.replace(/^Opción\s*/, "")), "Lo voy a pensar"])
+    kit.choiceRow("Elijo la opción", [
+      ...snap.options.map((option) => option.label.replace(/^Opción\s*/, "")),
+      "Lo voy a pensar",
+    ])
   } else {
     kit.text(
       [
@@ -275,15 +327,40 @@ function yourDecision(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPrint
     color: kit.color("ink"),
   })
   kit.y = captionY - 3
-  kit.text("Nombre y firma del paciente o su representante, y fecha", { size: SIZE.second, tone: "gray", width: half, leading: 1.4 })
+  kit.text("Nombre y firma del paciente o su representante, y fecha", {
+    size: SIZE.second,
+    tone: "gray",
+    width: half,
+    leading: 1.4,
+  })
   const bottom = kit.y
   if (signer) {
     const x = half + 21
     kit.y = top
     const credential = credentialOf(signer.title, signer.registration)
-    kit.text(`Firmado electrónicamente, ${dayWords(snap.issuedAt, zone)}`, { size: SIZE.label, face: "sansSemi", tone: "gray", indent: x, width: half, leading: 1.35 })
-    kit.text(signer.name, { size: SIZE.dense, face: "sansSemi", indent: x, width: half, leading: 1.4 })
-    if (credential) kit.text(credential, { size: SIZE.second, tone: "gray", indent: x, width: half, leading: 1.4 })
+    kit.text(`Firmado electrónicamente, ${dayWords(snap.issuedAt, zone)}`, {
+      size: SIZE.label,
+      face: "sansSemi",
+      tone: "gray",
+      indent: x,
+      width: half,
+      leading: 1.35,
+    })
+    kit.text(signer.name, {
+      size: SIZE.dense,
+      face: "sansSemi",
+      indent: x,
+      width: half,
+      leading: 1.4,
+    })
+    if (credential)
+      kit.text(credential, {
+        size: SIZE.second,
+        tone: "gray",
+        indent: x,
+        width: half,
+        leading: 1.4,
+      })
     kit.y = Math.min(kit.y, bottom)
   }
 }
@@ -312,7 +389,10 @@ function paymentNotes(line: BudgetPrintLine, money: (cents: number | null) => st
   }
   if ((line.discountCents ?? 0) > 0) {
     const reason = line.promotionName ? `Promoción ${line.promotionName}` : "Descuento"
-    notes.push({ inlines: `${reason}: − ${money(line.discountCents)} (de ${money(line.listTotalCents)})`, ...small })
+    notes.push({
+      inlines: `${reason}: − ${money(line.discountCents)} (de ${money(line.listTotalCents)})`,
+      ...small,
+    })
   }
   return notes
 }
@@ -332,8 +412,15 @@ function lineDetailRow(line: BudgetPrintLine, money: (cents: number | null) => s
 }
 
 /** Las columnas del detalle: el importe ocupa solo lo que necesita, y el texto, lo demás. */
-function detailColumns(kit: DocumentKit, lines: BudgetPrintLine[], money: (cents: number | null) => string) {
-  const width = Math.max(...lines.map((line) => kit.textWidth(linePrice(line, money), "sansSemi", SIZE.dense))) + 14
+function detailColumns(
+  kit: DocumentKit,
+  lines: BudgetPrintLine[],
+  money: (cents: number | null) => string,
+) {
+  const width =
+    Math.max(
+      ...lines.map((line) => kit.textWidth(linePrice(line, money), "sansSemi", SIZE.dense)),
+    ) + 14
   return [{ label: "" }, { label: "", width, align: "right" as const, pad: 0 }]
 }
 
@@ -343,11 +430,19 @@ function findingsSection(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPr
   const withDiagnosis = lines.filter((line) => line.diagnosis)
   // Sin texto del profesional, el nombre del diagnóstico.
   const fallback = unique(withDiagnosis.map((line) => line.diagnosis?.title ?? "")).join(". ")
-  const codes = unique(withDiagnosis.map((line) => (line.diagnosis?.title ? `${line.diagnosis.label} · ${line.diagnosis.title}` : (line.diagnosis?.label ?? ""))))
+  const codes = unique(
+    withDiagnosis.map((line) =>
+      line.diagnosis?.title
+        ? `${line.diagnosis.label} · ${line.diagnosis.title}`
+        : (line.diagnosis?.label ?? ""),
+    ),
+  )
   const text = hasOptions
     ? [
         snap.findings ?? fallback,
-        snap.findings && codes.some((code) => !snap.findings?.includes(code)) ? `(${codes.join("; ")})` : null,
+        snap.findings && codes.some((code) => !snap.findings?.includes(code))
+          ? `(${codes.join("; ")})`
+          : null,
       ]
         .filter(Boolean)
         .join(" ") || null
@@ -373,8 +468,12 @@ function findingsSection(kit: DocumentKit, snap: BudgetSnapshot, lines: BudgetPr
       rowPad: 4,
       closed: false,
       rows: dedupeRows(withDiagnosis).map((line) => {
-        const code = line.diagnosis?.title ? `${line.diagnosis.label} · ${line.diagnosis.title}` : (line.diagnosis?.label ?? "")
-        return sited ? [[{ inlines: upperFirstWord(line.detail ?? "—"), face: "sansBold" as const }], code] : [code]
+        const code = line.diagnosis?.title
+          ? `${line.diagnosis.label} · ${line.diagnosis.title}`
+          : (line.diagnosis?.label ?? "")
+        return sited
+          ? [[{ inlines: upperFirstWord(line.detail ?? "—"), face: "sansBold" as const }], code]
+          : [code]
       }),
     })
     kit.gap(6)
@@ -402,7 +501,11 @@ function dedupeRows(lines: BudgetPrintLine[]): BudgetPrintLine[] {
 }
 
 /** Una opción: por etapas si el producto las tiene, si no, «Qué se haría». */
-function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: number | null) => string) {
+function singleOption(
+  kit: DocumentKit,
+  snap: BudgetSnapshot,
+  money: (cents: number | null) => string,
+) {
   const lines = snap.lines
   const staged = snap.phases.length > 0
   const proposal = () => {
@@ -413,7 +516,9 @@ function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: num
   findingsSection(kit, snap, lines)
   proposal()
   const visits = addRanges(lines)
-  const visitsWords = visits ? ` · unas ${rangeWords(visits)} ${visits.max === 1 ? "visita" : "visitas"}` : ""
+  const visitsWords = visits
+    ? ` · unas ${rangeWords(visits)} ${visits.max === 1 ? "visita" : "visitas"}`
+    : ""
   const totalLine = () => {
     kit.total([{ text: "Total", face: "sansSemi" }, visitsWords], money(snap.totalCents))
   }
@@ -421,7 +526,12 @@ function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: num
     // Sin etapas: lo que se haría va de una vez, con su explicación.
     kit.heading(snap.words.steps, { size: SIZE.h2small, before: 14, after: 3, keep: 60 })
     kit.rule({ tone: "ink" })
-    kit.table({ columns: detailColumns(kit, lines, money), size: SIZE.dense, rowPad: 6.5, rows: lines.map((line) => lineDetailRow(line, money)) })
+    kit.table({
+      columns: detailColumns(kit, lines, money),
+      size: SIZE.dense,
+      rowPad: 6.5,
+      rows: lines.map((line) => lineDetailRow(line, money)),
+    })
     totalLine()
     return
   }
@@ -445,7 +555,11 @@ function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: num
       const total = stage.lines.reduce((sum, line) => sum + (line.totalCents ?? 0), 0)
       const names = stage.lines.map(lineLabel).join("; ")
       return [
-        [{ inlines: [{ text: `${index + 1}. ${stage.label}: `, face: "sansSemi" as const }, names] }],
+        [
+          {
+            inlines: [{ text: `${index + 1}. ${stage.label}: `, face: "sansSemi" as const }, names],
+          },
+        ],
         rangeWords(addRanges(stage.lines)),
         total === 0 ? "Incluido" : money(total),
       ]
@@ -457,7 +571,14 @@ function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: num
   else kit.gap(10)
   kit.heading(snap.words.steps, { size: SIZE.h2, before: 6, after: 2, keep: 60 })
   stages.forEach((stage, index) => {
-    kit.heading(`${index + 1}. ${stage.label}`, { face: "sansBold", size: SIZE.dense, leading: 1.4, before: 10, after: 2, keep: 30 })
+    kit.heading(`${index + 1}. ${stage.label}`, {
+      face: "sansBold",
+      size: SIZE.dense,
+      leading: 1.4,
+      before: 10,
+      after: 2,
+      keep: 30,
+    })
     kit.rule({ tone: "ink" })
     kit.table({
       columns: detailColumns(kit, lines, money),
@@ -470,14 +591,22 @@ function singleOption(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: num
 }
 
 /** Con 2 o 3 opciones: la tabla para comparar, y qué incluye cada una. */
-function manyOptions(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: number | null) => string) {
+function manyOptions(
+  kit: DocumentKit,
+  snap: BudgetSnapshot,
+  money: (cents: number | null) => string,
+) {
   const options = snap.options
   const all = options.flatMap((option) => option.lines)
   findingsSection(kit, snap, all)
   const count = options.length === 2 ? "Hay dos caminos" : "Hay tres caminos"
   kit.gap(6)
   kit.text(
-    [`${count}: `, { text: "elija uno", face: "sansSemi" }, ". Cada uno tiene su propio total; no se suman."],
+    [
+      `${count}: `,
+      { text: "elija uno", face: "sansSemi" },
+      ". Cada uno tiene su propio total; no se suman.",
+    ],
     { size: SIZE.dense },
   )
   if (snap.proposal) {
@@ -494,35 +623,114 @@ function manyOptions(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: numb
     options.forEach((option, index) => {
       const x = kit.left + labelWidth + index * columnWidth
       if (option.isRecommended) {
-        kit.page.drawRectangle({ x, y: top - height, width: columnWidth, height, color: kit.color("ink") })
+        kit.page.drawRectangle({
+          x,
+          y: top - height,
+          width: columnWidth,
+          height,
+          color: kit.color("ink"),
+        })
       } else {
-        kit.page.drawRectangle({ x, y: top - height, width: columnWidth, height, borderColor: kit.color("gray"), borderWidth: 0.5 })
+        kit.page.drawRectangle({
+          x,
+          y: top - height,
+          width: columnWidth,
+          height,
+          borderColor: kit.color("gray"),
+          borderWidth: 0.5,
+        })
       }
       const tone = option.isRecommended ? ("white" as const) : ("ink" as const)
       kit.y = top - 5
-      kit.text(option.label, { face: "serif", size: 12.75, tone, indent: labelWidth + index * columnWidth + 6, width: columnWidth - 12, leading: 1.25 })
+      kit.text(option.label, {
+        face: "serif",
+        size: 12.75,
+        tone,
+        indent: labelWidth + index * columnWidth + 6,
+        width: columnWidth - 12,
+        leading: 1.25,
+      })
       const state =
-        option.decision === "elegida" ? "Elegida" : option.decision === "no_elegida" ? "No elegida" : option.isRecommended ? "Recomendada" : ""
-      if (state) kit.text(state, { size: SIZE.label, face: "sansSemi", tone, indent: labelWidth + index * columnWidth + 6, width: columnWidth - 12, leading: 1.25 })
+        option.decision === "elegida"
+          ? "Elegida"
+          : option.decision === "no_elegida"
+            ? "No elegida"
+            : option.isRecommended
+              ? "Recomendada"
+              : ""
+      if (state)
+        kit.text(state, {
+          size: SIZE.label,
+          face: "sansSemi",
+          tone,
+          indent: labelWidth + index * columnWidth + 6,
+          width: columnWidth - 12,
+          leading: 1.25,
+        })
     })
     kit.y = top - height
   }
   const row = (label: string, values: Array<string | null>, strong = false): Cell[] => [
     [{ inlines: label, size: SIZE.label, face: "sansSemi", tone: "gray" }],
-    ...values.map((value): Cell => [{ inlines: value ?? "—", size: SIZE.second, leading: 1.4, face: strong ? "sansSemi" : "sans" }]),
+    ...values.map(
+      (value): Cell => [
+        {
+          inlines: value ?? "—",
+          size: SIZE.second,
+          leading: 1.4,
+          face: strong ? "sansSemi" : "sans",
+        },
+      ],
+    ),
   ]
   const rows: Cell[][] = []
-  if (options.some((option) => option.name)) rows.push(row("Nombre", options.map((option) => option.name), true))
-  rows.push(row("Qué se hace", options.map((option) => option.lines.map(lineLabel).join("; "))))
-  rows.push(row("Visitas", options.map((option) => rangeWords(addRanges(option.lines)) || null)))
-  if (options.some((option) => option.pros)) rows.push(row("A favor", options.map((option) => option.pros)))
-  if (options.some((option) => option.cons)) rows.push(row("A considerar", options.map((option) => option.cons)))
+  if (options.some((option) => option.name))
+    rows.push(
+      row(
+        "Nombre",
+        options.map((option) => option.name),
+        true,
+      ),
+    )
+  rows.push(
+    row(
+      "Qué se hace",
+      options.map((option) => option.lines.map(lineLabel).join("; ")),
+    ),
+  )
+  rows.push(
+    row(
+      "Visitas",
+      options.map((option) => rangeWords(addRanges(option.lines)) || null),
+    ),
+  )
+  if (options.some((option) => option.pros))
+    rows.push(
+      row(
+        "A favor",
+        options.map((option) => option.pros),
+      ),
+    )
+  if (options.some((option) => option.cons))
+    rows.push(
+      row(
+        "A considerar",
+        options.map((option) => option.cons),
+      ),
+    )
   rows.push([
     [{ inlines: "Total", size: SIZE.dense, face: "sansBold" }],
-    ...options.map((option): Cell => [{ inlines: money(option.totalCents), face: "serif", size: SIZE.h2small, leading: 1.25 }]),
+    ...options.map(
+      (option): Cell => [
+        { inlines: money(option.totalCents), face: "serif", size: SIZE.h2small, leading: 1.25 },
+      ],
+    ),
   ])
   kit.table({
-    columns: [{ label: "", width: labelWidth, pad: 6 }, ...options.map(() => ({ label: "", width: columnWidth, pad: 6 }))],
+    columns: [
+      { label: "", width: labelWidth, pad: 6 },
+      ...options.map(() => ({ label: "", width: columnWidth, pad: 6 })),
+    ],
     head: heads,
     rowPad: 5.5,
     size: SIZE.second,
@@ -532,8 +740,17 @@ function manyOptions(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: numb
   else kit.gap(8)
   kit.heading("Qué incluye cada opción", { size: SIZE.h2, before: 8, after: 4, keep: 60 })
   for (const option of options) {
-    const title = [option.label, option.name].filter(Boolean).join(" · ") + (option.isRecommended ? " (recomendada)" : "")
-    kit.heading(title, { face: "sansBold", size: SIZE.table, leading: 1.4, before: 9, after: 2, keep: 30 })
+    const title =
+      [option.label, option.name].filter(Boolean).join(" · ") +
+      (option.isRecommended ? " (recomendada)" : "")
+    kit.heading(title, {
+      face: "sansBold",
+      size: SIZE.table,
+      leading: 1.4,
+      before: 9,
+      after: 2,
+      keep: 30,
+    })
     kit.rule({ tone: "ink" })
     kit.table({
       columns: [{ label: "" }, { label: "", width: 130, align: "right", pad: 0 }],
@@ -555,13 +772,19 @@ function manyOptions(kit: DocumentKit, snap: BudgetSnapshot, money: (cents: numb
 
 function linesOfDecision(snap: BudgetSnapshot): BudgetPrintLine[] {
   if (snap.options.length <= 1) return snap.lines
-  const chosen: BudgetPrintOption | undefined = snap.options.find((option) => option.decision === "elegida")
+  const chosen: BudgetPrintOption | undefined = snap.options.find(
+    (option) => option.decision === "elegida",
+  )
   return chosen?.lines ?? snap.lines
 }
 
-export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | null): Promise<Uint8Array> {
+export async function renderBudgetPdf(
+  snap: BudgetSnapshot,
+  paper?: string | null,
+): Promise<Uint8Array> {
   const org = snap.org
-  const money = (cents: number | null) => (cents == null ? "por definir" : formatMoney(cents, snap.currency, org.locale))
+  const money = (cents: number | null) =>
+    cents == null ? "por definir" : formatMoney(cents, snap.currency, org.locale)
   const docLabel = `Presupuesto ${snap.numberLabel}`
   const kit = await DocumentKit.open(org, documentFormat(org, paper), {
     title: snap.words.title,
@@ -574,8 +797,13 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
   kit.text(snap.words.title, { face: "serif", size: SIZE.titleBudget, leading: 1.15 })
   kit.gap(3)
   kit.spread(
-    [{ text: snap.numberLabel, size: SIZE.table, face: "sansSemi" }, { text: ` · ${dayWords(snap.issuedAt, org)}`, tone: "gray" }],
-    snap.validUntil && !snap.isDraft ? { text: `Vigente hasta el ${dayWords(snap.validUntil, org)}`, face: "sansSemi" } : "",
+    [
+      { text: snap.numberLabel, size: SIZE.table, face: "sansSemi" },
+      { text: ` · ${dayWords(snap.issuedAt, org)}`, tone: "gray" },
+    ],
+    snap.validUntil && !snap.isDraft
+      ? { text: `Vigente hasta el ${dayWords(snap.validUntil, org)}`, face: "sansSemi" }
+      : "",
     { size: SIZE.second, leading: 1.45 },
   )
   if (snap.isDraft) {
@@ -586,7 +814,11 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
     kit.stateBox({ kind: "alert", title: "ANULADO", detail: null })
   } else if (snap.status === "sustituido") {
     kit.gap(8)
-    kit.stateBox({ kind: "note", title: "Sustituido por una revisión", detail: "Este presupuesto ya no vale: vale su revisión." })
+    kit.stateBox({
+      kind: "note",
+      title: "Sustituido por una revisión",
+      detail: "Este presupuesto ya no vale: vale su revisión.",
+    })
   }
   kit.gap(10)
   const person = snap.patient
@@ -597,18 +829,28 @@ export async function renderBudgetPdf(snap: BudgetSnapshot, paper?: string | nul
   ]
     .filter(Boolean)
     .join(" · ")
-  const professionalSub = snap.professional ? credentialOf(snap.professional.title, snap.professional.registration) : null
+  const professionalSub = snap.professional
+    ? credentialOf(snap.professional.title, snap.professional.registration)
+    : null
   kit.facts(
     [
       { label: "Paciente", value: person.displayName, sub: personSub, strong: true },
       ...(snap.professional
-        ? [{ label: "Le atiende", value: snap.professional.name, strong: true, ...(professionalSub ? { sub: professionalSub } : {}) }]
+        ? [
+            {
+              label: "Le atiende",
+              value: snap.professional.name,
+              strong: true,
+              ...(professionalSub ? { sub: professionalSub } : {}),
+            },
+          ]
         : []),
     ],
     2,
     { pad: 7.5 },
   )
-  const lines = snap.options.length > 1 ? snap.options.flatMap((option) => option.lines) : snap.lines
+  const lines =
+    snap.options.length > 1 ? snap.options.flatMap((option) => option.lines) : snap.lines
   if (snap.options.length > 1) manyOptions(kit, snap, money)
   else singleOption(kit, snap, money)
   // Lo que debe saber abre página si queda poco espacio.

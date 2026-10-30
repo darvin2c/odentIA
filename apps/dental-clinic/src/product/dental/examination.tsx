@@ -1,10 +1,12 @@
-import type {
-  ExaminationFieldsProps,
-  ProductExaminationUi,
+import {
+  type ExaminationFieldsProps,
+  type ProductExaminationUi,
+  subFieldError,
 } from "@odentia/clinic-app/product/product-ui"
 import { CORE_VITAL_KEYS } from "@odentia/clinical"
 import {
   Field,
+  FieldError,
   FieldLabel,
   Input,
   Select,
@@ -112,34 +114,56 @@ const INTRAORAL: ReadonlyArray<{
   { key: "orofaringe", label: "Orofaringe", id: "oro" },
 ]
 
+/** Lo que admite cada texto del examen: el mismo límite que el servidor (`assertExamination`). */
+const EXAM_TEXT_MAX = 500
+
 /** Extraoral, higiene oral e intraoral, en la grilla de dos columnas del bloque. */
-function DentalExamFields({ idPrefix, draft, onChange, disabled }: ExaminationFieldsProps) {
+function DentalExamFields({ idPrefix, draft, onChange, disabled, errors }: ExaminationFieldsProps) {
   const examination = draft as DentalExamDraft | null
   const edit = (group: "extraoral" | "intraoral", key: string, value: string) => {
     const prev = examination ?? blank()
     onChange({ ...prev, [group]: { ...prev[group], [key]: value } })
   }
+  const higieneId = `${idPrefix}-ex-higiene`
+  const higieneError = subFieldError(errors, "higieneOral", higieneId)
+  const textField = (
+    group: "extraoral" | "intraoral",
+    field: { key: string; label: string; id: string },
+    value: string,
+  ) => {
+    const id = `${idPrefix}-ex-${field.id}`
+    const error = subFieldError(errors, `${group}.${field.key}`, id)
+    return (
+      <Field key={field.key} data-invalid={error.invalid}>
+        <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+        <Input
+          id={id}
+          value={value}
+          maxLength={EXAM_TEXT_MAX}
+          disabled={disabled}
+          aria-invalid={error.invalid}
+          aria-describedby={error.describedBy}
+          onChange={(e) => edit(group, field.key, e.target.value)}
+        />
+        {error.message ? <FieldError id={error.errorId}>{error.message}</FieldError> : null}
+      </Field>
+    )
+  }
   return (
     <>
-      {EXTRAORAL.map((field) => (
-        <Field key={field.key}>
-          <FieldLabel htmlFor={`${idPrefix}-ex-${field.id}`}>{field.label}</FieldLabel>
-          <Input
-            id={`${idPrefix}-ex-${field.id}`}
-            value={examination?.extraoral[field.key] ?? ""}
-            disabled={disabled}
-            onChange={(e) => edit("extraoral", field.key, e.target.value)}
-          />
-        </Field>
-      ))}
-      <Field>
-        <FieldLabel htmlFor={`${idPrefix}-ex-higiene`}>Higiene oral</FieldLabel>
+      {EXTRAORAL.map((field) => textField("extraoral", field, examination?.extraoral[field.key] ?? ""))}
+      <Field data-invalid={higieneError.invalid}>
+        <FieldLabel htmlFor={higieneId}>Higiene oral</FieldLabel>
         <Select
           value={examination?.higieneOral ?? ""}
           onValueChange={(v) => onChange({ ...(examination ?? blank()), higieneOral: v ?? "" })}
           disabled={disabled}
         >
-          <SelectTrigger id={`${idPrefix}-ex-higiene`}>
+          <SelectTrigger
+            id={higieneId}
+            aria-invalid={higieneError.invalid}
+            aria-describedby={higieneError.describedBy}
+          >
             <SelectValue placeholder="Sin indicar" />
           </SelectTrigger>
           <SelectContent>
@@ -149,18 +173,11 @@ function DentalExamFields({ idPrefix, draft, onChange, disabled }: ExaminationFi
             <SelectItem value="mala">Mala</SelectItem>
           </SelectContent>
         </Select>
+        {higieneError.message ? (
+          <FieldError id={higieneError.errorId}>{higieneError.message}</FieldError>
+        ) : null}
       </Field>
-      {INTRAORAL.map((field) => (
-        <Field key={field.key}>
-          <FieldLabel htmlFor={`${idPrefix}-ex-${field.id}`}>{field.label}</FieldLabel>
-          <Input
-            id={`${idPrefix}-ex-${field.id}`}
-            value={examination?.intraoral[field.key] ?? ""}
-            disabled={disabled}
-            onChange={(e) => edit("intraoral", field.key, e.target.value)}
-          />
-        </Field>
-      ))}
+      {INTRAORAL.map((field) => textField("intraoral", field, examination?.intraoral[field.key] ?? ""))}
     </>
   )
 }

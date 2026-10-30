@@ -319,9 +319,12 @@ export function fetchSpecialtiesOverview() {
 
 /** «Elegir quién atiende»: la lista completa de una especialidad, de una vez. */
 export function saveSpecialtyProfessionals(specialtyId: string, userIds: string[]) {
-  return put<{ specialtyId: string; userIds: string[] }>(`${BASE}/specialties/${specialtyId}/professionals`, {
-    userIds,
-  })
+  return put<{ specialtyId: string; userIds: string[] }>(
+    `${BASE}/specialties/${specialtyId}/professionals`,
+    {
+      userIds,
+    },
+  )
 }
 
 // --- Plantillas de formulario ---
@@ -372,7 +375,11 @@ export function archiveFormTemplate(id: string) {
 
 // --- Capturas ---
 
-export function fetchFormResponses(query: { patientId: string; encounterId?: string; templateId?: string }) {
+export function fetchFormResponses(query: {
+  patientId: string
+  encounterId?: string
+  templateId?: string
+}) {
   return apiFetch<{ data: FormResponse[] }>(`${BASE}/form-responses${toSearch(query)}`)
 }
 
@@ -411,7 +418,9 @@ export function addFormAddendum(responseId: string, text: string) {
 
 // --- Consentimientos ---
 
-export function fetchConsentTemplates(query: { specialtyId?: string; status?: string; q?: string } = {}) {
+export function fetchConsentTemplates(
+  query: { specialtyId?: string; status?: string; q?: string } = {},
+) {
   return apiFetch<{ data: ConsentTemplate[] }>(`${BASE}/consent-templates${toSearch(query)}`)
 }
 
@@ -504,14 +513,16 @@ export function fetchConsentHistory(id: string) {
 
 // --- Órdenes ---
 
-export function fetchOrders(query: {
-  patientId?: string
-  status?: string
-  kind?: string
-  specialtyId?: string
-  /** Solo las de esta atención. */
-  encounterId?: string
-} = {}) {
+export function fetchOrders(
+  query: {
+    patientId?: string
+    status?: string
+    kind?: string
+    specialtyId?: string
+    /** Solo las de esta atención. */
+    encounterId?: string
+  } = {},
+) {
   return apiFetch<{ data: ClinicalOrder[] }>(`${BASE}/orders${toSearch(query)}`)
 }
 
@@ -593,7 +604,9 @@ export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", str
   enlace: "Firma simple · por enlace",
 }
 
-export function consentSignatureWords(document: Pick<ConsentDocument, "status" | "signatureMethod">): string | null {
+export function consentSignatureWords(
+  document: Pick<ConsentDocument, "status" | "signatureMethod">,
+): string | null {
   if (document.status !== "firmado" && document.status !== "revocado") return null
   return CONSENT_SIGNATURE_WORDS[document.signatureMethod ?? "clinica"]
 }
@@ -606,11 +619,19 @@ export const CONSENT_STATUS_LABELS: Record<ConsentDocument["status"], string> = 
 }
 
 /** «Enviar para firmar»: el consentimiento aparece en «Su enlace» y se le envía. */
-export async function sendConsentByLink(consentId: string, requestId: string): Promise<{ data: { recipientName: string } }> {
-  return apiFetch(`${BASE}/consents/${consentId}/send-link`, { method: "POST", body: JSON.stringify({ requestId }) })
+export async function sendConsentByLink(
+  consentId: string,
+  requestId: string,
+): Promise<{ data: { recipientName: string } }> {
+  return apiFetch(`${BASE}/consents/${consentId}/send-link`, {
+    method: "POST",
+    body: JSON.stringify({ requestId }),
+  })
 }
 
 /** El profesional confirma lo que la persona firmó desde su enlace: recién entonces queda firmado. */
-export async function confirmLinkSignedConsent(consentId: string): Promise<{ data: ConsentDocument }> {
+export async function confirmLinkSignedConsent(
+  consentId: string,
+): Promise<{ data: ConsentDocument }> {
   return apiFetch(`${BASE}/consents/${consentId}/confirm`, { method: "POST" })
 }

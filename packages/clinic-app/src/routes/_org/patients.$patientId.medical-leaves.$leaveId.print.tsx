@@ -35,7 +35,10 @@ function MedicalLeavePrintPage() {
   if (!found)
     return (
       <PageShell>
-        <EmptyState title="No encontramos este descanso médico" description="Puede que este enlace sea de otra persona o ya no exista." />
+        <EmptyState
+          title="No encontramos este descanso médico"
+          description="Puede que este enlace sea de otra persona o ya no exista."
+        />
       </PageShell>
     )
   return <MedicalLeavePaper page patientId={patientId} leave={found} />

@@ -1,5 +1,5 @@
 import { Badge, Button, buttonVariants } from "@odentia/ui"
-import { DetailDrawer, DetailSection, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { DetailDrawer, DetailSection, LoadingState, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
@@ -8,7 +8,7 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { timeAgo } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { HandoffUrgency } from "./handoff-badges"
 
 interface CaseBrief {
@@ -125,7 +125,7 @@ export function CaseBriefDrawer({
 
   if (conversationId === null) return null
   const brief = query.data?.data
-  const claimError = mutationErrorMessage(claim.error)
+  const claimError = claim.error ? submitErrorMessage(claim.error) : null
   const handoff = brief?.handoff ?? null
   const told = handoff?.notice ?? brief?.lastAgentMessage?.text ?? null
   const arrived = handoff ? timeAgo(handoff.createdAt) : ""

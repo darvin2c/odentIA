@@ -21,6 +21,7 @@ import {
   getAdminUnreached,
   getMessagePermissions,
   listAdminLinePeople,
+  LINE_SETTING_MESSAGES,
   runAdminLineOnce,
   setMessageChoice,
   updateAdminLine,
@@ -37,20 +38,29 @@ const settingsInput = z.object({
   enabled: z.boolean().optional(),
 })
 
+// Los mismos mensajes que `setLine` y la pantalla, por el nombre del dato en el cuerpo.
+const SAYS = LINE_SETTING_MESSAGES
+
 const lineInput = z.object({
   enabled: z.boolean().optional(),
   agentPart: z.boolean().optional(),
   teamPart: z.boolean().optional(),
-  days: z.number().int().min(1).max(365).nullable().optional(),
-  hoursBefore: z.array(z.number().int().min(1).max(168)).min(1).max(3).optional(),
-  delayHours: z.number().int().min(1).max(72).nullable().optional(),
-  hour: z.number().int().min(0).max(23).nullable().optional(),
-  taskNote: z.string().max(400).nullable().optional(),
+  days: z.number(SAYS.days).int(SAYS.days).min(1, SAYS.days).max(365, SAYS.days).nullable().optional(),
+  hoursBefore: z
+    .array(z.number(SAYS.hoursBefore).int(SAYS.hoursBefore).min(1, SAYS.hoursBefore).max(168, SAYS.hoursBefore), SAYS.hoursBefore)
+    .min(1, SAYS.hoursBefore)
+    .max(3, SAYS.hoursBefore)
+    .optional(),
+  delayHours: z.number(SAYS.delayHours).int(SAYS.delayHours).min(1, SAYS.delayHours).max(72, SAYS.delayHours).nullable().optional(),
+  hour: z.number(SAYS.hour).int(SAYS.hour).min(0, SAYS.hour).max(23, SAYS.hour).nullable().optional(),
+  // El tope real (`TASK_NOTE_CHARS`) lo mide el servicio con los espacios ya juntados: aquí solo se corta lo desmedido.
+  taskNote: z.string().max(400, SAYS.taskNote).nullable().optional(),
   noRecommend: z.boolean().optional(),
 })
 
-const draftNoteInput = z.object({ taskNote: z.string().max(400) })
+const draftNoteInput = z.object({ taskNote: z.string().max(400, SAYS.taskNote) })
 
+// Sin mensajes propios: los de `zodMessages` («Escribe al menos 4 caracteres.») son los que dice la pantalla.
 const requestInput = z.object({ text: z.string().trim().min(4).max(600) })
 
 export interface AgentAdminDeps extends CrmDeps {

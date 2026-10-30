@@ -4,18 +4,18 @@
  * equipo los vea o los imprima. Los datos de firma son los congelados al emitir.
  */
 import { diagnosisCodeLabel, medicalLeaveEnd } from "@odentia/clinical"
+import type { getOrderPrint } from "./clinical-forms.js"
 import {
   ageWords,
   chartNumber,
+  type DocumentClinic,
+  DocumentKit,
   dayTimeWords,
   dayWords,
   documentFormat,
-  DocumentKit,
-  type DocumentClinic,
   numberInWords,
   SIZE,
 } from "./document-kit.js"
-import type { getOrderPrint } from "./clinical-forms.js"
 import type { getMedicalLeavePrint } from "./medical-leaves.js"
 import type { getPrescriptionPrint } from "./prescriptions.js"
 
@@ -41,11 +41,18 @@ interface PaperPerson {
 }
 
 /** «Cirujano dentista · COP 12345». */
-export function credentialOf(title: string | null | undefined, registration: string | null | undefined): string | null {
+export function credentialOf(
+  title: string | null | undefined,
+  registration: string | null | undefined,
+): string | null {
   return [title, registration].filter(Boolean).join(" · ") || null
 }
 
-function diagnosisWords(system: string | null, code: string | null, description: string | null): string | null {
+function diagnosisWords(
+  system: string | null,
+  code: string | null,
+  description: string | null,
+): string | null {
   if (!code) return null
   const label = diagnosisCodeLabel(system, code)
   return description ? `${label} · ${description}` : label
@@ -55,14 +62,22 @@ function personFacts(kit: DocumentKit, person: PaperPerson) {
   const age = ageWords(person.birthDate, kit.clinic)
   return [
     { label: "Paciente", value: person.displayName, span: 2, strong: true },
-    ...(person.docNumber ? [{ label: person.docType ?? "Documento", value: person.docNumber }] : []),
+    ...(person.docNumber
+      ? [{ label: person.docType ?? "Documento", value: person.docNumber }]
+      : []),
     ...(age ? [{ label: "Edad", value: age }] : []),
   ]
 }
 
 function signedAtBottom(
   kit: DocumentKit,
-  input: { name: string | null; title: string | null; registration: string | null; at: Date | string; checkUrl: string | null },
+  input: {
+    name: string | null
+    title: string | null
+    registration: string | null
+    at: Date | string
+    checkUrl: string | null
+  },
 ) {
   if (!input.name) return
   const signed = {
@@ -76,7 +91,10 @@ function signedAtBottom(
 }
 
 /** La receta: alergias a la vista, cantidad en cifras y letras, y «Rp/». */
-export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getPrescriptionPrint>>, context: PaperContext) {
+export async function renderPrescriptionPdf(
+  data: Awaited<ReturnType<typeof getPrescriptionPrint>>,
+  context: PaperContext,
+) {
   const { prescription: rx, patient: person } = data
   const docLabel = `Receta N.º ${rx.prescriptionNumber}`
   const kit = await DocumentKit.open(context.clinic, documentFormat(context.clinic), {
@@ -94,7 +112,11 @@ export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getP
   ])
   if (rx.status === "anulada") {
     kit.gap(12)
-    kit.stateBox({ kind: "alert", title: "ANULADA", detail: rx.cancelReason ? `Motivo: ${rx.cancelReason}` : null })
+    kit.stateBox({
+      kind: "alert",
+      title: "ANULADA",
+      detail: rx.cancelReason ? `Motivo: ${rx.cancelReason}` : null,
+    })
   }
   kit.gap(16)
   const diagnosis = diagnosisWords(rx.diagnosisSystem, rx.diagnosisCode, data.diagnosisDescription)
@@ -104,19 +126,18 @@ export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getP
       ...(diagnosis ? [{ label: "Diagnóstico", value: diagnosis, span: 2 }] : []),
       { label: "Historia clínica", value: chartNumber(person.patientNumber), span: 2 },
       // El peso con que se recetó (latidIA, a un menor de 12 años).
-      ...(rx.patientWeightKg ? [{ label: "Peso", value: `${Number(rx.patientWeightKg)} kg`, span: 2 }] : []),
-      ...(data.allergies.length > 0 ? [{ label: "Alergias", value: data.allergies.join(", "), span: 4, bold: true }] : []),
+      ...(rx.patientWeightKg
+        ? [{ label: "Peso", value: `${Number(rx.patientWeightKg)} kg`, span: 2 }]
+        : []),
+      ...(data.allergies.length > 0
+        ? [{ label: "Alergias", value: data.allergies.join(", "), span: 4, bold: true }]
+        : []),
     ],
     4,
   )
   kit.heading("Rp/", { size: SIZE.total, before: 22, after: 8 })
   rx.items.forEach((item, index) => {
-    const name = [
-      item.genericName ?? item.medicationName,
-      item.strength,
-    ]
-      .filter(Boolean)
-      .join(" ")
+    const name = [item.genericName ?? item.medicationName, item.strength].filter(Boolean).join(" ")
     const title = [name, item.dosageForm].filter(Boolean).join(" · ")
     kit.table({
       columns: [{ label: "", width: 21, pad: 0 }, { label: "" }],
@@ -127,11 +148,25 @@ export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getP
         [
           [{ inlines: `${index + 1}.`, face: "sansSemi" }],
           [
-            { inlines: `${title}${item.brandName ? ` (${item.brandName})` : ""}`, size: 13.5, face: "sansSemi" },
+            {
+              inlines: `${title}${item.brandName ? ` (${item.brandName})` : ""}`,
+              size: 13.5,
+              face: "sansSemi",
+            },
             ...(item.quantity
-              ? [{ inlines: `Cantidad: ${item.quantity} (${numberInWords(item.quantity)})`, size: SIZE.table, tone: "soft" as const, gapBefore: 1 }]
+              ? [
+                  {
+                    inlines: `Cantidad: ${item.quantity} (${numberInWords(item.quantity)})`,
+                    size: SIZE.table,
+                    tone: "soft" as const,
+                    gapBefore: 1,
+                  },
+                ]
               : []),
-            { inlines: `${item.dose}, vía ${item.route}, ${item.frequency}, ${item.duration}.`, gapBefore: 4 },
+            {
+              inlines: `${item.dose}, vía ${item.route}, ${item.frequency}, ${item.duration}.`,
+              gapBefore: 4,
+            },
             ...(item.instructions ? [{ inlines: item.instructions, tone: "soft" as const }] : []),
           ],
         ],
@@ -154,7 +189,10 @@ export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getP
 }
 
 /** La orden: para quién, qué se pide y el motivo clínico. */
-export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPrint>>, context: PaperContext) {
+export async function renderOrderPdf(
+  data: Awaited<ReturnType<typeof getOrderPrint>>,
+  context: PaperContext,
+) {
   const { order, patient: person, requestedBy } = data
   const kind = ORDER_KIND_WORDS[order.kind] ?? "Orden"
   const kit = await DocumentKit.open(context.clinic, documentFormat(context.clinic), {
@@ -167,10 +205,18 @@ export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPri
   kit.titleWithDetails(kind, [{ text: `Pedida el ${dayWords(order.createdAt, context.clinic)}` }])
   if (order.status === "cancelado") {
     kit.gap(12)
-    kit.stateBox({ kind: "alert", title: "ANULADA", detail: order.cancelReason ? `Motivo: ${order.cancelReason}` : null })
+    kit.stateBox({
+      kind: "alert",
+      title: "ANULADA",
+      detail: order.cancelReason ? `Motivo: ${order.cancelReason}` : null,
+    })
   }
   kit.gap(16)
-  const diagnosis = diagnosisWords(order.diagnosisSystem, order.diagnosisCode, data.diagnosisDescription)
+  const diagnosis = diagnosisWords(
+    order.diagnosisSystem,
+    order.diagnosisCode,
+    data.diagnosisDescription,
+  )
   kit.facts(
     [
       ...personFacts(kit, person),
@@ -208,7 +254,10 @@ export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPri
  * El descanso médico: un documento propio, sin el formato oficial de ningún país
  * (issue 229, decisión 8). El diagnóstico va solo si la persona lo autorizó.
  */
-export async function renderMedicalLeavePdf(data: Awaited<ReturnType<typeof getMedicalLeavePrint>>, context: PaperContext) {
+export async function renderMedicalLeavePdf(
+  data: Awaited<ReturnType<typeof getMedicalLeavePrint>>,
+  context: PaperContext,
+) {
   const { leave, patient: person } = data
   const zone = context.clinic
   const docLabel = `Constancia N.º ${leave.leaveNumber}`
@@ -225,7 +274,11 @@ export async function renderMedicalLeavePdf(data: Awaited<ReturnType<typeof getM
   ])
   if (leave.status === "anulado") {
     kit.gap(12)
-    kit.stateBox({ kind: "alert", title: "ANULADO", detail: leave.cancelReason ? `Motivo: ${leave.cancelReason}` : null })
+    kit.stateBox({
+      kind: "alert",
+      title: "ANULADO",
+      detail: leave.cancelReason ? `Motivo: ${leave.cancelReason}` : null,
+    })
   }
   kit.gap(16)
   const diagnosis =
@@ -235,8 +288,12 @@ export async function renderMedicalLeavePdf(data: Awaited<ReturnType<typeof getM
   kit.facts(
     [
       ...personFacts(kit, person),
-      ...(data.guardianName ? [{ label: "Madre, padre o apoderado", value: data.guardianName, span: 2 }] : []),
-      ...(data.evaluatedAt ? [{ label: "Evaluado el", value: dayTimeWords(data.evaluatedAt, zone), span: 2 }] : []),
+      ...(data.guardianName
+        ? [{ label: "Madre, padre o apoderado", value: data.guardianName, span: 2 }]
+        : []),
+      ...(data.evaluatedAt
+        ? [{ label: "Evaluado el", value: dayTimeWords(data.evaluatedAt, zone), span: 2 }]
+        : []),
       ...(diagnosis ? [{ label: "Diagnóstico", value: diagnosis, span: 4 }] : []),
     ],
     4,

@@ -6,15 +6,11 @@
  */
 import { CLINICAL_PRODUCTS, type ClinicalProduct, productWords } from "@odentia/clinical"
 import {
-  Checkbox,
-  Field,
-  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
-  Input,
   RadioGroup,
   RadioGroupItem,
   Select,
@@ -23,10 +19,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { ApiError, api } from "../lib/api"
+import { z } from "zod"
+import { api } from "../lib/api"
 import { domainOf } from "../lib/host"
 import { CurrencySelect, centsToMajor, majorToCents } from "./billing-fields"
 import { ProductMark } from "./product"
@@ -146,10 +144,183 @@ function againstList(own: number | null, list: number | null | undefined): strin
   return "Igual que la lista"
 }
 
-/** Un número entero positivo o vacío (null); NaN si no lo es. */
-const optionalInt = (text: string) => (text.trim() ? (Number.isInteger(Number(text.trim())) ? Number(text.trim()) : Number.NaN) : null)
-
 const NO_TEMPLATE = "ninguno"
+
+const PRICE_KEYS = PRICE_FIELDS.map((item) => item.key) as [PriceKey, ...PriceKey[]]
+/** Lo que no se negocia en un plan en blanco (ADR 0085). */
+const DEFAULT_FIXED: readonly string[] = ["informa", "simple", "estandar", "preguntas", "almacenamiento"]
+
+/** Los precios, el crédito y la prueba de un plan, como se escriben: lo que copia «Empezar con los precios de». */
+function termsOf(seed: AdminPlan | undefined) {
+  return {
+    currency: seed?.currency ?? "USD",
+    price: seed ? centsToMajor(seed.priceCents, seed.currency) : "",
+    credit: seed ? centsToMajor(seed.creditCents, seed.currency) : "0",
+    prices: Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(seed?.[item.field] ?? null)])) as Record<PriceKey, string>,
+    fixed: Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, (seed?.fixedPriceTiers ?? DEFAULT_FIXED).includes(item.key)])) as Record<
+      PriceKey,
+      boolean
+    >,
+    included: String(seed?.argosIncludedQuestions ?? 100),
+    packQuestions: String(seed?.argosPackQuestions ?? 100),
+    includedGb: String(seed?.storageIncludedGb ?? 20),
+    informMessages: seed?.informMessageLimit ? String(seed.informMessageLimit) : "",
+    maxDiscount: String((seed?.maxDiscountBps ?? 6000) / 100),
+    sellerDiscount: String((seed?.sellerDiscountBps ?? 1000) / 100),
+    trialCredit: seed ? centsToMajor(seed.trialCreditCents, seed.currency) : "0",
+    trialDays: String(seed?.trialDays ?? 30),
+    trialMaxCredit: seed ? centsToMajor(seed.trialMaxCreditCents, seed.currency) : "0",
+    trialMaxDays: String(seed?.trialMaxDays ?? 60),
+    seatLimit: seed?.seatLimit ? String(seed.seatLimit) : "",
+    guaranteeMonths: seed?.guaranteeMonths ? String(seed.guaranteeMonths) : "",
+  }
+}
+
+const INTEGER = /^\d+$/
+const AMOUNT = /^\d+(?:[.,]\d+)?$/
+const PERCENT = /^\d+(?:[.,]\d{1,2})?$/
+const MAX_CENTS = 2147483647
+/** El precio por acción más alto que admite la API: 1 000 000 000 millonésimas. */
+const MAX_PRICE_MICROS = 1_000_000_000
+
+/**
+ * El plan como se escribe, con los mismos límites que la ruta: cada número es
+ * texto y cada error va en su campo. Un precio por acción vacío es «no cobra
+ * ese tipo» (lo dice la pantalla); los lugares, los meses y los mensajes por
+ * Informa vacíos, «sin tope».
+ */
+const planSchema = z
+  .object({
+    product: z.enum(CLINICAL_PRODUCTS),
+    template: z.string(),
+    code: z.string().trim().min(1, "Escribe el código del plan").max(80, "Escribe como mucho 80 caracteres"),
+    name: z.string().trim().min(1, "Escribe el nombre del plan").max(120, "Escribe como mucho 120 caracteres"),
+    currency: z.string().regex(/^[A-Z]{3}$/, "Elige la moneda"),
+    price: z.string(),
+    credit: z.string(),
+    prices: z.record(z.enum(PRICE_KEYS), z.string()),
+    fixed: z.record(z.enum(PRICE_KEYS), z.boolean()),
+    included: z.string(),
+    packQuestions: z.string(),
+    includedGb: z.string(),
+    informMessages: z.string(),
+    maxDiscount: z.string(),
+    sellerDiscount: z.string(),
+    trialCredit: z.string(),
+    trialDays: z.string(),
+    trialMaxCredit: z.string(),
+    trialMaxDays: z.string(),
+    isDefault: z.boolean(),
+    showOnWeb: z.boolean(),
+    seatLimit: z.string(),
+    guaranteeMonths: z.string(),
+  })
+  .superRefine((value, ctx) => {
+    const say = (path: Array<string>, message: string) => ctx.addIssue({ code: "custom", path, message })
+    const amount = (text: string) => {
+      const cents = AMOUNT.test(text.trim()) ? majorToCents(text, value.currency) : null
+      return cents !== null && cents <= MAX_CENTS ? cents : null
+    }
+    const integer = (text: string, min: number, max: number) =>
+      INTEGER.test(text.trim()) && Number(text.trim()) >= min && Number(text.trim()) <= max ? Number(text.trim()) : null
+    const percent = (text: string) => {
+      const bps = PERCENT.test(text.trim()) ? toBps(text) : null
+      return bps !== null && bps <= 9000 ? bps : null
+    }
+
+    if (amount(value.price) === null) say(["price"], "Escribe la cuota en números, por ejemplo 29 o 29.90")
+    if (amount(value.credit) === null) say(["credit"], "Escribe un importe en números (0 si no tiene)")
+    for (const key of PRICE_KEYS) {
+      const text = value.prices[key].trim()
+      if (!text) continue
+      const micros = AMOUNT.test(text) ? toMicros(text) : null
+      if (micros === null || micros > MAX_PRICE_MICROS) say(["prices", key], "Escribe un importe, o déjalo vacío si el plan no cobra este tipo")
+    }
+    if (integer(value.included, 0, 100_000) === null) say(["included"], "Escribe un número entero de 0 a 100000")
+    if (integer(value.packQuestions, 1, 10_000) === null) say(["packQuestions"], "Escribe un número entero de 1 a 10000")
+    if (integer(value.includedGb, 0, 100_000) === null) say(["includedGb"], "Escribe un número entero de 0 a 100000")
+    if (value.informMessages.trim() && integer(value.informMessages, 1, 1000) === null) {
+      say(["informMessages"], "Escribe de 1 a 1000 mensajes, o déjalo vacío para no poner tope")
+    }
+
+    const maxDiscount = percent(value.maxDiscount)
+    const sellerDiscount = percent(value.sellerDiscount)
+    if (maxDiscount === null) say(["maxDiscount"], "Escribe un porcentaje de 0 a 90")
+    if (sellerDiscount === null) say(["sellerDiscount"], "Escribe un porcentaje de 0 a 90")
+    else if (maxDiscount !== null && sellerDiscount > maxDiscount) say(["sellerDiscount"], "El vendedor no puede dar más que el descuento máximo")
+
+    const trialCredit = amount(value.trialCredit)
+    const trialMaxCredit = amount(value.trialMaxCredit)
+    if (trialCredit === null) say(["trialCredit"], "Escribe un importe en números (0 si no tiene)")
+    if (trialMaxCredit === null) say(["trialMaxCredit"], "Escribe un importe en números (0 si no tiene)")
+    else if (trialCredit !== null && trialMaxCredit < trialCredit) say(["trialMaxCredit"], "El saldo máximo de prueba no puede ser menor que el de siempre")
+    const trialDays = integer(value.trialDays, 1, 365)
+    const trialMaxDays = integer(value.trialMaxDays, 1, 365)
+    if (trialDays === null) say(["trialDays"], "Escribe de 1 a 365 días")
+    if (trialMaxDays === null) say(["trialMaxDays"], "Escribe de 1 a 365 días")
+    else if (trialDays !== null && trialMaxDays < trialDays) say(["trialMaxDays"], "Los días máximos de prueba no pueden ser menos que los de siempre")
+
+    if (value.seatLimit.trim() && integer(value.seatLimit, 1, 100_000) === null) {
+      say(["seatLimit"], "Escribe un número entero mayor que cero, o déjalo vacío")
+    }
+    if (value.guaranteeMonths.trim() && integer(value.guaranteeMonths, 1, 120) === null) {
+      say(["guaranteeMonths"], "Escribe de 1 a 120 meses, o déjalo vacío")
+    }
+  })
+type PlanValues = z.input<typeof planSchema>
+type NumberKey = Exclude<keyof PlanValues, "product" | "template" | "code" | "name" | "currency" | "prices" | "fixed" | "isDefault" | "showOnWeb">
+
+/** Cómo llama la API a cada dato del formulario (`priceCents` → la cuota escrita). */
+const PLAN_FIELD_MAP: Record<string, string> = {
+  priceCents: "price",
+  creditCents: "credit",
+  argosIncludedQuestions: "included",
+  argosPackQuestions: "packQuestions",
+  storageIncludedGb: "includedGb",
+  informMessageLimit: "informMessages",
+  maxDiscountBps: "maxDiscount",
+  sellerDiscountBps: "sellerDiscount",
+  trialCreditCents: "trialCredit",
+  trialMaxCreditCents: "trialMaxCredit",
+  ...Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, `prices.${item.key}`])),
+}
+
+/** El cuerpo de la API desde lo escrito, ya validado por `planSchema`: ninguna conversión cae en silencio. */
+function planBody(value: PlanValues, isNew: boolean) {
+  const currency = value.currency.trim().toUpperCase()
+  // planSchema ya comprobó que cada importe se lee: el null no llega; si llegara, es un error de programa.
+  const cents = (text: string) => {
+    const value = majorToCents(text, currency)
+    if (value === null) throw new Error(`Importe sin validar: ${text}`)
+    return value
+  }
+  const optional = (text: string) => (text.trim() ? Number(text.trim()) : null)
+  return {
+    code: value.code.trim(),
+    name: value.name.trim(),
+    // Solo al crear: el servidor no deja cambiarlo después.
+    ...(isNew ? { product: value.product } : {}),
+    currency,
+    priceCents: cents(value.price),
+    creditCents: cents(value.credit),
+    ...Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, toMicros(value.prices[item.key])])),
+    fixedPriceTiers: PRICE_KEYS.filter((key) => value.fixed[key]),
+    argosIncludedQuestions: Number(value.included.trim()),
+    argosPackQuestions: Number(value.packQuestions.trim()),
+    storageIncludedGb: Number(value.includedGb.trim()),
+    informMessageLimit: optional(value.informMessages),
+    maxDiscountBps: toBps(value.maxDiscount),
+    sellerDiscountBps: toBps(value.sellerDiscount),
+    trialCreditCents: cents(value.trialCredit),
+    trialDays: Number(value.trialDays.trim()),
+    trialMaxCreditCents: cents(value.trialMaxCredit),
+    trialMaxDays: Number(value.trialMaxDays.trim()),
+    isDefault: value.isDefault,
+    showOnWeb: value.showOnWeb,
+    seatLimit: optional(value.seatLimit),
+    guaranteeMonths: optional(value.guaranteeMonths),
+  }
+}
 
 export function PlanDrawer({
   plan,
@@ -166,72 +337,64 @@ export function PlanDrawer({
   onClose: () => void
   onSaved: () => void
 }) {
-  // El producto se elige al crear y no cambia después (ADR 0093).
-  const [product, setProduct] = useState<ClinicalProduct>(plan?.product ?? initialProduct)
   // Un plan nuevo empieza con los precios del de lista de su producto, o de otro si se elige.
   const listOf = (of: ClinicalProduct) => plans.find((item) => item.product === of && item.isDefault && item.isActive)
-  const listPlan = listOf(product)
-  const [template, setTemplate] = useState(plan ? NO_TEMPLATE : (listOf(initialProduct)?.id ?? NO_TEMPLATE))
-  const seed = plan ?? plans.find((item) => item.id === template)
-  const [code, setCode] = useState(plan?.code ?? "")
-  const [name, setName] = useState(plan?.name ?? "")
-  const [currency, setCurrency] = useState(seed?.currency ?? "USD")
-  const [price, setPrice] = useState(seed ? centsToMajor(seed.priceCents, seed.currency) : "")
-  const [credit, setCredit] = useState(seed ? centsToMajor(seed.creditCents, seed.currency) : "")
-  const [prices, setPrices] = useState<Record<PriceKey, string>>(
-    () => Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(seed?.[item.field] ?? null)])) as Record<PriceKey, string>,
-  )
-  const [fixed, setFixed] = useState<ReadonlySet<string>>(() => new Set(seed?.fixedPriceTiers ?? ["informa", "simple", "estandar", "preguntas", "almacenamiento"]))
-  const [included, setIncluded] = useState(String(seed?.argosIncludedQuestions ?? 100))
-  const [packQuestions, setPackQuestions] = useState(String(seed?.argosPackQuestions ?? 100))
-  const [includedGb, setIncludedGb] = useState(String(seed?.storageIncludedGb ?? 20))
-  const [informMessages, setInformMessages] = useState(seed?.informMessageLimit ? String(seed.informMessageLimit) : "")
-  const [maxDiscount, setMaxDiscount] = useState(String((seed?.maxDiscountBps ?? 6000) / 100))
-  const [sellerDiscount, setSellerDiscount] = useState(String((seed?.sellerDiscountBps ?? 1000) / 100))
-  const [trialCredit, setTrialCredit] = useState(seed ? centsToMajor(seed.trialCreditCents, seed.currency) : "")
-  const [trialDays, setTrialDays] = useState(String(seed?.trialDays ?? 30))
-  const [trialMaxCredit, setTrialMaxCredit] = useState(seed ? centsToMajor(seed.trialMaxCreditCents, seed.currency) : "")
-  const [trialMaxDays, setTrialMaxDays] = useState(String(seed?.trialMaxDays ?? 60))
-  const [isDefault, setIsDefault] = useState(plan?.isDefault ?? false)
-  // Un plan nuevo nace sin publicar en la web (decisión 14 de Fundadores).
-  const [showOnWeb, setShowOnWeb] = useState(plan?.showOnWeb ?? false)
-  const [seatLimit, setSeatLimit] = useState(seed?.seatLimit ? String(seed.seatLimit) : "")
-  const [guaranteeMonths, setGuaranteeMonths] = useState(seed?.guaranteeMonths ? String(seed.guaranteeMonths) : "")
-  const [error, setError] = useState<string | null>(null)
+  const save = useMutation({
+    mutationFn: (body: ReturnType<typeof planBody>) =>
+      plan
+        ? api(`/api/admin/billing/plans/${plan.id}`, { method: "PATCH", body: JSON.stringify(body) })
+        : api("/api/admin/billing/plans", { method: "POST", body: JSON.stringify(body) }),
+  })
+  // Los valores iniciales se fijan al abrir: la lista de planes que llega después no reinicia el borrador.
+  const [initial] = useState((): PlanValues => {
+    const template = plan ? NO_TEMPLATE : (listOf(initialProduct)?.id ?? NO_TEMPLATE)
+    return {
+      // El producto se elige al crear y no cambia después (ADR 0093).
+      product: plan?.product ?? initialProduct,
+      template,
+      code: plan?.code ?? "",
+      name: plan?.name ?? "",
+      ...termsOf(plan ?? plans.find((item) => item.id === template)),
+      isDefault: plan?.isDefault ?? false,
+      // Un plan nuevo nace sin publicar en la web (decisión 14 de Fundadores).
+      showOnWeb: plan?.showOnWeb ?? false,
+    }
+  })
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: planSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(planBody(value, !plan))
+      onSaved()
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: PLAN_FIELD_MAP })
+  const values = useStore(form.store, (state) => state.values)
+  const { product, currency } = values
 
   /** «Empezar con los precios de»: copia los precios y la prueba de otro plan; nombre y código no. */
   function copyFrom(id: string) {
-    setTemplate(id)
+    form.setFieldValue("template", id)
     const from = plans.find((item) => item.id === id)
     if (!from) return
-    setCurrency(from.currency)
-    setPrice(centsToMajor(from.priceCents, from.currency))
-    setCredit(centsToMajor(from.creditCents, from.currency))
-    setPrices(Object.fromEntries(PRICE_FIELDS.map((item) => [item.key, fromMicros(from[item.field])])) as Record<PriceKey, string>)
-    setFixed(new Set(from.fixedPriceTiers))
-    setIncluded(String(from.argosIncludedQuestions))
-    setPackQuestions(String(from.argosPackQuestions))
-    setIncludedGb(String(from.storageIncludedGb))
-    setInformMessages(from.informMessageLimit ? String(from.informMessageLimit) : "")
-    setMaxDiscount(String(from.maxDiscountBps / 100))
-    setSellerDiscount(String(from.sellerDiscountBps / 100))
-    setTrialCredit(centsToMajor(from.trialCreditCents, from.currency))
-    setTrialDays(String(from.trialDays))
-    setTrialMaxCredit(centsToMajor(from.trialMaxCreditCents, from.currency))
-    setTrialMaxDays(String(from.trialMaxDays))
-    setSeatLimit(from.seatLimit ? String(from.seatLimit) : "")
-    setGuaranteeMonths(from.guaranteeMonths ? String(from.guaranteeMonths) : "")
+    const { prices, fixed, ...texts } = termsOf(from)
+    for (const key of Object.keys(texts) as Array<keyof typeof texts>) form.setFieldValue(key, texts[key])
+    form.setFieldValue("prices", prices)
+    form.setFieldValue("fixed", fixed)
   }
   const words = productWords(product)
+  const listPlan = listOf(product)
   const compareTo = listPlan && listPlan.id !== plan?.id && listPlan.currency === currency.trim().toUpperCase() ? listPlan : undefined
 
+  // Solo para ver la comprobación mientras se escribe: lo que aún no es un número no se compara. Guardar valida cada campo.
   const terms = {
     currency: currency.trim().toUpperCase(),
-    priceCents: majorToCents(price, currency) ?? 0,
-    creditCents: majorToCents(credit || "0", currency) ?? 0,
-    ...(Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, toMicros(prices[item.key])])) as Record<PriceField, number | null>),
-    fixedPriceTiers: PRICE_FIELDS.map((item) => item.key).filter((key) => fixed.has(key)),
-    maxDiscountBps: toBps(maxDiscount) ?? 0,
+    priceCents: majorToCents(values.price, currency) ?? 0,
+    creditCents: majorToCents(values.credit, currency) ?? 0,
+    ...(Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, toMicros(values.prices[item.key])])) as Record<PriceField, number | null>),
+    fixedPriceTiers: PRICE_KEYS.filter((key) => values.fixed[key]),
+    maxDiscountBps: toBps(values.maxDiscount) ?? 0,
   }
   // La comprobación sigue a lo que se escribe, con una pausa para no pedirla en cada tecla.
   const [checked, setChecked] = useState(terms)
@@ -256,70 +419,15 @@ export function PlanDrawer({
     retry: false,
   })
 
-  const save = useMutation({
-    mutationFn: () => {
-      const priceCents = majorToCents(price, currency)
-      if (priceCents === null) throw new Error("Precio inválido")
-      const body = {
-        code: code.trim(),
-        name: name.trim(),
-        // Solo al crear: el servidor no deja cambiarlo después.
-        ...(plan ? {} : { product }),
-        currency: currency.trim().toUpperCase(),
-        priceCents,
-        creditCents: terms.creditCents,
-        ...Object.fromEntries(PRICE_FIELDS.map((item) => [item.field, terms[item.field]])),
-        fixedPriceTiers: terms.fixedPriceTiers,
-        argosIncludedQuestions: Number(included),
-        argosPackQuestions: Number(packQuestions),
-        storageIncludedGb: Number(includedGb),
-        informMessageLimit: optionalInt(informMessages),
-        maxDiscountBps: terms.maxDiscountBps,
-        sellerDiscountBps: toBps(sellerDiscount) ?? 0,
-        trialCreditCents: majorToCents(trialCredit || "0", currency) ?? 0,
-        trialDays: Number(trialDays),
-        trialMaxCreditCents: majorToCents(trialMaxCredit || "0", currency) ?? 0,
-        trialMaxDays: Number(trialMaxDays),
-        isDefault,
-        showOnWeb,
-        seatLimit: optionalInt(seatLimit),
-        guaranteeMonths: optionalInt(guaranteeMonths),
-      }
-      if (Number.isNaN(body.seatLimit) || Number.isNaN(body.guaranteeMonths)) throw new Error("Lugares y meses van como números enteros, o vacíos")
-      if (body.informMessageLimit !== null && !(body.informMessageLimit >= 1 && body.informMessageLimit <= 1000)) {
-        throw new Error("Los mensajes por Informa van de 1 a 1000, o vacío para no poner tope")
-      }
-      if (![body.argosIncludedQuestions, body.argosPackQuestions, body.storageIncludedGb].every((value) => Number.isInteger(value) && value >= 0)) {
-        throw new Error("Las preguntas y los GB van como números enteros")
-      }
-      return plan
-        ? api(`/api/admin/billing/plans/${plan.id}`, { method: "PATCH", body: JSON.stringify(body) })
-        : api("/api/admin/billing/plans", { method: "POST", body: JSON.stringify(body) })
-    },
-    onSuccess: () => {
-      onSaved()
-      onClose()
-    },
-    onError: (e) => setError(e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar") : e instanceof Error ? e.message : "No se pudo guardar"),
-  })
-
-  const field = (id: string, label: string, value: string, set: (value: string) => void, hint?: string, inputMode: "decimal" | "numeric" = "decimal") => (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        inputMode={inputMode}
-        autoComplete="off"
-        value={value}
-        onChange={(event) => set(event.target.value)}
-        aria-describedby={hint ? `${id}-ayuda` : undefined}
-      />
-      {hint ? <FieldDescription id={`${id}-ayuda`}>{hint}</FieldDescription> : null}
-    </Field>
+  const numberField = (name: NumberKey, id: string, label: string, description?: string, inputMode: "decimal" | "numeric" = "decimal") => (
+    <form.AppField name={name}>
+      {(field) => <field.TextField id={id} label={label} description={description} inputMode={inputMode} autoComplete="off" />}
+    </form.AppField>
   )
 
   return (
     <FormDrawer
+      {...surface}
       open
       title={plan ? "Editar plan" : "Nuevo plan"}
       description={
@@ -328,10 +436,7 @@ export function PlanDrawer({
           : "Cada plan es de un producto: lo usan sus clínicas y su web."
       }
       submitLabel={plan ? "Guardar" : "Crear plan"}
-      onSubmit={() => save.mutate()}
       onClose={onClose}
-      isSubmitting={save.isPending}
-      error={error}
       // Muchos campos con su ayuda: a 24rem quedaban dos columnas de 160 px.
       className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(40rem,calc(100vw-2rem))]"
     >
@@ -342,73 +447,94 @@ export function PlanDrawer({
           </p>
         ) : (
           <>
-            <FieldSet className="gap-3">
-              <FieldLegend variant="label" className="mb-0">
-                Producto
-              </FieldLegend>
-              <RadioGroup
-                aria-label="Producto"
-                value={product}
-                onValueChange={(value) => {
-                  if (value !== "dental" && value !== "medical") return
-                  setProduct(value)
-                  // Se marca por defecto o se publica en la web del producto nuevo, no del anterior.
-                  setIsDefault(false)
-                }}
-                className="flex flex-wrap gap-2"
-              >
-                {CLINICAL_PRODUCTS.map((option) => (
-                  <FieldLabel
-                    key={option}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 font-normal has-data-checked:border-foreground"
-                  >
-                    <RadioGroupItem value={option} />
-                    <ProductMark product={option} className="text-sm" />
-                  </FieldLabel>
-                ))}
-              </RadioGroup>
-              <FieldDescription>No se cambia después: sus clínicas y su web son de ese producto.</FieldDescription>
-            </FieldSet>
-            <Field>
-              <FieldLabel htmlFor="plan-template">Empezar con los precios de</FieldLabel>
-              <Select
-                value={template}
-                onValueChange={(value) => (value === null || value === NO_TEMPLATE ? setTemplate(NO_TEMPLATE) : copyFrom(String(value)))}
-                items={{ [NO_TEMPLATE]: "Ninguno: en blanco", ...Object.fromEntries(plans.map((item) => [item.id, `${item.name} · ${productWords(item.product).name}`])) }}
-              >
-                <SelectTrigger id="plan-template" className="w-full" aria-describedby="plan-template-ayuda">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {plans.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name} · {productWords(item.product).name}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value={NO_TEMPLATE}>Ninguno: en blanco</SelectItem>
-                </SelectContent>
-              </Select>
-              <FieldDescription id="plan-template-ayuda">Copia precios, crédito y prueba; después cambias lo que quieras.</FieldDescription>
-            </Field>
+            <form.AppField name="product">
+              {(field) => (
+                <field.Group legend="Producto" description="No se cambia después: sus clínicas y su web son de ese producto." className="gap-3">
+                  {(control) => (
+                    <RadioGroup
+                      aria-label="Producto"
+                      aria-describedby={control.describedBy}
+                      aria-invalid={control.invalid || undefined}
+                      value={field.state.value}
+                      onValueChange={(value) => {
+                        if (value !== "dental" && value !== "medical") return
+                        field.handleChange(value)
+                        // Se marca por defecto o se publica en la web del producto nuevo, no del anterior.
+                        form.setFieldValue("isDefault", false)
+                      }}
+                      className="flex flex-wrap gap-2"
+                    >
+                      {CLINICAL_PRODUCTS.map((option) => (
+                        <FieldLabel
+                          key={option}
+                          className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 font-normal has-data-checked:border-foreground"
+                        >
+                          <RadioGroupItem value={option} />
+                          <ProductMark product={option} className="text-sm" />
+                        </FieldLabel>
+                      ))}
+                    </RadioGroup>
+                  )}
+                </field.Group>
+              )}
+            </form.AppField>
+            <form.AppField name="template">
+              {(field) => (
+                <field.Control
+                  id="plan-template"
+                  label="Empezar con los precios de"
+                  description="Copia precios, crédito y prueba; después cambias lo que quieras."
+                >
+                  {(control) => (
+                    <Select
+                      value={field.state.value}
+                      onValueChange={(value) => (value === null || value === NO_TEMPLATE ? field.handleChange(NO_TEMPLATE) : copyFrom(String(value)))}
+                      items={{
+                        [NO_TEMPLATE]: "Ninguno: en blanco",
+                        ...Object.fromEntries(plans.map((item) => [item.id, `${item.name} · ${productWords(item.product).name}`])),
+                      }}
+                    >
+                      <SelectTrigger {...control.props} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {plans.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name} · {productWords(item.product).name}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value={NO_TEMPLATE}>Ninguno: en blanco</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           </>
         )}
 
         <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2">
-          <Field>
-            <FieldLabel htmlFor="plan-code">Código</FieldLabel>
-            <Input id="plan-code" value={code} onChange={(event) => setCode(event.target.value)} placeholder="odentia" />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="plan-name">Nombre</FieldLabel>
-            <Input id="plan-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Plan de lista" />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="plan-currency">Moneda</FieldLabel>
-            <CurrencySelect id="plan-currency" value={currency} onChange={setCurrency} />
-          </Field>
-          {field("plan-price", "Cuota al mes (sin descuento)", price, setPrice)}
+          <form.AppField name="code">{(field) => <field.TextField id="plan-code" label="Código" placeholder="odentia" />}</form.AppField>
+          <form.AppField name="name">{(field) => <field.TextField id="plan-name" label="Nombre" placeholder="Plan de lista" />}</form.AppField>
+          <form.AppField name="currency">
+            {(field) => (
+              <field.Control id="plan-currency" label="Moneda">
+                {(control) => (
+                  <CurrencySelect
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={(code) => field.handleChange(code)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          {numberField("price", "plan-price", "Cuota al mes (sin descuento)")}
         </div>
-        {field("plan-credit", "Crédito para los agentes", credit, setCredit, "Lo que vuelve de la cuota cada mes.")}
+        {numberField("credit", "plan-credit", "Crédito para los agentes", "Lo que vuelve de la cuota cada mes.")}
 
         <FieldSet>
           <FieldLegend>Precios por acción ({currency})</FieldLegend>
@@ -421,54 +547,36 @@ export function PlanDrawer({
               <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2">
                 {group.keys.map((key) => {
                   const item = PRICE_FIELDS.find((entry) => entry.key === key)!
-                  const hint = ["hint" in item ? item.hint : undefined, againstList(toMicros(prices[key]), compareTo?.[item.field])].filter(Boolean).join(" · ")
+                  const hint = ["hint" in item ? item.hint : undefined, againstList(toMicros(values.prices[key]), compareTo?.[item.field])]
+                    .filter(Boolean)
+                    .join(" · ")
                   return (
-                    <Field key={key}>
-                      <FieldLabel htmlFor={`plan-${key}`}>{item.label}</FieldLabel>
-                      <Input
-                        id={`plan-${key}`}
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={prices[key]}
-                        onChange={(event) => setPrices({ ...prices, [key]: event.target.value })}
-                        aria-describedby={hint ? `plan-${key}-ayuda` : undefined}
-                      />
-                      {hint ? <FieldDescription id={`plan-${key}-ayuda`}>{hint}</FieldDescription> : null}
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={`plan-${key}-fijo`}
-                          checked={fixed.has(key)}
-                          onCheckedChange={(value) => {
-                            const next = new Set(fixed)
-                            if (value === true) next.add(key)
-                            else next.delete(key)
-                            setFixed(next)
-                          }}
-                        />
-                        <FieldLabel htmlFor={`plan-${key}-fijo`} className="font-normal">
-                          No se negocia
-                        </FieldLabel>
-                      </div>
-                    </Field>
+                    <div key={key} className="flex flex-col gap-3">
+                      <form.AppField name={`prices.${key}`}>
+                        {(field) => (
+                          <field.TextField id={`plan-${key}`} label={item.label} description={hint || undefined} inputMode="decimal" autoComplete="off" />
+                        )}
+                      </form.AppField>
+                      <form.AppField name={`fixed.${key}`}>{(field) => <field.CheckboxField id={`plan-${key}-fijo`} label="No se negocia" />}</form.AppField>
+                    </div>
                   )
                 })}
                 {group.keys.includes("informa")
-                  ? field(
+                  ? numberField(
+                      "informMessages",
                       "plan-inform-messages",
                       "Mensajes por Informa",
-                      informMessages,
-                      setInformMessages,
                       "Mensajes de la persona que cubre cada Informa en su ventana. Por ahora solo se mide en Costo y margen: nadie lo paga. Vacío: sin tope.",
                       "numeric",
                     )
                   : null}
                 {group.keys.includes("preguntas") ? (
                   <>
-                    {field("plan-included", "Preguntas incluidas al mes", included, setIncluded, undefined, "numeric")}
-                    {field("plan-pack", "Preguntas por paquete", packQuestions, setPackQuestions, undefined, "numeric")}
+                    {numberField("included", "plan-included", "Preguntas incluidas al mes", undefined, "numeric")}
+                    {numberField("packQuestions", "plan-pack", "Preguntas por paquete", undefined, "numeric")}
                   </>
                 ) : null}
-                {group.keys.includes("almacenamiento") ? field("plan-gb", "GB incluidos", includedGb, setIncludedGb, undefined, "numeric") : null}
+                {group.keys.includes("almacenamiento") ? numberField("includedGb", "plan-gb", "GB incluidos", undefined, "numeric") : null}
               </div>
             </FieldSet>
           ))}
@@ -477,37 +585,35 @@ export function PlanDrawer({
         <FieldSet>
           <FieldLegend>Quién puede negociar</FieldLegend>
           <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2">
-            {field("plan-seller", "El vendedor, sin pedir aprobación (%)", sellerDiscount, setSellerDiscount)}
-            {field("plan-max", "La administración, hasta (%)", maxDiscount, setMaxDiscount, "Solo en lo que se negocia. La cuota no admite descuento.")}
+            {numberField("sellerDiscount", "plan-seller", "El vendedor, sin pedir aprobación (%)")}
+            {numberField("maxDiscount", "plan-max", "La administración, hasta (%)", "Solo en lo que se negocia. La cuota no admite descuento.")}
           </div>
         </FieldSet>
 
         <FieldSet>
           <FieldLegend>Prueba</FieldLegend>
           <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2">
-            {field("plan-trial-credit", "Saldo de regalo", trialCredit, setTrialCredit)}
-            {field("plan-trial-days", "Días", trialDays, setTrialDays, undefined, "numeric")}
-            {field("plan-trial-max-credit", "Saldo máximo con aprobación", trialMaxCredit, setTrialMaxCredit)}
-            {field("plan-trial-max-days", "Días máximos con aprobación", trialMaxDays, setTrialMaxDays, undefined, "numeric")}
+            {numberField("trialCredit", "plan-trial-credit", "Saldo de regalo")}
+            {numberField("trialDays", "plan-trial-days", "Días", undefined, "numeric")}
+            {numberField("trialMaxCredit", "plan-trial-max-credit", "Saldo máximo con aprobación")}
+            {numberField("trialMaxDays", "plan-trial-max-days", "Días máximos con aprobación", undefined, "numeric")}
           </div>
         </FieldSet>
 
         <FieldSet>
           <FieldLegend>Por invitación (Fundadores)</FieldLegend>
           <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2">
-            {field(
+            {numberField(
+              "seatLimit",
               "plan-seats",
               "Lugares (clínicas como máximo)",
-              seatLimit,
-              setSeatLimit,
               "Con lugares, el plan solo se entra con invitación. Vacío: es un plan normal. Bajarlo no saca a nadie.",
               "numeric",
             )}
-            {field(
+            {numberField(
+              "guaranteeMonths",
               "plan-guarantee",
               "Condiciones garantizadas (meses)",
-              guaranteeMonths,
-              setGuaranteeMonths,
               `Desde que la clínica entra; después pasa al plan por defecto${notice ? `, con aviso ${notice} días antes` : ""}.`,
               "numeric",
             )}
@@ -515,25 +621,24 @@ export function PlanDrawer({
         </FieldSet>
 
         <FieldGroup>
-          <Field orientation="horizontal">
-            <Checkbox id="plan-web" aria-describedby="plan-web-ayuda" checked={showOnWeb} onCheckedChange={(value) => setShowOnWeb(value === true)} />
-            <FieldContent>
-              <FieldLabel htmlFor="plan-web">Mostrar en {domainOf(product)}</FieldLabel>
-              <FieldDescription id="plan-web-ayuda">
-                Sus precios salen en la web de {words.name}. Apagado al crear un plan; al guardar, la web lo muestra en menos de un minuto.
-              </FieldDescription>
-            </FieldContent>
-          </Field>
-          <Field orientation="horizontal">
-            <Checkbox id="plan-default" aria-describedby="plan-default-ayuda" checked={isDefault} onCheckedChange={(value) => setIsDefault(value === true)} />
-            <FieldContent>
-              <FieldLabel htmlFor="plan-default">Plan por defecto de {words.name}</FieldLabel>
-              <FieldDescription id="plan-default-ayuda">
-                Con él abren, prueban y se cuentan las clínicas de {words.name} que no eligen otro. El de{" "}
-                {productWords(product === "dental" ? "medical" : "dental").name} no cambia.
-              </FieldDescription>
-            </FieldContent>
-          </Field>
+          <form.AppField name="showOnWeb">
+            {(field) => (
+              <field.CheckboxField
+                id="plan-web"
+                label={`Mostrar en ${domainOf(product)}`}
+                description={`Sus precios salen en la web de ${words.name}. Apagado al crear un plan; al guardar, la web lo muestra en menos de un minuto.`}
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="isDefault">
+            {(field) => (
+              <field.CheckboxField
+                id="plan-default"
+                label={`Plan por defecto de ${words.name}`}
+                description={`Con él abren, prueban y se cuentan las clínicas de ${words.name} que no eligen otro. El de ${productWords(product === "dental" ? "medical" : "dental").name} no cambia.`}
+              />
+            )}
+          </form.AppField>
         </FieldGroup>
 
         <section aria-label="Comprobación antes de guardar" className="flex flex-col gap-1.5 rounded-lg border p-3 text-sm">

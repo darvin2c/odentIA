@@ -8,7 +8,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, or, type SQL, sql } from "
 import { foldedWordsMatch } from "./search-text.js"
 import { testContactSql } from "./conversation-state.js"
 import { resolveAfterHandoffTask } from "./conversation-close.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /** Aviso en vivo para el stream (`org_events`): solo `{ orgId, kind, at }`, sin datos clínicos. */
@@ -119,7 +119,7 @@ function cleanDueAt(dueAt: string | null | undefined): Date | null | undefined {
   if (dueAt === undefined) return undefined
   if (dueAt === null) return null
   const parsed = new Date(dueAt)
-  if (Number.isNaN(parsed.getTime())) throw validation("La fecha de vencimiento no es válida")
+  if (Number.isNaN(parsed.getTime())) throw invalidField("dueAt", "La fecha de vencimiento no es válida")
   return parsed
 }
 
@@ -136,7 +136,7 @@ async function resolveTaskAssignee(
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, assignedUserId)))
     .limit(1)
-  if (!membership) throw validation("El asignado no es miembro de esta organización")
+  if (!membership) throw invalidField("assigneeUserId", "El asignado no es miembro de esta organización")
   return membership.userId
 }
 
@@ -454,8 +454,8 @@ export async function createTask(
   },
 ): Promise<TaskItem> {
   const title = input.title.trim()
-  if (!title) throw validation("El título de la tarea es obligatorio")
-  if (title.length > 200) throw validation("El título no puede superar 200 caracteres")
+  if (!title) throw invalidField("title", "El título de la tarea es obligatorio")
+  if (title.length > 200) throw invalidField("title", "El título no puede superar 200 caracteres")
   if (!CREATED_BY.includes(input.createdBy)) throw validation("createdBy inválido (user|agent|admin|sistema)")
   if (input.area != null && !(TASK_AREAS as readonly string[]).includes(input.area)) throw validation("Área inválida")
   const reason = input.reason?.trim() ? input.reason.trim().slice(0, 480) : null
@@ -497,18 +497,15 @@ export async function createTask(
       .where(and(eq(opportunity.id, links.opportunityId), eq(opportunity.organizationId, orgId)))
       .limit(1)
       .for("update")
-    if (opp?.status !== "open") throw validation("La oportunidad ya se cerró: no necesita otra tarea")
+    if (opp?.status !== "open") throw invalidField("opportunityId", "La oportunidad ya se cerró: no necesita otra tarea")
     const [open] = await tx
       .select({ id: crmTask.id, title: crmTask.title })
       .from(crmTask)
       .where(and(eq(crmTask.organizationId, orgId), eq(crmTask.opportunityId, links.opportunityId), eq(crmTask.status, "open")))
       .limit(1)
     if (open) {
-      throw new ServiceError(
-        "OPPORTUNITY_HAS_TASK",
-        409,
-        `Esta oportunidad ya tiene su tarea: «${open.title}». Márcala como hecha o cámbiala`,
-      )
+      const message = `Esta oportunidad ya tiene su tarea: «${open.title}». Márcala como hecha o cámbiala`
+      throw new ServiceError("OPPORTUNITY_HAS_TASK", 409, message, { opportunityId: message })
     }
     // Sin responsable, la tarea de una oportunidad va a Recepción, igual que la oportunidad.
     if (!assignee && !area) area = "recepcion"
@@ -590,8 +587,8 @@ export async function updateTask(
   const patch: Partial<typeof crmTask.$inferInsert> = { updatedAt: new Date() }
   if (input.title !== undefined) {
     const title = input.title.trim()
-    if (!title) throw validation("El título de la tarea es obligatorio")
-    if (title.length > 200) throw validation("El título no puede superar 200 caracteres")
+    if (!title) throw invalidField("title", "El título de la tarea es obligatorio")
+    if (title.length > 200) throw invalidField("title", "El título no puede superar 200 caracteres")
     patch.title = title
   }
   if (input.dueAt !== undefined) patch.dueAt = cleanDueAt(input.dueAt) ?? null
@@ -641,11 +638,8 @@ export async function updateTask(
       )
       .limit(1)
     if (other) {
-      throw new ServiceError(
-        "OPPORTUNITY_HAS_TASK",
-        409,
-        `Esta oportunidad ya tiene su tarea: «${other.title}». Márcala como hecha o cámbiala`,
-      )
+      const message = `Esta oportunidad ya tiene su tarea: «${other.title}». Márcala como hecha o cámbiala`
+      throw new ServiceError("OPPORTUNITY_HAS_TASK", 409, message, { opportunityId: message })
     }
   }
   const [updated] = await tx

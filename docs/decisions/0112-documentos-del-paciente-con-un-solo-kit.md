@@ -28,4 +28,4 @@ Una sola pieza que cuidar; los PDF de consentimiento ya guardados con su huella 
 
 ## Referencias
 
-`packages/services/src/document-kit.ts`, `document-check.ts`, `budget-pdf.ts`, `clinical-papers.ts`; `packages/db/drizzle/0022_documentos_formales.sql`.
+`packages/services/src/document-kit.ts`, `document-check.ts`, `budget-pdf.ts`, `clinical-papers.ts`; `packages/db/drizzle/0025_documentos_formales.sql`.

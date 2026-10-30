@@ -27,8 +27,8 @@
  */
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { TextDecoder } from "node:util"
 import { fileURLToPath } from "node:url"
+import { TextDecoder } from "node:util"
 import { type PatientGuide, parsePatientGuide } from "@odentia/clinical"
 import { notInArray, sql } from "drizzle-orm"
 import type { Db } from "./client.js"
@@ -109,7 +109,10 @@ export function loadProcedureLists() {
     "procedure_catalog_release.csv",
     "system_key,version,scope,source_url,source_sha256,expected_count,is_current",
   ).map((line) => {
-    const [systemKey, version, scope, sourceUrl, sourceSha256, expectedRaw, currentRaw] = splitHead(line, 7)
+    const [systemKey, version, scope, sourceUrl, sourceSha256, expectedRaw, currentRaw] = splitHead(
+      line,
+      7,
+    )
     const release = {
       systemKey: systemKey!,
       version: version!,
@@ -144,34 +147,46 @@ export function loadProcedureLists() {
       const file = codesFileOf(release.systemKey)
       const codes = strictLines(file, "system_key,code,version,section,display").map((line) => {
         const [systemKey, code, version, section, display] = splitHead(line, 5)
-        if (!systemKey || !code || !version || !display) throw new Error(`Línea inválida en ${file}: ${line}`)
+        if (!systemKey || !code || !version || !display)
+          throw new Error(`Línea inválida en ${file}: ${line}`)
         if (systemKey !== release.systemKey || version !== release.version) {
           throw new Error(`Código fuera de la edición vigente en ${file}: ${code}`)
         }
         return { systemKey, code, version, section: section || null, display }
       })
       if (codes.length !== release.expectedCount) {
-        throw new Error(`Cobertura de ${file}: ${codes.length} códigos frente a expected_count=${release.expectedCount}`)
+        throw new Error(
+          `Cobertura de ${file}: ${codes.length} códigos frente a expected_count=${release.expectedCount}`,
+        )
       }
-      if (new Set(codes.map((c) => c.code)).size !== codes.length) throw new Error(`Códigos duplicados en ${file}`)
+      if (new Set(codes.map((c) => c.code)).size !== codes.length)
+        throw new Error(`Códigos duplicados en ${file}`)
       return [release.systemKey, codes] as const
     }),
   )
 
-  const codeSets = new Map([...codesBySystem].map(([system, codes]) => [system, new Set(codes.map((c) => c.code))]))
+  const codeSets = new Map(
+    [...codesBySystem].map(([system, codes]) => [system, new Set(codes.map((c) => c.code))]),
+  )
 
   // --- Los códigos de cada producto: de una lista cargada y vigentes en ella ---
-  const products = strictLines("procedure_code_products.csv", "system_key,product,code").map((line) => {
-    const [systemKey, product, code] = splitHead(line, 3)
-    if (!systemKey || !product || !/^[a-z]+$/.test(product) || !code) {
-      throw new Error(`Línea inválida en procedure_code_products.csv: ${line}`)
-    }
-    if (!codeSets.get(systemKey)?.has(code)) {
-      throw new Error(`Código de un producto que no está en la edición vigente: ${systemKey} ${code}`)
-    }
-    return { systemKey, product, code }
-  })
-  if (new Set(products.map((p) => `${p.systemKey}:${p.product}:${p.code}`)).size !== products.length) {
+  const products = strictLines("procedure_code_products.csv", "system_key,product,code").map(
+    (line) => {
+      const [systemKey, product, code] = splitHead(line, 3)
+      if (!systemKey || !product || !/^[a-z]+$/.test(product) || !code) {
+        throw new Error(`Línea inválida en procedure_code_products.csv: ${line}`)
+      }
+      if (!codeSets.get(systemKey)?.has(code)) {
+        throw new Error(
+          `Código de un producto que no está en la edición vigente: ${systemKey} ${code}`,
+        )
+      }
+      return { systemKey, product, code }
+    },
+  )
+  if (
+    new Set(products.map((p) => `${p.systemKey}:${p.product}:${p.code}`)).size !== products.length
+  ) {
     throw new Error("Códigos repetidos en procedure_code_products.csv")
   }
 
@@ -188,8 +203,12 @@ export function loadProcedureLists() {
  * `{ "<key>": PatientGuide }`). Fail closed antes de tocar la base: una clave
  * que no es de ninguna biblioteca o un texto vacío es un error del archivo.
  */
-export function loadPatientGuides(keys: readonly string[], raw?: string): Map<string, PatientGuide> {
-  const content = raw ?? readFileSync(join(here, "..", "seeds", "biblioteca_explicaciones.json"), "utf8")
+export function loadPatientGuides(
+  keys: readonly string[],
+  raw?: string,
+): Map<string, PatientGuide> {
+  const content =
+    raw ?? readFileSync(join(here, "..", "seeds", "biblioteca_explicaciones.json"), "utf8")
   const parsed: unknown = JSON.parse(content)
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("biblioteca_explicaciones.json debe ser un objeto { clave: explicación }")
@@ -197,9 +216,13 @@ export function loadPatientGuides(keys: readonly string[], raw?: string): Map<st
   const known = new Set(keys)
   const guides = new Map<string, PatientGuide>()
   for (const [key, value] of Object.entries(parsed)) {
-    if (!known.has(key)) throw new Error(`biblioteca_explicaciones.json: la clave «${key}» no es de ninguna biblioteca`)
+    if (!known.has(key))
+      throw new Error(
+        `biblioteca_explicaciones.json: la clave «${key}» no es de ninguna biblioteca`,
+      )
     const guide = parsePatientGuide(value)
-    if (!guide) throw new Error(`biblioteca_explicaciones.json: la explicación de «${key}» está vacía`)
+    if (!guide)
+      throw new Error(`biblioteca_explicaciones.json: la explicación de «${key}» está vacía`)
     guides.set(key, guide)
   }
   return guides
@@ -235,11 +258,15 @@ export async function seedProcedureCodes(
   const given = Array.isArray(libraries) ? libraries : [libraries as CatalogLibrary]
   const prepared = given.map((library) => ({ product: library.product, ...library.prepare(lists) }))
   const allKeys = prepared.flatMap((library) => library.keys)
-  if (new Set(allKeys).size !== allKeys.length) throw new Error("Una clave de tratamiento se repite entre bibliotecas")
-  const patientGuides = prepared.length > 0 ? loadPatientGuides(allKeys) : new Map<string, PatientGuide>()
+  if (new Set(allKeys).size !== allKeys.length)
+    throw new Error("Una clave de tratamiento se repite entre bibliotecas")
+  const patientGuides =
+    prepared.length > 0 ? loadPatientGuides(allKeys) : new Map<string, PatientGuide>()
   const seededProducts = prepared.map((library) => library.product)
   const mappingsOf = (system: string) =>
-    prepared.length > 0 ? prepared.reduce((sum, library) => sum + library.mappings(system), 0) : null
+    prepared.length > 0
+      ? prepared.reduce((sum, library) => sum + library.mappings(system), 0)
+      : null
 
   await db.transaction(async (tx) => {
     // Lock por lista, en orden fijo: dos seeds concurrentes se serializan.
@@ -311,7 +338,10 @@ export async function seedProcedureCodes(
         await tx.execute(
           sql`insert into "procedure_code" ("system_key", "code", "version", "section", "display", "is_active")
             values ${sql.join(
-              batch.map((c) => sql`(${c.systemKey}, ${c.code}, ${c.version}, ${c.section}, ${c.display}, true)`),
+              batch.map(
+                (c) =>
+                  sql`(${c.systemKey}, ${c.code}, ${c.version}, ${c.section}, ${c.display}, true)`,
+              ),
               sql`, `,
             )}
             on conflict ("system_key", "code", "version") do update set
@@ -342,7 +372,9 @@ export async function seedProcedureCodes(
     // El texto sugerido de cada tratamiento: el archivo manda, entero. Aquí no se
     // toca el de ninguna clínica: el servicio guarda su propia copia al revisarlo.
     if (prepared.length > 0) {
-      await tx.execute(sql`update "catalog"."treatment_template" set "patient_guide" = null where "patient_guide" is not null`)
+      await tx.execute(
+        sql`update "catalog"."treatment_template" set "patient_guide" = null where "patient_guide" is not null`,
+      )
       for (const [key, guide] of patientGuides) {
         await tx.execute(
           sql`update "catalog"."treatment_template" set "patient_guide" = ${JSON.stringify(guide)}::jsonb where "key" = ${key}`,
@@ -352,7 +384,9 @@ export async function seedProcedureCodes(
 
     // Los códigos de cada producto se reemplazan enteros, lista por lista.
     for (const release of releases) {
-      await tx.execute(sql`delete from "procedure_code_product" where "system_key" = ${release.systemKey}`)
+      await tx.execute(
+        sql`delete from "procedure_code_product" where "system_key" = ${release.systemKey}`,
+      )
     }
     for (const batch of chunks(products)) {
       await tx.execute(

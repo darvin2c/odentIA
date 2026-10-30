@@ -35,7 +35,10 @@ function OrderPrintPage() {
   if (!found)
     return (
       <PageShell>
-        <EmptyState title="No encontramos esta orden" description="Puede que este enlace sea de otra persona o ya no exista." />
+        <EmptyState
+          title="No encontramos esta orden"
+          description="Puede que este enlace sea de otra persona o ya no exista."
+        />
       </PageShell>
     )
   return <OrderPaper page order={found} />

@@ -6,6 +6,11 @@
  * Manda el mensaje del servidor (ya es de negocio y está en español). Solo se
  * sustituye cuando es técnico (claves de reintento, textos del validador) o
  * cuando no hay mensaje.
+ *
+ * Dos usos: `financeErrorMessage` para lo que no es un formulario (una consulta
+ * que no cargó, una acción suelta) y `financeFormMessage`/`collectFormMessage`
+ * como `formMessage` de `useFormSurface`: solo cambian las palabras de lo que
+ * no es de ningún campo; lo que el servidor señala por campo va a su campo.
  */
 import { ApiError } from "./api"
 
@@ -49,15 +54,23 @@ export function financeErrorMessage(err: unknown): string {
   return err instanceof Error && err.message ? err.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
-export { financeErrorMessage as collectErrorMessage }
+/**
+ * `formMessage` de un formulario de finanzas: las palabras de caja para los
+ * códigos técnicos; `null` deja el mensaje del servidor (o el de su estado).
+ */
+export function financeFormMessage(err: unknown): string | null {
+  if (!(err instanceof ApiError)) return null
+  const code = err.shape.code
+  return code ? (PLAIN_BY_CODE[code] ?? null) : null
+}
 
 /**
- * Error al cobrar. El cobro lleva una clave propia: si la respuesta no llegó,
- * volver a pulsar «Cobrar» sin cambiar nada devuelve el mismo ticket.
+ * `formMessage` del cobro. El cobro lleva una clave propia: si la respuesta no
+ * llegó, volver a pulsar «Cobrar» sin cambiar nada devuelve el mismo ticket.
  */
-export function collectFailureMessage(err: unknown): string {
+export function collectFormMessage(err: unknown): string | null {
   if (isUnconfirmedError(err)) {
     return "No pudimos confirmar si el cobro quedó registrado. Pulsa «Cobrar» otra vez sin cambiar nada: si ya se registró, no se cobra dos veces."
   }
-  return financeErrorMessage(err)
+  return financeFormMessage(err)
 }

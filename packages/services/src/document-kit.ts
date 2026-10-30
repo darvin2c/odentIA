@@ -16,9 +16,10 @@
  *
  * Módulo interno: no se reexporta desde el índice del paquete.
  */
-import fontkit, { type Font } from "@pdf-lib/fontkit"
+
 import { readFileSync } from "node:fs"
-import { PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb, type RGB } from "pdf-lib"
+import fontkit, { type Font } from "@pdf-lib/fontkit"
+import { PDFDocument, type PDFFont, type PDFImage, type PDFPage, type RGB, rgb } from "pdf-lib"
 import QRCode from "qrcode"
 
 // --- La clínica en el papel ----------------------------------------------------
@@ -59,7 +60,8 @@ const MM = 72 / 25.4
 
 export function sheetFormat(paper: string): DocFormat {
   const sheet = paper.trim().toLowerCase()
-  if (sheet === "carta" || sheet === "letter") return { width: 612, height: 792, margin: 54, exactFit: false }
+  if (sheet === "carta" || sheet === "letter")
+    return { width: 612, height: 792, margin: 54, exactFit: false }
   // A4 si no se dice otra cosa: el papel nunca traba una impresión.
   return { width: 595.28, height: 841.89, margin: 54, exactFit: false }
 }
@@ -67,16 +69,27 @@ export function sheetFormat(paper: string): DocFormat {
 /** Un rollo largo: al terminar se recorta a lo escrito. */
 export function thermalFormat(width: string): DocFormat {
   const millimeters = width.trim() === "58" ? 58 : 80
-  return { width: millimeters * MM, height: 14_000, margin: millimeters === 58 ? 8 : 12, exactFit: true }
+  return {
+    width: millimeters * MM,
+    height: 14_000,
+    margin: millimeters === 58 ? 8 : 12,
+    exactFit: true,
+  }
 }
 
 /** Ticket y devolución: la térmica de la clínica, u hoja si se pide. */
-export function ticketFormat(clinic: Pick<DocumentClinic, "receiptWidth">, paper?: string | null): DocFormat {
+export function ticketFormat(
+  clinic: Pick<DocumentClinic, "receiptWidth">,
+  paper?: string | null,
+): DocFormat {
   return paper ? sheetFormat(paper) : thermalFormat(clinic.receiptWidth)
 }
 
 /** Lo demás: la hoja de la clínica, u otra si se pide. */
-export function documentFormat(clinic: Pick<DocumentClinic, "sheetSize">, paper?: string | null): DocFormat {
+export function documentFormat(
+  clinic: Pick<DocumentClinic, "sheetSize">,
+  paper?: string | null,
+): DocFormat {
   return sheetFormat(paper ?? clinic.sheetSize)
 }
 
@@ -146,7 +159,8 @@ export function printable(value: string, face: Face = "sans"): string {
 
 // --- Color ---------------------------------------------------------------------
 
-const hex = (value: number): RGB => rgb(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255)
+const hex = (value: number): RGB =>
+  rgb(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255)
 
 export type Tone = "ink" | "gray" | "soft" | "alert" | "white"
 
@@ -159,7 +173,13 @@ const SHEET_TONES: Record<Tone, RGB> = {
 }
 const BLACK = hex(0x000000)
 /** En la térmica no hay grises: todo es negro. */
-const THERMAL_TONES: Record<Tone, RGB> = { ink: BLACK, gray: BLACK, soft: BLACK, alert: BLACK, white: hex(0xffffff) }
+const THERMAL_TONES: Record<Tone, RGB> = {
+  ink: BLACK,
+  gray: BLACK,
+  soft: BLACK,
+  alert: BLACK,
+  white: hex(0xffffff),
+}
 const RULE = hex(0xcbd5e1)
 const HAIR = hex(0xe2e8f0)
 const FIELD = hex(0x64748b)
@@ -273,7 +293,9 @@ function baselineOf(top: number, size: number, height: number): number {
 
 function initialsOf(name: string): string {
   const words = name.split(/\s+/).filter((word) => /[\p{L}\p{N}]/u.test(word))
-  const letters = words.slice(0, 2).map((word) => [...(word.match(/[\p{L}\p{N}]/u)?.[0] ?? "")][0] ?? "")
+  const letters = words
+    .slice(0, 2)
+    .map((word) => [...(word.match(/[\p{L}\p{N}]/u)?.[0] ?? "")][0] ?? "")
   return letters.join("").toLocaleUpperCase("es")
 }
 
@@ -317,7 +339,11 @@ export class DocumentKit {
   }
 
   /** Un papel nuevo con su membrete ya escrito. */
-  static async open(clinic: DocumentClinic, format: DocFormat, options: KitOptions): Promise<DocumentKit> {
+  static async open(
+    clinic: DocumentClinic,
+    format: DocFormat,
+    options: KitOptions,
+  ): Promise<DocumentKit> {
     const pdf = await PDFDocument.create()
     pdf.registerFontkit(fontkit)
     pdf.setTitle(printable(options.title))
@@ -328,18 +354,31 @@ export class DocumentKit {
       pdf.setModificationDate(options.createdAt)
     }
     const entries = await Promise.all(
-      FACES.map(async (face) => [face, await pdf.embedFont(fontData(face).bytes, { subset: true })] as const),
+      FACES.map(
+        async (face) =>
+          [face, await pdf.embedFont(fontData(face).bytes, { subset: true })] as const,
+      ),
     )
     let logoImage: PDFImage | null = null
     if (clinic.logo && !format.exactFit) {
       try {
-        logoImage = clinic.logo.kind === "png" ? await pdf.embedPng(clinic.logo.bytes) : await pdf.embedJpg(clinic.logo.bytes)
+        logoImage =
+          clinic.logo.kind === "png"
+            ? await pdf.embedPng(clinic.logo.bytes)
+            : await pdf.embedJpg(clinic.logo.bytes)
       } catch {
         // Una imagen dañada no rompe el papel: salen las iniciales.
         logoImage = null
       }
     }
-    const kit = new DocumentKit(pdf, clinic, format, options, Object.fromEntries(entries) as Record<Face, PDFFont>, logoImage)
+    const kit = new DocumentKit(
+      pdf,
+      clinic,
+      format,
+      options,
+      Object.fromEntries(entries) as Record<Face, PDFFont>,
+      logoImage,
+    )
     kit.letterhead()
     return kit
   }
@@ -407,7 +446,9 @@ export class DocumentKit {
     this.y = this.bottomLimit + height + 2
   }
 
-  rule(options: { tone?: "ink" | "rule" | "hair"; thickness?: number; gapAfter?: number } = {}): void {
+  rule(
+    options: { tone?: "ink" | "rule" | "hair"; thickness?: number; gapAfter?: number } = {},
+  ): void {
     const color = options.tone === "ink" ? this.tones.ink : options.tone === "hair" ? HAIR : RULE
     const thickness = options.thickness ?? 0.75
     if (this.y - thickness < this.bottomLimit) this.newPage()
@@ -493,7 +534,8 @@ export class DocumentKit {
         }
         const words = paragraph.split(/ +/).filter(Boolean)
         for (const word of words) {
-          const space = pendingSpace && segments.length > 0 ? font.widthOfTextAtSize(" ", partSize) : 0
+          const space =
+            pendingSpace && segments.length > 0 ? font.widthOfTextAtSize(" ", partSize) : 0
           const wordWidth = font.widthOfTextAtSize(word, partSize)
           if (segments.length > 0 && used + space + wordWidth > width) {
             flush()
@@ -503,7 +545,10 @@ export class DocumentKit {
             // Una huella o una dirección larga: se parte por caracteres.
             let chunk = ""
             for (const char of word) {
-              if (font.widthOfTextAtSize(chunk + char, partSize) > width - used && (chunk || segments.length > 0)) {
+              if (
+                font.widthOfTextAtSize(chunk + char, partSize) > width - used &&
+                (chunk || segments.length > 0)
+              ) {
                 if (chunk) add(chunk, face, tone, partSize)
                 flush()
                 chunk = ""
@@ -526,7 +571,12 @@ export class DocumentKit {
 
   private drawLineAt(line: Line, x: number, top: number, width: number): void {
     const baseline = baselineOf(top, line.size, line.height)
-    let cursor = line.align === "right" ? x + width - line.width : line.align === "center" ? x + (width - line.width) / 2 : x
+    let cursor =
+      line.align === "right"
+        ? x + width - line.width
+        : line.align === "center"
+          ? x + (width - line.width) / 2
+          : x
     for (const segment of line.segments) {
       if (segment.text) {
         this.page.drawText(segment.text, {
@@ -542,7 +592,10 @@ export class DocumentKit {
   }
 
   /** Texto corrido, con salto de página línea a línea. */
-  text(inlines: Inline | Inline[], style: TextStyle & { indent?: number; width?: number } = {}): void {
+  text(
+    inlines: Inline | Inline[],
+    style: TextStyle & { indent?: number; width?: number } = {},
+  ): void {
     const indent = style.indent ?? 0
     const width = style.width ?? this.width - indent
     for (const line of this.lay(inlines, width, style)) {
@@ -553,7 +606,10 @@ export class DocumentKit {
   }
 
   /** Título o subtítulo, sin quedar solo al final de la página. */
-  heading(value: string, style: TextStyle & { before?: number; after?: number; keep?: number } = {}): void {
+  heading(
+    value: string,
+    style: TextStyle & { before?: number; after?: number; keep?: number } = {},
+  ): void {
     const size = style.size ?? SIZE.h2small
     const lines = this.lay(value, this.width, { face: "serif", leading: 1.25, ...style, size })
     const height = lines.reduce((sum, line) => sum + line.height, 0)
@@ -569,7 +625,14 @@ export class DocumentKit {
 
   /** Subtítulo en letra normal: «Indicaciones», «Declaración». */
   subheading(value: string, style: TextStyle & { before?: number; after?: number } = {}): void {
-    this.heading(value, { face: "sansBold", size: SIZE.table, leading: 1.4, before: 8, after: 1, ...style })
+    this.heading(value, {
+      face: "sansBold",
+      size: SIZE.table,
+      leading: 1.4,
+      before: 8,
+      after: 1,
+      ...style,
+    })
   }
 
   bullets(items: string[], style: TextStyle = {}): void {
@@ -597,7 +660,10 @@ export class DocumentKit {
   spread(left: Inline | Inline[], right: Inline | Inline[], style: TextStyle = {}): void {
     const rightLines = this.lay(right, this.width * 0.5, { ...style, align: "right" })
     const rightWidth = Math.max(0, ...rightLines.map((line) => line.width))
-    const leftLines = this.lay(left, Math.max(this.width - rightWidth - 12, this.width * 0.3), { ...style, align: "left" })
+    const leftLines = this.lay(left, Math.max(this.width - rightWidth - 12, this.width * 0.3), {
+      ...style,
+      align: "left",
+    })
     const height = Math.max(
       leftLines.reduce((sum, line) => sum + line.height, 0),
       rightLines.reduce((sum, line) => sum + line.height, 0),
@@ -618,7 +684,11 @@ export class DocumentKit {
   }
 
   /** Título a la izquierda y sus datos a la derecha, sobre la misma base. */
-  titleWithDetails(title: string, details: Array<{ text: string; strong?: boolean }>, size: number = SIZE.title): void {
+  titleWithDetails(
+    title: string,
+    details: Array<{ text: string; strong?: boolean }>,
+    size: number = SIZE.title,
+  ): void {
     const detailLines = details.flatMap((item) =>
       this.lay(item.text, this.width * 0.5, {
         align: "right",
@@ -629,7 +699,11 @@ export class DocumentKit {
       }),
     )
     const detailWidth = Math.max(0, ...detailLines.map((line) => line.width))
-    const titleLines = this.lay(title, this.width - detailWidth - 18, { face: "serif", size, leading: 1.15 })
+    const titleLines = this.lay(title, this.width - detailWidth - 18, {
+      face: "serif",
+      size,
+      leading: 1.15,
+    })
     const titleHeight = titleLines.reduce((sum, line) => sum + line.height, 0)
     const detailHeight = detailLines.reduce((sum, line) => sum + line.height, 0)
     const height = Math.max(titleHeight, detailHeight)
@@ -650,7 +724,14 @@ export class DocumentKit {
 
   /** Datos en rejilla entre dos reglas: «Paciente», «DNI», «Edad». */
   facts(
-    cells: Array<{ label: string; value: string; sub?: string; span?: number; strong?: boolean; bold?: boolean }>,
+    cells: Array<{
+      label: string
+      value: string
+      sub?: string
+      span?: number
+      strong?: boolean
+      bold?: boolean
+    }>,
     columns: number,
     options: { size?: number; pad?: number } = {},
   ): void {
@@ -677,14 +758,19 @@ export class DocumentKit {
           face: cell.bold ? "sansBold" : cell.strong ? "sansSemi" : "sans",
           leading: 1.4,
         }),
-        ...(cell.sub ? this.lay(cell.sub, width, { size: SIZE.second, tone: "gray", leading: 1.4 }) : []),
+        ...(cell.sub
+          ? this.lay(cell.sub, width, { size: SIZE.second, tone: "gray", leading: 1.4 })
+          : []),
       ]
       row.push({ lines, x: this.left + (unit + gapX) * column, width })
       column += span
     }
     if (row.length > 0) rows.push(row)
-    const heights = rows.map((placed) => Math.max(...placed.map((cell) => cell.lines.reduce((sum, line) => sum + line.height, 0))))
-    const total = heights.reduce((sum, height) => sum + height, 0) + (rows.length - 1) * 10 + pad * 2
+    const heights = rows.map((placed) =>
+      Math.max(...placed.map((cell) => cell.lines.reduce((sum, line) => sum + line.height, 0))),
+    )
+    const total =
+      heights.reduce((sum, height) => sum + height, 0) + (rows.length - 1) * 10 + pad * 2
     this.ensure(total + 2)
     this.rule()
     this.y -= pad
@@ -712,7 +798,12 @@ export class DocumentKit {
     return columns.map((column) => column.width ?? flex)
   }
 
-  private layCell(cell: Cell, width: number, column: TableColumn, size: number): Array<Line | { checkbox: number; gapBefore: number }> {
+  private layCell(
+    cell: Cell,
+    width: number,
+    column: TableColumn,
+    size: number,
+  ): Array<Line | { checkbox: number; gapBefore: number }> {
     const blocks: Block[] = Array.isArray(cell) ? (cell as Block[]) : [{ inlines: cell as Inline }]
     const out: Array<Line | { checkbox: number; gapBefore: number }> = []
     for (const block of blocks) {
@@ -720,7 +811,12 @@ export class DocumentKit {
         out.push({ checkbox: block.size ?? 12, gapBefore: block.gapBefore ?? 0 })
         continue
       }
-      const lines = this.lay(block.inlines, width, { size, leading: 1.4, align: column.align ?? "left", ...block })
+      const lines = this.lay(block.inlines, width, {
+        size,
+        leading: 1.4,
+        align: column.align ?? "left",
+        ...block,
+      })
       lines.forEach((line, index) => {
         if (index === 0 && block.gapBefore) line.gapBefore = block.gapBefore
       })
@@ -755,7 +851,9 @@ export class DocumentKit {
           align: column.align ?? "left",
         }),
       )
-      const height = Math.max(...heads.map((lines) => lines.reduce((sum, line) => sum + line.height, 0)))
+      const height = Math.max(
+        ...heads.map((lines) => lines.reduce((sum, line) => sum + line.height, 0)),
+      )
       const top = this.y
       let x = this.left
       heads.forEach((lines, index) => {
@@ -778,7 +876,9 @@ export class DocumentKit {
     }
     drawHead()
     rows.forEach((row, rowIndex) => {
-      const laid = row.map((cell, index) => this.layCell(cell, Math.max(widths[index]! - padOf(index), 1), columns[index]!, size))
+      const laid = row.map((cell, index) =>
+        this.layCell(cell, Math.max(widths[index]! - padOf(index), 1), columns[index]!, size),
+      )
       const height = Math.max(...laid.map((items) => this.itemsHeight(items))) + rowPad * 2
       const closes = rowIndex === rows.length - 1 && options.closed !== false
       if (this.y - height < this.bottomLimit && height <= this.pageRoom) {
@@ -793,7 +893,11 @@ export class DocumentKit {
   }
 
   private itemsHeight(items: Array<Line | { checkbox: number; gapBefore: number }>): number {
-    return items.reduce((sum, item) => sum + ("checkbox" in item ? item.checkbox + item.gapBefore : item.height + item.gapBefore), 0)
+    return items.reduce(
+      (sum, item) =>
+        sum + ("checkbox" in item ? item.checkbox + item.gapBefore : item.height + item.gapBefore),
+      0,
+    )
   }
 
   private cellsHeight(
@@ -804,7 +908,11 @@ export class DocumentKit {
     padOf: (index: number) => number,
   ): number {
     return Math.max(
-      ...row.map((cell, index) => this.itemsHeight(this.layCell(cell, Math.max(widths[index]! - padOf(index), 1), columns[index]!, size))),
+      ...row.map((cell, index) =>
+        this.itemsHeight(
+          this.layCell(cell, Math.max(widths[index]! - padOf(index), 1), columns[index]!, size),
+        ),
+      ),
     )
   }
 
@@ -824,7 +932,8 @@ export class DocumentKit {
         let cursor = top
         while (items.length > 0) {
           const item = items[0]!
-          const height = "checkbox" in item ? item.checkbox + item.gapBefore : item.height + item.gapBefore
+          const height =
+            "checkbox" in item ? item.checkbox + item.gapBefore : item.height + item.gapBefore
           if (cursor - height < this.bottomLimit) break
           cursor -= item.gapBefore
           if ("checkbox" in item) {
@@ -856,15 +965,26 @@ export class DocumentKit {
   }
 
   /** «Total» a la izquierda y el importe en letra grande a la derecha. */
-  total(left: Inline | Inline[], amount: string, options: { size?: number; before?: number } = {}): void {
+  total(
+    left: Inline | Inline[],
+    amount: string,
+    options: { size?: number; before?: number } = {},
+  ): void {
     const size = options.size ?? SIZE.total
     if (this.thermal) {
-      this.spread(left, { text: amount, face: "sansBold", size: SIZE.h2small }, { face: "sansBold", size: SIZE.h2small, leading: 1.3 })
+      this.spread(
+        left,
+        { text: amount, face: "sansBold", size: SIZE.h2small },
+        { face: "sansBold", size: SIZE.h2small, leading: 1.3 },
+      )
       return
     }
     const amountWidth = this.fonts.serif.widthOfTextAtSize(printable(amount, "serif"), size)
     const lines = this.lay(left, this.width - amountWidth - 18, { size: SIZE.table, leading: 1.4 })
-    const height = Math.max(size * 1.25, lines.reduce((sum, line) => sum + line.height, 0))
+    const height = Math.max(
+      size * 1.25,
+      lines.reduce((sum, line) => sum + line.height, 0),
+    )
     this.y -= options.before ?? 6
     this.ensure(height)
     const top = this.y
@@ -873,13 +993,22 @@ export class DocumentKit {
       this.drawLineAt(line, this.left, cursor, this.width)
       cursor -= line.height
     }
-    const amountLine = this.lay(amount, this.width, { face: "serif", size, leading: 1.25, align: "right" })[0]
-    if (amountLine) this.drawLineAt(amountLine, this.left, top - (height - amountLine.height), this.width)
+    const amountLine = this.lay(amount, this.width, {
+      face: "serif",
+      size,
+      leading: 1.25,
+      align: "right",
+    })[0]
+    if (amountLine)
+      this.drawLineAt(amountLine, this.left, top - (height - amountLine.height), this.width)
     this.y = top - height
   }
 
   /** Dos columnas de secciones cortas: «Si decide no tratarse», «Qué no incluye». */
-  grid(cells: Array<{ title: string; body: string | string[] }>, options: { columns?: number; size?: number } = {}): void {
+  grid(
+    cells: Array<{ title: string; body: string | string[] }>,
+    options: { columns?: number; size?: number } = {},
+  ): void {
     const columns = options.columns ?? 2
     const size = options.size ?? SIZE.dense
     const gapX = 21
@@ -889,13 +1018,18 @@ export class DocumentKit {
       const body: Array<{ line: Line; bullet: boolean }> = []
       if (Array.isArray(cell.body)) {
         for (const item of cell.body) {
-          this.lay(item, width - 12, { size, leading: 1.42 }).forEach((line, index) => body.push({ line, bullet: index === 0 }))
+          this.lay(item, width - 12, { size, leading: 1.42 }).forEach((line, index) => {
+            body.push({ line, bullet: index === 0 })
+          })
         }
       } else {
-        for (const line of this.lay(cell.body, width, { size, leading: 1.42 })) body.push({ line, bullet: false })
+        for (const line of this.lay(cell.body, width, { size, leading: 1.42 }))
+          body.push({ line, bullet: false })
       }
       const isList = Array.isArray(cell.body)
-      const height = title.reduce((sum, line) => sum + line.height, 0) + body.reduce((sum, item) => sum + item.line.height, 0)
+      const height =
+        title.reduce((sum, line) => sum + line.height, 0) +
+        body.reduce((sum, item) => sum + item.line.height, 0)
       return { title, body, height, isList }
     }
     for (let start = 0; start < cells.length; start += columns) {
@@ -939,7 +1073,15 @@ export class DocumentKit {
 
   // --- Recuadros ---------------------------------------------------------------
 
-  private frame(x: number, y: number, width: number, height: number, border: RGB, thickness: number, dashed = false): void {
+  private frame(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    border: RGB,
+    thickness: number,
+    dashed = false,
+  ): void {
     this.page.drawRectangle({
       x,
       y,
@@ -952,7 +1094,11 @@ export class DocumentKit {
   }
 
   /** ANULADA, REVOCADO, BORRADOR o un aviso en recuadro. */
-  stateBox(input: { kind: "alert" | "draft" | "note"; title: string; detail?: string | null }): void {
+  stateBox(input: {
+    kind: "alert" | "draft" | "note"
+    title: string
+    detail?: string | null
+  }): void {
     const tone: Tone = input.kind === "alert" ? "alert" : "ink"
     const padX = 12
     const padY = 8
@@ -963,11 +1109,22 @@ export class DocumentKit {
       tone,
       leading: 1.3,
     })
-    const detailLines = input.detail ? this.lay(input.detail, inner, { size: SIZE.dense, tone, leading: 1.4 }) : []
-    const height = [...titleLines, ...detailLines].reduce((sum, line) => sum + line.height, 0) + padY * 2
+    const detailLines = input.detail
+      ? this.lay(input.detail, inner, { size: SIZE.dense, tone, leading: 1.4 })
+      : []
+    const height =
+      [...titleLines, ...detailLines].reduce((sum, line) => sum + line.height, 0) + padY * 2
     this.ensure(height + 2)
     const top = this.y
-    this.frame(this.left, top - height, this.width, height, this.tones[tone], 1.5, input.kind === "draft")
+    this.frame(
+      this.left,
+      top - height,
+      this.width,
+      height,
+      this.tones[tone],
+      1.5,
+      input.kind === "draft",
+    )
     let cursor = top - padY
     for (const line of [...titleLines, ...detailLines]) {
       this.drawLineAt(line, this.left + padX, cursor, inner)
@@ -982,7 +1139,9 @@ export class DocumentKit {
     const padX = 14
     const padY = 11
     const inner = this.width - padX * 2
-    const title = input.title ? this.lay(input.title, inner, { face: "sansBold", size, leading: 1.35 }) : []
+    const title = input.title
+      ? this.lay(input.title, inner, { face: "sansBold", size, leading: 1.35 })
+      : []
     const body = this.lay(input.body, inner, { size, leading: 1.45 })
     const height = [...title, ...body].reduce((sum, line) => sum + line.height, 0) + padY * 2
     if (height > this.pageRoom) {
@@ -1014,13 +1173,22 @@ export class DocumentKit {
         if (code.modules.get(row, column)) path.push(`M${column} ${row}h1v1h-1z`)
       }
     }
-    this.page.drawSvgPath(path.join(""), { x, y: top, scale: module, color: this.thermal ? BLACK : this.tones.ink })
+    this.page.drawSvgPath(path.join(""), {
+      x,
+      y: top,
+      scale: module,
+      color: this.thermal ? BLACK : this.tones.ink,
+    })
   }
 
   /** «Firmado electrónicamente», con su QR para comprobarlo. */
   signedBlockHeight(input: Pick<SignedBlockInput, "credential" | "checkUrl">): number {
     const padY = 9
-    const lines = SIZE.label * 1.35 + SIZE.table * 1.4 + (input.credential ? SIZE.second * 1.4 : 0) + SIZE.second * 1.4
+    const lines =
+      SIZE.label * 1.35 +
+      SIZE.table * 1.4 +
+      (input.credential ? SIZE.second * 1.4 : 0) +
+      SIZE.second * 1.4
     return Math.max(lines, input.checkUrl ? 54 : 0) + padY * 2
   }
 
@@ -1034,9 +1202,19 @@ export class DocumentKit {
     const textWidth = this.width - padX * 2 - (input.checkUrl ? 180 : 0)
     let cursor = top - padY
     const rows: Array<[string, TextStyle]> = [
-      ["Firmado electrónicamente", { size: SIZE.label, face: "sansSemi", tone: "gray", leading: 1.35 }],
+      [
+        "Firmado electrónicamente",
+        { size: SIZE.label, face: "sansSemi", tone: "gray", leading: 1.35 },
+      ],
       [input.name, { size: SIZE.table, face: "sansSemi", leading: 1.4 }],
-      ...(input.credential ? [[input.credential, { size: SIZE.second, tone: "gray", leading: 1.4 }] as [string, TextStyle]] : []),
+      ...(input.credential
+        ? [
+            [input.credential, { size: SIZE.second, tone: "gray", leading: 1.4 }] as [
+              string,
+              TextStyle,
+            ],
+          ]
+        : []),
       [input.at, { size: SIZE.second, tone: "gray", leading: 1.4 }],
     ]
     for (const [value, style] of rows) {
@@ -1076,11 +1254,24 @@ export class DocumentKit {
     const top = this.y
     const secondWidth = second ? this.width * 0.25 : 0
     const gapX = second ? 21 : 0
-    const mainWidth = second ? this.width - secondWidth - gapX : this.thermal ? this.width : this.width * 0.6
+    const mainWidth = second
+      ? this.width - secondWidth - gapX
+      : this.thermal
+        ? this.width
+        : this.width * 0.6
     const draw = (x: number, width: number, value: string) => {
-      this.page.drawLine({ start: { x, y: top }, end: { x: x + width, y: top }, thickness: 0.75, color: this.tones.ink })
+      this.page.drawLine({
+        start: { x, y: top },
+        end: { x: x + width, y: top },
+        thickness: 0.75,
+        color: this.tones.ink,
+      })
       let cursor = top - 3
-      for (const line of this.lay(value, width, { size: SIZE.second, tone: "gray", leading: 1.4 })) {
+      for (const line of this.lay(value, width, {
+        size: SIZE.second,
+        tone: "gray",
+        leading: 1.4,
+      })) {
         this.drawLineAt(line, x, cursor, width)
         cursor -= line.height
       }
@@ -1091,7 +1282,11 @@ export class DocumentKit {
   }
 
   private penColumnHeight(signature: PenSignature, width: number, boxHeight: number): number {
-    const heading = this.lay(signature.heading, width, { face: "sansSemi", size: SIZE.table, leading: 1.4 })
+    const heading = this.lay(signature.heading, width, {
+      face: "sansSemi",
+      size: SIZE.table,
+      leading: 1.4,
+    })
     const lines = signature.lines.flatMap((item) =>
       this.lay(item.text, width, { size: item.strong ? SIZE.table : SIZE.second, leading: 1.4 }),
     )
@@ -1104,13 +1299,19 @@ export class DocumentKit {
     const gapX = 21
     const width = (this.width - gapX * (columns - 1)) / columns
     const boxHeight = options.boxHeight ?? 66
-    const height = Math.max(...signatures.map((signature) => this.penColumnHeight(signature, width, boxHeight)))
+    const height = Math.max(
+      ...signatures.map((signature) => this.penColumnHeight(signature, width, boxHeight)),
+    )
     this.ensure(height)
     const top = this.y
     signatures.forEach((signature, index) => {
       const x = this.left + (width + gapX) * index
       let cursor = top
-      for (const line of this.lay(signature.heading, width, { face: "sansSemi", size: SIZE.table, leading: 1.4 })) {
+      for (const line of this.lay(signature.heading, width, {
+        face: "sansSemi",
+        size: SIZE.table,
+        leading: 1.4,
+      })) {
         this.drawLineAt(line, x, cursor, width)
         cursor -= line.height
       }
@@ -1175,7 +1376,14 @@ export class DocumentKit {
         top -= rowHeight
         x = this.left
       }
-      this.page.drawRectangle({ x, y: top - box, width: box, height: box, borderColor: this.tones.ink, borderWidth: 0.75 })
+      this.page.drawRectangle({
+        x,
+        y: top - box,
+        width: box,
+        height: box,
+        borderColor: this.tones.ink,
+        borderWidth: 0.75,
+      })
       drawLabel(choice, x + box + 4.5)
       x += width + 15
     }
@@ -1189,7 +1397,11 @@ export class DocumentKit {
     const qrSize = input.url ? 54 : 0
     const offset = input.url ? qrSize + 10.5 : 0
     const inner = this.width - padX * 2 - offset
-    const title = this.lay(input.title, inner, { face: "sansBold", size: SIZE.dense, leading: 1.35 })
+    const title = this.lay(input.title, inner, {
+      face: "sansBold",
+      size: SIZE.dense,
+      leading: 1.35,
+    })
     const body = this.lay(input.body, inner, { size: SIZE.second, tone: "soft", leading: 1.4 })
     const textHeight = [...title, ...body].reduce((sum, line) => sum + line.height, 0)
     const height = Math.max(textHeight, qrSize) + padY * 2
@@ -1236,7 +1448,13 @@ export class DocumentKit {
           leading: 1.3,
           align: "center",
         })[0]
-        if (line) this.drawLineAt(line, x, y + cellHeight - (cellHeight - line.height) / 2, cellWidth * scale)
+        if (line)
+          this.drawLineAt(
+            line,
+            x,
+            y + cellHeight - (cellHeight - line.height) / 2,
+            cellWidth * scale,
+          )
       })
     })
     this.y = top - height
@@ -1247,8 +1465,12 @@ export class DocumentKit {
   /** «Dental Smile S.A.C. · RUC 20601234567». */
   private fiscalLine(): string {
     const { legalName, fiscalDocType, fiscalDocNumber } = this.clinic
-    const fiscal = fiscalDocNumber ? [fiscalDocType, fiscalDocNumber].filter(Boolean).join(" ") : null
-    return [legalName && legalName !== this.clinic.tradeName ? legalName : null, fiscal].filter(Boolean).join(" · ")
+    const fiscal = fiscalDocNumber
+      ? [fiscalDocType, fiscalDocNumber].filter(Boolean).join(" ")
+      : null
+    return [legalName && legalName !== this.clinic.tradeName ? legalName : null, fiscal]
+      .filter(Boolean)
+      .join(" · ")
   }
 
   private letterhead(): void {
@@ -1257,7 +1479,9 @@ export class DocumentKit {
       return
     }
     const clinic = this.clinic
-    const rightItems = [clinic.branchName, clinic.address, clinic.phone].filter((item): item is string => !!item)
+    const rightItems = [clinic.branchName, clinic.address, clinic.phone].filter(
+      (item): item is string => !!item,
+    )
     const rightMax = this.width * 0.42
     const rightLines = rightItems.flatMap((item) =>
       this.lay(item, rightMax, { size: SIZE.second, tone: "gray", leading: 1.4, align: "right" }),
@@ -1270,9 +1494,15 @@ export class DocumentKit {
       markWidth = Math.min(72, 39 * ratio)
     }
     const nameWidth = Math.max(this.width - rightWidth - 18 - markWidth - 10.5, this.width * 0.25)
-    const nameLines = this.lay(clinic.tradeName, nameWidth, { face: "serif", size: 16.5, leading: 1.2 })
+    const nameLines = this.lay(clinic.tradeName, nameWidth, {
+      face: "serif",
+      size: 16.5,
+      leading: 1.2,
+    })
     const fiscal = this.fiscalLine()
-    const fiscalLines = fiscal ? this.lay(fiscal, nameWidth, { size: SIZE.second, tone: "gray", leading: 1.35 }) : []
+    const fiscalLines = fiscal
+      ? this.lay(fiscal, nameWidth, { size: SIZE.second, tone: "gray", leading: 1.35 })
+      : []
     const nameHeight = [...nameLines, ...fiscalLines].reduce((sum, line) => sum + line.height, 0)
     const height = Math.max(39, nameHeight, rightHeight)
     const top = this.y
@@ -1288,7 +1518,13 @@ export class DocumentKit {
       })
     } else {
       const boxY = bottom + (height - 39) / 2
-      this.page.drawRectangle({ x: this.left, y: boxY, width: 39, height: 39, color: this.tones.ink })
+      this.page.drawRectangle({
+        x: this.left,
+        y: boxY,
+        width: 39,
+        height: 39,
+        color: this.tones.ink,
+      })
       const initials = this.lay(initialsOf(clinic.tradeName) || "·", 39, {
         face: "serif",
         size: 15,
@@ -1318,14 +1554,19 @@ export class DocumentKit {
     this.text(clinic.tradeName, { face: "serif", size: 14.25, align: "center", leading: 1.25 })
     const fiscal = this.fiscalLine()
     if (fiscal) this.text(fiscal, center)
-    for (const item of [clinic.branchName, clinic.address, clinic.phone]) if (item) this.text(item, center)
+    for (const item of [clinic.branchName, clinic.address, clinic.phone])
+      if (item) this.text(item, center)
     this.y -= 6
     this.rule({ tone: "ink", thickness: 1.5 })
   }
 
   /** Desde la página 2: el nombre de la clínica y el título del documento. */
   private shortHeader(): void {
-    const name = this.lay(this.clinic.tradeName, this.width * 0.55, { face: "serif", size: 12.75, leading: 1.25 })[0]
+    const name = this.lay(this.clinic.tradeName, this.width * 0.55, {
+      face: "serif",
+      size: 12.75,
+      leading: 1.25,
+    })[0]
     const title = this.lay(this.options.title, this.width * 0.42, {
       size: SIZE.second,
       tone: "gray",
@@ -1342,7 +1583,9 @@ export class DocumentKit {
   }
 
   private footerRight(page: number, pages: number): string {
-    return [this.options.docLabel, this.options.patientLabel, `Página ${page} de ${pages}`].filter(Boolean).join(" · ")
+    return [this.options.docLabel, this.options.patientLabel, `Página ${page} de ${pages}`]
+      .filter(Boolean)
+      .join(" · ")
   }
 
   private measureFooter(): void {
@@ -1351,13 +1594,25 @@ export class DocumentKit {
       return
     }
     const right = this.footerRight(999, 999)
-    const rightWidth = Math.min(this.fonts.sans.widthOfTextAtSize(printable(right), SIZE.label), this.width)
+    const rightWidth = Math.min(
+      this.fonts.sans.widthOfTextAtSize(printable(right), SIZE.label),
+      this.width,
+    )
     const note = this.options.legalNote?.trim()
     const leftWidth = Math.max(this.width - rightWidth - 18, this.width * 0.35)
-    this.legalLines = note ? this.lay(note, leftWidth, { size: SIZE.label, tone: "gray", leading: 1.35 }) : []
-    const rightLines = this.lay(right, Math.min(this.width - 18, this.width), { size: SIZE.label, leading: 1.35 })
+    this.legalLines = note
+      ? this.lay(note, leftWidth, { size: SIZE.label, tone: "gray", leading: 1.35 })
+      : []
+    const rightLines = this.lay(right, Math.min(this.width - 18, this.width), {
+      size: SIZE.label,
+      leading: 1.35,
+    })
     this.footerHeight =
-      6 + Math.max(this.legalLines.reduce((sum, line) => sum + line.height, 0), rightLines.reduce((sum, line) => sum + line.height, 0))
+      6 +
+      Math.max(
+        this.legalLines.reduce((sum, line) => sum + line.height, 0),
+        rightLines.reduce((sum, line) => sum + line.height, 0),
+      )
   }
 
   private drawFooters(): void {
@@ -1367,7 +1622,12 @@ export class DocumentKit {
       this.footers.push(text)
       this.page = page
       const top = BOTTOM + this.footerHeight
-      page.drawLine({ start: { x: this.left, y: top }, end: { x: this.right, y: top }, thickness: 0.75, color: RULE })
+      page.drawLine({
+        start: { x: this.left, y: top },
+        end: { x: this.right, y: top },
+        thickness: 0.75,
+        color: RULE,
+      })
       let cursor = top - 6
       for (const line of this.legalLines) {
         this.drawLineAt(line, this.left, cursor, this.width)
@@ -1456,9 +1716,18 @@ export function chartNumber(patientNumber: number): string {
 }
 
 /** «36 años»: la edad el día que se escribe, en la zona de la clínica. */
-export function ageWords(birthDate: string | null | undefined, zone: Zone, at: Date = new Date()): string | null {
+export function ageWords(
+  birthDate: string | null | undefined,
+  zone: Zone,
+  at: Date = new Date(),
+): string | null {
   if (!birthDate) return null
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: zone.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(at)
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at)
   const [y1, m1, d1] = birthDate.split("-").map(Number) as [number, number, number]
   const [y2, m2, d2] = today.split("-").map(Number) as [number, number, number]
   let years = y2 - y1
@@ -1472,13 +1741,60 @@ export function ageWords(birthDate: string | null | undefined, zone: Zone, at: D
 }
 
 const UNITS = [
-  "cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece",
-  "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve", "veinte", "veintiuno", "veintidós",
-  "veintitrés", "veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve",
+  "cero",
+  "uno",
+  "dos",
+  "tres",
+  "cuatro",
+  "cinco",
+  "seis",
+  "siete",
+  "ocho",
+  "nueve",
+  "diez",
+  "once",
+  "doce",
+  "trece",
+  "catorce",
+  "quince",
+  "dieciséis",
+  "diecisiete",
+  "dieciocho",
+  "diecinueve",
+  "veinte",
+  "veintiuno",
+  "veintidós",
+  "veintitrés",
+  "veinticuatro",
+  "veinticinco",
+  "veintiséis",
+  "veintisiete",
+  "veintiocho",
+  "veintinueve",
 ]
-const TENS = ["", "", "", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"]
+const TENS = [
+  "",
+  "",
+  "",
+  "treinta",
+  "cuarenta",
+  "cincuenta",
+  "sesenta",
+  "setenta",
+  "ochenta",
+  "noventa",
+]
 const HUNDREDS = [
-  "", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos",
+  "",
+  "ciento",
+  "doscientos",
+  "trescientos",
+  "cuatrocientos",
+  "quinientos",
+  "seiscientos",
+  "setecientos",
+  "ochocientos",
+  "novecientos",
 ]
 
 /** Un entero en letras, como se escribe en una receta: «nueve», «ciento veinte». */
@@ -1500,6 +1816,7 @@ export function numberInWords(value: number): string {
 }
 
 export function strokesOf(value: unknown): Strokes | null {
-  if (value && typeof value === "object" && "strokes" in value && Array.isArray(value.strokes)) return value.strokes as Strokes
+  if (value && typeof value === "object" && "strokes" in value && Array.isArray(value.strokes))
+    return value.strokes as Strokes
   return null
 }

@@ -10,8 +10,17 @@ import { DetailDrawer } from "@odentia/ui-patterns"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { type ComponentProps, useState } from "react"
-import { budgetNumberLabel, fetchBudgetDetail, PLAN_QUERY_KEYS, type PlanNextStep } from "../../../lib/budgets"
-import { fetchFollowUps, fetchTreatmentCoordination, type SchedulableControl } from "../../../lib/clinical-journey"
+import {
+  budgetNumberLabel,
+  fetchBudgetDetail,
+  PLAN_QUERY_KEYS,
+  type PlanNextStep,
+} from "../../../lib/budgets"
+import {
+  fetchFollowUps,
+  fetchTreatmentCoordination,
+  type SchedulableControl,
+} from "../../../lib/clinical-journey"
 import { usePermission } from "../../../lib/crm"
 import { openBookingAnywhere } from "../../agenda/schedule-host"
 import { FollowUpScheduler } from "../follow-up-scheduler"
@@ -36,7 +45,16 @@ export function NextStepButton({
   const action = step.action
   if (!action) return null
   if (step.kind === "enviar" && action.budgetId)
-    return <BudgetSendButton patientId={patient.id} budgetId={action.budgetId} showRecipient={false} size={size} variant={variant} reviewable />
+    return (
+      <BudgetSendButton
+        patientId={patient.id}
+        budgetId={action.budgetId}
+        showRecipient={false}
+        size={size}
+        variant={variant}
+        reviewable
+      />
+    )
   const onClick = () => {
     if ((step.kind === "agendar" || step.kind === "continuar") && action.planItemIds?.length) {
       openBookingAnywhere({
@@ -57,10 +75,18 @@ export function NextStepButton({
         {action.label}
       </Button>
       {open === "respuesta" && action.budgetId ? (
-        <BudgetAnswerDrawer patientId={patient.id} budgetId={action.budgetId} onClose={() => setOpen(null)} />
+        <BudgetAnswerDrawer
+          patientId={patient.id}
+          budgetId={action.budgetId}
+          onClose={() => setOpen(null)}
+        />
       ) : null}
       {open === "control" && action.followUpId ? (
-        <ScheduleControl patientId={patient.id} followUpId={action.followUpId} onClose={() => setOpen(null)} />
+        <ScheduleControl
+          patientId={patient.id}
+          followUpId={action.followUpId}
+          onClose={() => setOpen(null)}
+        />
       ) : null}
     </>
   )
@@ -89,7 +115,9 @@ export function BudgetAnswerDrawer({
   const runWrite = async <T,>(operation: () => Promise<T>): Promise<T> => {
     const result = await operation()
     await Promise.all([
-      ...PLAN_QUERY_KEYS.map((key) => queryClient.invalidateQueries({ queryKey: [key, patientId] })),
+      ...PLAN_QUERY_KEYS.map((key) =>
+        queryClient.invalidateQueries({ queryKey: [key, patientId] }),
+      ),
       queryClient.invalidateQueries({ queryKey: ["people"] }),
     ])
     onClose()
@@ -97,7 +125,10 @@ export function BudgetAnswerDrawer({
   }
   // El bloque ya se titula «¿Qué respondió?»: el cajón dice de qué presupuesto se trata.
   const description = budget
-    ? [budget.presentedAt ? format.day(budget.presentedAt) : null, format.money(budget.totalCents, budget.currency)]
+    ? [
+        budget.presentedAt ? format.day(budget.presentedAt) : null,
+        format.money(budget.totalCents, budget.currency),
+      ]
         .filter(Boolean)
         .join(" · ")
     : undefined
@@ -107,7 +138,9 @@ export function BudgetAnswerDrawer({
       title={budget ? budgetNumberLabel(budget.budgetNumber) : "Presupuesto"}
       description={description}
       isLoading={query.isPending}
-      error={query.isError ? "No se pudo leer el presupuesto. Ciérralo y vuelve a intentarlo." : null}
+      error={
+        query.isError ? "No se pudo leer el presupuesto. Ciérralo y vuelve a intentarlo." : null
+      }
       onClose={onClose}
       actions={
         <Link

@@ -1,20 +1,38 @@
 import { upperFirst } from "../../lib/product-words"
-import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { AgentMark, AgentSurface, ListeningIndicator, SubmitButton, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
+import { Button } from "@odentia/ui"
+import { AgentMark, AgentSurface, ListeningIndicator, submitForm, SubmitButton, useAppForm, useListeningStatus, useMicLevel } from "@odentia/ui-patterns"
 import { CircleAlert, Mic, Pause, Play, Square, TriangleAlert } from "lucide-react"
 import { seesBilling } from "@odentia/auth/permissions"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useRef, useState } from "react"
+import { z } from "zod"
 import { PLAN_PATH } from "../../lib/billing"
 import { useMyRole } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import { productUi } from "../../product/product-ui"
 import { CLINICAL_NAME } from "../../lib/agent-names"
-import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript } from "./dictation-session"
+import { DICTATION_KIND_LABEL, dictationClock, dictationErrorText, type DictationSession, type FailedSegment, highlightTranscript, suggestionText } from "./dictation-session"
 
 export type { DictationKind, DictationSuggestion } from "./dictation-session"
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
+
+/** Lo escrito en vez de dictado: los mismos límites que `dictateInput` de la API. */
+const typedSchema = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(3, "Escribe al menos 3 caracteres para que lo ordene.")
+    .max(12_000, "Escribe como mucho 12000 caracteres."),
+})
+
+/** «No pude confirmar «Caries en 16»: …», o el aviso general si no se sabe cuál. */
+function confirmReadyErrorText(session: DictationSession): string | null {
+  const message = dictationErrorText(session.confirmReady.error, "Alguna no se pudo confirmar. Revisa las que siguen en su bloque.")
+  const failed = session.confirmReadyFailed
+  if (!message || !failed) return message
+  return `No pude confirmar «${suggestionText(failed).title}» (${DICTATION_KIND_LABEL[failed.kind]}): ${message}`
+}
 
 const confirmReadyLabel = (ready: number) => (ready === 1 ? "Confirmar 1 lista" : `Confirmar las ${ready} listas`)
 
@@ -79,7 +97,16 @@ export function DictationPanel({
   onShowTranscript: () => void
 }) {
   const [typing, setTyping] = useState(false)
-  const [typed, setTyped] = useState("")
+  const typedRootRef = useRef<HTMLDivElement>(null)
+  const typedForm = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: typedSchema },
+    onSubmit: ({ value }) => {
+      session.submitTyped(value.text)
+      typedForm.reset({ text: "" })
+      setTyping(false)
+    },
+  })
   const role = useMyRole()
   const { mode, pending, ready } = session
   // Los bloques con sugerencias por revisar, con el nombre de su lista («Receta», «Plan de tratamiento»).
@@ -114,7 +141,7 @@ export function DictationPanel({
       ))}
       {session.confirmReady.isError ? (
         <p role="alert" className="text-sm text-destructive">
-          {dictationErrorText(session.confirmReady.error, "Alguna no se pudo confirmar. Revisa las que siguen en su bloque.")}
+          {confirmReadyErrorText(session)}
         </p>
       ) : null}
       {session.demo ? (
@@ -283,34 +310,29 @@ export function DictationPanel({
         </div>
       ) : null}
       {typing ? (
-        <div className="flex flex-col gap-2">
-          <Field>
-            <FieldLabel htmlFor="dictado-escrito">Escribe lo dictado</FieldLabel>
-            <Textarea
-              id="dictado-escrito"
-              rows={4}
-              maxLength={12_000}
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              placeholder={productUi().dictation?.placeholder}
-            />
-            <FieldDescription>
-              {session.canListen
-                ? "Si prefieres no usar el micrófono, escribe o pega aquí lo que dictarías."
-                : "Este navegador no reconoce la voz: escribe o pega aquí lo dictado."}
-            </FieldDescription>
-          </Field>
+        <div ref={typedRootRef} className="flex flex-col gap-2">
+          <typedForm.AppField name="text">
+            {(field) => (
+              <field.TextareaField
+                id="dictado-escrito"
+                label="Escribe lo dictado"
+                rows={4}
+                maxLength={12_000}
+                placeholder={productUi().dictation?.placeholder}
+                description={
+                  session.canListen
+                    ? "Si prefieres no usar el micrófono, escribe o pega aquí lo que dictarías."
+                    : "Este navegador no reconoce la voz: escribe o pega aquí lo dictado."
+                }
+              />
+            )}
+          </typedForm.AppField>
           <div className="flex flex-wrap gap-2">
             <SubmitButton
               type="button"
               className="min-h-11 sm:min-h-9"
               pending={session.organizing}
-              disabled={typed.trim().length < 3}
-              onClick={() => {
-                session.submitTyped(typed)
-                setTyped("")
-                setTyping(false)
-              }}
+              onClick={() => void submitForm(typedForm, { root: typedRootRef.current })}
             >
               Ordenar lo dictado
             </SubmitButton>

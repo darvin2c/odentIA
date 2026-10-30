@@ -1435,16 +1435,26 @@ const KIND_WORDS: Record<SaasPriceKey, string> = {
   almacenamiento: "El GB extra",
 }
 
+/** El precio de cada tipo, como se llama en el cuerpo del plan: el error se dice junto a ese precio. */
+const PRICE_FIELD_OF: Record<SaasPriceKey, string> = {
+  informa: "conversationInformMicros",
+  gestiona: "conversationMicros",
+  agenda: "conversationAgendaMicros",
+  simple: "consultationSimpleMicros",
+  estandar: "consultationStandardMicros",
+  completa: "consultationMicros",
+  cita: "recoveryMicros",
+  preguntas: "argosPackMicros",
+  almacenamiento: "storageGbMicros",
+}
+
 /** Lanza `SAAS_PRICE_BELOW_FLOOR` si algún precio queda bajo lo que exige la comprobación. */
 export function assertActionPricingFloor(plan: PlanPriceInput): void {
   const failed = checkActionPricing(plan).find((item) => !item.ok)
   if (!failed) return
   const price = new Intl.NumberFormat("es", { style: "currency", currency: plan.currency, maximumFractionDigits: 3 }).format((failed.minimumMicros ?? 0) / 1_000_000)
-  throw new ServiceError(
-    "SAAS_PRICE_BELOW_FLOOR",
-    409,
-    `${KIND_WORDS[failed.kind]} quedaría en ${price} con el descuento máximo: menos del doble de su peor costo. Sube el precio, baja el descuento máximo o deja ese precio sin descuento.`,
-  )
+  const message = `${KIND_WORDS[failed.kind]} quedaría en ${price} con el descuento máximo: menos del doble de su peor costo. Sube el precio, baja el descuento máximo o deja ese precio sin descuento.`
+  throw new ServiceError("SAAS_PRICE_BELOW_FLOOR", 409, message, { [PRICE_FIELD_OF[failed.kind]]: message })
 }
 
 /**
