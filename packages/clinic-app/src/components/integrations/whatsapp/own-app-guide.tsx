@@ -55,7 +55,9 @@ function GuideStep({ number, title, children }: { number: number; title: string;
 /**
  * Cómo crear la app de Meta de la clínica, de cero a publicada: seis pasos en
  * Meta, cada uno con el enlace a su página. Lo que Meta solo deja hacer por la
- * API (registrar el número, suscribir la app) no está aquí: lo hace el sistema.
+ * API (suscribir la app y registrar el número cuando su página no lo deja
+ * registrado) no está aquí: lo hace el sistema. Rutas y nombres de botones
+ * vistos en la página de Meta el 2026-10-29.
  */
 export function OwnAppGuide({ open, onClose }: { open: boolean; onClose: () => void }) {
   const name = appWords().name
@@ -78,18 +80,21 @@ export function OwnAppGuide({ open, onClose }: { open: boolean; onClose: () => v
           </GuideStep>
           <GuideStep number={2} title="Crear la app">
             <p>
-              «Crear app» (Create app) › caso de uso «Conectar con clientes a través de WhatsApp» › elige el portafolio del paso 1.
-              Ponle un nombre como «WhatsApp de la clínica».
+              «Crear app» (Create app) › ponle el nombre de la clínica, sin las palabras WhatsApp, Facebook ni Meta: Meta no deja usar
+              sus marcas. Caso de uso «Conectarte con los clientes a través de WhatsApp» › elige el portafolio del paso 1.
             </p>
             <MetaLink href={META.apps}>Abrir Meta for Developers</MetaLink>
           </GuideStep>
           <GuideStep number={3} title="Agregar el número de la clínica">
             <p>
-              En la app: WhatsApp › «Configuración de la API» (API Setup) › «Agregar número de teléfono». Escribe el nombre que verán
-              los pacientes y confirma con el código que llega por SMS o llamada. Si ese número hoy está en la aplicación WhatsApp de
-              un teléfono, Meta pide borrarlo ahí antes.
+              En la app: Casos de uso › «Personalizar» › «Paso 2: Configuración de producción» › «Registra tu número de teléfono de
+              WhatsApp» › «Agregar número de teléfono». Escribe el nombre que verán los pacientes y confirma con el código que llega
+              por SMS o llamada. Si ese número hoy está en la aplicación WhatsApp de un teléfono, Meta pide borrarlo ahí antes.
             </p>
-            <p>Registrar el número lo hace {name} por ti al pulsar «Comprobar».</p>
+            <p>
+              Ahí mismo quedan los dos identificadores que pide {name}: «Identificador de número de teléfono» y «Messaging Account
+              ID». Si Meta no deja el número registrado, {name} lo registra por ti al pulsar «Comprobar».
+            </p>
           </GuideStep>
           <GuideStep number={4} title="La forma de pago">
             <p>
@@ -99,13 +104,20 @@ export function OwnAppGuide({ open, onClose }: { open: boolean; onClose: () => v
             <MetaLink href={META.manager}>Abrir WhatsApp Manager</MetaLink>
           </GuideStep>
           <GuideStep number={5} title="La clave permanente">
-            <p>Configuración del negocio › «Usuarios del sistema» (System users) › «Agregar», con rol Administrador. Después:</p>
+            <p>
+              Configuración del negocio › «Usuarios del sistema» (System users) › «Agregar», con rol Administrador. Meta rechaza
+              nombres con muchas mayúsculas: usa una solo al inicio de cada palabra. Después:
+            </p>
             <ol className="flex list-[lower-alpha] flex-col gap-1 pl-5">
-              <li>«Asignar activos»: la app del paso 2 y la cuenta de WhatsApp, las dos con control total.</li>
               <li>
-                «Generar token»: elige la app, caducidad <strong className="font-semibold text-foreground">«Nunca»</strong> y marca
-                los tres permisos: <Scope>business_management</Scope> <Scope>whatsapp_business_management</Scope>{" "}
-                <Scope>whatsapp_business_messaging</Scope>
+                «Asignar activos», los dos con acceso total: en «Apps», la app del paso 2 con «Administrar app»; en «Messaging
+                accounts» › «Linked accounts», la cuenta de WhatsApp con «Todo». Sin la app asignada, el paso siguiente dice «No hay
+                permisos disponibles».
+              </li>
+              <li>
+                «Generar token»: elige la app, caducidad <strong className="font-semibold text-foreground">«Nunca»</strong> y marca{" "}
+                <Scope>whatsapp_business_management</Scope> <Scope>whatsapp_business_messaging</Scope>; también{" "}
+                <Scope>business_management</Scope> si aparece.
               </li>
               <li>Cópiala en ese momento: Meta no la vuelve a mostrar. Es la que pegas en «Clave de acceso permanente».</li>
             </ol>
@@ -113,8 +125,10 @@ export function OwnAppGuide({ open, onClose }: { open: boolean; onClose: () => v
           </GuideStep>
           <GuideStep number={6} title="Publicar la app">
             <p>
-              En la app: Configuración › «Básica» (Basic). Completa la dirección de la política de privacidad de la clínica, la
-              categoría y el ícono, y pulsa «Publicar». Sin publicar, Meta no avisa de los mensajes reales.
+              En la app: Configuración de la app › «Básica» (Basic). Completa la dirección de la política de privacidad de la
+              clínica, la categoría y el ícono, cuadrado y con fondo transparente: Meta rechaza el fondo blanco. Si pide
+              «Eliminación de datos de usuario», sirve la misma página de privacidad si explica cómo pedirlo. Pulsa «Guardar cambios»
+              y después, en el menú de la izquierda, «Publicar». Sin publicar, Meta no avisa de los mensajes reales.
             </p>
             <p>
               En esa misma página está la <strong className="font-semibold text-foreground">«Clave secreta de la app»</strong> (App

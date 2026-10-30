@@ -96,7 +96,7 @@ function WhereToFind() {
         <ul className="flex flex-col gap-1.5 rounded-xl bg-muted px-3.5 py-3 text-sm text-muted-foreground">
           <li>
             <strong className="font-semibold text-foreground">Los dos identificadores:</strong> en la app de Meta de la clínica,
-            en WhatsApp › «API Setup».
+            en «Paso 2: Configuración de producción» › «Registra tu número de teléfono de WhatsApp».
           </li>
           <li>
             <strong className="font-semibold text-foreground">La clave de acceso permanente:</strong> en la configuración del
@@ -295,6 +295,7 @@ function AddressStep({
       ) : null}
       <div className="flex flex-col gap-1 rounded-xl border px-3.5 py-3 text-sm">
         <strong className="font-semibold">Después marca tres avisos</strong>
+        <span className="text-muted-foreground">Meta no los marca solo: en «Campos del webhook», activa «Suscribirse» en cada fila.</span>
         <span className="text-muted-foreground">«messages», para recibir lo que escriben.</span>
         <span className="text-muted-foreground">«message_template_status_update», para saber cuándo WhatsApp aprueba un mensaje.</span>
         <span className="text-muted-foreground">«template_category_update», para saber si WhatsApp cuenta un aviso como promoción.</span>
@@ -371,8 +372,8 @@ function FirstMessageStep({
               </Button>
             </li>
             <li>
-              <strong className="font-semibold text-foreground">¿Marcaste «messages»?</strong> En WhatsApp › Configuración › Webhooks,
-              la fila «messages» debe estar suscrita.
+              <strong className="font-semibold text-foreground">¿Marcaste «messages»?</strong> En «Paso 2: Configuración de
+              producción» › «Configurar webhooks», la fila «messages» debe decir «Suscritos».
             </li>
             <li>
               <strong className="font-semibold text-foreground">¿Escribiste al número correcto?</strong> Desde otro teléfono, al número
@@ -507,7 +508,7 @@ export function WhatsAppConnectSteps({
           summary={
             stateOf(2) === "done"
               ? "Meta verificó la dirección."
-              : "Copia estos dos valores en tu app de Meta, en WhatsApp › Configuración."
+              : "Copia estos dos valores en tu app de Meta, en «Paso 2: Configuración de producción» › «Configurar webhooks»."
           }
         >
           <AddressStep

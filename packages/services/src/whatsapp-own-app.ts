@@ -146,7 +146,7 @@ function registerProblem(error: unknown, attemptsLeft: number): { text: string; 
   switch (error.code) {
     case 133006:
       return {
-        text: "Meta aún no verificó el número: confírmalo con el código por SMS o llamada en tu app de Meta (WhatsApp › Configuración de la API) y vuelve a comprobar.",
+        text: "Meta aún no verificó el número: confírmalo con el código por SMS o llamada en tu app de Meta («Paso 2: Configuración de producción» › «Registra tu número de teléfono de WhatsApp») y vuelve a comprobar.",
         pinNeeded: false,
       }
     case 133008:
