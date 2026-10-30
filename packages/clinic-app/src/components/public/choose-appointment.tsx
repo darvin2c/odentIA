@@ -1,6 +1,6 @@
 import { clinicalProfileFor } from "@odentia/clinical"
 import { Button, cn, ScrollArea } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PersonAvatar, SubmitButton } from "@odentia/ui-patterns"
+import { applySubmitError, clearSubmitErrors, EmptyState, ErrorState, LoadingState, PersonAvatar, SubmitButton, submitForm, useFormSubmitError } from "@odentia/ui-patterns"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CalendarX, Check, ChevronLeft, ChevronRight, MapPin, Users } from "lucide-react"
 import { type ReactNode, useEffect, useId, useRef, useState } from "react"
@@ -20,21 +20,7 @@ import {
   reserveBooking,
 } from "../../lib/booking-link"
 import { activeOrgLocale, activeOrgTimeZone } from "../../lib/locale"
-import {
-  type BookingDataDraft,
-  BookingDataForm,
-  checkYou,
-  emptyBookingDataDraft,
-  emptyYouDraft,
-  focusFirstYouError,
-  PromotionsQuestion,
-  type YouDraft,
-  type YouErrors,
-  youFieldsOf,
-  youInput,
-  youPromotionsId,
-  YouReview,
-} from "../booking-data-form"
+import { type BookingDataDraft, BookingDataForm, checkYou, emptyBookingDataDraft, PromotionsQuestion, useYouForm, YouReview, youFieldsOf, youInput, youPromotionsId } from "../booking-data-form"
 import { capital, hourOf, longDay, timeLabel, type WeekSlot } from "./week-slots"
 
 /**
@@ -61,6 +47,14 @@ const SLOT_TAKEN = ["APPOINTMENT_CONFLICT", "NO_ROOM", "STALE_VERSION", "VALIDAT
 const EXPIRED_TEXT = "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo."
 
 const slotTaken = (error: unknown): boolean => error instanceof ApiError && SLOT_TAKEN.includes(error.shape.code ?? "")
+
+/** Lo que se dice junto a los botones si no se pudo reservar (la hora ocupada se dice al volver a elegirla). */
+function actionWords(error: unknown): string {
+  if (!(error instanceof ApiError)) return "No pudimos reservar. Revisa tu conexión y vuelve a intentarlo."
+  if (LINK_ENDED.includes(error.shape.code ?? "")) return error.shape.message ?? EXPIRED_TEXT
+  return error.shape.message ?? "No pudimos reservar. Vuelve a intentarlo."
+}
+const RESERVE_SUBMIT = { formMessage: actionWords }
 
 /** «hoy», «mañana» o «martes, 3 de noviembre». */
 function dayWords(instant: string, timeZone: string): string {
@@ -197,9 +191,6 @@ export function ChooseAppointment({
   const [jumped, setJumped] = useState<string | null>(null)
   const [registered, setRegistered] = useState(false)
   const [dataDraft, setDataDraft] = useState<BookingDataDraft>(emptyBookingDataDraft)
-  // Quien ya es paciente: lo que le falta y lo que acepta, también al cambiar o agendar (novedades).
-  const [youDraft, setYouDraft] = useState<YouDraft>(emptyYouDraft)
-  const [youErrors, setYouErrors] = useState<YouErrors>({})
   // Su respuesta a novedades ya se guardó (al cambiar o agendar): no se vuelve a enviar si la hora falla.
   const [promotionsSaved, setPromotionsSaved] = useState(false)
   const [submissionId] = useState(() => crypto.randomUUID())
@@ -345,42 +336,29 @@ export function ChooseAppointment({
       goTo("cuando")
     },
   })
-  /** «Reservar mi cita», «Reservar» o «Cambiar mi cita»: lo que falta se dice junto al campo, sin enviar. */
+  // Quien ya es paciente: lo que le falta y lo que acepta, también al cambiar o agendar (novedades). Vive en
+  // la página, como lo de quien es nueva: no se pierde al volver a elegir la hora. Lo que falta se dice junto al campo.
+  const youForm = useYouForm({
+    validate: (value) =>
+      asksYou ? checkYou(value, youFields, view.pending, profile) : asksPromotions && value.promotions === null ? { promotions: "Elige una opción" } : {},
+    submit: async (value) => {
+      if (!slot) return
+      const input = asksYou
+        ? { chosen: slot, you: youInput(value, youFields, view.pending, profile) }
+        : { chosen: slot, ...(asksPromotions && value.promotions !== null ? { promotions: value.promotions } : {}) }
+      // La hora ocupada la resuelve `act` (vuelve a elegir); lo demás se dice junto a los botones.
+      await act.mutateAsync(input).catch((error: unknown) => {
+        if (!slotTaken(error)) throw error
+      })
+    },
+  })
+  const actionError = useFormSubmitError(youForm)
+  const reviewRoot = useRef<HTMLElement>(null)
+  /** «Reservar mi cita», «Reservar» o «Cambiar mi cita». */
   const confirm = () => {
     if (!slot || act.isPending) return
-    if (asksYou) {
-      const found = checkYou(youDraft, youFields, view.pending, profile)
-      setYouErrors(found)
-      if (focusFirstYouError(found)) return
-      act.mutate({ chosen: slot, you: youInput(youDraft, youFields, view.pending, profile) })
-      return
-    }
-    if (asksPromotions && youDraft.promotions === null) {
-      const found: YouErrors = { promotions: "Elige una opción" }
-      setYouErrors(found)
-      focusFirstYouError(found)
-      return
-    }
-    act.mutate({ chosen: slot, ...(asksPromotions && youDraft.promotions !== null ? { promotions: youDraft.promotions } : {}) })
+    void submitForm(youForm, { ...RESERVE_SUBMIT, root: reviewRoot.current })
   }
-  const changeYou = (patch: Partial<YouDraft>, ...cleared: Array<keyof YouErrors>) => {
-    setYouDraft((previous) => ({ ...previous, ...patch }))
-    if (cleared.some((key) => youErrors[key])) {
-      setYouErrors((previous) => {
-        const next = { ...previous }
-        for (const key of cleared) delete next[key]
-        return next
-      })
-    }
-  }
-  const actionError =
-    act.error && !slotTaken(act.error)
-      ? act.error instanceof ApiError
-        ? LINK_ENDED.includes(act.error.shape.code ?? "")
-          ? (act.error.shape.message ?? EXPIRED_TEXT)
-          : (act.error.shape.message ?? "No pudimos reservar. Vuelve a intentarlo.")
-        : "No pudimos reservar. Revisa tu conexión y vuelve a intentarlo."
-      : null
 
   const chooseBranch = (id: string) => {
     if (id !== branchId) {
@@ -608,7 +586,7 @@ export function ChooseAppointment({
       ) : null}
 
       {step === "revisa" && slot ? (
-        <section className="flex w-full flex-col gap-4 lg:mx-auto lg:max-w-2xl">
+        <section ref={reviewRoot} className="flex w-full flex-col gap-4 lg:mx-auto lg:max-w-2xl">
           <h2 ref={stepTitle} tabIndex={-1} className="text-lg font-semibold outline-none">
             {stepName.revisa}
           </h2>
@@ -640,7 +618,15 @@ export function ChooseAppointment({
               onRegistered={() => {
                 setRegistered(true)
                 void queryClient.invalidateQueries({ queryKey: ["booking-link", slug, token] })
-                act.mutate({ chosen: slot })
+                clearSubmitErrors(youForm)
+                act.mutate(
+                  { chosen: slot },
+                  {
+                    onError: (error) => {
+                      if (!slotTaken(error)) applySubmitError(youForm, error, RESERVE_SUBMIT)
+                    },
+                  },
+                )
               }}
             />
           ) : asksYou && view.you ? (
@@ -648,9 +634,7 @@ export function ChooseAppointment({
               you={view.you}
               fields={youFields}
               pending={view.pending}
-              draft={youDraft}
-              errors={youErrors}
-              onChange={changeYou}
+              form={youForm}
               profile={profile}
               today={today}
               countryCode={view.countryCode}
@@ -667,13 +651,7 @@ export function ChooseAppointment({
                     : "Ya tenemos tus datos: no te pedimos nada más. Te escribiremos por WhatsApp sobre esta cita: la confirmación, los recordatorios y los cambios."}
               </p>
               {asksPromotions ? (
-                <PromotionsQuestion
-                  id={youPromotionsId}
-                  clinicName={view.clinicName}
-                  value={youDraft.promotions}
-                  error={youErrors.promotions}
-                  onChange={(promotions) => changeYou({ promotions }, "promotions")}
-                />
+                <youForm.AppField name="promotions">{() => <PromotionsQuestion id={youPromotionsId} clinicName={view.clinicName} />}</youForm.AppField>
               ) : null}
             </>
           )}
