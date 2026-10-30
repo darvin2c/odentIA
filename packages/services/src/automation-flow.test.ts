@@ -1785,7 +1785,7 @@ describe("«Esperan su sí» y «Confirmó por teléfono» (decisión 21)", () =
     const done = await run(c, (tx) => confirmProposalByPhone(tx, c.orgId, c.ownerId, proposal.id))
     expect(done.status).toBe("ejecutada")
     const booked = await ownerDb.select().from(appointment).where(eq(appointment.patientId, p.patientId))
-    expect(booked).toMatchObject([{ startsAt, roomId: c.roomId, professionalUserId: c.professionalId, status: "programada" }])
+    expect(booked).toMatchObject([{ startsAt, roomId: c.roomId, professionalUserId: c.professionalId, status: "confirmada" }])
     expect(await run(c, (tx) => listAwaitingAnswer(tx, c.orgId))).toEqual({ items: [], total: 0 })
     // Otra persona: le proponen el mismo horario, que ya no está libre.
     const other = await person(c, "Ana Gómez", { openWindow: true })

@@ -1184,7 +1184,8 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.durationMin).toBe(45)
   expect(booked.startsAt.toISOString()).toBe(optionStart)
   expect(booked.endsAt.toISOString()).toBe(new Date(Date.parse(optionStart) + durationMin * 60_000).toISOString())
-  expect(booked.status).toBe("programada")
+  // La eligió la persona con su sí: nace confirmada (ADR 0109).
+  expect(booked.status).toBe("confirmada")
 })
 
 it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el aviso a la vista (ADR 0101)", async () => {
@@ -1776,7 +1777,7 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   expect(seen[seen.length - 1]?.getType()).toBe("system")
   const booked = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
-  expect(booked).toEqual([{ status: "programada" }])
+  expect(booked).toEqual([{ status: "confirmada" }])
   const runs = await ledgerRows(conversationId)
   expect(runs[runs.length - 1]?.toolsUsed).toEqual(["confirmar_propuesta", "send_reply"])
   expect(await agentMessages(conversationId)).toContain("Listo, tu cita quedó reservada.")
