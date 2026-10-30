@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto"
 import { channelAdapters, type OutboundMessage, ProviderRejectedError, ProviderThrottledError } from "@odentia/channels"
-import { type Db, type OutboundMessageJob, type QueueMessage, withOrgContext } from "@odentia/db"
+import { type Db, type OutboundMessageJob, type QueueMessage, sendOutboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { decryptConfig, isSaasSendBlocked, resolvePersonalLinkRefs, type Storage } from "@odentia/services"
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, lt, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 export interface SendDeps {
   storage: Storage
@@ -107,14 +107,14 @@ function replyButtonsOf(value: unknown): { id: string; title: string }[] | null 
  * contestado que no lo acepta (`ProviderRejectedError`): no salió y queda como
  * no entregado, con su motivo. Si lo frenó un límite de ritmo
  * (`ProviderThrottledError`) sigue en cola y se reintenta más tarde, hasta el
- * tope de entregas; mientras espera, otro mensaje de la conversación puede
- * salir antes que él.
+ * tope de entregas. Los mensajes de una conversación salen en orden: mientras
+ * uno anterior sigue en cola, este lo espera (`waiting`).
  */
 export async function processOutbound(
   db: Db,
   deps: SendDeps,
   msg: QueueMessage<OutboundMessageJob>,
-): Promise<"done" | "retry" | "deferred" | "throttled"> {
+): Promise<"done" | "retry" | "deferred" | "throttled" | "waiting"> {
   const { orgId, messageId } = msg.message
   // Restricción/pausa comercial: no se envía, no se pierde, no cuenta como
   // fallo (sale por "deferred" con VT largo; el reintento envenenado tampoco
@@ -133,6 +133,7 @@ export async function processOutbound(
   }
   let providerAttempted = false
   let conversationId: string | null = null
+  let waiting = false
   try {
     await withOrgContext(db, orgId, async (tx) => {
       const [row] = await tx
@@ -153,6 +154,27 @@ export async function processOutbound(
           .update(message)
           .set({ status: "failed", error: "connection-disabled" })
           .where(eq(message.id, messageId))
+        return
+      }
+      // En orden: uno anterior de la conversación que sigue en cola (frenado
+      // por un límite de ritmo, por reintentar o esperando a otro) sale
+      // primero. Solo si aún tiene su trabajo en la cola: uno que lo perdió no
+      // frena la conversación, y los que lo tienen terminan al tope de entregas.
+      const [ahead] = await tx
+        .select({ id: message.id })
+        .from(message)
+        .where(
+          and(
+            eq(message.conversationId, row.conversation.id),
+            eq(message.direction, "out"),
+            eq(message.status, "queued"),
+            lt(message.createdAt, row.message.createdAt),
+            sql`exists (select 1 from pgmq.q_outbound_messages q where q.message->>'messageId' = ${message.id}::text)`,
+          ),
+        )
+        .limit(1)
+      if (ahead) {
+        waiting = true
         return
       }
       const built: OutboundMessage = await buildOutbound(row, deps)
@@ -194,7 +216,7 @@ export async function processOutbound(
         at: new Date().toISOString(),
       })
     })
-    return "done"
+    return waiting ? "waiting" : "done"
   } catch (error) {
     if (providerAttempted) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -271,11 +293,22 @@ export async function consumeOutbound(
     // alguien reanuda y reencola). El mensaje queda `queued` hasta entonces.
     await db.execute(sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, 21600)`)
   } else if (verdict === "throttled") {
+    // Con su tipo: pgmq también tiene `set_vt` con una hora en vez de segundos.
     await db.execute(
-      sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, ${throttledDelaySeconds(msg.read_ct)})`,
+      sql`select pgmq.set_vt('outbound_messages', ${Number(msg.msg_id)}::bigint, ${throttledDelaySeconds(msg.read_ct)}::integer)`,
     )
+  } else if (verdict === "waiting") {
+    // Esperar a otro no gasta sus entregas: vuelve a la cola desde cero, en la
+    // misma transacción que suelta la lectura de ahora.
+    await db.transaction(async (tx) => {
+      await sendOutboundMessage(tx, msg.message, { delaySeconds: WAITING_DELAY_SECONDS })
+      await tx.execute(sql`select pgmq.delete('outbound_messages', ${Number(msg.msg_id)}::bigint)`)
+    })
   }
 }
+
+/** Cada cuánto vuelve a mirar un mensaje que espera a otro de su conversación. */
+export const WAITING_DELAY_SECONDS = 30
 
 /**
  * Cuánto espera un envío frenado por un límite de ritmo antes de volver a

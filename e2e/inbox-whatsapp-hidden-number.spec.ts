@@ -8,7 +8,7 @@ import { gotoHydrated } from "./hydration"
 
 /**
  * Quien usa nombre de usuario en WhatsApp puede ocultar su número: Meta manda
- * solo su BSUID (ADR 0108). Antes la conversación quedaba en «wa:undefined» y
+ * solo su BSUID (ADR 0110). Antes la conversación quedaba en «wa:undefined» y
  * la respuesta no salía. Sin proveedor: no acredita que WhatsApp entregue nada.
  */
 

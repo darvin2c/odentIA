@@ -66,9 +66,16 @@ export interface QueueMessage<T> {
 export function sendInboundMessage(db: Db, payload: InboundMessageJob): Promise<string> {
   return sendTo(db, "inbound_messages", payload)
 }
-/** Encola un mensaje out pendiente de envío al proveedor. */
-export function sendOutboundMessage(db: Db, payload: OutboundMessageJob): Promise<string> {
-  return sendTo(db, "outbound_messages", payload)
+/**
+ * Encola un mensaje out pendiente de envío al proveedor. `delaySeconds` lo
+ * hace visible más tarde: el que espera a otro de su conversación.
+ */
+export function sendOutboundMessage(
+  db: Db,
+  payload: OutboundMessageJob,
+  options: { delaySeconds?: number } = {},
+): Promise<string> {
+  return sendTo(db, "outbound_messages", payload, options.delaySeconds)
 }
 
 /**
