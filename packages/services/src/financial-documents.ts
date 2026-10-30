@@ -1213,6 +1213,8 @@ export async function sendFinancialDocument(
       actorUserId,
       memberRole,
       recipientContactId: recipient.contactId,
+      // Una dirección escrita, sin verificar: nada clínico ni su enlace personal.
+      unverifiedAddress: !!otherEmail,
     })
     pdf = await renderBudgetPdf(snap, input.paper ?? null)
     filename = asciiFilename(
@@ -1477,7 +1479,7 @@ export async function getFinancialDocumentPdf(
   input: { documentType: string; documentId: string; paper?: string | null },
   /** Quién lo pide: un odontólogo solo obtiene presupuestos de sus planes. */
   actor: { actorUserId?: string; memberRole?: string } = {},
-): Promise<{ bytes: Uint8Array; filename: string }> {
+): Promise<{ bytes: Uint8Array; filename: string; carriesClinical?: boolean }> {
   const documentType = assertDocumentType(input.documentType)
   if (documentType === "return") {
     const done = await renderReturnPdf(tx, orgId, patientId, input.documentId, input.paper ?? null)
@@ -1494,5 +1496,6 @@ export async function getFinancialDocumentPdf(
   return {
     bytes: await renderBudgetPdf(snap, input.paper ?? null),
     filename: asciiFilename(`Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`),
+    carriesClinical: snap.carriesClinical,
   }
 }

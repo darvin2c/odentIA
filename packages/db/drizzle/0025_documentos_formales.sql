@@ -4,6 +4,8 @@ ALTER TABLE "service_catalog" ADD COLUMN "patient_guide_reviewed_by" text;--> st
 ALTER TABLE "treatment_budget" ADD COLUMN "valid_until" date;--> statement-breakpoint
 ALTER TABLE "treatment_budget" ADD COLUMN "findings" text;--> statement-breakpoint
 ALTER TABLE "treatment_budget" ADD COLUMN "proposal" text;--> statement-breakpoint
+ALTER TABLE "treatment_budget" ADD COLUMN "delivered_snapshot" jsonb;--> statement-breakpoint
+ALTER TABLE "treatment_budget" ADD COLUMN "decided_via" text;--> statement-breakpoint
 ALTER TABLE "treatment_budget_item" ADD COLUMN "patient_guide" jsonb;--> statement-breakpoint
 ALTER TABLE "treatment_budget_option" ADD COLUMN "name" text;--> statement-breakpoint
 ALTER TABLE "treatment_budget_option" ADD COLUMN "pros" text;--> statement-breakpoint
@@ -13,6 +15,7 @@ ALTER TABLE "org_profile" ADD COLUMN "budget_valid_days" smallint DEFAULT 30 NOT
 ALTER TABLE "org_profile" ADD COLUMN "budget_payment_terms" text DEFAULT 'Cada tratamiento se paga cuando se realiza. Puede dejar un adelanto, que se descuenta de lo siguiente que deba.';--> statement-breakpoint
 ALTER TABLE "org_profile" ADD COLUMN "budget_change_terms" text DEFAULT 'Solo por algo que no se podía ver antes de empezar. Se le explica y le entregamos un presupuesto nuevo para que decida; nada se cobra sin su aceptación.';--> statement-breakpoint
 ALTER TABLE "service_catalog" ADD CONSTRAINT "service_catalog_patient_guide_reviewed_by_user_id_fk" FOREIGN KEY ("patient_guide_reviewed_by") REFERENCES "auth"."user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "treatment_budget" ADD CONSTRAINT "treatment_budget_decided_via_check" CHECK ("treatment_budget"."decided_via" IS NULL OR "treatment_budget"."decided_via" IN ('enlace','portal','conversacion','clinica'));--> statement-breakpoint
 ALTER TABLE "org_profile" ADD CONSTRAINT "org_profile_budget_valid_days_check" CHECK ("org_profile"."budget_valid_days" BETWEEN 1 AND 365);--> statement-breakpoint
 -- latidIA habla de atenciones: sus clínicas de hoy y las nuevas parten de esa
 -- misma frase. El texto de cada clínica se edita en su perfil.
@@ -61,7 +64,7 @@ CREATE FUNCTION public.treatment_budget_delivered_guard() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-  IF OLD.status <> 'borrador' AND (NEW.valid_until, NEW.findings, NEW.proposal) IS DISTINCT FROM (OLD.valid_until, OLD.findings, OLD.proposal) THEN
+  IF OLD.status <> 'borrador' AND (NEW.valid_until, NEW.findings, NEW.proposal, NEW.delivered_snapshot) IS DISTINCT FROM (OLD.valid_until, OLD.findings, OLD.proposal, OLD.delivered_snapshot) THEN
     RAISE EXCEPTION 'Lo entregado en el presupuesto no cambia';
   END IF;
   RETURN NEW;

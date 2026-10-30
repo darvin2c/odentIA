@@ -201,11 +201,13 @@ export function loadProcedureLists() {
 /**
  * Los textos sugeridos de la biblioteca (`seeds/biblioteca_explicaciones.json`,
  * `{ "<key>": PatientGuide }`). Fail closed antes de tocar la base: una clave
- * que no es de ninguna biblioteca o un texto vacío es un error del archivo.
+ * que no es de ninguna biblioteca o un texto vacío es un error del archivo. Sembrar
+ * una sola biblioteca (`partial`) ignora las claves de las demás.
  */
 export function loadPatientGuides(
   keys: readonly string[],
   raw?: string,
+  options: { partial?: boolean } = {},
 ): Map<string, PatientGuide> {
   const content =
     raw ?? readFileSync(join(here, "..", "seeds", "biblioteca_explicaciones.json"), "utf8")
@@ -216,10 +218,12 @@ export function loadPatientGuides(
   const known = new Set(keys)
   const guides = new Map<string, PatientGuide>()
   for (const [key, value] of Object.entries(parsed)) {
-    if (!known.has(key))
+    if (!known.has(key)) {
+      if (options.partial) continue
       throw new Error(
         `biblioteca_explicaciones.json: la clave «${key}» no es de ninguna biblioteca`,
       )
+    }
     const guide = parsePatientGuide(value)
     if (!guide)
       throw new Error(`biblioteca_explicaciones.json: la explicación de «${key}» está vacía`)
@@ -252,6 +256,8 @@ export interface PreparedLibrary {
 export async function seedProcedureCodes(
   db: Db,
   libraries: CatalogLibrary | readonly CatalogLibrary[] = [],
+  /** `partial: false`: son todas las bibliotecas, y una clave ajena de las explicaciones es un error. */
+  options: { partial?: boolean } = {},
 ): Promise<ProcedureCodesSeedResult> {
   const lists = loadProcedureLists()
   const { systems, releases, codesBySystem, products } = lists
@@ -261,7 +267,9 @@ export async function seedProcedureCodes(
   if (new Set(allKeys).size !== allKeys.length)
     throw new Error("Una clave de tratamiento se repite entre bibliotecas")
   const patientGuides =
-    prepared.length > 0 ? loadPatientGuides(allKeys) : new Map<string, PatientGuide>()
+    prepared.length > 0
+      ? loadPatientGuides(allKeys, undefined, { partial: options.partial !== false })
+      : new Map<string, PatientGuide>()
   const seededProducts = prepared.map((library) => library.product)
   const mappingsOf = (system: string) =>
     prepared.length > 0
@@ -373,7 +381,7 @@ export async function seedProcedureCodes(
     // toca el de ninguna clínica: el servicio guarda su propia copia al revisarlo.
     if (prepared.length > 0) {
       await tx.execute(
-        sql`update "catalog"."treatment_template" set "patient_guide" = null where "patient_guide" is not null`,
+        sql`update "catalog"."treatment_template" set "patient_guide" = null where "patient_guide" is not null and "product" in (${sql.join(seededProducts.map((product) => sql`${product}`), sql`, `)})`,
       )
       for (const [key, guide] of patientGuides) {
         await tx.execute(

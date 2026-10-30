@@ -125,6 +125,13 @@ export async function renderConsentPdf(
   const { document: doc } = data
   const zone = clinic
   const kit = await consentKit(data, clinic)
+  // Anulado antes de firmarse: lo que se iba a consentir, con su sello y sin firmas.
+  if (doc.status === "anulado") {
+    kit.gap(14)
+    kit.stateBox({ kind: "alert", title: "ANULADO", detail: doc.cancelReason ? `Motivo: ${doc.cancelReason}` : null })
+    consentBody(kit, data)
+    return kit.finish()
+  }
   if (revocation && doc.status === "revocado") {
     kit.gap(14)
     kit.stateBox({

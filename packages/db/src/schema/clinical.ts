@@ -1354,6 +1354,13 @@ export const treatmentPlan = pgTable(
  * actual; el contenido cotizado vive en `treatment_budget_item` (snapshot),
  * no en un join mutable a la oferta vigente. Un solo borrador por persona
  * (salvo el de una revisión): crece con cada atención (decisión 12). */
+/** Lo que se congela al entregar un presupuesto (ADR 0112). */
+export interface BudgetDeliveredSnapshot {
+  terms: { payment: string | null; change: string | null }
+  paymentMethods: string[]
+  consents: Array<{ title: string; risks: string[]; alternatives: string[]; consequences: string }>
+}
+
 export const treatmentBudget = pgTable(
   "treatment_budget",
   {
@@ -1381,14 +1388,22 @@ export const treatmentBudget = pgTable(
     /** «Lo que encontramos» y «Lo que le proponemos»: los escribe el profesional. */
     findings: text("findings"),
     proposal: text("proposal"),
+    /** Lo vigente al entregar: condiciones, medios de pago y lo que pesa de los consentimientos. Lo entregado no cambia. */
+    deliveredSnapshot: jsonb("delivered_snapshot").$type<BudgetDeliveredSnapshot>(),
     acceptedByName: text("accepted_by_name"),
     decisionNote: text("decision_note"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     decidedBy: text("decided_by").references(() => user.id),
+    /** Por dónde respondió: 'enlace', 'portal', 'conversacion' o 'clinica'. Nulo en lo decidido antes. */
+    decidedVia: text("decided_via"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
   (table) => [
+    check(
+      "treatment_budget_decided_via_check",
+      sql`${table.decidedVia} IS NULL OR ${table.decidedVia} IN ('enlace','portal','conversacion','clinica')`,
+    ),
     uniqueIndex("treatment_budget_org_number_uidx").on(
       table.organizationId,
       table.budgetNumber,

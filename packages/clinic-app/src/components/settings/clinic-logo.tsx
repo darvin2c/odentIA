@@ -43,7 +43,8 @@ export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: 
     validators: { onSubmit: logoSchema },
     onSubmit: async ({ value }) => {
       if (!value.file) return
-      const { blob, ext } = await renderAdjustedImage(value.file)
+      // En PNG: también sale en los documentos, y estos no leen WebP.
+      const { blob, ext } = await renderAdjustedImage(value.file, undefined, { png: true })
       const body = new FormData()
       body.append("file", blob, `logo.${ext}`)
       const slug = orgSlugFromHostname(window.location.hostname)
@@ -101,6 +102,9 @@ export function ClinicLogoSettings({ logo, name }: { logo: string | null; name: 
           ) : null}
         </div>
       </div>
+      {logo && /\.webp(\?|$)/i.test(logo) ? (
+        <p className="text-sm text-muted-foreground">Vuelve a subir el logo para que salga en los documentos.</p>
+      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}

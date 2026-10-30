@@ -171,6 +171,17 @@ export function createFinancialDocumentsRoute(
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const patientId = c.req.param("id")
     try {
+      // Como al enviarlo: si al firmar no se pudo guardar su PDF, se guarda ahora (una sola
+      // vez). Si tampoco se puede, se ve igual, generado al vuelo y sin guardarlo.
+      if (parsed.data.documentType === "consent") {
+        await generateConsentPdf({
+          run: (fn) => withOrgContext(deps.db, orgId, fn),
+          storage: deps.storage,
+          orgId,
+          userId,
+          consentId: parsed.data.documentId,
+        }).catch(() => null)
+      }
       const pdf = await withOrgContext(deps.db, orgId, (tx) =>
         renderHealthDocumentPdf(
           tx,
@@ -179,6 +190,7 @@ export function createFinancialDocumentsRoute(
           parsed.data.documentType,
           parsed.data.documentId,
           deps.storage,
+          { viewing: true },
         ),
       )
       await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "documentos" })
@@ -211,6 +223,9 @@ export function createFinancialDocumentsRoute(
           memberRole,
         }),
       )
+      if (pdf.carriesClinical) {
+        await traceClinicalRead(deps.db, { orgId, userId, patientId: c.req.param("id"), resource: "documentos" })
+      }
       return c.body(Buffer.from(pdf.bytes), 200, {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="${pdf.filename}"`,

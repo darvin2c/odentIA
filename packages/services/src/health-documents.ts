@@ -26,7 +26,7 @@ import {
   renderOrderPdf,
   renderPrescriptionPdf,
 } from "./clinical-papers.js"
-import { renderConsentPaperPdf } from "./consent-pdf.js"
+import { renderConsentPaperPdf, renderConsentPdf } from "./consent-pdf.js"
 import { type CheckableDocument, documentCheckUrl } from "./document-check.js"
 import { loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
@@ -254,6 +254,8 @@ export async function renderHealthDocumentPdf(
   documentId: string,
   /** Para leer el consentimiento guardado; receta y orden no lo usan. */
   storage: Pick<Storage, "getAttachment"> = {},
+  /** Para verlo el equipo: lo que no tiene PDF guardado se genera al vuelo, sin guardarlo. */
+  options: { viewing?: boolean } = {},
 ): Promise<{ bytes: Uint8Array; filename: string; label: string }> {
   const context = async () => ({
     clinic: await loadDocumentClinic(tx, orgId),
@@ -294,8 +296,21 @@ export async function renderHealthDocumentPdf(
       label: `Consentimiento · ${doc.titleSnapshot}`,
     }
   }
+  const named = {
+    filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+    label: `Consentimiento · ${doc.titleSnapshot}`,
+  }
+  // Revocado, el que se ve es el de la revocación: dice que ya no vale.
+  const revoked = options.viewing && doc.status === "revocado"
+  const storedId = revoked ? (doc.revokePdfDocumentId ?? null) : doc.pdfDocumentId
+  const storedSha = revoked ? (doc.revokePdfSha256 ?? null) : doc.pdfSha256
+  if (options.viewing && (!storedId || !storedSha)) {
+    // Un anulado nunca tuvo PDF; un firmado cuyo guardado falló no traba a quien lo abre.
+    const clinic = await loadDocumentClinic(tx, orgId)
+    return { ...named, bytes: await renderConsentPdf(data, clinic) }
+  }
   // Se envía el PDF que se guardó al firmar, no uno nuevo: es el de la huella (#47).
-  if (!doc.pdfDocumentId || !doc.pdfSha256)
+  if (!storedId || !storedSha)
     throw new ServiceError(
       "CONSENT_PDF_MISSING",
       409,
@@ -307,12 +322,12 @@ export async function renderHealthDocumentPdf(
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
     .where(
-      and(eq(patientDocument.id, doc.pdfDocumentId), eq(patientDocument.organizationId, orgId)),
+      and(eq(patientDocument.id, storedId), eq(patientDocument.organizationId, orgId)),
     )
     .limit(1)
   if (!file) throw notFound("PDF del consentimiento")
   const bytes = await storage.getAttachment(file.storageKey)
-  if (createHash("sha256").update(bytes).digest("hex") !== doc.pdfSha256)
+  if (createHash("sha256").update(bytes).digest("hex") !== storedSha)
     throw new ServiceError(
       "CONSENT_PDF_ALTERED",
       409,

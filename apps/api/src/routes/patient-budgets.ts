@@ -29,6 +29,7 @@ import {
 import type { Context } from "hono"
 import { Hono } from "hono"
 import { z } from "zod"
+import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
@@ -254,15 +255,19 @@ export function createPatientBudgetsRoute(deps: Pick<CrmDeps, "db" | "storage" |
 
   app.get("/:id/budgets/:budgetId/presentation", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        getBudgetPresentation(tx, orgId, c.req.param("id"), c.req.param("budgetId"), {
+    const patientId = c.req.param("id")
+    return runService(c, 200, async () => {
+      const presentation = await withOrgContext(deps.db, orgId, (tx) =>
+        getBudgetPresentation(tx, orgId, patientId, c.req.param("budgetId"), {
           memberRole,
           actorUserId: userId,
           clinicalAccess: canAccess(memberRole, "clinical.read"),
         }),
-      ),
-    )
+      )
+      // Lo encontrado es lectura clínica: deja su traza.
+      if (presentation.findings) await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "documentos" })
+      return presentation
+    })
   })
 
   app.patch("/:id/budgets/:budgetId/presentation", async (c) => {

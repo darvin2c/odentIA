@@ -1540,7 +1540,8 @@ export function toPortalBudget(
     validUntil: budget.validUntil,
     findings: context.findings.get(budget.id) ?? null,
     proposal: budget.proposal,
-    terms: context.terms,
+    // Lo entregado dice lo que se entregó; lo entregado antes de congelarlo, lo vigente.
+    terms: budget.deliveredSnapshot?.terms ?? context.terms,
     options: budget.options.map((option) => ({
       id: option.id,
       label: option.label,

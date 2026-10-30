@@ -14,6 +14,7 @@ import {
 import type { Db } from "@odentia/db"
 import { user } from "@odentia/db/schema/auth"
 import {
+  type BudgetDeliveredSnapshot,
   diagnosisCatalog,
   encounterProcedure,
   orgCounter,
@@ -50,7 +51,7 @@ import { productHooks } from "./products.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
 import { isPromotionLive, requirePromotionPrice } from "./promotions.js"
 import { personalLinkUrl } from "./public-links.js"
-import { listDecisionRecipients, requireDecisionContact } from "./responsibilities.js"
+import { requireDecisionContact } from "./responsibilities.js"
 
 /**
  * Documento económico de un plan clínico: cabecera con decisión auditada +
@@ -1895,9 +1896,14 @@ export async function deliverBudget(
       )
   }
   const validUntil = current.validUntil ?? (await defaultBudgetValidUntil(tx, orgId))
+  const deliveredSnapshot = await budgetDeliveredFacts(
+    tx,
+    orgId,
+    lines.map((line) => line.serviceId),
+  )
   const [updated] = await tx
     .update(treatmentBudget)
-    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date(), validUntil })
+    .set({ status: "presentado", presentedAt: new Date(), updatedAt: new Date(), validUntil, deliveredSnapshot })
     .where(
       and(
         eq(treatmentBudget.id, budgetId),
@@ -2204,7 +2210,7 @@ export async function decideBudget(
   patientId: string,
   budgetId: string,
   input: DecideBudgetInput,
-  opts: BudgetActorOpts & { skipOwnPlan?: boolean; via?: string } = {},
+  opts: BudgetActorOpts & { skipOwnPlan?: boolean; via?: "enlace" | "portal" | "conversacion" } = {},
 ): Promise<BudgetWithTotals> {
   await requirePatient(tx, orgId, patientId)
   const prev = await requireBudget(tx, orgId, patientId, budgetId)
@@ -2428,6 +2434,8 @@ export async function decideBudget(
       decisionNote,
       decidedAt: now,
       decidedBy: actorUserId,
+      // Sin canal y con alguien del equipo: lo anotó la clínica.
+      decidedVia: opts.via ?? (actorUserId ? "clinica" : null),
       updatedAt: now,
     })
     .where(
@@ -3088,6 +3096,31 @@ async function consentFactsOf(
   return facts
 }
 
+/** Condiciones, medios de pago y lo que pesa de los consentimientos, hoy. */
+async function budgetDeliveredFacts(
+  tx: Db,
+  orgId: string,
+  serviceIds: Array<string | null>,
+): Promise<BudgetDeliveredSnapshot> {
+  const [profile] = await tx
+    .select({ payment: orgProfile.budgetPaymentTerms, change: orgProfile.budgetChangeTerms })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  return {
+    terms: { payment: profile?.payment?.trim() || null, change: profile?.change?.trim() || null },
+    paymentMethods: (await listPaymentMethods(tx, orgId)).map((method) => method.name),
+    consents: await consentFactsOf(tx, orgId, serviceIds),
+  }
+}
+
+const DECIDED_VIA_WORDS: Record<string, string> = {
+  enlace: "por su enlace",
+  portal: "por el portal",
+  conversacion: "por la conversación",
+  clinica: "en la clínica",
+}
+
 function decisionWordsOf(
   budget: BudgetWithTotals,
   deciderName: string | null,
@@ -3103,10 +3136,10 @@ function decisionWordsOf(
     rechazado: "No aceptó",
     pospuesto: "Lo dejó para después",
   }
-  // Lo que responde la persona no queda a nombre de nadie del equipo: `decidedBy` nulo.
-  const where = budget.decidedBy ? "en la clínica" : "por su enlace"
+  // Lo decidido antes de guardar por dónde no dice canal: no se supone uno.
+  const where = budget.decidedVia ? DECIDED_VIA_WORDS[budget.decidedVia] : null
   return {
-    text: `${verb[budget.status] ?? "Respondió"} ${where}`,
+    text: [verb[budget.status] ?? "Respondió", where].filter(Boolean).join(" "),
     by: budget.acceptedByName ?? deciderName,
     at: budget.decidedAt,
   }
@@ -3126,7 +3159,7 @@ export async function getBudgetPrintPayload(
   orgId: string,
   patientId: string,
   budgetId: string,
-  opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess?: boolean } = {},
+  opts: BudgetActorOpts & { actorUserId?: string; clinicalAccess?: boolean; linkContactId?: string | null } = {},
 ): Promise<BudgetPrintPayload> {
   const budget = await getBudgetDetail(tx, orgId, patientId, budgetId, opts)
   const clinicalAccess = opts.clinicalAccess === true
@@ -3303,7 +3336,6 @@ export async function getBudgetPrintPayload(
         return label ? [{ key, label }] : []
       })
     : []
-  const methods = await listPaymentMethods(tx, orgId)
   const [decider] = budget.decisionContactId
     ? await tx
         .select({ name: contact.displayName })
@@ -3311,20 +3343,18 @@ export async function getBudgetPrintPayload(
         .where(and(eq(contact.id, budget.decisionContactId), eq(contact.organizationId, orgId)))
         .limit(1)
     : []
-  // Su enlace, si ya tiene uno vivo: un papel no crea ni renueva enlaces.
+  // El enlace de quien decide y recibe este papel, si ya tiene uno vivo: un papel no
+  // crea ni renueva enlaces. Sin `linkContactId` no lleva QR (`buildBudgetSnapshot`).
   let personalLinkUrlOf: string | null = null
   const key = documentSecretsKey()
-  if (key && !isDraft) {
-    const [recipient] = await listDecisionRecipients(tx, orgId, patientId)
-    if (recipient) {
-      const token = await livePersonalLinkToken(
-        tx,
-        orgId,
-        { contactId: recipient.contactId, patientId },
-        { secretsKey: key },
-      )
-      if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token)
-    }
+  if (key && !isDraft && opts.linkContactId) {
+    const token = await livePersonalLinkToken(
+      tx,
+      orgId,
+      { contactId: opts.linkContactId, patientId },
+      { secretsKey: key },
+    )
+    if (token) personalLinkUrlOf = await personalLinkUrl(tx, orgId, token)
   }
   return {
     quotationCode: "310",
@@ -3364,16 +3394,8 @@ export async function getBudgetPrintPayload(
     chart: clinicalAccess && site.chart ? site.chart(budget.items) : null,
     proposal: budget.proposal,
     phases,
-    terms: {
-      payment: profile.budgetPaymentTerms?.trim() || null,
-      change: profile.budgetChangeTerms?.trim() || null,
-    },
-    paymentMethods: methods.map((method) => method.name),
-    consents: await consentFactsOf(
-      tx,
-      orgId,
-      budget.items.map((line) => line.serviceId),
-    ),
+    // Lo entregado dice lo que se entregó; lo entregado antes de congelarlo, lo vigente.
+    ...(budget.deliveredSnapshot ?? (await budgetDeliveredFacts(tx, orgId, budget.items.map((line) => line.serviceId)))),
     decisionWords: decisionWordsOf(budget, decider?.name ?? null),
     personalLinkUrl: personalLinkUrlOf,
   }

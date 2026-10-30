@@ -300,6 +300,8 @@ it("las explicaciones sugeridas: una clave que no es de la biblioteca falla ante
     how: "Paso a paso",
   })
   expect(() => loadPatientGuides(["endo"], '{"no_existe":{"how":"Algo"}}')).toThrow(/no_existe/)
+  // Sembrar una sola biblioteca no choca con las claves de la otra.
+  expect(loadPatientGuides(["endo"], '{"otra":{"how":"Algo"}}', { partial: true }).size).toBe(0)
   expect(() => loadPatientGuides(["endo"], '{"endo":{"how":"   "}}')).toThrow(/vacía/)
   // El archivo vigente en el repositorio se lee sin error.
   const keys = ["biblioteca.csv", "biblioteca_medica.csv"].flatMap((file) =>

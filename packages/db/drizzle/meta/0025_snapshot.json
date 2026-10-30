@@ -1,5 +1,5 @@
 {
-  "id": "322bc580-7e94-4b40-b0b5-ce3d006f30b2",
+  "id": "93ac8f34-df90-4108-83d2-99cf19ac67c9",
   "prevId": "7d0f4994-761b-4792-bf15-aeb7197854d4",
   "version": "7",
   "dialect": "postgresql",
@@ -21064,6 +21064,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "delivered_snapshot": {
+          "name": "delivered_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
         "accepted_by_name": {
           "name": "accepted_by_name",
           "type": "text",
@@ -21084,6 +21090,12 @@
         },
         "decided_by": {
           "name": "decided_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_via": {
+          "name": "decided_via",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -21349,6 +21361,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "treatment_budget_decided_via_check": {
+          "name": "treatment_budget_decided_via_check",
+          "value": "\"treatment_budget\".\"decided_via\" IS NULL OR \"treatment_budget\".\"decided_via\" IN ('enlace','portal','conversacion','clinica')"
+        },
         "treatment_budget_status_check": {
           "name": "treatment_budget_status_check",
           "value": "\"treatment_budget\".\"status\" IN ('borrador','presentado','aceptado','parcial','rechazado','pospuesto','cancelado','sustituido')"

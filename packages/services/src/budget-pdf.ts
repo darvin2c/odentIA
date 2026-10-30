@@ -39,29 +39,45 @@ export interface BudgetSnapshot extends BudgetPrintPayload {
   sourceId: string
   numberLabel: string
   org: DocumentClinic
+  /** Lleva lo encontrado, diagnósticos o alergias: su lectura deja traza. */
+  carriesClinical: boolean
 }
 
 /**
  * La hoja desde su contenido (`getBudgetPrintPayload`). `actor` aplica la misma frontera
- * que la pantalla: un odontólogo solo obtiene la hoja de sus planes. Lo clínico va si
- * quien imprime lee lo clínico, o si el destinatario es la propia persona o su
- * representante legal; si no, se omite.
+ * que la pantalla: un odontólogo solo obtiene la hoja de sus planes.
+ *
+ * Al enviarla manda quien la recibe, no quien la envía: lo clínico y el QR de su enlace
+ * van solo si el destinatario es la propia persona o su representante legal. Una
+ * dirección escrita sin verificar (`unverifiedAddress`) nunca los lleva. Al imprimirla, lo
+ * clínico depende de quien imprime, y el QR es el de quien decide: se le entrega en mano.
  */
 export async function buildBudgetSnapshot(
   tx: Db,
   orgId: string,
   patientId: string,
   budgetId: string,
-  actor: { actorUserId?: string; memberRole?: string; recipientContactId?: string | null } = {},
+  actor: {
+    actorUserId?: string
+    memberRole?: string
+    recipientContactId?: string | null
+    unverifiedAddress?: boolean
+  } = {},
 ): Promise<BudgetSnapshot> {
-  const toAuthorized = actor.recipientContactId
-    ? (await listDecisionRecipients(tx, orgId, patientId)).some(
-        (row) => row.contactId === actor.recipientContactId,
-      )
-    : false
-  const clinicalAccess =
-    toAuthorized || (!!actor.memberRole && canAccess(actor.memberRole, "clinical.read"))
+  const deciders = await listDecisionRecipients(tx, orgId, patientId)
+  const sending = !!actor.recipientContactId || actor.unverifiedAddress === true
+  const toDecider =
+    !actor.unverifiedAddress && deciders.some((row) => row.contactId === actor.recipientContactId)
+  const clinicalAccess = sending
+    ? toDecider
+    : !!actor.memberRole && canAccess(actor.memberRole, "clinical.read")
+  const linkContactId = sending
+    ? toDecider
+      ? actor.recipientContactId
+      : null
+    : (deciders.find((row) => row.isDefault)?.contactId ?? null)
   const payload = await getBudgetPrintPayload(tx, orgId, patientId, budgetId, {
+    linkContactId,
     ...(actor.actorUserId ? { actorUserId: actor.actorUserId } : {}),
     ...(actor.memberRole ? { memberRole: actor.memberRole } : {}),
     clinicalAccess,
@@ -74,6 +90,11 @@ export async function buildBudgetSnapshot(
       payload.revisionNumber > 1 ? ` · revisión ${payload.revisionNumber}` : ""
     }`,
     org: payload.documentClinic,
+    carriesClinical:
+      !!payload.findings ||
+      payload.allergies.length > 0 ||
+      !!payload.chart ||
+      [...payload.lines, ...payload.options.flatMap((option) => option.lines)].some((line) => !!line.diagnosis),
   }
 }
 

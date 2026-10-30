@@ -322,12 +322,9 @@ export async function sendBudget(
       `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`,
     )
   }
-  const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId, {
-    recipientContactId: recipient.contactId,
-  })
-  const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   const senderKind = actor.by === "agente" || !actor.userId ? "agent" : "user"
   // «Ver y responder» abre su enlace: el mismo que ya tenga, donde el presupuesto aparece.
+  // Va antes de armar la hoja: así el primer envío a quien decide ya lleva su QR.
   const link =
     spec.link && deps.secretsKey
       ? await issuePersonalLink(
@@ -341,6 +338,10 @@ export async function sendBudget(
           { secretsKey: deps.secretsKey },
         )
       : null
+  const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId, {
+    recipientContactId: recipient.contactId,
+  })
+  const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   // En el mensaje no queda el token: lo pone el worker al enviarlo.
   const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId) : null
   let sent: { conversationId: string; messageId: string }
@@ -453,7 +454,10 @@ export async function answerBudgetButton(
         and r.kind in ('representante_legal','responsable_economico','autorizado_informacion'))`)
   if (!row || !(SENDABLE as readonly string[]).includes(row.status) || row.status === "borrador")
     return false
-  const snap = await buildBudgetSnapshot(tx, orgId, row.patientId, input.budgetId)
+  // Quien tocó el botón puede ser responsable económico: recibe lo que le corresponde a él.
+  const snap = await buildBudgetSnapshot(tx, orgId, row.patientId, input.budgetId, {
+    recipientContactId: input.contactId,
+  })
   const pdf = await renderBudgetPdf(snap, null)
   await deliverDocumentPdf(
     tx,
