@@ -77,19 +77,26 @@ export function setSubmitErrors(form: AnyFormApi, errors: SubmitErrors): void {
 }
 
 /**
- * Lo que dejó en cada campo y en el formulario la validación al enviar: se
- * conserva igual que un rechazo del servidor. Con Zod (Standard Schema) el
- * error de un campo es una lista de issues.
+ * Lo que dejó la validación al enviar: se conserva igual que un rechazo del
+ * servidor. Con Zod (Standard Schema) el error de un campo es una lista de
+ * issues. El de un dato que no tiene campo en pantalla (un paso que no está a
+ * la vista, un esquema que valida de más) se dice junto a los botones: si no,
+ * el envío se detendría sin decir por qué.
  */
 export function keepValidationErrors(form: AnyFormApi): void {
   const fields: Record<string, string> = {}
-  for (const [name, info] of Object.entries(form.fieldInfo as Record<string, { instance: unknown } | undefined>)) {
-    if (!info?.instance) continue
-    const message = fieldErrorMessages([form.getFieldMeta(name)?.errorMap?.onSubmit].flat())[0]
-    if (message) fields[name] = message
+  const unseen: string[] = []
+  const metas = form.state.fieldMeta as Record<string, { errorMap?: { onSubmit?: unknown } } | undefined>
+  const mounted = form.fieldInfo as Record<string, { instance: unknown } | undefined>
+  for (const [name, meta] of Object.entries(metas)) {
+    const message = fieldErrorMessages([meta?.errorMap?.onSubmit].flat())[0]
+    if (!message) continue
+    if (mounted[name]?.instance) fields[name] = message
+    else unseen.push(message)
   }
   const formError = form.state.errorMap.onSubmit
-  setSubmitErrors(form, { form: typeof formError === "string" ? formError : null, fields })
+  const general = [...new Set([typeof formError === "string" ? formError : null, ...unseen].filter(Boolean))]
+  setSubmitErrors(form, { form: general.join(" ") || null, fields })
 }
 
 /**

@@ -121,6 +121,23 @@ function FixForm() {
   )
 }
 
+/** Un esquema que valida un dato sin campo en pantalla (la región). */
+function HiddenFieldForm({ save }: { save: () => Promise<void> }) {
+  const form = useAppForm({
+    defaultValues: { name: "Centro", region: "" },
+    validators: {
+      onSubmit: ({ value }) => (value.region ? undefined : { fields: { region: [{ message: "Elige la región" }] } }),
+    },
+    onSubmit: save,
+  })
+  const surface = useFormSurface(form)
+  return (
+    <FormPanel {...surface} title="Nueva sede" onClose={() => {}}>
+      <form.AppField name="name">{(field) => <field.TextField label="Nombre" />}</form.AppField>
+    </FormPanel>
+  )
+}
+
 describe("useAppForm", () => {
   it("lo que no pasa la validación se marca en su campo, no se envía y el foco va a él", async () => {
     const user = userEvent.setup()
@@ -227,5 +244,16 @@ describe("useAppForm", () => {
     await user.click(screen.getByRole("button", { name: "Corregir" }))
 
     expect((screen.getByLabelText("Corregir el dato") as HTMLInputElement).value).toBe("Prefiere citas por la tarde")
+  })
+
+  it("lo que no pasa en un dato sin campo en pantalla se dice junto a los botones", async () => {
+    const user = userEvent.setup()
+    const save = vi.fn(async () => {})
+    render(<HiddenFieldForm save={save} />)
+
+    await user.click(screen.getByRole("button", { name: "Guardar" }))
+
+    expect((await screen.findByText("Elige la región")).getAttribute("role")).toBe("alert")
+    expect(save).not.toHaveBeenCalled()
   })
 })

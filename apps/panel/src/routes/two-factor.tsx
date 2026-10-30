@@ -63,7 +63,9 @@ function TwoFactorPage() {
         ? await authClient.twoFactor.verifyBackupCode({ code: value.code.trim(), trustDevice: value.trust })
         : await authClient.twoFactor.verifyTotp({ code: value.code, trustDevice: value.trust })
       if (result.error) {
-        if (authFailureOf(result.error).code === "INVALID_TWO_FACTOR_COOKIE") setExpired(true)
+        // El paso venció o se agotaron los intentos: hay que volver a entrar con la contraseña.
+        const code = authFailureOf(result.error).code
+        if (code === "INVALID_TWO_FACTOR_COOKIE" || code === "TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE") setExpired(true)
         throw authError(result.error, {
           fields: { INVALID_CODE: "code", INVALID_BACKUP_CODE: "code" },
           messages: { INVALID_CODE: recovery ? WRONG_BACKUP : WRONG_TOTP, INVALID_BACKUP_CODE: WRONG_BACKUP },

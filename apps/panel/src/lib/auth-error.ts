@@ -35,6 +35,10 @@ const BETTER_AUTH_WORDS: Record<string, string> = {
   INVALID_CODE: "Ese código no coincide. Escribe el que muestra ahora tu app.",
   INVALID_BACKUP_CODE: "Ese código de respaldo no coincide o ya se usó.",
   INVALID_TWO_FACTOR_COOKIE: "La verificación venció. Vuelve a entrar con tu correo y contraseña.",
+  TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE: "Hiciste varios intentos con códigos que no coinciden. Vuelve a entrar con tu correo y contraseña.",
+  OTP_HAS_EXPIRED: "Ese código venció. Pide uno nuevo.",
+  TOTP_NOT_ENABLED: "La verificación en dos pasos no está activa.",
+  BACKUP_CODES_NOT_ENABLED: "No tienes códigos de respaldo activos.",
   ACCOUNT_TEMPORARILY_LOCKED: AUTH_RATE_LIMITED,
   ACCOUNT_BLOCKED: "Tu cuenta está bloqueada. Escribe a soporte para revisarla.",
   CREDENTIAL_ACCOUNT_NOT_FOUND:
@@ -87,14 +91,13 @@ export interface AuthErrorRoute {
   fields?: Record<string, string>
   /** Código (o `"429"`) → texto propio de la pantalla. */
   messages?: Record<string, string>
-  /**
-   * Mensaje neutro para todo lo demás (credenciales, recuperar acceso: OWASP,
-   * un solo mensaje que no revela si la cuenta existe). Sin él, el de cada código.
-   */
-  neutral?: string
-  /** Códigos que se dicen tal cual aunque haya `neutral` (cuenta bloqueada tras validar la contraseña, 429…). */
-  keep?: readonly string[]
 }
+
+/** Lo único que es de verdad una sesión vencida. */
+const SESSION_CODES: Record<string, true> = { SESSION_EXPIRED: true, FAILED_TO_GET_SESSION: true }
+
+/** Los estados que `submitErrorOf` lee con su propio sentido; lo demás llega como un rechazo (400). */
+const KEPT_STATUS = new Set([403, 404, 409, 413, 429])
 
 /**
  * Convierte el rechazo de `authClient` en el error de la API que entienden
@@ -104,16 +107,19 @@ export interface AuthErrorRoute {
 export function authError(error: AuthClientError, route: AuthErrorRoute = {}): ApiError {
   const failure = authFailureOf(error)
   const key = failure.code ?? ""
-  const rateLimited = failure.status === 429 || key === "ACCOUNT_TEMPORARILY_LOCKED"
-  const kept = rateLimited || (route.keep?.includes(key) ?? false) || key in (route.fields ?? {})
   const message =
-    route.messages?.[key] ??
-    (failure.status === 429 ? route.messages?.["429"] : undefined) ??
-    (route.neutral && !kept ? route.neutral : failure.message)
+    route.messages?.[key] ?? (failure.status === 429 ? route.messages?.["429"] : undefined) ?? failure.message
   const field = failure.code ? route.fields?.[failure.code] : undefined
   const fields = field ? { ...failure.fields, [field]: message } : failure.fields
-  // 5xx: `submitErrorOf` dice que no se pudo confirmar; lo demás se dice con su mensaje.
-  return new ApiError(failure.status, { code: failure.code ?? undefined, message, fields })
+  // Better Auth responde 401 también a un código equivocado (TOTP, respaldo) y 422 a
+  // algunos rechazos; para `submitErrorOf` un 401 es la sesión vencida y un 422 no
+  // trae motivo legible. El mensaje ya es nuestro, así que llegan como 400. Un 5xx
+  // sigue siendo «no se pudo confirmar».
+  const status =
+    failure.status >= 500 || KEPT_STATUS.has(failure.status) || (failure.status === 401 && SESSION_CODES[key])
+      ? failure.status
+      : 400
+  return new ApiError(status, { code: failure.code ?? undefined, message, fields })
 }
 
 /** Sin red: better-fetch lanza el `TypeError` de `fetch`. */
