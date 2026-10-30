@@ -96,6 +96,8 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await page.getByRole("region", { name: "Contexto del contacto" }).getByRole("link", { name: "Reservar cita", exact: true }).click()
   await expect(page.getByText("Rosa Quispe todavía no es paciente")).toBeVisible()
   await page.getByRole("button", { name: "Semana siguiente" }).click()
+  // La pregunta de novedades y promociones no se salta: recepción anota lo que respondió.
+  await page.getByRole("group", { name: /^¿Acepta recibir novedades y promociones( de .+)? por WhatsApp\?$/ }).getByRole("button", { name: "No aceptó" }).click()
   await page.getByRole("button", { name: /^Registrar y reservar / }).click()
   // Al guardar vuelve al hilo; no hace falta registrarla antes en Pacientes.
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
