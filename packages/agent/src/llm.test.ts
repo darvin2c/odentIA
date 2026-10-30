@@ -1,16 +1,10 @@
-import { once } from "node:events"
-import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http"
 import { HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages"
 import { tool } from "@langchain/core/tools"
 import { ChatOpenAI } from "@langchain/openai"
 import { agentTextsFor } from "@odentia/services"
-import { dictationFindingsText } from "@odentia/services/dental"
-import { examSystemsText } from "@odentia/services/medical"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { argosMessages, argosModel } from "./argos.js"
-import { DENTAL_DICTATION_PROFILE } from "./dental/dictation.js"
-import { askDictationModel, type DictationProfile } from "./dictation.js"
 import { FakeChatModel } from "./fake-model.js"
 import {
   cachedPrompt,
@@ -23,41 +17,7 @@ import {
   resolveLlmSpec,
   viaResponses,
 } from "./llm.js"
-import { MEDICAL_DICTATION_PROFILE } from "./medical/dictation.js"
-
-interface Received {
-  url: string | undefined
-  headers: IncomingHttpHeaders
-  body: Record<string, unknown>
-}
-
-/** Servidor local que hace de proveedor: responde lo que diga `reply` según la petición número n (y su ruta). */
-async function fakeProvider(reply: (n: number, response: ServerResponse, url: string | undefined) => void) {
-  const requests: Received[] = []
-  const server = createServer(async (request, response) => {
-    let raw = ""
-    for await (const chunk of request) raw += chunk
-    requests.push({ url: request.url, headers: request.headers, body: JSON.parse(raw) as Record<string, unknown> })
-    reply(requests.length, response, request.url)
-  })
-  server.listen(0, "127.0.0.1")
-  await once(server, "listening")
-  const address = server.address()
-  if (!address || typeof address === "string") throw new Error("El servidor de prueba no abrió un puerto")
-  return {
-    origin: `http://127.0.0.1:${address.port}`,
-    requests,
-    close: async () => {
-      server.closeAllConnections()
-      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
-    },
-  }
-}
-
-function json(response: ServerResponse, status: number, body: unknown) {
-  response.writeHead(status, { "content-type": "application/json" })
-  response.end(JSON.stringify(body))
-}
+import { cacheMarked, fakeProvider, json, systemBlock, toolCallReply } from "./test-provider.js"
 
 const horario = tool(async () => "09:00", {
   name: "consultar_horario",
@@ -207,34 +167,10 @@ it("ChatGPT 6 con caché explícita recibe el corte en la parte fija y devuelve 
   }
 })
 
+// El dictado de cada producto se prueba igual en su carpeta (`dental/dictation.test.ts`, `medical/dictation.test.ts`).
 describe("el corte de la parte fija llega al proveedor por los dos caminos", () => {
-  /** La llamada a una herramienta, como la devuelve cada camino de OpenAI. */
-  function toolCall(response: ServerResponse, url: string | undefined, name: string) {
-    if (url === "/v1/responses")
-      return json(response, 200, {
-        id: "resp_1",
-        object: "response",
-        created_at: 1,
-        status: "completed",
-        model: "gpt-6-luna",
-        output: [{ type: "function_call", id: "fc_1", call_id: "call_1", name, arguments: "{}", status: "completed" }],
-        usage: { input_tokens: 12, output_tokens: 3, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } },
-      })
-    json(response, 200, {
-      id: "chatcmpl-1",
-      object: "chat.completion",
-      created: 1,
-      model: "gpt-6-luna",
-      choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: [{ id: "call_1", type: "function", function: { name, arguments: "{}" } }] }, finish_reason: "tool_calls" }],
-      usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 },
-    })
-  }
-  /** El primer bloque del mensaje de sistema tal como llegó: `input` en /v1/responses, `messages` en Chat Completions. */
-  const systemBlock = (request: Received | undefined) => ((request?.body.input ?? request?.body.messages) as Array<{ content: unknown[] }> | undefined)?.[0]?.content[0]
-  const marked = (type: "text" | "input_text", text: unknown = expect.any(String)) => ({ type, text, prompt_cache_breakpoint: { mode: "explicit" } })
-
   it("por /v1/responses va en un bloque input_text: a uno text LangChain 1.5.13 le quita el corte", async () => {
-    const provider = await fakeProvider((_, response, url) => toolCall(response, url, "consultar_horario"))
+    const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "consultar_horario"))
     try {
       const spec = resolveLlmSpec({ openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
       expect(viaResponses(await createConfiguredChatModel(spec, { explicitCache: true }))).toBe(false)
@@ -244,7 +180,7 @@ describe("el corte de la parte fija llega al proveedor por los dos caminos", () 
       // Así llegaba la parte fija de Argos y del dictado de latidIA: el corte se perdía por el camino.
       await model.invoke([new SystemMessage({ content: cachedPrompt("openai", "Lo fijo", false) }), new HumanMessage("Lo que cambia")])
       expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses", "/v1/responses"])
-      expect(systemBlock(provider.requests[0])).toEqual(marked("input_text", "Lo fijo"))
+      expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text", "Lo fijo"))
       expect(systemBlock(provider.requests[1])).toEqual({ type: "input_text", text: "Lo fijo" })
       // Sin caché (el modelo de demostración), el texto solo.
       expect(cachedPrompt("fake", "Lo fijo", true)).toBe("Lo fijo")
@@ -254,7 +190,7 @@ describe("el corte de la parte fija llega al proveedor por los dos caminos", () 
   })
 
   it("Argos piensa por /v1/responses y su parte fija llega con el corte; sin pensar va por Chat Completions, también con él", async () => {
-    const provider = await fakeProvider((_, response, url) => toolCall(response, url, "responder"))
+    const provider = await fakeProvider((_, response, url) => toolCallReply(response, url, "responder"))
     try {
       const platform = { openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 }
       const texts = agentTextsFor("dental")
@@ -266,33 +202,8 @@ describe("el corte de la parte fija llega al proveedor por los dos caminos", () 
         await model.invoke(argosMessages(model.provider, ask, model.responses), "required")
       }
       expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses", "/v1/chat/completions"])
-      expect(systemBlock(provider.requests[0])).toEqual(marked("input_text", expect.stringContaining("Cifras oficiales")))
-      expect(systemBlock(provider.requests[1])).toEqual(marked("text", expect.stringContaining("Cifras oficiales")))
-    } finally {
-      await provider.close()
-    }
-  })
-
-  it("el dictado de latidIA razona por /v1/responses y el de odentIA va por Chat Completions: los dos llevan el corte", async () => {
-    const provider = await fakeProvider((_, response, url) => toolCall(response, url, "registrar_dictado"))
-    try {
-      const spec = resolveLlmSpec({ openai: { apiKey: "clave-sintetica", baseUrl: `${provider.origin}/v1` }, maxRetries: 0 })
-      const products = [
-        { profile: MEDICAL_DICTATION_PROFILE, catalog: examSystemsText() },
-        { profile: DENTAL_DICTATION_PROFILE, catalog: dictationFindingsText() },
-      ]
-      for (const { profile, catalog } of products) {
-        // Como `extractDictation`: con el razonamiento del perfil.
-        const model = await createConfiguredChatModel(spec, { explicitCache: true, ...(profile.reasoning ? { reasoning: profile.reasoning } : {}) })
-        const pause = { services: ["Consulta"], diagnosisList: "CIE-10 (OMS)", catalog, transcript: "Viene por fiebre hace tres días.", context: "", pending: [] }
-        await askDictationModel(model, spec, { ...pause, provider: spec.provider, zone: { locale: "es-PE", timezone: "America/Lima" }, now: new Date("2026-10-29T15:00:00Z") }, profile)
-      }
-      expect(provider.requests.map((request) => request.url)).toEqual(["/v1/responses", "/v1/chat/completions"])
-      expect(systemBlock(provider.requests[0])).toEqual(marked("input_text"))
-      expect(systemBlock(provider.requests[1])).toEqual(marked("text"))
-      // Por Chat Completions el proveedor guarda solo hasta el corte; por /v1/responses no se le pide, y pone además el suyo.
-      expect(provider.requests[1]?.body).toMatchObject({ prompt_cache_options: { mode: "explicit" } })
-      expect(provider.requests[0]?.body).not.toHaveProperty("prompt_cache_options")
+      expect(systemBlock(provider.requests[0])).toEqual(cacheMarked("input_text", expect.stringContaining("Cifras oficiales")))
+      expect(systemBlock(provider.requests[1])).toEqual(cacheMarked("text", expect.stringContaining("Cifras oficiales")))
     } finally {
       await provider.close()
     }
