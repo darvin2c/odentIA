@@ -1,0 +1,2 @@
+ALTER TABLE "contact_identity" ADD COLUMN "provider_user_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "contact_identity_org_channel_provider_user_uidx" ON "contact_identity" USING btree ("organization_id","channel","provider_user_id") WHERE "contact_identity"."provider_user_id" IS NOT NULL;

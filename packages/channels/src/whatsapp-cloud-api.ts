@@ -18,6 +18,7 @@ import type {
   TemplateUnsupported,
   WebhookParseResult,
 } from "./protocol.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 import { metaGraphVersion } from "./meta-graph.js"
 
 export interface WhatsAppTemplateRef {
@@ -94,7 +95,10 @@ interface WaMedia {
 
 interface WaMessage {
   id: string
-  from: string
+  /** Teléfono de quien escribe. Meta lo omite si usa nombre de usuario y no hubo trato en 30 días. */
+  from?: string
+  /** Su BSUID: el id que Meta le da para esta empresa. Siempre llega. */
+  from_user_id?: string
   timestamp: string
   type: string
   text?: { body?: string }
@@ -136,17 +140,22 @@ interface WaValue {
   messaging_product?: string
   /** Número de la empresa al que pertenece el aviso. */
   metadata?: { display_phone_number?: string; phone_number_id?: string }
-  contacts?: { profile?: { name?: string }; wa_id?: string }[]
+  /** `wa_id` es el teléfono (puede faltar, como `from`); `user_id`, el BSUID. */
+  contacts?: { profile?: { name?: string }; wa_id?: string; user_id?: string }[]
   messages?: WaMessage[]
   statuses?: WaStatus[]
-  /** `smb_message_echoes`: lo que el equipo envió desde la app del celular (`from` es la empresa, `to` la persona). */
-  message_echoes?: (WaMessage & { to?: string })[]
+  /**
+   * `smb_message_echoes`: lo que el equipo envió desde la app del celular
+   * (`from` es la empresa, `to` la persona; sin su teléfono, `to_user_id`).
+   */
+  message_echoes?: (WaMessage & { to?: string; to_user_id?: string })[]
   /** `history`: el historial del celular, por partes; o el error si la clínica no quiso compartirlo. */
   history?: {
     errors?: WaError[]
     threads?: {
-      /** La persona del hilo (`wa_id`). */
+      /** La persona del hilo (`wa_id`); sin su teléfono, su BSUID va en `context.user_id`. */
       id?: string
+      context?: { user_id?: string }
       messages?: (WaMessage & { history_context?: { status?: string } })[]
     }[]
   }[]
@@ -175,10 +184,53 @@ function waDigits(value: unknown): string | null {
   return digits || null
 }
 
+/**
+ * El BSUID de una persona (`PE.1349…`): el id que Meta le da para esta empresa.
+ * Lleva el país y un punto, así que nunca se confunde con un número.
+ * https://developers.facebook.com/documentation/business-messaging/whatsapp/business-scoped-user-ids
+ */
+function waUserId(value: unknown): string | null {
+  const id = typeof value === "string" ? value.trim() : ""
+  return id && !/\s/.test(id) && /\D/.test(id) ? id : null
+}
+
+/**
+ * La dirección de la persona: su número (`wa:51999…`) o, si Meta lo oculta, su
+ * BSUID (`wa:PE.1349…`), con el que también se le responde (ADR 0108).
+ */
+function waAddress(phone: unknown, userId: unknown): string | null {
+  const digits = waDigits(phone)
+  if (digits) return `wa:${digits}`
+  const id = waUserId(userId)
+  return id ? whatsappHiddenAddress(id) : null
+}
+
+/** La dirección de quien ocultó su número: su BSUID (ADR 0108). */
+export function whatsappHiddenAddress(userId: string): string {
+  return `wa:${userId}`
+}
+
+/** La persona de un mensaje: a dónde se le responde y su BSUID, si llegó. */
+interface WaPerson {
+  address: string
+  userId: string | null
+}
+
+function personOf(phone: unknown, userId: unknown): WaPerson | null {
+  const address = waAddress(phone, userId)
+  return address ? { address, userId: waUserId(userId) } : null
+}
+
 /** Un mensaje que salió de la empresa: hilo y remitente son los de la persona a quien se escribió. */
-function fromBusiness(n: NormalizedInbound, customer: string): NormalizedInbound {
-  const { senderDisplayName: _name, ...rest } = n
-  return { ...rest, externalThreadId: `wa:${customer}`, senderExternalId: `wa:${customer}`, fromBusinessApp: true }
+function fromBusiness(n: NormalizedInbound, customer: WaPerson): NormalizedInbound {
+  const { senderDisplayName: _name, senderUserId: _business, ...rest } = n
+  return {
+    ...rest,
+    externalThreadId: customer.address,
+    senderExternalId: customer.address,
+    ...(customer.userId ? { senderUserId: customer.userId } : {}),
+    fromBusinessApp: true,
+  }
 }
 
 /** Lo que trae un cambio de coexistencia, ya normalizado. */
@@ -189,26 +241,31 @@ function coexistenceOf(value: WaValue): {
 } {
   const messages: NormalizedInbound[] = []
   for (const echo of value.message_echoes ?? []) {
-    const customer = waDigits(echo.to)
+    const customer = personOf(echo.to, echo.to_user_id)
     // Una reacción del equipo no es un mensaje que la Bandeja sepa mostrar.
     if (!customer || echo.type === "reaction") continue
-    const n = messageToNormalized(echo, undefined)
+    const n = messageToNormalized(echo, undefined, customer)
     if (n) messages.push(fromBusiness(n, customer))
   }
   let historyDeclined = false
   for (const chunk of value.history ?? []) {
     if (chunk.errors?.some((error) => error.code === HISTORY_DECLINED_CODE)) historyDeclined = true
     for (const thread of chunk.threads ?? []) {
-      const customer = waDigits(thread.id)
+      const customer = personOf(thread.id, thread.context?.user_id)
       if (!customer) continue
+      const customerPhone = waDigits(thread.id)
       for (const m of thread.messages ?? []) {
         if (m.type === "reaction") continue
-        const n = messageToNormalized(m, displayNameOf(value, m.from))
+        const n = messageToNormalized(m, displayNameOf(value, m), customer)
         if (!n) continue
         const status = m.history_context?.status?.toLowerCase()
         const historyStatus = status === "read" || status === "played" ? "read" : status === "delivered" ? "delivered" : "sent"
-        const own = waDigits(m.from) !== customer
-        messages.push(own ? { ...fromBusiness(n, customer), history: true, historyStatus } : { ...n, history: true })
+        // Lo de la empresa trae su número; lo de la persona, el suyo o su BSUID.
+        const fromPerson =
+          (customer.userId !== null && waUserId(m.from_user_id) === customer.userId) ||
+          waDigits(m.from) === null ||
+          waDigits(m.from) === customerPhone
+        messages.push(fromPerson ? { ...n, history: true } : { ...fromBusiness(n, customer), history: true, historyStatus })
       }
     }
   }
@@ -223,19 +280,30 @@ function coexistenceOf(value: WaValue): {
   return { messages, appContacts, historyDeclined }
 }
 
-function displayNameOf(value: WaValue, from: string): string | undefined {
-  return value.contacts?.find((c) => c.wa_id === from)?.profile?.name
+/** El nombre de perfil de quien escribió: su contacto por teléfono o, sin él, por BSUID. */
+function displayNameOf(value: WaValue, m: WaMessage): string | undefined {
+  const contact = value.contacts?.find(
+    (c) => (m.from !== undefined && c.wa_id === m.from) || (m.from_user_id !== undefined && c.user_id === m.from_user_id),
+  )
+  return contact?.profile?.name
 }
 
+/**
+ * `person` es la persona del hilo cuando el mensaje no la dice (el historial);
+ * sin teléfono ni BSUID no hay a quién responderle y el mensaje no entra.
+ */
 function messageToNormalized(
   m: WaMessage,
   displayName: string | undefined,
+  person: WaPerson | null = personOf(m.from, m.from_user_id),
 ): NormalizedInbound | null {
+  if (!person) return null
   const base = {
     externalEventId: m.id,
     externalMessageId: m.id,
-    externalThreadId: `wa:${m.from}`,
-    senderExternalId: `wa:${m.from}`,
+    externalThreadId: person.address,
+    senderExternalId: person.address,
+    ...(person.userId ? { senderUserId: person.userId } : {}),
     sentAt: new Date(Number(m.timestamp) * 1000).toISOString(),
   }
   const withName = {
@@ -354,6 +422,9 @@ function statusToNormalized(s: WaStatus): NormalizedStatus | null {
  */
 const NOT_ON_WHATSAPP_CODE = 131026
 
+const ACCOUNT_THROTTLE_WORDS =
+  "WhatsApp frenó el envío porque la clínica mandó demasiados mensajes en poco tiempo. Envíalo de nuevo en unos minutos."
+
 const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   [NOT_ON_WHATSAPP_CODE]: "WhatsApp no pudo entregarlo: lo más probable es que este número no tenga WhatsApp.",
   // «Business eligibility payment issue»: la cuenta de WhatsApp Business no
@@ -363,6 +434,47 @@ const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   // «Error validating access token»: la clave que dio Meta al conectar con
   // Facebook venció (dura 60 días) o la retiraron (darvin2c/odentIA#121).
   190: "WhatsApp no envió el mensaje porque la conexión con Meta venció o fue retirada. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp.",
+  // Límites de ritmo de la app (4), de la cuenta (80007) y de envío del número (130429).
+  4: ACCOUNT_THROTTLE_WORDS,
+  80007: ACCOUNT_THROTTLE_WORDS,
+  130429: ACCOUNT_THROTTLE_WORDS,
+  // «Pair rate limit»: demasiados mensajes seguidos a la misma persona.
+  131056: "WhatsApp frenó el envío porque se le mandaron demasiados mensajes seguidos a esta persona. Envíalo de nuevo en unos minutos.",
+  // Lo que WhatsApp aún no deja enviar a quien oculta su número (ADR 0108).
+  131062: "WhatsApp no deja enviar este tipo de mensaje a quien oculta su número.",
+}
+
+/**
+ * Límites de ritmo: Meta no lo aceptó por ahora y pide volver a intentarlo más
+ * tarde, así que el envío se reintenta sin riesgo de duplicarlo. 131048 (por la
+ * calidad del número) y 131049 (no antes de 24 horas) no se arreglan esperando
+ * unos minutos.
+ */
+const THROTTLE_CODES = new Set([4, 80007, 130429, 131056])
+
+const SEND_FAILURE_WORDS = new Set(Object.values(WHATSAPP_SEND_ERROR_WORDS))
+
+/**
+ * Rechazos que son de la cuenta de la clínica (pago, clave), no de la persona.
+ * El de ritmo no: no hay nada que arreglar en la conexión, y a quien no le llegó
+ * su aviso hay que llamarle.
+ */
+const ACCOUNT_FAILURE_WORDS = new Set([WHATSAPP_SEND_ERROR_WORDS[131042], WHATSAPP_SEND_ERROR_WORDS[190]])
+
+/**
+ * El envío no salió por la cuenta de WhatsApp de la clínica: se arregla una vez
+ * en la conexión, no persona por persona.
+ */
+export function isWhatsAppAccountFailure(error: string | null | undefined): boolean {
+  return !!error && ACCOUNT_FAILURE_WORDS.has(error)
+}
+
+/**
+ * El motivo guardado de un envío que no salió, si es uno de los que se dicen en
+ * palabras; nulo si es el motivo de Meta tal cual, que no es para la clínica.
+ */
+export function whatsappFailureWords(error: string | null | undefined): string | null {
+  return error && SEND_FAILURE_WORDS.has(error) ? error : null
 }
 
 /** Por qué no salió un envío: en palabras si es un caso conocido; si no, `código: motivo de Meta`. */
@@ -448,13 +560,22 @@ export function buildBody(to: string, kind: OutboundMessage["kind"], replyTo?: s
   return replyTo ? { ...body, context: { message_id: replyTo } } : body
 }
 
+/**
+ * A quién va: el número en `to` o, si la persona lo oculta, su BSUID en
+ * `recipient` (ADR 0108). Meta usa `to` si llegan los dos.
+ */
+function recipientOf(to: string): { to: string } | { recipient: string } {
+  return /^\d+$/.test(to) ? { to } : { recipient: to }
+}
+
 function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unknown> {
+  const recipient = recipientOf(to)
   if (kind.type === "text") {
     const buttons = (kind.buttons ?? []).slice(0, MAX_REPLY_BUTTONS)
     if (buttons.length > 0) {
       return {
         messaging_product: "whatsapp",
-        to,
+        ...recipient,
         type: "interactive",
         interactive: {
           type: "button",
@@ -470,7 +591,7 @@ function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unkno
     }
     return {
       messaging_product: "whatsapp",
-      to,
+      ...recipient,
       type: "text",
       text: { body: kind.text, preview_url: false },
     }
@@ -478,7 +599,7 @@ function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unkno
   if (kind.type === "template") {
     return {
       messaging_product: "whatsapp",
-      to,
+      ...recipient,
       type: "template",
       template: {
         name: kind.name,
@@ -511,7 +632,7 @@ function bodyOf(to: string, kind: OutboundMessage["kind"]): Record<string, unkno
   // WhatsApp no admite caption en audio; filename solo en document.
   return {
     messaging_product: "whatsapp",
-    to,
+    ...recipient,
     type: waType,
     [waType]: {
       link: media.url,
@@ -804,7 +925,7 @@ function readChanges(rawBody: string): WaChange[] {
       const messages: NormalizedInbound[] = []
       const statuses: NormalizedStatus[] = []
       for (const m of value.messages ?? []) {
-        const n = messageToNormalized(m, displayNameOf(value, m.from))
+        const n = messageToNormalized(m, displayNameOf(value, m))
         if (n) messages.push(n)
       }
       for (const s of value.statuses ?? []) {
@@ -964,9 +1085,16 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     )
     const id = sentMessageId(json)
     if (status >= 400 || !id) {
-      const code = graphErrorOf(json)?.code
-      const words = typeof code === "number" ? WHATSAPP_SEND_ERROR_WORDS[code] : undefined
-      throw new Error(words ?? `WhatsApp send falló: ${status} ${graphError(status, json)}`)
+      const error = graphErrorOf(json)
+      const words = typeof error?.code === "number" ? WHATSAPP_SEND_ERROR_WORDS[error.code] : undefined
+      const detail = words ?? `WhatsApp send falló: ${status} ${graphError(status, json)}`
+      // Meta contestó con su error: no lo aceptó. Un 5xx o una respuesta sin
+      // id no dicen si salió, y se tratan como ambiguos.
+      if (status >= 400 && status < 500 && error) {
+        if (typeof error.code === "number" && THROTTLE_CODES.has(error.code)) throw new ProviderThrottledError(detail)
+        throw new ProviderRejectedError(detail)
+      }
+      throw new Error(detail)
     }
     return { externalId: id }
   },
@@ -1088,7 +1216,9 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
   /**
    * Bloquear y desbloquear números (Block Users API): POST o DELETE en
    * `block_users`, que responde por número. El número viaja sin el prefijo
-   * `wa:` del hilo. Meta solo bloquea a quien escribió en las últimas 24 horas.
+   * `wa:` del hilo; quien oculta su número va por su BSUID en `user_id`, y la
+   * respuesta lo devuelve igual en `input` (ADR 0108). Meta solo bloquea a quien
+   * escribió en las últimas 24 horas.
    * https://developers.facebook.com/docs/whatsapp/cloud-api/block-users
    */
   async setBlocked(config, input, deps) {
@@ -1098,7 +1228,10 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
     const { status, json } = await graphFetch(
       cfg,
       `${cfg.phoneNumberId}/block_users`,
-      { method: input.blocked ? "POST" : "DELETE", body: { messaging_product: "whatsapp", block_users: users.map((user) => ({ user })) } },
+      {
+        method: input.blocked ? "POST" : "DELETE",
+        body: { messaging_product: "whatsapp", block_users: users.map((user) => (/^\d+$/.test(user) ? { user } : { user_id: user })) },
+      },
       deps,
     )
     const result = json && typeof json === "object" && "block_users" in json ? (json.block_users as Record<string, unknown>) : null

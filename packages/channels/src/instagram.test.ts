@@ -3,6 +3,7 @@ import { expect, it } from "vitest"
 import { type ContractFixtures, runAdapterContract } from "./contract.js"
 import { configureMetaGraphVersion } from "./meta-graph.js"
 import { instagramAdapter } from "./meta-messaging.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 
 // Flujo Instagram API con Instagram Login (docs primarias):
 // host graph.instagram.com, token de usuario de Instagram,
@@ -121,10 +122,22 @@ it("rechaza texto mayor a 1000 bytes y exige instagramId", async () => {
       { to: "ig:1", kind: { type: "text", text: "a".repeat(1001) } },
       { fetch },
     ),
-  ).rejects.toThrow("1000 bytes")
+  ).rejects.toBeInstanceOf(ProviderRejectedError)
   await expect(
     instagramAdapter.sendMessage({}, { to: "ig:1", kind: { type: "text", text: "hola" } }, { fetch }),
   ).rejects.toThrow("instagramId")
+})
+
+it("lo que Instagram rechaza con su error no salió, y su límite de ritmo se puede reintentar", async () => {
+  const send = (status: number, json: unknown) =>
+    instagramAdapter.sendMessage(config, { to: "ig:1", kind: { type: "text", text: "hola" } }, {
+      fetch: (async () => new Response(JSON.stringify(json), { status })) as typeof fetch,
+    })
+  const rejected = send(400, { error: { message: "(#100) No matching user found", code: 100 } })
+  await expect(rejected).rejects.toBeInstanceOf(ProviderRejectedError)
+  await expect(rejected).rejects.toThrow("No matching user found")
+  await expect(send(400, { error: { message: "Application request limit reached", code: 4 } })).rejects.toBeInstanceOf(ProviderThrottledError)
+  await expect(send(502, null)).rejects.not.toBeInstanceOf(ProviderRejectedError)
 })
 
 it("Instagram usa la misma versión de Meta que WhatsApp y el botón de Facebook", async () => {

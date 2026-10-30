@@ -26,6 +26,7 @@ import type {
   OutboundMessage,
   WebhookParseResult,
 } from "./protocol.js"
+import { ProviderRejectedError, ProviderThrottledError } from "./protocol.js"
 import { metaGraphVersion } from "./meta-graph.js"
 
 const GRAPH_HOST = "https://graph.facebook.com"
@@ -257,6 +258,21 @@ function graphError(status: number, json: unknown): string {
   return String(status)
 }
 
+/**
+ * Límites de ritmo del Graph de Meta: de la app (4), de quien usa la app (17),
+ * de la página (32), del método (613) y por caso de uso de páginas, Instagram y
+ * Messenger (80001, 80002, 80006). El envío no salió y se reintenta más tarde.
+ * https://developers.facebook.com/docs/graph-api/overview/rate-limiting
+ */
+const GRAPH_THROTTLE_CODES = new Set([4, 17, 32, 613, 80001, 80002, 80006])
+
+/** El código del `error` de una respuesta del Graph: null si lo trae sin código, undefined si no trae su error. */
+function graphErrorCode(json: unknown): number | null | undefined {
+  if (!json || typeof json !== "object" || !("error" in json) || !json.error || typeof json.error !== "object") return undefined
+  const code = (json.error as { code?: unknown }).code
+  return typeof code === "number" ? code : null
+}
+
 function sentMessageId(json: unknown): string | null {
   if (json && typeof json === "object" && "message_id" in json && typeof json.message_id === "string") {
     return json.message_id
@@ -286,12 +302,13 @@ async function sendViaGraph(
   deps: ChannelAdapterDeps,
   messagingType: "RESPONSE" | null,
 ): Promise<{ externalId: string }> {
+  // Lo que no se puede enviar no sale: no es un envío ambiguo.
   if (kind.type === "template") {
-    throw new Error(`${label} no admite plantillas: responde dentro de la ventana de 24 h`)
+    throw new ProviderRejectedError(`${label} no admite plantillas: responde dentro de la ventana de 24 h`)
   }
   // Instagram Login limita el texto a 1000 bytes UTF-8 (docs messaging-api).
   if (kind.type === "text" && label === "Instagram" && Buffer.byteLength(kind.text, "utf8") > 1000) {
-    throw new Error("Instagram limita el texto a 1000 bytes")
+    throw new ProviderRejectedError("Instagram limita el texto a 1000 bytes")
   }
   const message: Record<string, unknown> =
     kind.type === "text"
@@ -318,7 +335,15 @@ async function sendViaGraph(
   )
   const id = sentMessageId(json)
   if (status >= 400 || !id) {
-    throw new Error(`${label} send falló: ${graphError(status, json)}`)
+    const detail = `${label} send falló: ${graphError(status, json)}`
+    // Meta contestó con su error: no lo aceptó. Un 5xx o una respuesta sin id
+    // no dicen si salió, y se tratan como ambiguos.
+    const code = graphErrorCode(json)
+    if (status >= 400 && status < 500 && code !== undefined) {
+      if (code !== null && GRAPH_THROTTLE_CODES.has(code)) throw new ProviderThrottledError(detail)
+      throw new ProviderRejectedError(detail)
+    }
+    throw new Error(detail)
   }
   return { externalId: id }
 }

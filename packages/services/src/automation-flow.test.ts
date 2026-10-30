@@ -536,6 +536,22 @@ describe("por dónde le llega a cada persona", () => {
     expect(await noticesOf(c)).toHaveLength(0)
   })
 
+  it("si lo rechaza la cuenta de la clínica (clave vencida), no es del número de la persona ni deja su tarea (ADR 0108)", async () => {
+    const c = await clinic()
+    await ruleOn(c, "seguimiento_presupuesto", new Date(NOW.getTime() - HOUR))
+    const one = await person(c, "Clave vencida", { consent: ["seguimiento", "novedades"], openWindow: true })
+    await dueBudget(c, one.patientId)
+    await run(c, (tx) => syncBudgetFollowUps(tx, c.orgId, NOW))
+    expect((await deliver(c)).map((result) => result.outcome)).toEqual(["enviado"])
+    const [job] = await jobsOf(c)
+    const expired =
+      "WhatsApp no envió el mensaje porque la conexión con Meta venció o fue retirada. Vuelve a conectar con Facebook en Configuración › Integraciones › WhatsApp."
+    await ownerDb.update(message).set({ status: "failed", error: expired }).where(eq(message.id, job!.sentMessageId!))
+    expect(await run(c, (tx) => reconcileDeliveries(tx, c.orgId, NOW))).toBe(1)
+    expect((await jobsOf(c))[0]).toMatchObject({ status: "fallido", cause: "proveedor", lastError: expired })
+    expect(await tasksOf(c)).toHaveLength(0)
+  })
+
   it("tras una inasistencia, si la persona ya reservó otra cita no se le escribe", async () => {
     const c = await clinic()
     const p = await person(c, "Ya reservó", { consent: ["seguimiento"], openWindow: true })
