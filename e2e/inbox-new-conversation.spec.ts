@@ -53,20 +53,23 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await expect(none).toBeVisible()
   await expect(none.getByRole("link", { name: "Ver los mensajes", exact: true })).toBeVisible()
 
-  // --- «Contexto»: próxima cita, permisos de mensajes y «Reservar cita» para quien aún no es paciente ---
+  // --- «Contexto»: se pide, y entra a cada sección sin salir de la Bandeja ---
+  await page.getByRole("button", { name: "Contexto", exact: true }).click()
   const context = page.getByRole("region", { name: "Contexto del contacto" })
-  await expect(context).toContainText("Próxima cita")
-  await expect(context).toContainText("Ninguna")
-  await expect(context).toContainText("Novedades y promociones: aún no se le preguntó")
-  await expect(context.getByRole("link", { name: "Reservar cita", exact: true })).toHaveAttribute("href", new RegExp(`contactId=${detail.contact.id}`))
-  await expect(context).toContainText("todavía no es paciente")
-  // Su número con el formato de toda la aplicación, en la cabecera y en Canales; nunca «wa:».
+  await expect(context.getByRole("button", { name: /^Citas/ })).toContainText("Sin próxima cita")
+  // Su número con el formato de toda la aplicación; nunca «wa:».
   await expect(context).toContainText("+51 987 654 321")
-  await expect(context.getByRole("listitem").filter({ hasText: "WhatsApp" }).filter({ hasText: "+51 987 654 321" })).toHaveCount(1)
   await expect(context).not.toContainText("wa:")
   await expect(context).not.toContainText("+51987654321")
-  // «Tomar», «Devolver al agente» y «Resolver» solo en la cabecera del hilo.
-  await expect(context.getByRole("button", { name: /^(Tomar|Devolver al agente|Resolver)$/ })).toHaveCount(0)
+  // Quien aún no es paciente no tiene plan ni clínica.
+  await expect(context.getByRole("button", { name: /^Plan y presupuesto/ })).toHaveCount(0)
+  await context.getByRole("button", { name: /^Datos/ }).click()
+  await expect(context).toContainText("Novedades y promociones: aún no se le preguntó")
+  await context.getByRole("button", { name: "Volver al contexto" }).click()
+  await context.getByRole("button", { name: /^Citas/ }).click()
+  await expect(context.getByRole("link", { name: "Reservar cita", exact: true })).toHaveAttribute("href", new RegExp(`contactId=${detail.contact.id}`))
+  await expect(context).toContainText("todavía no es paciente")
+  await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("hilo-nuevo-con-contexto", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -93,7 +96,9 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   })
   await fixtureDb.update(member).set({ role: "reception" }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
-  await page.getByRole("region", { name: "Contexto del contacto" }).getByRole("link", { name: "Reservar cita", exact: true }).click()
+  const reception = page.getByRole("region", { name: "Contexto del contacto" })
+  await reception.getByRole("button", { name: /^Citas/ }).click()
+  await reception.getByRole("link", { name: "Reservar cita", exact: true }).click()
   await expect(page.getByText("Rosa Quispe todavía no es paciente")).toBeVisible()
   await page.getByRole("button", { name: "Semana siguiente" }).click()
   // La pregunta de novedades y promociones no se salta: recepción anota lo que respondió.
@@ -113,11 +118,16 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await expect(page.getByText("Fecha de nacimiento.", { exact: true })).toBeVisible()
   await info.attach("persona-ficha-minima", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // --- Odontología escribe a las personas, pero no lee el CRM: sin «Contexto» ni «Nueva conversación» ---
+  // --- Odontología no lee el CRM: sin «Nueva conversación»; de quien ya es paciente, su «Contexto» sin lo comercial ---
   await fixtureDb.update(member).set({ role: "clinician" }).where(and(eq(member.organizationId, org.id), eq(member.userId, owner.user.id)))
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
   await expect(page.getByText("Rosa Quispe").first()).toBeVisible()
   await expect(page.getByRole("button", { name: "Nueva conversación", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Contexto", exact: true })).toHaveCount(0)
+  const clinical = page.getByRole("region", { name: "Contexto del contacto" })
+  await expect(clinical.getByRole("button", { name: /^Clínica/ })).toBeVisible()
+  await expect(clinical.getByRole("button", { name: /^Oportunidades y tareas/ })).toHaveCount(0)
   expect((await api(page, "GET", `/api/crm/contacts/${detail.contact.id}/context`, org.slug)).status).toBe(403)
+  const lines = await call<{ lines: Record<string, string> }>(page, "GET", `/api/conversations/${conversationId}/context`, org.slug)
+  expect(lines.lines).not.toHaveProperty("ventas")
+  expect(lines.lines).not.toHaveProperty("recuerda")
 })

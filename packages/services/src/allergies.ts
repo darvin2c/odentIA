@@ -103,7 +103,7 @@ async function lockHealth(tx: Db, orgId: string, patientId: string) {
   return locked
 }
 
-async function activeAllergies(tx: Db, orgId: string, patientId: string, exceptId?: string) {
+export async function activeAllergies(tx: Db, orgId: string, patientId: string, exceptId?: string) {
   return tx
     .select()
     .from(patientAllergy)

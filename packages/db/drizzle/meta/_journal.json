@@ -159,8 +159,22 @@
     {
       "idx": 22,
       "version": "7",
-      "when": 1793370336724,
-      "tag": "0022_enlace_para_alguien_nuevo",
+      "when": 1793385077540,
+      "tag": "0022_acciones_del_agente",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793385092067,
+      "tag": "0023_acciones_del_agente_reglas",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793390257419,
+      "tag": "0024_enlace_para_alguien_nuevo",
       "breakpoints": true
     }
   ]

@@ -101,6 +101,8 @@ export interface ResolvePreview {
 
 export interface ConversationListItem {
   id: string
+  /** Lo último que hizo el agente, si la persona no volvió a escribir después. */
+  lastAction?: { at: string; title: string; what: string | null; state: "hecho" | "espera" | "no_se_pudo" | "vencio" | "ya_no_vale" | null } | null
   status: string
   agentStatus: string
   unreadCount: number

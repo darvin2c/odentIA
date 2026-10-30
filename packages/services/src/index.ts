@@ -8,6 +8,8 @@
  */
 export * from "./agentConfig.js"
 export * from "./agent-activity.js"
+export * from "./agent-actions.js"
+export * from "./conversation-context.js"
 export * from "./agent-case.js"
 export * from "./agent-case-brief.js"
 export * from "./admin-drafts.js"

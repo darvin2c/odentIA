@@ -513,17 +513,18 @@ test("bandeja: pasadas las 24 horas lo dice antes de escribir, ofrece el mensaje
   await expect(notice).toContainText("WhatsApp solo deja enviarle un mensaje aprobado")
   await expect(page.getByLabel("Mensaje", { exact: true })).toHaveCount(0)
 
-  // Los mensajes se eligen por lo que dicen, con los datos de esa persona ya puestos.
+  // Los mensajes se eligen por lo que dicen, con los datos de esa persona ya puestos. La lista se abre al pedirla.
+  await page.getByRole("button", { name: "Elegir un mensaje aprobado" }).click()
   const options = page.getByRole("radiogroup", { name: "Elige el mensaje" })
   const resume = options.getByRole("radio", { name: /Retomar la conversación/ })
   await expect(options.getByRole("radio")).toHaveCount(1)
   await expect(resume).toBeChecked()
-  await expect(options).toContainText("para continuar con tu consulta. ¿Seguimos por aquí?")
-  await expect(options).toContainText("Sí, continuemos")
+  await expect(page.getByText(/para continuar con tu consulta\. ¿Seguimos por aquí\?/).first()).toBeVisible()
+  await expect(page.getByText("Sí, continuemos").first()).toBeVisible()
   // Ni nombres técnicos ni «parámetros»: ningún dato se pide a quien envía.
-  await expect(options).not.toContainText(/odentia_|\{\{|plantilla/i)
+  await expect(page.locator("main")).not.toContainText(/odentia_|\{\{/)
   await expect(page.getByPlaceholder(/parámetros/i)).toHaveCount(0)
-  await expect(options.getByRole("textbox")).toHaveCount(0)
+  await expect(page.getByRole("textbox", { name: /de «Retomar la conversación»/ })).toHaveCount(0)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("bandeja-ventana-cerrada", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
@@ -578,7 +579,7 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
 
   const none = page.getByRole("status").filter({ hasText: "Aún no se le puede escribir" })
   await expect(none).toContainText("«Retomar la conversación» está en revisión")
-  await expect(page.getByRole("radiogroup", { name: "Elige el mensaje" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Elegir un mensaje aprobado" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Enviar mensaje", exact: true })).toHaveCount(0)
   await info.attach("bandeja-sin-mensaje-aprobado", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await none.getByRole("link", { name: "Ver los mensajes", exact: true }).click()
