@@ -3338,8 +3338,8 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
     )
   if (!allDates && query.from) filters.push(gte(paymentTicket.createdAt, dayBoundsUTC(day(query.from), timezone).start))
   if (!allDates && query.to) filters.push(lt(paymentTicket.createdAt, dayBoundsUTC(day(query.to), timezone).end))
+  const methodIds = (query.methodIds ?? []).filter((id) => UUID.test(id))
   if (query.methodIds?.length) {
-    const methodIds = query.methodIds.filter((id) => UUID.test(id))
     filters.push(
       methodIds.length
         ? sql`exists (select 1 from ${patientPayment} where ${patientPayment.organizationId} = ${paymentTicket.organizationId}
@@ -3409,63 +3409,17 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
     rows.map((row) => row.ticket.voidedBy).filter((id): id is string => !!id),
   )
 
-  const counts = await tx
-    .select({
-      currency: paymentTicket.currency,
-      rows: sql<number>`count(*)::int`,
-      tickets: sql<number>`(count(*) filter (where ${paymentTicket.voidedAt} is null))::int`,
-      cents: sql<string>`coalesce(sum(${paymentTicket.totalCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
-    })
-    .from(paymentTicket)
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .where(where)
-    .groupBy(paymentTicket.currency)
-  const methods = await tx
-    .select({
-      currency: patientPayment.currency,
-      name: patientPayment.methodName,
-      cents: sql<string>`sum(${patientPayment.amountCents})::bigint`,
-    })
-    .from(patientPayment)
-    .innerJoin(
-      paymentTicket,
-      and(eq(paymentTicket.organizationId, patientPayment.organizationId), eq(paymentTicket.id, patientPayment.ticketId)),
-    )
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .where(and(where, isNull(paymentTicket.voidedAt)))
-    .groupBy(patientPayment.currency, patientPayment.methodName)
-  const refunds = await tx
-    .select({ currency: paymentReturn.currency, cents: sql<string>`sum(${paymentReturn.totalCents})::bigint` })
-    .from(paymentReturn)
-    .innerJoin(
-      paymentTicket,
-      and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
-    )
-    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
-    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
-    .where(and(where, eq(paymentReturn.outcome, "pagado")))
-    .groupBy(paymentReturn.currency)
-
-  const totals: TicketTotals[] = counts.map((row) => ({
-    currency: row.currency,
-    tickets: row.tickets,
-    cobradoCents: bigintCents(row.cents),
-    refundedCents: bigintCents(refunds.find((item) => item.currency === row.currency)?.cents),
-    byMethod: methods
-      .filter((item) => item.currency === row.currency)
-      .map((item) => ({ name: item.name, cents: bigintCents(item.cents) }))
-      .sort((a, b) => b.cents - a.cents),
-  }))
+  // Lo que suma la lista entera se pide solo con la primera página: las siguientes no lo cambian.
+  const summary = cursor ? null : await ticketTotals(tx, orgId, where, methodIds)
 
   return {
     timezone,
     /** La búsqueda fue un número: se buscó en todas las fechas, sin la de los filtros. */
     allDates,
-    /** Filas de la lista entera, anuladas incluidas. */
-    total: counts.reduce((sum, row) => sum + row.rows, 0),
-    totals,
+    /** Filas de la lista entera, anuladas incluidas (solo en la primera página). */
+    total: summary?.total ?? null,
+    /** Solo en la primera página. */
+    totals: summary?.totals ?? null,
     nextCursor,
     /** Quiénes cobraron en esta sede: las opciones de «Cobró» (solo en la primera página). */
     cashiers: cursor ? null : await ticketCashiers(tx, orgId, branchRow.id),
@@ -3493,6 +3447,72 @@ export async function listTickets(tx: Db, orgId: string, query: TicketListQuery)
       }
     }),
   }
+}
+
+/**
+ * Cuántos tickets hay en la lista y lo que suma, por moneda y por medio. Con
+ * medios elegidos, lo cobrado es solo lo de esos medios: lo que se cuadra con
+ * el POS o con Yape, no el total de un ticket pagado con dos medios.
+ */
+async function ticketTotals(tx: Db, orgId: string, where: SQL, methodIds: string[]) {
+  const counts = await tx
+    .select({
+      currency: paymentTicket.currency,
+      rows: sql<number>`count(*)::int`,
+      tickets: sql<number>`(count(*) filter (where ${paymentTicket.voidedAt} is null))::int`,
+      cents: sql<string>`coalesce(sum(${paymentTicket.totalCents}) filter (where ${paymentTicket.voidedAt} is null), 0)::bigint`,
+    })
+    .from(paymentTicket)
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(where)
+    .groupBy(paymentTicket.currency)
+  const methods = await tx
+    .select({
+      currency: patientPayment.currency,
+      name: patientPayment.methodName,
+      cents: sql<string>`sum(${patientPayment.amountCents})::bigint`,
+    })
+    .from(patientPayment)
+    .innerJoin(
+      paymentTicket,
+      and(eq(paymentTicket.organizationId, patientPayment.organizationId), eq(paymentTicket.id, patientPayment.ticketId)),
+    )
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(
+      and(
+        where,
+        isNull(paymentTicket.voidedAt),
+        ...(methodIds.length ? [inArray(patientPayment.paymentMethodId, methodIds)] : []),
+      ),
+    )
+    .groupBy(patientPayment.currency, patientPayment.methodName)
+  const refunds = await tx
+    .select({ currency: paymentReturn.currency, cents: sql<string>`sum(${paymentReturn.totalCents})::bigint` })
+    .from(paymentReturn)
+    .innerJoin(
+      paymentTicket,
+      and(eq(paymentTicket.organizationId, paymentReturn.organizationId), eq(paymentTicket.id, paymentReturn.ticketId)),
+    )
+    .innerJoin(patient, and(eq(patient.id, paymentTicket.patientId), eq(patient.organizationId, orgId)))
+    .innerJoin(patientPerson, joinPatientPerson(patientPerson))
+    .where(and(where, eq(paymentReturn.outcome, "pagado")))
+    .groupBy(paymentReturn.currency)
+  const totals: TicketTotals[] = counts.map((row) => {
+    const byMethod = methods
+      .filter((item) => item.currency === row.currency)
+      .map((item) => ({ name: item.name, cents: bigintCents(item.cents) }))
+      .sort((a, b) => b.cents - a.cents)
+    return {
+      currency: row.currency,
+      tickets: row.tickets,
+      cobradoCents: methodIds.length ? byMethod.reduce((sum, item) => sum + item.cents, 0) : bigintCents(row.cents),
+      refundedCents: bigintCents(refunds.find((item) => item.currency === row.currency)?.cents),
+      byMethod,
+    }
+  })
+  return { total: counts.reduce((sum, row) => sum + row.rows, 0), totals }
 }
 
 /** Quiénes cobraron alguna vez en la sede, por nombre. */

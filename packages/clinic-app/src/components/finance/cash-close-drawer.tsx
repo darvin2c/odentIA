@@ -26,6 +26,7 @@ import {
 import { DetailDrawer, ErrorState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
+import { ticketDisplayNumber } from "./ticket-view"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import {
@@ -895,7 +896,7 @@ function CountedMovements({
   const what = (row: ClosureSheet["counted"][number]): string => {
     if (row.kind === "cobro")
       return row.ticketNumber !== null
-        ? `Ticket ${String(row.ticketNumber).padStart(6, "0")}${row.patientName ? ` · ${row.patientName}` : ""}`
+        ? `Ticket ${ticketDisplayNumber(row.ticketNumber)}${row.patientName ? ` · ${row.patientName}` : ""}`
         : row.concept
     if (row.kind === "gasto") return `Gasto: ${row.concept}`
     if (row.kind === "aporte") return `Ingreso de efectivo: ${row.concept}`

@@ -88,7 +88,7 @@ describe("Cobros: todos los tickets de la sede", () => {
     expect(all.totals).toEqual([
       expect.objectContaining({ currency: "PEN", tickets: 2, cobradoCents: 50000, refundedCents: 0 }),
     ])
-    expect(all.totals[0]?.byMethod).toEqual([
+    expect(all.totals?.[0]?.byMethod).toEqual([
       { name: "Efectivo", cents: 30000 },
       { name: "Tarjeta", cents: 20000 },
     ])
@@ -138,17 +138,38 @@ describe("Cobros: todos los tickets de la sede", () => {
 
     const byCard = await f.run((tx) => listTickets(tx, "org_a", { branchId, methodIds: [card.id] }))
     expect(byCard.data.map((row) => row.id)).toEqual([big.id])
+
+    // Un ticket pagado con dos medios: filtrado por uno, lo cobrado es solo lo de ese medio.
+    await f.run((tx) =>
+      createCharge(tx, ...f.args, { description: "Puente", amountCents: 30000, currency: "PEN", branchId }),
+    )
+    const split = await f.run((tx) =>
+      collectCharge(tx, ...f.args, {
+        branchId,
+        payments: [
+          { paymentMethodId: cash.id, amountCents: 10000 },
+          { paymentMethodId: card.id, amountCents: 20000 },
+        ],
+        requestId: randomUUID(),
+      }),
+    )
+    const cashOnly = await f.run((tx) => listTickets(tx, "org_a", { branchId, methodIds: [cash.id], state: "vigentes" }))
+    expect(cashOnly.data.map((row) => row.id)).toEqual([split.ticket.id, small.id])
+    expect(cashOnly.totals?.[0]).toMatchObject({ cobradoCents: 15000, byMethod: [{ name: "Efectivo", cents: 15000 }] })
+    await f.run((tx) =>
+      voidTicket(tx, "org_a", f.actor, f.patient.id, split.ticket.id, { reason: "Prueba", allowPostClose: true }),
+    )
     const byCashier = await f.run((tx) => listTickets(tx, "org_a", { branchId, cashierIds: [f.actor] }))
-    expect(byCashier.total).toBe(3)
+    expect(byCashier.total).toBe(4)
     const nobody = await f.run((tx) => listTickets(tx, "org_a", { branchId, cashierIds: [randomUUID()] }))
     expect(nobody.data).toEqual([])
     const voided = await f.run((tx) => listTickets(tx, "org_a", { branchId, state: "anulados" }))
-    expect(voided.data.map((row) => row.id)).toEqual([middle.id])
+    expect(voided.data.map((row) => row.id)).toEqual([split.ticket.id, middle.id])
     const live = await f.run((tx) => listTickets(tx, "org_a", { branchId, state: "vigentes" }))
     expect(live.data.map((row) => row.id)).toEqual([big.id, small.id])
 
     const byAmount = await f.run((tx) => listTickets(tx, "org_a", { branchId, sort: "monto" }))
-    expect(byAmount.data.map((row) => row.id)).toEqual([big.id, middle.id, small.id])
+    expect(byAmount.data.map((row) => row.id)).toEqual([big.id, split.ticket.id, middle.id, small.id])
 
     const page1 = await f.run((tx) => listTickets(tx, "org_a", { branchId, limit: 2 }))
     expect(page1.data).toHaveLength(2)
@@ -157,13 +178,15 @@ describe("Cobros: todos los tickets de la sede", () => {
       listTickets(tx, "org_a", { branchId, limit: 2, cursor: page1.nextCursor ?? undefined }),
     )
     expect(page2.nextCursor).toBeNull()
+    // Lo que suma la lista viene solo con la primera página.
     expect(page2.cashiers).toBeNull()
-    expect([...page1.data, ...page2.data].map((row) => row.id)).toEqual([middle.id, big.id, small.id])
+    expect(page2.totals).toBeNull()
+    expect([...page1.data, ...page2.data].map((row) => row.id)).toEqual([split.ticket.id, middle.id, big.id, small.id])
     const amountPage2 = await f.run(async (tx) => {
       const first = await listTickets(tx, "org_a", { branchId, sort: "monto", limit: 1 })
       return listTickets(tx, "org_a", { branchId, sort: "monto", limit: 1, cursor: first.nextCursor ?? undefined })
     })
-    expect(amountPage2.data.map((row) => row.id)).toEqual([middle.id])
+    expect(amountPage2.data.map((row) => row.id)).toEqual([split.ticket.id])
 
     await expect(f.run((tx) => listTickets(tx, "org_a", { branchId, cursor: "no-es-una-pagina" }))).rejects.toThrow()
   })

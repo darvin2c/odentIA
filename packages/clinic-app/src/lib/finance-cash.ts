@@ -97,13 +97,9 @@ export function otherMethods(byMethod: MethodTotal[]): MethodTotal[] {
   return byMethod.filter((row) => row.typeCode !== CASH_TYPE_CODE)
 }
 
-// --- Deudas: GET /finance/debts ------------------------------------------------
+// --- Deudas ------------------------------------------------------------------------
 
 export type { DebtRow } from "./finance-debt"
-
-export function fetchDebts(branchId: string): Promise<{ data: DebtRow[] }> {
-  return apiFetch<{ data: DebtRow[] }>(`/api/finance/debts?branchId=${encodeURIComponent(branchId)}`)
-}
 
 /** Lo que toca cobrar una vez descontado el saldo a favor. */
 export function debtDue(row: DebtRow): { dueCents: number; creditUsedCents: number } {
@@ -125,13 +121,6 @@ export function debtConcepts(row: DebtRow): string {
  */
 export function attendedTodayAt(row: DebtRow): string | null {
   return row.attendedTodayAt
-}
-
-/** Días que lleva debiendo, contados por día de calendario en la zona de la sede. */
-export function debtAgeDays(row: DebtRow, timeZone: string, today: string): number | null {
-  if (!row.oldestSince) return null
-  const since = dayKeyOf(row.oldestSince, timeZone)
-  return since ? Math.max(0, daysBetween(since, today)) : null
 }
 
 /** Totales por moneda: una deuda en otra moneda nunca se suma a la de la clínica. */
@@ -245,8 +234,9 @@ export interface TicketListBody {
   timezone: string
   /** La búsqueda fue un número: se buscó en todas las fechas. */
   allDates: boolean
-  total: number
-  totals: TicketTotals[]
+  /** Solo en la primera página: lo que suma la lista entera no cambia al pedir más. */
+  total: number | null
+  totals: TicketTotals[] | null
   nextCursor: string | null
   /** Solo en la primera página: quiénes cobraron en la sede. */
   cashiers: Array<{ id: string; name: string }> | null

@@ -45,7 +45,7 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowLeft, Banknote, Lock, Plus } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { BranchSwitcher } from "../../components/branch-switcher"
 import {
   CashCloseDrawer,
@@ -299,9 +299,21 @@ function FinanceWorkspace() {
   // La búsqueda y los filtros son de cada lista: al cambiar de sección se limpian.
   const showView = (next: FinanceView, patch: Partial<FinanceSearch> = {}) =>
     setSearch({ ...cleared, ticket: undefined, tab: next === "caja" ? undefined : next, ...patch })
-  const openTicket = (ticketId: string) => setSearch({ ticket: ticketId }, view === "cobros" && !!search.ticket)
-
-  const collect = (patient: CollectTarget | null = null) => setPanel({ kind: "cobrar", patient })
+  // Estables: las tablas de Cobros y Deudas los usan en sus columnas.
+  const ticketOpen = !!search.ticket
+  const openTicket = useCallback(
+    (ticketId: string) =>
+      void navigate({
+        search: (previous) => ({ ...previous, ticket: ticketId }),
+        replace: view === "cobros" && ticketOpen,
+        resetScroll: false,
+      }),
+    [navigate, view, ticketOpen],
+  )
+  const collect = useCallback(
+    (patient: CollectTarget | null = null) => setPanel({ kind: "cobrar", patient }),
+    [],
+  )
   const ws: Workspace | null =
     prof && branchId
       ? {
@@ -509,7 +521,7 @@ function FinanceWorkspace() {
                 onCloseCash={() => setPanel({ kind: "cerrar" })}
                 onCashMove={() => setPanel({ kind: "efectivo" })}
                 onShowDebts={() => showView("deudas")}
-                onShowTickets={() => showView("cobros", { fecha_from: todayIn(ws.timeZone), fecha_to: todayIn(ws.timeZone) })}
+                onShowTickets={(from) => showView("cobros", { fecha_from: from, fecha_to: todayIn(ws.timeZone) })}
                 onShowClosures={() => showView("cierres")}
                 onOpenTicket={openTicket}
               />
@@ -525,7 +537,7 @@ function FinanceWorkspace() {
                 openTicketId={search.ticket ?? null}
                 onOpenTicket={openTicket}
                 onListChange={setTicketList}
-                onCollect={() => collect()}
+                onCollect={collect}
               />
             ) : null}
             {view === "comisiones" ? (
@@ -809,8 +821,8 @@ function CashTab({
   onCloseCash: () => void
   onCashMove: () => void
   onShowDebts: () => void
-  /** Cobros con la fecha de hoy. */
-  onShowTickets: () => void
+  /** Cobros desde ese día (de la sede) hasta hoy. */
+  onShowTickets: (from: string) => void
   onShowClosures: () => void
 }) {
   const { branchId, locale, timeZone } = ws
@@ -884,10 +896,16 @@ function CashTab({
   const ticketCount = entries.filter((entry) => entry.type === "cobro" && !entry.voided).length
   const expenseCount = entries.filter((entry) => entry.type === "gasto").length
   const openedDay = state?.openedAt ? spokenMoment(state.openedAt, locale, zone) : null
-  const attendedDue = attended.reduce<Record<string, number>>((sum, row) => {
-    sum[row.currency] = (sum[row.currency] ?? 0) + row.dueCents
-    return sum
-  }, {})
+  // Lo de hoy es lo de la sede menos lo de antes: cuenta también a quien no cupo en la lista.
+  const attendedTotal = debts.data?.data.total ?? attended.length
+  const attendedDue = (debts.data?.data.summary.totals ?? [])
+    .map((row) => ({
+      currency: row.currency,
+      cents: row.cents - (earlier?.totals.find((item) => item.currency === row.currency)?.cents ?? 0),
+    }))
+    .filter((row) => row.cents > 0)
+  // «Ver cobros» abre lo mismo que suma la tarjeta: desde el último cierre si la caja va de varios días.
+  const collectedFrom = unclosedSince && reference ? dayKeyOf(reference, zone) : today
 
   return (
     <div className="flex flex-col gap-4">
@@ -973,7 +991,7 @@ function CashTab({
               {state.tickets > 0 ? (
                 <>
                   {" · "}
-                  <Button variant="link" className="h-auto p-0 align-baseline" onClick={onShowTickets}>
+                  <Button variant="link" className="h-auto p-0 align-baseline" onClick={() => onShowTickets(collectedFrom)}>
                     Ver cobros
                   </Button>
                 </>
@@ -990,10 +1008,8 @@ function CashTab({
           </h2>
           {attended.length > 0 ? (
             <p className="text-sm text-muted-foreground">
-              Salieron hoy de su atención · {plural(attended.length, "persona", "personas")} ·{" "}
-              {Object.entries(attendedDue)
-                .map(([unit, cents]) => formatMoney(cents, unit, locale))
-                .join(" · ")}
+              Salieron hoy de su atención · {plural(attendedTotal, "persona", "personas")} ·{" "}
+              {attendedDue.map((row) => formatMoney(row.cents, row.currency, locale)).join(" · ")}
             </p>
           ) : null}
         </div>
@@ -1041,6 +1057,13 @@ function CashTab({
                     />
                   )
                 })}
+                {attendedTotal > attended.length ? (
+                  <li className="py-3 text-sm">
+                    <Button variant="link" className="h-auto p-0" onClick={onShowDebts}>
+                      Ver las {attendedTotal - attended.length} que faltan en Deudas
+                    </Button>
+                  </li>
+                ) : null}
               </ul>
             ) : (
               <p className="mt-2 text-sm text-muted-foreground">Nadie salió hoy de su atención con algo por pagar.</p>

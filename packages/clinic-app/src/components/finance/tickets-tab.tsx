@@ -260,7 +260,7 @@ export function TicketsTab({
   if (tickets.isError && isForbidden(tickets.error)) {
     return <EmptyState title="Sin acceso a finanzas" description={financeErrorMessage(tickets.error)} />
   }
-  const line = first ? totalsLine(first.totals, locale) : null
+  const line = first?.totals ? totalsLine(first.totals, locale) : null
 
   return (
     <div className="flex flex-col gap-3">
