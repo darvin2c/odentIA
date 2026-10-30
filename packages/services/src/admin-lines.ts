@@ -392,6 +392,8 @@ const JOB_KIND_LINE: Record<string, AdminLineKey> = {
   aviso_cita_reservada_datos: "recordatorio_cita",
   // El recordatorio con «Completar mis datos», cuando faltan datos.
   recordatorio_cita_datos: "recordatorio_cita",
+  // El recordatorio sin «Confirmar», cuando la cita ya está confirmada (ADR 0109).
+  recordatorio_cita_confirmada: "recordatorio_cita",
   aviso_cita_movida: "recordatorio_cita",
   aviso_cita_cancelada: "recordatorio_cita",
 }

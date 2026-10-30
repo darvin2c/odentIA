@@ -18,9 +18,10 @@ import {
   getPersonalLinkPaper,
   getPersonalLinkQuestionnaire,
   getPersonalLinkView,
+  listBookingLinkProfessionals,
   listBookingLinkSlots,
   registerFromBookingLink,
-  reserveBookingLink,
+  reservePersonalLink,
   ServiceError,
   setPersonalLinkMessages,
   signPersonalLinkConsent,
@@ -41,16 +42,10 @@ const MAX_BUCKETS = 10000
 // mientras se escribe: tienen su cupo y no gastan el de enviar (issue 36).
 const LIMITS = { get: 240, post: 30, address: 60 } as const
 const token = z.string().regex(/^[0-9a-f]{64}$/)
-const slotsQuery = z.strictObject({ token, branchId: z.uuid(), from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }) })
-const reserveBody = z.strictObject({
-  token,
-  branchId: z.uuid(),
-  startsAt: z.iso.datetime({ offset: true }),
-  professionalUserId: z.string().min(1).max(200),
-  roomId: z.uuid().optional(),
-  // «Elegir horario» de lo que aceptó en su presupuesto.
-  planItemIds: z.array(z.uuid()).min(1).max(52).optional(),
-})
+// `cambiar`: las horas para cambiar su cita, con las reglas de su cita.
+const linkMode = z.enum(["cambiar"]).optional()
+const slotsQuery = z.strictObject({ token, branchId: z.uuid(), from: z.iso.datetime({ offset: true }), to: z.iso.datetime({ offset: true }), mode: linkMode })
+const professionalsQuery = z.strictObject({ token, branchId: z.uuid(), mode: linkMode })
 const registrationBody = z.strictObject({
   token,
   submissionId: z.uuid(),
@@ -58,9 +53,7 @@ const registrationBody = z.strictObject({
   answers: registrationAnswersSchema,
 })
 const shortText = (max: number) => z.string().trim().max(max)
-const dataBody = z.strictObject({
-  token,
-  data: z.strictObject({
+const linkData = z.strictObject({
     givenNames: shortText(100).optional(),
     familyName: shortText(200).optional(),
     birthDate: shortText(10).optional(),
@@ -82,9 +75,17 @@ const dataBody = z.strictObject({
     insuranceScheme: shortText(30).optional(),
     insurerName: shortText(200).optional(),
     affiliationNumber: shortText(50).optional(),
-  }),
+})
+const dataBody = z.strictObject({
+  token,
+  data: linkData,
   // Su salud, con las mismas reglas del registro de pacientes.
   health: registrationAnswersSchema.shape.health.nullable().optional(),
+  // El aviso que aún no aceptó y su respuesta a novedades y promociones, si nunca la dio.
+  privacyAccepted: z.boolean().optional(),
+  acceptsPromotions: z.boolean().optional(),
+  // Dejó su celular y se le dijo que le escribiremos por WhatsApp sobre sus citas.
+  acceptsReminders: z.literal(true).optional(),
   representative: z
     .strictObject({
       displayName: shortText(200).min(1),
@@ -95,6 +96,23 @@ const dataBody = z.strictObject({
       relationshipDetail: shortText(100).optional(),
     })
     .nullish(),
+})
+const reserveBody = z.strictObject({
+  token,
+  branchId: z.uuid(),
+  startsAt: z.iso.datetime({ offset: true }),
+  professionalUserId: z.string().min(1).max(200),
+  roomId: z.uuid().optional(),
+  // «Elegir horario» de lo que aceptó en su presupuesto.
+  planItemIds: z.array(z.uuid()).min(1).max(52).optional(),
+  // Quien ya es paciente: lo que faltaba de sus datos y lo que acepta, en el mismo paso.
+  you: z
+    .strictObject({
+      data: linkData,
+      privacyAccepted: z.boolean().optional(),
+      acceptsPromotions: z.boolean().optional(),
+    })
+    .optional(),
 })
 const decisionBody = z.strictObject({
   token,
@@ -231,8 +249,16 @@ export function createPublicBookingRoute(deps: {
   app.get("/:slug/slots", async (c) => {
     const query = slotsQuery.safeParse(c.req.query())
     if (!query.success) return c.json(errorBody(c, "VALIDATION", "Revisa las fechas pedidas"), 400)
-    const { token: linkToken, ...range } = query.data
-    return answer(c, 200, () => inOrg(c, (tx, orgId) => listBookingLinkSlots(tx, orgId, linkToken, range)))
+    const { token: linkToken, mode, ...range } = query.data
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => listBookingLinkSlots(tx, orgId, linkToken, { ...range, changing: mode === "cambiar" })))
+  })
+
+  // Con quién: quienes atienden en la sede y el próximo horario libre de cada uno, aunque no sea esta semana.
+  app.get("/:slug/professionals", async (c) => {
+    const query = professionalsQuery.safeParse(c.req.query())
+    if (!query.success) return c.json(errorBody(c, "VALIDATION", "Revisa la sede pedida"), 400)
+    const { token: linkToken, branchId, mode } = query.data
+    return answer(c, 200, () => inOrg(c, (tx, orgId) => listBookingLinkProfessionals(tx, orgId, linkToken, { branchId, changing: mode === "cambiar" })))
   })
 
   // Quien aún no es paciente deja aquí sus datos esenciales: la ficha la crea el registro de pacientes.
@@ -267,7 +293,7 @@ export function createPublicBookingRoute(deps: {
         if (!access.allowed) {
           throw new ServiceError("SAAS_RESTRICTED", 403, "La clínica pausó las reservas en línea: escríbenos por otro canal")
         }
-        return reserveBookingLink(tx, orgId, linkToken, choice, { secretsKey: deps.secretsKey })
+        return reservePersonalLink(tx, orgId, linkToken, choice, { secretsKey: deps.secretsKey })
       }),
     )
   })

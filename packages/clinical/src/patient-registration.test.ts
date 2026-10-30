@@ -41,6 +41,26 @@ describe("contrato de registro", () => {
     expect(validateRegistrationAnswers(saved, { ...minimal, demographics: { ...minimal.demographics, occupation: "Abogada" } }, { ...internal, scope: "essentials" })).toHaveProperty("demographics.occupation")
     expect(validateRegistrationAnswers(saved, { ...minimal, health: adult.health }, { ...internal, scope: "essentials" })).toHaveProperty("health")
   })
+  it("al reservar desde su enlace se pide lo obligatorio que ese paso sabe pedir; lo demás queda para «Tus datos»", () => {
+    const saved = { ...config, version: 1, fields: { ...config.fields, sex: "required" as const, address: "required" as const } }
+    const booking = { ...publicContext, scope: "essentials" } as const
+    const answers: RegistrationAnswers = {
+      demographics: {
+        displayName: "Rosa Pérez Quispe", givenNames: "Rosa", familyName: "Pérez Quispe", docType: "DNI", docNumber: "45678912",
+        phone: "+51987654321", birthDate: "1990-05-14", sex: "F",
+      },
+      respondent: "patient", privacyAccepted: true, acceptsReminders: true, acceptsMessages: false,
+    }
+    expect(validateRegistrationAnswers(saved, answers, booking)).toEqual({})
+    // La fecha de nacimiento y el sexo que la clínica exige no se saltan, ni siquiera «Para mí».
+    expect(validateRegistrationAnswers(saved, { ...answers, demographics: { ...answers.demographics, birthDate: null } }, booking)).toHaveProperty("demographics.birthDate")
+    expect(validateRegistrationAnswers(saved, { ...answers, demographics: { ...answers.demographics, sex: null } }, booking)).toHaveProperty("demographics.sex")
+    // La dirección no se pide en ese paso: queda pendiente para «Tus datos», sin bloquear la reserva.
+    expect(pendingRegistrationFields(saved, answers).map((field) => field.key)).toEqual(["address"])
+    // Lo censal y la salud nunca se piden al reservar.
+    expect(validateRegistrationAnswers(saved, { ...answers, demographics: { ...answers.demographics, occupation: "Abogada" } }, booking)).toHaveProperty("demographics.occupation")
+    expect(validateRegistrationAnswers(saved, { ...answers, health: adult.health }, booking)).toHaveProperty("health")
+  })
   it("el teléfono de quien habla por la persona cuenta como suyo, en el registro y en lo que falta de su ficha", () => {
     const saved = { ...config, version: 1 }
     const child: RegistrationAnswers = { demographics: { displayName: "Mateo Quispe", givenNames: "Mateo", familyName: "Quispe", birthDate: "2020-03-01" }, respondent: "staff", privacyAccepted: false,

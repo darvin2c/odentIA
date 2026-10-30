@@ -316,6 +316,7 @@ it("el consentimiento se firma en su enlace con su documento y el profesional lo
 
 it("«Ver y responder»: el presupuesto aparece en el mismo enlace, se responde y deja de servir al decidirlo", async () => {
   const f = await clinicalFixture()
+  await ownerDb.insert(branch).values({ organizationId: ORG, name: `Sede ${randomUUID().slice(0, 6)}`, timezone: "America/Lima" })
   const personId = (await f.run((tx) => patientPersonId(tx, ORG, f.patient.id)))!
   const link = await f.run((tx) => issuePersonalLink(tx, ORG, { contactId: personId, patientId: f.patient.id }, { secretsKey: KEY }))
   const item = await f.run((tx) =>
@@ -333,7 +334,11 @@ it("«Ver y responder»: el presupuesto aparece en el mismo enlace, se responde 
   expect(answer.budget.status).toBe("aceptado")
   // «¿Reservamos…?»: lo aceptado queda para elegir horario.
   expect(answer.toSchedule.map((line) => line.planItemId)).toEqual([item.id])
-  expect((await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))).budgets).toEqual([])
+  const after = await f.run((tx) => getPersonalLinkView(tx, ORG, link.token))
+  expect(after.budgets).toEqual([])
+  // «Elegir horario» sigue teniendo dónde: las sedes no se van al responder.
+  expect(view.branches.length).toBeGreaterThan(0)
+  expect(after.branches.map((row) => row.id)).toEqual(view.branches.map((row) => row.id))
 })
 
 it("revocado no sirve, y el enlace de un correo (/c/) solo lleva a «Su enlace» con esa cita", async () => {

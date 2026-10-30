@@ -362,7 +362,7 @@ export function ThreadView({
       createPersonalLinkForContact(input.contactId, id, input.patientId),
     onSuccess: (result) => {
       const firstName = detail?.contact.displayName.split(" ")[0] ?? ""
-      setComposer(`${firstName ? `${firstName}, c` : "C"}ompleta tus datos y tu salud aquí (toma 2 minutos): ${result.data.url}`)
+      setComposer(`${firstName ? `${firstName}, c` : "C"}ompleta tus datos aquí (toma 2 minutos): ${result.data.url}`)
       setLinkPasted(true)
       setRegistrationError(null)
     },

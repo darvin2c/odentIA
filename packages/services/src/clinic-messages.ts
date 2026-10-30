@@ -54,6 +54,7 @@ import {
   positionalBody,
   PERSONAL_LINK_MESSAGE_KEY,
   ANSWER_READY_MESSAGE_KEY,
+  REMINDER_CONFIRMED_KEY,
   RESUME_MESSAGE_KEY,
   replyId,
   splitNamedBody, messageExampleValues } from "./automation-messages.js"
@@ -200,6 +201,7 @@ const NOTICE_TITLES: Record<string, string> = {
   aviso_cita_reservada: "Recordar la cita: cita reservada",
   aviso_cita_reservada_datos: "Recordar la cita: cita reservada, faltan datos",
   recordatorio_cita_datos: "Recordar la cita: recordatorio, faltan datos",
+  recordatorio_cita_confirmada: "Recordar la cita: recordatorio, cita confirmada",
   aviso_cita_movida: "Recordar la cita: cambio de fecha",
   aviso_cita_cancelada: "Recordar la cita: cita cancelada",
 }
@@ -931,6 +933,8 @@ const WHEN: Record<AutomationMessageKey, (days: number | null, timing: LineTimin
     "Al reservar una cita a quien le faltan datos para atenderla: en lugar del aviso de reserva, con su enlace para completarlos.",
   recordatorio_cita_datos: () =>
     "Antes de la cita, a quien aún le faltan datos para atenderla: en lugar del recordatorio, con el botón «Completar mis datos».",
+  recordatorio_cita_confirmada: () =>
+    "Antes de una cita ya confirmada (la que eligió la persona o la que ya confirmó): en lugar del recordatorio, sin «Confirmar» y con «Cambiar mi cita».",
   aviso_cita_movida: () => "Al cambiar la fecha o la hora de una cita.",
   aviso_cita_cancelada: () => "Al cancelar una cita que aún no llega, con la opción de reservar otra.",
 }
@@ -996,6 +1000,9 @@ function meanwhileOf(
   if (def.origin === "plan")
     return "Mientras tanto el presupuesto sale con su PDF a quien escribió en las últimas 24 horas, o por correo."
   if (def.origin !== "agente") return "Mientras tanto no se ofrece en la Bandeja."
+  // Sale en lugar del recordatorio: por WhatsApp, mientras no lo aprueban, sale el de siempre.
+  if (def.id === REMINDER_CONFIRMED_KEY)
+    return "Mientras tanto sale como respuesta a quien escribió en las últimas 24 horas, o por correo; a los demás les llega el recordatorio de siempre, con «Confirmar»."
   const people =
     waiting > 0
       ? ` ${waiting === 1 ? "1 persona lo tiene" : `${waiting} personas lo tienen`} por salir en las próximas 24 horas.`
@@ -1067,7 +1074,17 @@ function itemOf(
     current,
     pending,
     buttons: [
-      ...(def.link ? [{ title: def.link.title, does: "Abre su enlace: lo que tiene pendiente con la clínica, sin ver nada de lo guardado." }] : []),
+      ...(def.link
+        ? [
+            {
+              title: def.link.title,
+              does:
+                def.id === REMINDER_CONFIRMED_KEY
+                  ? "Abre su enlace: ahí cambia la cita a otro horario o la cancela, sin ver nada de lo guardado."
+                  : "Abre su enlace: lo que tiene pendiente con la clínica, sin ver nada de lo guardado.",
+            },
+          ]
+        : []),
       ...def.buttons.map((button) => ({ title: button.title, does: buttonDoes(def, button) })),
     ],
     variables: def.data.map((item) => ({

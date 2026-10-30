@@ -469,7 +469,7 @@
   },
   {
     "name": "proponer_cita",
-    "description": "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, unidad dental, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).",
+    "description": "Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, unidad dental, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta). Si a la clínica le falta un dato del paciente o que acepte el aviso de privacidad, no la propone: te da su enlace con esa hora para que confirme sus datos y reserve ahí.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -533,7 +533,7 @@
   },
   {
     "name": "reservar_paciente_nuevo",
-    "description": "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona, van los datos de esa persona con forOther; si es su hijo o hija menor, también minor. Nunca preguntes nada de salud para esto.",
+    "description": "Para quien aún no es paciente, cuando ya eligió un hueco de buscar_huecos: te da su enlace con esa hora ya elegida, para que deje sus datos (o los de la persona para quien es la cita) y quede reservada ahí. Si quien escribe ya es paciente y la cita es para otra persona que aún no lo es (su hijo, por ejemplo), con forOther. Por aquí no se registra a nadie: no le pidas apellidos, documento ni nada de salud para esto.",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -580,56 +580,14 @@
           "minLength": 0,
           "maxLength": 500
         },
-        "givenNames": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 100,
-          "description": "Sus nombres, como los escribió."
-        },
-        "familyName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200,
-          "description": "Sus apellidos, como los escribió."
-        },
-        "docType": {
-          "description": "Tipo de documento, solo si lo dio.",
-          "type": "string",
-          "enum": [
-            "NACIONAL",
-            "DNI",
-            "CE",
-            "PASAPORTE",
-            "CNV",
-            "DIE",
-            "OTRO"
-          ]
-        },
-        "docNumber": {
-          "description": "Número de documento, solo si lo dio.",
-          "type": "string",
-          "maxLength": 20
-        },
         "forOther": {
-          "description": "true si la cita es para otra persona: los nombres son los de esa persona.",
+          "description": "true si quien escribe ya es paciente y la cita es para otra persona que aún no lo es.",
           "type": "boolean"
-        },
-        "minor": {
-          "description": "Con forOther: true si es su hijo o hija menor de edad y quien escribe es su madre, padre o tutor.",
-          "type": "boolean"
-        },
-        "writerName": {
-          "description": "Cómo se llama quien escribe, cuando la cita es para otra persona.",
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 200
         }
       },
       "required": [
         "professionalUserId",
-        "startsAt",
-        "givenNames",
-        "familyName"
+        "startsAt"
       ],
       "additionalProperties": false
     }

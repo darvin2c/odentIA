@@ -124,6 +124,7 @@ export function BookingDrawer({
   const canRegister = usePermission("patients.write")
   const can = useCan()
   const profile = useOrgProfile()
+  const tradeName = profile.data?.tradeName?.trim() || null
   // Lo que la clínica pide en su registro y aquí no se escribe: queda pendiente en su página.
   const configQuery = useQuery({
     queryKey: ["patient-registration-config"],
@@ -211,9 +212,10 @@ export function BookingDrawer({
   }, [shown, patientName, onPreview])
   React.useEffect(() => () => onPreview(null), [onPreview])
 
-  // Lo que dijo por teléfono de novedades y promociones, el único permiso que se pide.
-  // Opcional: si no se toca no se guarda nada; lo de su atención es parte del servicio (ADR 0030).
+  // Lo que dijo por teléfono de novedades y promociones: siempre se le pregunta (se responde una vez y
+  // nunca viene marcada). Los mensajes de su cita no se preguntan: se le dicen y quedan guardados (ADR 0030).
   const [generalConsent, setGeneralConsent] = React.useState<boolean | null>(null)
+  const [consentError, setConsentError] = React.useState(false)
   const consentNote = React.useRef<string | null>(null)
   const whatsappNote = React.useRef<string | null>(null)
 
@@ -274,20 +276,22 @@ export function BookingDrawer({
           registered.data.whatsapp === "en_uso"
             ? "Su número de WhatsApp ya es de otra persona de la clínica: no se movió. Revísalo en su página antes de escribirle."
             : null
-        if (generalConsent !== null) {
-          // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono.
-          await (async () => {
-            const personId =
-              seed.person?.contactId ??
-              (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
-            await apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
+        // Se anota en su persona, como en Datos › Mensajes, diciendo que lo dijo por teléfono: los mensajes
+        // de su cita (se le dijo que le escribirán por WhatsApp) y su respuesta a novedades y promociones.
+        await (async () => {
+          const personId =
+            seed.person?.contactId ??
+            (await apiFetch<{ data: { personId: string } }>(`/api/people/by-patient/${registered.data.id}`)).data.personId
+          const permission = (tipo: "recordatorio" | "novedades", recibir: boolean) =>
+            apiFetch(`/api/agent/admin/people/${personId}/permissions`, {
               method: "POST",
-              body: JSON.stringify({ tipo: "novedades", recibir: generalConsent, source: "telefono" }),
+              body: JSON.stringify({ tipo, recibir, source: "telefono" }),
             })
-          })().catch(() => {
-            consentNote.current = "No se pudo anotar si acepta novedades y promociones: anótalo en su página, en Datos."
-          })
-        }
+          await permission("recordatorio", true)
+          if (generalConsent !== null) await permission("novedades", generalConsent)
+        })().catch(() => {
+          consentNote.current = "No se pudo anotar lo que dijo de sus mensajes: anótalo en su página, en Datos › Mensajes."
+        })
         // Las búsquedas de pacientes ya hechas dejaron de valer.
         void queryClient.invalidateQueries({ queryKey: ["patients"] })
         // Si la reserva fallara después, la persona ya está registrada: no se crea dos veces.
@@ -394,6 +398,12 @@ export function BookingDrawer({
           event.preventDefault()
           setError("")
           if (!shown) return
+          // A quien se registra se le pregunta por novedades: sin su respuesta no se guarda.
+          if (registering && generalConsent === null) {
+            setConsentError(true)
+            document.getElementById("cita-nuevo-permiso-si")?.focus()
+            return
+          }
           // Fuera del horario no se reserva sin más: se pregunta si es una urgencia.
           if (state === "outside") setUrgent(true)
           else save.mutate({ range: shown })
@@ -496,35 +506,45 @@ export function BookingDrawer({
                   ? `Se crea su ficha con nombre y teléfono, unida a esta persona. ${pendingWords}`.trim()
                   : `Con esto basta para la cita. ${pendingWords}`.trim()}
               </p>
-              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040). */}
-              <p className="text-xs text-muted-foreground">Díselo: «Te avisaremos por WhatsApp sobre tus citas.»</p>
-              <div role="group" aria-labelledby="cita-nuevo-permiso" className="grid gap-1.5">
-                <span id="cita-nuevo-permiso" className="text-sm font-medium">
-                  ¿Acepta recibir novedades y promociones de la clínica?
-                </span>
-                <span className="text-xs text-muted-foreground">
-                  Opcional: si no se lo preguntaste, déjalo así.
-                </span>
+              {/* El aviso previo que pide WhatsApp para los mensajes de servicio (ADR 0040): queda guardado. */}
+              <p className="text-xs text-muted-foreground">
+                Díselo: «Te escribiremos por WhatsApp sobre tu cita: la confirmación, los recordatorios y los cambios.»
+              </p>
+              <fieldset
+                aria-describedby={consentError ? "cita-nuevo-permiso-error" : undefined}
+                className="m-0 grid min-w-0 gap-1.5 border-0 p-0"
+              >
+                <legend className="mb-1.5 p-0 text-sm font-medium">
+                  {`¿Acepta recibir novedades y promociones${tradeName ? ` de ${tradeName}` : ""} por WhatsApp?`}
+                </legend>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { value: true, label: "Sí, aceptó por teléfono" },
-                    { value: false, label: "No aceptó" },
+                    { value: true, id: "cita-nuevo-permiso-si", label: "Sí, aceptó por teléfono" },
+                    { value: false, id: "cita-nuevo-permiso-no", label: "No aceptó" },
                   ].map((option) => (
                     <Button
                       key={option.label}
+                      id={option.id}
                       type="button"
                       size="sm"
+                      className="min-h-11 sm:min-h-8"
                       variant={generalConsent === option.value ? "default" : "outline"}
                       aria-pressed={generalConsent === option.value}
-                      onClick={() =>
-                        setGeneralConsent((current) => (current === option.value ? null : option.value))
-                      }
+                      onClick={() => {
+                        setGeneralConsent(option.value)
+                        setConsentError(false)
+                      }}
                     >
                       {option.label}
                     </Button>
                   ))}
                 </div>
-              </div>
+                {consentError ? (
+                  <p id="cita-nuevo-permiso-error" role="alert" className="text-sm text-destructive">
+                    Pregúntale y elige una opción.
+                  </p>
+                ) : null}
+              </fieldset>
             </div>
           ) : (
             <div className="grid gap-1.5">

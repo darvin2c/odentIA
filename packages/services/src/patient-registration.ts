@@ -51,7 +51,8 @@ import {
 import { getPatientHealth, initializeDeclaredPatientHealth } from "./clinical.js"
 import { joinPatientPerson, patientRowColumns } from "./patient-identity.js"
 import { applyMessagePermissions } from "./data-consents.js"
-import { createPerson, findPersonByDocument } from "./people.js"
+import { consentStatusOf } from "./message-permission.js"
+import { createPerson, findPersonByDocument, setPersonArchived } from "./people.js"
 import { grantResponsibility } from "./responsibilities.js"
 import { claimWhatsAppNumber, isDirectThread, lockRegistrationContacts } from "./contacts.js"
 import { completeTask, createTask, discardTask, settleTask } from "./tasks.js"
@@ -82,7 +83,7 @@ function notCompleted(): ServiceError {
 const ALREADY_REGISTERED_TEXT = "Ya tienes tu registro en la clínica. Aquí puedes registrar a tu hijo o a un familiar."
 
 /** El contacto ya tiene ficha propia (su vínculo `self`). */
-async function hasOwnRecord(tx: Db, orgId: string, contactId: string): Promise<boolean> {
+export async function hasOwnRecord(tx: Db, orgId: string, contactId: string): Promise<boolean> {
   const [own] = await tx
     .select({ id: patientContact.id })
     .from(patientContact)
@@ -429,6 +430,16 @@ export async function createPatientRegistrationLink(
     .limit(1)
     .for("share")
   if (!config || !config.enabled) throw validation("El registro público está deshabilitado")
+  // Quien se registra desde su propio enlace volvió, como quien escribe: sale sola
+  // del archivo. Antes de tomar el lock compartido, porque reactivar toma el exclusivo.
+  if (actorUserId === null) {
+    const [archived] = await tx
+      .select({ id: contact.id })
+      .from(contact)
+      .where(and(eq(contact.id, input.contactId), eq(contact.organizationId, orgId), eq(contact.isActive, false)))
+      .limit(1)
+    if (archived) await setPersonArchived(tx, orgId, { userId: null }, archived.id, false)
+  }
   await lockRegistrationContacts(tx, orgId, [input.contactId], false)
   const [person] = await tx
     .select()
@@ -973,9 +984,11 @@ export async function registerPatient(
     // Los permisos de mensajes son finalidades de este mismo consentimiento:
     // cuentan solo las que el registro de la clínica pregunta.
     const asked = [
-      // Los recordatorios de su cita no se preguntan: son parte del servicio (ADR 0030).
-      // `askReminders` queda sin uso; un «no» que llegue igual se guarda como baja.
-      ...(answers.acceptsReminders === false ? ["recordatorios"] : []),
+      // Los mensajes de su cita no se preguntan: son parte del servicio (ADR 0030).
+      // Cuando el formulario le dice que le escribirán por WhatsApp sobre su cita
+      // (`acceptsReminders: true`), queda guardado como su permiso, con su fecha y
+      // de dónde vino; un «no» que llegue se guarda como baja.
+      ...(answers.acceptsReminders !== undefined ? ["recordatorios"] : []),
       ...(config.askMessages && answers.acceptsMessages !== undefined ? ["comunicaciones"] : []),
     ]
     const purposes = [
@@ -988,10 +1001,15 @@ export async function registerPatient(
     const grantorId = representativePending
       ? null
       : await registrationGrantor(tx, orgId, created.id, answers.respondent === "representative")
-    if (grantorId && asked.length > 0) {
+    // Lo que ya respondió no se pisa: haberle dicho que le escribiremos sobre su cita no
+    // vuelve a encender los recordatorios que apagó (ni los de quien no quiere ningún mensaje).
+    const keepsReminders =
+      !!grantorId && answers.acceptsReminders === true && (await consentStatusOf(tx, orgId, grantorId, "recordatorio")) !== null
+    const toApply = keepsReminders ? asked.filter((purpose) => purpose !== "recordatorios") : asked
+    if (grantorId && toApply.length > 0) {
       await applyMessagePermissions(tx, orgId, actorUserId, grantorId, {
         accepted: purposes,
-        asked,
+        asked: toApply,
         channel: isPublic ? "formulario_publico" : "presencial",
       })
     }

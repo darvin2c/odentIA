@@ -168,7 +168,7 @@ test("whatsapp: se conecta con los datos de la app de Meta en tres pasos que se 
   await expect(connected).toContainText("Ya recibe mensajes.")
   // Al conectar se piden los trece mensajes de odentIA: los diez del agente y los tres que envía el equipo
   // («Retomar la conversación», «Presupuesto listo» y «Su enlace»).
-  await expect(connected).toContainText("16 mensajes están en revisión de WhatsApp.")
+  await expect(connected).toContainText("17 mensajes están en revisión de WhatsApp.")
   await expect(connected).toContainText("WhatsApp pide una forma de pago en tu cuenta para enviar mensajes aprobados")
   await expect(connected.getByRole("link", { name: /Abrir mi cuenta de Meta/ })).toHaveAttribute("href", /^https:\/\/business\.facebook\.com\//)
   await expect(finishing).toHaveCount(0)
@@ -285,13 +285,13 @@ test("whatsapp: la lista de mensajes, abrir uno, cambiarle el texto y verlo en r
   const messages = page.getByRole("region", { name: "Mensajes", exact: true })
   const byAgent = messages.getByRole("group", { name: "Los envía Argos" })
   const byTeam = messages.getByRole("group", { name: "Los envía tu equipo desde la Bandeja" })
-  // Uno por línea que escribe y los cuatro avisos de «Recordar la cita» (reservada, reservada con datos que
-  // faltan, cambio de fecha, cancelada).
-  await expect(byAgent.getByRole("listitem")).toHaveCount(12)
+  // Uno por línea que escribe, los cuatro avisos de «Recordar la cita» (reservada, reservada con datos que
+  // faltan, cambio de fecha, cancelada) y los recordatorios con datos que faltan y de una cita ya confirmada.
+  await expect(byAgent.getByRole("listitem")).toHaveCount(13)
   // «Retomar una oportunidad» viene escrito como los demás del agente.
   await expect(byAgent.getByRole("listitem").filter({ hasText: "Retomar una oportunidad" })).toContainText("En revisión")
   await expect(byTeam.getByRole("listitem")).toHaveCount(4)
-  await expect(messages).toContainText("2 aprobados · 14 en revisión")
+  await expect(messages).toContainText("2 aprobados · 15 en revisión")
   // Nadie lee ni escribe nombres técnicos.
   await expect(messages).not.toContainText(/odentia_|plantilla|template/i)
   const reminder = byAgent.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })
@@ -584,7 +584,7 @@ test("bandeja: sin ningún mensaje aprobado dice por qué, y solo quien puede ab
   await info.attach("bandeja-sin-mensaje-aprobado", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await none.getByRole("link", { name: "Ver los mensajes", exact: true }).click()
   await expect(page).toHaveURL(tenantPattern(org.slug, "/settings/integrations/whatsapp"))
-  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("16 en revisión")
+  await expect(page.getByRole("region", { name: "Mensajes", exact: true })).toContainText("17 en revisión")
 
   // Recepción atiende conversaciones pero no abre Configuración: lee a quién avisar, sin enlace.
   await fixtureDb

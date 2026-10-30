@@ -451,7 +451,7 @@ export function routeInstruction(path: RoutePath, prefetched?: string | null, fa
         : ""
     } si además pregunta algo que está en lo que sabes de la clínica (un precio, cuánto dura, una sede), respóndelo en el mismo aviso; si para resolverlo el equipo necesitará un dato que puede darte ahora (su nombre completo, la fecha de su atención) y aún no lo tienes, pídeselo en el mismo aviso; no le pidas que repita lo que ya escribió; no des consejo clínico ni diagnóstico; no prometas una hora ni un plazo que no figure en este contexto (si aquí están el horario de atención o el teléfono de la sede y vienen al caso, puedes decirlos tal cual); el vencimiento de una tarea es un plazo interno del equipo, no una hora de respuesta para la persona.`
   }
-  // Con qué se propone la cita: quien aún no es paciente se reserva y registra con su sí (ADR 0101).
+  // Con qué se propone la cita: a quien aún no es paciente, su enlace con la hora elegida (ADR 0109).
   const propose = has("reservar_paciente_nuevo") ? "proponer_cita (o reservar_paciente_nuevo, si aún no es paciente)" : "proponer_cita"
   const progress = facts.progress
   if (path === "clinico") {
