@@ -871,7 +871,11 @@ export async function reservePersonalLink(
     const link = await requireLiveLink(tx, orgId, token, true)
     if (link.patientId && link.decides) {
       const missing = (await missingOf(tx, orgId, link)) ?? []
-      await saveLinkData(tx, orgId, link, link.patientId, missing, you, { requireSomething: false })
+      await saveLinkData(tx, orgId, link, link.patientId, missing, you, { requireSomething: false }).catch((error: unknown) => {
+        // Un dato mal escrito no es una hora ocupada: la página lo dice junto a sus datos, sin volver a elegir la hora.
+        if (error instanceof ServiceError && error.code === "VALIDATION") throw new ServiceError("LINK_DATA_INVALID", 400, error.message)
+        throw error
+      })
     }
   }
   return reserveBookingLink(tx, orgId, token, choice, deps)
