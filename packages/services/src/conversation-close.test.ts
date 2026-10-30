@@ -4,7 +4,8 @@ import { agentCaseMemory, agentHandoff, agentProposal, agentRunLedger } from "@o
 import { member, user } from "@odentia/db/schema/auth"
 import { agentConfig, channelConnection, contact, conversation, crmTask, message } from "@odentia/db/schema/crm"
 import { crmNote } from "@odentia/db/schema/crm-workspace"
-import { auditEvent } from "@odentia/db/schema/org"
+import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { auditEvent, branch } from "@odentia/db/schema/org"
 import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
@@ -36,6 +37,7 @@ import { completeTask } from "./tasks.js"
 import { setWritingHours } from "./writing-hours.js"
 import { getWorkspaceHome } from "./workspace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
+import { insertTestPatients } from "./test-patient.js"
 
 /**
  * Ninguna conversación queda abierta (ADR 0024): cerrar con su motivo y sus
@@ -100,6 +102,9 @@ describe("la voz de la clínica al despedirse e insistir", () => {
   it("dice que estamos atentos, con el nombre si parece un nombre y el trato de la clínica", () => {
     expect(greetingName("Ana Paredes")).toBe("Ana")
     expect(greetingName("+51 987 654 321")).toBeNull()
+    // Lo que ocupa el lugar del nombre sin serlo («Paciente», que pone la Agenda sin nombre) no se usa.
+    expect(greetingName("Paciente Prueba WhatsApp")).toBeNull()
+    expect(greetingName("Cliente")).toBeNull()
     expect(farewellText({ treatment: "tu", tone: "cercano", emojis: "no" }, "Ana")).toBe("Ana, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
     expect(farewellText({ treatment: "usted", tone: "formal", emojis: "pocos" }, null)).toBe("Cuando desee retomar, escríbanos por aquí: quedamos atentos.")
     expect(farewellText({ treatment: "tu", tone: "cercano", emojis: "pocos" }, null)).toBe("Cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte. 😊")
@@ -287,6 +292,25 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
     expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta", closedByUserId: null })
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Hugo, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
+  })
+
+  it("si en la atención quedó una cita, cierra sin «cuando quieras retomar»: le escribe su recordatorio (ADR 0113)", async () => {
+    const c = await clinic()
+    const conv = await c.thread("Carlos Ramos", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
+    await c.say(conv.id, "in", "Sí, el jueves a las 5", IN)
+    await c.say(conv.id, "out", "Listo: tu cita quedó para el jueves a las 5:00 p. m.", OUT)
+    const [site] = await ownerDb.insert(branch).values({ organizationId: c.orgId, name: "Centro", timezone: "America/Lima" }).returning({ id: branch.id })
+    const [room] = await ownerDb.insert(scheduleRoom).values({ organizationId: c.orgId, branchId: site!.id, name: "Unidad 1" }).returning({ id: scheduleRoom.id })
+    const [patient] = await insertTestPatients(ownerDb, { organizationId: c.orgId, displayName: "Carlos Ramos", patientNumber: 1 })
+    const startsAt = new Date("2026-10-15T22:00:00Z")
+    await ownerDb.insert(appointment).values({
+      organizationId: c.orgId, branchId: site!.id, patientId: patient!.id, professionalUserId: c.ownerId, roomId: room!.id,
+      startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "confirmada", source: "enlace",
+      conversationId: conv.id, createdAt: new Date("2026-10-12T14:00:30Z"),
+    })
+    expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
+    expect((await c.messages(conv.id)).at(-1)?.body).toBe("Listo: tu cita quedó para el jueves a las 5:00 p. m.")
   })
 
   it("sin algo por responder no insiste, fuera de horario tampoco, y cierra a la hora configurada", async () => {
