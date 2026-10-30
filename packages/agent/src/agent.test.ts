@@ -2551,7 +2551,7 @@ it("el agente entrega un enlace para elegir la cita solo a quien ya es paciente,
   expect(refused).toContain("no tiene activo el registro de pacientes en línea")
 })
 
-it("con los horarios va su enlace para ver toda la agenda, una vez por atención (lo reportó una clínica)", async () => {
+it("con los horarios va siempre su enlace para ver toda la agenda (lo pidió una clínica)", async () => {
   const { conversationId } = await ingestText("tg:agenda-entera", "evt-agenda-entera-1", "¿Tienen cita el lunes?")
   const fx = await bookingFixture(conversationId, "agenda-entera")
   const ctx: AgentToolCtx = {
@@ -2566,14 +2566,18 @@ it("con los horarios va su enlace para ver toda la agenda, una vez por atención
   const first = String(await search())
   expect(first).toContain("hasta tres por profesional y día, repartidos en su jornada")
   expect(first).toMatch(/Su enlace para ver toda la agenda y elegir el día, la hora y con quién: https:\/\/norte\.odentia\.test\/reserva\?token=[0-9a-f]{64}/)
-  // Una segunda búsqueda en la misma corrida no lo vuelve a traer.
+  // Una segunda búsqueda en la misma corrida no lo vuelve a traer: va una vez en la respuesta.
   expect(String(await search())).not.toContain("/reserva?token=")
-  // Si ya le salió en esta atención, solo se le recuerda que ahí los ve todos.
-  ctx.bookingLinkOffered = false
-  ctx.bookingLinkSent = true
-  const later = String(await search())
-  expect(later).not.toContain("/reserva?token=")
-  expect(later).toContain("Ya le enviaste en esta atención su enlace para ver toda la agenda")
+  const url = ctx.bookingLinkUrl!
+  // La respuesta que ofrece horarios sin la agenda no sale: se pide una vez agregarla.
+  const reply = makeAgentTools(ctx).find((item) => item.name === "send_reply")!
+  const blocked = String(await reply.invoke({ text: "Tengo el lunes a las 9:00 o a las 11:30. ¿Cuál prefieres?" }))
+  expect(blocked).toContain("No enviado: le ofreces horarios sin su enlace para ver toda la agenda")
+  expect(blocked).toContain(url)
+  // En la corrida siguiente vuelve a ir con los horarios.
+  ctx.bookingLinkUrl = undefined
+  ctx.agendaNudged = false
+  expect(String(await search())).toContain(url)
 })
 
 it("mientras la persona sigue escribiendo la corrida se pospone, y el tope evita esperar de más", async () => {

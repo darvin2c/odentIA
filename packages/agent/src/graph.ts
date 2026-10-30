@@ -952,8 +952,6 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     toolCtx.formulas = progress.formulas
     // La pregunta por el sí de quien se registra empieza por su nombre si aún no se le habló por él.
     toolCtx.usedName = progress.usedName
-    // `buscar_huecos` trae su enlace para ver toda la agenda una sola vez por atención.
-    toolCtx.bookingLinkSent = progress.linkSent
     const attentionBlock = [caseBlock, attentionLines(progress, cfg.personaName, { name: givenName, saves: available.has("update_contact") }).join("\n")]
       .filter(Boolean)
       .join("\n\n")

@@ -305,10 +305,10 @@ export interface AgentToolCtx {
   caseOnFile?: { topics: number; notes: number }
   /** Ya se le pidió una vez en esta corrida que no diga hecho lo que no hizo. */
   claimNudged?: boolean
-  /** Ya le salió en esta atención su enlace para elegir la cita (`attentionProgress`). */
-  bookingLinkSent?: boolean
-  /** `buscar_huecos` ya trajo su enlace en esta corrida: una segunda búsqueda no lo repite. */
-  bookingLinkOffered?: boolean
+  /** Su enlace para ver toda la agenda, si `buscar_huecos` lo trajo en esta corrida: va con los horarios. */
+  bookingLinkUrl?: string
+  /** Ya se le pidió una vez en esta corrida que agregue la agenda a los horarios. */
+  agendaNudged?: boolean
   /**
    * Dirección pública de la plataforma, para armar enlaces que la persona abre
    * (reservar su cita). Sin ella el agente no tiene la herramienta del enlace.
@@ -848,6 +848,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: en esta atención ya le respondiste con «Entiendo…» o «anoté que…». Respóndele directo a lo que dijo o preguntó, sin repetírselo; si no hay nada nuevo, una frase corta basta. Vuelve a llamar a la misma herramienta sola en su paso.`
   }
 
+  /**
+   * Ofrece horarios sin su enlace para ver toda la agenda: la clínica pidió que vaya siempre con
+   * ellos. Cuenta como oferta un mensaje con dos o más horas; la cita ya elegida no lo necesita.
+   * Una vez por corrida.
+   */
+  const agendaMissing = (text: string): string | null => {
+    const url = ctx.bookingLinkUrl
+    if (!url || ctx.agendaNudged || text.includes("/reserva?token=")) return null
+    if (new Set(text.match(/\b\d{1,2}:\d{2}\b/g) ?? []).size < 2) return null
+    ctx.agendaNudged = true
+    return `${ctx.dryRun ? "[SIMULACIÓN] " : ""}No enviado: le ofreces horarios sin su enlace para ver toda la agenda. Agrégalo al final, en una frase («Puedes ver todos los horarios y elegir con quién aquí: ${url}»), y vuelve a llamar a la misma herramienta sola en su paso.`
+  }
+
   /** Le pregunta su nombre dos veces en el mismo mensaje (auditoría del ADR 0104). Una vez por corrida. */
   const nameTwice = (text: string): string | null => {
     if (ctx.nameNudged || nameQuestionsIn(text) < 2) return null
@@ -928,7 +941,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     async ({ text: written }: { text: string }) => {
       // Las marcas de formato se ajustan al canal antes de comprobar y enviar.
       const text = formatForChannel(written, await conversationChannel(ctx), { emojis: ctx.emojis })
-      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text) ?? formulaAgain(text)
+      const mismatch = wrongLanguage(text) ?? wrongTreatment(text) ?? unbackedClaim(text) ?? nameTwice(text) ?? formulaAgain(text) ?? agendaMissing(text)
       if (mismatch) return mismatch
       const { verdict, blocked } = await checkReply(text)
       if (blocked) return blocked
@@ -1325,22 +1338,19 @@ export function makeAgentTools(ctx: AgentToolCtx) {
   }
 
   /**
-   * Lo que acompaña a los horarios, una vez por atención: su enlace para ver toda la agenda. Con
-   * tres horas por profesional y día, la persona creía que no había más y no podía elegir con
-   * quién (lo reportó una clínica). Sin enlace (varios pacientes, sin registro en línea, una
-   * prueba) siguen solo los horarios.
+   * Lo que acompaña siempre a los horarios: su enlace para ver toda la agenda. Con unas pocas
+   * horas por profesional, la persona creía que no había más y no podía elegir con quién; la
+   * clínica pidió que cada vez que Sofi ofrece horarios vaya la agenda, en odentIA y en latidIA.
+   * Sin enlace (varios pacientes, sin registro en línea, una prueba) siguen solo los horarios.
    */
   const agendaLine = async (serviceId: string | undefined): Promise<string | null> => {
-    if (ctx.dryRun || !ctx.publicUrl || ctx.bookingLinkOffered) return null
-    if (ctx.bookingLinkSent) {
-      return "Ya le enviaste en esta atención su enlace para ver toda la agenda: si pide más horarios o a otro profesional, recuérdale en una frase que ahí los ve todos."
-    }
+    if (ctx.dryRun || !ctx.publicUrl || ctx.bookingLinkUrl) return null
     try {
       const link = await personalLink(ctx.publicUrl, serviceId ? { serviceId } : {})
       if (!link) return null
-      ctx.bookingLinkOffered = true
+      ctx.bookingLinkUrl = link.url
       const data = link.needsRegistration ? " Como aún no es paciente, ahí también deja sus datos al reservar." : ""
-      return `Su enlace para ver toda la agenda y elegir el día, la hora y con quién: ${link.url}\nOfrécele dos o tres de estos horarios, repartidos, y al final el enlace en una frase (por ejemplo «Si prefieres ver todos los horarios y elegir con quién, aquí puedes: ${link.url}»).${data}`
+      return `Su enlace para ver toda la agenda y elegir el día, la hora y con quién: ${link.url}\nOfrécele dos o tres de estos horarios, repartidos, y al final, siempre que le ofrezcas horarios, el enlace en una frase (por ejemplo «Puedes ver todos los horarios y elegir con quién aquí: ${link.url}»).${data}`
     } catch (error) {
       if (error instanceof ServiceError) return null
       throw error
@@ -2268,7 +2278,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // El aviso a la persona sigue el mismo formato del canal que cualquier respuesta.
       const notice = message?.trim() ? formatForChannel(message.trim(), await conversationChannel(ctx), { emojis: ctx.emojis }) : undefined
       // Antes de registrar nada: el aviso en otro idioma o en otro trato se vuelve a pedir.
-      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? formulaAgain(notice)) : null
+      const mismatch = notice ? (wrongLanguage(notice) ?? wrongTreatment(notice) ?? formulaAgain(notice) ?? agendaMissing(notice)) : null
       if (mismatch) return mismatch
       // Lo que queda escrito para quien toma el caso: qué pide, qué falta y el
       // aviso que de verdad salió (no el que se intentó).
