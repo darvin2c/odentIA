@@ -378,6 +378,9 @@ it("finanzas: cada ruta rechaza a quien no es caja ni administración", async ()
     `/finance/closures?branchId=${BRANCH_A}`,
     `/finance/closures/${id}`,
     `/finance/debts?branchId=${BRANCH_A}`,
+    `/finance/debts/list?branchId=${BRANCH_A}`,
+    `/finance/tickets?branchId=${BRANCH_A}`,
+    `/finance/tickets/${id}`,
     `/finance/movements?branchId=${BRANCH_A}&day=2026-01-15`,
     `/finance/expenses?branchId=${BRANCH_A}`,
   ]
@@ -415,7 +418,20 @@ it("cuenta y cobro: reception/professional 403, cashier cobra con ticket, tenanc
   expect((await postJson(buildApp("clinician", DENT1), `/patients/${PAT_A}/collect`, collectBody(CASH_A))).status).toBe(403)
   const collected = await postJson(buildApp("cashier", CASH), `/patients/${PAT_A}/collect`, collectBody(CASH_A))
   expect(collected.status).toBe(201)
-  expect(TicketData.parse(await collected.json()).data.ticket.id).toBeTruthy()
+  const ticketId = TicketData.parse(await collected.json()).data.ticket.id
+  expect(ticketId).toBeTruthy()
+
+  // Cobros: caja ve la lista y abre el ticket por su id; otra clínica no lo ve.
+  const list = await buildApp("cashier", CASH).request(`/finance/tickets?branchId=${BRANCH_A}`)
+  expect(list.status).toBe(200)
+  const listed = (await list.json()) as { data: { data: Array<{ id: string }>; total: number } }
+  expect(listed.data.data.map((row) => row.id)).toContain(ticketId)
+  expect((await buildApp("cashier", CASH).request(`/finance/tickets/${ticketId}`)).status).toBe(200)
+  expect((await buildApp("admin", ADMIN_B, ORG_B).request(`/finance/tickets/${ticketId}`)).status).toBe(404)
+  expect((await buildApp("admin", ADMIN_B, ORG_B).request(`/finance/tickets?branchId=${BRANCH_A}`)).status).toBe(404)
+  // Un filtro que no existe es un error de la petición, no una lista vacía.
+  expect((await buildApp("cashier", CASH).request(`/finance/tickets?branchId=${BRANCH_A}&estado=x`)).status).toBe(400)
+  expect((await buildApp("cashier", CASH).request(`/finance/debts/list?branchId=${BRANCH_A}&age=45`)).status).toBe(400)
 })
 
 it("presupuestos: reception lee, envía y anota sin cambiar precios; cashier decide sin escribir; professional solo lo propio", async () => {

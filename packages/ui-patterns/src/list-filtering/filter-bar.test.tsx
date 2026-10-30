@@ -109,6 +109,15 @@ const overflowTotalFilter = {
   money: { fractionDigits: 2 },
 }
 
+/** La fila de escritorio: la del teléfono también está en el DOM (jsdom no aplica el CSS que la oculta). */
+function desktopRow(container: HTMLElement): HTMLElement {
+  return container.querySelector<HTMLElement>('[data-filter-row="desktop"]') as HTMLElement
+}
+
+function compactRow(container: HTMLElement): HTMLElement {
+  return container.querySelector<HTMLElement>('[data-filter-row="mobile"]') as HTMLElement
+}
+
 /** Simula el ancho medido del row desktop: jsdom no hace layout. */
 function setRowLayout(clientWidth: number, scrollWidth: number) {
   Object.defineProperty(HTMLElement.prototype, "clientWidth", {
@@ -228,23 +237,22 @@ describe("filtros de listas", () => {
     expect(mocks.setParam).toHaveBeenCalledWith("branch_id", "south")
   })
 
-  it("mantiene búsqueda y ordenamiento fuera del drawer compacto", async () => {
+  it("en el teléfono cada filtro va con su nombre en la fila, sin un cajón «Filtros»", () => {
+    mocks.values = { status: "ready" }
     const { container } = render(
       <FilterBar
         filters={[statusFilter]}
         sortOptions={[{ value: "created_at", label: "Fecha" }]}
       />,
     )
-    const compactBar = container.querySelector<HTMLElement>('[class~="md:hidden"]')
-    const compact = within(compactBar as HTMLElement)
+    const compact = within(compactRow(container))
     expect(compact.getByRole("searchbox")).toBeTruthy()
-    expect(compact.getByRole("button", { name: "Filtros" })).toBeTruthy()
+    expect(compact.getByRole("button", { name: "Estado: Listo" })).toBeTruthy()
     expect(compact.getByRole("button", { name: "Ordenar" })).toBeTruthy()
+    expect(compact.queryByRole("button", { name: "Filtros" })).toBeNull()
 
-    fireEvent.click(compact.getByRole("button", { name: "Filtros" }))
-    const drawer = await screen.findByRole("dialog", { name: "Filtros" })
-    expect(within(drawer).queryByRole("searchbox")).toBeNull()
-    expect(within(drawer).queryByRole("button", { name: "Ordenar" })).toBeNull()
+    fireEvent.click(compact.getByRole("button", { name: "Limpiar" }))
+    expect(mocks.resetFilters).toHaveBeenCalled()
   })
 
   it("agrupa filtros secundarios activos en Más filtros", async () => {
@@ -295,11 +303,12 @@ describe("filtros de listas", () => {
       },
     ]
     setRowLayoutFitted(1100)
-    render(<FilterBar filters={filters} sortOptions={[{ value: "name", label: "Nombre" }]} />)
+    const { container } = render(<FilterBar filters={filters} sortOptions={[{ value: "name", label: "Nombre" }]} />)
+    const row = within(desktopRow(container))
 
-    expect(screen.getByRole("button", { name: "Filtro 2" })).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Filtro 3" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Filtro 4" })).toBeNull()
+    expect(row.getByRole("button", { name: "Filtro 2" })).toBeTruthy()
+    expect(row.getByRole("button", { name: "Filtro 3" })).toBeTruthy()
+    expect(row.queryByRole("button", { name: "Filtro 4" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Más filtros" }))
 
     const drawer = await screen.findByRole("dialog", { name: "Más filtros" })
@@ -314,9 +323,9 @@ describe("filtros de listas", () => {
       label: `Filtro ${index + 1}`,
       options: [{ value: "active", label: "Activo" }],
     }))
-    render(<FilterBar filters={filters} sortOptions={[]} />)
+    const { container } = render(<FilterBar filters={filters} sortOptions={[]} />)
 
-    expect(screen.getByRole("button", { name: "Filtro 4" })).toBeTruthy()
+    expect(within(desktopRow(container)).getByRole("button", { name: "Filtro 4" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Más filtros" })).toBeNull()
   })
 
@@ -328,9 +337,10 @@ describe("filtros de listas", () => {
       options: [{ value: "active", label: "Activo" }],
     }))
     setRowLayout(400, 2000)
-    render(<FilterBar filters={filters} sortOptions={[]} />)
+    const { container } = render(<FilterBar filters={filters} sortOptions={[]} />)
+    const row = within(desktopRow(container))
 
-    expect(screen.queryByRole("button", { name: "Filtro 4" })).toBeNull()
+    expect(row.queryByRole("button", { name: "Filtro 4" })).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Más filtros" }))
 
     const drawer = await screen.findByRole("dialog", { name: "Más filtros" })
@@ -339,7 +349,7 @@ describe("filtros de listas", () => {
 
     setRowLayout(1600, 0)
     triggerRowResize()
-    expect(screen.getByRole("button", { name: "Filtro 4" })).toBeTruthy()
+    expect(row.getByRole("button", { name: "Filtro 4" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Más filtros" })).toBeNull()
   })
 
@@ -350,14 +360,14 @@ describe("filtros de listas", () => {
       label: `Filtro ${index + 1}`,
       options: [{ value: "active", label: "Activo" }],
     }))
-    const { rerender } = render(<FilterBar filters={filters} sortOptions={[]} />)
-    expect(screen.getByRole("button", { name: "Filtro 4" })).toBeTruthy()
+    const { container, rerender } = render(<FilterBar filters={filters} sortOptions={[]} />)
+    expect(within(desktopRow(container)).getByRole("button", { name: "Filtro 4" })).toBeTruthy()
 
     mocks.values = { filter_1: "active" }
     setRowLayout(400, 2000)
     rerender(<FilterBar filters={filters} sortOptions={[]} />)
 
-    expect(screen.queryByRole("button", { name: "Filtro 4" })).toBeNull()
+    expect(within(desktopRow(container)).queryByRole("button", { name: "Filtro 4" })).toBeNull()
     expect(screen.getByRole("button", { name: "Más filtros: 1" })).toBeTruthy()
   })
 
@@ -377,6 +387,17 @@ describe("filtros de listas", () => {
     render(<Calendar mode="range" selected={{}} onSelect={onSelect} />)
     fireEvent.click(screen.getByRole("button", { name: "Últimos 30 días" }))
     expect(onSelect).toHaveBeenCalledWith({ from: "2026-08-12", to: "2026-09-10" })
+  })
+
+  it("«Este mes» llega hasta hoy y «Mes pasado» es el mes entero", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-10T12:00:00Z"))
+    const onSelect = vi.fn()
+    render(<Calendar mode="range" selected={{}} onSelect={onSelect} />)
+    fireEvent.click(screen.getByRole("button", { name: "Este mes" }))
+    expect(onSelect).toHaveBeenLastCalledWith({ from: "2026-09-01", to: "2026-09-10" })
+    fireEvent.click(screen.getByRole("button", { name: "Mes pasado" }))
+    expect(onSelect).toHaveBeenLastCalledWith({ from: "2026-08-01", to: "2026-08-31" })
   })
 
   it("plegada, la búsqueda dice «Buscar» para no cortar la ayuda; al abrirse, la ayuda completa", () => {

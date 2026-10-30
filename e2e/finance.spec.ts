@@ -99,6 +99,8 @@ for (const viewport of [
     await expect(page.getByRole("article", { name: /^Ticket / })).toBeVisible()
 
     await gotoHydrated(page, tenant(slug, "/finance"))
+    // Caja es el día: quien salió hoy de su atención con algo por pagar.
+    await expect(page.getByRole("main").getByRole("heading", { name: "Por cobrar ahora" })).toBeVisible()
     await expect(page.getByRole("main").getByText(/350\.00/).first()).toBeVisible()
     await shot("caja-con-movimientos")
     // El cobro anulado sigue a la vista, marcado, y cada renglón abre su ticket.
@@ -106,6 +108,31 @@ for (const viewport of [
     await page.getByRole("main").getByRole("button", { name: /^Ver el ticket/ }).first().click()
     await expect(page.getByRole("article", { name: /^Ticket / })).toBeVisible()
     await shot("ver-ticket")
+
+    // Cobros: todos los tickets con su detalle y lo que suma lo que se ve; lo anulado no suma.
+    await gotoHydrated(page, tenant(slug, "/finance?tab=cobros"))
+    const tickets = page.getByRole("main")
+    await expect(tickets.getByRole("button", { name: /^Ver el ticket/ })).toHaveCount(2)
+    await expect(tickets).toContainText(/1 ticket · S\/\s*100\.00/)
+    await expect(tickets.getByText("Anulado").first()).toBeVisible()
+    await shot("cobros")
+    // Cada filtro dice su nombre y lo elegido; queda en la dirección.
+    await tickets.getByRole("button", { name: "Estado", exact: true }).click()
+    await page.getByRole("option", { name: "Anulados" }).click()
+    await expect(page).toHaveURL(/estado=anulados/)
+    await expect(tickets.getByRole("button", { name: /^Ver el ticket/ })).toHaveCount(1)
+    await tickets.getByRole("button", { name: /^Ver el ticket/ }).click()
+    await expect(page.getByRole("article", { name: /anulado/ })).toBeVisible()
+    await shot("cobros-anulados")
+    // La búsqueda por nombre, sin tildes, encuentra los dos tickets de Lucía.
+    await gotoHydrated(page, tenant(slug, "/finance?tab=cobros&q=lucia"))
+    await expect(page.getByRole("main").getByRole("button", { name: /^Ver el ticket/ })).toHaveCount(2)
+
+    // Deudas: quién debe, lo que falta y la próxima cita, con la misma barra.
+    await gotoHydrated(page, tenant(slug, "/finance?tab=deudas"))
+    await expect(page.getByRole("main").getByText("Lucía Quispe").first()).toBeVisible()
+    await expect(page.getByRole("main").getByText(/350\.00/).first()).toBeVisible()
+    await shot("deudas")
 
     // Comisiones vive como pestaña de Finanzas y la ruta antigua lleva ahí.
     await gotoHydrated(page, tenant(slug, "/commissions"))

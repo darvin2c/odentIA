@@ -26,6 +26,7 @@ import {
 import { DetailDrawer, ErrorState, FormDrawer } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId, useState } from "react"
+import { ticketDisplayNumber } from "./ticket-view"
 import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import {
@@ -35,11 +36,14 @@ import {
   cashErrorMessage,
   closeCashApi,
   type ClosureSheet,
+  dayKeyOf,
   differenceLabel,
   errorCode,
   fetchClosureSheet,
   financeKeys,
+  formatClock,
   formatDateTimeSheet,
+  formatDayMonth,
   invalidateFinance,
   type MethodTotal,
   momentOf,
@@ -799,6 +803,7 @@ export function ClosureSheetDrawer({
   locale,
   orgTimeZone,
   notice,
+  onShowTickets,
   onClose,
 }: {
   closureId: string | null
@@ -806,6 +811,8 @@ export function ClosureSheetDrawer({
   orgTimeZone: string
   /** Aviso sobre la hoja abierta (p. ej. que la caja ya estaba cerrada). */
   notice?: string | null
+  /** Abre Cobros con los días de la ventana del cierre (días de la sede). */
+  onShowTickets?: (range: { from: string; to: string }) => void
   onClose: () => void
 }): React.JSX.Element {
   const query = useQuery({
@@ -852,6 +859,7 @@ export function ClosureSheetDrawer({
             </p>
           ) : null}
           <CashClosureSheet sheet={sheet} locale={locale} orgTimeZone={orgTimeZone} />
+          <CountedMovements sheet={sheet} locale={locale} orgTimeZone={orgTimeZone} onShowTickets={onShowTickets} />
           <p className="text-sm text-muted-foreground">
             Un cierre no se edita. Lo que se corrija después queda como movimiento del día en que
             se corrige.
@@ -859,5 +867,69 @@ export function ClosureSheetDrawer({
         </div>
       ) : null}
     </DetailDrawer>
+  )
+}
+
+/**
+ * Lo que contó el cierre, movimiento por movimiento (cobros con su ticket,
+ * gastos, ingresos, retiros y devoluciones en efectivo): para entender una
+ * diferencia sin rehacer el día. No se imprime; la hoja ya lleva los totales.
+ */
+function CountedMovements({
+  sheet,
+  locale,
+  orgTimeZone,
+  onShowTickets,
+}: {
+  sheet: ClosureSheet
+  locale: string
+  orgTimeZone: string
+  onShowTickets?: (range: { from: string; to: string }) => void
+}): React.JSX.Element | null {
+  const timeZone = sheet.branch?.timezone || sheet.orgProfile?.timezone || orgTimeZone
+  const from = dayKeyOf(sheet.closure.windowFrom, timeZone)
+  const to = dayKeyOf(sheet.closure.closedAt ?? sheet.closure.windowTo ?? sheet.closure.windowFrom, timeZone)
+  const rows = (sheet.counted ?? []).filter((row) => row.kind !== "apertura")
+  const money = (cents: number) => plainAmount(cents, sheet.closure.currency, locale)
+  const when = (iso: string) =>
+    from === to ? formatClock(iso, locale, timeZone) : `${formatDayMonth(iso, locale, timeZone)} ${formatClock(iso, locale, timeZone)}`
+  const what = (row: ClosureSheet["counted"][number]): string => {
+    if (row.kind === "cobro")
+      return row.ticketNumber !== null
+        ? `Ticket ${ticketDisplayNumber(row.ticketNumber)}${row.patientName ? ` · ${row.patientName}` : ""}`
+        : row.concept
+    if (row.kind === "gasto") return `Gasto: ${row.concept}`
+    if (row.kind === "aporte") return `Ingreso de efectivo: ${row.concept}`
+    if (row.kind === "retiro") return `Retiro de efectivo: ${row.concept}`
+    return `Devolución: ${row.concept}`
+  }
+  if (rows.length === 0 && !onShowTickets) return null
+  return (
+    <section aria-labelledby="cierre-contado" className="flex flex-col gap-2">
+      <h3 id="cierre-contado" className="text-sm font-semibold">
+        Lo que contó · {rows.length === 1 ? "1 movimiento" : `${rows.length} movimientos`} en efectivo
+      </h3>
+      {rows.length > 0 ? (
+        <ul className="divide-y rounded-lg border bg-card text-sm">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-baseline gap-3 px-3 py-2">
+              <span className="w-24 shrink-0 text-muted-foreground tabular-nums">{when(row.createdAt)}</span>
+              <span className="min-w-0 flex-1 break-words">{what(row)}</span>
+              <span className={`shrink-0 tabular-nums ${row.direction === "egreso" ? "text-destructive" : ""}`}>
+                {row.direction === "egreso" ? "− " : ""}
+                {money(row.amountCents)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">No hubo movimientos en efectivo en esta ventana.</p>
+      )}
+      {onShowTickets ? (
+        <Button type="button" variant="link" className="h-auto self-start p-0" onClick={() => onShowTickets({ from, to })}>
+          {from === to ? "Ver todos los cobros de ese día" : "Ver todos los cobros de esos días"}
+        </Button>
+      ) : null}
+    </section>
   )
 }

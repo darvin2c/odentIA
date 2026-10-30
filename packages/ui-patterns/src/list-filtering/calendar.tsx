@@ -1,5 +1,5 @@
 import { Button, cn, Calendar as DatePicker } from "@odentia/ui"
-import { format, subDays, subMonths } from "date-fns"
+import { endOfMonth, format, startOfMonth, subDays, subMonths } from "date-fns"
 import { es } from "date-fns/locale"
 import { common } from "../common.js"
 import { formatTimeZone } from "../locale.js"
@@ -108,19 +108,37 @@ export function Calendar(props: CalendarProps) {
           props.compact && "grid-cols-2",
         )}
       >
-        {RANGE_PRESETS.map((preset) => {
-          const from = format(subDays(today, preset.days - 1), "yyyy-MM-dd")
-          const to = format(today, "yyyy-MM-dd")
-          const active = props.selected?.from === from && props.selected?.to === to
+        {[
+          ...RANGE_PRESETS.map((preset) => ({
+            key: `dias-${preset.days}`,
+            label: preset.label,
+            from: format(subDays(today, preset.days - 1), "yyyy-MM-dd"),
+            to: format(today, "yyyy-MM-dd"),
+          })),
+          // Los meses del calendario, para cuadrar el mes: el en curso llega hasta hoy.
+          {
+            key: "este-mes",
+            label: common.filters.thisMonth,
+            from: format(startOfMonth(today), "yyyy-MM-dd"),
+            to: format(today, "yyyy-MM-dd"),
+          },
+          {
+            key: "mes-pasado",
+            label: common.filters.lastMonth,
+            from: format(startOfMonth(subMonths(today, 1)), "yyyy-MM-dd"),
+            to: format(endOfMonth(subMonths(today, 1)), "yyyy-MM-dd"),
+          },
+        ].map((preset) => {
+          const active = props.selected?.from === preset.from && props.selected?.to === preset.to
           return (
             <Button
-              key={preset.days}
+              key={preset.key}
               type="button"
               variant="outline"
               size="sm"
               aria-pressed={active}
               className={cn("w-full justify-center", active && "border-accent bg-surface-muted")}
-              onClick={() => props.onSelect({ from, to })}
+              onClick={() => props.onSelect({ from: preset.from, to: preset.to })}
             >
               {preset.label}
             </Button>
