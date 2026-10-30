@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { TextDecoder } from "node:util"
 import { fileURLToPath } from "node:url"
 import { expect, it } from "vitest"
+import { loadPatientGuides } from "./procedure-codes.js"
 
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
 // se convierte en U+FFFD silencioso (mojibake en pantalla). Estos tests lo
@@ -252,4 +253,12 @@ it("la lista oficial conserva sus denominaciones y la biblioteca tiene nombres p
   expect(d2391.name).not.toBe(byCode.get("D2391"))
   // El sellante se dibuja en las caras: va por superficies (revisión del tablero 7b).
   expect(library.get(keyOf.get("D1351")!)).toMatchObject({ scope: "surfaces", condition: "sealant" })
+})
+
+it("las explicaciones sugeridas: una clave que no es de la biblioteca falla antes de tocar la base", () => {
+  expect(loadPatientGuides(["endo"], '{"endo":{"how":"  Paso a paso  "}}').get("endo")).toEqual({ how: "Paso a paso" })
+  expect(() => loadPatientGuides(["endo"], '{"no_existe":{"how":"Algo"}}')).toThrow(/no_existe/)
+  expect(() => loadPatientGuides(["endo"], '{"endo":{"how":"   "}}')).toThrow(/vacía/)
+  // El archivo vigente en el repositorio se lee sin error.
+  expect(() => loadPatientGuides([])).not.toThrow()
 })

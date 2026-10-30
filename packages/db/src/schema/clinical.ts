@@ -1,6 +1,7 @@
 import type {
   BloodGroup,
   ContactRelationship,
+  PatientGuide,
   ProcedureCodingSnapshot,
   RegistrationAnswers,
   RegistrationEntryPoint,
@@ -1085,6 +1086,12 @@ export const treatmentTemplate = catalogSchema.table(
     codedOnly: boolean("coded_only").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     version: integer("version").notNull().default(1),
+    /**
+     * Texto sugerido para explicar el tratamiento (`PatientGuide`): solo un punto
+     * de partida para la clínica. Nunca le llega a un paciente hasta que ella lo
+     * guarda en su servicio.
+     */
+    patientGuide: jsonb("patient_guide").$type<PatientGuide>(),
   },
   (table) => [
     uniqueIndex("treatment_template_key_uidx").on(table.key),
@@ -1184,6 +1191,13 @@ export const serviceCatalog = pgTable(
     priceDisclosure: text("price_disclosure").notNull().default("evaluacion"),
     /** La evaluación que ofrece el agente cuando el precio no es exacto. */
     evaluationServiceId: uuid("evaluation_service_id").references((): AnyPgColumn => serviceCatalog.id),
+    /**
+     * La explicación del servicio para el paciente, de la clínica: empieza vacía,
+     * y sin ella el servicio sale solo con nombre y precio.
+     */
+    patientGuide: jsonb("patient_guide").$type<PatientGuide>(),
+    patientGuideReviewedAt: timestamp("patient_guide_reviewed_at", { withTimezone: true }),
+    patientGuideReviewedBy: text("patient_guide_reviewed_by").references(() => user.id),
     isActive: boolean("is_active").notNull().default(true),
     ...timestamps,
   },
@@ -1322,6 +1336,11 @@ export const treatmentBudget = pgTable(
     currency: char("currency", { length: 3 }).notNull(),
     status: text("status").notNull().default("borrador"),
     notes: text("notes"),
+    /** Hasta cuándo vale; al entregar se calcula con los días de la clínica. Vencer no cambia el estado. */
+    validUntil: date("valid_until"),
+    /** «Lo que encontramos» y «Lo que le proponemos»: los escribe el profesional. */
+    findings: text("findings"),
+    proposal: text("proposal"),
     acceptedByName: text("accepted_by_name"),
     decisionNote: text("decision_note"),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -1370,6 +1389,10 @@ export const treatmentBudgetOption = pgTable(
     position: smallint("position").notNull(),
     isRecommended: boolean("is_recommended").notNull().default(false),
     decision: text("decision").notNull().default("pendiente"),
+    /** Cómo se llama este camino («Conservar el molar») y qué pesar al elegirlo. */
+    name: text("name"),
+    pros: text("pros"),
+    cons: text("cons"),
     createdBy: text("created_by").references(() => user.id),
     ...timestamps,
   },
@@ -1509,6 +1532,12 @@ export const treatmentBudgetItem = pgTable(
       .notNull()
       .references(() => treatmentPlanItem.id),
     serviceId: uuid("service_id").references(() => serviceCatalog.id),
+    /**
+     * La explicación de esta línea: en borrador, el ajuste solo para este
+     * paciente; al entregar, la que quedó (la del servicio si no hubo ajuste).
+     * Lo entregado no cambia.
+     */
+    patientGuide: jsonb("patient_guide").$type<PatientGuide>(),
     title: text("title").notNull(),
     scope: text("scope"),
     // Sitio (ADR 0079): sistema, código y calificadores, como bodySite de FHIR.

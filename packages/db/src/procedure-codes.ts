@@ -29,6 +29,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { TextDecoder } from "node:util"
 import { fileURLToPath } from "node:url"
+import { type PatientGuide, parsePatientGuide } from "@odentia/clinical"
 import { notInArray, sql } from "drizzle-orm"
 import type { Db } from "./client.js"
 
@@ -182,6 +183,28 @@ export function loadProcedureLists() {
  * transacción (odentIA: `dental/library.ts`, ADR 0069 y 0079; latidIA:
  * `medical/library.ts`, issue 229).
  */
+/**
+ * Los textos sugeridos de la biblioteca (`seeds/biblioteca_explicaciones.json`,
+ * `{ "<key>": PatientGuide }`). Fail closed antes de tocar la base: una clave
+ * que no es de ninguna biblioteca o un texto vacío es un error del archivo.
+ */
+export function loadPatientGuides(keys: readonly string[], raw?: string): Map<string, PatientGuide> {
+  const content = raw ?? readFileSync(join(here, "..", "seeds", "biblioteca_explicaciones.json"), "utf8")
+  const parsed: unknown = JSON.parse(content)
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("biblioteca_explicaciones.json debe ser un objeto { clave: explicación }")
+  }
+  const known = new Set(keys)
+  const guides = new Map<string, PatientGuide>()
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!known.has(key)) throw new Error(`biblioteca_explicaciones.json: la clave «${key}» no es de ninguna biblioteca`)
+    const guide = parsePatientGuide(value)
+    if (!guide) throw new Error(`biblioteca_explicaciones.json: la explicación de «${key}» está vacía`)
+    guides.set(key, guide)
+  }
+  return guides
+}
+
 export interface CatalogLibrary {
   /** El producto de sus tratamientos (`treatment_template.product`): solo toca los suyos. */
   product: string
@@ -213,6 +236,7 @@ export async function seedProcedureCodes(
   const prepared = given.map((library) => ({ product: library.product, ...library.prepare(lists) }))
   const allKeys = prepared.flatMap((library) => library.keys)
   if (new Set(allKeys).size !== allKeys.length) throw new Error("Una clave de tratamiento se repite entre bibliotecas")
+  const patientGuides = prepared.length > 0 ? loadPatientGuides(allKeys) : new Map<string, PatientGuide>()
   const seededProducts = prepared.map((library) => library.product)
   const mappingsOf = (system: string) =>
     prepared.length > 0 ? prepared.reduce((sum, library) => sum + library.mappings(system), 0) : null
@@ -314,6 +338,17 @@ export async function seedProcedureCodes(
 
     // Las bibliotecas de los productos, con su código en cada lista.
     for (const library of prepared) await library.seed(tx)
+
+    // El texto sugerido de cada tratamiento: el archivo manda, entero. Aquí no se
+    // toca el de ninguna clínica: el servicio guarda su propia copia al revisarlo.
+    if (prepared.length > 0) {
+      await tx.execute(sql`update "catalog"."treatment_template" set "patient_guide" = null where "patient_guide" is not null`)
+      for (const [key, guide] of patientGuides) {
+        await tx.execute(
+          sql`update "catalog"."treatment_template" set "patient_guide" = ${JSON.stringify(guide)}::jsonb where "key" = ${key}`,
+        )
+      }
+    }
 
     // Los códigos de cada producto se reemplazan enteros, lista por lista.
     for (const release of releases) {

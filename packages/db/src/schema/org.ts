@@ -10,6 +10,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -54,6 +55,16 @@ export const orgProfile = pgTable("org_profile", {
   sheetSize: text("sheet_size").notNull().default("A4"),
   // Frase al pie del ticket; por defecto recibo interno sin validez fiscal.
   ticketFooter: text("ticket_footer").notNull().default("Recibo interno. No es un documento fiscal."),
+  // Presupuesto: días de vigencia al entregarlo y sus dos textos, que edita cada
+  // clínica; vacíos, esa sección no sale. El texto inicial, también el de las
+  // clínicas nuevas, es dato de la base (su migración): el código no lo escribe.
+  budgetValidDays: smallint("budget_valid_days").notNull().default(30),
+  budgetPaymentTerms: text("budget_payment_terms").default(
+    "Cada tratamiento se paga cuando se realiza. Puede dejar un adelanto, que se descuenta de lo siguiente que deba.",
+  ),
+  budgetChangeTerms: text("budget_change_terms").default(
+    "Solo por algo que no se podía ver antes de empezar. Se le explica y le entregamos un presupuesto nuevo para que decida; nada se cobra sin su aceptación.",
+  ),
   // Teléfono para urgencias de la clínica (también cuando está cerrada): lo da
   // el agente ante una urgencia, junto con el número de emergencias del país
   // (ADR 0084). Nulo: el agente da solo ese número.
@@ -83,6 +94,7 @@ export const orgProfile = pgTable("org_profile", {
     sql`(${table.productsTaxCategory} IS NULL) = (${table.productsTaxBps} IS NULL) AND (${table.productsTaxCategory} IS NULL OR (${table.productsTaxCategory} = 'S' AND ${table.productsTaxBps} BETWEEN 1 AND 5000) OR (${table.productsTaxCategory} IN ('E','O','Z') AND ${table.productsTaxBps} = 0))`,
   ),
   check("org_profile_receipt_width_check", sql`${table.receiptWidth} IN ('58','80')`),
+  check("org_profile_budget_valid_days_check", sql`${table.budgetValidDays} BETWEEN 1 AND 365`),
   check("org_profile_product_check", sql`${table.product} IN ('dental','medical')`),
   check("org_profile_sheet_size_check", sql`${table.sheetSize} IN ('A4','Letter')`),
   check(

@@ -155,6 +155,13 @@
       "when": 1793337021565,
       "tag": "0021_bsuid_de_whatsapp",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793385709650,
+      "tag": "0022_documentos_formales",
+      "breakpoints": true
     }
   ]
 }
