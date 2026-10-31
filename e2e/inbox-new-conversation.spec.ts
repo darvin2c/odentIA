@@ -119,7 +119,7 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   await expect(page.getByText(/No se pudo registrar/)).toHaveCount(0)
   // Reservar no navega: se espera a que quede guardada (la cita aparece en su Contexto, ya como paciente).
-  await expect(reception.getByRole("button", { name: "Ver cita" })).toBeVisible()
+  await expect(reception.getByRole("button", { name: "Ver cita", disabled: false })).toBeVisible()
   await expect(reception.getByRole("button", { name: "Reservar cita", exact: true })).toHaveCount(1)
   const [registered] = await call<{ id: string; displayName: string }[]>(page, "GET", "/api/patients?q=Rosa&limit=5", org.slug)
   expect(registered?.displayName).toBe("Rosa Quispe")
