@@ -276,6 +276,81 @@ export async function listAgentContextCandidates(tx: Db, orgId: string, contactI
   }))
 }
 
+/** La clave de la tarea «Revisar su nombre», por paciente y nombre dicho. */
+const NAME_REVIEW_KEY = "nombre-distinto:"
+
+/** Sus palabras sin tildes y en minúsculas: «José» y «jose» son la misma. */
+const nameWords = (value: string): string[] =>
+  value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter(Boolean)
+
+/**
+ * Quien ya es paciente dice en el chat que se llama distinto de como figura
+ * en su ficha (ADR 0113). El chat no prueba un nombre (un apodo, un familiar
+ * que escribe desde su celular), así que su ficha no cambia: queda una tarea
+ * para que recepción la revise, una por nombre dicho. Ella misma puede
+ * corregirlo al reservar desde su enlace, con su documento entero.
+ * `no_es_paciente`: su nombre se guarda como siempre; `mismo_nombre`: lo que
+ * dijo ya está en su ficha; `prueba`: la persona de «Probar», que no se avisa.
+ */
+export async function reportPatientNameMismatch(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; conversationId: string | null; said: string },
+): Promise<"no_es_paciente" | "mismo_nombre" | "prueba" | "avisado"> {
+  const own = (await listPatientsByContact(tx, orgId, input.contactId)).find((item) => item.relationship === "self")
+  if (!own) return "no_es_paciente"
+  const said = nameWords(input.said)
+  const saved = new Set(nameWords(own.displayName))
+  if (said.length === 0 || said.every((word) => saved.has(word))) return "mismo_nombre"
+  const [person] = await tx
+    .select({ isTest: contact.isTest })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
+    .limit(1)
+  if (person?.isTest) return "prueba"
+  const spoken = input.said.trim().replace(/\s+/g, " ")
+  await createTask(tx, orgId, {
+    title: `Revisar su nombre: ${own.displayName}`,
+    contactId: input.contactId,
+    conversationId: input.conversationId,
+    patientId: own.id,
+    area: "recepcion",
+    createdBy: "agent",
+    reason: `En el chat dijo llamarse «${spoken}», pero su ficha dice «${own.displayName}». Si su ficha está mal, corrígela; ella también puede corregirla al reservar desde su enlace.`,
+    idempotencyKey: `${NAME_REVIEW_KEY}${own.id}:${said.join("-")}`,
+  })
+  return "avisado"
+}
+
+
+/**
+ * Cómo dijo llamarse quien es paciente, mientras su tarea «Revisar su nombre»
+ * siga abierta: cada turno de Sofi se arma desde su ficha y, sin esto, en el
+ * siguiente lo volvía a llamar por el nombre de la ficha. Al revisarla el
+ * equipo (corregida o no), vuelve a mandar la ficha.
+ */
+export async function pendingSpokenName(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ reason: crmTask.reason })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.contactId, contactId),
+        eq(crmTask.status, "open"),
+        sql`${crmTask.idempotencyKey} like ${`${NAME_REVIEW_KEY}%`}`,
+      ),
+    )
+    .orderBy(desc(crmTask.createdAt))
+    .limit(1)
+  return row?.reason ? (/dijo llamarse «([^»]+)»/.exec(row.reason)?.[1] ?? null) : null
+}
+
 export interface AgentPatientSummary {
   context: AgentPatientContext
   upcomingAppointments: Array<{

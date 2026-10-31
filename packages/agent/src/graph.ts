@@ -36,6 +36,7 @@ import {
   LESSON_PERSON_NAME,
   PROBAR_PERSON_NAME,
   listAgentContextCandidates,
+  pendingSpokenName,
   listAttentionMessages,
   listContactChannelHistory,
   listContactNotes,
@@ -791,8 +792,20 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     )
     // Con solo sus nombres ya se sabe con quién habla: los apellidos se piden cuando hacen falta.
     const onlyGivenNames = !nameKnown && Boolean(person?.givenNames?.trim()) && !person?.isTest
-    const nameLine = nameKnown
-      ? `${person?.givenNames} ${person?.familyName}.`
+    // Si dice que se llama de otra forma, se guarda lo que dijo: siendo paciente, su ficha
+    // no cambia y recepción la revisa (ADR 0113). Antes la llamaba por el nombre del chat
+    // y los mensajes automáticos por el de su ficha, sin que nadie lo notara.
+    const otherName = available.has("update_contact")
+      ? " Si te dice que se llama de otra forma (no un apodo ni un diminutivo de ese nombre), háblale por el que te dijo y guárdalo con update_contact en ese mismo paso."
+      : ""
+    // Mientras recepción no revise su ficha, el nombre que dijo manda en cada turno (si no, volvía al de la ficha).
+    const spokenName = nameKnown
+      ? await withOrgContext(toolCtx.db, toolCtx.orgId, (tx) => pendingSpokenName(tx, toolCtx.orgId, toolCtx.contactId)).catch(() => null)
+      : null
+    const nameLine = spokenName
+      ? `dijo llamarse ${spokenName}: háblale siempre así. Su ficha dice otro nombre y recepción la está revisando; no le digas cómo figura.`
+      : nameKnown
+      ? `${person?.givenNames} ${person?.familyName}.${otherName}`
       : onlyGivenNames
         ? `${person?.givenNames}; aún no sabes sus apellidos (pídelos solo si hacen falta, por ejemplo para registrarla).`
         : `su ficha no tiene su nombre («${contactDetail.displayName}» es el de su perfil o del chat). Si ya te lo dijo en esta conversación, úsalo y no se lo vuelvas a pedir; si no, aún no sabes cómo se llama.`

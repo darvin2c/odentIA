@@ -489,8 +489,8 @@ describe("reservar desde un enlace", () => {
     // Al reservar ve lo que ya sabemos, con el documento abreviado, lo que falta y lo pendiente.
     const sent = await run((tx) => createBookingLink(tx, ORG, { conversationId: lia.conversationId, branchId: site!.id }, { secretsKey: KEY }))
     const view = await run((tx) => getBookingLinkView(tx, ORG, sent.token))
-    expect(view.you).toEqual({ name: "Lía Campos", document: "DNI ••••7123", phone: "+51987000111" })
-    expect(view.pending).toEqual({ privacy: true, promotions: true })
+    expect(view.you).toEqual({ name: "Lía Campos", givenNames: "Lía", familyName: "Campos", document: "DNI ••••7123", phone: "+51987000111" })
+    expect(view.pending).toEqual({ privacy: true, promotions: true, promotionsOffer: false })
     expect(view.data?.missing.map((item) => item.key)).toEqual(expect.arrayContaining(["birthDate", "sex"]))
 
     // Un enlace para completar sus datos no se impone a ese mensaje: deja de ofrecer la reserva que no usó.
@@ -520,8 +520,57 @@ describe("reservar desde un enlace", () => {
       ["novedades", false, "enlace"],
       ["recordatorio", true, "enlace"],
     ])
-    // Ya no queda nada pendiente: no se le vuelve a preguntar.
-    expect((await run((tx) => getBookingLinkView(tx, ORG, sent.token))).pending).toEqual({ privacy: false, promotions: false })
+    // Ya no queda nada pendiente: no se le vuelve a preguntar; como dijo que no, solo se le ofrece la casilla.
+    expect((await run((tx) => getBookingLinkView(tx, ORG, sent.token))).pending).toEqual({ privacy: false, promotions: false, promotionsOffer: true })
+  })
+
+  it("quien ve en su enlace un nombre que no es el suyo lo corrige con su documento entero, y quien dijo que no a novedades puede marcar la casilla", async () => {
+    const dar = await person("dar-enlace")
+    const [site] = await ownerDb.insert(branch).values({ organizationId: ORG, name: "Magdalena", timezone: "America/Lima" }).returning({ id: branch.id })
+    const professional = "dentista-nombre"
+    await ownerDb.insert(user).values([{ id: professional, name: "Dra. Milagros Díaz", email: "milagros.diaz@enlace.test", emailVerified: true }])
+    await ownerDb.insert(member).values([{ id: `m-${professional}`, userId: professional, organizationId: ORG, role: "member", createdAt: new Date() }])
+    await run((tx) => createRoom(tx, ORG, { branchId: site!.id, name: "Unidad dental M" }))
+    await run((tx) =>
+      setProfessionalSchedule(tx, ORG, OWNER, {
+        branchId: site!.id,
+        professionalUserId: professional,
+        rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+      }))
+    // Una ficha con el nombre equivocado (la de una prueba) y su documento; ya dijo que no a novedades.
+    const [created] = await insertTestPatients(ownerDb, {
+      organizationId: ORG, displayName: "Paciente Prueba WhatsApp", givenNames: "Paciente", familyName: "Prueba WhatsApp", docType: "DNI", docNumber: "44044243",
+      birthDate: "1986-03-21", sex: "M", phone: "+51993029296", patientNumber: await run((tx) => nextPatientNumber(tx, ORG)),
+    })
+    await run((tx) => setPatientContact(tx, ORG, OWNER, created!.id, { contactId: dar.contactId, relationship: "self", isPreferred: true }))
+    await ownerDb.insert(automationConsent).values({ organizationId: ORG, contactId: dar.contactId, purpose: "novedades", status: "revoked", source: "enlace" })
+
+    const sent = await run((tx) => createBookingLink(tx, ORG, { conversationId: dar.conversationId, branchId: site!.id }, { secretsKey: KEY }))
+    const view = await run((tx) => getBookingLinkView(tx, ORG, sent.token))
+    expect(view.you).toMatchObject({ name: "Paciente Prueba WhatsApp", givenNames: "Paciente", familyName: "Prueba WhatsApp", document: "DNI ••••4243" })
+    expect(view.pending).toMatchObject({ promotions: false, promotionsOffer: true })
+
+    const monday = upcomingMonday()
+    const range = { branchId: site!.id, from: monday.toISOString(), to: new Date(monday.getTime() + 86_400_000).toISOString() }
+    const { slots } = await run((tx) => listBookingLinkSlots(tx, ORG, sent.token, range))
+    const chosen = slots[0]!
+    const where = { branchId: site!.id, startsAt: chosen.startsAt, professionalUserId: chosen.professionalUserId, ...(chosen.roomId ? { roomId: chosen.roomId } : {}) }
+    const name = { givenNames: "Darvin", familyName: "Cotrina" }
+    // El enlace prueba que tiene su chat, no quién es: con otro documento no se cambia nada ni se reserva.
+    await expect(run((tx) =>
+      reservePersonalLink(tx, ORG, sent.token, { ...where, you: { data: {}, name: { ...name, docNumber: "44044244" } } }, { secretsKey: KEY }))).rejects.toMatchObject({ code: "LINK_DATA_INVALID" })
+    expect(await ownerDb.select().from(appointment).where(eq(appointment.patientId, created!.id))).toEqual([])
+
+    // Con su documento (escrito con puntos) queda su nombre, el de antes en sus notas, y su sí a novedades.
+    await run((tx) =>
+      reservePersonalLink(tx, ORG, sent.token, { ...where, you: { data: {}, name: { ...name, docNumber: "44.044.243" }, acceptsPromotions: true } }, { secretsKey: KEY }))
+    const [saved] = await selectTestPatients(ownerDb).where(eq(patient.id, created!.id))
+    expect(saved).toMatchObject({ displayName: "Darvin Cotrina", givenNames: "Darvin", familyName: "Cotrina", docNumber: "44044243" })
+    expect((await run((tx) => listPersonNotes(tx, ORG, dar.contactId))).map((note) => note.body)).toContain(
+      "Corrigió su nombre desde su enlace: antes figuraba como Paciente Prueba WhatsApp.",
+    )
+    const permissions = await ownerDb.select().from(automationConsent).where(eq(automationConsent.contactId, dar.contactId))
+    expect(permissions.find((row) => row.purpose === "novedades")).toMatchObject({ status: "granted" })
   })
 })
 

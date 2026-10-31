@@ -139,11 +139,16 @@ export interface PersonalLinkView {
   /**
    * Quien ya es paciente y decide por él, al reservar: lo que ya sabemos, para
    * que no lo vuelva a escribir. El documento va abreviado: el enlace prueba
-   * que tiene su chat, no quién es.
+   * que tiene su chat, no quién es. Sus nombres y apellidos, para que corrija
+   * el que no es suyo (`PersonalLinkDataInput.name`).
    */
-  you: { name: string; document: string | null; phone: string | null } | null
-  /** Lo que aún no aceptó o no respondió: se le pide en el mismo paso en que reserva. */
-  pending: { privacy: boolean; promotions: boolean } | null
+  you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
+  /**
+   * Lo que aún no aceptó o no respondió: se le pide en el mismo paso en que
+   * reserva. `promotionsOffer`: dijo que no a novedades y promociones; se le
+   * ofrece una casilla sin marcar para recibirlas, sin pedirle respuesta.
+   */
+  pending: { privacy: boolean; promotions: boolean; promotionsOffer: boolean } | null
   /** Presupuestos que esperan su respuesta. */
   budgets: PortalBudgetView[]
   /** Consentimientos que la clínica le envió a firmar. */
@@ -199,23 +204,41 @@ async function youOf(
   if (!link.patientId || !link.decides || link.expired) return { you: null, pending: null }
   const person = link.canBook ? await requirePatient(tx, orgId, link.patientId) : null
   return {
-    you: person ? { name: person.displayName, document: shortDocument(person.docType, person.docNumber), phone: person.phone ?? null } : null,
+    you: person
+      ? {
+          name: person.displayName,
+          givenNames: person.givenNames ?? null,
+          familyName: person.familyName ?? null,
+          document: shortDocument(person.docType, person.docNumber),
+          phone: person.phone ?? null,
+        }
+      : null,
     // También al cambiar su cita o agendar lo aceptado: lo que no respondió se le pregunta ahí.
     pending: await pendingOf(tx, orgId, link.row.contactId, link.patientId),
   }
 }
 
-/** Si aún no aceptó el aviso de privacidad y si nunca respondió lo de novedades y promociones. */
-async function pendingOf(tx: Db, orgId: string, contactId: string, patientId: string): Promise<{ privacy: boolean; promotions: boolean }> {
+/**
+ * Si aún no aceptó el aviso de privacidad, si nunca respondió lo de novedades
+ * y promociones y si les dijo que no (menos a quien no quiere ningún mensaje).
+ */
+async function pendingOf(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+  patientId: string,
+): Promise<{ privacy: boolean; promotions: boolean; promotionsOffer: boolean }> {
   const config = await getPatientRegistrationConfig(tx, orgId)
   const [accepted] = await tx
     .select({ id: patientDataConsent.id })
     .from(patientDataConsent)
     .where(and(eq(patientDataConsent.organizationId, orgId), eq(patientDataConsent.patientId, patientId), isNull(patientDataConsent.revokedAt)))
     .limit(1)
+  const promotions = config.askMessages ? await consentStatusOf(tx, orgId, contactId, "novedades") : "granted"
   return {
     privacy: !accepted && !!config.privacyNotice,
-    promotions: config.askMessages && (await consentStatusOf(tx, orgId, contactId, "novedades")) === null,
+    promotions: promotions === null,
+    promotionsOffer: promotions !== null && promotions !== "granted" && (await consentStatusOf(tx, orgId, contactId, "avisos")) !== "revoked",
   }
 }
 
@@ -596,8 +619,13 @@ export interface PersonalLinkDataInput {
   health?: DeclaredPatientHealthInput | null
   /** Acepta el aviso de privacidad que aún no había aceptado (registrada por teléfono, por ejemplo). */
   privacyAccepted?: boolean
-  /** Su respuesta a novedades y promociones, si nunca la había dado. */
+  /** Su respuesta a novedades y promociones, si nunca la había dado, o su sí si antes dijo que no. */
   acceptsPromotions?: boolean
+  /**
+   * Su nombre, si el de su ficha no es el suyo. Con un documento guardado se
+   * le pide entero (`docNumber`) y debe ser el mismo (`correctLinkName`).
+   */
+  name?: { givenNames: string; familyName: string; docNumber?: string } | null
   /** Dejó su celular y se le dijo que le escribiremos por WhatsApp sobre sus citas. */
   acceptsReminders?: true
 }
@@ -707,8 +735,9 @@ async function saveLinkData(
     if (value) patch[key] = value
   }
   const withHealth = !!input.health && (await healthNeverRecorded(tx, orgId, patientId))
+  const renamed = input.name ? await correctLinkName(tx, orgId, link, patientId, input.name) : null
   const consented = await saveLinkConsents(tx, orgId, link, patientId, input, options.toldWhatsApp)
-  if (Object.keys(patch).length === 0 && !withHealth) {
+  if (Object.keys(patch).length === 0 && !withHealth && !renamed) {
     if (options.requireSomething && !consented) throw validation("Completa al menos un dato")
     return
   }
@@ -746,7 +775,8 @@ async function saveLinkData(
   if (personId) {
     const done = missing.filter((item) => !stillMissing.some((left) => left.key === item.key)).map((item) => item.label)
     const parts = [
-      done.length > 0 ? `Completó desde su enlace: ${done.join(", ")}.` : "Envió sus datos desde su enlace.",
+      renamed ? `Corrigió su nombre desde su enlace: antes figuraba como ${renamed}.` : null,
+      done.length > 0 ? `Completó desde su enlace: ${done.join(", ")}.` : renamed ? null : "Envió sus datos desde su enlace.",
       withHealth ? "Declaró su salud: queda por revisar en sus antecedentes." : null,
       stillMissing.length > 0 ? `Sigue faltando: ${stillMissing.map((item) => item.label).join(", ")}.` : null,
       duplicateOf ? "El documento que escribió ya está en otra ficha: no se guardó." : null,
@@ -791,8 +821,47 @@ async function saveLinkData(
     action: "personal_link.data_sent",
     entity: "patient",
     entityId: patientId,
-    metadata: { fields: Object.keys(patch), health: withHealth, duplicate: !!duplicateOf, minorWithoutRepresentative: !!pendingRepresentative, origin: "paciente" },
+    metadata: {
+      fields: Object.keys(patch),
+      health: withHealth,
+      renamed: !!renamed,
+      duplicate: !!duplicateOf,
+      minorWithoutRepresentative: !!pendingRepresentative,
+      origin: "paciente",
+    },
   })
+}
+
+/** Sin espacios, puntos ni guiones y en mayúsculas: el mismo documento escrito de otra forma. */
+const documentKey = (value: string) => value.replace(/[\s.-]/g, "").toUpperCase()
+
+/**
+ * Corrige su nombre desde su enlace, cuando el de su ficha no es el suyo (una
+ * ficha de prueba, un nombre mal escrito o el de su perfil de WhatsApp). El
+ * enlace prueba que tiene su chat, no quién es: si la ficha tiene documento,
+ * se le pide entero y debe ser el mismo; sin documento manda el nombre que
+ * escribe, como al registrarse (ADR 0108). Devuelve el nombre de antes, que
+ * queda en sus notas, o null si no cambió nada.
+ */
+async function correctLinkName(
+  tx: Db,
+  orgId: string,
+  link: ResolvedPersonalLink,
+  patientId: string,
+  input: NonNullable<PersonalLinkDataInput["name"]>,
+): Promise<string | null> {
+  if (!link.decides) return null
+  const givenNames = input.givenNames.trim().replace(/\s+/g, " ")
+  const familyName = input.familyName.trim().replace(/\s+/g, " ")
+  if (!givenNames) throw validation("Escribe tus nombres")
+  if (!familyName) throw validation("Escribe tus apellidos")
+  const person = await requirePatient(tx, orgId, patientId)
+  if (person.givenNames === givenNames && person.familyName === familyName) return null
+  if (person.docNumber && documentKey(input.docNumber ?? "") !== documentKey(person.docNumber)) {
+    throw validation(`Ese ${person.docType ?? "documento"} no es el de esta ficha. Si no es la tuya, escríbenos por el chat.`)
+  }
+  await updatePatient(tx, orgId, `contact:${link.row.contactId}`, patientId, { givenNames, familyName })
+  return person.displayName
 }
 
 /**
@@ -800,7 +869,7 @@ async function saveLinkData(
  * de privacidad que aún no tenía (con la versión vigente, por el formulario
  * público) y novedades y promociones si nunca respondió. Si la pantalla le dijo
  * «Te escribiremos por WhatsApp sobre tu cita» (al reservar), queda el permiso de
- * sus recordatorios si no había ninguno. Nada de lo ya respondido se pisa. Devuelve si guardó algo.
+ * sus recordatorios si no había ninguno. Nada de lo ya respondido se pisa, salvo un «no» a novedades que ahora es sí. Devuelve si guardó algo.
  */
 async function saveLinkConsents(
   tx: Db,
@@ -842,9 +911,13 @@ async function saveLinkConsents(
   if (toldWhatsApp && (await consentStatusOf(tx, orgId, link.row.contactId, "recordatorio")) === null) {
     await setConsent(tx, orgId, null, link.row.contactId, { purpose: "recordatorio", granted: true, source: "enlace" })
   }
-  if (input.acceptsPromotions !== undefined && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null) {
-    await setConsent(tx, orgId, null, link.row.contactId, { purpose: "novedades", granted: input.acceptsPromotions, source: "enlace" })
-    saved = true
+  if (input.acceptsPromotions !== undefined) {
+    // Un «no» de antes solo cambia por su sí: la casilla que se le ofrece al reservar (`promotionsOffer`).
+    const status = await consentStatusOf(tx, orgId, link.row.contactId, "novedades")
+    if (status === null || (input.acceptsPromotions && status !== "granted")) {
+      await setConsent(tx, orgId, null, link.row.contactId, { purpose: "novedades", granted: input.acceptsPromotions, source: "enlace" })
+      saved = true
+    }
   }
   return saved
 }
