@@ -16,7 +16,7 @@ import { AgentMark, AgentSurface, DataTableSkeleton, SideColumn, SideDockPortal,
 import { ArrowRight, ChevronDown, ChevronRight, Lock } from "lucide-react"
 import type { ReactNode } from "react"
 import { useCan, usePermission } from "../../lib/crm"
-import { agentTabsFor, canConfirmByPhone, canCorrectAgent, RECEPTION_TEST_COLUMN } from "../../lib/screen-rules"
+import { agentTabsFor, canCorrectAgent, RECEPTION_TEST_COLUMN } from "../../lib/screen-rules"
 import { PageLoading } from "./page-loading"
 
 /** Una línea de `text-sm`: la barra más su aire mide lo mismo que el renglón. */
@@ -56,7 +56,7 @@ function TabsLoading({ active }: { active: ReturnType<typeof agentTabsFor>[numbe
             to={tab.to}
             data-active={tab.key === active ? "" : undefined}
             aria-current={tab.key === active ? "page" : undefined}
-            className={cn(tabsTriggerClassName, "shrink-0 min-h-11 sm:min-h-9", "phoneLast" in tab && "max-sm:order-1")}
+            className={cn(tabsTriggerClassName, "shrink-0 min-h-11 sm:min-h-9")}
           >
             {tab.label}
           </Link>
@@ -334,11 +334,11 @@ export function ReceptionSkeleton() {
           </div>
         </ReceptionCard>
 
-        <ReceptionCard title="Qué sabe" hint="Solo responde con esto. Si el dato no está aquí, lo dice y pasa a una persona." phone>
+        <ReceptionCard title="Qué sabe" hint="Lee tus datos en el momento y lo que le enseñaste. Si algo no está, lo dice y pasa a una persona." phone>
           <ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
             <ReceptionEntry label="Respuestas oficiales" />
             <ReceptionEntry label="Servicios y precios" />
-            <ReceptionEntry label="Sedes y horarios" />
+            <ReceptionEntry label="Horario y sedes" />
             <ReceptionEntry label="Lo que aprendió de tus correcciones" />
           </ul>
           <div className="flex flex-col gap-1 rounded-xl bg-muted/60 p-4 text-sm">
@@ -636,54 +636,6 @@ export function ClinicalAssistantPageSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Esperan su sí
-// ---------------------------------------------------------------------------
-
-/** Las filas de la lista: la tarjeta y su título ya están en la pantalla. */
-export function AwaitingAnswerSkeleton() {
-  const canConfirm = canConfirmByPhone(useCan())
-  return (
-    <ul aria-hidden className="flex flex-col divide-y rounded-xl border">
-      {slots(3).map((row) => (
-        <li key={row} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <div className="min-w-0 flex-1 basis-64">
-            <BaseLine className="w-48 max-w-full" />
-            <Line className="w-4/5" />
-          </div>
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-            <Skeleton className="h-11 flex-1 rounded-md sm:h-8 sm:w-36 sm:flex-none" />
-            {canConfirm ? <Skeleton className="h-11 flex-1 rounded-md sm:h-8 sm:w-40 sm:flex-none" /> : null}
-          </div>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-export function AwaitingAnswerPageSkeleton() {
-  return (
-    <PageLoading title="Agente" className="flex flex-col gap-6">
-      <div className="flex flex-col gap-6">
-        {/* Dice el nombre de recepción de la clínica: se pinta con él al llegar. */}
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
-          <Line className="w-96 max-w-full" />
-        </div>
-        <TabsLoading active="pendientes" />
-        <section className="elevated flex flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6">
-          <div>
-            <h2 className="font-heading text-base font-semibold">Esperan su sí</h2>
-            <p className="text-sm text-muted-foreground">
-              Para saber, no para hacer. Si la persona confirma por teléfono, anótalo aquí. Lo ya hecho se ve en la conversación y en la cita.
-            </p>
-          </div>
-          <AwaitingAnswerSkeleton />
-        </section>
-      </div>
-    </PageLoading>
-  )
-}
-
-// ---------------------------------------------------------------------------
 // Aprender
 // ---------------------------------------------------------------------------
 
@@ -872,22 +824,34 @@ export function KnowledgeGapsSkeleton() {
   )
 }
 
-/** «Lo básico»: la cifra, solo desde `sm`, la barra y las preguntas. */
+/** «Lo que solo tú sabes»: la cifra, solo desde `sm`, la barra y las ocho etiquetas. */
 export function KnowledgeBasicsSkeleton() {
   return (
-    <div aria-hidden className="flex flex-col gap-3 max-sm:gap-2">
+    <div aria-hidden className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
         <Skeleton className="my-1 hidden h-6 w-48 sm:block" />
         <Skeleton className="h-2 w-full rounded-full sm:h-2.5" />
       </div>
-      <div className="flex flex-col gap-1.5">
-        {slots(4).map((row) => (
-          <Line key={row} className="w-4/5" />
+      <div className="flex flex-wrap gap-1.5">
+        {slots(8).map((row) => (
+          <Skeleton key={row} className="h-7 w-28 rounded-full" />
         ))}
       </div>
     </div>
   )
 }
+
+/** Las filas de «Lo que toma de tus datos», con su título y dónde se edita: lo que dice cada una llega con los datos. */
+const KNOWLEDGE_SOURCE_ROWS = [
+  { title: "Horario de atención", action: "Horarios y ausencias" },
+  { title: "Feriados y cierres", action: "Horarios y ausencias" },
+  { title: "Sedes", action: "Sedes" },
+  { title: "Equipo", action: "Equipo" },
+  { title: "Servicios y precios", action: "Servicios" },
+  { title: "Promociones", action: "Promociones" },
+  { title: "Medios de pago", action: "Medios de pago" },
+  { title: "Teléfono de urgencias", action: "Datos de la clínica" },
+]
 
 export function KnowledgePageSkeleton() {
   const canWrite = usePermission("agent.write")
@@ -906,8 +870,10 @@ export function KnowledgePageSkeleton() {
       }
     >
       <div aria-hidden className="flex flex-col gap-6">
-        <Subtitle>Solo responde con lo que está aquí. Si un dato falta, lo dice y pasa a una persona.</Subtitle>
+        {/* Dicen el nombre de recepción de la clínica: se pintan con él al llegar. */}
+        <Line className="w-[36rem] max-w-full" />
         <TabsLoading active="conocimiento" />
+        <Line className="-mt-2 w-96 max-w-full" />
         <div className="grid min-w-0 items-stretch gap-4 xl:grid-cols-2">
           <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-5 sm:p-6">
             <div className="min-w-0">
@@ -916,10 +882,10 @@ export function KnowledgePageSkeleton() {
             </div>
             <KnowledgeGapsSkeleton />
           </section>
-          <section className="elevated relative flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6 max-sm:gap-2">
+          <section className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6">
             <div className="min-w-0">
-              <h2 className="font-heading text-base font-semibold">Lo básico de una clínica</h2>
-              <p className="hidden text-sm text-muted-foreground sm:block">Las preguntas que casi todos los pacientes hacen.</p>
+              <h2 className="font-heading text-base font-semibold">Lo que solo tú sabes</h2>
+              <p className="text-sm text-muted-foreground">Lo que preguntan seguido y no está en tus datos. Es opcional.</p>
             </div>
             <KnowledgeBasicsSkeleton />
           </section>
@@ -936,19 +902,20 @@ export function KnowledgePageSkeleton() {
           <KnowledgeAnswerRowsSkeleton />
         </section>
         <section className="elevated flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card">
-          <div className="px-4 pt-4 pb-2.5 sm:px-5">
+          <div className="px-4 pt-4 pb-2.5 sm:px-6">
             <h2 className="font-heading text-base font-semibold">Lo que toma de tus datos</h2>
-            <p className="text-sm text-muted-foreground">Siempre al día: no se copia, se lee en el momento.</p>
+            <p className="text-sm text-muted-foreground">Siempre al día: no se copia, se lee en el momento. Se edita donde vive.</p>
           </div>
           <ul className="flex flex-col">
-            {[
-              { title: "Servicios y precios", action: "Se editan en Servicios" },
-              { title: "Sedes y horarios", action: "Se editan en Sedes" },
-            ].map((row) => (
+            {KNOWLEDGE_SOURCE_ROWS.map((row) => (
               <li key={row.title} className="border-t">
-                <div className="flex min-h-13 flex-wrap items-center gap-x-4 gap-y-0.5 px-4 py-2 sm:px-5">
-                  <span className="flex-[1_1_12rem] font-semibold">{row.title}</span>
-                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+                <div className="grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 px-4 py-2.5 sm:grid-cols-[13rem_minmax(0,1fr)_auto] sm:px-6">
+                  <span className="font-semibold">{row.title}</span>
+                  <ChevronRight aria-hidden className="size-4 text-primary sm:hidden" />
+                  <span className="col-span-2 sm:col-span-1">
+                    <Line className="w-3/4" />
+                  </span>
+                  <span className="hidden items-center gap-1.5 text-sm font-semibold text-primary sm:inline-flex">
                     {row.action}
                     <ArrowRight aria-hidden className="size-3.5" />
                   </span>
@@ -956,6 +923,10 @@ export function KnowledgePageSkeleton() {
               </li>
             ))}
           </ul>
+          <p className="border-t bg-muted/60 px-4 py-3 text-sm text-muted-foreground sm:px-6">
+            De cada persona, solo mientras le escribe: sus citas, su presupuesto, su saldo y lo que la clínica anotó de ella. Nada de su historia
+            clínica.
+          </p>
         </section>
       </div>
     </PageLoading>

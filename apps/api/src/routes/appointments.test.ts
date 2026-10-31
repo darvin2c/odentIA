@@ -136,6 +136,7 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
   expect(denied.status).toBe(403)
   const memberReads = await member.request(`/agenda/resources?branchId=${branchId}`)
   expect(memberReads.status).toBe(403)
+  expect((await member.request(`/agenda/hours?branchId=${branchId}`)).status).toBe(403)
 
   const owner = buildApp("owner")
   const created = await owner.request("/agenda/rooms", {
@@ -157,6 +158,11 @@ it("recursos: reception lee; member no crea unidad dental ni lee agenda, owner s
     }
   }
   expect(body.data.timeZone).toBe("America/Lima")
+  // El horario de atención de la sede: el mismo que dice el agente, sin escribirse aparte (ADR 0118).
+  const hours = await reception.request(`/agenda/hours?branchId=${branchId}`)
+  expect(hours.status).toBe(200)
+  expect(((await hours.json()) as { data: { id: string; week: unknown[] } }).data).toMatchObject({ id: branchId, week: expect.any(Array) })
+  expect((await reception.request("/agenda/hours?branchId=otra")).status).toBe(400)
   expect(body.data.professionals.map((p) => p.id)).toContain(PROFESSIONAL)
   expect(body.data.rooms.map((c) => c.id)).toEqual([roomId])
 })

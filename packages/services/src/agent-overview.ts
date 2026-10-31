@@ -3,12 +3,24 @@ import { member, user } from "@odentia/db/schema/auth"
 import { agentLesson } from "@odentia/db/schema/agent"
 import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { and, asc, count, desc, eq, gte, inArray, sql } from "drizzle-orm"
+import { getBranchHours } from "./agent-clinic-info.js"
 import { countLearningPending } from "./agent-learning.js"
 import { type AgentModelCheck, getAgentConfig } from "./agentConfig.js"
-import { countOpenKnowledgeGaps, getKnowledgeBasics, getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
+import { countOpenKnowledgeGaps, getKnowledgeDataSources, listActiveKnowledge } from "./knowledge.js"
 import { getOrgLocale } from "./locale.js"
 
 /* ---------- Resumen del agente: cómo va y qué necesita de la clínica ---------- */
+
+/**
+ * Lo que se resuelve dentro de Agente: respuestas por revisar, lecciones por
+ * aprobar y lo que no supo responder. Es el número del menú «Agente» y la
+ * suma de los números de sus pestañas; los casos que el agente pasó al equipo
+ * se cuentan donde se toman (el botón «Agente» de la cabecera).
+ */
+export async function countAgentWork(tx: Db, orgId: string): Promise<number> {
+  const learning = await countLearningPending(tx, orgId)
+  return learning.review + learning.lessons + (await countOpenKnowledgeGaps(tx, orgId))
+}
 
 export interface AgentOutcomes {
   /** Conversaciones en las que el agente respondió o derivó en el periodo. */
@@ -46,14 +58,19 @@ export interface AgentOverview {
    * Aprender. Los casos que pasó el agente no se cuentan aquí: su único
    * contador es el del menú (`getAgentPanelSummary`).
    */
-  needsYou: { gaps: number; basicsMissing: number; review: number; lessons: number }
+  needsYou: { gaps: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   /** Lo que aprendió en los últimos siete días. */
   learned: AgentLearned
   /** `at`: cuándo falló ese último intento. */
   provider: { problem: AgentProviderProblem | null; at: string | null }
-  knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
+  /**
+   * `branchesWithHours`: sedes con horario de atención (el de su equipo) y
+   * `services`: servicios activos. Sin ellos no puede decir cuándo atiende ni
+   * qué hace la clínica (ADR 0120).
+   */
+  knows: { answers: number; servicesWithPrice: number; services: number; branches: number; branchesWithHours: number }
   /**
    * Comprobaciones para encender el agente; dicen qué falta. El canal y el
    * modelo impiden encender (el modelo lo comprueba aparte, `GET /api/agent/model`);
@@ -204,7 +221,6 @@ export async function getAgentOverview(
 ): Promise<AgentOverview> {
   const cfg = await getAgentConfig(tx, orgId)
   const zone = await getOrgLocale(tx, orgId)
-  const basics = await getKnowledgeBasics(tx, orgId)
   // Todos los servicios, sin el tope del prompt; con precio cuentan solo los que el agente puede decir.
   const sources = await getKnowledgeDataSources(tx, orgId)
   const connections = await tx
@@ -230,7 +246,6 @@ export async function getAgentOverview(
     enabled: cfg.enabled,
     needsYou: {
       gaps: await countOpenKnowledgeGaps(tx, orgId),
-      basicsMissing: basics.total - basics.covered,
       ...(await countLearningPending(tx, orgId)),
     },
     today: await agentOutcomes(tx, orgId, await startOfOrgDay(tx, zone.timezone)),
@@ -240,9 +255,9 @@ export async function getAgentOverview(
     knows: {
       answers: (await listActiveKnowledge(tx, orgId)).length,
       servicesWithPrice: sources.pricedServices,
+      services: sources.services,
       branches: sources.branches,
-      basicsCovered: basics.covered,
-      basicsTotal: basics.total,
+      branchesWithHours: (await getBranchHours(tx, orgId)).filter((branch) => branch.week.length > 0).length,
     },
     readiness: {
       channels: connections.map((row) => row.channel),

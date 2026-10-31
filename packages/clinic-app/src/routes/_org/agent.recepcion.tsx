@@ -143,7 +143,7 @@ function Card({
 }
 
 /** Fila con su entrada: lo que hay y, si se puede cambiar, a dónde lleva. */
-function EntryRow({ label, value, onClick, to }: { label: string; value: string | null; onClick?: () => void; to?: "/agent/knowledge" | "/services" | "/settings/branches" | "/agent/learn" }) {
+function EntryRow({ label, value, onClick, to }: { label: string; value: string | null; onClick?: () => void; to?: "/agent/knowledge" | "/services" | "/settings/availability" | "/agent/learn" }) {
   const content = (
     <>
       <span className="min-w-0 flex-[1_1_9rem] font-semibold">{label}</span>
@@ -617,7 +617,7 @@ function ReceptionPage() {
 
           <Card
             title="Qué sabe"
-            hint="Solo responde con esto. Si el dato no está aquí, lo dice y pasa a una persona."
+            hint="Lee tus datos en el momento y lo que le enseñaste. Si algo no está, lo dice y pasa a una persona."
             phone={{
               summary: `${count(knows.answers, "respuesta", "respuestas")} · ${count(knows.servicesWithPrice, "precio que dice", "precios que dice")} · ${count(knows.branches, "sede", "sedes")} · lo que recuerda de cada persona`,
               to: canWrite ? "/agent/knowledge" : undefined,
@@ -641,9 +641,15 @@ function ReceptionPage() {
               </li>
               <li>
                 <EntryRow
-                  label="Sedes y horarios"
-                  value={knows.branches === 0 ? "Ninguna sede activa" : count(knows.branches, "sede", "sedes")}
-                  to="/settings/branches"
+                  label="Horario y sedes"
+                  value={
+                    knows.branches === 0
+                      ? "Ninguna sede activa"
+                      : knows.branchesWithHours === 0
+                        ? "Nadie del equipo tiene horario"
+                        : count(knows.branches, "sede", "sedes")
+                  }
+                  to="/settings/availability"
                 />
               </li>
               <li>

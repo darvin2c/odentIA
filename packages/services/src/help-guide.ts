@@ -143,7 +143,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo dejo constancia de que la persona aceptó lo que le propuso Sofi?",
-        a: "En la banda de la conversación, «Registrar confirmación», si ya dijo que sí en el chat; el equipo no aprueba nada por ella. Si te lo dijo por teléfono, en Agente › Esperan su sí, «Confirmó por teléfono».",
+        a: "En la banda de la conversación, «Registrar confirmación», si ya dijo que sí en el chat; el equipo no aprueba nada por ella. Si te lo dijo por teléfono, en esa misma banda, «Confirmó por teléfono».",
       },
       {
         q: "¿Cómo veo en qué se basó una respuesta de Sofi?",
@@ -449,7 +449,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Agente",
     parent: null,
     purpose:
-      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», las citas que «Esperan su sí», lo que aprenden y su conocimiento. Los casos que te pasa Sofi están en «Te espera» y en el panel del agente. El número junto a Agente en el menú cuenta lo que nadie ha tomado más lo tuyo.",
+      "El resumen de tus agentes (Sofi, tu agente de recepción; Clío, tu agente clínico, y Argos, tu agente administrador): cómo van, qué necesita de ti y la entrada para configurar cada uno, el «Horario de recontacto», lo que aprenden y lo que sabe Sofi. El número junto a Agente en el menú cuenta lo que se resuelve aquí: respuestas por revisar, lecciones por aprobar y lo que no supo responder. Los casos que te pasa Sofi están en «Te espera» y en el panel del botón «Agente» de la cabecera, con su número; lo que espera el sí de una persona, en su conversación de la Bandeja.",
     terms: [
       "sofi",
       "clío",
@@ -481,7 +481,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     faqs: [
       {
         q: "¿Cómo enciendo el agente?",
-        a: "En Agente, en la fila de Sofi, usa el interruptor. Te muestra cinco comprobaciones (canal, que el modelo responda, lo básico de tu clínica, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende.",
+        a: "En Agente, en la fila de Sofi, usa el interruptor. Te muestra cinco comprobaciones (canal, que el modelo responda, que sepa tu horario y tus servicios, si lo probaste y quién recibe los casos); lo que falta te lleva a donde se resuelve. Sin un canal o sin un modelo que responda no se enciende.",
       },
       {
         q: "¿Qué hago si el modelo no responde?",
@@ -493,7 +493,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Cómo le enseño algo al agente?",
-        a: "Los datos de tu clínica (precios, horarios, políticas) van en Agente › Conocimiento. Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se borran igual. Si respondió mal, corrígelo en Agente › Aprender; al aprobar una regla que contradice otra te lo dice antes, con «Reemplazar», «Mantener las dos» o «Descartar».",
+        a: "Sofi lee al momento los datos de tu clínica: horario del equipo, sedes, servicios y precios, promociones y medios de pago; se editan donde viven y Agente › Conocimiento te muestra todo lo que toma. Ahí agregas lo que solo tú sabes (estacionamiento, cuotas, seguros…). Cómo quieres que atienda va en Agente › Sofi, en «Lo que el agente debe saber»: una sola lista con lo que escribe la clínica («Escrita por la clínica», con quién y cuándo) y lo que aprendió de tus correcciones («Aprendida», con la conversación de la que salió y quién la aprobó). Todas se editan y se borran igual. Si respondió mal, corrígelo en Agente › Aprender; al aprobar una regla que contradice otra te lo dice antes, con «Reemplazar», «Mantener las dos» o «Descartar».",
       },
       {
         q: "¿A qué hora le escribe odentIA a una persona?",
@@ -504,8 +504,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
         a: "Hay dos y cada uno sirve para algo distinto. De atención: la agenda y las horas que se ofrecen para reservar (Configuración › Horarios y ausencias). De recontacto: cuándo Sofi escribe primero (Agente). Para responder no hay horario: cuando la persona escribe, Sofi responde siempre.",
       },
       {
-        q: "¿Qué es «Esperan su sí»?",
-        a: "Las citas que Sofi le propuso a alguien y esperan su respuesta, por ejemplo «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas · hace 20 min». Es para saber, no para hacer: si responde «sí», la cita se reserva sola. Si te confirma por teléfono, pulsa «Confirmó por teléfono» y se reserva con la misma regla que la de Sofi; si el horario ya no está libre, te lo dice para que elijas otro en la Agenda. Si no responde, Sofi insiste una vez y, al despedirse, le dice que dejó libre ese horario.",
+        q: "¿Dónde veo las citas que esperan el sí de alguien?",
+        a: "En su conversación de la Bandeja: la fila dice «Espera su sí» y la banda de Sofi tiene «Registrar confirmación» (si dijo que sí en el chat) y «Confirmó por teléfono» (si lo dijo por otra vía); las dos reservan con la misma regla que Sofi y, si el horario ya no está libre, te lo dicen. También están en el panel del botón «Agente», en «Esperan». Si no responde, Sofi insiste una vez y, al despedirse, le dice que dejó libre ese horario.",
       },
     ],
   },

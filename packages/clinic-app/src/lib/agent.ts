@@ -110,10 +110,10 @@ export interface AgentPanelSummary {
   enabled: boolean
   /** Propuestas que esperan el sí del interlocutor; se ven, el equipo no las decide. */
   awaitingContact: number
-  /** Citas propuestas que esperan el sí de la persona: el número de «Esperan su sí». */
-  awaitingAnswer: number
-  /** Casos que el agente pasó a una persona y siguen sin resolver: lo que espera al equipo. */
+  /** Casos que el agente pasó a quien mira y siguen sin resolver: el número del botón «Agente» de la cabecera. */
   openHandoffs: number
+  /** Lo que se resuelve dentro de Agente (por revisar, lecciones y lo que no supo): el número del menú. */
+  toResolve: number
   /** Corridas de hoy que respondieron o derivaron. */
   interventionsToday: number
   /** Corridas de hoy con error o sin respuesta. */
@@ -297,13 +297,14 @@ export const MODEL_CHECK_TEXT = {
 
 export interface AgentOverview {
   enabled: boolean
-  needsYou: { gaps: number; basicsMissing: number; review: number; lessons: number }
+  needsYou: { gaps: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   learned: AgentLearned
   /** El último intento de usar el modelo falló por el proveedor (`at`: cuándo); `null` si responde. */
   provider: { problem: AgentProviderProblem | null; at: string | null }
-  knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
+  /** `branchesWithHours` y `services`: sin ellos no puede decir cuándo atiende ni qué hace la clínica. */
+  knows: { answers: number; servicesWithPrice: number; services: number; branches: number; branchesWithHours: number }
   readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
 }
 
@@ -591,28 +592,9 @@ export interface GuidanceItem {
 export interface GuidanceList {
   items: GuidanceItem[]
   counts: { all: number; escrita: number; aprendida: number }
+  /** Cuántas reglas puede tener activas y cuánto mide cada una (ADR 0119). */
+  limits: { rules: number; chars: number }
 }
 
 export const GUIDANCE_KEY = ["agent-guidance"] as const
 
-/** Una cita que el agente propuso y espera el sí de la persona (`/api/agent/awaiting`). */
-export interface AwaitingAnswerItem {
-  id: string
-  conversationId: string
-  contactId: string | null
-  contactName: string | null
-  channel: string | null
-  action: "reservar_cita" | "reprogramar_cita" | "cancelar_cita"
-  /** «Le propuse el jueves 22 a las 16:30 con la Dra. Rojas». */
-  text: string
-  createdAt: string
-  /** El horario se ocupó (o la cita cambió) mientras esperaba. */
-  taken: boolean
-}
-
-export interface AwaitingAnswerList {
-  items: AwaitingAnswerItem[]
-  total: number
-}
-
-export const AWAITING_ANSWER_KEY = ["agent-awaiting"] as const

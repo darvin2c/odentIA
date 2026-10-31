@@ -257,32 +257,31 @@ describe("bloque de conocimiento del prompt", () => {
   })
 })
 
-it("lo básico de una clínica cuenta lo cubierto por respuestas vigentes y por los datos del sistema", async () => {
+it("lo que solo tú sabes cuenta lo cubierto por respuestas vigentes; lo que está en los datos no se pregunta (ADR 0120)", async () => {
   const before = await run((tx) => getKnowledgeBasics(tx, ORG))
   expect(before.total).toBe(KNOWLEDGE_BASICS.length)
-  expect(before.total).toBe(25)
+  expect(before.total).toBe(8)
+  // Horario, medios de pago o cómo cambiar una cita salen de los datos: no son preguntas que escribir.
+  for (const key of ["horario", "medios_pago", "cambiar_cita", "dolor"]) expect(before.items.some((item) => item.key === key)).toBe(false)
   const parking = before.items.find((item) => item.key === "estacionamiento")
-  expect(parking).toMatchObject({ covered: false, coveredBy: null })
+  expect(parking).toMatchObject({ covered: false, label: "Estacionamiento", entryId: null })
   const entry = await publish({ kind: "faq", title: "Estacionamiento", body: "Hay cuatro plazas para pacientes.", basicKey: "estacionamiento" })
   const after = await run((tx) => getKnowledgeBasics(tx, ORG))
   expect(after.covered).toBe(before.covered + 1)
-  expect(after.items.find((item) => item.key === "estacionamiento")).toMatchObject({
-    covered: true, coveredBy: "respuesta", entryId: entry.id,
-  })
+  expect(after.items.find((item) => item.key === "estacionamiento")).toMatchObject({ covered: true, entryId: entry.id })
   // Vencida deja de contar.
   await run((tx) => updateKnowledgeEntry(tx, ORG, OWNER, entry.id, { validUntil: day(-1) }))
   expect((await run((tx) => getKnowledgeBasics(tx, ORG))).covered).toBe(before.covered)
-  // Las que salen de los datos dicen de dónde.
-  expect(before.items.find((item) => item.key === "servicios")?.dataSource).toBe("Servicios activos")
+  // Una clave que ya no está en la lista no se pone en una respuesta nueva…
+  await expect(publish({ kind: "faq", title: "Horario", body: "De 9 a 18.", basicKey: "horario" })).rejects.toMatchObject({ code: "VALIDATION" })
+  // …pero la que ya la tenía se sigue editando sin perderla.
+  await ownerDb.update(agentKnowledgeEntry).set({ basicKey: "horario" }).where(eq(agentKnowledgeEntry.id, entry.id))
+  const edited = await run((tx) => updateKnowledgeEntry(tx, ORG, OWNER, entry.id, { body: "Hay seis plazas.", basicKey: "horario" }))
+  expect(edited.basicKey).toBe("horario")
 })
 
-it("«¿Qué medios de pago aceptan?» se cubre sola con los medios activos de caja", async () => {
-  const basic = async () =>
-    (await run((tx) => getKnowledgeBasics(tx, ORG))).items.find((item) => item.key === "medios_pago")
-  const before = await basic()
-  expect(before?.dataSource).toBe("Medios de pago activos")
+it("los medios de pago llegan al agente desde caja, sin escribirlos", async () => {
   const method = await run((tx) => createPaymentMethod(tx, ORG, OWNER, { name: "Transferencia básicos", typeCode: "30" }))
-  expect(await basic()).toMatchObject({ covered: true, coveredBy: "datos", entryId: null })
   const snapshot = await run((tx) => getClinicInfoSnapshot(tx, ORG))
   expect(formatKnowledgeForPrompt(snapshot, [])).toContain("Transferencia básicos")
   // Apagado en caja, deja de decirse al agente sin editar ningún texto.
@@ -319,7 +318,6 @@ it("lo que toma de tus datos cuenta los precios que el agente puede decir y las 
   ])
   const onlyEvaluation = await run((tx) => getKnowledgeDataSources(tx, ORG))
   expect(onlyEvaluation.pricedServices).toBe(before.pricedServices)
-  // «Lo básico: precios» sale de esta misma cuenta: un tarifario «Solo con evaluación» no la cubre.
   await ownerDb.insert(serviceCatalog).values([
     { organizationId: ORG, name: "Limpieza Fuentes", source: "custom", priceCents: 9000, currency: "PEN", priceDisclosure: "exacto" },
     { organizationId: ORG, name: "Evaluación Fuentes", source: "custom", priceCents: 0, currency: "PEN" },

@@ -355,13 +355,15 @@ function useCanSeePanel(): boolean {
 }
 
 /**
- * Botón «Agente» de la cabecera: abre el panel desde cualquier página. No
- * lleva número: el único contador de los casos del agente está en el menú.
+ * Botón «Agente» de la cabecera: abre el panel desde cualquier página. Lleva
+ * el número de los casos que el agente pasó a quien mira (lo que nadie tomó
+ * más lo suyo): se toman en este panel (ADR 0118), como en «Te espera».
  */
 export function AgentPanelButton() {
   const canSee = useCanSeePanel()
   const { open: columnOpen, surface, docked, setOpen, buttonRef } = useContext(AgentPanelContext)
   const compact = useHeaderCompact()
+  const cases = useAgentPanelSummary(canSee).data?.data.openHandoffs ?? 0
   const open = columnOpen && surface === "agente"
   if (!canSee) return null
   return (
@@ -371,7 +373,7 @@ export function AgentPanelButton() {
       variant={open ? "default" : "outline"}
       className={`elevated relative h-9 gap-2 rounded-full px-2 max-md:hidden ${compact ? "w-9 justify-center gap-0 px-0" : "md:pr-3"}`}
       onClick={() => setOpen(!open)}
-      aria-label="Agente"
+      aria-label={`Agente${cases ? `: ${cases} ${cases === 1 ? "caso" : "casos"} por tomar` : ""}`}
       aria-expanded={open}
       aria-controls={open && docked ? PANEL_ID : undefined}
     >
@@ -381,6 +383,11 @@ export function AgentPanelButton() {
         <Bot className="size-4" aria-hidden />
       </span>
       {compact ? null : <span className="hidden md:inline">Agente</span>}
+      {cases > 0 ? (
+        <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-foreground px-1 text-xs font-semibold text-background ring-2 ring-canvas">
+          {cases > 99 ? "99+" : cases}
+        </span>
+      ) : null}
     </Button>
   )
 }
@@ -393,6 +400,7 @@ export function AgentPanelButton() {
 export function AgentPanelMenuItem() {
   const canSee = useCanSeePanel()
   const { setOpen } = useContext(AgentPanelContext)
+  const cases = useAgentPanelSummary(canSee).data?.data.openHandoffs ?? 0
   if (!canSee) return null
   return (
     <DropdownMenuItem
@@ -407,6 +415,12 @@ export function AgentPanelMenuItem() {
     >
       <Bot aria-hidden />
       Agente
+      {cases > 0 ? (
+        <span className="ml-auto tabular-nums text-muted-foreground">
+          {cases}
+          <span className="sr-only"> {cases === 1 ? "caso por tomar" : "casos por tomar"}</span>
+        </span>
+      ) : null}
     </DropdownMenuItem>
   )
 }
@@ -640,14 +654,6 @@ function PanelBody({ summary }: { summary: AgentPanelSummary | undefined }) {
           </TabsContent>
         </div>
       </ScrollArea>
-      <div className="border-t p-4 sm:p-5">
-        <Link
-          to="/agent/pendientes"
-          className="flex min-h-11 items-center justify-center rounded-full border font-semibold hover:bg-accent/60"
-        >
-          Ver las citas que esperan su sí
-        </Link>
-      </div>
     </Tabs>
   )
 }

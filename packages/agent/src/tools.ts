@@ -133,7 +133,7 @@ export async function conversationChannel(ctx: AgentToolCtx): Promise<string | n
 }
 
 /** Lo máximo que espera una búsqueda en la conversación al proveedor de vectores. */
-const QUERY_EMBED_MS = 3_000
+export const QUERY_EMBED_MS = 3_000
 
 export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
   ver_sedes_y_servicios: { kind: "servicios", label: "Sedes, servicios y precios" },

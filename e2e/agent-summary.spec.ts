@@ -99,7 +99,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const [index, name] of ["Respuestas por revisar", "Lecciones por aprobar", "Preguntas sin respuesta"].entries()) {
     await expect(tiles.nth(index)).toContainText(name)
   }
-  // Los casos del agente se cuentan en un solo sitio, el menú (ADR 0025): el resumen no repite «Esperan su sí».
+  // Los casos del agente se cuentan en el botón de la cabecera (ADR 0118): el resumen no los repite.
   await expect(needs.getByRole("link", { name: /Esperan su sí|Pendientes/ })).toHaveCount(0)
   const agents = page.getByRole("region", { name: "Tus agentes" })
   await expect(agents).toContainText("La base que comparten los tres")
@@ -148,7 +148,7 @@ test("agente: el resumen dice cómo le fue, qué aprendió y qué pasa cuando no
   for (const tile of tileBoxes) expect(tile.height).toBeGreaterThanOrEqual(44)
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
   const tabX = async (name: string) => (await box(tabs.getByRole("link", { name: new RegExp(`^${name}`) }))).x
-  const order = [await tabX("Resumen"), await tabX("Aprender"), await tabX("Conocimiento"), await tabX("Esperan su sí")]
+  const order = [await tabX("Resumen"), await tabX("Aprender"), await tabX("Conocimiento")]
   expect(order).toEqual([...order].sort((a, b) => a - b))
   // Una fila por agente, sin botones sueltos ni interruptor: todo eso vive en su página.
   await expect(agents.getByRole("switch")).toHaveCount(0)

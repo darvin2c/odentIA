@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { agentSearchItem } from "@odentia/db/schema/agent"
+import { agentLesson, agentSearchItem } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
@@ -15,6 +15,7 @@ import {
   formatAgentPrice,
   formatClinicSearch,
   getAgentClinicData,
+  getAgentDataSources,
   identifyAskedService,
   getBranchHours,
   listAgentProfessionals,
@@ -23,6 +24,7 @@ import {
   SERVICES_IN_PROMPT,
   searchClinic,
 } from "./agent-clinic-info.js"
+import { lessonsForTurn } from "./agent-learning.js"
 import { rankByMeaning, refreshAgentSearch, type SearchEmbedder, syncSearchItems } from "./agent-search-index.js"
 import { createPromotion } from "./promotions.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -121,6 +123,22 @@ describe("lo que sabe Informar", () => {
     ])
     expect(centro?.closures).toHaveLength(1)
     expect(centro?.closures[0]?.reason).toBe("Feriado")
+  })
+
+  it("lo que toma de tus datos cuenta lo mismo que recibe el agente (ADR 0120)", async () => {
+    const sources = await run((tx) => getAgentDataSources(tx, ORG))
+    const data = await run((tx) => getAgentClinicData(tx, ORG, true))
+    expect(sources.hours).toEqual(data.hours)
+    expect(sources.team).toEqual({
+      professionals: data.professionals.length,
+      specialties: new Set(data.professionals.flatMap((item) => item.specialties)).size,
+    })
+    expect(sources.services.total).toBe(data.services.length)
+    // Los de «solo con evaluación» no cuentan como precio que dice.
+    expect(sources.services.priced).toBe(data.services.filter((item) => item.price.disclosure !== "evaluacion" && item.price.priceCents > 0).length)
+    expect(sources.promotions.map((item) => item.name)).toEqual(data.promotions.map((item) => item.name))
+    expect(sources.informs).toBe(true)
+    expect(sources.branches.total).toBeGreaterThan(0)
   })
 
   it("los profesionales con su especialidad y sus días; sin más datos de la persona", async () => {
@@ -298,6 +316,34 @@ describe("búsqueda por significado", () => {
     await ownerDb.update(serviceCatalog).set({ priceCents: 55000 }).where(eq(serviceCatalog.id, ids["Blanqueamiento dental"]!))
     const again = await run((tx) => searchClinic(tx, ORG, "x", { rankedServiceIds: ranked.services }))
     expect(formatAgentPrice(again.services[0]!.price, ZONE)).toMatch(/550\.00/)
+  })
+
+  it("un ejemplo aprobado se encuentra por significado aunque haya cientos más nuevos (ADR 0119)", async () => {
+    const example = (question: string, minutesAgo: number) => ({
+      organizationId: ORG,
+      kind: "ejemplo" as const,
+      scope: "recepcion",
+      title: `Cuando preguntan: ${question}`,
+      question,
+      body: "Te recomiendo una evaluación de blanqueamiento.",
+      status: "activa" as const,
+      proposedBy: "agent",
+      approvedAt: new Date(Date.now() - minutesAgo * 60_000),
+    })
+    const [old] = await ownerDb.insert(agentLesson).values(example("Se me pusieron amarillos, ¿qué me recomiendan?", 100_000)).returning({ id: agentLesson.id })
+    // Más nuevos que los que se comparan por palabras: el antiguo queda fuera de ellos.
+    await ownerDb.insert(agentLesson).values(Array.from({ length: 200 }, (_, index) => example(`Hola, buenas tardes ${index}`, index)))
+    await refreshAgentSearch(ownerDb, appDb, toy, { maxBatchesPerOrg: 10 })
+    const asked = "tengo los dientes amarillos"
+    expect((await run((tx) => lessonsForTurn(tx, ORG, "recepcion", asked))).examples.map((item) => item.id)).not.toContain(old!.id)
+    const [query] = await toy.embed([asked])
+    const ranked = await run((tx) => rankByMeaning(tx, ORG, { model: toy.model, embedding: query! }))
+    expect(ranked.examples[0]).toBe(old!.id)
+    const turn = await run((tx) => lessonsForTurn(tx, ORG, "recepcion", asked, { rankedExampleIds: ranked.examples }))
+    expect(turn.examples[0]?.id).toBe(old!.id)
+    expect(turn.examples.length).toBeLessThanOrEqual(2)
+    await ownerDb.delete(agentLesson).where(eq(agentLesson.organizationId, ORG))
+    await run((tx) => syncSearchItems(tx, ORG))
   })
 
   it("un vector de otro modelo no se compara; el proveedor que falla deja buscar por palabras", async () => {

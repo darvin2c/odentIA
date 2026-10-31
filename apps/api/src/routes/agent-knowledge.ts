@@ -3,8 +3,8 @@ import {
   answerKnowledgeGaps,
   createKnowledgeEntry,
   discardKnowledgeGaps,
+  getAgentDataSources,
   getKnowledgeBasics,
-  getKnowledgeDataSources,
   getKnowledgeEntry,
   listKnowledgePage,
   listKnowledgeGaps,
@@ -94,18 +94,18 @@ export function createAgentKnowledgeRoute(deps: CrmDeps) {
     }
   })
 
-  /** Qué preguntas básicas de una clínica ya puede responder el agente. */
+  /** «Lo que solo tú sabes»: cuáles de esas preguntas ya tienen respuesta oficial. */
   app.get("/basics", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
     return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getKnowledgeBasics(tx, orgId)))
   })
 
-  /** Cuánto hay en el sistema de lo que el agente lee en el momento (servicios con tarifa, sedes). */
+  /** «Lo que toma de tus datos»: lo que el agente lee en el momento, contado (ADR 0120). */
   app.get("/sources", async (c) => {
     const { orgId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "agent.read")) return c.json(errorBody(c, "FORBIDDEN", "Sin acceso al agente"), 403)
-    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getKnowledgeDataSources(tx, orgId)))
+    return runService(c, 200, () => withOrgContext(deps.db, orgId, (tx) => getAgentDataSources(tx, orgId)))
   })
 
   /** Lo que el agente no supo responder, agrupado, con lo que respondió el equipo. */

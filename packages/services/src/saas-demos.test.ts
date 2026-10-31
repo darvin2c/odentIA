@@ -359,12 +359,15 @@ describe("una demo de Pediatría en Colombia", () => {
       .where(eq(opportunity.organizationId, orgId))
     expect(opportunities.map((row) => row.status).sort()).toEqual(["lost", "open", "open", "open", "won"])
 
-    // Sofi ya tiene publicadas las respuestas básicas, también la de su tipo.
+    // Sofi ya tiene publicadas las de «Lo que solo tú sabes» y la de su tipo; el horario sale del
+    // equipo de la demo, no de un texto (ADR 0120).
     const answers = await ownerDb
-      .select({ basicKey: agentKnowledgeEntry.basicKey })
+      .select({ basicKey: agentKnowledgeEntry.basicKey, title: agentKnowledgeEntry.title })
       .from(agentKnowledgeEntry)
       .where(and(eq(agentKnowledgeEntry.organizationId, orgId), eq(agentKnowledgeEntry.status, "publicada")))
-    expect(answers.map((row) => row.basicKey)).toEqual(expect.arrayContaining(["horario", "ninos"]))
+    expect(answers.map((row) => row.basicKey)).toEqual(expect.arrayContaining(["sin_cita", "tardanza", "primera_cita"]))
+    expect(answers.map((row) => row.basicKey)).not.toContain("horario")
+    expect(answers.map((row) => row.title)).toContain("¿Atienden a niños? ¿Desde qué edad?")
   })
 
   it("ponerla al día cierra lo que pasó, no toca lo hecho a mano y es igual si se repite el mismo día", async () => {

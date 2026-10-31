@@ -1,16 +1,16 @@
-import { Button } from "@odentia/ui"
+import { Button, cn } from "@odentia/ui"
 import { SkeletonRegion } from "@odentia/ui-patterns"
+import { Check } from "lucide-react"
+import { useReceptionName } from "../../lib/agent-names"
 import { QueryErrorState } from "../../lib/query-error"
-import type { KnowledgeBasics as Basics } from "./knowledge-model"
 import { KnowledgeBasicsSkeleton } from "../skeletons/agent"
-
-/** Preguntas pendientes a la vista como etiquetas; el resto se resume en «y N más». */
-const CHIPS = 4
+import type { KnowledgeBasics as Basics } from "./knowledge-model"
 
 /**
- * «Lo básico de una clínica»: cuántas de las preguntas que casi todos hacen ya
- * tienen respuesta y cuáles faltan. En teléfono es una tarjeta que se toca
- * entera para responderlas.
+ * «Lo que solo tú sabes» (ADR 0120): lo que los pacientes preguntan seguido y
+ * no está en ningún dato del sistema. Es opcional, así que no se presenta como
+ * algo que falta: cada pregunta dice si ya tiene respuesta, con su marca y no
+ * solo con el color. Lo que sí está en los datos va en «Lo que toma de tus datos».
  */
 export function KnowledgeBasics({
   basics,
@@ -27,19 +27,16 @@ export function KnowledgeBasics({
   canWrite: boolean
   onAnswerMissing: () => void
 }) {
+  const receptionName = useReceptionName()
   const missing = basics?.items.filter((item) => !item.covered) ?? []
-  const missingHint = missing.length === 1 ? "Falta 1. Toca para responderla." : `Faltan ${missing.length}. Toca para responderlas.`
   return (
-    <section
-      aria-labelledby="lo-basico"
-      className="elevated relative flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6 max-sm:gap-2"
-    >
+    <section aria-labelledby="solo-tu" className="elevated flex min-w-0 flex-col gap-3 rounded-xl border bg-card p-4 sm:p-6">
       <div className="flex items-baseline gap-2">
         <div className="min-w-0 flex-1">
-          <h2 id="lo-basico" className="font-heading text-base font-semibold">
-            Lo básico de una clínica
+          <h2 id="solo-tu" className="font-heading text-base font-semibold">
+            Lo que solo tú sabes
           </h2>
-          <p className="hidden text-sm text-muted-foreground sm:block">Las preguntas que casi todos los pacientes hacen.</p>
+          <p className="text-sm text-muted-foreground">Lo que preguntan seguido y no está en tus datos. Es opcional.</p>
         </div>
         {basics ? (
           <span className="text-sm font-semibold tabular-nums text-primary-soft-foreground sm:hidden">
@@ -64,7 +61,7 @@ export function KnowledgeBasics({
             </p>
             <div
               role="progressbar"
-              aria-label="Preguntas básicas respondidas"
+              aria-label="Preguntas con respuesta"
               aria-valuemin={0}
               aria-valuemax={basics.total}
               aria-valuenow={basics.covered}
@@ -73,49 +70,38 @@ export function KnowledgeBasics({
               <div className="h-full rounded-full bg-primary" style={{ width: `${(basics.covered / basics.total) * 100}%` }} />
             </div>
           </div>
+          <ul aria-label="Preguntas" className="flex flex-wrap gap-1.5">
+            {basics.items.map((item) => (
+              <li
+                key={item.key}
+                title={item.question}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm",
+                  item.covered ? "bg-success-soft text-success" : "bg-muted",
+                )}
+              >
+                {item.covered ? <Check aria-hidden className="size-3.5" /> : null}
+                {item.label}
+                <span className="sr-only">{item.covered ? ": con respuesta" : ": sin respuesta"}</span>
+              </li>
+            ))}
+          </ul>
           {missing.length === 0 ? (
-            <p className="text-sm text-success">Todo lo básico está respondido.</p>
+            <p className="text-sm text-success">Todas tienen respuesta.</p>
           ) : (
-            <>
-              <div className="hidden flex-col gap-3 sm:flex">
-                <h3 className="text-sm font-semibold">Las que faltan</h3>
-                <ul className="flex flex-wrap gap-1.5">
-                  {missing.slice(0, CHIPS).map((item) => (
-                    <li key={item.key} className="rounded-full bg-muted px-3 py-1 text-sm">
-                      {item.question}
-                    </li>
-                  ))}
-                  {missing.length > CHIPS ? (
-                    <li className="px-1 py-1 text-sm text-muted-foreground">y {missing.length - CHIPS} más</li>
-                  ) : null}
-                </ul>
-                {canWrite ? (
-                  <Button type="button" variant="outline" className="self-start border-primary text-primary-soft-foreground" onClick={onAnswerMissing}>
-                    Responder las que faltan
-                  </Button>
-                ) : null}
-              </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
               {canWrite ? (
-                // El botón ocupa toda la tarjeta y escribe su texto abajo; la línea
-                // invisible le reserva el sitio. (Un `::after` estirado no sirve: al
-                // pulsar, el botón se desplaza y pasa a contener su propio `::after`.)
-                <>
-                  <span aria-hidden className="invisible text-sm sm:hidden">
-                    {missingHint}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="absolute inset-0 h-auto items-end justify-start whitespace-normal rounded-xl p-[15px] text-left text-sm font-normal text-muted-foreground hover:bg-transparent sm:hidden"
-                    onClick={onAnswerMissing}
-                  >
-                    {missingHint}
-                  </Button>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground sm:hidden">{missing.length === 1 ? "Falta 1." : `Faltan ${missing.length}.`}</p>
-              )}
-            </>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 border-primary text-primary-soft-foreground sm:min-h-9 sm:self-start"
+                  onClick={onAnswerMissing}
+                >
+                  {missing.length === 1 ? "Responder la que falta" : `Responder las ${missing.length} que faltan`}
+                </Button>
+              ) : null}
+              <span className="text-sm text-muted-foreground">Sin respuesta, {receptionName} dice que lo confirma y lo pasa al equipo.</span>
+            </div>
           )}
         </>
       )}

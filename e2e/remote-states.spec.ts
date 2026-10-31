@@ -57,7 +57,7 @@ for (const section of [
 test("conocimiento: error de consulta y de versiones se recuperan sin inventar un vacío", async ({ owner }) => {
   const { page, org } = owner
   const entry = await call<{ id: string }>(page, "POST", "/api/agent/knowledge", org.slug, {
-    kind: "faq", title: "Horario de atención", body: "Atendemos de lunes a viernes.", branchId: null,
+    kind: "faq", title: "¿Tienen estacionamiento?", body: "Sí, cuatro plazas para pacientes.", branchId: null,
   }, 201)
   await call(page, "POST", `/api/agent/knowledge/${entry.id}/status`, org.slug, { status: "publicada" })
   let failEntries = true
@@ -70,7 +70,7 @@ test("conocimiento: error de consulta y de versiones se recuperan sin inventar u
   await expect(page.getByText(/^(Todavía no hay respuestas oficiales|Sin resultados)$/)).toBeHidden()
   failEntries = false
   await page.getByRole("button", { name: "Reintentar", exact: true }).click()
-  await expect(page.getByText("Horario de atención", { exact: true })).toBeVisible()
+  await expect(page.getByText("¿Tienen estacionamiento?", { exact: true })).toBeVisible()
 
   let failVersions = true
   await page.route(url => url.pathname === `/api/agent/knowledge/${entry.id}/revisions`, async route => {
@@ -78,13 +78,13 @@ test("conocimiento: error de consulta y de versiones se recuperan sin inventar u
     await route.continue()
   })
   // Las versiones se piden desde el detalle de la respuesta.
-  await page.getByRole("listitem").filter({ hasText: "Horario de atención" }).getByRole("button").first().click()
+  await page.getByRole("listitem").filter({ hasText: "¿Tienen estacionamiento?" }).getByRole("button").first().click()
   await page.getByRole("button", { name: /^Ver versiones/ }).click()
   await expect(page.getByRole("button", { name: "Reintentar", exact: true })).toBeVisible()
   await expect(page.getByText("Sin versiones", { exact: true })).toBeHidden()
   failVersions = false
   await page.getByRole("button", { name: "Reintentar", exact: true }).click()
-  await expect(page.getByText("Atendemos de lunes a viernes.", { exact: true })).toHaveCount(2)
+  await expect(page.getByText("Sí, cuatro plazas para pacientes.", { exact: true })).toHaveCount(2)
 })
 
 test("reportes: un fallo de red conserva el periodo y permite consultar otra vez", async ({ owner }) => {

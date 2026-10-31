@@ -204,9 +204,10 @@ const navDefinitions: NavDefinition[] = [
   { label: "Agenda", to: "/agenda", icon: CalendarDays, permission: "appointments.read" },
   { label: "Tareas", to: "/tasks", icon: ListTodo, permission: "tasks.read" },
   // El agente es una sola entrada, junto al trabajo diario; sus secciones
-  // (pendientes, aprender, conocimiento) son pestañas de página. El destino se
-  // resuelve por permiso: quien solo decide entra directo a Pendientes.
-  { label: "Agente", to: "/agent", icon: Bot, permissionsAny: ["agent.read", "agent.decide"] },
+  // (resumen, aprender, conocimiento) son pestañas de página. Es de quien lo
+  // supervisa: quien solo decide (recepción) atiende lo del agente en la
+  // Bandeja y en el panel del botón «Agente» de la cabecera.
+  { label: "Agente", to: "/agent", icon: Bot, permission: "agent.read" },
   {
     label: "Personas",
     children: [
@@ -342,17 +343,14 @@ function OrgLayout() {
     }
     if (kind !== "appointment.updated") invalidateAgentPanelQueries(queryClient)
   })
-  // Contador ligero para el badge del agente; la misma consulta alimenta el panel.
-  const agentSummary = useAgentPanelSummary(canAccessAny(role, ["agent.read", "agent.decide"]))
-  // El único contador de los casos del agente: lo que nadie tomó más lo tuyo
-  // (lo cuenta el servidor para quien mira). Panel, pestañas y Resumen no lo repiten.
-  const pendingCases = agentSummary.data?.data.openHandoffs ?? 0
-  // El agente lleva su contador y, para quien solo decide, entra por Pendientes.
-  const withAgentState = <T extends AppShellNavItem>(item: T): T => {
-    if (item.to !== "/agent") return item
-    const target = canAccess(role, "agent.read") ? item : { ...item, to: "/agent/pendientes" }
-    return pendingCases > 0 ? { ...target, badge: pendingCases } : target
-  }
+  // Contador ligero del menú; la misma consulta alimenta el panel y su botón.
+  const agentSummary = useAgentPanelSummary(canAccess(role, "agent.read"))
+  // Cada número donde se resuelve (ADR 0118): el menú cuenta lo que se
+  // resuelve dentro de Agente, la suma de sus pestañas. Los casos que pasó el
+  // agente van en el botón «Agente» de la cabecera.
+  const toResolve = agentSummary.data?.data.toResolve ?? 0
+  const withAgentState = <T extends AppShellNavItem>(item: T): T =>
+    item.to === "/agent" && toResolve > 0 ? { ...item, badge: toResolve } : item
   // Filtra entradas y subentradas por permiso: cada grupo muestra solo las hijas autorizadas.
   const navItems = navDefinitions.flatMap((item): AppShellNavEntry[] => {
     const selfVisible =

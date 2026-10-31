@@ -8,7 +8,7 @@ import type { MouseEventHandler, ReactNode } from "react"
  *
  * `exact` deja al patrón como única fuente del ítem activo: sin él, `Link`
  * marca además `aria-current` en cada prefijo de la ruta (`/agent` estando en
- * `/agent/pendientes`) y el lector anuncia dos páginas actuales.
+ * `/agent/learn`) y el lector anuncia dos páginas actuales.
  */
 export function RouterLink({
   to,

@@ -418,6 +418,12 @@ test("agenda: lo que falta se dice con su acción, y la sede se elige en un solo
   await expect(
     page.getByRole("heading", { name: `Horario semanal de ${owner.user.name}` }),
   ).toBeVisible()
+  // El horario de atención de la sede sale de lo recién guardado: no se escribe aparte (ADR 0118).
+  const branchHours = page.getByRole("region", { name: "Horario de atención" })
+  await expect(branchHours).toContainText("Lunes")
+  await expect(branchHours).toContainText("15:00 – 19:00")
+  await branchHours.scrollIntoViewIfNeeded()
+  await shot("horario-de-la-sede")
   await expect(page.getByLabel("lunes, desde").first()).toContainText("09:00")
   await expect(page.getByLabel("lunes, desde")).toHaveCount(2)
   await expect(page.getByRole("heading", { name: "Unidades dentales" })).toBeVisible()

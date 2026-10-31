@@ -4,6 +4,7 @@ import { user } from "@odentia/db/schema/auth"
 import { contact, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm"
+import { assertRuleRoom, countActiveRules, LESSON_RULE_LIMIT, RULE_BODY_CHARS } from "./agent-learning.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 
 /**
@@ -17,7 +18,6 @@ import { invalidField, notFound, ServiceError, validation } from "./errors.js"
  */
 
 const AGENT = "recepcion"
-const BODY_CHARS = 2000
 const TITLE_CHARS = 200
 /** Líneas que muestra la lista: el agente recibe hasta `LESSON_RULE_LIMIT`. */
 const LIST_LIMIT = 300
@@ -38,6 +38,8 @@ export interface GuidanceItem {
 export interface GuidanceList {
   items: GuidanceItem[]
   counts: { all: number; escrita: number; aprendida: number }
+  /** Cuántas reglas puede tener activas (`LESSON_RULE_LIMIT`) y cuánto mide cada una (`RULE_BODY_CHARS`). */
+  limits: { rules: number; chars: number }
 }
 
 const activeRules = (orgId: string) =>
@@ -47,7 +49,8 @@ function clean(value: unknown): string {
   if (typeof value !== "string") throw invalidField("body", "Escribe qué debe saber el agente")
   const text = value.trim().replace(/\s+/g, " ")
   if (!text) throw invalidField("body", "Escribe qué debe saber el agente")
-  if (text.length > BODY_CHARS) throw invalidField("body", `Como mucho ${BODY_CHARS} caracteres`)
+  // Va entera en cada mensaje (ADR 0119): lo más largo va mejor como ejemplo o respuesta oficial.
+  if (text.length > RULE_BODY_CHARS) throw invalidField("body", `Como mucho ${RULE_BODY_CHARS} caracteres`)
   return text
 }
 
@@ -115,12 +118,14 @@ export async function listAgentGuidance(tx: Db, orgId: string, input: { source?:
       contactName: row.conversationId ? (contacts.get(row.conversationId) ?? null) : null,
     })),
     counts: { all: escrita + aprendida, escrita, aprendida },
+    limits: { rules: LESSON_RULE_LIMIT, chars: RULE_BODY_CHARS },
   }
 }
 
-/** «Agregar»: lo que escribe la clínica vale desde que se guarda. */
+/** «Agregar»: lo que escribe la clínica vale desde que se guarda, si cabe en el tope de reglas. */
 export async function addAgentGuidance(tx: Db, orgId: string, actorUserId: string, body: unknown): Promise<GuidanceItem> {
   const text = clean(body)
+  await assertRuleRoom(tx, orgId, AGENT, "agregar")
   const now = new Date()
   const [row] = await tx
     .insert(agentLesson)
@@ -201,6 +206,35 @@ export interface RuleConflict {
   conflictWith: { id: string; body: string } | null
   /** Cómo se detectó: con el modelo de decisión o con la comparación simple. */
   method: "modelo" | "comparacion"
+  /**
+   * Con el tope de reglas lleno (ADR 0119), las activas de ese agente, para
+   * elegir cuál reemplaza la nueva; nulo si cabe una más.
+   */
+  full: { limit: number; rules: Array<{ id: string; body: string }> } | null
+}
+
+/** Las reglas activas de un agente si ya llegó al tope; nulo si cabe otra. */
+async function fullRules(tx: Db, orgId: string, scope: string): Promise<RuleConflict["full"]> {
+  if ((await countActiveRules(tx, orgId, scope)) < LESSON_RULE_LIMIT) return null
+  const rules = await tx
+    .select({ id: agentLesson.id, body: agentLesson.body })
+    .from(agentLesson)
+    .where(
+      and(
+        eq(agentLesson.organizationId, orgId),
+        eq(agentLesson.status, "activa"),
+        eq(agentLesson.kind, "regla"),
+        eq(agentLesson.scope, scope),
+      ),
+    )
+    // En el orden en que le llegan al agente: lo escrito por la clínica primero.
+    .orderBy(
+      sql`case ${agentLesson.source} when 'escrita' then 0 else 1 end`,
+      sql`case ${agentLesson.source} when 'escrita' then ${agentLesson.createdAt} end asc`,
+      desc(agentLesson.approvedAt),
+      asc(agentLesson.id),
+    )
+  return { limit: LESSON_RULE_LIMIT, rules }
 }
 
 const STOP = new Set([
@@ -264,13 +298,14 @@ export async function findRuleConflict(
   model: RuleConflictModel | null = null,
 ): Promise<RuleConflict> {
   const [lesson] = await tx
-    .select({ body: agentLesson.body, kind: agentLesson.kind, status: agentLesson.status })
+    .select({ body: agentLesson.body, kind: agentLesson.kind, status: agentLesson.status, scope: agentLesson.scope })
     .from(agentLesson)
     .where(and(eq(agentLesson.id, lessonId), eq(agentLesson.organizationId, orgId)))
     .limit(1)
   if (!lesson) throw notFound("Lección")
-  if (lesson.kind !== "regla") return { conflictWith: null, method: model ? "modelo" : "comparacion" }
+  if (lesson.kind !== "regla") return { conflictWith: null, method: model ? "modelo" : "comparacion", full: null }
   if (lesson.status !== "propuesta") throw new ServiceError("LESSON_NOT_PROPOSED", 409, `La lección ya está ${lesson.status}`)
+  const full = await fullRules(tx, orgId, lesson.scope)
   const others = await tx
     .select({ id: agentLesson.id, body: agentLesson.body })
     .from(agentLesson)
@@ -280,13 +315,13 @@ export async function findRuleConflict(
   if (model) {
     try {
       for (const other of related.slice(0, MODEL_CHECKS)) {
-        if (await model(lesson.body, other.body)) return { conflictWith: other, method: "modelo" }
+        if (await model(lesson.body, other.body)) return { conflictWith: other, method: "modelo", full }
       }
-      return { conflictWith: null, method: "modelo" }
+      return { conflictWith: null, method: "modelo", full }
     } catch {
       // Sin respuesta del modelo, la comparación simple.
     }
   }
   const found = related.find((other) => simpleRulesConflict(lesson.body, other.body)) ?? null
-  return { conflictWith: found, method: "comparacion" }
+  return { conflictWith: found, method: "comparacion", full }
 }
