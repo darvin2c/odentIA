@@ -641,6 +641,12 @@ it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran
     status: "queued",
     createdAt: t2,
   })
+  // Lo que no salió pide a una persona, con el agente encendido en el hilo.
+  const cFailed = await makeContact("org_a", `${prefix} Falló`)
+  const convFailed = await makeConversationDirect("org_a", cFailed.id)
+  await addMessage("org_a", convFailed, { direction: "in", status: "received", createdAt: t0 })
+  await addMessage("org_a", convFailed, { direction: "out", senderKind: "agent", status: "sent", createdAt: t1 })
+  await addMessage("org_a", convFailed, { direction: "out", senderKind: "agent", status: "failed", createdAt: t2 })
   // «Por atender» (ADR 0050): sin responder y sin el agente a cargo; un
   // saliente que sigue en cola todavía no es respuesta.
   await withOrgContext(appDb, "org_a", (tx) => setAgentStatus(tx, "org_a", convUn, false))
@@ -651,6 +657,7 @@ it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran
   const unIds = attend.items.map((c) => c.id)
   expect(unIds).toContain(convUn)
   expect(unIds).toContain(convQueued)
+  expect(unIds).toContain(convFailed)
   expect(unIds).not.toContain(convOk)
   // Esperan al paciente: una propuesta espera su sí, o se le respondió y no contesta;
   // un saliente que sigue en cola todavía no es respuesta.
@@ -671,6 +678,7 @@ it("conversaciones: las vistas «Por atender» y «Esperan al paciente» filtran
   expect(approval.items.map((c) => c.id)).toContain(convUn)
   expect(approval.items.map((c) => c.id)).toContain(convOk)
   expect(approval.items.map((c) => c.id)).not.toContain(convQueued)
+  expect(approval.items.map((c) => c.id)).not.toContain(convFailed)
   // Paginación recorre la vista sin duplicar ni colar otras.
   const paged: string[] = []
   let cursor: string | undefined

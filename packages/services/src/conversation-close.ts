@@ -12,6 +12,7 @@ import {
   acceptedOutSql,
   handoffOpenExistsSql,
   lastAcceptedOutSql,
+  lastIsFailedOutSql,
   proposalPendingExistsSql,
   teamLiveSql,
   unansweredSql,
@@ -601,6 +602,7 @@ interface CareRow {
   connectionStatus: string
   unanswered: boolean
   hasAcceptedOut: boolean
+  lastFailed: boolean
   handoffOpen: boolean
   proposalPending: boolean
 }
@@ -645,6 +647,7 @@ export async function tickConversationCare(
       connectionStatus: channelConnection.status,
       unanswered: sql<boolean>`${unansweredSql(conv)}`,
       hasAcceptedOut: sql<boolean>`${lastAcceptedOutSql(conv)} is not null`,
+      lastFailed: sql<boolean>`${lastIsFailedOutSql(conv)}`,
       handoffOpen: sql<boolean>`${handoffOpenExistsSql(conv)}`,
       proposalPending: sql<boolean>`${proposalPendingExistsSql(conv)}`,
     })
@@ -685,6 +688,8 @@ export async function tickConversationCare(
     if (row.handoffOpen && !(await settleAnsweredTopics(inner, row))) return null
     // Con una persona a cargo no se cierra sola: la muestra «Te espera».
     if (row.assignedUserId !== null || row.agentStatus === "off") return null
+    // Lo último no salió: está en «Por atender». Ni otra despedida al mismo canal ni un cierre «no respondió».
+    if (row.lastFailed) return null
     if (row.unanswered || !row.hasAcceptedOut) return null
     // Terminó con su cita y no queda nada por responder: se da por resuelta sin escribirle.
     if (!row.handoffOpen && !row.proposalPending && (await bookedInAttention(inner, orgId, row))) {

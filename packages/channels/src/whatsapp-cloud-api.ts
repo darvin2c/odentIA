@@ -425,6 +425,9 @@ const NOT_ON_WHATSAPP_CODE = 131026
 const ACCOUNT_THROTTLE_WORDS =
   "WhatsApp frenó el envío porque la clínica mandó demasiados mensajes en poco tiempo. Envíalo de nuevo en unos minutos."
 
+/** «Error validating access token»: Meta ya no acepta la clave con que se envió. */
+export const WHATSAPP_TOKEN_REJECTED_CODE = 190
+
 const WHATSAPP_SEND_ERROR_WORDS: Record<number, string> = {
   [NOT_ON_WHATSAPP_CODE]: "WhatsApp no pudo entregarlo: lo más probable es que este número no tenga WhatsApp.",
   // «Business eligibility payment issue»: la cuenta de WhatsApp Business no
@@ -1092,7 +1095,7 @@ export const whatsappCloudApiAdapter: ChannelAdapter = {
       // id no dicen si salió, y se tratan como ambiguos.
       if (status >= 400 && status < 500 && error) {
         if (typeof error.code === "number" && THROTTLE_CODES.has(error.code)) throw new ProviderThrottledError(detail)
-        throw new ProviderRejectedError(detail)
+        throw new ProviderRejectedError(detail, typeof error.code === "number" ? error.code : null)
       }
       throw new Error(detail)
     }

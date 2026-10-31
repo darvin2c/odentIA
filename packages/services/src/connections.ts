@@ -99,6 +99,10 @@ export interface SignupPending {
   problem: string | null
 }
 
+/** La clave que dio Meta ya no sirve: solo la repone volver a conectar. */
+export const SIGNUP_TOKEN_DEAD =
+  "La clave que dio Meta ya no sirve: venció o la retiraron. Vuelve a conectar con Facebook para que los mensajes sigan saliendo."
+
 /** Cómo va una conexión hecha con «Conectar con Facebook». */
 export interface ConnectionSignupView {
   grantedAt: string
@@ -115,6 +119,8 @@ export interface ConnectionSignupView {
    * salen mensajes hasta volver a conectar con el botón. Nulo: no se cortó.
    */
   metaRemoved: { at: string; why: string } | null
+  /** Meta ya no acepta la clave (`SIGNUP_TOKEN_DEAD`): no salen mensajes hasta volver a conectar con el botón. */
+  tokenDead: boolean
 }
 
 /**
@@ -181,6 +187,8 @@ function signupView(signup: ConnectionSignup | null): ConnectionSignupView | nul
     businessApp: signup.businessApp === true,
     historyDeclined: Boolean(signup.sync?.historyDeclinedAt),
     metaRemoved: signup.metaRemoved ? { at: signup.metaRemoved.at, why: metaRemovalWhy(signup.metaRemoved) } : null,
+    // Solo si ya no sirve: «no se pudo renovar» sigue enviando, y su texto trae lo que dijo Meta.
+    tokenDead: signup.tokenProblem === SIGNUP_TOKEN_DEAD,
   }
 }
 

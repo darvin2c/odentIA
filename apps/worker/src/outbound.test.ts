@@ -1,15 +1,29 @@
 import { telegramBotApiAdapter } from "@odentia/channels"
 import { type OutboundMessageJob, withOrgContext } from "@odentia/db"
-import { message } from "@odentia/db/schema/crm"
-import { closeConversationWith, createConnection, ingestInbound, personalLinkRef, personalLinkToken, sendOutbound } from "@odentia/services"
-import { eq, sql } from "drizzle-orm"
+import { supportCase } from "@odentia/db/schema/admin-support"
+import { member, user } from "@odentia/db/schema/auth"
+import { agentConfig, channelConnection, conversation, message } from "@odentia/db/schema/crm"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
+import {
+  closeConversationWith,
+  createConnection,
+  ingestInbound,
+  listConnections,
+  listInboxConversations,
+  listWorkspaceNotifications,
+  personalLinkRef,
+  personalLinkToken,
+  sendOutbound,
+  SIGNUP_TOKEN_DEAD,
+} from "@odentia/services"
+import { eq, like, sql } from "drizzle-orm"
 import { expect, it } from "vitest"
 import { consumeOutbound, processOutbound, throttledDelaySeconds, WAITING_DELAY_SECONDS } from "./outbound.js"
 import { appDb, KEY, ownerDb, setupTestDb, storageStub, tgConnId } from "./test-setup.js"
 
 setupTestDb()
 
-const deps = { storage: storageStub, fetch, secretsKey: KEY, senderMode: "mock" as const }
+const deps = { storage: storageStub, fetch, secretsKey: KEY, senderMode: "mock" as const, ownerDb }
 
 async function seedQueuedText(): Promise<{ conversationId: string; messageId: string }> {
   const depsIngest = { storage: storageStub, fetch, secretsKey: KEY }
@@ -307,6 +321,115 @@ it("lo que Meta rechaza con su error queda como no entregado, con su motivo y si
   expect(row).toEqual({ status: "failed", error: "WhatsApp send falló: 400 (#131009) Parameter value is not valid" })
   expect(await processOutbound(appDb, rejecting, outJob(messageId, 5))).toBe("done")
   expect(calls).toBe(1)
+})
+
+/** Meta de prueba que rechaza todo envío con ese código. No acredita lo que responde Meta real. */
+function metaRejecting(code: number) {
+  return {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => new Response(JSON.stringify({ error: { message: "Rechazado", code } }), { status: code === 190 ? 401 : 400 })) as typeof fetch,
+  }
+}
+
+/** La conexión y la conversación de un mensaje. */
+async function whereIs(messageId: string) {
+  const [row] = await ownerDb
+    .select({ connectionId: conversation.channelConnectionId, conversationId: conversation.id })
+    .from(message)
+    .innerJoin(conversation, eq(conversation.id, message.conversationId))
+    .where(eq(message.id, messageId))
+  return row!
+}
+
+/** Marca la conexión como hecha con «Conectar con Facebook». */
+async function asSignup(connectionId: string) {
+  await ownerDb
+    .update(channelConnection)
+    .set({ signup: { grantedAt: "2026-09-01T12:00:00.000Z", subscribedAt: "2026-09-01T12:00:05.000Z", registeredAt: "2026-09-01T12:00:09.000Z", problems: {} } })
+    .where(eq(channelConnection.id, connectionId))
+}
+
+const tokenNotices = (connectionId: string) =>
+  ownerDb.select({ userId: workspaceNotification.userId, title: workspaceNotification.title, resolvedAt: workspaceNotification.resolvedAt })
+    .from(workspaceNotification)
+    .where(eq(workspaceNotification.subject, `clave-meta:${connectionId}`))
+
+const connectionView = async (connectionId: string) =>
+  (await withOrgContext(appDb, "org_a", (tx) => listConnections(tx, "org_a"))).find((item) => item.id === connectionId)
+
+it("lo que el proveedor rechaza pasa a «Por atender» y un envío aceptado después lo saca", async () => {
+  // Con Recepción encendida: sin ella ya estaría en «Por atender» antes del rechazo.
+  await ownerDb.insert(agentConfig).values({ organizationId: "org_a", enabled: true })
+  const messageId = await queuedWhatsApp("wa:51911100011")
+  const { conversationId } = await whereIs(messageId)
+  const inAttend = async () =>
+    (await withOrgContext(appDb, "org_a", (tx) => listInboxConversations(tx, "org_a", { view: "attend" }))).items.some((item) => item.id === conversationId)
+  expect(await inAttend()).toBe(false)
+  expect(await processOutbound(appDb, metaRejecting(131009), outJob(messageId))).toBe("done")
+  expect(await inAttend()).toBe(true)
+  const again = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId, senderKind: "user", content: { type: "text", text: "Te escribo de la clínica" } }),
+  )
+  const accepting = {
+    ...deps,
+    senderMode: "live" as const,
+    fetch: (async () => new Response(JSON.stringify({ messages: [{ id: `wamid.${Math.random()}` }] }), { status: 200 })) as typeof fetch,
+  }
+  expect(await processOutbound(appDb, accepting, outJob(again.id))).toBe("done")
+  expect(await inAttend()).toBe(false)
+  await ownerDb.delete(agentConfig).where(eq(agentConfig.organizationId, "org_a"))
+})
+
+it("el primer 190 en una conexión del botón la marca y avisa una vez, sin esperar la revisión de cada 12 horas", async () => {
+  await ownerDb.insert(user).values({ id: "ob-duena", name: "Ana Torres", email: "ana@outbound.test", emailVerified: true })
+  await ownerDb.insert(member).values({ id: "m-ob-duena", userId: "ob-duena", organizationId: "org_a", role: "owner", createdAt: new Date() })
+  const first = await queuedWhatsApp("wa:51911100012")
+  const { connectionId } = await whereIs(first)
+  await asSignup(connectionId)
+  expect((await connectionView(connectionId))?.signup?.tokenDead).toBe(false)
+
+  expect(await processOutbound(appDb, metaRejecting(190), outJob(first))).toBe("done")
+  expect((await messageState(first))?.status).toBe("failed")
+  const [row] = await ownerDb.select({ signup: channelConnection.signup }).from(channelConnection).where(eq(channelConnection.id, connectionId))
+  expect(row?.signup?.tokenProblem).toBe(SIGNUP_TOKEN_DEAD)
+  expect((await connectionView(connectionId))?.signup?.tokenDead).toBe(true)
+  expect(await tokenNotices(connectionId)).toMatchObject([{ userId: "ob-duena", title: "La conexión de WhatsApp con Meta dejó de servir", resolvedAt: null }])
+  // El aviso dice que odentIA ya está avisado: el caso de Soporte existe.
+  const cases = () => ownerDb.select({ id: supportCase.id }).from(supportCase).where(like(supportCase.dedupeKey, "clave-meta-sin-renovar:190"))
+  expect(await cases()).toHaveLength(1)
+
+  // Otro rechazo no repite el aviso.
+  const { conversationId } = await whereIs(first)
+  const second = await withOrgContext(appDb, "org_a", (tx) =>
+    sendOutbound(tx, "org_a", { conversationId, senderKind: "agent", content: { type: "text", text: "Otro" } }),
+  )
+  await ownerDb.update(workspaceNotification).set({ readAt: new Date() }).where(eq(workspaceNotification.subject, `clave-meta:${connectionId}`))
+  expect(await processOutbound(appDb, metaRejecting(190), outJob(second.id))).toBe("done")
+  const [notice] = await ownerDb.select({ readAt: workspaceNotification.readAt }).from(workspaceNotification).where(eq(workspaceNotification.subject, `clave-meta:${connectionId}`))
+  expect(notice?.readAt).not.toBeNull()
+
+  // Al volver a conectar la clave deja de tener problema y el aviso se retira.
+  await ownerDb.update(channelConnection).set({ signup: { ...row!.signup!, tokenProblem: null } }).where(eq(channelConnection.id, connectionId))
+  await withOrgContext(appDb, "org_a", (tx) => listWorkspaceNotifications(tx, "org_a", "ob-duena", ["settings.write"]))
+  expect((await tokenNotices(connectionId))[0]?.resolvedAt).not.toBeNull()
+  expect((await connectionView(connectionId))?.signup?.tokenDead).toBe(false)
+})
+
+it("un 190 sin el botón (a mano, una demo) o un rechazo de pago no marcan la conexión", async () => {
+  const byHand = await queuedWhatsApp("wa:51911100013")
+  const manual = (await whereIs(byHand)).connectionId
+  expect(await processOutbound(appDb, metaRejecting(190), outJob(byHand))).toBe("done")
+  expect(await tokenNotices(manual)).toEqual([])
+  expect((await connectionView(manual))?.signup).toBeNull()
+
+  const payment = await queuedWhatsApp("wa:51911100014")
+  const paying = (await whereIs(payment)).connectionId
+  await asSignup(paying)
+  expect(await processOutbound(appDb, metaRejecting(131042), outJob(payment))).toBe("done")
+  expect((await messageState(payment))?.status).toBe("failed")
+  expect(await tokenNotices(paying)).toEqual([])
+  expect((await connectionView(paying))?.signup?.tokenDead).toBe(false)
 })
 
 it("un límite de ritmo de Meta deja el mensaje en cola para reintentarlo más tarde; al tope, queda como no entregado", async () => {
