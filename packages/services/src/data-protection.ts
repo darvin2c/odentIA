@@ -13,10 +13,15 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { desc, eq, sql } from "drizzle-orm"
 import { getAgentConfig } from "./agentConfig.js"
-import { type Establishment, header, newWriter, zoneOf } from "./health-documents.js"
+import {
+  type DocumentClinic,
+  DocumentKit,
+  documentFormat,
+  SIZE,
+  type Zone,
+} from "./document-kit.js"
 import { clinicToday } from "./inventory-stock.js"
-import { orgProduct } from "./locale.js"
-import { MUTED, type Zone } from "./pdf-writer.js"
+import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE, orgProduct } from "./locale.js"
 
 export interface DataProtectionActivity {
   id: "atender" | "citas" | "conversar" | "cobrar" | "novedades"
@@ -33,6 +38,17 @@ export interface DataProtectionProcessor {
   country: string
   /** Por qué interviene en esta clínica: «conectado el 3 oct 2026», «Recepción encendida». */
   detail: string | null
+}
+
+/** Lo que el registro dice de quien responde por los datos. */
+export interface Establishment {
+  legalName: string | null
+  tradeName: string | null
+  fiscalDocType: string | null
+  fiscalDocNumber: string | null
+  address: string | null
+  locale?: string | null
+  timezone?: string | null
 }
 
 export interface DataProtectionView {
@@ -75,14 +91,23 @@ const CHANNEL_NAMES: Record<string, string> = {
   microsoft365: "Microsoft 365",
 }
 
-function processorRow(p: DataProcessor, detail: string | null, name = p.short): DataProtectionProcessor {
+function processorRow(
+  p: DataProcessor,
+  detail: string | null,
+  name = p.short,
+): DataProtectionProcessor {
   return { id: p.id, name, receives: p.receives, country: p.country, detail }
 }
 
 /** «3 oct 2026», en la zona y el idioma de la clínica. */
 function day(value: Date | string, zone: Zone): string {
   return new Date(value)
-    .toLocaleDateString(zone.locale, { timeZone: zone.timezone, day: "numeric", month: "short", year: "numeric" })
+    .toLocaleDateString(zone.locale, {
+      timeZone: zone.timezone,
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })
     .replaceAll(".", "")
 }
 
@@ -135,7 +160,10 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     group by provider`)
   const connected = new Map(connections.map((c) => [c.provider, c]))
   const agent = await getAgentConfig(tx, orgId)
-  const zone = zoneOf(responsible)
+  const zone: Zone = {
+    locale: responsible.locale || NEUTRAL_LOCALE,
+    timezone: responsible.timezone || NEUTRAL_TIMEZONE,
+  }
 
   const [counts] = await tx.execute<{ novedades: number; people: number }>(sql`
     select
@@ -198,7 +226,10 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         if (agent.enabled || agent.clinicalAssistantEnabled) {
           // El modelo lo usan Recepción y el dictado; la decisión y la búsqueda, solo los agentes.
           if (p.id === "openai") {
-            const uses = [agent.enabled ? "agentes encendidos" : null, agent.clinicalAssistantEnabled ? "dictado encendido" : null]
+            const uses = [
+              agent.enabled ? "agentes encendidos" : null,
+              agent.clinicalAssistantEnabled ? "dictado encendido" : null,
+            ]
             inUse.push(processorRow(p, uses.filter(Boolean).join(" y ")))
           } else if (agent.enabled) inUse.push(processorRow(p, "agentes encendidos"))
         }
@@ -210,10 +241,15 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
         const mine = p.use.providers.filter((provider) => connected.has(provider))
         if (mine.length === 0) break
         for (const provider of mine) usedProviders.add(provider)
-        const since = mine.map((provider) => connected.get(provider)!.since).sort((a, b) => +a - +b)[0]!
+        const since = mine
+          .map((provider) => connected.get(provider)!.since)
+          .sort((a, b) => +a - +b)[0]!
         const channels = mine.map((provider) => CHANNEL_NAMES[provider] ?? provider)
         const name = p.id === "meta" ? `${channels.join(", ")} (Meta)` : p.short
-        const account = p.id === "gmail" || p.id === "microsoft365" ? `${connected.get(mine[0]!)!.display_name} · ` : ""
+        const account =
+          p.id === "gmail" || p.id === "microsoft365"
+            ? `${connected.get(mine[0]!)!.display_name} · `
+            : ""
         inUse.push(processorRow(p, `${account}conectado el ${day(since, zone)}`, name))
         break
       }
@@ -247,7 +283,11 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
     platform: productWords(await orgProduct(tx, orgId)).name,
     responsible: { ...responsible, missing },
     agreement: agreement
-      ? { version: agreement.version, acceptedAt: agreement.acceptedAt.toISOString(), acceptedByName: agreement.acceptedByName }
+      ? {
+          version: agreement.version,
+          acceptedAt: agreement.acceptedAt.toISOString(),
+          acceptedByName: agreement.acceptedByName,
+        }
       : null,
     activities,
     processors: { inUse, always, notUsed },
@@ -264,37 +304,62 @@ export async function getDataProtectionView(tx: Db, orgId: string): Promise<Data
 }
 
 /** «Registro de actividades de tratamiento»: el PDF de una página para la autoridad (tablero 10). */
-export async function renderDataProtectionPdf(view: DataProtectionView): Promise<Uint8Array> {
-  const zone = zoneOf(view.responsible)
-  const { pdf, w } = await newWriter("Registro de actividades de tratamiento")
-  header(w, view.responsible)
-  w.text("Registro de actividades de tratamiento", { size: 15, bold: true })
-  w.text(`Al ${day(new Date(), zone)} · generado por ${view.platform}`, { size: 8, color: MUTED })
-  w.heading("1. Responsable y encargado")
-  const fiscal = [view.responsible.fiscalDocType, view.responsible.fiscalDocNumber].filter(Boolean).join(" ")
-  w.text(`Responsable: ${[view.responsible.legalName, fiscal].filter(Boolean).join(", ") || "sin datos"}.`)
-  w.text(
+export async function renderDataProtectionPdf(
+  view: DataProtectionView,
+  clinic: DocumentClinic,
+): Promise<Uint8Array> {
+  const zone: Zone = clinic
+  const title = "Registro de actividades de tratamiento"
+  const kit = await DocumentKit.open(clinic, documentFormat(clinic), { title, docLabel: title })
+  const section = (value: string) =>
+    kit.heading(value, { size: SIZE.h2small, before: 14, after: 4 })
+  kit.gap(20)
+  kit.titleWithDetails(
+    title,
+    [{ text: `Al ${day(new Date(), zone)}` }, { text: `Generado por ${view.platform}` }],
+    SIZE.titleBudget,
+  )
+  kit.gap(6)
+  section("1. Responsable y encargado")
+  const fiscal = [view.responsible.fiscalDocType, view.responsible.fiscalDocNumber]
+    .filter(Boolean)
+    .join(" ")
+  kit.text(
+    `Responsable: ${[view.responsible.legalName, fiscal].filter(Boolean).join(", ") || "sin datos"}.`,
+  )
+  kit.text(
     view.agreement
       ? `Encargado: ${view.platform}, según el contrato de encargo aceptado el ${day(view.agreement.acceptedAt, zone)} (versión ${view.agreement.version}).`
       : `Encargado: ${view.platform}. El contrato de encargo aún no se aceptó.`,
   )
-  w.heading("2. Actividades")
-  for (const a of view.activities)
-    w.list([`${a.purpose}: ${a.data}. Permiso: ${a.basis}. Se guarda: ${a.keep.toLowerCase()}.`])
-  w.heading("3. Encargados y transferencias internacionales")
-  for (const p of [...view.processors.inUse, ...view.processors.always])
-    w.list([`${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`])
-  w.text("Los que están fuera del país son una transferencia internacional autorizada en el contrato de encargo.", {
-    size: 8,
-    color: MUTED,
-  })
-  w.heading("4. Cómo se protegen")
-  w.text(
+  section("2. Actividades")
+  kit.bullets(
+    view.activities.map(
+      (a) => `${a.purpose}: ${a.data}. Permiso: ${a.basis}. Se guarda: ${a.keep.toLowerCase()}.`,
+    ),
+    { size: SIZE.dense },
+  )
+  section("3. Encargados y transferencias internacionales")
+  kit.bullets(
+    [...view.processors.inUse, ...view.processors.always].map(
+      (p) => `${p.name} (${p.country}): ${p.receives}${p.detail ? ` · ${p.detail}` : ""}.`,
+    ),
+    { size: SIZE.dense },
+  )
+  kit.text(
+    "Los que están fuera del país son una transferencia internacional autorizada en el contrato de encargo.",
+    {
+      size: SIZE.label,
+      tone: "gray",
+    },
+  )
+  section("4. Cómo se protegen")
+  kit.text(
     "Cada clínica ve solo sus datos; cada persona del equipo, solo lo que su rol permite. Las consultas a la historia clínica y los cambios quedan registrados. Conexiones cifradas y copias de seguridad diarias.",
   )
-  w.heading("5. Derechos de las personas")
+  section("5. Derechos de las personas")
   const r = view.requests
-  w.text(
+  kit.text(
     `Se atienden en 10 días corridos. En ${r.year}: ${[
       plural(r.received, "pedido", "pedidos"),
       `${plural(r.onTime, "respondido", "respondidos")} a tiempo`,
@@ -304,11 +369,15 @@ export async function renderDataProtectionPdf(view: DataProtectionView): Promise
       `${plural(r.locked, "historia bloqueada", "historias bloqueadas")} a pedido`,
     ].join(", ")}.`,
   )
-  return pdf.save()
+  return kit.finish()
 }
 
 /** Cada descarga queda en la Actividad del equipo (decisión 6). */
-export async function recordDataProtectionDownload(tx: Db, orgId: string, actorUserId: string): Promise<void> {
+export async function recordDataProtectionDownload(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+): Promise<void> {
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,

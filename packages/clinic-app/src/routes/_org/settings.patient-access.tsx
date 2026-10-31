@@ -1,16 +1,14 @@
-import { Alert, AlertDescription, AlertTitle, Checkbox, Skeleton, toast } from "@odentia/ui"
-import { PageHeader, SubmitButton } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Skeleton, toast } from "@odentia/ui"
+import { PageHeader, SubmitButton, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { type ReactNode, useEffect, useId, useState } from "react"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
-import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { PageDraftGuard, sameDraft } from "../../lib/page-draft-guard"
 import {
   fetchPortalPolicyApi,
-  type PortalPolicy,
   type PortalPolicyInput,
   savePortalPolicyApi,
 } from "../../lib/portal"
@@ -62,45 +60,6 @@ function PortalSkeleton() {
   )
 }
 
-/** Una casilla del formulario con su explicación debajo. Se guarda con «Guardar». */
-function Option({
-  label,
-  hint,
-  checked,
-  disabled,
-  onChange,
-}: {
-  label: string
-  hint?: ReactNode
-  checked: boolean
-  disabled: boolean
-  onChange: (checked: boolean) => void
-}) {
-  const id = useId()
-  return (
-    <div className="flex min-h-11 items-start gap-3 sm:min-h-0">
-      <Checkbox
-        id={id}
-        className="mt-0.5"
-        checked={checked}
-        disabled={disabled}
-        aria-describedby={hint ? `${id}-ayuda` : undefined}
-        onCheckedChange={(value) => onChange(value === true)}
-      />
-      <div className="flex min-w-0 flex-col gap-0.5 text-sm">
-        <label htmlFor={id} className="font-medium">
-          {label}
-        </label>
-        {hint ? (
-          <span id={`${id}-ayuda`} className="text-muted-foreground">
-            {hint}
-          </span>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 /**
  * Portal del paciente (ADR 0037): solo si está encendido y qué puede ver el
  * paciente. Lo demás son valores fijos, que la página dice en palabras: el
@@ -109,35 +68,8 @@ function Option({
  * teléfono). Es un solo formulario: nada vale hasta pulsar «Guardar».
  */
 function PortalSettings() {
-  const queryClient = useQueryClient()
-  const canWrite = usePermission("settings.write")
   const policyQuery = useQuery({ queryKey: ["portal-policy"], queryFn: fetchPortalPolicyApi, retry: 1 })
-  const [form, setForm] = useState<PortalPolicyInput | null>(null)
-  const [baseline, setBaseline] = useState<PortalPolicyInput | null>(null)
-
-  useEffect(() => {
-    if (policyQuery.data && form === null) {
-      const { updatedAt: _ignored, ...input } = policyQuery.data
-      setForm(input)
-      setBaseline(input)
-    }
-  }, [policyQuery.data, form])
-
-  const saveMutation = useMutation({
-    mutationFn: (input: PortalPolicyInput) => savePortalPolicyApi(input),
-    onSuccess: (policy: PortalPolicy, submitted) => {
-      const { updatedAt: _ignored, ...input } = policy
-      // Lo escrito mientras se guardaba no se pisa con la respuesta.
-      setForm((current) =>
-        sameDraft(current, submitted) ? input : current,
-      )
-      setBaseline(input)
-      toast.success("Portal del paciente guardado")
-      void queryClient.invalidateQueries({ queryKey: ["portal-policy"] })
-    },
-  })
-
-  if (form === null) {
+  if (!policyQuery.data) {
     return (
       <div className="flex max-w-3xl flex-col gap-6">
         <PageHeader title={TITLE} subtitle={SUBTITLE} />
@@ -149,26 +81,49 @@ function PortalSettings() {
       </div>
     )
   }
+  const { updatedAt: _ignored, ...initial } = policyQuery.data
+  return (
+    <PortalForm
+      initial={initial}
+      staleError={policyQuery.isError}
+      onRetry={() => void policyQuery.refetch()}
+    />
+  )
+}
 
-  const set = <K extends keyof PortalPolicyInput>(key: K, value: PortalPolicyInput[K]) => {
-    setForm((prev) => (prev ? { ...prev, [key]: value } : prev))
-  }
-
-  function onSave() {
-    if (form === null || !canWrite) return
-    saveMutation.mutate(form)
-  }
-
-  const dirty = !sameDraft(form, baseline)
+/** El formulario, con los valores guardados una sola vez: una recarga no pisa el borrador. */
+function PortalForm({
+  initial,
+  staleError,
+  onRetry,
+}: {
+  initial: PortalPolicyInput
+  staleError: boolean
+  onRetry: () => void
+}) {
+  const queryClient = useQueryClient()
+  const canWrite = usePermission("settings.write")
+  const form = useAppForm({
+    defaultValues: initial,
+    onSubmit: async ({ value }) => {
+      const policy = await savePortalPolicyApi(value)
+      const { updatedAt: _ignored, ...saved } = policy
+      // Lo marcado mientras se guardaba no se pisa con la respuesta.
+      if (sameDraft(form.state.values, value)) form.reset(saved)
+      toast.success("Portal del paciente guardado")
+      void queryClient.invalidateQueries({ queryKey: ["portal-policy"] })
+    },
+  })
+  const dirty = useStore(form.store, (state) => !state.isDefaultValue)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const submitError = useFormSubmitError(form)
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       <PageDraftGuard dirty={dirty} />
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
 
-      {policyQuery.isError ? (
-        <SettingsLoadError stale what="el portal del paciente" onRetry={() => void policyQuery.refetch()} />
-      ) : null}
+      {staleError ? <SettingsLoadError stale what="el portal del paciente" onRetry={onRetry} /> : null}
       {!canWrite ? (
         <p role="note" className="text-sm text-muted-foreground">
           Puedes ver el portal; cambiarlo es de quien administra la clínica.
@@ -179,13 +134,15 @@ function PortalSettings() {
         <h2 id="portal-encendido" className="font-heading text-base font-medium">
           El portal
         </h2>
-        <Option
-          label="Portal del paciente encendido"
-          hint="Apagado por defecto. Apagado, nadie entra y no se dan accesos."
-          checked={form.enabled}
-          disabled={!canWrite}
-          onChange={(checked) => set("enabled", checked)}
-        />
+        <form.AppField name="enabled">
+          {(field) => (
+            <field.CheckboxField
+              label="Portal del paciente encendido"
+              description="Apagado por defecto. Apagado, nadie entra y no se dan accesos."
+              disabled={!canWrite}
+            />
+          )}
+        </form.AppField>
       </section>
 
       <section className={CARD} aria-labelledby="portal-alcance">
@@ -198,30 +155,18 @@ function PortalSettings() {
             de lo marcado aquí.
           </p>
         </div>
-        <Option
-          label="Citas"
-          checked={form.allowedScope.appointments}
-          disabled={!canWrite}
-          onChange={(checked) => set("allowedScope", { ...form.allowedScope, appointments: checked })}
-        />
-        <Option
-          label="Presupuestos"
-          checked={form.allowedScope.budgets}
-          disabled={!canWrite}
-          onChange={(checked) => set("allowedScope", { ...form.allowedScope, budgets: checked })}
-        />
-        <Option
-          label="Cuenta y saldo"
-          checked={form.allowedScope.account}
-          disabled={!canWrite}
-          onChange={(checked) => set("allowedScope", { ...form.allowedScope, account: checked })}
-        />
-        <Option
-          label="Documentos"
-          checked={form.allowedScope.documents}
-          disabled={!canWrite}
-          onChange={(checked) => set("allowedScope", { ...form.allowedScope, documents: checked })}
-        />
+        <form.AppField name="allowedScope.appointments">
+          {(field) => <field.CheckboxField label="Citas" disabled={!canWrite} />}
+        </form.AppField>
+        <form.AppField name="allowedScope.budgets">
+          {(field) => <field.CheckboxField label="Presupuestos" disabled={!canWrite} />}
+        </form.AppField>
+        <form.AppField name="allowedScope.account">
+          {(field) => <field.CheckboxField label="Cuenta y saldo" disabled={!canWrite} />}
+        </form.AppField>
+        <form.AppField name="allowedScope.documents">
+          {(field) => <field.CheckboxField label="Documentos" disabled={!canWrite} />}
+        </form.AppField>
       </section>
 
       <section className={CARD} aria-labelledby="portal-fijo">
@@ -239,21 +184,20 @@ function PortalSettings() {
         </p>
       </section>
 
-      {saveMutation.isError ? (
-        <Alert variant="destructive">
-          <AlertTitle>No pudimos guardar el portal del paciente</AlertTitle>
-          <AlertDescription>
-            {saveMutation.error instanceof ApiError && saveMutation.error.shape.message
-              ? saveMutation.error.shape.message
-              : "Lo que escribiste sigue aquí: vuelve a intentarlo."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
       {canWrite ? (
-        <div>
-          <SubmitButton className="min-h-11" pending={saveMutation.isPending} onClick={onSave}>
-            Guardar
-          </SubmitButton>
+        <div className="flex flex-col gap-2">
+          <div>
+            <SubmitButton className="min-h-11" pending={isSubmitting} onClick={() => void submitForm(form)}>
+              Guardar
+            </SubmitButton>
+          </div>
+          {submitError ? (
+            // Junto a «Guardar» (ADR 0113), con el título de siempre de esta pantalla.
+            <div role="alert" className="flex flex-col gap-0.5 text-sm text-destructive">
+              <p className="font-medium">No pudimos guardar el portal del paciente</p>
+              <p>{submitError}</p>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

@@ -1,10 +1,19 @@
-import { Badge, Button, cn, Field, FieldDescription, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import { Badge, Button, cn, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { FlowDiagram, type FlowDiagramStep, LoadingState } from "@odentia/ui-patterns"
+import {
+  FlowDiagram,
+  type FlowDiagramStep,
+  LoadingState,
+  setSubmitErrors,
+  submitErrorMessage,
+  useAppForm,
+} from "@odentia/ui-patterns"
+import { type AnyFormApi, useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { PersonLink } from "../person-link"
 import { Bot, ChevronDown, User } from "lucide-react"
 import { useId, useState } from "react"
+import { z } from "zod"
 import {
   type AdminFlow,
   type AdminLineDetail,
@@ -16,7 +25,7 @@ import {
 import { ADMIN_NAME, useReceptionName, withReceptionName, withReceptionNameIn } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { activeOrgLocale } from "../../lib/locale"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { AdminDraftBlock, DeleteAdminLine } from "./admin-draft"
 
 /** Quién lo hace, con icono y palabras: nunca solo con color. Las líneas son de Argos. */
@@ -128,12 +137,14 @@ export function AdminLine({
           // Con Argos apagado no se prende nada, pero lo prendido se puede apagar.
           disabled={!canWrite || (!adminOn && !line.enabled) || save.isPending}
           aria-label={`${line.enabled ? "Apagar" : "Prender"}: ${line.name}`}
+          aria-describedby={save.isError ? `${uid}-error` : undefined}
           onCheckedChange={(next: boolean) => save.mutate(next)}
         />
       </div>
       {save.isError ? (
-        <p role="alert" className="px-4 pb-3 text-sm text-destructive">
-          {mutationErrorMessage(save.error)}
+        // El motivo del servidor (sin ninguna parte prendida, Argos apagado en otra sesión), junto al interruptor.
+        <p id={`${uid}-error`} role="alert" className="px-4 pb-3 text-sm text-destructive">
+          {withReceptionName(submitErrorMessage(save.error), receptionName)}
         </p>
       ) : null}
       {open ? (
@@ -171,6 +182,243 @@ export { toDiagram as adminFlowToDiagram }
 const NO_HOUR = "sin-hora"
 const HOURS_OF_DAY = Array.from({ length: 24 }, (_, hour) => hour)
 
+/** Lo que se dice de cada ajuste: lo mismo que `lineInput` de la API y `setLine`. */
+const DAYS_RANGE = "El plazo va de 1 a 365 días."
+const DELAY_RANGE = "La espera va de 1 a 72 horas."
+const TASK_NOTE_MAX = 160
+const TASK_NOTE_TOO_LONG = `La indicación para la tarea admite hasta ${TASK_NOTE_MAX} caracteres.`
+
+/** Un número entero entre `min` y `max` escrito en el campo: vacío o con decimales no pasa. */
+const wholeBetween = (min: number, max: number, message: string) =>
+  z
+    .string()
+    .trim()
+    .refine((text) => /^\d+$/.test(text) && Number(text) >= min && Number(text) <= max, message)
+
+/** El dato de la línea en el cuerpo de PATCH `/api/agent/admin/lines/:key`. */
+type LineSettingName = "days" | "delayHours" | "taskNote" | "hour"
+
+/** Cualquier rechazo de un ajuste es de ese dato: se dice en su campo, con el mensaje del servidor. */
+function setSettingError(form: AnyFormApi, message: string | undefined) {
+  setSubmitErrors(form, { fields: message ? { value: message } : {} })
+}
+
+/**
+ * Un ajuste de la línea que se guarda solo, al salir del campo o al elegir:
+ * lo escrito se valida y se conserva, y lo que no pasa (aquí o en el
+ * servidor) se dice en el mismo campo. Cada ajuste es su propio formulario:
+ * uno a medio corregir no frena a los demás.
+ */
+function useLineSetting({
+  lineKey,
+  name,
+  saved,
+  read,
+  schema,
+  toBody,
+}: {
+  lineKey: string
+  name: LineSettingName
+  /** El valor guardado, como se escribe en el campo. */
+  saved: string
+  read: (line: AdminLineDetail) => string
+  schema: z.ZodType<unknown, string>
+  toBody: (value: string) => number | string | null
+}) {
+  const queryClient = useQueryClient()
+  const save = useMutation({
+    retry: false,
+    mutationFn: (value: number | string | null) =>
+      apiFetch<{ data: AdminLineDetail }>(`/api/agent/admin/lines/${lineKey}`, { method: "PATCH", body: JSON.stringify({ [name]: value }) }),
+    onSuccess: (response) => {
+      queryClient.setQueryData(adminLineKey(lineKey), response)
+      refreshAdmin(queryClient)
+    },
+  })
+  const form = useAppForm({
+    defaultValues: { value: saved },
+    validators: { onSubmit: z.object({ value: schema }) },
+    onSubmit: async ({ value, formApi }) => {
+      // Sin cambios no se envía nada: el campo vuelve a decir lo guardado.
+      if (value.value.trim() === saved) {
+        formApi.reset({ value: saved })
+        return
+      }
+      const response = await save.mutateAsync(toBody(value.value))
+      formApi.reset({ value: read(response.data) })
+    },
+  })
+  const commit = async () => {
+    setSettingError(form, undefined)
+    try {
+      await form.handleSubmit()
+    } catch (error) {
+      setSettingError(form, submitErrorMessage(error))
+    }
+  }
+  const saving = useStore(form.store, (state) => state.isSubmitting)
+  return { form, commit, saving }
+}
+
+const daysOf = (line: AdminLineDetail) => String(line.days ?? line.defaultDays ?? "")
+
+function DaysSetting({ line, editable }: { line: AdminLineDetail; editable: boolean }) {
+  const { form, commit, saving } = useLineSetting({
+    lineKey: line.key,
+    name: "days",
+    saved: daysOf(line),
+    read: daysOf,
+    schema: wholeBetween(1, 365, DAYS_RANGE),
+    toBody: Number,
+  })
+  return (
+    <form.AppField name="value">
+      {(field) => (
+        <field.Control
+          className="max-w-56"
+          label={line.daysLabel ?? "Plazo en días"}
+          description={`De 1 a 365. Por defecto, ${line.defaultDays}. Se guarda al salir del campo.`}
+        >
+          {(control) => (
+            <Input
+              {...control.props}
+              type="number"
+              min={1}
+              max={365}
+              disabled={!editable || saving}
+              value={field.state.value}
+              onChange={(event) => field.handleChange(event.target.value)}
+              onBlur={() => {
+                control.onBlur()
+                void commit()
+              }}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
+}
+
+const delayOf = (line: AdminLineDetail) => String(line.delayHours ?? "")
+
+function DelaySetting({ line, editable }: { line: AdminLineDetail; editable: boolean }) {
+  const { form, commit, saving } = useLineSetting({
+    lineKey: line.key,
+    name: "delayHours",
+    saved: delayOf(line),
+    read: delayOf,
+    schema: wholeBetween(1, 72, DELAY_RANGE),
+    toBody: Number,
+  })
+  return (
+    <form.AppField name="value">
+      {(field) => (
+        <field.Control className="max-w-56" label="Horas de espera" description="De 1 a 72. Se guarda al salir del campo.">
+          {(control) => (
+            <Input
+              {...control.props}
+              type="number"
+              min={1}
+              max={72}
+              disabled={!editable || saving}
+              value={field.state.value}
+              onChange={(event) => field.handleChange(event.target.value)}
+              onBlur={() => {
+                control.onBlur()
+                void commit()
+              }}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
+}
+
+const taskNoteOf = (line: AdminLineDetail) => line.taskNote ?? ""
+
+function TaskNoteSetting({ line, editable }: { line: AdminLineDetail; editable: boolean }) {
+  const receptionName = useReceptionName()
+  const { form, commit, saving } = useLineSetting({
+    lineKey: line.key,
+    name: "taskNote",
+    saved: taskNoteOf(line),
+    read: taskNoteOf,
+    schema: z.string().trim().max(TASK_NOTE_MAX, TASK_NOTE_TOO_LONG),
+    toBody: (value) => value.trim(),
+  })
+  return (
+    <form.AppField name="value">
+      {(field) => (
+        <field.Control
+          className="max-w-xl"
+          label="Indicación para quien reciba la tarea"
+          description={`La lee quien reciba la tarea en ${line.team}; ${receptionName} nunca la dice. Se guarda al salir del campo.`}
+        >
+          {(control) => (
+            <Input
+              {...control.props}
+              maxLength={TASK_NOTE_MAX}
+              disabled={!editable || saving}
+              value={field.state.value}
+              placeholder="Opcional. Por ejemplo: ofrecerle el horario de la tarde"
+              onChange={(event) => field.handleChange(event.target.value)}
+              onBlur={() => {
+                control.onBlur()
+                void commit()
+              }}
+            />
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
+}
+
+const hourOf = (line: AdminLineDetail) => (line.hour === null ? NO_HOUR : String(line.hour))
+
+function HourSetting({ line, editable }: { line: AdminLineDetail; editable: boolean }) {
+  const { form, commit, saving } = useLineSetting({
+    lineKey: line.key,
+    name: "hour",
+    saved: hourOf(line),
+    read: hourOf,
+    schema: z.string(),
+    toBody: (value) => (value === NO_HOUR ? null : Number(value)),
+  })
+  return (
+    <form.AppField name="value">
+      {(field) => (
+        <field.Control className="max-w-56" label="A qué hora sale" description="Al día siguiente, con la hora de la sede. Respeta el horario de recontacto.">
+          {(control) => (
+            <Select
+              value={field.state.value}
+              disabled={!editable || saving}
+              onValueChange={(value) => {
+                field.handleChange(value ?? NO_HOUR)
+                void commit()
+              }}
+            >
+              <SelectTrigger {...control.props}>
+                <SelectValue>{field.state.value === NO_HOUR ? "24 horas después" : `${field.state.value}:00`}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_HOUR}>24 horas después</SelectItem>
+                {HOURS_OF_DAY.map((hour) => (
+                  <SelectItem key={hour} value={String(hour)}>
+                    {hour}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </field.Control>
+      )}
+    </form.AppField>
+  )
+}
+
 /** Una línea abierta: su flujo, sus partes, lo que recibe la persona y lo que pasó con cada quien. */
 export function AdminLineOpen({
   lineKey,
@@ -191,9 +439,6 @@ export function AdminLineOpen({
   const receptionName = useReceptionName()
   const [whole, setWhole] = useState(false)
   const [allPeople, setAllPeople] = useState(false)
-  const [daysDraft, setDaysDraft] = useState<string | null>(null)
-  const [hoursDraft, setHoursDraft] = useState<string | null>(null)
-  const [noteDraft, setNoteDraft] = useState<string | null>(null)
   const query = useQuery({
     queryKey: adminLineKey(lineKey),
     queryFn: () => apiFetch<{ data: AdminLineDetail }>(`/api/agent/admin/lines/${lineKey}`),
@@ -212,10 +457,14 @@ export function AdminLineOpen({
     enabled: unreachedOnly,
     retry: false,
   })
-  const save = useMutation({
+  // Prender o apagar una parte («le escribe», «tarea para el equipo»): su error se dice junto a ese interruptor.
+  const parts = useMutation({
     retry: false,
-    mutationFn: (patch: Record<string, unknown>) =>
-      apiFetch<{ data: AdminLineDetail }>(`/api/agent/admin/lines/${lineKey}`, { method: "PATCH", body: JSON.stringify(patch) }),
+    mutationFn: ({ part, next }: { part: "agent" | "team"; next: boolean }) =>
+      apiFetch<{ data: AdminLineDetail }>(`/api/agent/admin/lines/${lineKey}`, {
+        method: "PATCH",
+        body: JSON.stringify(part === "agent" ? { agentPart: next } : { teamPart: next }),
+      }),
     onSuccess: (response) => {
       queryClient.setQueryData(adminLineKey(lineKey), response)
       refreshAdmin(queryClient)
@@ -225,7 +474,7 @@ export function AdminLineOpen({
   if (query.isError) return <QueryErrorState error={query.error} onRetry={() => void query.refetch()} />
   // Los textos del servidor nombran a «Sofi»: con otro nombre en la clínica, se dice el suyo.
   const line = withReceptionNameIn(query.data.data, receptionName)
-  const editable = canWrite && adminOn && !save.isPending
+  const editable = canWrite && adminOn
   // Apagada se ve entera; prendida, solo lo que se ejecuta salvo que se pida verla entera.
   const showWhole = !line.enabled || whole
   const flow = toDiagram(showWhole ? line.fullFlow : line.flow)
@@ -261,6 +510,9 @@ export function AdminLineOpen({
               : "Se dibuja solo lo que está prendido."
             : "Está apagada: así se ejecutaría. No pasa nada hasta que la prendas."}
         </p>
+        {canWrite && !adminOn ? (
+          <p className="text-sm text-muted-foreground">Sus partes y ajustes se cambian con {ADMIN_NAME} encendido: enciéndelo primero.</p>
+        ) : null}
         <FlowDiagram
           label={line.name}
           main={flow.main}
@@ -273,26 +525,31 @@ export function AdminLineOpen({
             if (!source.part) return null
             // En una línea que solo deja trabajo al equipo, su única parte se apaga con la línea.
             if (source.part === "team" && !line.hasAgent) return null
-            const checked = source.part === "agent" ? line.agentPart : line.teamPart
-            const label = source.part === "agent" ? `${receptionName} le escribe` : `Tarea para ${line.team}`
+            const part = source.part
+            const checked = part === "agent" ? line.agentPart : line.teamPart
+            const label = part === "agent" ? `${receptionName} le escribe` : `Tarea para ${line.team}`
+            const failed = parts.isError && parts.variables?.part === part
             return (
-              <label className="flex cursor-pointer items-center justify-between gap-2 text-xs font-medium">
-                {checked ? "Prendido" : "Apagado"}
-                <Switch
-                  checked={checked}
-                  disabled={!editable}
-                  aria-label={label}
-                  onCheckedChange={(next: boolean) => save.mutate(source.part === "agent" ? { agentPart: next } : { teamPart: next })}
-                />
-              </label>
+              <>
+                <label className="flex cursor-pointer items-center justify-between gap-2 text-xs font-medium">
+                  {checked ? "Prendido" : "Apagado"}
+                  <Switch
+                    checked={checked}
+                    disabled={!editable || parts.isPending}
+                    aria-label={label}
+                    aria-describedby={failed ? `${uid}-parte-${part}-error` : undefined}
+                    onCheckedChange={(next: boolean) => parts.mutate({ part, next })}
+                  />
+                </label>
+                {failed ? (
+                  <p id={`${uid}-parte-${part}-error`} role="alert" className="text-xs text-destructive">
+                    {withReceptionName(submitErrorMessage(parts.error), receptionName)}
+                  </p>
+                ) : null}
+              </>
             )
           }}
         />
-        {save.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {mutationErrorMessage(save.error)}
-          </p>
-        ) : null}
         {line.noticeExample && line.agentPart ? (
           <p className="rounded-xl bg-muted px-3.5 py-3 text-sm">
             <span className="font-semibold">Así es el aviso cuando no puede:</span> «{line.noticeExample}»
@@ -322,90 +579,10 @@ export function AdminLineOpen({
         </section>
       ) : null}
 
-      {line.defaultDays !== null ? (
-        <Field className="max-w-56">
-          <FieldLabel htmlFor={`${uid}-plazo`}>{line.daysLabel ?? "Plazo en días"}</FieldLabel>
-          <Input
-            id={`${uid}-plazo`}
-            type="number"
-            min={1}
-            max={365}
-            disabled={!editable}
-            value={daysDraft ?? String(line.days ?? line.defaultDays)}
-            onChange={(event) => setDaysDraft(event.target.value)}
-            onBlur={() => {
-              const value = Number(daysDraft)
-              if (daysDraft !== null && value !== line.days && Number.isInteger(value) && value >= 1 && value <= 365) save.mutate({ days: value })
-              setDaysDraft(null)
-            }}
-          />
-          <FieldDescription>Por defecto, {line.defaultDays}. Se guarda al salir del campo.</FieldDescription>
-        </Field>
-      ) : null}
-
-      {line.delayHours !== null ? (
-        <Field className="max-w-56">
-          <FieldLabel htmlFor={`${uid}-espera`}>Horas de espera</FieldLabel>
-          <Input
-            id={`${uid}-espera`}
-            type="number"
-            min={1}
-            max={72}
-            disabled={!editable}
-            value={hoursDraft ?? String(line.delayHours)}
-            onChange={(event) => setHoursDraft(event.target.value)}
-            onBlur={() => {
-              const value = Number(hoursDraft)
-              if (hoursDraft !== null && value !== line.delayHours && Number.isInteger(value) && value >= 1 && value <= 72) save.mutate({ delayHours: value })
-              setHoursDraft(null)
-            }}
-          />
-          <FieldDescription>De 1 a 72. Se guarda al salir del campo.</FieldDescription>
-        </Field>
-      ) : null}
-
-      {line.teamPart ? (
-        <Field className="max-w-xl">
-          <FieldLabel htmlFor={`${uid}-indicacion`}>Indicación para quien reciba la tarea</FieldLabel>
-          <Input
-            id={`${uid}-indicacion`}
-            maxLength={160}
-            disabled={!editable}
-            value={noteDraft ?? line.taskNote ?? ""}
-            placeholder="Opcional. Por ejemplo: ofrecerle el horario de la tarde"
-            onChange={(event) => setNoteDraft(event.target.value)}
-            onBlur={() => {
-              if (noteDraft !== null && noteDraft.trim() !== (line.taskNote ?? "")) save.mutate({ taskNote: noteDraft.trim() })
-              setNoteDraft(null)
-            }}
-          />
-          <FieldDescription>La lee quien reciba la tarea en {line.team}; {receptionName} nunca la dice. Se guarda al salir del campo.</FieldDescription>
-        </Field>
-      ) : null}
-
-      {line.hourAdjustable ? (
-        <Field className="max-w-56">
-          <FieldLabel htmlFor={`${uid}-hora`}>A qué hora sale</FieldLabel>
-          <Select
-            value={line.hour === null ? NO_HOUR : String(line.hour)}
-            disabled={!editable}
-            onValueChange={(value) => save.mutate({ hour: value === NO_HOUR ? null : Number(value) })}
-          >
-            <SelectTrigger id={`${uid}-hora`}>
-              <SelectValue>{line.hour === null ? "24 horas después" : `${line.hour}:00`}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NO_HOUR}>24 horas después</SelectItem>
-              {HOURS_OF_DAY.map((hour) => (
-                <SelectItem key={hour} value={String(hour)}>
-                  {hour}:00
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <FieldDescription>Al día siguiente, con la hora de la sede. Respeta el horario de recontacto.</FieldDescription>
-        </Field>
-      ) : null}
+      {line.defaultDays !== null ? <DaysSetting line={line} editable={editable} /> : null}
+      {line.delayHours !== null ? <DelaySetting line={line} editable={editable} /> : null}
+      {line.teamPart ? <TaskNoteSetting line={line} editable={editable} /> : null}
+      {line.hourAdjustable ? <HourSetting line={line} editable={editable} /> : null}
 
       <section aria-labelledby={`${uid}-personas`} className="flex flex-col gap-2">
         <h3 id={`${uid}-personas`} className="font-heading text-sm font-semibold">

@@ -180,6 +180,8 @@ function PublicRegistrationPage() {
               }
               if (shape?.code === "REGISTRATION_NOT_COMPLETED")
                 throw new Error("No pudimos completar el registro. Comunícate con recepción.")
+              // Lo escrito con un formato que no vale: el cuestionario lo dice en su campo.
+              if (shape?.fields && Object.keys(shape.fields).length > 0) throw error
               throw new Error(
                 shape?.message ?? "No pudimos enviar el registro. Inténtalo de nuevo.",
               )

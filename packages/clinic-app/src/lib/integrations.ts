@@ -1,3 +1,4 @@
+import { z } from "zod"
 import { type AgentModelStatus, MODEL_CHECK_TEXT } from "./agent"
 import { AGENT_MODEL_LABEL, type ConnectionItem } from "./crm"
 import { appWords } from "./product-words"
@@ -126,6 +127,26 @@ export interface ChannelField {
   hint: string
   /** Una clave: se escribe oculta y es lo que «Cambiar la clave» vuelve a pedir. */
   secret: boolean
+}
+
+/**
+ * El servidor nombra los datos de una conexión como van en el cuerpo
+ * (`config.accessToken`); en el formulario cada uno es su campo (`fieldMap`).
+ */
+export function connectionConfigField(serverField: string): string | undefined {
+  return serverField.startsWith("config.") ? serverField.slice("config.".length) : undefined
+}
+
+/** Lo que se dice de un dato de la conexión que se dejó vacío. */
+export const CHANNEL_FIELD_REQUIRED = "Escribe este dato."
+
+/** Los datos de una conexión, todos obligatorios: el esquema de su formulario. */
+export function channelFieldsSchema(fields: ChannelField[]) {
+  return z.record(z.string(), z.string()).superRefine((values, context) => {
+    for (const field of fields) {
+      if (!(values[field.key] ?? "").trim()) context.addIssue({ code: "custom", path: [field.key], message: CHANNEL_FIELD_REQUIRED })
+    }
+  })
 }
 
 export interface ChannelSetup {

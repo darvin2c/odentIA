@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto"
-import { normalizePhone, type RegistrationAnswers, type RegistrationConfig } from "@odentia/clinical"
+import {
+  normalizePhone,
+  type RegistrationAnswers,
+  type RegistrationConfig,
+} from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { organization, user } from "@odentia/db/schema/auth"
@@ -10,7 +14,13 @@ import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
 import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal, expireBookingProposals } from "./agent-operations.js"
+import { appointmentCalendarDownload } from "./appointment-calendar.js"
 import { createAppointment } from "./appointments.js"
+import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
+import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
+import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { consentStatusOf } from "./message-permission.js"
 import {
   assertOwnAppointmentChangeable,
   cancelOwnAppointment,
@@ -18,20 +28,19 @@ import {
   moveOwnAppointment,
   ownAppointmentChangeable,
 } from "./own-appointment.js"
-import { listAvailableSlots } from "./availability.js"
-import { consentStatusOf } from "./message-permission.js"
-import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
-import { personalLinkToken } from "./personal-link-token.js"
-import { branchNotFound, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
-import { createPatientRegistrationLink, getPatientRegistrationConfig, hasOwnRecord, registerPatient } from "./patient-registration.js"
-import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
-import { scheduledItems } from "./plan-next.js"
-import { refreshConversationTier } from "./saas-actions.js"
-import { contactDecides } from "./responsibilities.js"
-import { attendingRule } from "./specialties.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
-import { appointmentCalendarDownload } from "./appointment-calendar.js"
+import {
+  createPatientRegistrationLink,
+  getPatientRegistrationConfig,
+  hasOwnRecord,
+  registerPatient,
+} from "./patient-registration.js"
+import { listPatientsByContact, patientOrganizationToday, personIsTest } from "./patients.js"
+import { personalLinkToken } from "./personal-link-token.js"
+import { scheduledItems } from "./plan-next.js"
+import { contactDecides } from "./responsibilities.js"
+import { refreshConversationTier } from "./saas-actions.js"
+import { attendingRule } from "./specialties.js"
 
 /**
  * «Su enlace» (fase 3, decisión 8; ADR 0037, que amplía el 0014): la página
@@ -107,6 +116,35 @@ export interface IssuedPersonalLink {
 }
 
 /**
+ * El enlace que esta persona ya tiene vivo para este paciente, sin tocarlo: leerlo no
+ * renueva ni crea nada. Para lo que solo lo muestra (el QR de un papel); sin uno vivo, null.
+ */
+export async function livePersonalLinkToken(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; patientId: string },
+  deps: { secretsKey: Buffer },
+): Promise<string | null> {
+  const [live] = await tx
+    .select({ id: appointmentBookingLink.id, tokenHash: appointmentBookingLink.tokenHash })
+    .from(appointmentBookingLink)
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.contactId, input.contactId),
+        eq(appointmentBookingLink.patientId, input.patientId),
+        isNull(appointmentBookingLink.revokedAt),
+        gt(appointmentBookingLink.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(desc(appointmentBookingLink.createdAt))
+    .limit(1)
+  if (!live) return null
+  const token = tokenFor(deps.secretsKey, live.id)
+  return hashToken(token) === live.tokenHash ? token : null
+}
+
+/**
  * Da el enlace de esta persona para este paciente: el que ya tiene vivo, con
  * su vigencia renovada, o uno nuevo. Uno solo por persona y paciente: el
  * nuevo deja sin efecto los anteriores.
@@ -124,10 +162,21 @@ export async function issuePersonalLink(
     const [conv] = await tx
       .select({ isTest: conversation.isTest, personIsTest: contact.isTest })
       .from(conversation)
-      .innerJoin(contact, and(eq(contact.organizationId, conversation.organizationId), eq(contact.id, conversation.contactId)))
+      .innerJoin(
+        contact,
+        and(
+          eq(contact.organizationId, conversation.organizationId),
+          eq(contact.id, conversation.contactId),
+        ),
+      )
       .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
       .limit(1)
-    if (conv?.isTest && !conv.personIsTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.")
+    if (conv?.isTest && !conv.personIsTest)
+      throw new ServiceError(
+        "TEST_CONVERSATION",
+        409,
+        "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.",
+      )
   }
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtext(${`su-enlace:${orgId}:${input.contactId}:${patientId ?? ""}`}))`,
@@ -139,7 +188,10 @@ export async function issuePersonalLink(
     eq(appointmentBookingLink.contactId, input.contactId),
     patientId
       ? eq(appointmentBookingLink.patientId, patientId)
-      : and(isNull(appointmentBookingLink.patientId), eq(appointmentBookingLink.newPerson, newPerson)),
+      : and(
+          isNull(appointmentBookingLink.patientId),
+          eq(appointmentBookingLink.newPerson, newPerson),
+        ),
     isNull(appointmentBookingLink.revokedAt),
   )
   const [live] = await tx
@@ -168,8 +220,18 @@ export async function issuePersonalLink(
     await tx
       .update(appointmentBookingLink)
       .set(patch)
-      .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, live.id)))
-    return { linkId: live.id, token: tokenFor(deps.secretsKey, live.id), expiresAt: patch.expiresAt ?? live.expiresAt, reused: true }
+      .where(
+        and(
+          eq(appointmentBookingLink.organizationId, orgId),
+          eq(appointmentBookingLink.id, live.id),
+        ),
+      )
+    return {
+      linkId: live.id,
+      token: tokenFor(deps.secretsKey, live.id),
+      expiresAt: patch.expiresAt ?? live.expiresAt,
+      reused: true,
+    }
   }
   // Uno solo por persona y paciente: el nuevo deja sin efecto los anteriores.
   await tx.update(appointmentBookingLink).set({ revokedAt: now }).where(samePerson)
@@ -272,7 +334,11 @@ export interface BookingLinkPick {
  * Se escribe tal cual, sin codificar: codificada, el worker no la encontraría.
  */
 export function bookingPickAddress(origin: string, token: string, pick: BookingLinkPick): string {
-  const query = new URLSearchParams({ sede: pick.branchId, con: pick.professionalUserId, hora: new Date(pick.startsAt).toISOString() })
+  const query = new URLSearchParams({
+    sede: pick.branchId,
+    con: pick.professionalUserId,
+    hora: new Date(pick.startsAt).toISOString(),
+  })
   return `${origin}/reserva?${query.toString()}&token=${token}`
 }
 
@@ -284,22 +350,46 @@ async function bookingLinkFor(
   onlyWithoutAppointment: boolean,
 ): Promise<IssuedBookingLink | null> {
   const [conv] = await tx
-    .select({ contactId: conversation.contactId, isTest: conversation.isTest, personIsTest: contact.isTest })
+    .select({
+      contactId: conversation.contactId,
+      isTest: conversation.isTest,
+      personIsTest: contact.isTest,
+    })
     .from(conversation)
-    .innerJoin(contact, and(eq(contact.organizationId, conversation.organizationId), eq(contact.id, conversation.contactId)))
+    .innerJoin(
+      contact,
+      and(
+        eq(contact.organizationId, conversation.organizationId),
+        eq(contact.id, conversation.contactId),
+      ),
+    )
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, input.conversationId)))
     .limit(1)
   if (!conv) throw notFound("Conversación")
   // En una prueba se reserva de verdad, para su persona de prueba (ADR 0094); nunca para una real.
-  if (conv.isTest && !conv.personIsTest) throw new ServiceError("TEST_CONVERSATION", 409, "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.")
-  const linked = (await listPatientsByContact(tx, orgId, conv.contactId)).filter((item) => item.isActive)
+  if (conv.isTest && !conv.personIsTest)
+    throw new ServiceError(
+      "TEST_CONVERSATION",
+      409,
+      "Es una prueba con una persona real: no se envían enlaces ni se reserva o registra a nadie de verdad.",
+    )
+  const linked = (await listPatientsByContact(tx, orgId, conv.contactId)).filter(
+    (item) => item.isActive,
+  )
   // Para alguien nuevo, aunque quien escribe ya tenga pacientes: el enlace no es de ninguno.
   const newPerson = input.newPerson === true && !input.patientId && linked.length > 0
   // Quien recién se contacta aún no tiene ficha: la crea él mismo en la página,
   // con el registro de pacientes de la clínica. Sin ese registro activo no hay
   // con qué pedirle sus datos ni su consentimiento, y el enlace no se emite.
-  if ((linked.length === 0 || newPerson) && !(await getPatientRegistrationConfig(tx, orgId)).enabled) {
-    throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "La persona aún no es paciente y la clínica no tiene activo el registro de pacientes en línea")
+  if (
+    (linked.length === 0 || newPerson) &&
+    !(await getPatientRegistrationConfig(tx, orgId)).enabled
+  ) {
+    throw new ServiceError(
+      "BOOKING_NEEDS_PATIENT",
+      409,
+      "La persona aún no es paciente y la clínica no tiene activo el registro de pacientes en línea",
+    )
   }
   const chosen = newPerson
     ? undefined
@@ -311,16 +401,27 @@ async function bookingLinkFor(
   if (!chosen && linked.length > 0 && !newPerson) {
     throw input.patientId
       ? validation("Ese paciente no está vinculado a la persona de la conversación")
-      : new ServiceError("BOOKING_PATIENT_AMBIGUOUS", 409, "La persona tiene varios pacientes vinculados: indica para quién es la cita")
+      : new ServiceError(
+          "BOOKING_PATIENT_AMBIGUOUS",
+          409,
+          "La persona tiene varios pacientes vinculados: indica para quién es la cita",
+        )
   }
   const booking = input.booking ?? true
   // Sin ficha, su enlace solo sirve para elegir su cita y dejar sus datos.
-  if (!booking && !chosen) throw validation("Para completar sus datos, primero tiene que ser paciente")
+  if (!booking && !chosen)
+    throw validation("Para completar sus datos, primero tiene que ser paciente")
   if (input.serviceId) {
     const [service] = await tx
       .select({ id: serviceCatalog.id })
       .from(serviceCatalog)
-      .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, input.serviceId), eq(serviceCatalog.isActive, true)))
+      .where(
+        and(
+          eq(serviceCatalog.organizationId, orgId),
+          eq(serviceCatalog.id, input.serviceId),
+          eq(serviceCatalog.isActive, true),
+        ),
+      )
       .limit(1)
     if (!service) throw notFound("Servicio")
   }
@@ -328,11 +429,22 @@ async function bookingLinkFor(
     const [site] = await tx
       .select({ id: branch.id })
       .from(branch)
-      .where(and(eq(branch.organizationId, orgId), eq(branch.id, input.branchId), eq(branch.isActive, true)))
+      .where(
+        and(
+          eq(branch.organizationId, orgId),
+          eq(branch.id, input.branchId),
+          eq(branch.isActive, true),
+        ),
+      )
       .limit(1)
     if (!site) throw branchNotFound()
   }
-  if (onlyWithoutAppointment && chosen && (await nextAppointmentOf(tx, orgId, chosen.id, new Date()))) return null
+  if (
+    onlyWithoutAppointment &&
+    chosen &&
+    (await nextAppointmentOf(tx, orgId, chosen.id, new Date()))
+  )
+    return null
   const issued = await issuePersonalLink(
     tx,
     orgId,
@@ -340,7 +452,9 @@ async function bookingLinkFor(
       contactId: conv.contactId,
       patientId: chosen?.id ?? null,
       conversationId: input.conversationId,
-      ...(booking ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null } : { booking: false }),
+      ...(booking
+        ? { booking: true, serviceId: input.serviceId ?? null, branchId: input.branchId ?? null }
+        : { booking: false }),
       createdBy: input.createdBy ?? null,
       ...(newPerson ? { newPerson: true } : {}),
     },
@@ -362,7 +476,12 @@ async function findLink(tx: Db, orgId: string, token: string, lock = false): Pro
   const query = tx
     .select()
     .from(appointmentBookingLink)
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.tokenHash, hashToken(token))))
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.tokenHash, hashToken(token)),
+      ),
+    )
     .limit(1)
   const [row] = lock ? await query.for("update") : await query
   if (!row) throw notFound("Enlace")
@@ -378,12 +497,16 @@ async function patientOf(tx: Db, orgId: string, link: LinkRow): Promise<string |
   if (link.patientId) return link.patientId
   // El de alguien nuevo es de quien se registre ahí, no del paciente que ya tenga quien lo abre.
   if (link.newPerson) return null
-  const linked = (await listPatientsByContact(tx, orgId, link.contactId)).filter((item) => item.isActive)
+  const linked = (await listPatientsByContact(tx, orgId, link.contactId)).filter(
+    (item) => item.isActive,
+  )
   if (linked.length !== 1 || !linked[0]) return null
   await tx
     .update(appointmentBookingLink)
     .set({ patientId: linked[0].id })
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.id)))
+    .where(
+      and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.id)),
+    )
   return linked[0].id
 }
 
@@ -397,7 +520,8 @@ interface ShownAppointment {
 }
 
 /** Una cita se puede cambiar, cancelar o confirmar mientras siga en pie y no haya empezado (`own-appointment.ts`). */
-const isChangeable = (row: { status: string; startsAt: Date }): boolean => ownAppointmentChangeable(row)
+const isChangeable = (row: { status: string; startsAt: Date }): boolean =>
+  ownAppointmentChangeable(row)
 
 const SHOWN_COLUMNS = {
   id: appointment.id,
@@ -413,7 +537,12 @@ const SHOWN_COLUMNS = {
  * se envió) mientras no pase su hora, o la próxima en pie del paciente
  * mientras el enlace esté vigente. Al pasar la hora deja de servir.
  */
-async function shownAppointment(tx: Db, orgId: string, link: LinkRow, patientId: string | null): Promise<ShownAppointment | null> {
+async function shownAppointment(
+  tx: Db,
+  orgId: string,
+  link: LinkRow,
+  patientId: string | null,
+): Promise<ShownAppointment | null> {
   const now = new Date()
   if (link.appointmentId) {
     const [own] = await tx
@@ -429,7 +558,12 @@ async function shownAppointment(tx: Db, orgId: string, link: LinkRow, patientId:
 }
 
 /** La próxima cita en pie del paciente: la que muestra su enlace mientras está vigente. */
-async function nextAppointmentOf(tx: Db, orgId: string, patientId: string, now: Date): Promise<ShownAppointment | null> {
+async function nextAppointmentOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  now: Date,
+): Promise<ShownAppointment | null> {
   const [next] = await tx
     .select(SHOWN_COLUMNS)
     .from(appointment)
@@ -471,7 +605,12 @@ export interface ResolvedPersonalLink {
 }
 
 /** El enlace con lo que hoy le toca: la cita que muestra y hasta cuándo sirve lo demás. */
-export async function resolvePersonalLink(tx: Db, orgId: string, token: string, lock = false): Promise<ResolvedPersonalLink> {
+export async function resolvePersonalLink(
+  tx: Db,
+  orgId: string,
+  token: string,
+  lock = false,
+): Promise<ResolvedPersonalLink> {
   const row = await findLink(tx, orgId, token, lock)
   const live = row.revokedAt === null
   const patientId = live ? await patientOf(tx, orgId, row) : row.patientId
@@ -479,7 +618,8 @@ export async function resolvePersonalLink(tx: Db, orgId: string, token: string, 
   const own = shown && shown.id === row.appointmentId ? shown.startsAt : null
   const deadline = own && own > row.expiresAt ? own : row.expiresAt
   const canBook = live && row.booking && row.usedAt === null && row.expiresAt.getTime() > Date.now()
-  const decides = live && patientId !== null && (await contactDecides(tx, orgId, patientId, row.contactId))
+  const decides =
+    live && patientId !== null && (await contactDecides(tx, orgId, patientId, row.contactId))
   const expired = deadline.getTime() <= Date.now()
   return { row, patientId, live, appointment: shown, deadline, canBook, decides, expired }
 }
@@ -505,7 +645,11 @@ export async function requireLiveLink(
 /** Lo del paciente que no es su cita solo lo ve y lo responde quien decide por él. */
 export function requireLinkDecider(link: ResolvedPersonalLink): string {
   if (!link.patientId || !link.decides) {
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este enlace no puede responder por esta persona")
+    throw new ServiceError(
+      "PORTAL_FORBIDDEN",
+      404,
+      "Este enlace no puede responder por esta persona",
+    )
   }
   return link.patientId
 }
@@ -514,7 +658,12 @@ export function requireLinkDecider(link: ResolvedPersonalLink): string {
  * Deja sin efecto «Su enlace» de un paciente («Quitar enlace»): todos los que
  * tenga vivos, de quien sea. Lo que ya hizo con él se conserva.
  */
-export async function revokePersonalLinks(tx: Db, orgId: string, actorUserId: string, patientId: string): Promise<{ revoked: number }> {
+export async function revokePersonalLinks(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  patientId: string,
+): Promise<{ revoked: number }> {
   const rows = await tx
     .update(appointmentBookingLink)
     .set({ revokedAt: new Date() })
@@ -540,7 +689,11 @@ export async function revokePersonalLinks(tx: Db, orgId: string, actorUserId: st
 }
 
 export function linkExpired(): ServiceError {
-  return new ServiceError("BOOKING_LINK_EXPIRED", 409, "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo.")
+  return new ServiceError(
+    "BOOKING_LINK_EXPIRED",
+    409,
+    "Este enlace ya no sirve. Responde el mensaje y te enviamos uno nuevo.",
+  )
 }
 
 export interface BookingLinkAppointment {
@@ -566,7 +719,11 @@ export interface BookingLinkAppointment {
   serviceName: string | null
 }
 
-export async function appointmentView(tx: Db, orgId: string, appointmentId: string): Promise<BookingLinkAppointment | null> {
+export async function appointmentView(
+  tx: Db,
+  orgId: string,
+  appointmentId: string,
+): Promise<BookingLinkAppointment | null> {
   const [row] = await tx
     .select({
       startsAt: appointment.startsAt,
@@ -600,7 +757,10 @@ export async function appointmentView(tx: Db, orgId: string, appointmentId: stri
     canConfirm: changeable && row.status === "programada",
     branchName: row.branchName,
     branchAddress: (await branchAddressWriter(tx, orgId))(row.branchAddress),
-    branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({ address: row.branchAddress, placeId: row.branchPlaceId }),
+    branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({
+      address: row.branchAddress,
+      placeId: row.branchPlaceId,
+    }),
     professionalName: row.professionalName,
     serviceName: row.serviceName,
   }
@@ -619,16 +779,22 @@ export async function bookingContext(
   tx: Db,
   orgId: string,
   link: LinkRow,
-): Promise<{ service: { name: string; durationMin: number | null } | null; branches: BookingLinkBranch[]; branchId: string | null }> {
+): Promise<{
+  service: { name: string; durationMin: number | null } | null
+  branches: BookingLinkBranch[]
+  branchId: string | null
+}> {
   const region = await findOrgLocale(tx, orgId)
   const service = link.serviceId
-    ? (
+    ? ((
         await tx
           .select({ name: serviceCatalog.name, durationMin: serviceCatalog.durationMin })
           .from(serviceCatalog)
-          .where(and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, link.serviceId)))
+          .where(
+            and(eq(serviceCatalog.organizationId, orgId), eq(serviceCatalog.id, link.serviceId)),
+          )
           .limit(1)
-      )[0] ?? null
+      )[0] ?? null)
     : null
   const sites = await tx
     .select({
@@ -661,7 +827,11 @@ export async function bookingContext(
 }
 
 /** Nombre de pila de quien abre el enlace: «Hola, Pedro». */
-export async function linkContactFirstName(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+export async function linkContactFirstName(
+  tx: Db,
+  orgId: string,
+  contactId: string,
+): Promise<string | null> {
   const [row] = await tx
     .select({ givenNames: contact.givenNames, displayName: contact.displayName })
     .from(contact)
@@ -671,7 +841,11 @@ export async function linkContactFirstName(tx: Db, orgId: string, contactId: str
 }
 
 /** Nombre de pila del paciente, para decir de quién es lo pendiente. */
-export async function patientFirstNameOf(tx: Db, orgId: string, patientId: string): Promise<string | null> {
+export async function patientFirstNameOf(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<string | null> {
   const [row] = await tx
     .select({ givenNames: patientPerson.givenNames, displayName: patientPerson.displayName })
     .from(patient)
@@ -682,7 +856,11 @@ export async function patientFirstNameOf(tx: Db, orgId: string, patientId: strin
 }
 
 export async function clinicNameOf(tx: Db, orgId: string): Promise<string> {
-  const [org] = await tx.select({ name: organization.name }).from(organization).where(eq(organization.id, orgId)).limit(1)
+  const [org] = await tx
+    .select({ name: organization.name })
+    .from(organization)
+    .where(eq(organization.id, orgId))
+    .limit(1)
   return org?.name ?? ""
 }
 
@@ -698,14 +876,23 @@ export interface BookingLinkSlot {
 export async function listWeekSlots(
   tx: Db,
   orgId: string,
-  input: { branchId: string; from: string; to: string; serviceId?: string | null; durationMin?: number | null; forTest?: boolean },
+  input: {
+    branchId: string
+    from: string
+    to: string
+    serviceId?: string | null
+    durationMin?: number | null
+    forTest?: boolean
+  },
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   const from = new Date(input.from)
   const to = new Date(input.to)
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) throw validation("Rango de fechas inválido")
-  if (to.getTime() - from.getTime() > SLOT_RANGE_DAYS * 86_400_000) throw validation(`El rango máximo es de ${SLOT_RANGE_DAYS} días`)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from)
+    throw validation("Rango de fechas inválido")
+  if (to.getTime() - from.getTime() > SLOT_RANGE_DAYS * 86_400_000)
+    throw validation(`El rango máximo es de ${SLOT_RANGE_DAYS} días`)
   // El paso de las horas lo decide la Agenda (`bookingStepMin`): el mismo que ofrece el agente.
-  const notBefore = new Date().toISOString()
+  const notBefore = selfBookingNotBefore()
   // Día por día: la Agenda recorta cada consulta a un tope de huecos, y con
   // varios profesionales una semana entera dejaría sin horarios los últimos días.
   const slots: BookingLinkSlot[] = []
@@ -724,7 +911,13 @@ export async function listWeekSlots(
     timeZone = day.timeZone
     truncated ||= day.truncated
     for (const slot of day.slots) {
-      slots.push({ startsAt: slot.startsAt, endsAt: slot.endsAt, professionalUserId: slot.professionalUserId, professionalName: slot.professionalName, roomId: slot.roomId })
+      slots.push({
+        startsAt: slot.startsAt,
+        endsAt: slot.endsAt,
+        professionalUserId: slot.professionalUserId,
+        professionalName: slot.professionalName,
+        roomId: slot.roomId,
+      })
     }
   }
   return { slots, timeZone, truncated }
@@ -748,23 +941,45 @@ interface LinkSlotRules {
  * su servicio; para cambiar su cita, solo los de su sede y con su duración;
  * para lo aceptado de su presupuesto, lo que dura una cita en la sede.
  */
-async function linkSlotRules(tx: Db, orgId: string, token: string, branchId: string, changing = false): Promise<LinkSlotRules> {
+async function linkSlotRules(
+  tx: Db,
+  orgId: string,
+  token: string,
+  branchId: string,
+  changing = false,
+): Promise<LinkSlotRules> {
   const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
   const forTest = await personIsTest(tx, orgId, link.row.contactId)
   // Al cambiar su cita valen las reglas de su cita, aunque el enlace también ofrezca reservar otra.
   if (link.canBook && !(changing && link.appointment && isChangeable(link.appointment))) {
-    if (link.row.branchId && link.row.branchId !== branchId) throw validation("Este enlace es para otra sede")
-    return { serviceId: link.row.serviceId, durationMin: null, forTest, currentProfessionalUserId: null }
+    if (link.row.branchId && link.row.branchId !== branchId)
+      throw validation("Este enlace es para otra sede")
+    return {
+      serviceId: link.row.serviceId,
+      durationMin: null,
+      forTest,
+      currentProfessionalUserId: null,
+    }
   }
   const current = link.appointment
   if (current && isChangeable(current)) {
     if (current.branchId !== branchId) throw validation("La cita es en otra sede")
     const view = await appointmentView(tx, orgId, current.id)
-    return { serviceId: null, durationMin: view?.durationMin ?? null, forTest, currentProfessionalUserId: current.professionalUserId }
+    return {
+      serviceId: null,
+      durationMin: view?.durationMin ?? null,
+      forTest,
+      currentProfessionalUserId: current.professionalUserId,
+    }
   }
   // Lo aceptado de un presupuesto se reserva desde el mismo enlace («Elegir horario»):
   // solo quien decide por el paciente y mientras el enlace esté vigente.
-  if (link.patientId && link.decides && !link.expired && (await hasSchedulableItems(tx, orgId, link.patientId))) {
+  if (
+    link.patientId &&
+    link.decides &&
+    !link.expired &&
+    (await hasSchedulableItems(tx, orgId, link.patientId))
+  ) {
     return { serviceId: null, durationMin: null, forTest, currentProfessionalUserId: null }
   }
   throw linkExpired()
@@ -782,7 +997,12 @@ export async function listBookingLinkSlots(
 ): Promise<{ slots: BookingLinkSlot[]; timeZone: string; truncated: boolean }> {
   const { changing, ...range } = input
   const rules = await linkSlotRules(tx, orgId, token, input.branchId, changing)
-  return listWeekSlots(tx, orgId, { ...range, serviceId: rules.serviceId, durationMin: rules.durationMin, forTest: rules.forTest })
+  return listWeekSlots(tx, orgId, {
+    ...range,
+    serviceId: rules.serviceId,
+    durationMin: rules.durationMin,
+    forTest: rules.forTest,
+  })
 }
 
 export interface BookingLinkProfessional {
@@ -821,7 +1041,9 @@ export async function listBookingLinkProfessionals(
   const rules = await linkSlotRules(tx, orgId, token, input.branchId, input.changing)
   const now = new Date()
   const until = new Date(now.getTime() + NEXT_FREE_HORIZON_DAYS * 86_400_000)
-  const attending = rules.serviceId ? await attendingRule(tx, orgId, { serviceId: rules.serviceId, branchId: input.branchId }) : null
+  const attending = rules.serviceId
+    ? await attendingRule(tx, orgId, { serviceId: rules.serviceId, branchId: input.branchId })
+    : null
   const staff = await tx
     .selectDistinct({ id: professionalSchedule.professionalUserId, name: user.name })
     .from(professionalSchedule)
@@ -831,7 +1053,9 @@ export async function listBookingLinkProfessionals(
         eq(professionalSchedule.organizationId, orgId),
         eq(professionalSchedule.branchId, input.branchId),
         eq(professionalSchedule.isActive, true),
-        attending ? inArray(professionalSchedule.professionalUserId, attending.professionalUserIds) : undefined,
+        attending
+          ? inArray(professionalSchedule.professionalUserId, attending.professionalUserIds)
+          : undefined,
       ),
     )
   const found = await listAvailableSlots(tx, orgId, {
@@ -840,7 +1064,7 @@ export async function listBookingLinkProfessionals(
     ...(rules.durationMin ? { durationMin: rules.durationMin } : {}),
     from: now.toISOString(),
     to: until.toISOString(),
-    notBefore: now.toISOString(),
+    notBefore: selfBookingNotBefore(now),
     firstPerProfessional: true,
     ...(rules.forTest ? { forTest: true } : {}),
   })
@@ -860,14 +1084,20 @@ export async function listBookingLinkProfessionals(
   const earliest = found.slots[0]
   return {
     professionals,
-    first: earliest ? { startsAt: earliest.startsAt, professionalUserId: earliest.professionalUserId } : null,
+    first: earliest
+      ? { startsAt: earliest.startsAt, professionalUserId: earliest.professionalUserId }
+      : null,
     until: until.toISOString(),
     timeZone: found.timeZone,
   }
 }
 
 /** Tiene tratamientos aceptados por hacer: «Elegir horario» después de responder su presupuesto. */
-export async function hasSchedulableItems(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+export async function hasSchedulableItems(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<boolean> {
   const [row] = await tx
     .select({ id: treatmentPlanItem.id })
     .from(treatmentPlanItem)
@@ -894,7 +1124,13 @@ async function conversationChannel(tx: Db, orgId: string, link: LinkRow): Promis
   const [row] = await tx
     .select({ channel: channelConnection.channel })
     .from(conversation)
-    .innerJoin(channelConnection, and(eq(channelConnection.id, conversation.channelConnectionId), eq(channelConnection.organizationId, orgId)))
+    .innerJoin(
+      channelConnection,
+      and(
+        eq(channelConnection.id, conversation.channelConnectionId),
+        eq(channelConnection.organizationId, orgId),
+      ),
+    )
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, link.conversationId)))
     .limit(1)
   return row?.channel ?? null
@@ -905,10 +1141,20 @@ async function conversationPhone(tx: Db, orgId: string, link: LinkRow): Promise<
   const [row] = await tx
     .select({ channel: channelConnection.channel, sender: contactIdentity.externalUserId })
     .from(conversation)
-    .innerJoin(channelConnection, and(eq(channelConnection.id, conversation.channelConnectionId), eq(channelConnection.organizationId, orgId)))
+    .innerJoin(
+      channelConnection,
+      and(
+        eq(channelConnection.id, conversation.channelConnectionId),
+        eq(channelConnection.organizationId, orgId),
+      ),
+    )
     .innerJoin(
       contactIdentity,
-      and(eq(contactIdentity.id, conversation.contactIdentityId), eq(contactIdentity.organizationId, orgId), eq(contactIdentity.contactId, link.contactId)),
+      and(
+        eq(contactIdentity.id, conversation.contactIdentityId),
+        eq(contactIdentity.organizationId, orgId),
+        eq(contactIdentity.contactId, link.contactId),
+      ),
     )
     .where(and(eq(conversation.organizationId, orgId), eq(conversation.id, link.conversationId)))
     .limit(1)
@@ -954,10 +1200,18 @@ export interface BookingLinkRegistrationForm {
  * Del nombre de su perfil, nombres y apellidos para empezar: la primera palabra
  * y el resto. Un número o algo sin letras no es un nombre. La persona lo corrige.
  */
-function namesFromProfile(displayName: string): { givenNames: string; familyName: string | null } | null {
-  const words = displayName.trim().split(/\s+/).filter((word) => /\p{L}/u.test(word) && !/\d/.test(word))
+function namesFromProfile(
+  displayName: string,
+): { givenNames: string; familyName: string | null } | null {
+  const words = displayName
+    .trim()
+    .split(/\s+/)
+    .filter((word) => /\p{L}/u.test(word) && !/\d/.test(word))
   if (words.length === 0) return null
-  return { givenNames: words[0] as string, familyName: words.length > 1 ? words.slice(1).join(" ") : null }
+  return {
+    givenNames: words[0] as string,
+    familyName: words.length > 1 ? words.slice(1).join(" ") : null,
+  }
 }
 
 /**
@@ -965,12 +1219,21 @@ function namesFromProfile(displayName: string): { givenNames: string; familyName
  * el registro vigente de la clínica (versión y aviso de privacidad), lo que ya
  * sabemos de la persona y, si se conoce, el celular desde el que escribe.
  */
-export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, token: string): Promise<BookingLinkRegistrationForm> {
+export async function getBookingLinkRegistrationForm(
+  tx: Db,
+  orgId: string,
+  token: string,
+): Promise<BookingLinkRegistrationForm> {
   const link = await requireLiveLink(tx, orgId, token)
   if (!link.canBook) throw linkExpired()
   if (link.patientId !== null) throw alreadyPatient()
   const config = await getPatientRegistrationConfig(tx, orgId)
-  if (!config.enabled) throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "La clínica no tiene activo el registro de pacientes en línea")
+  if (!config.enabled)
+    throw new ServiceError(
+      "BOOKING_NEEDS_PATIENT",
+      409,
+      "La clínica no tiene activo el registro de pacientes en línea",
+    )
   const [person] = await tx
     .select({
       displayName: contact.displayName,
@@ -986,9 +1249,15 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
     .from(contact)
     .where(and(eq(contact.organizationId, orgId), eq(contact.id, link.row.contactId)))
     .limit(1)
-  const told = person && (person.givenNames || person.familyName) ? { givenNames: person.givenNames, familyName: person.familyName } : null
+  const told =
+    person && (person.givenNames || person.familyName)
+      ? { givenNames: person.givenNames, familyName: person.familyName }
+      : null
   // El nombre del perfil solo se toma de WhatsApp: es el que la página dice de dónde salió.
-  const profile = !told && person && (await conversationChannel(tx, orgId, link.row)) === "whatsapp" ? namesFromProfile(person.displayName) : null
+  const profile =
+    !told && person && (await conversationChannel(tx, orgId, link.row)) === "whatsapp"
+      ? namesFromProfile(person.displayName)
+      : null
   return {
     config,
     today: await patientOrganizationToday(tx, orgId),
@@ -1005,7 +1274,9 @@ export async function getBookingLinkRegistrationForm(tx: Db, orgId: string, toke
       birthDate: null,
       sex: person?.sex ?? null,
     },
-    asksPromotions: config.askMessages && (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null,
+    asksPromotions:
+      config.askMessages &&
+      (await consentStatusOf(tx, orgId, link.row.contactId, "novedades")) === null,
     ownRecord: await hasOwnRecord(tx, orgId, link.row.contactId),
   }
 }
@@ -1027,8 +1298,12 @@ export async function registerFromBookingLink(
   const link = await requireLiveLink(tx, orgId, token, true)
   if (!link.canBook) throw linkExpired()
   if (link.patientId !== null) throw alreadyPatient()
-  if (!link.row.conversationId) throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "Este enlace no sirve para registrarse")
-  const registration = await createPatientRegistrationLink(tx, orgId, null, { contactId: link.row.contactId, conversationId: link.row.conversationId })
+  if (!link.row.conversationId)
+    throw new ServiceError("BOOKING_NEEDS_PATIENT", 409, "Este enlace no sirve para registrarse")
+  const registration = await createPatientRegistrationLink(tx, orgId, null, {
+    contactId: link.row.contactId,
+    conversationId: link.row.conversationId,
+  })
   const created = await registerPatient(
     tx,
     orgId,
@@ -1038,18 +1313,37 @@ export async function registerFromBookingLink(
   await tx
     .update(appointmentBookingLink)
     .set({ patientId: created.id })
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.id, link.row.id),
+      ),
+    )
   // Lo que la clínica exige y aún falta lo anota en el caso el propio registro
   // (`registerPatient` con `essentials`); la ficha queda con la identidad por revisar.
   return { registered: true }
 }
 
 /** «lunes, 21 de septiembre a las 3:00 p. m.», en el formato de la clínica y la zona de la sede. */
-async function whenText(tx: Db, orgId: string, startsAt: string, timeZone: string): Promise<string> {
+async function whenText(
+  tx: Db,
+  orgId: string,
+  startsAt: string,
+  timeZone: string,
+): Promise<string> {
   const { locale } = await findOrgLocale(tx, orgId)
   const date = new Date(startsAt)
-  const day = new Intl.DateTimeFormat(locale, { timeZone, weekday: "long", day: "numeric", month: "long" }).format(date)
-  const time = new Intl.DateTimeFormat(locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(date)
+  const day = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(date)
+  const time = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date)
   return `${day} a las ${time}`
 }
 
@@ -1093,26 +1387,45 @@ export async function reserveBookingLink(
   tx: Db,
   orgId: string,
   token: string,
-  input: { branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[] },
+  input: {
+    branchId: string
+    startsAt: string
+    professionalUserId: string
+    roomId?: string
+    planItemIds?: string[]
+  },
   deps: { secretsKey?: Buffer } = {},
 ): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true)
   const forTreatment = (input.planItemIds?.length ?? 0) > 0
   if (!forTreatment) {
-    if (link.row.booking && link.row.usedAt) throw new ServiceError("BOOKING_LINK_USED", 409, "Con este enlace ya se reservó una cita")
+    if (link.row.booking && link.row.usedAt)
+      throw new ServiceError("BOOKING_LINK_USED", 409, "Con este enlace ya se reservó una cita")
     if (!link.canBook) throw linkExpired()
-    if (link.row.branchId && link.row.branchId !== input.branchId) throw validation("Este enlace es para otra sede")
+    if (link.row.branchId && link.row.branchId !== input.branchId)
+      throw invalidField("branchId", "Este enlace es para otra sede: elige esa sede.")
   }
   const patientId = link.patientId
-  if (!patientId) throw new ServiceError("BOOKING_NEEDS_REGISTRATION", 409, "Antes de reservar necesitamos tus datos")
+  if (!patientId)
+    throw new ServiceError(
+      "BOOKING_NEEDS_REGISTRATION",
+      409,
+      "Antes de reservar necesitamos tus datos",
+    )
   if (forTreatment) {
     // Lo aceptado lo agenda quien decide por el paciente, y una sola vez: bajo
     // el bloqueo del enlace, lo que ya tiene cita por venir no se vuelve a reservar.
     requireLinkDecider(link)
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`su-enlace-agenda:${orgId}:${patientId}`}))`)
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`su-enlace-agenda:${orgId}:${patientId}`}))`,
+    )
     const already = await scheduledItems(tx, orgId, patientId, input.planItemIds ?? [])
     if (already.size > 0) {
-      throw new ServiceError("BOOKING_ALREADY_SCHEDULED", 409, "Eso ya tiene su cita. Si quieres cambiarla, usa «Cambiar» en tu cita.")
+      throw new ServiceError(
+        "BOOKING_ALREADY_SCHEDULED",
+        409,
+        "Eso ya tiene su cita. Si quieres cambiarla, usa «Cambiar» en tu cita.",
+      )
     }
   }
   const created = await createAppointment(tx, orgId, `contact:${link.row.contactId}`, {
@@ -1135,7 +1448,12 @@ export async function reserveBookingLink(
   await tx
     .update(appointmentBookingLink)
     .set({ appointmentId: created.id, ...(forTreatment ? {} : { usedAt: new Date() }) })
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.id, link.row.id),
+      ),
+    )
   // La cita que esperaba su sí en el chat ya no se reserva: su «sí» de después reservaría otra.
   if (link.row.conversationId) await expireBookingProposals(tx, orgId, link.row.conversationId)
   // Quien abrió el enlace (la madre que reserva para su hijo) es quien conversó: su conversación pasa a «Gestiona» (ADR 0085).
@@ -1165,7 +1483,11 @@ export async function reserveBookingLink(
  * muestra el enlace, el mismo evento que el del portal y el del correo. Una
  * cita cancelada sale cancelada, para que el calendario la quite.
  */
-export async function getBookingLinkCalendar(tx: Db, orgId: string, token: string): Promise<string> {
+export async function getBookingLinkCalendar(
+  tx: Db,
+  orgId: string,
+  token: string,
+): Promise<string> {
   const link = await requireLiveLink(tx, orgId, token, false, { ownAppointment: true })
   if (!link.appointment) throw notFound("Cita")
   return appointmentCalendarDownload(tx, orgId, link.appointment.id)
@@ -1197,7 +1519,12 @@ export async function changeBookingLinkAppointment(
   await tx
     .update(appointmentBookingLink)
     .set({ appointmentId: current.id })
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.id, link.row.id),
+      ),
+    )
   const view = await appointmentView(tx, orgId, current.id)
   if (!view) throw notFound("Cita")
   const when = await whenText(tx, orgId, view.startsAt, view.timeZone)
@@ -1226,11 +1553,22 @@ export async function cancelBookingLinkAppointment(
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
   const before = await appointmentView(tx, orgId, current.id)
-  await cancelOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "La canceló la persona desde su enlace")
+  await cancelOwnAppointment(
+    tx,
+    orgId,
+    `contact:${link.row.contactId}`,
+    current,
+    "La canceló la persona desde su enlace",
+  )
   await tx
     .update(appointmentBookingLink)
     .set({ appointmentId: current.id })
-    .where(and(eq(appointmentBookingLink.organizationId, orgId), eq(appointmentBookingLink.id, link.row.id)))
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.id, link.row.id),
+      ),
+    )
   const view = await appointmentView(tx, orgId, current.id)
   if (!view || !before) throw notFound("Cita")
   const when = await whenText(tx, orgId, before.startsAt, before.timeZone)
@@ -1250,7 +1588,11 @@ export async function cancelBookingLinkAppointment(
 }
 
 /** Confirma la cita del enlace: la misma operación que el botón «Confirmar» del recordatorio. */
-export async function confirmBookingLinkAppointment(tx: Db, orgId: string, token: string): Promise<BookingLinkAppointment> {
+export async function confirmBookingLinkAppointment(
+  tx: Db,
+  orgId: string,
+  token: string,
+): Promise<BookingLinkAppointment> {
   const link = await requireLiveLink(tx, orgId, token, true, { ownAppointment: true })
   const current = changeableAppointment(link)
   await confirmOwnAppointment(tx, orgId, `contact:${link.row.contactId}`, current, "enlace")

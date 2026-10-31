@@ -165,10 +165,19 @@ export const REMINDER_DATA_KEY = "recordatorio_cita_datos"
  */
 export const REMINDER_CONFIRMED_KEY = "recordatorio_cita_confirmada"
 
+/**
+ * «¿Vienes en camino?» (ADR 0113): de «Recordar la cita», a los minutos de la
+ * hora si la persona no llegó y en su sede ya marcaron llegadas ese día. Es su
+ * propio trabajo, uno por cita, y cuenta como recordatorio: lo apaga «No más
+ * recordatorios».
+ */
+export const APPOINTMENT_ARRIVAL_KEY = "cita_sin_llegar"
+
 export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
   REMINDER_DATA_KEY,
   REMINDER_CONFIRMED_KEY,
+  APPOINTMENT_ARRIVAL_KEY,
   // Los avisos de la cita van junto a su línea, «Recordar la cita»; el de
   // reserva con «Su enlace», junto al de reserva.
   "aviso_cita_reservada",
@@ -227,6 +236,21 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
     link: { title: "Cambiar mi cita" },
     buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, NO_REMINDERS],
     subject: "Recordatorio de cita",
+  },
+  // Sale mientras la cita todavía puede darse: no dice «no viniste», pregunta.
+  cita_sin_llegar: {
+    key: "cita_sin_llegar",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_cita_sin_llegar_v1",
+    body: "Hola, {{1}}. Te esperamos en {{2}}: tu cita es {{3}}. ¿Vienes en camino? Si no puedes llegar, responde y te ayudamos a cambiarla.",
+    variables: ["persona", "lugar", "citas"],
+    buttons: [
+      { action: "responder", title: "Voy en camino" },
+      { action: "responder", title: "No podré ir", asks: "cambiar" },
+      NO_REMINDERS,
+    ],
+    subject: "Te esperamos en tu cita",
   },
   // «Controles y seguimiento»: se apaga aparte de los recordatorios de la cita.
   recordatorio_control: {

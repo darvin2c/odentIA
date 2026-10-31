@@ -4,15 +4,7 @@ import {
   type OrgRole,
   ROLE_DESCRIPTIONS,
 } from "@odentia/auth/permissions"
-import {
-  Badge,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  Input,
-  toast,
-} from "@odentia/ui"
+import { Badge, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   common,
@@ -20,24 +12,28 @@ import {
   DataTableSkeleton,
   EmptyState,
   ErrorState,
+  type FieldControl,
   FilterBar,
   FormDrawer,
-  fieldErrorMessages,
   PageHeader,
   RowActions,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
   useListSearch,
 } from "@odentia/ui-patterns"
-import { useForm, useStore } from "@tanstack/react-form"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { CalendarCheck, Plus, Users } from "lucide-react"
-import { type FormEvent, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { z } from "zod"
 import { ProfessionalProfileDrawer } from "../../components/professional-profile-drawer"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ResetTwoFactorDialog, TeamTwoFactorCard, TwoFactorBadge, useTeamTwoFactor } from "../../components/settings/team-two-factor"
 import { ChoiceSelect } from "../../components/ui/choice-select"
+import { ApiError } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
 import { fetchTeamCalendarFeeds, revokeTeamCalendarFeed, TEAM_CALENDAR_KEY, whenWords } from "../../lib/calendar-feed"
 import { useMyRole, usePermission } from "../../lib/crm"
@@ -93,41 +89,55 @@ const ACCOUNT_ERRORS: Record<string, string> = {
     "La clínica necesita al menos un Propietario.",
 }
 
-/** El motivo conocido o el mensaje propio: nunca el texto interno del proveedor. */
-function accountError(error: { code?: string } | null | undefined, fallback: string): Error | null {
-  if (!error) return null
-  return new Error((error.code ? ACCOUNT_ERRORS[error.code] : undefined) ?? fallback)
+/** Los motivos que son de un dato del formulario: se dicen junto a ese campo. */
+const ACCOUNT_ERROR_FIELDS: Record<string, string> = {
+  USER_IS_ALREADY_A_MEMBER_OF_THIS_ORGANIZATION: "email",
+  USER_IS_ALREADY_INVITED_TO_THIS_ORGANIZATION: "email",
 }
 
-/** Selector de rol: el estándar, con lo que puede hacer el rol elegido debajo. */
-function RoleField({
-  id,
+/**
+ * El rechazo de la cuenta (better-fetch: `{ code, message, status }`) como un
+ * `ApiError` que la superficie sabe repartir: el motivo conocido en su campo o
+ * en el pie, y nunca el texto interno del proveedor (llega en inglés).
+ */
+function accountError(
+  error: { code?: string; status?: number } | null | undefined,
+  fallback: string,
+): ApiError | null {
+  if (!error) return null
+  const message = (error.code ? ACCOUNT_ERRORS[error.code] : undefined) ?? fallback
+  const field = error.code ? ACCOUNT_ERROR_FIELDS[error.code] : undefined
+  return new ApiError(error.status ?? 400, {
+    code: error.code,
+    message,
+    fields: field ? { [field]: message } : undefined,
+  })
+}
+
+/** Selector de rol: el estándar, unido a la etiqueta, la ayuda y el error de su campo. */
+function RoleSelect({
+  control,
   value,
   roles,
   onChange,
 }: {
-  id: string
+  control: FieldControl
   value: OrgRole
   roles: readonly OrgRole[]
   onChange: (role: OrgRole) => void
 }) {
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>Rol</FieldLabel>
-      <ChoiceSelect
-        id={id}
-        value={value}
-        aria-describedby={`${id}-help`}
-        onChange={(event) => onChange(event.target.value as OrgRole)}
-      >
-        {roles.map((role) => (
-          <option key={role} value={role}>
-            {roleLabel(role)}
-          </option>
-        ))}
-      </ChoiceSelect>
-      <FieldDescription id={`${id}-help`}>{roleDescription(value)}</FieldDescription>
-    </Field>
+    <ChoiceSelect
+      {...control.props}
+      value={value}
+      onChange={(event) => onChange(event.target.value as OrgRole)}
+    >
+      {roles.map((role) => (
+        <option key={role} value={role}>
+          {roleLabel(role)}
+        </option>
+      ))}
+    </ChoiceSelect>
   )
 }
 
@@ -144,8 +154,8 @@ function TeamPage() {
   const sort = listSearch.get("sort")
   const hasCriteria = search !== "" || roleFilter !== undefined
   const [inviteOpen, setInviteOpen] = useState(false)
-  /** A quién se le está cambiando el rol, con el rol elegido en el selector. */
-  const [roleEdit, setRoleEdit] = useState<{ member: Membership; role: OrgRole } | null>(null)
+  /** A quién se le está cambiando el rol; el rol elegido vive en `roleForm`. */
+  const [roleMember, setRoleMember] = useState<Membership | null>(null)
   const [confirmingRole, setConfirmingRole] = useState(false)
   const [removing, setRemoving] = useState<Membership | null>(null)
   const [stoppingCalendar, setStoppingCalendar] = useState<Membership | null>(null)
@@ -206,20 +216,17 @@ function TeamPage() {
       toast.success(`Invitación enviada a ${values.email.trim()}`)
       await refreshTeam()
     },
-    onError: (cause) => toast.error(cause.message),
   })
 
-  const form = useForm({
+  const form = useAppForm({
     defaultValues: { email: "", role: "member" as OrgRole },
     validators: { onSubmit: inviteSchema },
     onSubmit: async ({ value }) => {
       await inviteMutation.mutateAsync(value)
     },
   })
+  const inviteSurface = useFormSurface(form)
 
-  // Suscripción explícita: el render de la página no se entera de los cambios de
-  // meta del formulario por sí solo (los campos se re-renderizan por su cuenta).
-  const isDirty = useStore(form.store, (state) => !state.isDefaultValue)
   /** Cierra y deja el formulario prístino: sin el reset, el dirty sobrevive al
    *  cierre y el próximo abrir pediría confirmar cambios ya guardados. */
   function closeInviteForm() {
@@ -227,7 +234,7 @@ function TeamPage() {
     form.reset()
   }
 
-  const { mutate: changeRole, isPending: changingRole } = useMutation({
+  const roleMutation = useMutation({
     mutationFn: async ({ member, role }: { member: Membership; role: OrgRole }) => {
       const { error } = await authClient.organization.updateMemberRole({
         memberId: member.id,
@@ -239,15 +246,29 @@ function TeamPage() {
     },
     onSuccess: async (_result, { member, role }) => {
       setConfirmingRole(false)
-      setRoleEdit(null)
+      setRoleMember(null)
       toast.success(`${member.user.name} ahora es ${roleLabel(role)}`)
       await refreshTeam()
     },
-    onError: (cause) => {
-      setConfirmingRole(false)
-      toast.error(cause.message)
+  })
+
+  // Elegir el rol: al guardar se valida y, si cambia, se confirma diciendo qué pasa.
+  const roleForm = useAppForm({
+    defaultValues: { role: "member" as OrgRole },
+    validators: {
+      onSubmit: ({ value }) =>
+        roleMember && value.role === roleMember.role
+          ? { fields: { role: "Elige un rol distinto al actual." } }
+          : undefined,
+    },
+    onSubmit: () => {
+      // Nada cambia todavía: primero se dice qué pasa y se confirma.
+      roleMutation.reset()
+      setConfirmingRole(true)
     },
   })
+  const roleSurface = useFormSurface(roleForm)
+  const chosenRole = useStore(roleForm.store, (state) => state.values.role)
 
   const removeMutation = useMutation({
     mutationFn: async (member: Membership) => {
@@ -263,7 +284,6 @@ function TeamPage() {
       toast.success(`${member.user.name} ya no forma parte del equipo`)
       await refreshTeam()
     },
-    onError: (cause) => toast.error(cause.message),
   })
 
   // Quién comparte su agenda con su calendario (issue 46): la fila lo dice y quien configura lo apaga.
@@ -279,7 +299,6 @@ function TeamPage() {
       toast.success(`${member.user.name} ya no comparte su agenda`)
       await queryClient.invalidateQueries({ queryKey: TEAM_CALENDAR_KEY })
     },
-    onError: (cause) => toast.error(cause.message),
   })
 
   const cancelInvitationMutation = useMutation({
@@ -295,7 +314,6 @@ function TeamPage() {
       toast.success(`Invitación de ${invitation.email} cancelada`)
       await refreshTeam()
     },
-    onError: (cause) => toast.error(cause.message),
   })
 
   const ownerCount = useMemo(
@@ -415,8 +433,10 @@ function TeamPage() {
                   {
                     key: "role",
                     label: "Cambiar rol",
-                    onSelect: () =>
-                      setRoleEdit({ member: membership, role: membership.role as OrgRole }),
+                    onSelect: () => {
+                      roleForm.reset({ role: membership.role as OrgRole })
+                      setRoleMember(membership)
+                    },
                   },
                   {
                     key: "remove",
@@ -433,7 +453,7 @@ function TeamPage() {
         },
       },
     ],
-    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, feedByUser, twoFactorByUser, myRole],
+    [assignable, canManage, ownerCount, session.userId, profileByUser, profilesLoaded, feedByUser, twoFactorByUser, myRole, roleForm],
   )
   const filteredMembers = useMemo(() => {
     const needle = search.toLowerCase()
@@ -483,7 +503,6 @@ function TeamPage() {
     setInviteOpen(true)
   }
   const pendingInvitations = (org?.invitations ?? []).filter((inv) => inv.status === "pending")
-  const roleChanged = roleEdit !== null && roleEdit.role !== roleEdit.member.role
 
   return (
     <div className="flex flex-col gap-6">
@@ -586,75 +605,62 @@ function TeamPage() {
       )}
 
       <FormDrawer
+        {...inviteSurface}
         open={inviteOpen}
         onClose={closeInviteForm}
         title="Invitar al equipo"
         description="Le llega un correo para crear su cuenta y entrar a la clínica con el rol que elijas."
-        isDirty={isDirty}
-        isSubmitting={inviteMutation.isPending}
         submitLabel="Invitar"
         cancelLabel={common.actions.cancel}
-        onSubmit={(event: FormEvent) => {
-          event.preventDefault()
-          void form.handleSubmit()
-        }}
       >
         <div className="flex flex-col gap-4">
-          <form.Field name="email">
-            {(field) => {
-              const error = fieldErrorMessages(field.state.meta.errors)[0]
-              return (
-                <Field>
-                  <FieldLabel htmlFor="invite-email">Invitar por correo</FieldLabel>
-                  <Input
-                    id="invite-email"
-                    type="email"
-                    autoComplete="off"
-                    aria-invalid={error ? true : undefined}
-                    value={field.state.value}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                  />
-                  <FieldError>{error ?? null}</FieldError>
-                </Field>
-              )
-            }}
-          </form.Field>
-          <form.Field name="role">
+          <form.AppField name="email">
             {(field) => (
-              <RoleField
-                id="invite-role"
-                value={field.state.value}
-                roles={assignable}
-                onChange={(role) => field.handleChange(role)}
-              />
+              <field.TextField id="invite-email" label="Invitar por correo" type="email" autoComplete="off" />
             )}
-          </form.Field>
+          </form.AppField>
+          <form.AppField name="role">
+            {(field) => (
+              <field.Control id="invite-role" label="Rol" description={roleDescription(field.state.value)}>
+                {(control) => (
+                  <RoleSelect
+                    control={control}
+                    value={field.state.value}
+                    roles={assignable}
+                    onChange={(role) => field.handleChange(role)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         </div>
       </FormDrawer>
 
-      {roleEdit ? (
+      {roleMember ? (
         <FormDrawer
-          key={roleEdit.member.id}
+          {...roleSurface}
+          key={roleMember.id}
           open
-          onClose={() => setRoleEdit(null)}
-          title={`Rol de ${roleEdit.member.user.name}`}
+          onClose={() => setRoleMember(null)}
+          title={`Rol de ${roleMember.user.name}`}
           description="El rol decide qué puede ver y hacer en la clínica."
-          isSubmitting={changingRole}
-          submitDisabled={!roleChanged}
           submitLabel="Cambiar rol"
           cancelLabel={common.actions.cancel}
-          onSubmit={(event: FormEvent) => {
-            event.preventDefault()
-            // Nada cambia todavía: primero se dice qué pasa y se confirma.
-            if (roleChanged) setConfirmingRole(true)
-          }}
         >
-          <RoleField
-            id="member-role"
-            value={roleEdit.role}
-            roles={assignable}
-            onChange={(role) => setRoleEdit({ ...roleEdit, role })}
-          />
+          <roleForm.AppField name="role">
+            {(field) => (
+              <field.Control id="member-role" label="Rol" description={roleDescription(field.state.value)}>
+                {(control) => (
+                  <RoleSelect
+                    control={control}
+                    value={field.state.value}
+                    roles={assignable}
+                    onChange={(role) => field.handleChange(role)}
+                  />
+                )}
+              </field.Control>
+            )}
+          </roleForm.AppField>
         </FormDrawer>
       ) : null}
 
@@ -669,40 +675,49 @@ function TeamPage() {
       ) : null}
 
       <ConfirmDialog
-        open={confirmingRole && roleEdit !== null}
+        open={confirmingRole && roleMember !== null}
         onClose={() => setConfirmingRole(false)}
-        onConfirm={() => roleEdit && changeRole(roleEdit)}
-        title={`Cambiar el rol de ${roleEdit?.member.user.name ?? ""}`}
+        onConfirm={() => roleMember && roleMutation.mutate({ member: roleMember, role: chosenRole })}
+        title={`Cambiar el rol de ${roleMember?.user.name ?? ""}`}
         description={
-          roleEdit
-            ? `Pasa de ${roleLabel(roleEdit.member.role)} a ${roleLabel(roleEdit.role)}. Como ${roleLabel(roleEdit.role)}: ${roleDescription(roleEdit.role)}`
+          roleMember
+            ? `Pasa de ${roleLabel(roleMember.role)} a ${roleLabel(chosenRole)}. Como ${roleLabel(chosenRole)}: ${roleDescription(chosenRole)}`
             : ""
         }
         confirmLabel="Cambiar rol"
         variant="default"
-        pending={changingRole}
+        pending={roleMutation.isPending}
+        error={roleMutation.isError ? submitErrorMessage(roleMutation.error) : null}
       />
 
       <ConfirmDialog
         open={removing !== null}
-        onClose={() => setRemoving(null)}
+        onClose={() => {
+          setRemoving(null)
+          removeMutation.reset()
+        }}
         onConfirm={() => removing && removeMutation.mutate(removing)}
         title={`Quitar a ${removing?.user.name ?? ""} del equipo`}
         description="Dejará de entrar a esta clínica con su cuenta. Lo que ya registró se conserva."
         confirmLabel="Quitar del equipo"
         variant="destructive"
         pending={removeMutation.isPending}
+        error={removeMutation.isError ? submitErrorMessage(removeMutation.error) : null}
       />
 
       <ConfirmDialog
         open={stoppingCalendar !== null}
-        onClose={() => setStoppingCalendar(null)}
+        onClose={() => {
+          setStoppingCalendar(null)
+          stopCalendarMutation.reset()
+        }}
         onConfirm={() => stoppingCalendar && stopCalendarMutation.mutate(stoppingCalendar)}
         title={`¿Dejar de compartir la agenda de ${stoppingCalendar?.user.name ?? ""}?`}
         description="Su enlace deja de funcionar y sus citas desaparecen de su calendario (puede tardar: depende de su calendario). Si lo quiere de nuevo, lo crea en su Agenda."
         confirmLabel="Dejar de compartir"
         variant="destructive"
         pending={stopCalendarMutation.isPending}
+        error={stopCalendarMutation.isError ? submitErrorMessage(stopCalendarMutation.error) : null}
       />
 
       <ResetTwoFactorDialog
@@ -712,7 +727,10 @@ function TeamPage() {
 
       <ConfirmDialog
         open={cancelling !== null}
-        onClose={() => setCancelling(null)}
+        onClose={() => {
+          setCancelling(null)
+          cancelInvitationMutation.reset()
+        }}
         onConfirm={() => cancelling && cancelInvitationMutation.mutate(cancelling)}
         title="Cancelar la invitación"
         description={`El enlace que recibió ${cancelling?.email ?? ""} dejará de servir. Puedes invitarle de nuevo cuando quieras.`}
@@ -720,6 +738,7 @@ function TeamPage() {
         cancelLabel="Volver"
         variant="destructive"
         pending={cancelInvitationMutation.isPending}
+        error={cancelInvitationMutation.isError ? submitErrorMessage(cancelInvitationMutation.error) : null}
       />
     </div>
   )

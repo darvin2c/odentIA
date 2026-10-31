@@ -36,6 +36,7 @@ import { confirmationReply, type ConfirmedItem } from "./appointment-confirm-wor
 import { APPOINTMENT_CALENDAR_FILENAME, APPOINTMENT_CALENDAR_MIME, appointmentCalendarInvite } from "./appointment-calendar.js"
 import { setAppointmentStatus } from "./appointments.js"
 import {
+  APPOINTMENT_ARRIVAL_KEY,
   APPOINTMENT_DATA_NOTICE_KEY,
   REMINDER_CONFIRMED_KEY,
   REMINDER_DATA_KEY,
@@ -70,7 +71,7 @@ import {
   templateReasonWords,
 } from "./clinic-messages.js"
 import { deliverHeldReplies, sendOutbound, sendTemplateOutbound } from "./conversations.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { patientCreditSql } from "./payments.js"
 import { findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
 import { lapsedToInvite, recordInvitation } from "./return-invites.js"
@@ -83,7 +84,7 @@ import { createTask, settleTask } from "./tasks.js"
 import { upsertWorkspaceNotification } from "./workspace.js"
 import { NOT_RECOVERY_KINDS, patientHasItsAppointment } from "./saas-actions.js"
 import { getAgentSpendGate } from "./saas-terms.js"
-import { nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
+import { isWritingTime, nextWritingDay, sendTimeFor, writingScheduleOf } from "./writing-hours.js"
 import type { Storage } from "./storage.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { productHooks } from "./products.js"
@@ -119,6 +120,19 @@ export interface LineConfig {
 
 export const TASK_NOTE_CHARS = 160
 
+/**
+ * Lo que se dice de un ajuste de línea fuera de rango, por su nombre en el
+ * cuerpo de PATCH `/api/agent/admin/lines/:key`: lo mismo en la ruta, aquí y
+ * en la pantalla.
+ */
+export const LINE_SETTING_MESSAGES = {
+  days: "El plazo va de 1 a 365 días.",
+  hoursBefore: "El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes.",
+  delayHours: "La espera va de 1 a 72 horas.",
+  hour: "La hora va de 0 a 23.",
+  taskNote: `La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres.`,
+} as const
+
 /** Los tiempos vigentes de una línea, para decirlos con las palabras del catálogo. */
 export function lineTiming(rule: Pick<RuleRow, "config"> | null, extra: LineTiming = {}): LineTiming {
   const { hoursBefore, delayHours, hour } = lineConfigOf(rule?.config)
@@ -135,8 +149,8 @@ function assertKind(kind: string): AutomationKind {
   return kind as AutomationKind
 }
 
-/** Los tipos de trabajo: los de cada línea y los avisos de cita de «Recordar la cita». */
-const JOB_KINDS: readonly string[] = [...AUTOMATION_KINDS, ...APPOINTMENT_NOTICE_KEYS]
+/** Los tipos de trabajo: los de cada línea, los avisos de cita y «¿Vienes en camino?» de «Recordar la cita». */
+const JOB_KINDS: readonly string[] = [...AUTOMATION_KINDS, ...APPOINTMENT_NOTICE_KEYS, APPOINTMENT_ARRIVAL_KEY]
 
 function assertJobKind(kind: string): string {
   if (!JOB_KINDS.includes(kind)) throw notFound("Línea del administrador")
@@ -283,46 +297,46 @@ export async function setLine(
   let enabled = input.enabled ?? was.enabled
   if (!agentPart && !teamPart) {
     if (input.enabled === true) {
-      throw validation("Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
+      throw invalidField("enabled", "Elige al menos una parte: que Sofi escriba o que quede una tarea para el equipo")
     }
     enabled = false
   }
   const config: LineConfig = { ...was.config }
   if (input.days !== undefined) {
-    if (line.defaultDays === null) throw validation(`«${line.name}» no tiene un plazo en días`)
+    if (line.defaultDays === null) throw invalidField("days", `«${line.name}» no tiene un plazo en días`)
     if (input.days === null) delete config.days
     else {
-      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw validation("El plazo va de 1 a 365 días")
+      if (!Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw invalidField("days", LINE_SETTING_MESSAGES.days)
       config.days = input.days
     }
   }
   if (input.hoursBefore !== undefined) {
-    if (kind !== "recordatorio_cita") throw validation(`«${line.name}» no se ajusta por horas`)
+    if (kind !== "recordatorio_cita") throw invalidField("hoursBefore", `«${line.name}» no se ajusta por horas`)
     const hours = [...new Set(input.hoursBefore)].sort((a, b) => b - a)
     if (hours.length < 1 || hours.length > 3 || hours.some((h) => !Number.isInteger(h) || h < 1 || h > 168)) {
-      throw validation("El recordatorio admite de uno a tres avisos, entre 1 y 168 horas antes")
+      throw invalidField("hoursBefore", LINE_SETTING_MESSAGES.hoursBefore)
     }
     config.hoursBefore = hours
   }
   if (input.delayHours !== undefined) {
-    if (line.delayHours === undefined) throw validation(`«${line.name}» no espera horas`)
+    if (line.delayHours === undefined) throw invalidField("delayHours", `«${line.name}» no espera horas`)
     if (input.delayHours === null) delete config.delayHours
     else {
-      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw validation("La espera va de 1 a 72 horas")
+      if (!Number.isInteger(input.delayHours) || input.delayHours < 1 || input.delayHours > 72) throw invalidField("delayHours", LINE_SETTING_MESSAGES.delayHours)
       config.delayHours = input.delayHours
     }
   }
   if (input.hour !== undefined) {
-    if (!line.hourAdjustable) throw validation(`«${line.name}» no tiene una hora de salida que se pueda fijar`)
+    if (!line.hourAdjustable) throw invalidField("hour", `«${line.name}» no tiene una hora de salida que se pueda fijar`)
     if (input.hour === null) delete config.hour
     else {
-      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw validation("La hora va de 0 a 23")
+      if (!Number.isInteger(input.hour) || input.hour < 0 || input.hour > 23) throw invalidField("hour", LINE_SETTING_MESSAGES.hour)
       config.hour = input.hour
     }
   }
   if (input.taskNote !== undefined) {
     const note = input.taskNote?.replace(/\s+/g, " ").trim() ?? ""
-    if (note.length > TASK_NOTE_CHARS) throw validation(`La indicación para la tarea admite hasta ${TASK_NOTE_CHARS} caracteres`)
+    if (note.length > TASK_NOTE_CHARS) throw invalidField("taskNote", LINE_SETTING_MESSAGES.taskNote)
     if (note) config.taskNote = note
     else delete config.taskNote
   }
@@ -1094,6 +1108,67 @@ export async function syncAppointmentReminders(
       if (job) programados++
     }
   }
+  const arrivals = await syncArrivalChecks(tx, orgId, rule, now)
+  return { programados: programados + arrivals.programados, omitidos: omitidos + arrivals.omitidos }
+}
+
+/** Minutos después de la hora en que se pregunta si viene en camino. */
+const ARRIVAL_ASK_AFTER_MS = 15 * 60_000
+/** Pasado esto desde la hora (o al terminar la cita), ya no se pregunta. */
+const ARRIVAL_ASK_UNTIL_MS = 60 * 60_000
+/** Que la sede marcó una llegada en estas horas dice que ahí se registran las llegadas. */
+const ARRIVAL_SIGNAL_MS = 12 * 3_600_000
+
+/**
+ * «¿Vienes en camino?» de «Recordar la cita» (ADR 0113): a los 15 minutos de la
+ * hora, a quien no tiene la llegada marcada. Solo en una sede que ya marcó
+ * alguna llegada en las últimas 12 horas: si allí no se registran, la falta de
+ * llegada no dice nada y se le escribiría a quien ya está en el sillón. Sale al
+ * momento y solo dentro del «Horario para escribir»; si no, no sale. Uno por
+ * cita (`cita_sin_llegar:<cita>`).
+ */
+async function syncArrivalChecks(tx: Db, orgId: string, rule: RuleRow, now: Date): Promise<SyncSummary> {
+  let programados = 0
+  let omitidos = 0
+  const due = await tx
+    .select()
+    .from(appointment)
+    .where(
+      and(
+        eq(appointment.organizationId, orgId),
+        eq(appointment.isTest, false),
+        inArray(appointment.status, ["programada", "confirmada"]),
+        isNull(appointment.arrivedAt),
+        lte(appointment.startsAt, new Date(now.getTime() - ARRIVAL_ASK_AFTER_MS)),
+        sql`${appointment.startsAt} > ${new Date(now.getTime() - ARRIVAL_ASK_UNTIL_MS).toISOString()}::timestamptz`,
+        sql`${appointment.endsAt} > ${now.toISOString()}::timestamptz`,
+        gte(appointment.startsAt, activeSince(rule)),
+        sql`exists (select 1 from appointment seen
+          where seen.organization_id = ${orgId} and seen.branch_id = ${appointment.branchId}
+            and seen.arrived_at between ${new Date(now.getTime() - ARRIVAL_SIGNAL_MS).toISOString()}::timestamptz and ${now.toISOString()}::timestamptz)`,
+        notYetQueued(orgId, APPOINTMENT_ARRIVAL_KEY, appointment.id),
+      ),
+    )
+    .orderBy(asc(appointment.startsAt), asc(appointment.id))
+    .limit(BATCH_LIMIT)
+  for (const appt of due) {
+    const timeZone = await timezoneOf(tx, orgId, appt.branchId)
+    if (!isWritingTime(now, await writingScheduleOf(tx, orgId, timeZone))) continue
+    const contactId = await preferredContact(tx, orgId, appt.patientId)
+    if (!contactId) omitidos++
+    const time = new Intl.DateTimeFormat((await findOrgLocale(tx, orgId)).locale, { timeZone, hour: "numeric", minute: "2-digit" }).format(appt.startsAt)
+    const job = await enqueueJob(tx, orgId, {
+      ruleId: rule.id,
+      kind: APPOINTMENT_ARRIVAL_KEY,
+      dedupeKey: `${APPOINTMENT_ARRIVAL_KEY}:${appt.id}`,
+      scheduledFor: now,
+      contactId,
+      appointmentId: appt.id,
+      patientId: appt.patientId,
+      payload: { timeZone, detail: `No ha llegado a su cita de las ${time}.` },
+    })
+    if (job) programados++
+  }
   return { programados, omitidos }
 }
 
@@ -1445,6 +1520,33 @@ async function stillValid(
     }
     if (appt.startsAt.getTime() < now.getTime() - 60_000) {
       return { valid: false, reason: "La cita ya pasó" }
+    }
+    // Uno por cita y por día: el de pocas horas antes que el «Horario para escribir»
+    // corre a la noche anterior llega el mismo día que el de un día antes (ADR 0113).
+    const tz = jobPayloadOf(job.payload).timeZone ?? (await timezoneOf(tx, orgId, null))
+    const [today] = await tx.execute<{ id: string }>(sql`
+      select j.id from automation_job j
+      where j.organization_id = ${orgId} and j.appointment_id = ${job.appointmentId} and j.kind = 'recordatorio_cita'
+        and j.status = 'enviado' and j.id <> ${job.id}
+        and (j.updated_at at time zone ${tz})::date = (${now.toISOString()}::timestamptz at time zone ${tz})::date
+      limit 1`)
+    if (today) return { valid: false, reason: "Ya se le recordó esta cita hoy" }
+    return { valid: true }
+  }
+  if (job.kind === APPOINTMENT_ARRIVAL_KEY && job.appointmentId) {
+    const [appt] = await tx
+      .select({ status: appointment.status, startsAt: appointment.startsAt, endsAt: appointment.endsAt, arrivedAt: appointment.arrivedAt })
+      .from(appointment)
+      .where(and(eq(appointment.id, job.appointmentId), eq(appointment.organizationId, orgId)))
+      .limit(1)
+    if (!appt) return { valid: false, reason: "La cita ya no existe" }
+    if (appt.arrivedAt) return { valid: false, reason: "Ya llegó" }
+    if (!["programada", "confirmada"].includes(appt.status)) {
+      return { valid: false, reason: `La cita ya está ${APPOINTMENT_STATUS_WORDS[appt.status] ?? appt.status}` }
+    }
+    // Pasada la cita, preguntar si viene en camino ya no sirve: lo sigue «Reprogramar tras una inasistencia».
+    if (now.getTime() >= Math.min(appt.endsAt.getTime(), appt.startsAt.getTime() + ARRIVAL_ASK_UNTIL_MS)) {
+      return { valid: false, reason: "La hora de la cita ya pasó" }
     }
     return { valid: true }
   }
@@ -2038,6 +2140,7 @@ const NOTICE_TASK_TITLE: Record<string, (name: string) => string> = {
   aviso_cita_reservada: (name) => `Avisarle a ${name} que su cita quedó reservada`,
   aviso_cita_movida: (name) => `Avisarle a ${name} que su cita cambió de fecha`,
   aviso_cita_cancelada: (name) => `Avisarle a ${name} que su cita se canceló`,
+  [APPOINTMENT_ARRIVAL_KEY]: (name) => `Llamar a ${name}: no ha llegado a su cita`,
 }
 
 /**
@@ -2153,7 +2256,7 @@ async function linkOpportunityThread(tx: Db, orgId: string, job: JobRow, convers
 
 /** Hasta cuándo sirve llamar por el recordatorio de una cita: hasta que empieza. */
 async function reminderDue(tx: Db, orgId: string, job: JobRow): Promise<Date | undefined> {
-  if ((job.kind !== "recordatorio_cita" && !isAppointmentNotice(job.kind)) || !job.appointmentId) return undefined
+  if ((job.kind !== "recordatorio_cita" && job.kind !== APPOINTMENT_ARRIVAL_KEY && !isAppointmentNotice(job.kind)) || !job.appointmentId) return undefined
   const [appt] = await tx
     .select({ startsAt: appointment.startsAt })
     .from(appointment)
@@ -2426,9 +2529,10 @@ export async function deliverJob(
       return true
     })
     if (covered.length > 0) await close(covered, "cancelado", "Cubierto por otro recordatorio de la misma cita")
-  } else if (!isAppointmentNotice(job.kind)) {
+  } else if (!isAppointmentNotice(job.kind) && job.kind !== APPOINTMENT_ARRIVAL_KEY) {
     // Un aviso de cita no espera a mañana: la cita cambió hoy. Sí cuenta como el
-    // mensaje del día de la persona, así que lo demás espera.
+    // mensaje del día de la persona, así que lo demás espera. «¿Vienes en camino?»
+    // tampoco espera: mañana ya no sirve (ADR 0113).
     const rows = await tx.execute<{ sent: boolean; reminder: boolean }>(sql`
       select
         exists (select 1 from automation_job j
@@ -2762,7 +2866,7 @@ async function markCrashedJob(tx: Db, orgId: string, jobId: string, now: Date, e
   return { jobId, outcome: "fallido", detail }
 }
 
-/** Cancela lo pendiente de una cita al resolverse (confirmada/atendida/cancelada). */
+/** Cancela lo pendiente de una cita al resolverse (llegó, atendida, cancelada o no vino); confirmarla no la resuelve. */
 export async function cancelPendingForAppointment(
   tx: Db,
   orgId: string,

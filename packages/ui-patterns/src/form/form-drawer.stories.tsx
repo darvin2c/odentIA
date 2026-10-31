@@ -2,6 +2,7 @@ import { Button, toast } from "@odentia/ui"
 import type { Meta, StoryObj } from "@storybook/react"
 import { useState } from "react"
 import { DemoFields, demoSubmit, useDemoWizard } from "../story-fixtures.js"
+import { useAppForm, useFormSurface } from "./app-form.js"
 import { FormDrawer } from "./form-drawer.js"
 
 /**
@@ -9,7 +10,8 @@ import { FormDrawer } from "./form-drawer.js"
  * Esc los aporta Base UI. Las stories de ancho replican el hack de
  * `--drawer-content-width` que usan hoy las páginas con formularios extensos.
  *
- * El feedback de guardado es por toast (éxito y error), como en el platform.
+ * Guardar bien se confirma con un toast. Un error se dice en el formulario: el
+ * de un campo junto a él (`useAppForm`) y lo demás junto a los botones.
  */
 const meta = {
   title: "Patrones/FormDrawer",
@@ -168,10 +170,70 @@ export const FalloDeGuardado: Story = {
         onSubmit={(event) => {
           event.preventDefault()
           setError("No se pudo guardar: la sesión expiró.")
-          toast.error("No se pudo guardar. Inténtalo de nuevo.")
         }}
       >
         <DemoFields />
+      </FormDrawer>
+    )
+  },
+}
+
+/** El servidor de prueba: ese correo ya es de otra sede y la región no está en este formulario. */
+async function saveBranch(value: { email: string }) {
+  const { promise, resolve } = Promise.withResolvers<void>()
+  setTimeout(resolve, 600)
+  await promise
+  if (value.email.trim() === "ana@odentia.dev") {
+    const message = "Ese correo ya es de otra sede"
+    throw Object.assign(new Error(message), {
+      status: 409,
+      shape: { code: "EMAIL_TAKEN", message, fields: { email: message, region: "Elige la región de la lista" } },
+    })
+  }
+  toast.success("Sede guardada")
+}
+
+/**
+ * Con `useAppForm`: lo que no pasa la validación se marca en su campo y el
+ * foco va al primero; lo que rechaza el servidor cae en su campo y lo que no
+ * es de ninguno, junto a los botones. Prueba «Guardar» vacío, un teléfono a
+ * medias y luego el correo «ana@odentia.dev».
+ */
+export const ErroresPorCampo: Story = {
+  render: function FieldErrorsStory() {
+    const form = useAppForm({
+      defaultValues: { name: "", email: "", phone: null as string | null },
+      validators: {
+        onSubmit: ({ value }) => {
+          const fields: Record<string, string> = {}
+          if (!value.name.trim()) fields.name = "Escribe el nombre de la sede"
+          if (!value.email.includes("@")) fields.email = "Escribe un correo válido, como nombre@clinica.com"
+          return Object.keys(fields).length > 0 ? { fields } : undefined
+        },
+      },
+      onSubmit: async ({ value }) => saveBranch(value),
+    })
+    const surface = useFormSurface(form)
+    return (
+      <FormDrawer {...surface} open title="Nueva sede" onClose={noop}>
+        <div className="flex flex-col gap-4">
+          <form.AppField name="name">
+            {(field) => <field.TextField label="Nombre" maxLength={120} />}
+          </form.AppField>
+          <form.AppField name="email">
+            {(field) => (
+              <field.TextField
+                label="Correo"
+                type="email"
+                autoComplete="email"
+                description="Aquí llegan las copias de las citas."
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="phone">
+            {(field) => <field.PhoneField label="Teléfono" defaultCountry="PE" />}
+          </form.AppField>
+        </div>
       </FormDrawer>
     )
   },

@@ -11,7 +11,7 @@ import { findingDefinition, type FindingDetails, isValidTooth } from "@odentia/d
 import type { Db } from "@odentia/db"
 import { addOdontogramEntries } from "./odontogram.js"
 import { addEncounterDiagnosis } from "../encounter-diagnoses.js"
-import { validation } from "../errors.js"
+import { invalidField } from "../errors.js"
 import { addPlanItem } from "../plan.js"
 import { requireServiceForIndication } from "../service-catalog.js"
 
@@ -48,19 +48,20 @@ export async function registerToothFinding(
 ) {
   const teeth = [...new Set(input.toothNumbers ?? [])]
   if (teeth.length === 0 || teeth.length > 52 || teeth.some((tooth) => !isValidTooth(tooth)))
-    throw validation("Elige la pieza o las piezas del hallazgo")
+    throw invalidField("toothNumbers", "Elige la pieza o las piezas del hallazgo")
   const def = findingDefinition(input.condition)
-  if (!def) throw validation("Elige el hallazgo de la lista")
+  if (!def) throw invalidField("condition", "Elige el hallazgo de la lista")
   const group = def.scope === "pair" || def.scope === "span" || def.scope === "arch"
   const surfaces = teeth.length === 1 ? (input.surfaces ?? []) : []
   if ((input.surfaces ?? []).length > 0 && teeth.length > 1)
-    throw validation("Las caras se registran con una sola pieza")
+    throw invalidField("surfaces", "Las caras se registran con una sola pieza")
   // Lo que se planifica aquí es de la pieza: lo demás se indica en «Plan y controles».
   const service = input.treatment?.serviceId
     ? await requireServiceForIndication(tx, orgId, input.treatment.serviceId)
     : null
   if (service && service.scope !== "tooth" && service.scope !== "surfaces")
-    throw validation(
+    throw invalidField(
+      "treatment.serviceId",
       `«${service.name}» no es un tratamiento de una pieza: indícalo en «Plan y controles» de la atención`,
     )
   const targets = group ? [teeth[0]!] : teeth
@@ -68,16 +69,23 @@ export async function registerToothFinding(
   const diagnoses = []
   const planItems = []
   for (const toothNumber of targets) {
-    const rows = await addOdontogramEntries(tx, orgId, actorUserId, patientId, {
-      encounterId: input.encounterId,
-      toothNumber,
-      condition: input.condition,
-      surfaces,
-      details: group ? { ...(input.details ?? {}), relatedTeeth: teeth } : input.details,
-      note: input.note ?? null,
-      diagnosisCode: input.diagnosis?.diagnosisCode ?? null,
-      diagnosisSystem: input.diagnosis?.diagnosisSystem ?? null,
-    })
+    const rows = await addOdontogramEntries(
+      tx,
+      orgId,
+      actorUserId,
+      patientId,
+      {
+        encounterId: input.encounterId,
+        toothNumber,
+        condition: input.condition,
+        surfaces,
+        details: group ? { ...(input.details ?? {}), relatedTeeth: teeth } : input.details,
+        note: input.note ?? null,
+        diagnosisCode: input.diagnosis?.diagnosisCode ?? null,
+        diagnosisSystem: input.diagnosis?.diagnosisSystem ?? null,
+      },
+      { diagnosisField: "diagnosis.diagnosisCode" },
+    )
     entries.push(...rows)
     if (input.diagnosis) {
       diagnoses.push(

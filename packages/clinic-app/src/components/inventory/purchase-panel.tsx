@@ -21,12 +21,14 @@ import {
   Textarea,
   toast,
 } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, DetailSection, FormDrawer } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, DetailSection, FormDrawer, submitForm, useAppForm, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { MoreHorizontal } from "lucide-react"
 import * as React from "react"
-import { cashErrorMessage, invalidateFinance, voidSupplierCreditUseApi } from "../../lib/finance-cash"
+import { z } from "zod"
+import { invalidateFinance, voidSupplierCreditUseApi } from "../../lib/finance-cash"
 import {
   cancelOrder,
   closeOrder,
@@ -51,6 +53,7 @@ import {
 } from "../../lib/inventory"
 import { QueryErrorState } from "../../lib/query-error"
 import { PurchasePaymentDrawer } from "./purchase-payment-drawer"
+import { VoidDrawer } from "../finance/void-drawer"
 import { Chip } from "./fields"
 import { useInventory } from "./inventory-scope"
 
@@ -111,6 +114,7 @@ function OrderActions({ order }: { order: PurchaseOrderView }) {
     },
     onError: (error) => toast.error(inventoryErrorMessage(error)),
   })
+  // Cerrar y cancelar se confirman en un diálogo: el motivo del rechazo se dice ahí, no en un aviso detrás.
   const close = useMutation({
     mutationFn: () => closeOrder(order.id),
     onSuccess: () => {
@@ -118,7 +122,6 @@ function OrderActions({ order }: { order: PurchaseOrderView }) {
       toast.success(`${order.label} quedó cerrada con lo que llegó.`)
       refresh()
     },
-    onError: (error) => toast.error(inventoryErrorMessage(error)),
   })
   const cancel = useMutation({
     mutationFn: (payments?: "anular" | "a_favor") => cancelOrder(order.id, payments),
@@ -127,7 +130,6 @@ function OrderActions({ order }: { order: PurchaseOrderView }) {
       toast.success(`${order.label} quedó cancelada.`)
       refresh()
     },
-    onError: (error) => toast.error(inventoryErrorMessage(error)),
   })
   const paid = order.balance?.paidCents ?? 0
   const startCancel = () => setCancelling(paid > 0 ? "paid" : "plain")
@@ -168,11 +170,9 @@ function OrderActions({ order }: { order: PurchaseOrderView }) {
             className="min-h-11 sm:min-h-8"
             disabled={confirm.isPending}
             onClick={() => {
-              // Un borrador guardado sin precio no se pide a 0: se abre para escribirlo.
-              if (order.lines.some((line) => !line.unitCostCents)) {
-                toast.info("Falta el precio de algún producto: escríbelo y confirma el pedido.")
-                open.editPurchase(order)
-              } else confirm.mutate()
+              // Un borrador guardado sin precio no se pide a 0: se abre con esas filas marcadas.
+              if (order.lines.some((line) => !line.unitCostCents)) open.editPurchase(order, { missingPrices: true })
+              else confirm.mutate()
             }}
           >
             Confirmar pedido
@@ -217,7 +217,11 @@ function OrderActions({ order }: { order: PurchaseOrderView }) {
         confirmLabel="Cerrar la compra"
         cancelLabel="Volver"
         pending={close.isPending}
-        onClose={() => setClosing(false)}
+        error={close.error ? inventoryErrorMessage(close.error) : null}
+        onClose={() => {
+          setClosing(false)
+          close.reset()
+        }}
         onConfirm={() => close.mutate()}
       >
         <p className="text-sm text-muted-foreground">
@@ -234,15 +238,21 @@ function OrderActions({ order }: { order: PurchaseOrderView }) {
         confirmLabel="Cancelar la compra"
         cancelLabel="Volver"
         pending={cancel.isPending}
-        onClose={() => setCancelling(null)}
+        error={cancel.error ? inventoryErrorMessage(cancel.error) : null}
+        onClose={() => {
+          setCancelling(null)
+          cancel.reset()
+        }}
         onConfirm={() => cancel.mutate(undefined)}
       />
       <CancelPaidDialog
         order={cancelling === "paid" ? order : null}
-        pending={cancel.isPending}
         canPay={can.pay}
-        onClose={() => setCancelling(null)}
-        onConfirm={(payments) => cancel.mutate(payments)}
+        onClose={() => {
+          setCancelling(null)
+          cancel.reset()
+        }}
+        onConfirm={(payments) => cancel.mutateAsync(payments)}
       />
     </div>
   )
@@ -294,25 +304,37 @@ function CopyOrderDrawer({ text, onClose }: { text: string; onClose: () => void 
   )
 }
 
+const cancelPaidSchema = z.object({
+  payments: z.string().refine((value) => value === "anular" || value === "a_favor", "Elige qué pasa con lo pagado."),
+})
+
 /** Cancelar una compra con pagos: anularlos (el proveedor devolvió el dinero) o dejarlos a favor. */
 function CancelPaidDialog({
   order,
-  pending: busy,
   canPay,
   onClose,
   onConfirm,
 }: {
   order: PurchaseOrderView | null
-  pending: boolean
   canPay: boolean
   onClose: () => void
-  onConfirm: (payments: "anular" | "a_favor") => void
+  /** La cancelación (`mutateAsync`): si la rechaza, el motivo se dice en el diálogo. */
+  onConfirm: (payments: "anular" | "a_favor") => Promise<unknown>
 }) {
   const { locale } = useInventory()
-  const [choice, setChoice] = React.useState<"anular" | "a_favor" | "">("")
+  const form = useAppForm({
+    defaultValues: { payments: "" },
+    validators: { onSubmit: cancelPaidSchema },
+    onSubmit: async ({ value }) => {
+      await onConfirm(value.payments as "anular" | "a_favor")
+    },
+  })
+  const error = useFormSubmitError(form)
+  const busy = useStore(form.store, (state) => state.isSubmitting)
+  // Cada apertura empieza sin elegir.
   React.useEffect(() => {
-    if (order) setChoice("")
-  }, [order])
+    if (order) form.reset()
+  }, [order, form])
   const paid = order?.balance?.paidCents ?? 0
   // Nunca se supone una moneda: la de la orden, y sin orden no hay importe que decir.
   const money = (cents: number) => (order ? formatMoney(cents, order.currency, locale) : "")
@@ -328,89 +350,51 @@ function CancelPaidDialog({
       confirmLabel="Cancelar la compra"
       cancelLabel="Volver"
       pending={busy}
-      confirmDisabled={!canPay || choice === ""}
+      error={error}
+      // Sin permiso de pagos no se cancela: la descripción dice quién lo hace.
+      confirmDisabled={!canPay}
       onClose={onClose}
-      onConfirm={() => {
-        if (choice) onConfirm(choice)
-      }}
+      onConfirm={() => void submitForm(form)}
     >
       {canPay ? (
-        <RadioGroup aria-label="Qué pasa con lo pagado" value={choice} onValueChange={(value) => setChoice(value as "anular" | "a_favor")} className="flex flex-col gap-2">
-          <FieldLabel className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 font-normal">
-            <RadioGroupItem value="a_favor" className="mt-0.5" />
-            <span>
-              <strong>Dejarlo a favor con {order?.supplierName ?? "el proveedor"}</strong>
-              <br />
-              <span className="text-sm text-muted-foreground">Se usa al pagar su próxima compra.</span>
-            </span>
-          </FieldLabel>
-          <FieldLabel className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 font-normal">
-            <RadioGroupItem value="anular" className="mt-0.5" />
-            <span>
-              <strong>Anular los pagos</strong>
-              <br />
-              <span className="text-sm text-muted-foreground">El proveedor devolvió el dinero: los gastos quedan anulados con su motivo.</span>
-            </span>
-          </FieldLabel>
-        </RadioGroup>
+        <form.AppField name="payments">
+          {(field) => (
+            <field.Group legend="Qué pasa con lo pagado">
+              {(control) => (
+                <RadioGroup
+                  name={control.name}
+                  value={field.state.value}
+                  aria-invalid={control.invalid || undefined}
+                  aria-describedby={control.describedBy}
+                  onValueChange={(value) => {
+                    field.handleChange(String(value))
+                    field.handleBlur()
+                  }}
+                  className="flex flex-col gap-2"
+                >
+                  <FieldLabel className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 font-normal">
+                    <RadioGroupItem value="a_favor" className="mt-0.5" aria-invalid={control.invalid || undefined} />
+                    <span>
+                      <strong>Dejarlo a favor con {order?.supplierName ?? "el proveedor"}</strong>
+                      <br />
+                      <span className="text-sm text-muted-foreground">Se usa al pagar su próxima compra.</span>
+                    </span>
+                  </FieldLabel>
+                  <FieldLabel className="flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 font-normal">
+                    <RadioGroupItem value="anular" className="mt-0.5" aria-invalid={control.invalid || undefined} />
+                    <span>
+                      <strong>Anular los pagos</strong>
+                      <br />
+                      <span className="text-sm text-muted-foreground">El proveedor devolvió el dinero: los gastos quedan anulados con su motivo.</span>
+                    </span>
+                  </FieldLabel>
+                </RadioGroup>
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
       ) : null}
     </ConfirmDialog>
-  )
-}
-
-/** Anular lo usado a favor: la misma confirmación que los otros anulados, en cajón y con motivo. */
-function VoidCreditUseDrawer({
-  open,
-  description,
-  isSubmitting,
-  error,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean
-  description: string
-  isSubmitting: boolean
-  error: string | null
-  onClose: () => void
-  onConfirm: (reason: string) => void
-}) {
-  const fieldId = React.useId()
-  const [reason, setReason] = React.useState("")
-  const [missing, setMissing] = React.useState(false)
-  React.useEffect(() => {
-    if (!open) return
-    setReason("")
-    setMissing(false)
-  }, [open])
-  return (
-    <FormDrawer
-      dock={false}
-      open={open}
-      title="Anular lo usado a favor"
-      description={description}
-      error={missing ? "Escribe el motivo de la anulación." : error}
-      isSubmitting={isSubmitting}
-      isDirty={reason !== ""}
-      submitLabel="Anular"
-      cancelLabel="No anular"
-      onClose={() => {
-        if (!isSubmitting) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!reason.trim()) {
-          setMissing(true)
-          return
-        }
-        setMissing(false)
-        onConfirm(reason.trim())
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor={fieldId}>Motivo</FieldLabel>
-        <Textarea id={fieldId} maxLength={2000} value={reason} onChange={(event) => setReason(event.target.value)} />
-      </Field>
-    </FormDrawer>
   )
 }
 
@@ -587,10 +571,7 @@ function PaymentBlock({ order }: { order: PurchaseOrderDetail }) {
                       variant="ghost"
                       size="sm"
                       aria-label={`Anular el uso de ${money(item.amountCents)} a favor`}
-                      onClick={() => {
-                        voidCredit.reset()
-                        setVoidingCredit(item)
-                      }}
+                      onClick={() => setVoidingCredit(item)}
                     >
                       Anular
                     </Button>
@@ -602,19 +583,16 @@ function PaymentBlock({ order }: { order: PurchaseOrderDetail }) {
         </div>
       </section>
       {paying ? <PurchasePaymentDrawer order={order} locale={locale} timeZone={timeZone} open={paying} onClose={() => setPaying(false)} /> : null}
-      <VoidCreditUseDrawer
+      <VoidDrawer
         open={voidingCredit !== null}
+        title="Anular lo usado a favor"
         description={
           voidingCredit
             ? `${money(voidingCredit.amountCents)} vuelven a estar a favor con ${order.supplierName ?? "el proveedor"} y esta compra los vuelve a deber. Queda en el historial con su motivo.`
             : ""
         }
-        isSubmitting={voidCredit.isPending}
-        error={voidCredit.error ? cashErrorMessage(voidCredit.error) : null}
         onClose={() => setVoidingCredit(null)}
-        onConfirm={(reason) => {
-          if (voidingCredit) voidCredit.mutate({ id: voidingCredit.id, reason })
-        }}
+        onConfirm={(reason) => (voidingCredit ? voidCredit.mutateAsync({ id: voidingCredit.id, reason }) : Promise.resolve())}
       />
     </DetailSection>
   )

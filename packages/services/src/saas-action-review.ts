@@ -16,7 +16,7 @@ import { openSupportCaseFromHelp, replyToSupportCase, setSupportCaseStatus } fro
 import { contactScreenFacts } from "./contact-screen.js"
 import { addBusinessDays, saasTermsAt } from "./saas-commercial-terms.js"
 import { sendToSpam } from "./contact-screen-actions.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { currentSaasPeriod, listPeriodActions, microsToCents } from "./saas-actions.js"
 
 /**
@@ -227,11 +227,11 @@ export async function requestActionReview(
   input: { actionId: string; reason: string; note?: string | null; allowRead?: boolean },
 ): Promise<ReviewRequestResult> {
   if (!(SAAS_REVIEW_REASONS as readonly string[]).includes(input.reason)) {
-    throw validation(`Motivo inválido (${SAAS_REVIEW_REASONS.join("|")})`)
+    throw invalidField("reason", "Elige por qué no debió cobrarse")
   }
   const reason = input.reason as SaasReviewReason
   const note = input.note?.trim() ? input.note.trim() : null
-  if (note && note.length > NOTE_MAX) throw validation(`Lo que cuentas admite hasta ${NOTE_MAX} caracteres`)
+  if (note && note.length > NOTE_MAX) throw invalidField("note", `Lo que cuentas admite hasta ${NOTE_MAX} caracteres`)
   await lockReviews(tx, orgId)
   const { action, period } = await reviewableAction(tx, orgId, input.actionId)
   if (action.priceMicros === null) throw new ServiceError("REVIEW_NOT_CHARGED", 409, "Esta acción no tiene precio: no se cobra")
@@ -379,8 +379,8 @@ export async function decideActionReview(
   input: { caseId: string; accept: boolean; answer: string },
 ): Promise<void> {
   const answer = input.answer.trim()
-  if (!answer) throw validation("Escribe qué le dices a la clínica")
-  if (answer.length > NOTE_MAX) throw validation(`La respuesta admite hasta ${NOTE_MAX} caracteres`)
+  if (!answer) throw invalidField("answer", "Escribe qué le dices a la clínica")
+  if (answer.length > NOTE_MAX) throw invalidField("answer", `La respuesta admite hasta ${NOTE_MAX} caracteres`)
   const [review] = await db.select().from(saasActionReview).where(eq(saasActionReview.supportCaseId, input.caseId)).limit(1)
   if (!review) throw notFound("Revisión")
   const now = new Date()

@@ -1,4 +1,5 @@
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -18,7 +19,6 @@ import {
   ScrollArea,
   Spinner,
   toast,
-  Badge,
 } from "@odentia/ui"
 import {
   Attachment,
@@ -80,11 +80,11 @@ import {
 import { activeOrgLocale } from "../../lib/locale"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { filiationGapsText } from "../../lib/patients"
-import { invalidateAgentPanelQueries } from "../agent-panel"
 import { AnswerTraceDrawer } from "../agent/answer-trace"
 import { CaseBriefDrawer } from "../agent/case-brief"
 import { CorrectDrawer, type CorrectionTarget } from "../agent/correct-drawer"
 import { LessonDrawer } from "../agent/lesson-drawer"
+import { invalidateAgentPanelQueries } from "../agent-panel"
 import { BlockPersonDialog, ContactScreenBanner, conversationTarget, useContactScreenActions } from "../inbox-contact-screen"
 import { InboxApprovedMessages } from "../integrations/whatsapp/inbox-approved-messages"
 import { AgentActionCard, type AgentActionItem, AgentActionLines, useAgentActions } from "./agent-actions"
@@ -679,7 +679,12 @@ export function ThreadView({
   const notice: { text: string; warn?: boolean; agent?: boolean } | null = promises
     ? { text: "Prometes responder después: usa «Enviar, sigue pendiente» para que el tema no se dé por resuelto.", warn: true }
     : threadAttention?.unreachable === true && topics.length > 0
-      ? { text: "Sin forma de avisarle: no hay un WhatsApp ni un correo suyo por donde llegarle. Si cierra la pestaña del chat, no le llega la respuesta.", warn: true }
+      ? {
+          text: threadAttention.othersPhone
+            ? `Sin forma de avisarle: el WhatsApp que dejó (${threadAttention.othersPhone}) ya es de otra persona de la clínica, y no se usa sin confirmar quién es. Al visitante no se le dijo. Si cierra la pestaña del chat, no le llega la respuesta.`
+            : "Sin forma de avisarle: no hay un WhatsApp ni un correo suyo por donde llegarle. Si cierra la pestaña del chat, no le llega la respuesta.",
+          warn: true,
+        }
       : closed && canWrite
         ? { text: "Está cerrada: si le escribes, se vuelve a abrir." }
         : threadAttention?.teamLive && threadAttention.agentAttending && !doneTopic

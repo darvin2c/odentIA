@@ -1,9 +1,12 @@
-import { Button, Input, ScrollArea, Textarea } from "@odentia/ui"
+import { Button, FieldLegend, FieldSet, ScrollArea } from "@odentia/ui"
+import { type ApiErrorShape, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { createFileRoute } from "@tanstack/react-router"
 import { createIsomorphicFn } from "@tanstack/react-start"
 import { setResponseHeader } from "@tanstack/react-start/server"
 import { CheckCircle2, SendHorizontal, X } from "lucide-react"
-import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react"
+import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { API_URL } from "../../lib/auth-client"
 import { orgSlugFromHostname, requestHostname } from "../../lib/host"
 
@@ -84,12 +87,16 @@ interface Poll {
   contact: { whatsapp: string | null; email: string | null } | null
 }
 
+/**
+ * Un rechazo de la API del chat, con la forma de `ApiError` (`status` +
+ * `shape`): el formulario pone cada dato señalado (`fields`) en su campo.
+ */
 class ChatError extends Error {
   constructor(
-    message: string,
     readonly status: number,
+    readonly shape: ApiErrorShape,
   ) {
-    super(message)
+    super(shape.message ?? "No pudimos conectar con el chat.")
   }
 }
 
@@ -104,12 +111,48 @@ async function call<T>(path: string, init: RequestInit = {}, token?: string | nu
   })
   const body = (await response.json().catch(() => null)) as {
     data?: T
-    error?: { message?: string }
+    error?: ApiErrorShape
   } | null
-  if (!response.ok)
-    throw new ChatError(body?.error?.message ?? "No pudimos conectar con el chat.", response.status)
+  if (!response.ok) throw new ChatError(response.status, body?.error ?? {})
   return body?.data as T
 }
+
+/**
+ * Lo que se le dice a quien escribe cuando algo no es de ningún campo: en sus
+ * palabras y con qué hacer, sin la jerga del servidor («Sesión requerida»).
+ */
+function chatProblem(error: unknown): string {
+  if (!(error instanceof ChatError) || error.status >= 500 || error.status === 408)
+    return "No se pudo enviar. Revisa tu conexión y vuelve a intentarlo."
+  if (error.status === 401)
+    return "Tu conversación se cerró. Vuelve a enviarlo para empezar una nueva."
+  if (error.status === 429) return "Escribiste muy seguido. Espera un momento y vuelve a intentarlo."
+  if (error.status === 403 || error.status === 404 || error.shape.code === "WEBCHAT_DISABLED")
+    return "Este chat no está disponible por ahora."
+  return error.shape.message?.trim() || "No se pudo enviar. Vuelve a intentarlo."
+}
+
+/** El mensaje: algo escrito, con el mismo límite que la API. */
+const messageSchema = z.object({
+  text: z.string().trim().min(1, "Escribe tu mensaje.").max(2000, "Escribe como mucho 2000 caracteres."),
+})
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** «¿Dónde te avisamos?»: uno de los dos, con los mismos límites que la API. */
+const contactSchema = z
+  .object({
+    whatsapp: z.string().trim().max(40, "Tu WhatsApp tiene como mucho 40 caracteres."),
+    email: z
+      .string()
+      .trim()
+      .max(320, "Tu correo tiene como mucho 320 caracteres.")
+      .refine((value) => value === "" || EMAIL_SHAPE.test(value), "Revisa tu correo: falta algo, como la @."),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.whatsapp.trim() && !value.email.trim())
+      ctx.addIssue({ code: "custom", path: ["whatsapp"], message: "Escribe tu WhatsApp o tu correo." })
+  })
 
 const storageKey = (slug: string) => `odentia-chat:${slug}`
 function storedToken(slug: string): string | null {
@@ -154,8 +197,11 @@ function WebchatWindow() {
     contact: null,
   })
   const [pending, setPending] = useState<ChatMessage[]>([])
-  const [text, setText] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  // Antes de hidratar, «Enviar» haría el envío nativo del formulario (un GET a
+  // `/embed?text=…`) que recarga la ventana sin `site` ni `ticket` y pierde el
+  // mensaje: hasta que responde, enviar no es posible.
+  const [ready, setReady] = useState(false)
+  useEffect(() => setReady(true), [])
   const bottom = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -213,63 +259,69 @@ function WebchatWindow() {
     return () => window.removeEventListener("keydown", onKey)
   }, [close])
 
-  async function send(event?: FormEvent) {
-    event?.preventDefault()
-    const message = text.trim()
-    if (!message || !slug) return
-    const key = crypto.randomUUID().replace(/-/g, "")
-    setPending((items) => [
-      ...items,
-      {
-        key,
-        from: "visitante",
-        author: null,
-        text: message,
-        at: new Date().toISOString(),
-        sending: true,
-      },
-    ])
-    setText("")
-    setError(null)
-    try {
-      let session = token
-      if (!session) {
-        // La sesión nace con el primer mensaje: mirar el sitio no crea conversaciones.
-        const opened = await call<{ token: string }>(`/api/webchat/${slug}/session`, {
-          method: "POST",
-          body: JSON.stringify({ site: site ?? "", ticket: ticket ?? "" }),
-        })
-        session = opened.token
-        storeToken(slug, session)
-        setToken(session)
-      }
-      await call(
-        `/api/webchat/${slug}/messages`,
+  const messageForm = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: messageSchema },
+    onSubmit: async ({ value, formApi }) => {
+      const message = value.text.trim()
+      if (!slug) return
+      const key = crypto.randomUUID().replace(/-/g, "")
+      setPending((items) => [
+        ...items,
         {
-          method: "POST",
-          body: JSON.stringify({ clientMessageId: key, text: message.slice(0, 2000) }),
+          key,
+          from: "visitante",
+          author: null,
+          text: message,
+          at: new Date().toISOString(),
+          sending: true,
         },
-        session,
-      )
-      setPending((items) =>
-        items.map((item) => (item.key === key ? { ...item, sending: false } : item)),
-      )
-      void refresh()
-    } catch (cause) {
-      setPending((items) => items.filter((item) => item.key !== key))
-      setText(message)
-      setError(
-        cause instanceof ChatError && cause.status !== 500
-          ? cause.message
-          : "No se pudo enviar. Revisa tu conexión y vuelve a intentarlo.",
-      )
-    }
-  }
+      ])
+      formApi.setFieldValue("text", "")
+      try {
+        let session = token
+        if (!session) {
+          // La sesión nace con el primer mensaje: mirar el sitio no crea conversaciones.
+          const opened = await call<{ token: string }>(`/api/webchat/${slug}/session`, {
+            method: "POST",
+            body: JSON.stringify({ site: site ?? "", ticket: ticket ?? "" }),
+          })
+          session = opened.token
+          storeToken(slug, session)
+          setToken(session)
+        }
+        await call(
+          `/api/webchat/${slug}/messages`,
+          {
+            method: "POST",
+            body: JSON.stringify({ clientMessageId: key, text: message }),
+          },
+          session,
+        )
+        setPending((items) =>
+          items.map((item) => (item.key === key ? { ...item, sending: false } : item)),
+        )
+        void refresh()
+      } catch (cause) {
+        // El mensaje vuelve al campo para reenviarlo; una sesión que ya no vale empieza de nuevo.
+        setPending((items) => items.filter((item) => item.key !== key))
+        formApi.setFieldValue("text", message)
+        if (cause instanceof ChatError && cause.status === 401 && !test) {
+          storeToken(slug, null)
+          setToken(null)
+        }
+        throw cause
+      }
+    },
+  })
+  const sendMessage = useFormSubmit(messageForm, { formMessage: chatProblem })
+  const sendError = useFormSubmitError(messageForm)
+  const sending = useStore(messageForm.store, (state) => state.isSubmitting)
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
-      void send()
+      sendMessage()
     }
   }
 
@@ -370,32 +422,36 @@ function WebchatWindow() {
           <div ref={bottom} />
         </ol>
       </ScrollArea>
-      <form className="flex flex-col gap-1 border-t p-2" onSubmit={send}>
+      <form className="flex flex-col gap-1 border-t p-2" onSubmit={sendMessage} noValidate>
         <div className="flex items-end gap-2">
-          <Textarea
-            aria-label="Tu mensaje"
-            rows={1}
-            value={text}
-            maxLength={2000}
-            placeholder="Escribe tu mensaje…"
-            className="max-h-32 min-h-11 resize-none text-base"
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={onKeyDown}
-          />
+          <messageForm.AppField name="text">
+            {(field) => (
+              <field.TextareaField
+                label="Tu mensaje"
+                hideLabel
+                className="min-w-0 flex-1 gap-1"
+                rows={1}
+                maxLength={2000}
+                placeholder="Escribe tu mensaje…"
+                textareaClassName="max-h-32 min-h-11 resize-none text-base"
+                onKeyDown={onKeyDown}
+              />
+            )}
+          </messageForm.AppField>
           <Button
             type="submit"
             size="icon"
             className="size-11 shrink-0 text-white"
             style={{ backgroundColor: accent }}
             aria-label="Enviar"
-            disabled={!text.trim()}
+            disabled={sending || !ready}
           >
             <SendHorizontal className="size-5" />
           </Button>
         </div>
-        {error ? (
+        {sendError ? (
           <p role="alert" className="px-1 text-sm text-destructive">
-            {error}
+            {sendError}
           </p>
         ) : null}
       </form>
@@ -453,62 +509,59 @@ function ContactCard({
   accent: string
   onSaved: (contact: Poll["contact"]) => void
 }) {
-  const [whatsapp, setWhatsapp] = useState("")
-  const [email, setEmail] = useState("")
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  async function save(event: FormEvent) {
-    event.preventDefault()
-    if (!whatsapp.trim() && !email.trim()) {
-      setError("Escribe tu WhatsApp o tu correo.")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    try {
+  const form = useAppForm({
+    defaultValues: { whatsapp: "", email: "" },
+    validators: { onSubmit: contactSchema },
+    onSubmit: async ({ value }) => {
       const saved = await call<{ contact: Poll["contact"] }>(
         `/api/webchat/${slug}/contact`,
         {
           method: "POST",
-          body: JSON.stringify({ whatsapp: whatsapp.trim() || null, email: email.trim() || null }),
+          body: JSON.stringify({ whatsapp: value.whatsapp.trim() || null, email: value.email.trim() || null }),
         },
         token,
       )
       onSaved(saved.contact)
-    } catch (cause) {
-      setError(
-        cause instanceof ChatError ? cause.message : "No se pudo guardar. Vuelve a intentarlo.",
-      )
-    } finally {
-      setSaving(false)
-    }
-  }
+    },
+  })
+  const save = useFormSubmit(form, { formMessage: chatProblem })
+  const error = useFormSubmitError(form)
+  const saving = useStore(form.store, (state) => state.isSubmitting)
   return (
     <li className="self-stretch">
       <form
         className="flex flex-col gap-2 rounded-2xl border bg-card p-3"
         onSubmit={save}
+        noValidate
         aria-label="Dónde te avisamos"
       >
-        <p className="text-sm font-semibold">¿Dónde te avisamos cuando te respondan?</p>
-        <Input
-          aria-label="Tu WhatsApp"
-          inputMode="tel"
-          autoComplete="tel"
-          placeholder="Tu WhatsApp"
-          className="text-base"
-          value={whatsapp}
-          onChange={(event) => setWhatsapp(event.target.value)}
-        />
-        <Input
-          aria-label="O tu correo"
-          type="email"
-          autoComplete="email"
-          placeholder="o tu correo"
-          className="text-base"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
+        <FieldSet className="gap-2">
+          <FieldLegend className="text-sm font-semibold">¿Dónde te avisamos cuando te respondan?</FieldLegend>
+          <form.AppField name="whatsapp">
+            {(field) => (
+              <field.TextField
+                label="Tu WhatsApp"
+                inputMode="tel"
+                autoComplete="tel"
+                maxLength={40}
+                placeholder="+51 987 654 321"
+                inputClassName="text-base"
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="email">
+            {(field) => (
+              <field.TextField
+                label="O tu correo"
+                type="email"
+                autoComplete="email"
+                maxLength={320}
+                placeholder="tu@correo.com"
+                inputClassName="text-base"
+              />
+            )}
+          </form.AppField>
+        </FieldSet>
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}

@@ -49,7 +49,15 @@ const cents = z.number().int().positive().max(2147483647)
 const currency = z.string().regex(/^[A-Z]{3}$/)
 const isoDateTime = z.iso.datetime({ offset: true })
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({
+    reason: z
+      .string({ error: "Escribe el motivo de la anulación." })
+      .trim()
+      .min(1, "Escribe el motivo de la anulación.")
+      .max(2000, "Escribe el motivo en 2000 caracteres como mucho."),
+  })
+  .strict()
 
 export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
   const app = new Hono()
@@ -72,7 +80,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
         branchId: z.uuid(),
         kind: z.enum(["aporte", "retiro"]),
         amountCents: cents,
-        concept: z.string().trim().min(1).max(500),
+        concept: z.string().trim().min(1, "Cuenta para qué es el movimiento.").max(500, "Escribe como mucho 500 caracteres."),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -310,7 +318,7 @@ export function createFinanceRoute(deps: Pick<CrmDeps, "db">) {
       .object({
         branchId: z.uuid(),
         category: z.string().max(60).optional(),
-        concept: z.string().trim().min(1).max(500),
+        concept: z.string().trim().min(1, "Escribe en qué se gastó.").max(500, "Escribe como mucho 500 caracteres."),
         amountCents: cents,
         currency: currency.optional(),
         spentAt: isoDateTime.nullish(),

@@ -8,8 +8,6 @@ import {
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
-  Field,
-  FieldLabel,
   Select,
   SelectContent,
   SelectItem,
@@ -18,7 +16,7 @@ import {
 } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useId, useMemo, useState } from "react"
+import { type FocusEvent, useId, useMemo, useState } from "react"
 import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { useClinicSpecialties } from "../../lib/clinical-forms"
@@ -32,7 +30,12 @@ interface ServicePickerProps {
   onChange: (service: ServiceCatalogItem) => void
   disabled?: boolean
   currentService?: { id: string; name: string }
-  label?: string
+  /** Va al buscador, el enfocable principal (para `FieldLabel htmlFor`). */
+  id?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  /** Al salir del selector entero (especialidad y buscador). */
+  onBlur?: () => void
 }
 
 const NO_SPECIALTY = "todas"
@@ -41,15 +44,20 @@ const NO_SPECIALTY = "todas"
  * Selector de tratamiento del tarifario para planes y procedimientos.
  * La tarifa se muestra solo como lectura; sin tarifa no se puede cotizar.
  * Tras elegir se mantiene abierto para seguir añadiendo uno por uno.
+ * No pinta su etiqueta: la pantalla lo nombra con `Field` + `FieldLabel htmlFor={id}`.
  */
 export function ServicePicker({
   value,
   onChange,
   disabled = false,
   currentService,
-  label = "Tratamiento",
+  id: idProp,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
 }: ServicePickerProps) {
-  const id = useId()
+  const fallbackId = useId()
+  const id = idProp ?? fallbackId
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState(false)
   const [specialty, setSpecialty] = useState<string>(NO_SPECIALTY)
@@ -77,9 +85,15 @@ export function ServicePicker({
 
   const selectedItem = items.find((row) => row.id === value) ?? null
 
+  // `onBlur` solo al salir del selector entero, no al pasar de la especialidad al buscador.
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!onBlur || event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    onBlur()
+  }
+
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+    // biome-ignore lint/a11y/noStaticElementInteractions: solo escucha cuándo el foco sale de lo que tiene dentro, para dar el campo por visitado.
+    <div className="flex flex-col gap-3" onBlur={handleBlur}>
       <div className="flex flex-col gap-2">
         <Select
           value={specialty}
@@ -137,6 +151,8 @@ export function ServicePicker({
             disabled={disabled}
             placeholder="Buscar tratamiento por nombre, código o especialidad…"
             showTrigger={false}
+            aria-invalid={invalid || undefined}
+            aria-describedby={describedBy}
           />
           <ComboboxContent>
             {servicesQuery.isPending ? (
@@ -219,6 +235,6 @@ export function ServicePicker({
           {currentService.name} · Tratamiento guardado; no disponible para nuevas selecciones.
         </p>
       ) : null}
-    </Field>
+    </div>
   )
 }

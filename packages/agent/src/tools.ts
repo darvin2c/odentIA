@@ -1,111 +1,111 @@
 import { createHash } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
-import { channelConnection, conversation } from "@odentia/db/schema/crm"
-import { and, eq } from "drizzle-orm"
 import type { AnswerBasisItem, AnswerCheck, AnswerTraceOutcome } from "@odentia/db/schema/agent"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
+import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import {
+  type AgentPatientBudgets,
   addAgentCaseNote,
   addPersonFact,
-  type AgentPatientBudgets,
-  CASE_SLOTS,
-  type CaseSlot,
+  agentReplyBlockedReason,
+  agentTextsFor,
+  annotateHandoff,
+  answerGeneralPermission,
+  bookedDataLink,
+  bookingPickAddress,
   budgetAnswerQuestion,
   budgetLineWords,
   budgetNumberText,
   buildAgentProposalKey,
-  getAgentPatientBudgets,
-  planBudgetAnswer,
-  proposalConfirmButtons,
-  resendBudgetByContact,
-  confirmProposalByContact,
-  proposalReplyOf,
-  chosenBeforeProposalOf,
-  bookedDataLink,
-  answerGeneralPermission,
-  chooseMessagesInConversation,
-  confirmAppointmentByContact,
+  CASE_SLOTS,
+  type CaseSlot,
   type ContactAppointmentOption,
-  PERSONAL_LINK_TTL_DAYS,
-  createBookingLink,
-  issueAgendaLink,
-  personalLinkAddress,
-  personalLinkRef,
-  GAPS_PER_PROFESSIONAL_PER_DAY,
-  requestPortalReentry,
-  annotateHandoff,
-  agentReplyBlockedReason,
-  newerInboundThan,
+  chatBookingMissing,
+  chooseMessagesInConversation,
+  chosenBeforeProposalOf,
+  clinicAddressOf,
+  clinicOrigin,
+  clinicSearchFoundNothing,
   closeConversationWith,
   closurePendingReason,
+  confirmAppointmentByContact,
+  confirmProposalByContact,
+  createBookingLink,
   createHandoff,
-  topicKindOf,
-  recordTopicAskedAgain,
-  latestOpenTopic,
-  getProposal,
   createProposal,
   createTask,
-  recordAgentAction,
+  emergencyAdviceFor,
   findFreeGaps,
-  getAgentPatientSummary,
-  getContact,
-  getClinicInfoSnapshot,
-  getOpportunity,
-  getOrgLocale,
-  clinicSearchFoundNothing,
   formatAgentClinicData,
   formatClinicSearch,
-  GENERAL_PERMISSION_QUESTION,
-  generalPermissionWords,
-  listPricedSubjects,
-  PRICES_PER_CONVERSATION,
   formatOrgMoney,
   formatZoned,
+  GAPS_PER_PROFESSIONAL_PER_DAY,
+  GENERAL_PERMISSION_QUESTION,
+  generalPermissionWords,
   getAgentClinicData,
   getAgentConfig,
+  getAgentPatientBudgets,
+  getAgentPatientSummary,
+  getClinicInfoSnapshot,
+  getContact,
+  getOpportunity,
+  getOrgLocale,
+  getProposal,
+  issueAgendaLink,
+  latestOpenTopic,
   listAgentContextCandidates,
   reportPatientNameMismatch,
-  bookingPickAddress,
-  chatBookingMissing,
   listContactChannelHistory,
   listContactNotes,
   listOpportunities,
   listPaymentMethods,
+  listPricedSubjects,
   listTasks,
+  newerInboundThan,
   noteLessonUse,
   operationAgentSchema,
+  PERSONAL_LINK_TTL_DAYS,
+  PRICES_PER_CONVERSATION,
+  type ProductAgentTexts,
+  personalLinkAddress,
+  personalLinkRef,
+  planBudgetAnswer,
+  proposalConfirmButtons,
+  proposalReplyOf,
+  rankByMeaning,
+  recordAgentAction,
   recordAnswerTrace,
   recordKnowledgeGap,
+  recordTopicAskedAgain,
+  requestPortalReentry,
   requireContact,
+  resendBudgetByContact,
   resolveAgentPatientContext,
-  resumeConversationBySystem,
-  sendReceiptInConversation,
-  rankByMeaning,
   resolveProfessionalRef,
+  resumeConversationBySystem,
+  ServiceError,
+  saveWebchatContactForConversation,
   searchClinic,
   searchPublishedKnowledge,
-  ServiceError,
+  sendReceiptInConversation,
+  topicKindOf,
   updateContact,
   webchatHandoffWhere,
   webchatReplyRoutes,
-  saveWebchatContactForConversation,
-  agentTextsFor,
-  emergencyAdviceFor,
-  type ProductAgentTexts,
-  clinicAddressOf,
-  clinicOrigin,
 } from "@odentia/services"
-import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
+import { and, eq } from "drizzle-orm"
 import { z } from "zod"
-import type { DecisionModel } from "./decision/port.js"
-import { choseThisSlot, understoodYes } from "./confirm-intent.js"
-import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
+import { formulasIn, nameQuestionsIn } from "./attention.js"
 import { formatForChannel } from "./channel-format.js"
 import { claimsOf } from "./claims.js"
+import { choseThisSlot, understoodYes } from "./confirm-intent.js"
+import type { DecisionModel } from "./decision/port.js"
+import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
-import { formulasIn, nameQuestionsIn } from "./attention.js"
-import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, timesIn, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, pricedSubjectsOf, type ReplyVerdict, refusedPaymentMentions, timesIn, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -984,7 +984,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if ((await conversationChannel(ctx)) !== "webchat") return null
     const routes = await inOrg((tx) => webchatReplyRoutes(tx, ctx.orgId, ctx.contactId)).catch(() => null)
     if (!routes) return null
-    if (routes.whatsapp || routes.correo) {
+    // Un número de otra persona (`othersPhone`) cuenta como dejado: lo decide el equipo, y
+    // decirle al visitante que no sirve le revelaría quién es de la clínica.
+    if (routes.whatsapp || routes.correo || routes.othersPhone) {
       ctx.contactOnFile = true
       return null
     }

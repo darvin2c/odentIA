@@ -8,7 +8,7 @@
 import { reportGoal, REPORT_GOAL_METRICS } from "@odentia/db/schema/reports"
 import type { Db } from "@odentia/db"
 import { sql } from "drizzle-orm"
-import { validation } from "./errors.js"
+import { invalidField, validation } from "./errors.js"
 import { getOrgLocale } from "./locale.js"
 import { currentMonthIn, monthStart, type ReportWindow, type YearMonth } from "./report-periods.js"
 
@@ -61,8 +61,9 @@ export async function setReportGoal(
   const metric = input.metric as ReportGoalMetric
   const { timezone, currency } = await getOrgLocale(tx, orgId)
   if (input.amount !== null) {
-    if (!Number.isSafeInteger(input.amount) || input.amount <= 0) throw validation(metric === "cobrado" ? "Escribe cuánto quieres cobrar cada mes" : "Escribe cuántos pacientes nuevos quieres cada mes")
-    if (input.amount > (metric === "cobrado" ? MAX_CENTS : MAX_PATIENTS)) throw validation("La meta es demasiado grande")
+    if (!Number.isSafeInteger(input.amount) || input.amount <= 0)
+      throw invalidField("amount", metric === "cobrado" ? "Escribe cuánto quieres cobrar cada mes" : "Escribe cuántos pacientes nuevos quieres cada mes")
+    if (input.amount > (metric === "cobrado" ? MAX_CENTS : MAX_PATIENTS)) throw invalidField("amount", "La meta es demasiado grande")
   }
   const month = currentMonthIn(timezone, now)
   const fromMonth = `${monthKey(month)}-01`

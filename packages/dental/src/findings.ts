@@ -154,6 +154,26 @@ function archRowOf(toothNumber: number): readonly number[] {
   return rows.find((row) => row.includes(toothNumber)) ?? []
 }
 
+/**
+ * El dato del hallazgo al que se refiere un error, con el nombre que tiene en
+ * el cuerpo de la petición (`details.grade`): la pantalla lo dice junto a él.
+ */
+export type FindingField =
+  | "toothNumber"
+  | "condition"
+  | "surfaces"
+  | "details"
+  | `details.${keyof FindingDetails & string}`
+  | "note"
+  | "diagnosisCode"
+  | "encounterId"
+
+/** Un error de un hallazgo con el dato que hay que cambiar. */
+export interface FindingIssue {
+  field: FindingField
+  message: string
+}
+
 /** Valida la forma del dibujo libre; devuelve verdadero si es finito y acotado. */
 function pushDrawingErrors(errors: string[], drawing: unknown, minPoints: number): boolean {
   if (!Array.isArray(drawing) || drawing.length === 0) {
@@ -209,33 +229,44 @@ export function validateFinding(
   input: FindingInput,
   options: ValidateFindingOptions = { strictVariants: true },
 ): string[] {
-  const errors: string[] = []
+  return findingIssues(input, options).map((issue) => issue.message)
+}
+
+/**
+ * Lo mismo que `validateFinding`, cada error con su dato (`FindingField`):
+ * la pantalla y el servidor lo señalan en su campo.
+ */
+export function findingIssues(
+  input: FindingInput,
+  options: ValidateFindingOptions = { strictVariants: true },
+): FindingIssue[] {
+  const issues: FindingIssue[] = []
+  const add = (field: FindingField, message: string) => issues.push({ field, message })
   const toothOk = isValidTooth(input.toothNumber)
   if (!toothOk) {
-    errors.push(`Pieza FDI inválida: "${input.toothNumber}".`)
+    add("toothNumber", `Pieza FDI inválida: "${input.toothNumber}".`)
   }
   const def = findingDefinition(input.condition)
   if (!def) {
-    errors.push(`Condición desconocida: "${input.condition}".`)
-    return errors
+    add("condition", `Condición desconocida: "${input.condition}".`)
+    return issues
   }
 
   const rawDetails: unknown = input.details ?? {}
   if (typeof rawDetails !== "object" || rawDetails === null || Array.isArray(rawDetails)) {
-    errors.push("Los detalles del hallazgo son inválidos.")
-    return errors
+    add("details", "Los detalles del hallazgo son inválidos.")
+    return issues
   }
   const details = rawDetails as FindingDetails
   for (const key of Object.keys(details)) {
-    if (!Object.hasOwn(KNOWN_DETAIL_KEYS, key))
-      errors.push(`Campo no reconocido en detalles: "${key}".`)
+    if (!Object.hasOwn(KNOWN_DETAIL_KEYS, key)) add("details", `Campo no reconocido en detalles: "${key}".`)
   }
 
   // Superficies: solo el alcance `surface` las admite; siempre contra la anatomía.
   let surfaces: string[] = []
   if (input.surfaces !== undefined && input.surfaces !== null) {
     if (!Array.isArray(input.surfaces)) {
-      errors.push("Las superficies del hallazgo son inválidas.")
+      add("surfaces", "Las superficies del hallazgo son inválidas.")
     } else {
       surfaces = input.surfaces
     }
@@ -243,17 +274,17 @@ export function validateFinding(
   const seenSurface: Record<string, true> = {}
   for (const surface of surfaces) {
     if (typeof surface !== "string" || !SURFACES.includes(surface)) {
-      errors.push(`Superficie desconocida: "${surface}".`)
+      add("surfaces", `Superficie desconocida: "${surface}".`)
       continue
     }
-    if (seenSurface[surface]) errors.push(`Superficie duplicada: "${surface}".`)
+    if (seenSurface[surface]) add("surfaces", `Superficie duplicada: "${surface}".`)
     seenSurface[surface] = true
     if (toothOk && !surfacesForTooth(input.toothNumber).some((valid) => valid === surface)) {
-      errors.push(`La superficie ${surface} no corresponde a la pieza ${input.toothNumber}.`)
+      add("surfaces", `La superficie ${surface} no corresponde a la pieza ${input.toothNumber}.`)
     }
   }
   if (def.scope !== "surface" && surfaces.length > 0) {
-    errors.push(`El hallazgo "${def.label}" no admite superficies.`)
+    add("surfaces", `El hallazgo "${def.label}" no admite superficies.`)
   }
 
   // Variante: con odontograma oficial, obligatoria cuando el catálogo la
@@ -262,78 +293,79 @@ export function validateFinding(
   if (def.variants) {
     if (!variantPresent) {
       if (options.strictVariants)
-        errors.push(`El hallazgo "${def.label}" requiere variante (sigla oficial).`)
+        add("details.variant", `El hallazgo "${def.label}" requiere variante (sigla oficial).`)
     } else if (!def.variants.some((item) => item.value === details.variant)) {
-      errors.push(
+      add(
+        "details.variant",
         options.strictVariants
           ? `Variante desconocida para "${def.label}": "${details.variant}".`
           : `${def.variantName ?? "Variante"} desconocida para "${def.label}": "${details.variant}".`,
       )
     }
   } else if (variantPresent) {
-    errors.push(`El hallazgo "${def.label}" no admite variante.`)
+    add("details.variant", `El hallazgo "${def.label}" no admite variante.`)
   }
 
   // Calidad: obligatoria en color dual (buen/mal estado); prohibida en color fijo.
   const qualityPresent = isPresent(details.quality)
   if (def.color === "quality") {
     if (details.quality !== "good" && details.quality !== "poor") {
-      errors.push(`El hallazgo "${def.label}" requiere el estado (buen estado o mal estado).`)
+      add("details.quality", `El hallazgo "${def.label}" requiere el estado (buen estado o mal estado).`)
     }
   } else if (qualityPresent) {
-    errors.push(`El hallazgo "${def.label}" tiene color normativo fijo y no admite estado.`)
+    add("details.quality", `El hallazgo "${def.label}" tiene color normativo fijo y no admite estado.`)
   }
 
   // Grado de movilidad: entero >= 1. No existe M0 patológico.
   const gradePresent = details.grade !== undefined && details.grade !== null
   if (input.condition === "pathological_mobility") {
     if (!gradePresent) {
-      errors.push(`La movilidad patológica requiere el grado (número arábigo).`)
+      add("details.grade", `La movilidad patológica requiere el grado (número arábigo).`)
     } else if (details.grade === 0) {
-      errors.push("El grado 0 no es movilidad patológica (no existe M0).")
+      add("details.grade", "El grado 0 no es movilidad patológica (no existe M0).")
     } else if (!Number.isInteger(details.grade) || (details.grade as number) < 1) {
-      errors.push("El grado de movilidad debe ser un entero mayor o igual a 1.")
+      add("details.grade", "El grado de movilidad debe ser un entero mayor o igual a 1.")
     }
   } else if (gradePresent) {
-    errors.push(`El hallazgo "${def.label}" no admite grado.`)
+    add("details.grade", `El hallazgo "${def.label}" no admite grado.`)
   }
 
   // Dirección del giro: obligatoria en giroversión.
   const directionPresent = isPresent(details.direction)
   if (input.condition === "rotation") {
     if (details.direction !== "clockwise" && details.direction !== "counterclockwise") {
-      errors.push("La giroversión requiere la dirección del giro.")
+      add("details.direction", "La giroversión requiere la dirección del giro.")
     }
   } else if (directionPresent) {
-    errors.push(`El hallazgo "${def.label}" no admite dirección.`)
+    add("details.direction", `El hallazgo "${def.label}" no admite dirección.`)
   }
 
   // Posiciones: obligatorias en posición anormal, compatibles con la arcada.
   if (input.condition === "abnormal_position") {
     const positions = asStringList(details.positions)
     if (!positions || positions.length === 0) {
-      errors.push(`La posición anormal requiere al menos una posición (M/D/V/P/L).`)
+      add("details.positions", `La posición anormal requiere al menos una posición (M/D/V/P/L).`)
     } else {
       const seenPosition = new Set<string>()
       for (const position of positions) {
         if (!Object.hasOwn(POSITION_VALUES, position)) {
-          errors.push(`Posición desconocida: "${position}".`)
+          add("details.positions", `Posición desconocida: "${position}".`)
           continue
         }
-        if (seenPosition.has(position)) errors.push(`Posición duplicada: "${position}".`)
+        if (seenPosition.has(position)) add("details.positions", `Posición duplicada: "${position}".`)
         seenPosition.add(position)
         if (toothOk && position === "palatal" && !isUpperTooth(input.toothNumber)) {
-          errors.push(`La posición palatinizada solo corresponde a piezas superiores.`)
+          add("details.positions", `La posición palatinizada solo corresponde a piezas superiores.`)
         }
         if (toothOk && position === "lingual" && isUpperTooth(input.toothNumber)) {
-          errors.push(`La posición lingualizada solo corresponde a piezas inferiores.`)
+          add("details.positions", `La posición lingualizada solo corresponde a piezas inferiores.`)
         }
       }
     }
   } else if (asStringList(details.positions)?.length) {
-    errors.push(`El hallazgo "${def.label}" no admite posiciones.`)
+    add("details.positions", `El hallazgo "${def.label}" no admite posiciones.`)
   } else if (details.positions !== undefined && details.positions !== null) {
-    errors.push(`Las posiciones del hallazgo "${def.label}" son inválidas.`)
+    add("details.positions", `Las posiciones del hallazgo "${def.label}" son inválidas.`)
   }
 
   // Piezas relacionadas según alcance.
@@ -342,7 +374,7 @@ export function validateFinding(
   let related: number[] | undefined
   if (relatedRaw !== undefined && relatedRaw !== null) {
     if (!Array.isArray(relatedRaw)) {
-      errors.push("Las piezas relacionadas del hallazgo son inválidas.")
+      add("details.relatedTeeth", "Las piezas relacionadas del hallazgo son inválidas.")
     } else {
       related = relatedRaw
     }
@@ -350,7 +382,7 @@ export function validateFinding(
   let abutments: number[] | undefined
   if (abutmentRaw !== undefined && abutmentRaw !== null) {
     if (!Array.isArray(abutmentRaw)) {
-      errors.push("Los pilares del hallazgo son inválidos.")
+      add("details.abutmentTeeth", "Los pilares del hallazgo son inválidos.")
     } else {
       abutments = abutmentRaw
     }
@@ -360,16 +392,17 @@ export function validateFinding(
 
   if (def.scope === "tooth" || def.scope === "surface") {
     if (relatedList.length > 0) {
-      errors.push(
+      add(
+        "details.relatedTeeth",
         `El hallazgo "${def.label}" es de pieza individual y no admite piezas relacionadas.`,
       )
     }
     if (abutmentList.length > 0) {
-      errors.push(`El hallazgo "${def.label}" no admite pilares.`)
+      add("details.abutmentTeeth", `El hallazgo "${def.label}" no admite pilares.`)
     }
   } else if (def.scope === "pair") {
     if (abutmentList.length > 0) {
-      errors.push(`El hallazgo "${def.label}" no admite pilares.`)
+      add("details.abutmentTeeth", `El hallazgo "${def.label}" no admite pilares.`)
     }
     if (
       relatedList.length !== 2 ||
@@ -377,44 +410,46 @@ export function validateFinding(
       relatedList.some((tooth) => !isValidTooth(tooth)) ||
       relatedList[0] === relatedList[1]
     ) {
-      errors.push(
+      add(
+        "details.relatedTeeth",
         `El hallazgo "${def.label}" relaciona exactamente dos piezas válidas incluyendo la pieza ${input.toothNumber}.`,
       )
     } else if (
       isPrimaryTooth(relatedList[0]) !== isPrimaryTooth(relatedList[1]) ||
       isUpperTooth(relatedList[0]) !== isUpperTooth(relatedList[1])
     ) {
-      errors.push(`El par de "${def.label}" debe ser de la misma arcada y dentición.`)
+      add("details.relatedTeeth", `El par de "${def.label}" debe ser de la misma arcada y dentición.`)
     } else if (input.condition !== "transposition") {
       // Diastema, fusión y supernumeraria ocurren entre piezas adyacentes;
       // la transposición puede involucrar piezas no adyacentes.
       const row = archRowOf(relatedList[0])
       const gap = Math.abs(row.indexOf(relatedList[0]) - row.indexOf(relatedList[1]))
-      if (gap !== 1) errors.push(`El par de "${def.label}" debe ser de piezas adyacentes.`)
+      if (gap !== 1) add("details.relatedTeeth", `El par de "${def.label}" debe ser de piezas adyacentes.`)
     }
   } else if (def.scope === "span") {
     for (const tooth of relatedList) {
-      if (!isValidTooth(tooth)) errors.push(`Pieza relacionada inválida: "${tooth}".`)
+      if (!isValidTooth(tooth)) add("details.relatedTeeth", `Pieza relacionada inválida: "${tooth}".`)
     }
     const validRelated = relatedList.filter((tooth) => isValidTooth(tooth))
     const unique = [...new Set(validRelated)]
     if (unique.length !== validRelated.length) {
-      errors.push("Las piezas del tramo no deben duplicarse.")
+      add("details.relatedTeeth", "Las piezas del tramo no deben duplicarse.")
     }
     // La prótesis parcial removible puede reemplazar una sola pieza; el resto exige tramo.
     const minSpan = input.condition === "removable_partial_denture" ? 1 : 2
     if (!toothOk || !relatedList.includes(input.toothNumber) || unique.length < minSpan) {
-      errors.push(
+      add(
+        "details.relatedTeeth",
         `El hallazgo "${def.label}" requiere el tramo de piezas incluyendo la pieza ${input.toothNumber}.`,
       )
     } else {
       const row = archRowOf(input.toothNumber)
       if (!unique.every((tooth) => row.includes(tooth))) {
-        errors.push(`El tramo de "${def.label}" debe ser de la misma arcada y dentición.`)
+        add("details.relatedTeeth", `El tramo de "${def.label}" debe ser de la misma arcada y dentición.`)
       } else {
         const indices = unique.map((tooth) => row.indexOf(tooth)).sort((a, b) => a - b)
         const contiguous = indices.every((index, i) => i === 0 || index === indices[i - 1] + 1)
-        if (!contiguous) errors.push(`El tramo de "${def.label}" debe ser contiguo.`)
+        if (!contiguous) add("details.relatedTeeth", `El tramo de "${def.label}" debe ser contiguo.`)
       }
     }
     if (input.condition === "fixed_partial_denture") {
@@ -423,14 +458,14 @@ export function validateFinding(
         abutmentList.length >= 1 &&
         new Set(abutmentList).size === abutmentList.length &&
         abutmentList.every((tooth) => isValidTooth(tooth) && relatedList.includes(tooth))
-      if (!pillarsOk) errors.push("El puente requiere al menos un pilar válido dentro del tramo.")
+      if (!pillarsOk) add("details.abutmentTeeth", "El puente requiere al menos un pilar válido dentro del tramo.")
     } else if (abutmentList.length > 0) {
-      errors.push(`El hallazgo "${def.label}" no admite pilares.`)
+      add("details.abutmentTeeth", `El hallazgo "${def.label}" no admite pilares.`)
     }
   } else {
     // Alcance `arch`: el hallazgo abarca la arcada completa de la pieza.
     if (abutmentList.length > 0) {
-      errors.push(`El hallazgo "${def.label}" no admite pilares.`)
+      add("details.abutmentTeeth", `El hallazgo "${def.label}" no admite pilares.`)
     }
     if (toothOk) {
       const expected = [...archRowOf(input.toothNumber)].sort((a, b) => a - b)
@@ -442,21 +477,21 @@ export function validateFinding(
         actual.length === expected.length &&
         actual.every((tooth, i) => tooth === expected[i])
       if (!complete) {
-        errors.push(`El hallazgo "${def.label}" abarca la arcada completa de la pieza.`)
+        add("details.relatedTeeth", `El hallazgo "${def.label}" abarca la arcada completa de la pieza.`)
       }
       if (new Set(relatedList).size !== relatedList.length) {
-        errors.push("Las piezas de la arcada no deben duplicarse.")
+        add("details.relatedTeeth", "Las piezas de la arcada no deben duplicarse.")
       }
     } else if (relatedList.length > 0) {
-      errors.push(`El hallazgo "${def.label}" abarca la arcada completa de la pieza.`)
+      add("details.relatedTeeth", `El hallazgo "${def.label}" abarca la arcada completa de la pieza.`)
     }
   }
 
   // Evidencia clínica directa cuando la norma la exige.
   if (details.clinicallyObserved !== undefined && typeof details.clinicallyObserved !== "boolean") {
-    errors.push("La observación clínica debe ser verdadero o falso.")
+    add("details.clinicallyObserved", "La observación clínica debe ser verdadero o falso.")
   } else if (def.requiresEvidence && details.clinicallyObserved !== true) {
-    errors.push(`El hallazgo "${def.label}" solo se registra con observación clínica directa.`)
+    add("details.clinicallyObserved", `El hallazgo "${def.label}" solo se registra con observación clínica directa.`)
   }
 
   // Dibujo: mínimo dos puntos por trazo; la forma observada de un hallazgo de
@@ -466,62 +501,64 @@ export function validateFinding(
   const drawingOnlyShape = def.scope === "surface" && surfaces.length === 0
   const minPoints = drawingOnlyShape ? 3 : 2
   if (drawingPresent && def.scope !== "surface" && !def.requiresDrawing) {
-    errors.push(
+    add(
+      "details.drawing",
       `El hallazgo "${def.label}" se representa con su símbolo normativo, no con trazos libres.`,
     )
   } else if (drawingPresent) {
-    const drawingOk = pushDrawingErrors(errors, details.drawing, minPoints)
+    const drawingErrors: string[] = []
+    const drawingOk = pushDrawingErrors(drawingErrors, details.drawing, minPoints)
+    for (const message of drawingErrors) add("details.drawing", message)
     if (!drawingOk) {
       if (input.condition === "fracture") {
-        errors.push("La fractura dental requiere el trazo de la fractura (al menos dos puntos).")
+        add("details.drawing", "La fractura dental requiere el trazo de la fractura (al menos dos puntos).")
       } else if (drawingOnlyShape) {
-        errors.push(
+        add(
+          "details.drawing",
           `El dibujo de "${def.label}" requiere al menos tres puntos por trazo para cerrar la forma observada.`,
         )
       }
     }
   } else if (input.condition === "fracture") {
-    errors.push("La fractura dental requiere el trazo de la fractura (al menos dos puntos).")
+    add("details.drawing", "La fractura dental requiere el trazo de la fractura (al menos dos puntos).")
   }
   if (drawingOnlyShape && !drawingPresent) {
-    errors.push(
-      `El hallazgo "${def.label}" requiere superficies o el dibujo de la forma observada.`,
-    )
+    add("surfaces", `El hallazgo "${def.label}" requiere superficies o el dibujo de la forma observada.`)
   }
 
   // Especificaciones: obligatorias en corona temporal (material) y fluorosis (clasificación).
   if (details.specifications !== undefined && typeof details.specifications !== "string") {
-    errors.push("Las especificaciones del hallazgo son inválidas.")
+    add("details.specifications", "Las especificaciones del hallazgo son inválidas.")
   } else {
     const specifications = (details.specifications ?? "").trim()
     if (specifications.length > MAX_TEXT) {
-      errors.push(`Las especificaciones superan el máximo de ${MAX_TEXT} caracteres.`)
+      add("details.specifications", `Las especificaciones superan el máximo de ${MAX_TEXT} caracteres.`)
     }
     if (input.condition === "temporary_crown" && specifications === "") {
-      errors.push(`La corona temporal requiere el material en especificaciones.`)
+      add("details.specifications", `La corona temporal requiere el material en especificaciones.`)
     }
     if (details.variant === "fluorosis" && specifications === "") {
-      errors.push("La fluorosis requiere la clasificación utilizada en especificaciones.")
+      add("details.specifications", "La fluorosis requiere la clasificación utilizada en especificaciones.")
     }
   }
   if (details.observations !== undefined && typeof details.observations !== "string") {
-    errors.push("Las observaciones del hallazgo son inválidas.")
+    add("details.observations", "Las observaciones del hallazgo son inválidas.")
   } else if ((details.observations ?? "").length > MAX_TEXT) {
-    errors.push(`Las observaciones superan el máximo de ${MAX_TEXT} caracteres.`)
+    add("details.observations", `Las observaciones superan el máximo de ${MAX_TEXT} caracteres.`)
   }
   // La observación clínica es texto libre: exige observaciones o nota no vacías.
   if (input.condition === "clinical_observation") {
     const observations = typeof details.observations === "string" ? details.observations.trim() : ""
     const note = typeof input.note === "string" ? input.note.trim() : ""
     if (observations === "" && note === "") {
-      errors.push("La observación clínica requiere observaciones o nota.")
+      add("details.observations", "La observación clínica requiere observaciones o nota.")
     }
   }
 
   if (input.note !== undefined && input.note !== null && typeof input.note !== "string") {
-    errors.push("La nota del hallazgo es inválida.")
+    add("note", "La nota del hallazgo es inválida.")
   } else if (typeof input.note === "string" && input.note.length > MAX_TEXT) {
-    errors.push(`La nota supera el máximo de ${MAX_TEXT} caracteres.`)
+    add("note", `La nota supera el máximo de ${MAX_TEXT} caracteres.`)
   }
   for (const [field, label] of [
     ["diagnosisCode", "El código diagnóstico"],
@@ -529,10 +566,10 @@ export function validateFinding(
   ] as const) {
     const value = input[field]
     if (value !== undefined && value !== null && value !== "" && typeof value !== "string") {
-      errors.push(`${label} del hallazgo es inválido.`)
+      add(field, `${label} del hallazgo es inválido.`)
     }
   }
-  return errors
+  return issues
 }
 
 function timeOf(value: string | Date | null | undefined): number | undefined {

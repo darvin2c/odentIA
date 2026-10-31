@@ -1,14 +1,24 @@
-import { Button, buttonVariants, cn, Field, FieldLabel, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea, Textarea } from "@odentia/ui"
-import { DetailDrawer, SubmitButton, useHeaderCompact } from "@odentia/ui-patterns"
+import { Button, buttonVariants, cn, InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea, Textarea } from "@odentia/ui"
+import {
+  DetailDrawer,
+  isUnconfirmedSubmit,
+  SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  useHeaderCompact,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { ArrowRight, CircleHelp } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import { ApiError, apiFetch } from "../lib/api"
+import { apiFetch } from "../lib/api"
 import { useReceptionName, withReceptionName } from "../lib/agent-names"
 import { ASK_HELP_EVENT } from "../lib/global-search"
-import { mutationErrorMessage } from "../lib/query-error"
 import { casesEnvelope, SupportCasesSection } from "./support-cases"
 import { appWords } from "../lib/product-words"
 
@@ -49,8 +59,6 @@ interface Exchange {
   reply: HelpReply
   /** Lo que la persona dijo de la respuesta, si ya lo dijo. */
   helpful?: boolean
-  /** Lo que se enviaría a odentIA si no supo; empieza siendo la pregunta y se puede cambiar. */
-  toSend?: string
   /** Ya la envió a odentIA, o dijo que no. */
   sent?: "enviada" | "no"
 }
@@ -58,6 +66,7 @@ interface Exchange {
 /** Mensaje directo a odentIA desde el pie del panel: una consulta a soporte o un problema. */
 interface DirectMessage {
   kind: SupportKind
+  /** Con qué empieza el mensaje (vacío, o lo que dejó escrito `openSupportRequest`). */
   text: string
   sent: boolean
 }
@@ -88,6 +97,27 @@ function withDestination(text: string, where: string): ReactNode {
   )
 }
 
+/** Lo que admiten `POST /api/help/ask` y `POST /api/help/requests` por texto. */
+const TEXT_MAX = 500
+
+/** La pregunta a la Ayuda, con los límites y palabras de la ruta. */
+const askSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(3, "Escribe tu pregunta: al menos 3 caracteres.")
+    .max(TEXT_MAX, "Escribe como mucho 500 caracteres."),
+})
+
+/** Lo que se envía a odentIA, con los límites y palabras de la ruta. */
+const sendSchema = z.object({
+  question: z
+    .string()
+    .trim()
+    .min(3, "Escribe lo que quieres enviar: al menos 3 caracteres.")
+    .max(TEXT_MAX, "Escribe como mucho 500 caracteres."),
+})
+
 /**
  * «Lo que se envía»: el texto, que la persona puede cambiar, y lo que se
  * agrega solo con los valores que el servidor guardará junto a él.
@@ -95,36 +125,53 @@ function withDestination(text: string, where: string): ReactNode {
 export function WhatIsSent({
   id,
   label,
-  value,
-  onChange,
+  initial,
   attached,
-  error,
-  pending,
   onSend,
   onCancel,
   cancelLabel,
 }: {
   id: string
   label: string
-  value: string
-  onChange: (value: string) => void
+  /** Con qué empieza el texto; después es de la persona. */
+  initial: string
   attached: HelpAttachments | undefined
-  error: string | null
-  pending: boolean
-  onSend: () => void
+  /** Envía el texto ya limpio; si rechaza, el motivo se dice en el campo o junto a los botones. */
+  onSend: (text: string) => Promise<unknown>
   onCancel: () => void
   cancelLabel: string
 }) {
+  const form = useAppForm({
+    defaultValues: { question: initial },
+    validators: { onSubmit: sendSchema },
+    onSubmit: async ({ value }) => {
+      await onSend(value.question.trim())
+    },
+  })
+  const onSubmit = useFormSubmit(form)
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
   return (
-    <>
+    <form noValidate onSubmit={onSubmit} className="flex flex-col gap-2">
       <section aria-labelledby={`${id}-titulo`} className="flex flex-col gap-2.5 rounded-xl border p-3.5 text-sm">
         <h3 id={`${id}-titulo`} className="font-heading text-[15px] font-semibold">
           Lo que se envía
         </h3>
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <Textarea id={id} rows={2} maxLength={500} value={value} onChange={(event) => onChange(event.target.value)} />
-        </Field>
+        <form.AppField name="question">
+          {(field) => (
+            <field.Control label={label} id={id}>
+              {(control) => (
+                <Textarea
+                  {...control.props}
+                  rows={2}
+                  maxLength={TEXT_MAX}
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
         <div className="flex flex-col gap-0.5">
           <p className="font-semibold text-muted-foreground">Se agrega solo</p>
           <ul className="flex flex-col gap-0.5">
@@ -142,14 +189,14 @@ export function WhatIsSent({
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <SubmitButton type="button" className="min-h-11 flex-1 sm:min-h-9" pending={pending} disabled={value.trim().length < 3} onClick={onSend}>
+        <SubmitButton type="submit" className="min-h-11 flex-1 sm:min-h-9" pending={pending}>
           Enviar a {appWords().name}
         </SubmitButton>
         <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={pending} onClick={onCancel}>
           {cancelLabel}
         </Button>
       </div>
-    </>
+    </form>
   )
 }
 
@@ -181,7 +228,6 @@ export function HelpButton({ className }: { className?: string } = {}) {
   // El correo «Soporte de odentIA respondió tu caso» abre aquí: `?ayuda=casos&caso=<id>`.
   const [linkedCase, setLinkedCase] = useState<string | null>(null)
   const handledLink = useRef<string | null>(null)
-  const [draft, setDraft] = useState("")
   const [exchanges, setExchanges] = useState<Exchange[]>([])
   const [direct, setDirect] = useState<DirectMessage | null>(null)
 
@@ -210,16 +256,35 @@ export function HelpButton({ className }: { className?: string } = {}) {
         question,
         reply: askEnvelope.parse(body).data,
       })),
-    onSuccess: (exchange) => {
-      setExchanges((current) => [...current, exchange])
-      setDraft("")
+    onSuccess: (exchange) => setExchanges((current) => [...current, exchange]),
+  })
+  // Si la red o el servidor fallan, la pregunta se queda escrita para volver a intentarlo.
+  const askOptions = { formMessage: (error: unknown) => (isUnconfirmedSubmit(error) ? "No pude responder ahora. Vuelve a intentarlo." : null) }
+  const askForm = useAppForm({
+    defaultValues: { question: "" },
+    validators: { onSubmit: askSchema },
+    onSubmit: async ({ value }) => {
+      if (ask.isPending) return
+      await ask.mutateAsync(value.question.trim())
+      askForm.reset()
     },
   })
+  const onAskSubmit = useFormSubmit(askForm, askOptions)
+  const askError = useFormSubmitError(askForm)
+  /** Una pregunta que no se escribió (sugerencia, buscador): pasa por la misma caja y sus mismos avisos. */
+  const askText = (text: string) => {
+    askForm.setFieldValue("question", text)
+    void submitForm(askForm, askOptions)
+  }
+  const askTextRef = useRef(askText)
+  askTextRef.current = askText
   const rate = useMutation({
     retry: false,
     mutationFn: (input: { index: number; askId: string; helpful: boolean }) =>
       apiFetch(`/api/help/ask/${input.askId}/feedback`, { method: "POST", body: JSON.stringify({ helpful: input.helpful }) }),
     onMutate: (input) => setExchanges((current) => current.map((item, index) => (index === input.index ? { ...item, helpful: input.helpful } : item))),
+    // No quedó anotado: vuelve a preguntarse y se dice por qué.
+    onError: (_error, input) => setExchanges((current) => current.map((item, index) => (index === input.index ? { ...item, helpful: undefined } : item))),
   })
   // Un solo envío para lo que no supo, para soporte y para un problema: siempre un caso para el equipo de odentIA.
   const send = useMutation({
@@ -240,17 +305,16 @@ export function HelpButton({ className }: { className?: string } = {}) {
     setOpen(true)
   }, [searchStr])
   // El buscador rápido manda aquí lo que no es un nombre ni una pantalla: «¿cuántas citas hay mañana?».
-  const askQuestion = ask.mutate
   useEffect(() => {
     function onAsk(event: Event) {
       const question = (event as CustomEvent<{ question?: string }>).detail?.question?.trim() ?? ""
       setOpen(true)
-      if (question.length >= 3) askQuestion(question)
-      else setDraft(question)
+      if (question.length >= 3) askTextRef.current(question)
+      else askForm.setFieldValue("question", question)
     }
     window.addEventListener(ASK_HELP_EVENT, onAsk)
     return () => window.removeEventListener(ASK_HELP_EVENT, onAsk)
-  }, [askQuestion])
+  }, [askForm])
   // biome-ignore lint/correctness/useExhaustiveDependencies: al cambiar de pantalla, un mensaje a medio escribir diría otra pantalla de la que se adjunta.
   useEffect(() => {
     setDirect(null)
@@ -265,27 +329,12 @@ export function HelpButton({ className }: { className?: string } = {}) {
     return () => window.removeEventListener(OPEN_HELP_EVENT, onOpen)
   }, [])
 
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    const question = draft.trim()
-    if (question.length >= 3 && !ask.isPending) ask.mutate(question)
-  }
-
   function openDirect(kind: SupportKind) {
-    send.reset()
     setDirect({ kind, text: "", sent: false })
   }
 
-  const askError =
-    ask.error instanceof ApiError && ask.error.status === 429
-      ? (ask.error.shape.message ?? "Llegaste al tope de preguntas por hoy.")
-      : ask.error
-        ? "No pude responder ahora. Vuelve a intentarlo."
-        : null
   const title = screen.data?.title
   const attached = screen.data?.attached
-  const sendError = (index: number | null) => (send.isError && send.variables?.index === index ? mutationErrorMessage(send.error) : null)
-  const sendPending = (index: number | null) => send.isPending && send.variables?.index === index
 
   return (
     <>
@@ -391,12 +440,9 @@ export function HelpButton({ className }: { className?: string } = {}) {
                           <WhatIsSent
                             id={`ayuda-enviar-${index}`}
                             label="Tu pregunta · puedes cambiarla"
-                            value={exchange.toSend ?? exchange.question}
-                            onChange={(text) => setExchanges((current) => current.map((item, at) => (at === index ? { ...item, toSend: text } : item)))}
+                            initial={exchange.question}
                             attached={attached}
-                            error={sendError(index)}
-                            pending={sendPending(index)}
-                            onSend={() => send.mutate({ index, text: (exchange.toSend ?? exchange.question).trim(), kind: "pregunta" })}
+                            onSend={(text) => send.mutateAsync({ index, text, kind: "pregunta" })}
                             onCancel={() => setExchanges((current) => current.map((item, at) => (at === index ? { ...item, sent: "no" } : item)))}
                             cancelLabel="No, gracias"
                           />
@@ -420,6 +466,13 @@ export function HelpButton({ className }: { className?: string } = {}) {
                               No
                             </Button>
                           </fieldset>
+                        ) : null}
+                        {exchange.helpful === undefined ? (
+                          rate.isError && rate.variables?.index === index ? (
+                            <p role="alert" className="text-sm text-destructive">
+                              No se anotó: {submitErrorMessage(rate.error)}
+                            </p>
+                          ) : null
                         ) : (
                           <p role="status" className="text-sm text-muted-foreground">
                             {exchange.helpful ? "Gracias. Lo anotamos." : "Gracias. Lo anotamos para mejorar la guía."}
@@ -443,7 +496,7 @@ export function HelpButton({ className }: { className?: string } = {}) {
                     variant="outline"
                     className="h-auto min-h-11 justify-start whitespace-normal py-2 text-left text-primary sm:min-h-10"
                     disabled={ask.isPending}
-                    onClick={() => ask.mutate(suggestion)}
+                    onClick={() => askText(suggestion)}
                   >
                     {suggestion}
                   </Button>
@@ -452,41 +505,46 @@ export function HelpButton({ className }: { className?: string } = {}) {
             ) : null}
 
             <div className="flex flex-col gap-2 border-t pt-3.5">
-              <form onSubmit={submit}>
-                <FieldLabel htmlFor="ayuda-pregunta" className="sr-only">
-                  Tu pregunta
-                </FieldLabel>
-                <InputGroup className="border-input bg-card">
-                  <InputGroupTextarea
-                    id="ayuda-pregunta"
-                    rows={1}
-                    maxLength={500}
-                    className="max-h-32 min-h-11"
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault()
-                        event.currentTarget.form?.requestSubmit()
-                      }
-                    }}
-                    placeholder="Pregunta cómo hacer algo…"
-                    aria-describedby="ayuda-pregunta-nota"
-                  />
-                  <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
-                    <InputGroupButton
-                      type="submit"
-                      variant="default"
-                      size="icon-sm"
-                      className="size-11 rounded-xl sm:size-9"
-                      aria-label="Preguntar"
-                      disabled={draft.trim().length < 3 || ask.isPending}
-                      aria-busy={ask.isPending}
-                    >
-                      <ArrowRight aria-hidden />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
+              <form noValidate onSubmit={onAskSubmit}>
+                <askForm.AppField name="question">
+                  {(field) => (
+                    <field.Control label="Tu pregunta" hideLabel id="ayuda-pregunta">
+                      {(control) => (
+                        <InputGroup className="border-input bg-card">
+                          <InputGroupTextarea
+                            {...control.props}
+                            rows={1}
+                            maxLength={TEXT_MAX}
+                            className="max-h-32 min-h-11"
+                            value={field.state.value}
+                            onChange={(event) => field.handleChange(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && !event.shiftKey) {
+                                event.preventDefault()
+                                event.currentTarget.form?.requestSubmit()
+                              }
+                            }}
+                            placeholder="Pregunta cómo hacer algo…"
+                            aria-describedby={["ayuda-pregunta-nota", control.describedBy].filter(Boolean).join(" ")}
+                          />
+                          <InputGroupAddon align="inline-end" className="self-end py-1.5 pr-1.5">
+                            <InputGroupButton
+                              type="submit"
+                              variant="default"
+                              size="icon-sm"
+                              className="size-11 rounded-xl sm:size-9"
+                              aria-label="Preguntar"
+                              disabled={ask.isPending}
+                              aria-busy={ask.isPending}
+                            >
+                              <ArrowRight aria-hidden />
+                            </InputGroupButton>
+                          </InputGroupAddon>
+                        </InputGroup>
+                      )}
+                    </field.Control>
+                  )}
+                </askForm.AppField>
               </form>
               {askError ? (
                 <p role="alert" className="text-sm text-destructive">
@@ -502,14 +560,12 @@ export function HelpButton({ className }: { className?: string } = {}) {
                 <section aria-label={DIRECT[direct.kind].title} className="flex flex-col gap-2">
                   <h3 className="text-sm font-semibold">{DIRECT[direct.kind].title}</h3>
                   <WhatIsSent
+                    key={`${direct.kind}:${direct.text}`}
                     id="ayuda-directo"
                     label={DIRECT[direct.kind].label}
-                    value={direct.text}
-                    onChange={(text) => setDirect({ ...direct, text })}
+                    initial={direct.text}
                     attached={attached}
-                    error={sendError(null)}
-                    pending={sendPending(null)}
-                    onSend={() => send.mutate({ index: null, text: direct.text.trim(), kind: direct.kind })}
+                    onSend={(text) => send.mutateAsync({ index: null, text, kind: direct.kind })}
                     onCancel={() => setDirect(null)}
                     cancelLabel="Cancelar"
                   />

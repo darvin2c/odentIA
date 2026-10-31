@@ -1,3 +1,6 @@
+import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
+import { hcLabel } from "@odentia/clinic-app/lib/patients"
+import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
 import { diagnosisCodeLabel } from "@odentia/clinical"
 import { FDI_ADULT_ROWS, FDI_CHILD_ROWS, surfaceLabel, toothNameOf } from "@odentia/dental"
 import { Button } from "@odentia/ui"
@@ -5,11 +8,8 @@ import { LoadingState, PageShell } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { findingWords } from "../../components/dental/odontogram-notation"
-import { formatDate } from "@odentia/clinic-app/lib/clinical-journey"
-import { fetchOdontogramPrint } from "../../lib/dental/odontogram"
-import { hcLabel } from "@odentia/clinic-app/lib/patients"
-import { type OdontogramEntry } from "../../lib/dental/odontogram"
-import { QueryErrorState } from "@odentia/clinic-app/lib/query-error"
+import { SheetLetterhead, SheetPageStyle } from "../../components/dental/odontogram-sheet"
+import { fetchOdontogramPrint, type OdontogramEntry } from "../../lib/dental/odontogram"
 
 export const Route = createFileRoute("/_org/patients/$patientId/odontogram/print")({
   component: OdontogramPrintPage,
@@ -52,19 +52,16 @@ function OdontogramPrintPage() {
   const { entries, patient, establishment, printedAt } = query.data.data
   const byTooth = new Map<number, OdontogramEntry[]>()
   for (const entry of entries) {
-    for (const tooth of entry.details?.relatedTeeth?.length ? entry.details.relatedTeeth : [entry.toothNumber]) {
+    for (const tooth of entry.details?.relatedTeeth?.length
+      ? entry.details.relatedTeeth
+      : [entry.toothNumber]) {
       byTooth.set(tooth, [...(byTooth.get(tooth) ?? []), entry])
     }
   }
   const teeth = [...byTooth.keys()].sort((a, b) => (ORDER.get(a) ?? 99) - (ORDER.get(b) ?? 99))
   return (
     <PageShell className="flex flex-col gap-4">
-      <style>{`@page { size: A4; margin: 12mm }
-      @media print {
-        body * { visibility: hidden; }
-        .odontogram-sheet, .odontogram-sheet * { visibility: visible; }
-        .odontogram-sheet { position: absolute; inset: 0 auto auto 0; width: 100%; border: 0; box-shadow: none; }
-      }`}</style>
+      <SheetPageStyle />
       <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <p className="text-sm text-muted-foreground">
           Hoja con la numeración internacional (FDI) y los hallazgos de hoy por pieza.
@@ -74,18 +71,11 @@ function OdontogramPrintPage() {
         </Button>
       </div>
       <article className="odontogram-sheet mx-auto flex w-full max-w-[210mm] flex-col gap-5 rounded-lg border bg-white p-8 text-sm text-black">
-        <header className="flex flex-wrap items-start justify-between gap-4 border-b pb-4">
-          <div>
-            <p className="text-base font-semibold">
-              {establishment?.tradeName || establishment?.legalName || "Establecimiento"}
-            </p>
-            {establishment?.address ? <p>{establishment.address}</p> : null}
-          </div>
-          <div className="text-right">
-            <p className="text-base font-semibold">Odontograma</p>
-            <p>{formatDate(printedAt)}</p>
-          </div>
-        </header>
+        <SheetLetterhead establishment={establishment} />
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <h1 className="text-base font-semibold">Odontograma</h1>
+          <p>{formatDate(printedAt)}</p>
+        </div>
         <section className="grid gap-1 sm:grid-cols-2">
           <p>
             <span className="font-medium">Paciente:</span> {patient.displayName}
@@ -95,7 +85,8 @@ function OdontogramPrintPage() {
           </p>
           {patient.docNumber ? (
             <p>
-              <span className="font-medium">{patient.docType ?? "Documento"}:</span> {patient.docNumber}
+              <span className="font-medium">{patient.docType ?? "Documento"}:</span>{" "}
+              {patient.docNumber}
             </p>
           ) : null}
         </section>
@@ -108,7 +99,9 @@ function OdontogramPrintPage() {
                   <span
                     key={tooth}
                     className={`flex h-8 w-8 items-center justify-center rounded border text-xs tabular-nums ${
-                      byTooth.has(tooth) ? "border-black font-bold" : "border-gray-300 text-gray-500"
+                      byTooth.has(tooth)
+                        ? "border-black font-bold"
+                        : "border-gray-300 text-gray-500"
                     }`}
                   >
                     {tooth}
@@ -134,7 +127,9 @@ function OdontogramPrintPage() {
                     <span key={entry.id}>
                       {findingWords(null, entry)}
                       {entry.surface ? ` · cara ${surfaceLabel(entry.surface).toLowerCase()}` : ""}
-                      {entry.diagnosisCode ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}` : ""}
+                      {entry.diagnosisCode
+                        ? ` · ${diagnosisCodeLabel(entry.diagnosisSystem, entry.diagnosisCode)}`
+                        : ""}
                     </span>
                   ))}
                 </li>

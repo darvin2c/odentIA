@@ -52,6 +52,18 @@ export interface ProductWords {
   }
   /** Lo que hace estándar y completa una consulta de Clío (`consultationTierOf` en services). */
   clioTiers: { estandar: string; completa: string }
+  /** Cómo se llaman las partes de la hoja del presupuesto. */
+  budgetPaper: {
+    title: string
+    /** Lo que se presupuesta: la cabecera de la tabla. */
+    item: string
+    findings: string
+    steps: string
+    noCare: string
+    change: string
+    /** «marque una casilla por tratamiento». */
+    itemLower: string
+  }
 }
 
 const WORDS: Record<ClinicalProduct, ProductWords> = {
@@ -80,6 +92,15 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
       estandar: "Nota con diagnóstico, receta, controles u odontograma",
       completa: "Armó el presupuesto",
     },
+    budgetPaper: {
+      title: "Presupuesto de tratamiento",
+      item: "Tratamiento",
+      findings: "Lo que encontramos",
+      steps: "Cómo se haría, paso a paso",
+      noCare: "Si decide no tratarse",
+      change: "Si el importe cambia",
+      itemLower: "tratamiento",
+    },
   },
   medical: {
     name: "latidIA",
@@ -105,6 +126,15 @@ const WORDS: Record<ClinicalProduct, ProductWords> = {
     clioTiers: {
       estandar: "Nota con examen o diagnóstico, receta o controles",
       completa: "Dejó indicado lo que sigue",
+    },
+    budgetPaper: {
+      title: "Presupuesto de atención",
+      item: "Atención",
+      findings: "Por qué viene",
+      steps: "Qué se haría",
+      noCare: "Si decide no atenderse",
+      change: "Si algo cambia",
+      itemLower: "atención",
     },
   },
 }

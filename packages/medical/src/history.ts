@@ -84,46 +84,57 @@ const isDate = (value: unknown): value is string =>
   !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime()) &&
   new Date(`${value}T00:00:00Z`).toISOString().startsWith(value)
 
-class HistoryError extends Error {}
-const fail = (message: string): never => {
-  throw new HistoryError(message)
+/** Un dato que no pasa: el mensaje y la ruta del dato en la entrevista («habitos.cigarrillosDia»). */
+class HistoryError extends Error {
+  constructor(
+    message: string,
+    readonly field: string | undefined,
+  ) {
+    super(message)
+  }
+}
+const fail = (message: string, field?: string): never => {
+  throw new HistoryError(message, field)
 }
 
-function only(group: Rec, name: string, keys: readonly string[]): void {
+function only(group: Rec, name: string, keys: readonly string[], field: string): void {
   const extra = Object.keys(group).find((key) => !keys.includes(key))
-  if (extra) fail(`${name}: no tiene el dato ${extra}`)
+  if (extra) fail(`${name}: no tiene el dato ${extra}`, field)
 }
-function pastDate(value: unknown, label: string, today: string): string | undefined {
+function pastDate(value: unknown, label: string, today: string, field: string): string | undefined {
   if (value === undefined || value === null || value === "") return undefined
-  if (!isDate(value)) fail(`${label}: la fecha va como AAAA-MM-DD`)
-  if ((value as string) > today) fail(`${label}: la fecha no puede ser futura`)
+  if (!isDate(value)) fail(`${label}: elige una fecha válida`, field)
+  if ((value as string) > today) fail(`${label}: la fecha no puede ser futura`, field)
   return value as string
 }
-function count(value: unknown, label: string, max: number): number | undefined {
+function count(value: unknown, label: string, max: number, field: string): number | undefined {
   if (value === undefined || value === null || value === "") return undefined
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max)
-    fail(`${label}: un número entero de 0 a ${max}`)
+    fail(`${label}: un número entero de 0 a ${max}`, field)
   return value as number
 }
 function choice<T extends string>(
   value: unknown,
   options: Record<T, string>,
   label: string,
+  field: string,
 ): T | undefined {
   if (value === undefined || value === null || value === "") return undefined
-  if (typeof value !== "string" || !(value in options)) fail(`${label}: elige una de las opciones`)
+  if (typeof value !== "string" || !(value in options)) fail(`${label}: elige una de las opciones`, field)
   return value as T
 }
 
-function statement(value: unknown, label: string, today: string, withWeeks: boolean) {
+function statement(value: unknown, label: string, today: string, withWeeks: boolean, field: string) {
   if (value === undefined || value === null) return undefined
-  if (!isRec(value)) return fail(`${label}: falta si o no`)
-  only(value, label, withWeeks ? ["estado", "fecha", "semanas"] : ["estado", "fecha"])
-  if (!(YES_NO as readonly unknown[]).includes(value.estado)) fail(`${label}: el estado es sí o no`)
-  const fecha = pastDate(value.fecha, label, today)
-  if (!fecha) fail(`${label}: falta la fecha en que se dijo`)
+  if (!isRec(value)) return fail(`${label}: falta si o no`, field)
+  only(value, label, withWeeks ? ["estado", "fecha", "semanas"] : ["estado", "fecha"], field)
+  if (!(YES_NO as readonly unknown[]).includes(value.estado)) fail(`${label}: el estado es sí o no`, `${field}.estado`)
+  const fecha = pastDate(value.fecha, label, today, `${field}.fecha`)
+  if (!fecha) fail(`${label}: falta la fecha en que se dijo`, `${field}.fecha`)
   const semanas =
-    withWeeks && value.estado === "si" ? count(value.semanas, `${label}, semanas`, 42) : undefined
+    withWeeks && value.estado === "si"
+      ? count(value.semanas, `${label}, semanas`, 42, `${field}.semanas`)
+      : undefined
   return {
     estado: value.estado as YesNo,
     fecha: fecha as string,
@@ -133,12 +144,14 @@ function statement(value: unknown, label: string, today: string, withWeeks: bool
 
 /**
  * Valida y limpia los grupos médicos de la entrevista; lo demás queda igual.
- * Un grupo vacío se quita. `today` (YYYY-MM-DD) es el día de la clínica.
+ * Un grupo vacío se quita. `today` (YYYY-MM-DD) es el día de la clínica. Un
+ * error dice, en `field`, la ruta de su dato en la entrevista
+ * («ginecoObstetricos.partos»; la regla entre los tres conteos, el grupo).
  */
 export function parseMedicalHistory(
   answers: Rec,
   today: string,
-): { ok: true; value: Rec } | { ok: false; error: string } {
+): { ok: true; value: Rec } | { ok: false; error: string; field?: string } {
   try {
     const out: Rec = { ...answers }
     const set = (key: string, value: Rec | unknown[] | undefined) => {
@@ -150,11 +163,11 @@ export function parseMedicalHistory(
     }
     const pregnancy = answers.embarazoLactancia
     if (pregnancy !== undefined) {
-      if (!isRec(pregnancy)) fail("Embarazo y lactancia debe ser un objeto")
+      if (!isRec(pregnancy)) fail("Embarazo y lactancia debe ser un objeto", "embarazoLactancia")
       const group = pregnancy as Rec
-      only(group, "Embarazo y lactancia", ["embarazo", "lactancia"])
-      const embarazo = statement(group.embarazo, "Embarazo", today, true)
-      const lactancia = statement(group.lactancia, "Lactancia", today, false)
+      only(group, "Embarazo y lactancia", ["embarazo", "lactancia"], "embarazoLactancia")
+      const embarazo = statement(group.embarazo, "Embarazo", today, true, "embarazoLactancia.embarazo")
+      const lactancia = statement(group.lactancia, "Lactancia", today, false, "embarazoLactancia.lactancia")
       set("embarazoLactancia", {
         ...(embarazo ? { embarazo } : {}),
         ...(lactancia ? { lactancia } : {}),
@@ -162,16 +175,17 @@ export function parseMedicalHistory(
     }
     const gyneco = answers.ginecoObstetricos
     if (gyneco !== undefined) {
-      if (!isRec(gyneco)) fail("Gineco-obstétricos debe ser un objeto")
+      if (!isRec(gyneco)) fail("Gineco-obstétricos debe ser un objeto", "ginecoObstetricos")
       const group = gyneco as Rec
-      only(group, "Gineco-obstétricos", ["fur", "gestas", "partos", "cesareas", "metodo"])
-      const fur = pastDate(group.fur, "Última regla", today)
-      const gestas = count(group.gestas, "Embarazos", 30)
-      const partos = count(group.partos, "Partos", 30)
-      const cesareas = count(group.cesareas, "Cesáreas", 30)
+      only(group, "Gineco-obstétricos", ["fur", "gestas", "partos", "cesareas", "metodo"], "ginecoObstetricos")
+      const fur = pastDate(group.fur, "Última regla", today, "ginecoObstetricos.fur")
+      const gestas = count(group.gestas, "Embarazos", 30, "ginecoObstetricos.gestas")
+      const partos = count(group.partos, "Partos", 30, "ginecoObstetricos.partos")
+      const cesareas = count(group.cesareas, "Cesáreas", 30, "ginecoObstetricos.cesareas")
+      // La regla es de los tres conteos: se dice bajo el grupo.
       if (gestas !== undefined && (partos ?? 0) + (cesareas ?? 0) > gestas)
-        fail("Gineco-obstétricos: los partos y las cesáreas no pueden ser más que los embarazos")
-      const metodo = choice(group.metodo, CONTRACEPTION_METHODS, "Método anticonceptivo")
+        fail("Los partos y las cesáreas no pueden ser más que los embarazos", "ginecoObstetricos")
+      const metodo = choice(group.metodo, CONTRACEPTION_METHODS, "Método anticonceptivo", "ginecoObstetricos.metodo")
       set("ginecoObstetricos", {
         ...(fur ? { fur } : {}),
         ...(gestas === undefined ? {} : { gestas }),
@@ -182,15 +196,17 @@ export function parseMedicalHistory(
     }
     const habits = answers.habitos
     if (habits !== undefined) {
-      if (!isRec(habits)) fail("Hábitos debe ser un objeto")
+      if (!isRec(habits)) fail("Hábitos debe ser un objeto", "habitos")
       const group = habits as Rec
-      only(group, "Hábitos", ["tabaco", "cigarrillosDia", "alcohol", "actividadFisica"])
-      const tabaco = choice(group.tabaco, TOBACCO, "Tabaco")
+      only(group, "Hábitos", ["tabaco", "cigarrillosDia", "alcohol", "actividadFisica"], "habitos")
+      const tabaco = choice(group.tabaco, TOBACCO, "Tabaco", "habitos.tabaco")
       // Los cigarrillos al día solo se dicen de quien fuma.
       const cigarrillosDia =
-        tabaco === "fuma" ? count(group.cigarrillosDia, "Cigarrillos al día", 100) : undefined
-      const alcohol = choice(group.alcohol, ALCOHOL, "Alcohol")
-      const actividadFisica = choice(group.actividadFisica, ACTIVITY, "Actividad física")
+        tabaco === "fuma"
+          ? count(group.cigarrillosDia, "Cigarrillos al día", 100, "habitos.cigarrillosDia")
+          : undefined
+      const alcohol = choice(group.alcohol, ALCOHOL, "Alcohol", "habitos.alcohol")
+      const actividadFisica = choice(group.actividadFisica, ACTIVITY, "Actividad física", "habitos.actividadFisica")
       set("habitos", {
         ...(tabaco ? { tabaco } : {}),
         ...(cigarrillosDia === undefined ? {} : { cigarrillosDia }),
@@ -200,25 +216,26 @@ export function parseMedicalHistory(
     }
     const vaccines = answers.vacunas
     if (vaccines !== undefined) {
-      if (!Array.isArray(vaccines)) fail("Vacunas debe ser una lista")
+      if (!Array.isArray(vaccines)) fail("Vacunas debe ser una lista", "vacunas")
       const list = vaccines as unknown[]
-      if (list.length > MAX_VACCINES) fail(`Vacunas: hasta ${MAX_VACCINES}`)
+      if (list.length > MAX_VACCINES) fail(`Vacunas: hasta ${MAX_VACCINES}`, "vacunas")
       set(
         "vacunas",
-        list.flatMap((item) => {
-          if (!isRec(item)) return fail("Vacunas: cada una con su nombre")
-          only(item, "Vacunas", ["vacuna", "fecha"])
+        list.flatMap((item, index) => {
+          if (!isRec(item)) return fail("Vacunas: cada una con su nombre", `vacunas.${index}.vacuna`)
+          only(item, "Vacunas", ["vacuna", "fecha"], `vacunas.${index}`)
           const vacuna = typeof item.vacuna === "string" ? item.vacuna.trim() : ""
-          if (vacuna.length > 120) fail("Vacunas: el nombre tiene hasta 120 caracteres")
+          if (vacuna.length > 120) fail("Vacunas: el nombre tiene hasta 120 caracteres", `vacunas.${index}.vacuna`)
           if (!vacuna) return []
-          const fecha = pastDate(item.fecha, `Vacuna ${vacuna}`, today)
+          const fecha = pastDate(item.fecha, `Vacuna ${vacuna}`, today, `vacunas.${index}.fecha`)
           return [{ vacuna, ...(fecha ? { fecha } : {}) }]
         }),
       )
     }
     return { ok: true, value: out }
   } catch (error) {
-    if (error instanceof HistoryError) return { ok: false, error: error.message }
+    if (error instanceof HistoryError)
+      return { ok: false, error: error.message, ...(error.field ? { field: error.field } : {}) }
     throw error
   }
 }

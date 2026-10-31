@@ -69,10 +69,16 @@ const identityInput = z
   .strict()
 
 const openInput = z
-  .object({ reason: z.enum(RECORD_OPENING_REASONS), note: z.string().trim().max(500).nullish() })
+  .object({
+    reason: z.enum(RECORD_OPENING_REASONS, "Elige el motivo"),
+    note: z.string().trim().max(500, "El motivo admite hasta 500 caracteres").nullish(),
+  })
   .strict()
 
-const noteInput = z.object({ body: z.string().trim().min(1).max(4000) }).strict()
+/** El máximo de `createContactNote`: la pantalla y la ruta dicen lo mismo. */
+const noteInput = z
+  .object({ body: z.string().trim().min(1, "Escribe la nota.").max(2000, "La nota admite hasta 2000 caracteres.") })
+  .strict()
 
 function forbidden(c: Context, message: string) {
   return c.json(errorBody(c, "FORBIDDEN", message), 403)

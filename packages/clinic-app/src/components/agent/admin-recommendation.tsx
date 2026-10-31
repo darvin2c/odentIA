@@ -1,14 +1,14 @@
 import { Button } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, DetailSection, LoadingState } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, DetailSection, LoadingState, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 import { ADMIN_LINE_WHERE, type AdminAdvice, type AdminRecommendation, type AdminUnreached, refreshAdmin } from "../../lib/admin"
 import { ADMIN_NAME, useReceptionName, withReceptionNameIn } from "../../lib/agent-names"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { AdminPersonItem, WhoDoesIt } from "./admin-line"
 import { PersonLink } from "../person-link"
 
@@ -145,9 +145,22 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                   <p className="text-[15px] font-bold">Solo esta vez</p>
                   <p className="text-sm">{item.once.detail}</p>
                 </div>
-                <Button type="button" variant="outline" className="min-h-11 w-full" disabled={once.isPending} onClick={() => setConfirmOnce(true)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 w-full"
+                  disabled={once.isPending}
+                  aria-describedby={once.isError && !confirmOnce ? "recomendacion-una-vez-error" : undefined}
+                  onClick={() => setConfirmOnce(true)}
+                >
                   {item.once.label}
                 </Button>
+                {/* Con la confirmación abierta, el error se dice dentro de ella. */}
+                {once.isError && !confirmOnce ? (
+                  <p id="recomendacion-una-vez-error" role="alert" className="text-sm text-destructive">
+                    {submitErrorMessage(once.error)}
+                  </p>
+                ) : null}
               </div>
             ) : null}
             <div className="flex flex-col gap-2.5 rounded-xl border border-agent-border bg-agent-soft p-3.5">
@@ -177,11 +190,6 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                 {where.label}
               </Link>
             ) : null}
-            {once.isError ? (
-              <p role="alert" className="text-sm text-destructive">
-                {once.error instanceof ApiError && once.error.status === 403 ? "Tu rol no puede pedir esto." : mutationErrorMessage(once.error)}
-              </p>
-            ) : null}
           </DetailSection>
 
           {canAdmin ? (
@@ -190,13 +198,20 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
                 <p className="min-w-0 flex-1 basis-48 text-[13px] text-muted-foreground">
                   ¿No te sirve? Pide que no te la recomiende más. Sigue en «Listas para activar» por si cambias de idea.
                 </p>
-                <Button type="button" variant="ghost" className="min-h-11 sm:min-h-10" disabled={stop.isPending} onClick={() => stop.mutate()}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="min-h-11 sm:min-h-10"
+                  disabled={stop.isPending}
+                  aria-describedby={stop.isError ? "recomendacion-no-recomendar-error" : undefined}
+                  onClick={() => stop.mutate()}
+                >
                   No recomendarla más
                 </Button>
               </div>
               {stop.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  {mutationErrorMessage(stop.error)}
+                <p id="recomendacion-no-recomendar-error" role="alert" className="text-sm text-destructive">
+                  {submitErrorMessage(stop.error)}
                 </p>
               ) : null}
             </div>
@@ -210,6 +225,7 @@ export function AdminRecommendationDrawer({ recommendationKey, onClose }: { reco
               confirmLabel={item.actor === "agente" ? "Escribirles" : "Crear las tareas"}
               variant="default"
               pending={once.isPending}
+              error={once.isError ? submitErrorMessage(once.error) : null}
               onClose={() => {
                 if (!once.isPending) setConfirmOnce(false)
               }}

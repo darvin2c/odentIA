@@ -1,29 +1,28 @@
+import { Badge, Button, toast } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  Field,
-  FieldLabel,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import {
+  applySubmitError,
   ConfirmDialog,
+  clearSubmitErrors,
+  focusFirstInvalid,
   FormDrawer,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
 } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useId, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useStore } from "@tanstack/react-form"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import {
   addFormAddendum,
   createFormResponse,
   discardFormResponse,
   FORM_RESPONSE_STATUS_LABELS,
   type FormResponse,
+  type FormSchemaDef,
   type FormTemplate,
   fetchFormAddenda,
   finalizeFormResponse,
@@ -33,18 +32,13 @@ import { useMemberName, useOrgMembers } from "../../lib/crm"
 import type { PatientDocument } from "../../lib/patients"
 import { imageTypeLabel } from "./document-labels"
 import {
-  AnswerInput,
+  AnswerAppField,
   type AttachmentOption,
   answersForServer,
   isFieldVisible,
   missingRequired,
 } from "./form-fields"
 import { activeOrgLocale } from "../../lib/locale"
-
-const errorMessage = (e: unknown) =>
-  e instanceof ApiError
-    ? (e.shape.message ?? "No se pudo completar la acción")
-    : "No se pudo completar la acción"
 
 const when = (value: string | null | undefined) =>
   value ? new Date(value).toLocaleDateString(activeOrgLocale(), { dateStyle: "medium" }) : "—"
@@ -66,6 +60,11 @@ function statusOf(response: FormResponse): {
   }
 }
 
+const newResponseSchema = z.object({
+  templateId: z.string().min(1, "Elige el formulario."),
+  professionalUserId: z.string(),
+})
+
 export function NewResponseDrawer({
   open,
   onClose,
@@ -85,97 +84,94 @@ export function NewResponseDrawer({
   defaultProfessionalUserId?: string
   onCreated: (id: string) => Promise<void>
 }) {
-  const ids = useId()
   const members = useOrgMembers()
-  const [templateId, setTemplateId] = useState("")
-  const [professionalUserId, setProfessionalUserId] = useState(defaultProfessionalUserId ?? "")
-  const [error, setError] = useState<string | null>(null)
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (value: z.infer<typeof newResponseSchema>) =>
       createFormResponse({
-        templateId,
+        templateId: value.templateId,
         patientId,
         encounterId: encounterId ?? null,
-        professionalUserId: professionalUserId || null,
+        professionalUserId: value.professionalUserId || null,
         answers: {},
       }),
-    onSuccess: async (result) => {
-      setTemplateId("")
+  })
+  const form = useAppForm({
+    defaultValues: { templateId: "", professionalUserId: defaultProfessionalUserId ?? "" },
+    validators: { onSubmit: newResponseSchema },
+    onSubmit: async ({ value }) => {
+      const result = await create.mutateAsync(value)
+      form.reset()
       await onCreated(result.data.id)
     },
-    onError: (e) => setError(errorMessage(e)),
   })
+  const surface = useFormSurface(form)
   return (
     <FormDrawer
+      {...surface}
       open={open}
       onClose={() => {
-        setError(null)
+        form.reset()
         onClose()
       }}
       title="Nuevo formulario"
       description="Solo se ofrece la versión vigente de cada plantilla. La captura se guarda sola mientras la completas."
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (!templateId) {
-          setError("Elige el formulario")
-          return
-        }
-        setError(null)
-        create.mutate()
-      }}
-      isSubmitting={create.isPending}
-      error={error}
       submitLabel="Empezar"
     >
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`${ids}-template`}>Formulario</FieldLabel>
-          <Select
-            items={Object.fromEntries(templates.map((t) => [t.id, t.title]))}
-            value={templateId}
-            onValueChange={(v) => setTemplateId(v ?? "")}
-          >
-            <SelectTrigger id={`${ids}-template`} aria-required="true">
-              <SelectValue placeholder="Elige el formulario" />
-            </SelectTrigger>
-            <SelectContent>
-              {templates.map((t) => (
-                <SelectItem key={t.id} value={t.id}>
-                  {t.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-pro`}>Profesional responsable</FieldLabel>
-          <Select
-            items={Object.fromEntries([
-              ["", "Sin asignar"],
-              ...members.map((m) => [m.userId, m.user.name]),
-            ])}
-            value={professionalUserId}
-            onValueChange={(v) => setProfessionalUserId(v ?? "")}
-          >
-            <SelectTrigger id={`${ids}-pro`}>
-              <SelectValue placeholder="Sin asignar" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="">Sin asignar</SelectItem>
-              {members.map((m) => (
-                <SelectItem key={m.userId} value={m.userId}>
-                  {m.user.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        <form.AppField name="templateId">
+          {(field) => (
+            <field.SelectField
+              label="Formulario"
+              placeholder="Elige el formulario"
+              options={templates.map((t) => ({ value: t.id, label: t.title }))}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="professionalUserId">
+          {(field) => (
+            <field.SelectField
+              label="Profesional responsable"
+              options={[
+                { value: "", label: "Sin asignar" },
+                ...members.map((m) => ({ value: m.userId, label: m.user.name })),
+              ]}
+            />
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
 }
 
 type SaveState = "guardado" | "pendiente" | "guardando" | "error"
+
+/**
+ * Para finalizar, cada obligatoria visible tiene respuesta: lo que falta se
+ * dice en su pregunta (la misma regla que el servidor al cerrar).
+ */
+function finalizeSchema(schema: FormSchemaDef) {
+  return z.object({ answers: z.record(z.string(), z.unknown()) }).superRefine((value, ctx) => {
+    for (const field of missingRequired(schema, value.answers)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["answers", field.id],
+        message: "Responde esta pregunta para finalizar.",
+      })
+    }
+  })
+}
+
+const discardSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Indica el motivo del descarte.")
+    .max(2000, "El motivo admite hasta 2000 caracteres."),
+})
+
+const addendumSchema = z.object({
+  text: z.string().trim().min(1, "Escribe la adenda.").max(5000, "La adenda admite hasta 5000 caracteres."),
+})
 
 export function ResponseDetail({
   response,
@@ -191,16 +187,36 @@ export function ResponseDetail({
   const memberName = useMemberName()
   const schema = response.templateSnapshot
   const editable = response.status === "borrador" && canWrite
-  const [answers, setAnswers] = useState<Record<string, unknown>>({ ...response.answers })
+  const articleRef = useRef<HTMLElement | null>(null)
   const [saveState, setSaveState] = useState<SaveState>("guardado")
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [finalizeOpen, setFinalizeOpen] = useState(false)
-  const [missing, setMissing] = useState<string[]>([])
   const [discardOpen, setDiscardOpen] = useState(false)
-  const [discardReason, setDiscardReason] = useState("")
-  const [addendum, setAddendum] = useState("")
-  const dirty = useRef(false)
+  // Cambios sin guardar: `version` cuenta cada cambio y `saved` el último guardado.
+  const version = useRef(0)
+  const saved = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Si el último guardado falló: el autoguardado corre con el estado de su render, que
+  // ya dice «pendiente» por el cambio que lo disparó, así que el fallo se recuerda aquí.
+  const saveFailed = useRef(false)
+
+  const validators = useMemo(() => ({ onSubmit: finalizeSchema(schema) }), [schema])
+  const form = useAppForm({
+    defaultValues: { answers: { ...response.answers } as Record<string, unknown> },
+    validators,
+    listeners: {
+      onChange: () => {
+        version.current += 1
+        setSaveState("pendiente")
+      },
+    },
+    // «Finalizar…»: con todo respondido y guardado, se pide la confirmación.
+    onSubmit: async () => {
+      await persist()
+      setFinalizeOpen(true)
+    },
+  })
+  const answers = useStore(form.store, (state) => state.values.answers)
+  const formError = useFormSubmitError(form)
 
   const documentsQuery = useQuery({
     queryKey: ["patient-documents", response.patientId, "activos"],
@@ -213,85 +229,124 @@ export function ResponseDetail({
     label: `${d.label} · ${imageTypeLabel(d.imageType) ?? d.category}`,
   }))
 
-  const save = async (): Promise<boolean> => {
-    if (timer.current) clearTimeout(timer.current)
-    if (!dirty.current) return true
+  /** Guarda lo pendiente; si el servidor lo rechaza, lanza su error. */
+  const persist = async (): Promise<void> => {
+    clearTimeout(timer.current ?? undefined)
+    const target = version.current
+    if (target === saved.current) return
     setSaveState("guardando")
     try {
-      await updateFormResponse(response.id, { answers: answersForServer(schema, answers) })
-      dirty.current = false
-      setSaveState("guardado")
-      setSaveError(null)
-      return true
-    } catch (e) {
+      await updateFormResponse(response.id, {
+        answers: answersForServer(schema, form.state.values.answers),
+      })
+      saved.current = target
+      saveFailed.current = false
+      setSaveState(version.current === target ? "guardado" : "pendiente")
+    } catch (error) {
       setSaveState("error")
-      setSaveError(errorMessage(e))
-      return false
+      saveFailed.current = true
+      throw error
     }
   }
-  // Guardado automático 1,2 s después del último cambio.
+  // Guardado automático 1,2 s después del último cambio: lo que el servidor
+  // rechaza se dice en su pregunta (`answers.<id>`) o junto a los botones.
+  const autosave = () => {
+    const failedBefore = saveFailed.current
+    persist()
+      .then(() => {
+        if (failedBefore) clearSubmitErrors(form)
+      })
+      .catch((error: unknown) => applySubmitError(form, error))
+  }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: guarda al cambiar respuestas; `autosave` se rehace en cada render.
   useEffect(() => {
-    if (!dirty.current || !editable) return
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => void save(), 1200)
+    if (version.current === saved.current || !editable) return
+    clearTimeout(timer.current ?? undefined)
+    timer.current = setTimeout(autosave, 1200)
     return () => {
-      if (timer.current) clearTimeout(timer.current)
+      clearTimeout(timer.current ?? undefined)
     }
-    // biome-ignore lint/correctness/useExhaustiveDependencies: guarda al cambiar respuestas
   }, [answers])
-  // Al cambiar de formulario o salir, se guarda lo pendiente.
+  // Al cambiar de formulario o salir, se guarda lo pendiente; si falla, se avisa
+  // (la pantalla ya no está para decirlo junto a la pregunta).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al desmontar; lee el borrador vigente al salir.
   useEffect(
     () => () => {
-      if (dirty.current)
-        void updateFormResponse(response.id, {
-          answers: answersForServer(schema, answersRef.current),
-        })
+      if (version.current === saved.current) return
+      const title = response.templateTitle ?? "el formulario"
+      updateFormResponse(response.id, {
+        answers: answersForServer(schema, form.state.values.answers),
+      }).catch((error: unknown) =>
+        toast.error(`No se guardaron los últimos cambios de «${title}». ${submitErrorMessage(error)}`, {
+          description: "Vuelve a abrirlo y revisa las respuestas.",
+        }),
+      )
     },
-    // biome-ignore lint/correctness/useExhaustiveDependencies: solo al desmontar
     [],
   )
-  const answersRef = useRef(answers)
-  answersRef.current = answers
 
-  const finalize = useMutation({
-    mutationFn: () => finalizeFormResponse(response.id),
-    onSuccess: async () => {
-      setFinalizeOpen(false)
-      toast.success("Formulario finalizado")
-      await onChanged()
-    },
-    onError: (e) => {
-      setFinalizeOpen(false)
-      setSaveError(errorMessage(e))
-    },
-  })
+  const finalize = useMutation({ mutationFn: () => finalizeFormResponse(response.id) })
+  const confirmFinalize = () => {
+    finalize
+      .mutateAsync()
+      .then(async () => {
+        setFinalizeOpen(false)
+        toast.success("Formulario finalizado")
+        await onChanged()
+      })
+      .catch((error: unknown) => {
+        // Lo que falte o esté mal se dice en su pregunta, ya sin el diálogo delante.
+        setFinalizeOpen(false)
+        applySubmitError(form, error)
+        focusFirstInvalid(articleRef.current)
+      })
+  }
+
   const discard = useMutation({
-    mutationFn: () => discardFormResponse(response.id, discardReason.trim()),
-    onSuccess: async () => {
+    mutationFn: (reason: string) => discardFormResponse(response.id, reason),
+  })
+  const discardForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: discardSchema },
+    onSubmit: async ({ value }) => {
+      await discard.mutateAsync(value.reason.trim())
       setDiscardOpen(false)
       toast.success("Borrador descartado")
       await onChanged()
     },
-    onError: (e) => setSaveError(errorMessage(e)),
   })
+  const discardError = useFormSubmitError(discardForm)
+  const discarding = useStore(discardForm.store, (state) => state.isSubmitting)
+
   const addendaQuery = useQuery({
     queryKey: ["form-addenda", response.id],
     queryFn: () => fetchFormAddenda(response.id),
     enabled: response.status === "finalizado",
   })
   const addAddendum = useMutation({
-    mutationFn: () => addFormAddendum(response.id, addendum.trim()),
-    onSuccess: async () => {
-      setAddendum("")
+    mutationFn: (text: string) => addFormAddendum(response.id, text),
+  })
+  const addendumRef = useRef<HTMLDivElement | null>(null)
+  const addendumForm = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: addendumSchema },
+    onSubmit: async ({ value }) => {
+      await addAddendum.mutateAsync(value.text.trim())
+      addendumForm.reset()
       await queryClient.invalidateQueries({ queryKey: ["form-addenda", response.id] })
       toast.success("Adenda registrada")
     },
-    onError: (e) => setSaveError(errorMessage(e)),
   })
+  const addendumError = useFormSubmitError(addendumForm)
+  const addingAddendum = useStore(addendumForm.store, (state) => state.isSubmitting)
   const status = statusOf(response)
 
   return (
-    <article aria-labelledby={`${ids}-title`} className="flex flex-col gap-4 rounded-md border p-4">
+    <article
+      ref={articleRef}
+      aria-labelledby={`${ids}-title`}
+      className="flex flex-col gap-4 rounded-md border p-4"
+    >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h3 id={`${ids}-title`} className="text-base font-semibold">
@@ -338,24 +393,15 @@ export function ResponseDetail({
           {section.fields
             .filter((field) => isFieldVisible(field, answers))
             .map((field) => (
-              <AnswerInput
-                key={field.id}
-                field={field}
-                value={answers[field.id]}
-                disabled={!editable}
-                attachments={attachments}
-                onChange={(value) => {
-                  dirty.current = true
-                  setSaveState("pendiente")
-                  setAnswers((prev) => ({ ...prev, [field.id]: value }))
-                }}
-              />
+              <form.AppField key={field.id} name={`answers.${field.id}`}>
+                {() => <AnswerAppField field={field} disabled={!editable} attachments={attachments} />}
+              </form.AppField>
             ))}
         </section>
       ))}
-      {saveError ? (
+      {formError ? (
         <p role="alert" className="text-sm text-destructive">
-          {saveError}
+          {formError}
         </p>
       ) : null}
       {editable ? (
@@ -364,26 +410,13 @@ export function ResponseDetail({
             type="button"
             variant="ghost"
             onClick={() => {
-              setDiscardReason("")
+              discardForm.reset()
               setDiscardOpen(true)
             }}
           >
             Descartar borrador…
           </Button>
-          <Button
-            type="button"
-            onClick={async () => {
-              const pending = missingRequired(schema, answers)
-              setMissing(pending.map((f) => f.label))
-              if (pending.length > 0) {
-                setSaveError(
-                  `Completa antes de finalizar: ${pending.map((f) => f.label).join(", ")}`,
-                )
-                return
-              }
-              if (await save()) setFinalizeOpen(true)
-            }}
-          >
+          <Button type="button" onClick={() => void submitForm(form, { root: articleRef.current })}>
             Finalizar…
           </Button>
         </div>
@@ -407,27 +440,33 @@ export function ResponseDetail({
             </div>
           ))}
           {canWrite ? (
-            <Field>
-              <FieldLabel htmlFor={`${ids}-addendum`}>Nueva adenda</FieldLabel>
-              <Textarea
-                id={`${ids}-addendum`}
-                value={addendum}
-                onChange={(event) => setAddendum(event.target.value)}
-                rows={2}
-                maxLength={5000}
-                placeholder="Corrección o alcance posterior; no modifica lo finalizado"
-              />
+            <div ref={addendumRef} className="flex flex-col gap-2">
+              <addendumForm.AppField name="text">
+                {(field) => (
+                  <field.TextareaField
+                    label="Nueva adenda"
+                    rows={2}
+                    maxLength={5000}
+                    placeholder="Corrección o alcance posterior; no modifica lo finalizado"
+                  />
+                )}
+              </addendumForm.AppField>
+              {addendumError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {addendumError}
+                </p>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 className="self-start"
-                disabled={!addendum.trim() || addAddendum.isPending}
-                onClick={() => addAddendum.mutate()}
+                disabled={addingAddendum}
+                onClick={() => void submitForm(addendumForm, { root: addendumRef.current })}
               >
                 Agregar adenda
               </Button>
-            </Field>
+            </div>
           ) : null}
         </section>
       ) : null}
@@ -438,30 +477,22 @@ export function ResponseDetail({
         description="Quedará inmutable en la historia clínica. Las correcciones posteriores se hacen con adendas."
         confirmLabel="Finalizar"
         pending={finalize.isPending}
-        confirmDisabled={missing.length > 0}
         onClose={() => setFinalizeOpen(false)}
-        onConfirm={() => finalize.mutate()}
+        onConfirm={confirmFinalize}
       />
       <ConfirmDialog
         open={discardOpen}
         title="Descartar borrador"
         description="No cuenta como registro clínico y ya no se podrá editar. Queda la traza con el motivo."
         confirmLabel="Descartar"
-        pending={discard.isPending}
-        confirmDisabled={!discardReason.trim()}
+        pending={discarding}
+        error={discardError}
         onClose={() => setDiscardOpen(false)}
-        onConfirm={() => discard.mutate()}
+        onConfirm={() => void submitForm(discardForm)}
       >
-        <Field>
-          <FieldLabel htmlFor={`${ids}-discard`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${ids}-discard`}
-            aria-required="true"
-            value={discardReason}
-            maxLength={2000}
-            onChange={(event) => setDiscardReason(event.target.value)}
-          />
-        </Field>
+        <discardForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo" aria-required="true" maxLength={2000} />}
+        </discardForm.AppField>
       </ConfirmDialog>
     </article>
   )

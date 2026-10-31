@@ -1,4 +1,9 @@
-import { createStubFetch, gmailAdapter, microsoft365Adapter, splitColdSubject } from "@odentia/channels"
+import {
+  createStubFetch,
+  gmailAdapter,
+  microsoft365Adapter,
+  splitColdSubject,
+} from "@odentia/channels"
 import { withOrgContext } from "@odentia/db"
 import {
   patientCharge,
@@ -8,16 +13,22 @@ import {
   patientResponsibility,
   paymentTicket,
 } from "@odentia/db/schema/clinical"
-import { branch } from "@odentia/db/schema/org"
 import { contact } from "@odentia/db/schema/crm"
+import { branch } from "@odentia/db/schema/org"
+import { eq } from "drizzle-orm"
 import { expect, it } from "vitest"
-import { budgetFormat, ticketFormat } from "./financial-document-pdf.js"
-import { getDocumentSendOptions, listDocumentRecipients, proposeChannel, sendFinancialDocument } from "./financial-documents.js"
+import { budgetFormat } from "./budget-pdf.js"
+import { ticketFormat } from "./financial-document-pdf.js"
+import {
+  getDocumentSendOptions,
+  listDocumentRecipients,
+  proposeChannel,
+  sendFinancialDocument,
+} from "./financial-documents.js"
 import { nextPatientNumber } from "./patients.js"
 import type { Storage } from "./storage.js"
-import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
-import { eq } from "drizzle-orm"
+import { appDb, ownerDb, setupTestDb } from "./test-setup.js"
 
 setupTestDb()
 
@@ -45,18 +56,29 @@ it("propone correo si hay conexión utilizable, si no el preferido", () => {
     { channel: "whatsapp", usable: true, hasThread: true, connectionId: "c2" },
   ]
   expect(
-    proposeChannel(base, { email: "p@example.com", preferredChannel: "whatsapp", lastChannel: "whatsapp" })?.channel,
+    proposeChannel(base, {
+      email: "p@example.com",
+      preferredChannel: "whatsapp",
+      lastChannel: "whatsapp",
+    })?.channel,
   ).toBe("email")
   expect(
-    proposeChannel(base, { email: null, preferredChannel: "whatsapp", lastChannel: "email" })?.channel,
+    proposeChannel(base, { email: null, preferredChannel: "whatsapp", lastChannel: "email" })
+      ?.channel,
   ).toBe("whatsapp")
   expect(
     proposeChannel(base, { email: null, preferredChannel: null, lastChannel: "whatsapp" })?.channel,
   ).toBe("whatsapp")
-  expect(proposeChannel(base, { email: null, preferredChannel: null, lastChannel: null })?.connectionId).toBe("c1")
-  expect(proposeChannel([], { email: "p@example.com", preferredChannel: null, lastChannel: null })).toBeNull()
+  expect(
+    proposeChannel(base, { email: null, preferredChannel: null, lastChannel: null })?.connectionId,
+  ).toBe("c1")
+  expect(
+    proposeChannel([], { email: "p@example.com", preferredChannel: null, lastChannel: null }),
+  ).toBeNull()
   const unusable = base.map((o) => ({ ...o, usable: false }))
-  expect(proposeChannel(unusable, { email: "p@example.com", preferredChannel: null, lastChannel: null })).toBeNull()
+  expect(
+    proposeChannel(unusable, { email: "p@example.com", preferredChannel: null, lastChannel: null }),
+  ).toBeNull()
 })
 
 it("parte el asunto del envío en frío en primera línea", async () => {
@@ -113,7 +135,9 @@ it("microsoft 365 envía nuevo con adjunto para mail:", async () => {
   )
   expect(result.externalId.startsWith("m365-send:paciente@example.com:")).toBe(true)
   // captured[0] es la descarga del adjunto; el envío es captured[1].
-  const body = captured[1]?.body as { message?: { subject?: string; toRecipients?: unknown[]; attachments?: unknown[] } }
+  const body = captured[1]?.body as {
+    message?: { subject?: string; toRecipients?: unknown[]; attachments?: unknown[] }
+  }
   expect(body?.message?.subject).toBe("Ticket de cobro · Clínica")
   expect(body?.message?.toRecipients).toHaveLength(1)
   expect(body?.message?.attachments).toHaveLength(1)
@@ -122,11 +146,11 @@ it("microsoft 365 envía nuevo con adjunto para mail:", async () => {
 async function seedRecipients(orgId: string) {
   // La persona del paciente (su vínculo propio lo pone la base), con correo.
   const [person] = await insertTestPatients(ownerDb, {
-      organizationId: orgId,
-      displayName: "Paciente doctos",
-      email: "pac@example.com",
-      patientNumber: await nextPatientNumber(ownerDb, orgId),
-    })
+    organizationId: orgId,
+    displayName: "Paciente doctos",
+    email: "pac@example.com",
+    patientNumber: await nextPatientNumber(ownerDb, orgId),
+  })
   const [self] = await ownerDb.select().from(contact).where(eq(contact.id, person!.personId))
   const [payer] = await ownerDb
     .insert(contact)
@@ -197,7 +221,13 @@ async function seedRecipients(orgId: string) {
     ticketId: ticket!.id,
     amountCents: 45000,
   })
-  return { patientId: person!.id, selfId: self!.id, payerId: payer!.id, strangerId: stranger!.id, ticketId: ticket!.id }
+  return {
+    patientId: person!.id,
+    selfId: self!.id,
+    payerId: payer!.id,
+    strangerId: stranger!.id,
+    ticketId: ticket!.id,
+  }
 }
 
 it("lista a la persona y al pagador, y rechaza a un tercero", async () => {
@@ -207,9 +237,14 @@ it("lista a la persona y al pagador, y rechaza a un tercero", async () => {
   )
   expect(recipients.map((r) => r.contactId).sort()).toEqual([seed.payerId, seed.selfId].sort())
   expect(recipients.find((r) => r.contactId === seed.payerId)?.isDefault).toBe(true)
-  expect(recipients.find((r) => r.contactId === seed.payerId)?.relation).toBe("responsable_economico")
+  expect(recipients.find((r) => r.contactId === seed.payerId)?.relation).toBe(
+    "responsable_economico",
+  )
   const options = await withOrgContext(appDb, "org_a", (tx) =>
-    getDocumentSendOptions(tx, "org_a", seed.patientId, { documentType: "ticket", documentId: seed.ticketId }),
+    getDocumentSendOptions(tx, "org_a", seed.patientId, {
+      documentType: "ticket",
+      documentId: seed.ticketId,
+    }),
   )
   expect(options.document.label).toBe("Ticket N.º 000001")
   expect(options.document.statusLabel).toBe("Vigente")

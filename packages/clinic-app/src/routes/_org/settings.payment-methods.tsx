@@ -1,25 +1,25 @@
-import {
-  Badge,
-  Button,
-  cn,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  Skeleton,
-  toast,
-} from "@odentia/ui"
 import { FISCAL_DISCLAIMER } from "@odentia/clinical"
+import { Badge, Button, cn, FieldGroup, FieldLegend, FieldSet, Skeleton, toast } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { common, EmptyState, ErrorState, FormDrawer, PageHeader } from "@odentia/ui-patterns"
+import {
+  common,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  PageHeader,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { ArrowDown, ArrowUp, Plus, Wallet } from "lucide-react"
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { useReceptionName } from "../../lib/agent-names"
-import { ApiError } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { type OrgProfile, saveOrgPrinting, useOrgProfile } from "../../lib/org"
 import {
@@ -48,12 +48,6 @@ const SHEET_SIZES = { A4: "A4 · 210 × 297 mm", Letter: "Carta · 216 × 279 mm
 
 /** Clave de la lista completa (también los apagados), la que edita esta pantalla. */
 const METHODS_KEY = ["payment-methods", false] as const
-
-function messageOf(error: unknown, fallback: string): string {
-  return error instanceof ApiError && error.status < 500 && error.shape.message
-    ? error.shape.message
-    : fallback
-}
 
 /** Qué hace el tipo del medio en caja, dicho con palabras. */
 function typeBehavior(typeCode: string): string {
@@ -104,7 +98,7 @@ function PaymentMethodsPage() {
       )
       await refreshMethods()
     },
-    onError: (error) => toast.error(messageOf(error, "No pudimos guardar el cambio")),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
 
   const moveMutation = useMutation({
@@ -121,7 +115,7 @@ function PaymentMethodsPage() {
       })
       await queryClient.invalidateQueries({ queryKey: ["org-payment-methods"] })
     },
-    onError: (error) => toast.error(messageOf(error, "No pudimos cambiar el orden")),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
 
   // Al reordenar, la fila cambia de sitio: el foco vuelve al botón que se usó o,
@@ -164,7 +158,11 @@ function PaymentMethodsPage() {
         subtitle={SUBTITLE}
         primary={
           canWrite && methods && methods.length > 0
-            ? { label: "Agregar medio de pago", icon: <Plus aria-hidden />, onClick: () => setMethodForm("new") }
+            ? {
+                label: "Agregar medio de pago",
+                icon: <Plus aria-hidden />,
+                onClick: () => setMethodForm("new"),
+              }
             : undefined
         }
       />
@@ -175,7 +173,8 @@ function PaymentMethodsPage() {
             Medios de pago
           </h2>
           <p className="text-sm text-muted-foreground">
-            Caja ofrece los encendidos, en este orden, y {receptionName} responde con esta misma lista.
+            Caja ofrece los encendidos, en este orden, y {receptionName} responde con esta misma
+            lista.
           </p>
         </div>
         {neverLoaded ? (
@@ -375,7 +374,8 @@ function TicketCard({
             Ticket e impresión
           </h2>
           <p className="text-sm text-muted-foreground">
-            El ticket y la hoja de cierre salen en térmica; el presupuesto, en hoja.
+            El ticket y la hoja de cierre salen en térmica; el presupuesto, en hoja, con sus
+            condiciones.
           </p>
         </div>
         {profile && onEdit ? (
@@ -421,11 +421,29 @@ function TicketCard({
             {SHEET_SIZES[profile.sheetSize === "Letter" ? "Letter" : "A4"]}
           </TicketRow>
           <TicketRow label="Frase al pie del ticket">{profile.ticketFooter}</TicketRow>
+          <TicketRow label="Días de vigencia del presupuesto">
+            {profile.budgetValidDays ?? 30}
+          </TicketRow>
+          <TicketRow label="Cómo se paga">
+            {profile.budgetPaymentTerms || "Sin texto: no sale en el presupuesto"}
+          </TicketRow>
+          <TicketRow label="Si el importe cambia">
+            {profile.budgetChangeTerms || "Sin texto: no sale en el presupuesto"}
+          </TicketRow>
         </dl>
       )}
     </section>
   )
 }
+
+const methodSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Escribe el nombre del medio de pago")
+    .max(120, "El nombre admite hasta 120 caracteres"),
+  typeCode: z.enum(PAYMENT_TYPE_CODES, "Elige el tipo del medio de pago de la lista"),
+})
 
 /** Alta y edición de un medio de pago, en la superficie lateral. */
 function PaymentMethodForm({
@@ -441,25 +459,25 @@ function PaymentMethodForm({
   const initialType = (PAYMENT_TYPE_CODES as readonly string[]).includes(method?.typeCode ?? "")
     ? (method?.typeCode as PaymentTypeCode)
     : "1"
-  const [name, setName] = useState(method?.name ?? "")
-  const [typeCode, setTypeCode] = useState<PaymentTypeCode>(initialType)
-  const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: () =>
-      method
-        ? updatePaymentMethodApi(method.id, { name: name.trim(), typeCode })
-        : createPaymentMethodApi({ name: name.trim(), typeCode }),
-    onSuccess: async () => {
+    mutationFn: (values: { name: string; typeCode: PaymentTypeCode }) =>
+      method ? updatePaymentMethodApi(method.id, values) : createPaymentMethodApi(values),
+  })
+  const form = useAppForm({
+    defaultValues: { name: method?.name ?? "", typeCode: initialType as PaymentTypeCode },
+    validators: { onSubmit: methodSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({ name: value.name.trim(), typeCode: value.typeCode })
       toast.success(method ? "Medio de pago guardado" : "Medio de pago agregado")
       await onSaved()
     },
-    onError: (cause) =>
-      setError(messageOf(cause, "No pudimos guardar el medio de pago. Vuelve a intentarlo.")),
   })
-  const isDirty = name !== (method?.name ?? "") || typeCode !== initialType
+  const surface = useFormSurface(form)
+  const typeCode = useStore(form.store, (state) => state.values.typeCode)
 
   return (
     <FormDrawer
+      {...surface}
       open
       title={method ? `Editar ${method.name}` : "Nuevo medio de pago"}
       description={
@@ -468,56 +486,70 @@ function PaymentMethodForm({
           : "Se añade al final de la lista; después puedes subirlo."
       }
       onClose={onClose}
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault()
-        setError(null)
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty={isDirty}
-      error={error}
-      submitDisabled={!name.trim()}
       submitLabel={common.actions.save}
     >
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor="payment-method-name">Nombre</FieldLabel>
-          <Input
-            id="payment-method-name"
-            required
-            maxLength={120}
-            aria-describedby="payment-method-name-help"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <FieldDescription id="payment-method-name-help">
-            Como lo dice caja y como saldrá en el ticket.
-          </FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="payment-method-type">Tipo</FieldLabel>
-          <ChoiceSelect
-            id="payment-method-type"
-            value={typeCode}
-            aria-describedby="payment-method-type-help"
-            onChange={(event) => setTypeCode(event.target.value as PaymentTypeCode)}
-          >
-            {PAYMENT_TYPE_CODES.map((code) => (
-              <option key={code} value={code}>
-                {paymentTypeLabel(code)}
-              </option>
-            ))}
-          </ChoiceSelect>
-          <FieldDescription id="payment-method-type-help">
-            {isCashMethod(typeCode)
-              ? "El efectivo se cuenta al cerrar caja."
-              : "Al cobrar con él se pide el número de operación, y no entra en el conteo de caja."}
-          </FieldDescription>
-        </Field>
+        <form.AppField name="name">
+          {(field) => (
+            <field.TextField
+              label="Nombre"
+              maxLength={120}
+              description="Como lo dice caja y como saldrá en el ticket."
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="typeCode">
+          {(field) => (
+            <field.Control
+              label="Tipo"
+              description={
+                isCashMethod(typeCode)
+                  ? "El efectivo se cuenta al cerrar caja."
+                  : "Al cobrar con él se pide el número de operación, y no entra en el conteo de caja."
+              }
+            >
+              {(control) => (
+                <ChoiceSelect
+                  id={control.id}
+                  name={control.name}
+                  aria-invalid={control.invalid || undefined}
+                  aria-describedby={control.describedBy}
+                  value={field.state.value}
+                  onBlur={control.onBlur}
+                  onChange={(event) => field.handleChange(event.target.value as PaymentTypeCode)}
+                >
+                  {PAYMENT_TYPE_CODES.map((code) => (
+                    <option key={code} value={code}>
+                      {paymentTypeLabel(code)}
+                    </option>
+                  ))}
+                </ChoiceSelect>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )
 }
+
+const ticketSchema = z.object({
+  receiptWidth: z.enum(["58", "80"], "Elige el ancho del ticket: 58 u 80 mm"),
+  sheetSize: z.enum(["A4", "Letter"], "Elige el tamaño de hoja: A4 o Carta"),
+  ticketFooter: z
+    .string()
+    .trim()
+    .min(1, "Escribe la frase al pie del ticket")
+    .max(280, "La frase al pie admite hasta 280 caracteres"),
+  budgetValidDays: z
+    .string()
+    .refine(
+      (value) => /^\d+$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 365,
+      "Escribe un número de 1 a 365.",
+    ),
+  budgetPaymentTerms: z.string().max(2000, "Escribe como mucho 2000 caracteres."),
+  budgetChangeTerms: z.string().max(2000, "Escribe como mucho 2000 caracteres."),
+})
 
 /** Ancho del ticket, tamaño de hoja y frase al pie, en la superficie lateral. */
 function TicketForm({
@@ -529,90 +561,141 @@ function TicketForm({
   onClose: () => void
   onSaved: () => Promise<unknown>
 }) {
-  const initial = {
-    receiptWidth: profile.receiptWidth === "58" ? ("58" as const) : ("80" as const),
-    sheetSize: profile.sheetSize === "Letter" ? ("Letter" as const) : ("A4" as const),
-    ticketFooter: profile.ticketFooter,
-  }
-  const [receiptWidth, setReceiptWidth] = useState<"58" | "80">(initial.receiptWidth)
-  const [sheetSize, setSheetSize] = useState<"A4" | "Letter">(initial.sheetSize)
-  const [ticketFooter, setTicketFooter] = useState(initial.ticketFooter)
-  const [error, setError] = useState<string | null>(null)
-  const save = useMutation({
-    mutationFn: () =>
-      saveOrgPrinting({ receiptWidth, sheetSize, ticketFooter: ticketFooter.trim() }),
-    onSuccess: async () => {
+  const save = useMutation({ mutationFn: saveOrgPrinting })
+  const form = useAppForm({
+    defaultValues: {
+      receiptWidth: profile.receiptWidth === "58" ? ("58" as const) : ("80" as const),
+      sheetSize: profile.sheetSize === "Letter" ? ("Letter" as const) : ("A4" as const),
+      ticketFooter: profile.ticketFooter,
+      budgetValidDays: String(profile.budgetValidDays ?? 30),
+      budgetPaymentTerms: profile.budgetPaymentTerms ?? "",
+      budgetChangeTerms: profile.budgetChangeTerms ?? "",
+    } as {
+      receiptWidth: "58" | "80"
+      sheetSize: "A4" | "Letter"
+      ticketFooter: string
+      budgetValidDays: string
+      budgetPaymentTerms: string
+      budgetChangeTerms: string
+    },
+    validators: { onSubmit: ticketSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync({
+        receiptWidth: value.receiptWidth,
+        sheetSize: value.sheetSize,
+        ticketFooter: value.ticketFooter.trim(),
+        budgetValidDays: Number(value.budgetValidDays),
+        budgetPaymentTerms: value.budgetPaymentTerms.trim() || null,
+        budgetChangeTerms: value.budgetChangeTerms.trim() || null,
+      })
       toast.success("Ticket guardado")
       await onSaved()
     },
-    onError: (cause) =>
-      setError(messageOf(cause, "No pudimos guardar el ticket. Vuelve a intentarlo.")),
   })
-  const isDirty =
-    receiptWidth !== initial.receiptWidth ||
-    sheetSize !== initial.sheetSize ||
-    ticketFooter !== initial.ticketFooter
+  const surface = useFormSurface(form)
 
   return (
     <FormDrawer
+      {...surface}
       open
       title="Ticket e impresión"
-      description="Vale para los tickets y presupuestos que se impriman desde ahora."
+      description="Vale para los tickets y presupuestos que se impriman desde ahora. Lo ya entregado no cambia."
       onClose={onClose}
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault()
-        setError(null)
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty={isDirty}
-      error={error}
-      submitDisabled={!ticketFooter.trim()}
       submitLabel={common.actions.save}
+      className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(36rem,calc(100vw-2rem))]"
     >
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor="ticket-width">Ancho del ticket</FieldLabel>
-          <ChoiceSelect
-            id="ticket-width"
-            value={receiptWidth}
-            aria-describedby="ticket-width-help"
-            onChange={(event) => setReceiptWidth(event.target.value === "58" ? "58" : "80")}
-          >
-            <option value="80">{RECEIPT_WIDTHS["80"]}</option>
-            <option value="58">{RECEIPT_WIDTHS["58"]}</option>
-          </ChoiceSelect>
-          <FieldDescription id="ticket-width-help">
-            El de la impresora térmica: en él salen el ticket y la hoja de cierre de caja.
-          </FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="ticket-sheet">Tamaño de hoja</FieldLabel>
-          <ChoiceSelect
-            id="ticket-sheet"
-            value={sheetSize}
-            aria-describedby="ticket-sheet-help"
-            onChange={(event) => setSheetSize(event.target.value === "Letter" ? "Letter" : "A4")}
-          >
-            <option value="A4">{SHEET_SIZES.A4}</option>
-            <option value="Letter">{SHEET_SIZES.Letter}</option>
-          </ChoiceSelect>
-          <FieldDescription id="ticket-sheet-help">En ella sale el presupuesto.</FieldDescription>
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="ticket-footer">Frase al pie del ticket</FieldLabel>
-          <Input
-            id="ticket-footer"
-            required
-            maxLength={280}
-            aria-describedby="ticket-footer-help"
-            value={ticketFooter}
-            onChange={(event) => setTicketFooter(event.target.value)}
-          />
-          <FieldDescription id="ticket-footer-help">
-            Va antes de «{FISCAL_DISCLAIMER}», que todo ticket lleva siempre. Los tickets ya emitidos conservan la frase con la que salieron.
-          </FieldDescription>
-        </Field>
+        <form.AppField name="receiptWidth">
+          {(field) => (
+            <field.Control
+              label="Ancho del ticket"
+              description="El de la impresora térmica: en él salen el ticket y la hoja de cierre de caja."
+            >
+              {(control) => (
+                <ChoiceSelect
+                  id={control.id}
+                  name={control.name}
+                  aria-invalid={control.invalid || undefined}
+                  aria-describedby={control.describedBy}
+                  value={field.state.value}
+                  onBlur={control.onBlur}
+                  onChange={(event) =>
+                    field.handleChange(event.target.value === "58" ? "58" : "80")
+                  }
+                >
+                  <option value="80">{RECEIPT_WIDTHS["80"]}</option>
+                  <option value="58">{RECEIPT_WIDTHS["58"]}</option>
+                </ChoiceSelect>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="sheetSize">
+          {(field) => (
+            <field.Control label="Tamaño de hoja" description="En ella sale el presupuesto.">
+              {(control) => (
+                <ChoiceSelect
+                  id={control.id}
+                  name={control.name}
+                  aria-invalid={control.invalid || undefined}
+                  aria-describedby={control.describedBy}
+                  value={field.state.value}
+                  onBlur={control.onBlur}
+                  onChange={(event) =>
+                    field.handleChange(event.target.value === "Letter" ? "Letter" : "A4")
+                  }
+                >
+                  <option value="A4">{SHEET_SIZES.A4}</option>
+                  <option value="Letter">{SHEET_SIZES.Letter}</option>
+                </ChoiceSelect>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="ticketFooter">
+          {(field) => (
+            <field.TextField
+              label="Frase al pie del ticket"
+              maxLength={280}
+              description={`Va antes de «${FISCAL_DISCLAIMER}», que todo ticket lleva siempre. Los tickets ya emitidos conservan la frase con la que salieron.`}
+            />
+          )}
+        </form.AppField>
+        <FieldSet>
+          <FieldLegend>Condiciones del presupuesto</FieldLegend>
+          <FieldGroup>
+            <form.AppField name="budgetValidDays">
+              {(field) => (
+                <field.TextField
+                  label="Días de vigencia del presupuesto"
+                  inputMode="numeric"
+                  inputClassName="max-w-32"
+                  description="Con esto se propone su fecha; se puede cambiar en cada uno."
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="budgetPaymentTerms">
+              {(field) => (
+                <field.TextareaField
+                  label="Cómo se paga"
+                  rows={3}
+                  maxLength={2000}
+                  description="Vacío, esa parte no sale en el presupuesto."
+                />
+              )}
+            </form.AppField>
+            <form.AppField name="budgetChangeTerms">
+              {(field) => (
+                <field.TextareaField
+                  label="Si el importe cambia"
+                  rows={3}
+                  maxLength={2000}
+                  description="Vacío, esa parte no sale en el presupuesto."
+                />
+              )}
+            </form.AppField>
+          </FieldGroup>
+        </FieldSet>
       </div>
     </FormDrawer>
   )

@@ -11,6 +11,12 @@
  * agregarlo, aunque se pague después; si no había, queda como faltante.
  * Paga el paciente salvo que se elija a uno de sus responsables vigentes.
  *
+ * Cada error se dice junto a lo que hay que corregir: el concepto, el importe,
+ * el medio (o la parte con varios medios), lo recibido o quién paga; lo que no
+ * es de ningún dato, junto a los botones. Cada bloque en línea (cambiar un
+ * concepto, su promoción, otro concepto, un producto) es su propio formulario
+ * con su error en su campo.
+ *
  * Moneda de la clínica (prop requerida) y formato del perfil; dinero con el
  * módulo compartido `@odentia/clinical`. Nada fijo de un país.
  */
@@ -20,10 +26,8 @@ import {
   Checkbox,
   cn,
   Field,
-  FieldDescription,
   FieldError,
   FieldLabel,
-  Input,
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
@@ -31,18 +35,34 @@ import {
   RadioGroupItem,
   Skeleton,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, ResourceSelect, SubmitButton } from "@odentia/ui-patterns"
+import {
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  ResourceSelect,
+  SubmitButton,
+  submitForm,
+  useAppForm,
+  useFieldContext,
+  useFieldControl,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { MoreHorizontal, Plus, X } from "lucide-react"
 import { useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react"
-import { ChoiceSelect } from "../ui/choice-select"
+import { z } from "zod"
 import { useActiveBranch } from "../../lib/active-branch"
 import { fetchResponsibilities, RESPONSIBILITY_KIND_LABELS } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
-import { collectFailureMessage, financeErrorMessage } from "../../lib/finance"
+import { collectFormMessage, financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
+  type AccountPendingItem,
   CASH_TYPE_CODE,
+  type CollectInput,
+  type CollectResultBody,
   collectApi,
   createManualChargeApi,
   createProductChargeApi,
@@ -53,17 +73,16 @@ import {
   fetchPaymentMethods,
   fetchSaleProducts,
   formatAmountPlain,
-  voidChargeApi,
-  type AccountPendingItem,
-  type CollectResultBody,
   type PaymentMethodOption,
   type ProductCharge,
   type PromotionItem,
   type PromotionOption,
   type SaleProduct,
+  voidChargeApi,
 } from "../../lib/finance-collect"
 import { parseWholeQuantity, saleDeductionWords, saleStockNote } from "../../lib/materials"
 import { PersonPicker } from "../person-picker"
+import { ChoiceSelect } from "../ui/choice-select"
 
 /** Lo más que se vende de un producto en un concepto (el tope del servidor). */
 const SALE_QUANTITY_MAX = 9999
@@ -107,6 +126,7 @@ export function MoneyInput({
   currency,
   locale,
   onKeyDown,
+  onBlur,
   disabled,
   autoFocus,
   invalid,
@@ -119,6 +139,7 @@ export function MoneyInput({
   currency: string
   locale: string
   onKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void
+  onBlur?: () => void
   disabled?: boolean
   autoFocus?: boolean
   invalid?: boolean
@@ -142,27 +163,51 @@ export function MoneyInput({
         aria-invalid={invalid || undefined}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
+        onBlur={onBlur}
       />
     </InputGroup>
   )
 }
 
-/** Medios de pago activos como botones, en el orden que la clínica les dio. */
+/**
+ * Medios de pago activos como botones, en el orden que la clínica les dio.
+ * Dentro de un `field.Group` el nombre lo da su leyenda (sin `labelId`) y el
+ * grupo se marca con `invalid` y `aria-describedby`.
+ */
 export function PaymentMethodButtons({
+  id,
   labelId,
   methods,
   value,
   onChange,
+  onBlur,
   disabled,
+  invalid,
+  "aria-describedby": describedBy,
 }: {
-  labelId: string
+  id?: string
+  labelId?: string
   methods: PaymentMethodOption[]
   value: string
   onChange: (id: string) => void
+  /** Al salir el foco del grupo. */
+  onBlur?: () => void
   disabled?: boolean
+  invalid?: boolean
+  "aria-describedby"?: string
 }): React.JSX.Element {
   return (
-    <div role="group" aria-labelledby={labelId} className="flex flex-wrap gap-2">
+    <div
+      id={id}
+      role="group"
+      aria-labelledby={labelId}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      className="flex flex-wrap gap-2"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onBlur?.()
+      }}
+    >
       {methods.map((method) => {
         const selected = method.id === value
         return (
@@ -172,7 +217,7 @@ export function PaymentMethodButtons({
             variant={selected ? "default" : "outline"}
             aria-pressed={selected}
             disabled={disabled}
-            className="min-h-10"
+            className={cn("min-h-10", invalid && !selected && "border-destructive")}
             onClick={() => onChange(method.id)}
           >
             {method.name}
@@ -186,8 +231,8 @@ export function PaymentMethodButtons({
 /** Un medio dentro de un cobro con varios medios. */
 interface SplitLine {
   key: number
-  paymentMethodId: string
-  amountText: string
+  methodId: string
+  amount: string
   reference: string
   /** Absorbe la diferencia con el importe hasta que la persona escribe el suyo. */
   auto: boolean
@@ -204,35 +249,194 @@ function rebalance(
   if (lines.filter((line) => line.auto).length !== 1) return lines
   const fixed = lines
     .filter((line) => !line.auto)
-    .reduce((sum, line) => sum + (parseMoneyOrNull(line.amountText, currency, locale) ?? 0), 0)
+    .reduce((sum, line) => sum + (parseMoneyOrNull(line.amount, currency, locale) ?? 0), 0)
   const rest = totalCents - fixed
   return lines.map((line) =>
-    line.auto
-      ? { ...line, amountText: rest > 0 ? formatMoneyInput(rest, currency, locale) : "" }
-      : line,
+    line.auto ? { ...line, amount: rest > 0 ? formatMoneyInput(rest, currency, locale) : "" } : line,
   )
+}
+
+/** El paciente elegido en el buscador, cuando el cobro no llega con uno. */
+interface PickedPatient {
+  id: string
+  name: string
+  document: string | null
+  sex: string | null
+}
+
+/** El borrador del cobro. Sin varios medios, `payments` va vacío y manda `methodId`. */
+interface CollectDraft {
+  patient: PickedPatient | null
+  chargeIds: string[]
+  /** Adelanto: no paga conceptos, queda a favor. */
+  advance: boolean
+  amount: string
+  methodId: string
+  reference: string
+  payments: SplitLine[]
+  cashReceived: string
+  payerContactId: string
+}
+
+const EMPTY_DRAFT: CollectDraft = {
+  patient: null,
+  chargeIds: [],
+  advance: false,
+  amount: "",
+  methodId: "",
+  reference: "",
+  payments: [],
+  cashReceived: "",
+  payerContactId: "",
+}
+
+/** Lo que el borrador necesita de la pantalla para calcularse y validarse. */
+interface CollectRules {
+  needsPatient: boolean
+  /** Lo pendiente en la moneda de la clínica. */
+  pending: AccountPendingItem[]
+  favor: number
+  methods: PaymentMethodOption[]
+  currency: string
+  locale: string
+}
+
+/** Las cifras del cobro a partir del borrador: lo que se ve y lo que se envía. */
+function collectFigures(value: CollectDraft, rules: CollectRules) {
+  const { pending, favor, methods, currency, locale } = rules
+  const money = (text: string) => parseMoneyOrNull(text, currency, locale)
+  const lineCents = (text: string) => money(text) ?? 0
+  const methodById = (id: string) => methods.find((item) => item.id === id)
+  const isCash = (id: string) => methodById(id)?.typeCode === CASH_TYPE_CODE
+  const selectedItems = pending.filter((item) => value.chargeIds.includes(item.chargeId))
+  const selectedTotal = selectedItems.reduce((sum, item) => sum + item.saldoCents, 0)
+  const autoCredit = value.advance ? 0 : Math.min(favor, selectedTotal)
+  /** Lo que falta pagar de lo marcado, ya descontado el saldo a favor. */
+  const due = value.advance ? 0 : Math.max(0, selectedTotal - autoCredit)
+  const creditOnly = !value.advance && selectedItems.length > 0 && due === 0
+  const amountCents = money(value.amount)
+  const split = value.payments.length > 0
+  const method = methodById(value.methodId) ?? methods[0] ?? null
+  const splitTotal = value.payments.reduce((sum, line) => sum + lineCents(line.amount), 0)
+  const hasCash = split ? value.payments.some((line) => isCash(line.methodId)) : method?.typeCode === CASH_TYPE_CODE
+  const cashPortion = split
+    ? value.payments.reduce((sum, line) => sum + (isCash(line.methodId) ? lineCents(line.amount) : 0), 0)
+    : hasCash
+      ? (amountCents ?? 0)
+      : 0
+  const receivedCents = value.cashReceived.trim() ? money(value.cashReceived) : null
+  const change = hasCash && receivedCents !== null ? receivedCents - cashPortion : null
+  return {
+    money,
+    lineCents,
+    methodById,
+    selectedItems,
+    autoCredit,
+    due,
+    creditOnly,
+    amountCents,
+    split,
+    method,
+    splitTotal,
+    hasCash,
+    cashPortion,
+    receivedCents,
+    change,
+  }
+}
+
+const lineSchema = z.object({
+  key: z.number(),
+  methodId: z.string(),
+  amount: z.string(),
+  reference: z.string().max(MAX_REFERENCE, `Escribe como mucho ${MAX_REFERENCE} caracteres.`),
+  auto: z.boolean(),
+})
+
+/** Las reglas del cobro, cada una en el dato que hay que corregir. */
+function collectSchema(rules: () => CollectRules) {
+  return z
+    .object({
+      patient: z.custom<PickedPatient | null>(),
+      chargeIds: z.array(z.string()),
+      advance: z.boolean(),
+      amount: z.string(),
+      methodId: z.string(),
+      reference: z.string().max(MAX_REFERENCE, `Escribe como mucho ${MAX_REFERENCE} caracteres.`),
+      payments: z.array(lineSchema),
+      cashReceived: z.string(),
+      payerContactId: z.string(),
+    })
+    .superRefine((value, ctx) => {
+      const current = rules()
+      const { currency, locale } = current
+      const issue = (path: Array<string | number>, message: string) => ctx.addIssue({ code: "custom", path, message })
+      if (current.needsPatient && !value.patient) {
+        issue(["patient"], "Busca y elige al paciente que paga.")
+        return
+      }
+      const figures = collectFigures(value, current)
+      if (!value.advance && figures.selectedItems.length === 0) {
+        issue(["chargeIds"], "Marca al menos un concepto o cobra un adelanto.")
+        return
+      }
+      if (figures.creditOnly) return
+      const amountCents = figures.amountCents
+      const amountOk = amountCents !== null && amountCents > 0
+      if (!amountOk) {
+        issue(["amount"], value.advance ? "Escribe el importe del adelanto." : "Escribe el importe que paga ahora.")
+      } else if (!value.advance && amountCents > figures.due) {
+        issue(
+          ["amount"],
+          `El importe supera lo que falta de lo marcado (${formatMoney(figures.due, currency, locale)}). Para dejar dinero a favor, cobra un adelanto.`,
+        )
+      }
+      if (figures.split) {
+        let linesOk = true
+        value.payments.forEach((line, index) => {
+          if (!figures.methodById(line.methodId)) {
+            issue(["payments", index, "methodId"], "Elige el medio de pago de cada parte.")
+            linesOk = false
+          }
+          const cents = figures.money(line.amount)
+          if (cents === null || cents <= 0) {
+            issue(["payments", index, "amount"], "Escribe el importe de cada medio de pago.")
+            linesOk = false
+          }
+        })
+        if (amountOk && linesOk && figures.splitTotal !== amountCents) {
+          issue(
+            ["payments"],
+            `Los medios suman ${formatMoney(figures.splitTotal, currency, locale)} y el importe es ${formatMoney(amountCents, currency, locale)}.`,
+          )
+        }
+      } else if (!figures.method) {
+        issue(["methodId"], "Elige el medio de pago.")
+      }
+      if (
+        figures.hasCash &&
+        value.cashReceived.trim() &&
+        (figures.receivedCents === null || figures.receivedCents < figures.cashPortion)
+      ) {
+        issue(["cashReceived"], "Lo que recibes en efectivo no cubre la parte en efectivo.")
+      }
+    })
 }
 
 /** Bloque abierto bajo un concepto: corregir el importe o poner el precio de una promoción «desde». */
 type Editor =
-  | { kind: "amount"; chargeId: string; amountText: string; reason: string; confirmRemove: boolean }
-  | {
-      kind: "promo"
-      chargeId: string
-      promotionId: string
-      promotionName: string
-      floorCents: number
-      amountText: string
-      reason: string
-    }
+  | { kind: "amount"; chargeId: string }
+  | { kind: "promo"; chargeId: string; promotionId: string; promotionName: string; floorCents: number }
 
 /** Cambio sobre un concepto: quién muestra el progreso, qué se llama y qué pasa al terminar. */
 interface ConceptJob {
   target: string
-  errorAt: string
   run: () => Promise<unknown>
-  done?: (result: unknown) => void
+  done?: () => void
 }
+
+/** Lo que el servidor llama distinto en los bloques de un concepto. */
+const CONCEPT_FIELDS = { amountCents: "amount" }
 
 export function CollectDrawer({
   patientId,
@@ -272,32 +476,14 @@ export function CollectDrawer({
   const canConfigure = usePermission("settings.write")
   const sede = useActiveBranch()
 
-  const [chosen, setChosen] = useState<{
-    id: string
-    name: string
-    document: string | null
-    sex: string | null
-  } | null>(null)
-  const effectiveId = patientId ?? chosen?.id ?? null
-
-  const [selected, setSelected] = useState<string[]>([])
   const [selectInit, setSelectInit] = useState(false)
-  const [advanceMode, setAdvanceMode] = useState(false)
-  const [amountText, setAmountText] = useState("")
+  /** El importe sigue a lo marcado hasta que la persona escribe otro. */
   const [amountTouched, setAmountTouched] = useState(false)
-  const [methodId, setMethodId] = useState("")
-  const [reference, setReference] = useState("")
-  const [split, setSplit] = useState<SplitLine[] | null>(null)
-  const [cashReceived, setCashReceived] = useState("")
-  const [payerContactId, setPayerContactId] = useState("")
-  const [payerOpen, setPayerOpen] = useState(false)
   const [editor, setEditor] = useState<Editor | null>(null)
-  const [adding, setAdding] = useState<{ description: string; amountText: string } | null>(null)
-  /** «+ Agregar producto» abierto: lo elegido de lo que se vende y la cantidad escrita. */
-  // Cada vez que se abre «+ Agregar producto» lleva su clave: si se corta la red y se vuelve a
-  // tocar «Agregar», el servidor devuelve la misma venta sin descontar otra vez.
-  const [addingProduct, setAddingProduct] = useState<{ product: SaleProduct | null; quantityText: string; requestId: string } | null>(null)
-  const [productQuery, setProductQuery] = useState("")
+  const [adding, setAdding] = useState(false)
+  const [addingProduct, setAddingProduct] = useState(false)
+  /** El rechazo de una acción suelta sobre un concepto (aplicar o quitar una promoción). */
+  const [rowError, setRowError] = useState<{ chargeId: string; message: string } | null>(null)
   /**
    * Lo vendido en este cobro, por concepto: con esto se dice «15.00 c/u · se
    * descuentan 2 de Sede Miraflores» bajo su línea (la cuenta no lo trae).
@@ -305,41 +491,123 @@ export function CollectDrawer({
   const [soldHere, setSoldHere] = useState<
     Record<string, { quantity: number; unitPriceCents: number; branchName: string }>
   >({})
-  const [inlineError, setInlineError] = useState<{ at: string; message: string } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [dirty, setDirty] = useState(false)
-  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  /**
+   * La clave del cobro: la misma mientras el cajón siga abierto y no se cobre.
+   * Si la respuesta no llega, volver a pulsar «Cobrar» sin cambiar nada
+   * devuelve el mismo ticket en vez de cobrar dos veces.
+   */
+  const requestId = useRef<string>(crypto.randomUUID())
   const keySeq = useRef(1)
+  const rules = useRef<CollectRules>({
+    needsPatient: patientId === null,
+    pending: [],
+    favor: 0,
+    methods: [],
+    currency,
+    locale,
+  })
+  const schema = useMemo(() => collectSchema(() => rules.current), [])
 
-  const resetDraft = useCallback(() => {
-    setSelected([])
-    setSelectInit(false)
-    setAdvanceMode(false)
-    setAmountText("")
-    setAmountTouched(false)
-    setMethodId("")
-    setReference("")
-    setSplit(null)
-    setCashReceived("")
-    setPayerContactId("")
-    setPayerOpen(false)
+  const collect = useMutation({
+    mutationFn: async ({ id, body }: { id: string; body: CollectInput }) => (await collectApi(id, body)).data,
+    onSuccess: (result, { id }) => {
+      // La respuesta ya trae la cuenta al día: el ticket la lee sin esperar.
+      queryClient.setQueryData(["patient-account3", id], { data: result.account })
+      void queryClient.invalidateQueries({ queryKey: ["patient-account", id] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-cash"] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
+      void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
+      requestId.current = crypto.randomUUID()
+      onCollected(result, id)
+      onClose()
+    },
+  })
+
+  const form = useAppForm({
+    defaultValues: EMPTY_DRAFT,
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const id = patientId ?? value.patient?.id
+      if (!id) return
+      const figures = collectFigures(value, rules.current)
+      // El esquema ya exige importe y medio: aquí solo se arma el cuerpo.
+      const amountCents = figures.amountCents ?? 0
+      const single = figures.method
+      const base = { branchId, payerContactId: value.payerContactId || null, requestId: requestId.current }
+      // Sin medios el servidor usa solo el saldo a favor.
+      const payments = figures.creditOnly
+        ? undefined
+        : figures.split
+          ? value.payments.map((line) => ({
+              paymentMethodId: line.methodId,
+              amountCents: figures.lineCents(line.amount),
+              ...(line.reference.trim() ? { reference: line.reference.trim() } : {}),
+            }))
+          : single
+            ? [
+                {
+                  paymentMethodId: single.id,
+                  amountCents,
+                  ...(!figures.hasCash && value.reference.trim() ? { reference: value.reference.trim() } : {}),
+                },
+              ]
+            : []
+      const cash =
+        !figures.creditOnly && figures.hasCash && figures.receivedCents !== null
+          ? { cashReceivedCents: figures.receivedCents }
+          : {}
+      await collect.mutateAsync({
+        id,
+        body: value.advance
+          ? { ...base, advanceCents: amountCents, payments, ...cash }
+          : {
+              ...base,
+              chargeIds: figures.selectedItems.map((item) => item.chargeId),
+              ...(payments ? { payments } : {}),
+              ...cash,
+            },
+      })
+    },
+  })
+  const surface = useFormSurface(form, {
+    formMessage: collectFormMessage,
+    // El servidor nombra los datos del cuerpo; con un solo medio, su medio e
+    // importe son los del formulario simple.
+    fieldMap: (key) => {
+      if (key === "chargeIds" || key.startsWith("chargeIds[")) return "chargeIds"
+      if (key === "advanceCents") return "amount"
+      if (key === "cashReceivedCents") return "cashReceived"
+      const part = /^payments\[(\d+)\]\.(paymentMethodId|amountCents|reference)$/.exec(key)
+      if (!part) return undefined
+      const name = part[2] === "paymentMethodId" ? "methodId" : part[2] === "amountCents" ? "amount" : "reference"
+      return form.state.values.payments.length > 0 ? `payments[${part[1]}].${name}` : name
+    },
+  })
+
+  const values = useStore(form.store, (state) => state.values)
+  const chosen = values.patient
+  const effectiveId = patientId ?? chosen?.id ?? null
+
+  const closeInline = () => {
     setEditor(null)
-    setAdding(null)
-    setAddingProduct(null)
-    setProductQuery("")
-    setInlineError(null)
-    setError(null)
-  }, [])
+    setAdding(false)
+    setAddingProduct(false)
+  }
 
   // Sesión nueva al abrir: borrador limpio y clave de cobro nueva.
   useEffect(() => {
     if (!open) return
-    setChosen(null)
-    resetDraft()
+    form.reset()
+    setSelectInit(false)
+    setAmountTouched(false)
+    setEditor(null)
+    setAdding(false)
+    setAddingProduct(false)
+    setRowError(null)
     setSoldHere({})
-    setDirty(false)
-    setRequestId(crypto.randomUUID())
-  }, [open, patientId, resetDraft])
+    requestId.current = crypto.randomUUID()
+  }, [open, patientId, form])
 
   const account = useQuery({
     queryKey: ["patient-account3", effectiveId],
@@ -376,20 +644,12 @@ export function CollectDrawer({
     queryFn: () => fetchActivePromotions(),
     enabled: open && offersPromotions,
   })
-  // «+ Agregar producto»: lo que se vende, con su precio y lo que hay en la
-  // sede del cobro (la misma de los conceptos). Busca en el servidor.
-  const productSearch = useDeferredValue(productQuery.trim())
-  const saleProducts = useQuery({
-    queryKey: ["sale-products", branchId, productSearch],
-    queryFn: () => fetchSaleProducts({ branchId, q: productSearch || undefined, limit: 20 }),
-    enabled: open && addingProduct !== null && Boolean(branchId),
-    placeholderData: (previous) => previous,
-    staleTime: 15_000,
-  })
   const methodList = methods.data?.data ?? []
-  const method = methodList.find((item) => item.id === methodId) ?? methodList[0] ?? null
-  const methodById = (id: string) => methodList.find((item) => item.id === id)
-  const isCash = (id: string) => methodById(id)?.typeCode === CASH_TYPE_CODE
+
+  rules.current = { needsPatient: patientId === null, pending, favor, methods: methodList, currency, locale }
+  const figures = collectFigures(values, rules.current)
+  const { autoCredit, due, creditOnly, amountCents, split, method, splitTotal, hasCash, change } =
+    figures
 
   // Selección inicial: lo pendiente, o lo que pidió quien abrió el cobro.
   // Sin nada pendiente el cobro nace como adelanto.
@@ -397,41 +657,33 @@ export function CollectDrawer({
     if (!open || selectInit || !data) return
     const ids = pending.map((item) => item.chargeId)
     const preset = (presetChargeIds ?? []).filter((id) => ids.includes(id))
-    setSelected(preset.length > 0 ? preset : ids)
-    if (pending.length === 0) setAdvanceMode(true)
+    form.setFieldValue("chargeIds", preset.length > 0 ? preset : ids, { dontUpdateMeta: true })
+    if (pending.length === 0) form.setFieldValue("advance", true, { dontUpdateMeta: true })
     setSelectInit(true)
-  }, [open, selectInit, data, pending, presetChargeIds])
+  }, [open, selectInit, data, pending, presetChargeIds, form])
 
-  const selectedItems = pending.filter((item) => selected.includes(item.chargeId))
-  const selectedTotal = selectedItems.reduce((sum, item) => sum + item.saldoCents, 0)
-  const autoCredit = advanceMode ? 0 : Math.min(favor, selectedTotal)
-  /** Lo que falta pagar de lo marcado, ya descontado el saldo a favor. */
-  const due = advanceMode ? 0 : Math.max(0, selectedTotal - autoCredit)
-  const creditOnly = !advanceMode && selectedItems.length > 0 && due === 0
-  const amountCents = parseMoneyOrNull(amountText, currency, locale)
+  /** Con una línea «automática», esta completa lo que falta para `totalCents`. */
+  // Memorizada: el efecto del importe la usa sin volver a correr en cada render.
+  const followAmount = useCallback(
+    (totalCents: number | null) => {
+      const lines = form.state.values.payments
+      if (lines.length === 0) return
+      rebalance(lines, totalCents, currency, locale).forEach((line, index) => {
+        if (line.amount !== lines[index]?.amount) {
+          form.setFieldValue(`payments[${index}].amount`, line.amount, { dontUpdateMeta: true })
+        }
+      })
+    },
+    [form, currency, locale],
+  )
 
   // El importe sigue a lo marcado hasta que la persona escribe otro.
   useEffect(() => {
-    if (!open || amountTouched || advanceMode) return
-    setAmountText(due > 0 ? formatMoneyInput(due, currency, locale) : "")
-    setSplit((current) => (current ? rebalance(current, due > 0 ? due : null, currency, locale) : current))
-  }, [open, amountTouched, advanceMode, due, currency, locale])
-
-  const lineCents = (text: string) => parseMoneyOrNull(text, currency, locale) ?? 0
-  const splitTotal = split ? split.reduce((sum, line) => sum + lineCents(line.amountText), 0) : 0
-  const hasCash = split
-    ? split.some((line) => isCash(line.paymentMethodId))
-    : method?.typeCode === CASH_TYPE_CODE
-  const cashPortion = split
-    ? split.reduce(
-        (sum, line) => sum + (isCash(line.paymentMethodId) ? lineCents(line.amountText) : 0),
-        0,
-      )
-    : hasCash
-      ? (amountCents ?? 0)
-      : 0
-  const receivedCents = cashReceived.trim() ? parseMoneyOrNull(cashReceived, currency, locale) : null
-  const change = hasCash && receivedCents !== null ? receivedCents - cashPortion : null
+    if (!open || amountTouched || values.advance) return
+    const text = due > 0 ? formatMoneyInput(due, currency, locale) : ""
+    if (form.state.values.amount !== text) form.setFieldValue("amount", text, { dontUpdateMeta: true })
+    followAmount(due > 0 ? due : null)
+  }, [open, amountTouched, values.advance, due, currency, locale, form, followAmount])
 
   const refreshAccount = async (id: string) => {
     await queryClient.invalidateQueries({ queryKey: ["patient-account3", id] })
@@ -442,75 +694,21 @@ export function CollectDrawer({
   // Corregir, quitar, agregar o aplicar promoción: una sola mutación a la vez.
   const conceptMutation = useMutation({
     mutationFn: (job: ConceptJob) => job.run(),
-    onSuccess: async (result, job) => {
-      setEditor(null)
-      setAdding(null)
-      setAddingProduct(null)
-      setProductQuery("")
-      setInlineError(null)
-      setError(null)
+    onSuccess: async (_result, job) => {
+      closeInline()
+      setRowError(null)
       // El precio cambió: el importe vuelve a seguir a lo marcado.
       setAmountTouched(false)
-      setDirty(true)
-      job.done?.(result)
+      job.done?.()
       await refreshAccount(effectiveId as string)
     },
-    onError: (err, job) => setInlineError({ at: job.errorAt, message: financeErrorMessage(err) }),
   })
   const conceptBusy = (target: string) =>
     conceptMutation.isPending && conceptMutation.variables?.target === target
+  const runConcept = (job: ConceptJob) => conceptMutation.mutateAsync(job)
 
-  const collectMutation = useMutation({
-    mutationFn: async () => {
-      const id = effectiveId as string
-      const base = { branchId, payerContactId: payerContactId || null, requestId }
-      // Sin medios el servidor usa solo el saldo a favor.
-      const payments = creditOnly
-        ? undefined
-        : split
-          ? split.map((line) => ({
-              paymentMethodId: line.paymentMethodId,
-              amountCents: lineCents(line.amountText),
-              ...(line.reference.trim() ? { reference: line.reference.trim() } : {}),
-            }))
-          : [
-              {
-                paymentMethodId: (method as PaymentMethodOption).id,
-                amountCents: amountCents as number,
-                ...(!hasCash && reference.trim() ? { reference: reference.trim() } : {}),
-              },
-            ]
-      const cash =
-        !creditOnly && hasCash && receivedCents !== null ? { cashReceivedCents: receivedCents } : {}
-      const result = advanceMode
-        ? await collectApi(id, { ...base, advanceCents: amountCents as number, payments, ...cash })
-        : await collectApi(id, {
-            ...base,
-            chargeIds: selectedItems.map((item) => item.chargeId),
-            ...(payments ? { payments } : {}),
-            ...cash,
-          })
-      return result.data
-    },
-    onSuccess: (result) => {
-      const id = effectiveId as string
-      // La respuesta ya trae la cuenta al día: el ticket la lee sin esperar.
-      queryClient.setQueryData(["patient-account3", id], { data: result.account })
-      void queryClient.invalidateQueries({ queryKey: ["patient-account", id] })
-      void queryClient.invalidateQueries({ queryKey: ["finance-debts"] })
-      void queryClient.invalidateQueries({ queryKey: ["finance-cash"] })
-      void queryClient.invalidateQueries({ queryKey: ["finance-movements"] })
-      void queryClient.invalidateQueries({ queryKey: ["finance-closures"] })
-      setDirty(false)
-      setRequestId(crypto.randomUUID())
-      onCollected(result, id)
-      onClose()
-    },
-    onError: (err) => setError(collectFailureMessage(err)),
-  })
-
-  const busy = conceptMutation.isPending || collectMutation.isPending
-  const inlineOpen = editor !== null || adding !== null || addingProduct !== null
+  const busy = conceptMutation.isPending || surface.isSubmitting
+  const inlineOpen = editor !== null || adding || addingProduct
   const noMethods = methods.isSuccess && methodList.length === 0
 
   // Lo que ya sabe quien abre el cobro manda (sin parpadeo); lo demás lo trae la cuenta.
@@ -556,7 +754,6 @@ export function CollectDrawer({
     }
     return [...seen.entries()].map(([contactId, value]) => ({ contactId, ...value }))
   }, [responsibilities.data])
-  const payer = payerOptions.find((option) => option.contactId === payerContactId) ?? null
 
   /** Promociones vigentes que incluyen el servicio del concepto, en la moneda de la clínica. */
   const offersFor = (item: AccountPendingItem): Array<{ promo: PromotionOption; price: PromotionItem }> => {
@@ -573,221 +770,119 @@ export function CollectDrawer({
     )
   }
 
-  const toggleConcept = (chargeId: string) => {
-    setSelected((current) =>
-      current.includes(chargeId) ? current.filter((id) => id !== chargeId) : [...current, chargeId],
-    )
-    setAmountTouched(false)
-    setDirty(true)
+  /** Marca o desmarca un concepto: los marcados vuelven a fijar el importe. */
+  const addCharge = (chargeId: string) => {
+    form.setFieldValue("chargeIds", (current) => (current.includes(chargeId) ? current : [...current, chargeId]))
+    form.setFieldValue("advance", false)
   }
 
-  const closeInline = () => {
-    setEditor(null)
-    setAdding(null)
-    setAddingProduct(null)
-    setProductQuery("")
-    setInlineError(null)
-  }
-
-  const saveAmount = () => {
-    if (editor?.kind !== "amount") return
-    const charge = pending.find((item) => item.chargeId === editor.chargeId)
-    if (!charge) return
-    const cents = parseMoneyOrNull(editor.amountText, currency, locale)
-    if (cents === null || cents <= 0) {
-      setInlineError({ at: charge.chargeId, message: "Escribe el nuevo importe." })
-      return
-    }
-    if (cents === charge.totalCents) {
-      setInlineError({ at: charge.chargeId, message: "Es el mismo importe: no hay nada que guardar." })
-      return
-    }
-    if (!editor.reason.trim()) {
-      setInlineError({ at: charge.chargeId, message: "Escribe el motivo del cambio." })
-      return
-    }
-    conceptMutation.mutate({
-      target: `guardar-${charge.chargeId}`,
-      errorAt: charge.chargeId,
-      run: () =>
-        editChargeConceptApi(effectiveId as string, charge.chargeId, {
-          amountCents: cents,
-          reason: editor.reason.trim(),
-        }),
+  const saveAmount = (item: AccountPendingItem, cents: number, reason: string) =>
+    runConcept({
+      target: `guardar-${item.chargeId}`,
+      run: () => editChargeConceptApi(effectiveId as string, item.chargeId, { amountCents: cents, reason }),
     })
-  }
 
-  const removeConcept = () => {
-    if (editor?.kind !== "amount") return
-    const chargeId = editor.chargeId
-    if (!editor.reason.trim()) {
-      setEditor({ ...editor, confirmRemove: false })
-      setInlineError({ at: chargeId, message: "Escribe el motivo para quitarlo." })
-      return
-    }
-    if (!editor.confirmRemove) {
-      setInlineError(null)
-      setEditor({ ...editor, confirmRemove: true })
-      return
-    }
-    conceptMutation.mutate({
-      target: `quitar-${chargeId}`,
-      errorAt: chargeId,
-      run: () => voidChargeApi(effectiveId as string, chargeId, editor.reason.trim()),
+  const removeConcept = (item: AccountPendingItem, reason: string) =>
+    runConcept({
+      target: `quitar-${item.chargeId}`,
+      run: () => voidChargeApi(effectiveId as string, item.chargeId, reason),
       done: () => {
-        setSelected((current) => current.filter((id) => id !== chargeId))
+        form.setFieldValue("chargeIds", (current) => current.filter((id) => id !== item.chargeId))
         // Si era un producto, volvió a la sede.
         void queryClient.invalidateQueries({ queryKey: ["sale-products"] })
         void queryClient.invalidateQueries({ queryKey: ["inventory"] })
       },
     })
-  }
 
   const applyPromotion = (item: AccountPendingItem, promo: PromotionOption, price: PromotionItem) => {
+    setRowError(null)
     if (price.mode === "from") {
       // «Desde» anuncia un mínimo: el precio final lo pone quien cobra, empezando ahí.
-      setAdding(null)
-      setAddingProduct(null)
-      setInlineError(null)
+      setAdding(false)
+      setAddingProduct(false)
       setEditor({
         kind: "promo",
         chargeId: item.chargeId,
         promotionId: promo.id,
         promotionName: promo.name,
         floorCents: price.priceCents ?? 0,
-        amountText: formatMoneyInput(price.priceCents ?? 0, currency, locale),
-        reason: "",
       })
       return
     }
-    conceptMutation.mutate({
-      target: `promo-${item.chargeId}-${promo.id}`,
-      errorAt: item.chargeId,
-      run: () =>
-        editChargeConceptApi(effectiveId as string, item.chargeId, { promotionId: promo.id }),
-    })
+    conceptMutation.mutate(
+      {
+        target: `promo-${item.chargeId}-${promo.id}`,
+        run: () => editChargeConceptApi(effectiveId as string, item.chargeId, { promotionId: promo.id }),
+      },
+      { onError: (err) => setRowError({ chargeId: item.chargeId, message: financeErrorMessage(err) }) },
+    )
   }
 
-  const savePromotionPrice = () => {
-    if (editor?.kind !== "promo") return
-    const cents = parseMoneyOrNull(editor.amountText, currency, locale)
-    if (cents === null || cents <= 0) {
-      setInlineError({ at: editor.chargeId, message: "Escribe el precio final." })
-      return
-    }
-    if (cents < editor.floorCents && !editor.reason.trim()) {
-      setInlineError({
-        at: editor.chargeId,
-        message: `El precio baja de ${formatMoney(editor.floorCents, currency, locale)}: escribe el motivo.`,
-      })
-      return
-    }
-    conceptMutation.mutate({
-      target: `guardar-${editor.chargeId}`,
-      errorAt: editor.chargeId,
+  const savePromotionPrice = (
+    target: Extract<Editor, { kind: "promo" }>,
+    cents: number,
+    reason: string,
+  ) =>
+    runConcept({
+      target: `guardar-${target.chargeId}`,
       run: () =>
-        editChargeConceptApi(effectiveId as string, editor.chargeId, {
-          promotionId: editor.promotionId,
+        editChargeConceptApi(effectiveId as string, target.chargeId, {
+          promotionId: target.promotionId,
           amountCents: cents,
-          ...(editor.reason.trim() ? { reason: editor.reason.trim() } : {}),
+          ...(reason ? { reason } : {}),
         }),
     })
-  }
 
   const removePromotion = (item: AccountPendingItem) => {
-    conceptMutation.mutate({
-      target: `sin-promo-${item.chargeId}`,
-      errorAt: item.chargeId,
-      run: () => editChargeConceptApi(effectiveId as string, item.chargeId, { promotionId: null }),
-    })
+    setRowError(null)
+    conceptMutation.mutate(
+      {
+        target: `sin-promo-${item.chargeId}`,
+        run: () => editChargeConceptApi(effectiveId as string, item.chargeId, { promotionId: null }),
+      },
+      { onError: (err) => setRowError({ chargeId: item.chargeId, message: financeErrorMessage(err) }) },
+    )
   }
 
-  const addConcept = () => {
-    if (!adding) return
-    if (!branchId) {
-      setInlineError({ at: "agregar", message: "Elige la sede antes de agregar un concepto." })
-      return
-    }
-    const description = adding.description.trim()
-    const cents = parseMoneyOrNull(adding.amountText, currency, locale)
-    if (!description) {
-      setInlineError({ at: "agregar", message: "Escribe qué es lo que se cobra." })
-      return
-    }
-    if (cents === null || cents <= 0) {
-      setInlineError({ at: "agregar", message: "Escribe el importe." })
-      return
-    }
-    conceptMutation.mutate({
+  const addConcept = (description: string, cents: number) => {
+    let created: string | null = null
+    return runConcept({
       target: "agregar",
-      errorAt: "agregar",
-      run: () =>
-        createManualChargeApi(effectiveId as string, { branchId, description, amountCents: cents }),
-      done: (result) => {
-        const created = (result as { data?: { id?: string } }).data?.id
-        if (created) setSelected((current) => [...current, created])
-        setAdvanceMode(false)
+      run: async () => {
+        created = (await createManualChargeApi(effectiveId as string, { branchId, description, amountCents: cents }))
+          .data.id
+      },
+      done: () => {
+        if (created) addCharge(created)
+        else form.setFieldValue("advance", false)
       },
     })
   }
 
-  /** Lo elegido en «+ Agregar producto», su cantidad y lo que costará (se ve, no se escribe). */
-  const chosenProduct = addingProduct?.product ?? null
-  const productQuantity = addingProduct ? parseWholeQuantity(addingProduct.quantityText, locale) : null
-  const productAmount =
-    chosenProduct && chosenProduct.salePriceCents !== null && productQuantity !== null && productQuantity > 0
-      ? chosenProduct.salePriceCents * productQuantity
-      : null
-  const productStockNote =
-    chosenProduct && chosenProduct.salePriceCents !== null
-      ? saleStockNote(chosenProduct, productQuantity ?? 1, sedeName || "esta sede")
-      : null
-  const saleDetail = (item: SaleProduct) =>
-    [
-      item.salePriceCents !== null && item.currency
-        ? formatMoney(item.salePriceCents, item.currency, locale)
-        : "Sin precio de venta",
-      item.onHandText ? `hay ${item.onHandText}` : `no hay en ${sedeName || "esta sede"}`,
-    ].join(" · ")
-
-  const addProduct = () => {
-    if (!addingProduct) return
-    if (!branchId) {
-      setInlineError({ at: "producto", message: "Elige la sede antes de agregar un producto." })
-      return
-    }
-    const product = addingProduct.product
-    if (!product) {
-      setInlineError({ at: "producto-elegir", message: "Busca y elige el producto." })
-      return
-    }
-    if (product.salePriceCents === null) return
-    const quantity = parseWholeQuantity(addingProduct.quantityText, locale)
-    if (quantity === null || quantity < 1 || quantity > SALE_QUANTITY_MAX) {
-      setInlineError({ at: "producto-cantidad", message: `La cantidad va de 1 a ${SALE_QUANTITY_MAX}, sin decimales.` })
-      return
-    }
-    const unitPriceCents = product.salePriceCents
-    conceptMutation.mutate({
+  const addProduct = (product: SaleProduct, quantity: number, saleKey: string) => {
+    const unitPriceCents = product.salePriceCents ?? 0
+    let created: ProductCharge | null = null
+    return runConcept({
       target: "producto",
-      errorAt: "producto",
-      run: () =>
-        createProductChargeApi(effectiveId as string, {
-          productId: product.productId,
-          quantity,
-          branchId,
-          requestId: addingProduct.requestId,
-        }),
-      done: (result) => {
-        const created = (result as { data?: ProductCharge }).data
-        if (created?.id) {
-          setSelected((current) => [...current, created.id])
+      run: async () => {
+        created = (
+          await createProductChargeApi(effectiveId as string, {
+            productId: product.productId,
+            quantity,
+            branchId,
+            requestId: saleKey,
+          })
+        ).data
+      },
+      done: () => {
+        const charge: ProductCharge | null = created
+        if (charge) {
+          addCharge(charge.id)
           setSoldHere((current) => ({
             ...current,
-            [created.id]: { quantity, unitPriceCents, branchName: sedeName || "la sede" },
+            [charge.id]: { quantity, unitPriceCents, branchName: sedeName || "la sede" },
           }))
-        }
-        setAdvanceMode(false)
+        } else form.setFieldValue("advance", false)
         // Salió de la sede: lo que hay cambia en la lista y en Inventario.
         void queryClient.invalidateQueries({ queryKey: ["sale-products"] })
         void queryClient.invalidateQueries({ queryKey: ["inventory"] })
@@ -795,125 +890,54 @@ export function CollectDrawer({
     })
   }
 
-  const changeAmount = (value: string) => {
-    setAmountText(value)
-    setAmountTouched(true)
-    setDirty(true)
-    if (split) {
-      setSplit(rebalance(split, parseMoneyOrNull(value, currency, locale), currency, locale))
-    }
-  }
-
   const addSplitLine = () => {
-    const used = new Set(split ? split.map((line) => line.paymentMethodId) : method ? [method.id] : [])
+    const current = form.state.values
+    const used = new Set(split ? current.payments.map((line) => line.methodId) : method ? [method.id] : [])
     const next = methodList.find((item) => !used.has(item.id))
     const extra: SplitLine = {
       key: keySeq.current++,
-      paymentMethodId: next?.id ?? "",
-      amountText: "",
+      methodId: next?.id ?? "",
+      amount: "",
       reference: "",
       auto: true,
     }
-    const current: SplitLine[] = split
-      ? split.map((line) => ({ ...line, auto: false }))
+    const lines: SplitLine[] = split
+      ? current.payments.map((line) => ({ ...line, auto: false }))
       : [
           {
             key: keySeq.current++,
-            paymentMethodId: method?.id ?? "",
-            amountText,
-            reference: hasCash ? "" : reference,
+            methodId: method?.id ?? "",
+            amount: current.amount,
+            reference: hasCash ? "" : current.reference,
             auto: false,
           },
         ]
-    setSplit(rebalance([...current, extra], amountCents, currency, locale))
-    setDirty(true)
+    form.setFieldValue("payments", rebalance([...lines, extra], amountCents, currency, locale))
   }
 
-  const patchSplitLine = (key: number, patch: Partial<SplitLine>) => {
-    if (!split) return
-    const next = split.map((line) => (line.key === key ? { ...line, ...patch } : line))
-    setSplit("amountText" in patch ? rebalance(next, amountCents, currency, locale) : next)
-    setDirty(true)
-  }
-
-  const removeSplitLine = (key: number) => {
-    if (!split) return
-    const rest = split.filter((line) => line.key !== key)
+  const removeSplitLine = (index: number) => {
+    const rest = form.state.values.payments.filter((_, at) => at !== index)
     if (rest.length > 1) {
-      setSplit(rebalance(rest, amountCents, currency, locale))
-    } else {
-      // Con un solo medio vuelve la forma simple: botones y un importe.
-      setSplit(null)
-      if (rest[0]) {
-        setMethodId(rest[0].paymentMethodId)
-        setReference(rest[0].reference)
-      }
+      void form.removeFieldValue("payments", index)
+      followAmount(amountCents)
+      return
     }
-    setDirty(true)
+    // Con un solo medio vuelve la forma simple: botones y un importe.
+    form.setFieldValue("payments", [])
+    if (rest[0]) {
+      form.setFieldValue("methodId", rest[0].methodId)
+      form.setFieldValue("reference", rest[0].reference)
+    }
   }
 
-  const submitCollect = () => {
-    if (!canWrite) {
-      setError("Tu rol no cobra. Pídeselo a caja.")
-      return
-    }
-    if (!effectiveId) {
-      setError("Busca y elige al paciente que paga.")
-      return
-    }
-    if (!branchId) {
-      setError("Elige la sede a cuya caja entra el cobro.")
-      return
-    }
-    if (inlineOpen) {
-      setError("Guarda o cancela el cambio del concepto antes de cobrar.")
-      return
-    }
-    if (!advanceMode && selectedItems.length === 0) {
-      setError("Marca al menos un concepto o cobra un adelanto.")
-      return
-    }
-    if (!creditOnly) {
-      if (amountCents === null || amountCents <= 0) {
-        setError(advanceMode ? "Escribe el importe del adelanto." : "Escribe el importe que paga ahora.")
-        return
-      }
-      if (!advanceMode && amountCents > due) {
-        setError(
-          `El importe supera lo que falta de lo marcado (${formatMoney(due, currency, locale)}). Para dejar dinero a favor, cobra un adelanto.`,
-        )
-        return
-      }
-      if (split) {
-        for (const line of split) {
-          if (!methodById(line.paymentMethodId)) {
-            setError("Elige el medio de pago de cada parte.")
-            return
-          }
-          const cents = parseMoneyOrNull(line.amountText, currency, locale)
-          if (cents === null || cents <= 0) {
-            setError("Escribe el importe de cada medio de pago.")
-            return
-          }
-        }
-        if (splitTotal !== amountCents) {
-          setError(
-            `Los medios suman ${formatMoney(splitTotal, currency, locale)} y el importe es ${formatMoney(amountCents, currency, locale)}.`,
-          )
-          return
-        }
-      } else if (!method) {
-        setError("Elige el medio de pago.")
-        return
-      }
-      if (hasCash && cashReceived.trim() && (receivedCents === null || receivedCents < cashPortion)) {
-        setError("Lo que recibes en efectivo no cubre la parte en efectivo.")
-        return
-      }
-    }
-    setError(null)
-    collectMutation.mutate()
-  }
+  /** Lo que impide cobrar sin depender de lo escrito, dicho junto al pie. */
+  const blockedReason = !canWrite
+    ? "Tu rol no cobra. Pídeselo a caja."
+    : !branchId
+      ? "Elige la sede a cuya caja entra el cobro."
+      : inlineOpen
+        ? "Guarda o cancela el cambio del concepto antes de cobrar."
+        : null
 
   const submitLabel = creditOnly
     ? "Usar saldo a favor"
@@ -923,167 +947,44 @@ export function CollectDrawer({
 
   const editorFor = (item: AccountPendingItem) => {
     if (!editor || editor.chargeId !== item.chargeId) return null
-    const errorText = inlineError?.at === item.chargeId ? inlineError.message : null
-    const patch = (change: Partial<Editor>) => setEditor({ ...editor, ...change } as Editor)
     if (editor.kind === "promo") {
-      const cents = parseMoneyOrNull(editor.amountText, currency, locale)
-      const belowFloor = cents !== null && cents < editor.floorCents
       return (
-        <div
-          id={`${uid}-editor-${item.chargeId}`}
-          className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3"
-        >
-          <p className="text-sm font-medium">Promoción: {editor.promotionName}</p>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-promo-precio`}>Precio final</FieldLabel>
-            <MoneyInput
-              id={`${uid}-promo-precio`}
-              autoFocus
-              currency={currency}
-              locale={locale}
-              value={editor.amountText}
-              onChange={(value) => patch({ amountText: value })}
-              onKeyDown={onEnter(savePromotionPrice)}
-            />
-            <FieldDescription>
-              Solo pide un motivo si el precio baja de{" "}
-              {formatMoney(editor.floorCents, currency, locale)}.
-            </FieldDescription>
-          </Field>
-          {belowFloor ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-promo-motivo`}>Motivo</FieldLabel>
-              <Input
-                id={`${uid}-promo-motivo`}
-                maxLength={MAX_REASON}
-                value={editor.reason}
-                onChange={(event) => patch({ reason: event.target.value })}
-                onKeyDown={onEnter(savePromotionPrice)}
-              />
-            </Field>
-          ) : null}
-          {errorText ? (
-            <p role="alert" className="text-sm text-destructive">
-              {errorText}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-2">
-            <SubmitButton
-              size="sm"
-              pending={conceptBusy(`guardar-${item.chargeId}`)}
-              disabled={conceptMutation.isPending}
-              onClick={savePromotionPrice}
-            >
-              Aplicar promoción
-            </SubmitButton>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={conceptMutation.isPending}
-              onClick={closeInline}
-            >
-              Cancelar
-            </Button>
-          </div>
-        </div>
+        <PromoPriceEditor
+          key={`promo-${editor.promotionId}`}
+          idPrefix={uid}
+          editorId={`${uid}-editor-${item.chargeId}`}
+          promotionName={editor.promotionName}
+          floorCents={editor.floorCents}
+          currency={currency}
+          locale={locale}
+          busy={conceptMutation.isPending}
+          pending={conceptBusy(`guardar-${item.chargeId}`)}
+          onSave={(cents, reason) => savePromotionPrice(editor, cents, reason)}
+          onCancel={closeInline}
+        />
       )
     }
     return (
-      <div
-        id={`${uid}-editor-${item.chargeId}`}
-        className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3"
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-nuevo-importe`}>Nuevo importe</FieldLabel>
-          <MoneyInput
-            id={`${uid}-nuevo-importe`}
-            autoFocus
-            currency={currency}
-            locale={locale}
-            value={editor.amountText}
-            onChange={(value) => patch({ amountText: value, confirmRemove: false })}
-            onKeyDown={onEnter(saveAmount)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${uid}-motivo`}>Motivo</FieldLabel>
-          <Input
-            id={`${uid}-motivo`}
-            maxLength={MAX_REASON}
-            value={editor.reason}
-            onChange={(event) => patch({ reason: event.target.value, confirmRemove: false })}
-            onKeyDown={onEnter(saveAmount)}
-          />
-        </Field>
-        {errorText ? (
-          <p role="alert" className="text-sm text-destructive">
-            {errorText}
-          </p>
-        ) : null}
-        {editor.confirmRemove ? (
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirmar quitar concepto">
-            <p className="min-w-0 flex-1 basis-full text-sm sm:basis-0">
-              {/* Un producto vendido vuelve a la sede de donde salió. */}
-              {item.productId && item.productQuantity
-                ? `Se quita de la cuenta y ${item.productQuantity === 1 ? "vuelve 1" : `vuelven ${item.productQuantity}`} a ${item.branchId === branchId && sedeName ? sedeName : "la sede"}. ¿Lo quitas?`
-                : "Se quita de la cuenta y queda en el historial. ¿Lo quitas?"}
-            </p>
-            <SubmitButton
-              size="sm"
-              variant="destructive"
-              pending={conceptBusy(`quitar-${item.chargeId}`)}
-              disabled={conceptMutation.isPending}
-              onClick={removeConcept}
-            >
-              Sí, quitar
-            </SubmitButton>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={conceptMutation.isPending}
-              onClick={() => patch({ confirmRemove: false })}
-            >
-              No
-            </Button>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            <SubmitButton
-              size="sm"
-              pending={conceptBusy(`guardar-${item.chargeId}`)}
-              disabled={conceptMutation.isPending}
-              onClick={saveAmount}
-            >
-              Guardar cambio
-            </SubmitButton>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={conceptMutation.isPending}
-              onClick={closeInline}
-            >
-              Cancelar
-            </Button>
-            <span className="flex-1" />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              disabled={conceptMutation.isPending}
-              onClick={removeConcept}
-            >
-              Quitar concepto
-            </Button>
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">
-          Queda registrado quién lo cambió, cuándo y por qué.
-        </p>
-      </div>
+      <AmountEditor
+        key="importe"
+        idPrefix={uid}
+        editorId={`${uid}-editor-${item.chargeId}`}
+        item={item}
+        currency={currency}
+        locale={locale}
+        removeQuestion={
+          // Un producto vendido vuelve a la sede de donde salió.
+          item.productId && item.productQuantity
+            ? `Se quita de la cuenta y ${item.productQuantity === 1 ? "vuelve 1" : `vuelven ${item.productQuantity}`} a ${item.branchId === branchId && sedeName ? sedeName : "la sede"}. ¿Lo quitas?`
+            : "Se quita de la cuenta y queda en el historial. ¿Lo quitas?"
+        }
+        busy={conceptMutation.isPending}
+        savePending={conceptBusy(`guardar-${item.chargeId}`)}
+        removePending={conceptBusy(`quitar-${item.chargeId}`)}
+        onSave={(cents, reason) => saveAmount(item, cents, reason)}
+        onRemove={(reason) => removeConcept(item, reason)}
+        onCancel={closeInline}
+      />
     )
   }
 
@@ -1142,6 +1043,7 @@ export function CollectDrawer({
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title="Cobrar"
       headerContent={
@@ -1156,37 +1058,65 @@ export function CollectDrawer({
           </div>
         ) : undefined
       }
-      error={error}
-      isSubmitting={collectMutation.isPending}
       isLoading={Boolean(effectiveId) && account.isPending}
-      isDirty={dirty}
       submitLabel={submitLabel}
       submitDisabled={
-        !canWrite || !data || inlineOpen || conceptMutation.isPending || (noMethods && !creditOnly)
+        !data ||
+        blockedReason !== null ||
+        conceptMutation.isPending ||
+        (!creditOnly && (!methods.isSuccess || noMethods))
       }
       onClose={() => {
         if (!busy) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        submitCollect()
       }}
     >
       <div className="flex flex-col gap-6">
         {patientId === null ? (
           // El buscador de personas de toda la aplicación, solo con pacientes (ADR 0029).
-          <PersonPicker
-            label="Paciente"
-            patientsOnly
-            value={chosen ? { id: `ficha:${chosen.id}`, name: chosen.name, patientId: chosen.id, document: chosen.document } : null}
-            onChange={(person) => {
-              resetDraft()
-              if (person?.patientId) {
-                setChosen({ id: person.patientId, name: person.name, document: person.document ?? null, sex: person.sex ?? null })
-                setDirty(true)
-              } else setChosen(null)
-            }}
-          />
+          <form.AppField name="patient">
+            {(field) => (
+              <field.Control label="Paciente" id={`${uid}-paciente`}>
+                {(control) => (
+                  <PersonPicker
+                    id={control.id}
+                    label="Paciente"
+                    patientsOnly
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={
+                      field.state.value
+                        ? {
+                            id: `ficha:${field.state.value.id}`,
+                            name: field.state.value.name,
+                            patientId: field.state.value.id,
+                            document: field.state.value.document,
+                          }
+                        : null
+                    }
+                    onChange={(person) => {
+                      // Otro paciente: borrador nuevo, con la misma clave de cobro.
+                      form.reset()
+                      setSelectInit(false)
+                      setAmountTouched(false)
+                      closeInline()
+                      setRowError(null)
+                      field.handleChange(
+                        person?.patientId
+                          ? {
+                              id: person.patientId,
+                              name: person.name,
+                              document: person.document ?? null,
+                              sex: person.sex ?? null,
+                            }
+                          : null,
+                      )
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : null}
 
         {!effectiveId ? (
@@ -1202,386 +1132,244 @@ export function CollectDrawer({
           />
         ) : data ? (
           <>
-            <fieldset className="flex min-w-0 flex-col gap-3">
-              <legend className="mb-2 text-sm font-semibold">Qué paga</legend>
-              {advanceMode ? (
-                <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                  Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el
-                  próximo cobro.
-                </p>
-              ) : pending.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No tiene nada pendiente.</p>
-              ) : (
-                <ul className="flex flex-col divide-y rounded-xl border">
-                  {pending.map((item) => {
-                    const checked = selected.includes(item.chargeId)
-                    // Un producto vendido: «15.00 c/u · salieron 2 de …», agregado ahora o antes.
-                    const sold =
-                      soldHere[item.chargeId] ??
-                      (item.productId && item.productQuantity
-                        ? {
-                            quantity: item.productQuantity,
-                            unitPriceCents: Math.round(item.totalCents / item.productQuantity),
-                            branchName: item.branchId === branchId && sedeName ? sedeName : "la sede",
-                          }
-                        : undefined)
-                    // Con pagos aplicados el concepto ya no se corrige: se cobra lo que falta.
-                    const editable = canWrite && item.paidCents === 0
-                    const editing = editor?.chargeId === item.chargeId
-                    const promotion = editable ? promotionFor(item) : null
-                    const rowError =
-                      !editing && inlineError?.at === item.chargeId ? inlineError.message : null
-                    return (
-                      <li key={item.chargeId} className="flex flex-col gap-2 px-3 py-2.5">
-                        <div className="flex items-start gap-2">
-                          <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-sm">
-                            <Checkbox
-                              className="mt-0.5"
-                              checked={checked}
-                              disabled={busy}
-                              onCheckedChange={() => toggleConcept(item.chargeId)}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block break-words font-medium">
-                                {item.description}
-                                {item.visitNumber && item.visitsPlanned
-                                  ? `, visita ${item.visitNumber} de ${item.visitsPlanned}`
-                                  : ""}
-                              </span>
-                              {sold ? (
-                                <span className="block text-xs text-muted-foreground">
-                                  {sold.quantity > 1
-                                    ? `${formatAmountPlain(sold.unitPriceCents, currency, locale)} c/u · `
-                                    : ""}
-                                  {saleDeductionWords(sold.quantity, sold.branchName)}
-                                </span>
-                              ) : null}
-                              {item.paidCents > 0 ? (
-                                <span className="block text-xs text-muted-foreground">
-                                  Costó {formatAmountPlain(item.totalCents, currency, locale)} · pagó{" "}
-                                  {formatAmountPlain(item.paidCents, currency, locale)}
-                                </span>
-                              ) : null}
-                              {!editable && item.promotionName ? (
-                                <span className="block text-xs text-muted-foreground">
-                                  Promoción: {item.promotionName}
-                                </span>
-                              ) : null}
-                            </span>
-                            <span className="shrink-0 font-semibold tabular-nums">
-                              {formatAmountPlain(item.saldoCents, currency, locale)}
-                            </span>
-                          </label>
-                          {editable ? (
+            <form.AppField name="chargeIds">
+              {(chargesField) => (
+                <chargesField.Group legend="Qué paga" className="min-w-0 gap-3">
+                  {(chargesControl) => (
+                    <>
+                      {values.advance ? (
+                        <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                          Adelanto: no paga un concepto. Queda como saldo a favor y se usa solo en el
+                          próximo cobro.
+                        </p>
+                      ) : pending.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No tiene nada pendiente.</p>
+                      ) : (
+                        <ul className="flex flex-col divide-y rounded-xl border">
+                          {pending.map((item) => {
+                            const checked = chargesField.state.value.includes(item.chargeId)
+                            // Un producto vendido: «15.00 c/u · salieron 2 de …», agregado ahora o antes.
+                            const sold =
+                              soldHere[item.chargeId] ??
+                              (item.productId && item.productQuantity
+                                ? {
+                                    quantity: item.productQuantity,
+                                    unitPriceCents: Math.round(item.totalCents / item.productQuantity),
+                                    branchName: item.branchId === branchId && sedeName ? sedeName : "la sede",
+                                  }
+                                : undefined)
+                            // Con pagos aplicados el concepto ya no se corrige: se cobra lo que falta.
+                            const editable = canWrite && item.paidCents === 0
+                            const editing = editor?.chargeId === item.chargeId
+                            const promotion = editable ? promotionFor(item) : null
+                            const itemError =
+                              !editing && rowError?.chargeId === item.chargeId ? rowError.message : null
+                            return (
+                              <li key={item.chargeId} className="flex flex-col gap-2 px-3 py-2.5">
+                                <div className="flex items-start gap-2">
+                                  <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-sm">
+                                    <Checkbox
+                                      className="mt-0.5"
+                                      checked={checked}
+                                      disabled={busy}
+                                      aria-invalid={chargesControl.invalid || undefined}
+                                      aria-describedby={chargesControl.describedBy}
+                                      onCheckedChange={() => {
+                                        chargesField.handleChange(
+                                          checked
+                                            ? chargesField.state.value.filter((id) => id !== item.chargeId)
+                                            : [...chargesField.state.value, item.chargeId],
+                                        )
+                                        setAmountTouched(false)
+                                      }}
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block break-words font-medium">
+                                        {item.description}
+                                        {item.visitNumber && item.visitsPlanned
+                                          ? `, visita ${item.visitNumber} de ${item.visitsPlanned}`
+                                          : ""}
+                                      </span>
+                                      {sold ? (
+                                        <span className="block text-xs text-muted-foreground">
+                                          {sold.quantity > 1
+                                            ? `${formatAmountPlain(sold.unitPriceCents, currency, locale)} c/u · `
+                                            : ""}
+                                          {saleDeductionWords(sold.quantity, sold.branchName)}
+                                        </span>
+                                      ) : null}
+                                      {item.paidCents > 0 ? (
+                                        <span className="block text-xs text-muted-foreground">
+                                          Costó {formatAmountPlain(item.totalCents, currency, locale)} · pagó{" "}
+                                          {formatAmountPlain(item.paidCents, currency, locale)}
+                                        </span>
+                                      ) : null}
+                                      {!editable && item.promotionName ? (
+                                        <span className="block text-xs text-muted-foreground">
+                                          Promoción: {item.promotionName}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                    <span className="shrink-0 font-semibold tabular-nums">
+                                      {formatAmountPlain(item.saldoCents, currency, locale)}
+                                    </span>
+                                  </label>
+                                  {editable ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      className="-my-1 -mr-1 shrink-0"
+                                      aria-label={`Cambiar ${item.description}`}
+                                      aria-expanded={editing}
+                                      aria-controls={editing ? `${uid}-editor-${item.chargeId}` : undefined}
+                                      disabled={busy}
+                                      onClick={() => {
+                                        setRowError(null)
+                                        setAdding(false)
+                                        setAddingProduct(false)
+                                        setEditor(editing ? null : { kind: "amount", chargeId: item.chargeId })
+                                      }}
+                                    >
+                                      <MoreHorizontal aria-hidden />
+                                    </Button>
+                                  ) : null}
+                                </div>
+                                {promotion}
+                                {itemError ? (
+                                  <p role="alert" className="text-sm text-destructive">
+                                    {itemError}
+                                  </p>
+                                ) : null}
+                                {editorFor(item)}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      )}
+                      {promotions.isError ? (
+                        <p role="alert" className="text-sm text-destructive">
+                          No se pudieron consultar las promociones vigentes.{" "}
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0"
+                            onClick={() => void promotions.refetch()}
+                          >
+                            Reintentar
+                          </Button>
+                        </p>
+                      ) : null}
+                      {autoCredit > 0 ? (
+                        <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
+                          <span>Se usa su saldo a favor</span>
+                          <span className="font-medium tabular-nums">
+                            − {formatAmountPlain(autoCredit, currency, locale)}
+                          </span>
+                        </p>
+                      ) : null}
+                      {otherCurrencyCount > 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          {otherCurrencyCount === 1
+                            ? "Tiene 1 concepto en otra moneda, que no entra en este cobro."
+                            : `Tiene ${otherCurrencyCount} conceptos en otra moneda, que no entran en este cobro.`}
+                        </p>
+                      ) : null}
+                      {adding ? (
+                        <OtherConceptForm
+                          idPrefix={uid}
+                          currency={currency}
+                          locale={locale}
+                          branchId={branchId}
+                          busy={conceptMutation.isPending}
+                          pending={conceptBusy("agregar")}
+                          onAdd={addConcept}
+                          onCancel={closeInline}
+                        />
+                      ) : addingProduct ? (
+                        <ProductForm
+                          idPrefix={uid}
+                          open={open}
+                          branchId={branchId}
+                          sedeName={sedeName}
+                          locale={locale}
+                          busy={conceptMutation.isPending}
+                          pending={conceptBusy("producto")}
+                          onAdd={addProduct}
+                          onCancel={closeInline}
+                        />
+                      ) : canWrite ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => {
+                              setEditor(null)
+                              setAdding(false)
+                              setRowError(null)
+                              setAddingProduct(true)
+                            }}
+                          >
+                            <Plus aria-hidden />
+                            Agregar producto
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => {
+                              setEditor(null)
+                              setAddingProduct(false)
+                              setRowError(null)
+                              setAdding(true)
+                            }}
+                          >
+                            <Plus aria-hidden />
+                            Agregar otro concepto
+                          </Button>
+                          {values.advance ? (
+                            pending.length > 0 ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => {
+                                  form.setFieldValue("advance", false)
+                                  setAmountTouched(false)
+                                }}
+                              >
+                                Cobrar lo pendiente
+                              </Button>
+                            ) : null
+                          ) : (
                             <Button
                               type="button"
-                              variant="ghost"
-                              size="icon-sm"
-                              className="-my-1 -mr-1 shrink-0"
-                              aria-label={`Cambiar ${item.description}`}
-                              aria-expanded={editing}
-                              aria-controls={editing ? `${uid}-editor-${item.chargeId}` : undefined}
+                              variant="outline"
+                              size="sm"
                               disabled={busy}
                               onClick={() => {
-                                setInlineError(null)
-                                setAdding(null)
-                                setAddingProduct(null)
-                                setEditor(
-                                  editing
-                                    ? null
-                                    : {
-                                        kind: "amount",
-                                        chargeId: item.chargeId,
-                                        amountText: formatMoneyInput(item.totalCents, currency, locale),
-                                        reason: "",
-                                        confirmRemove: false,
-                                      },
-                                )
+                                closeInline()
+                                form.setFieldValue("advance", true)
+                                form.setFieldValue("amount", "")
+                                form.setFieldValue("payments", [])
+                                setAmountTouched(false)
                               }}
                             >
-                              <MoreHorizontal aria-hidden />
+                              Cobrar un adelanto
                             </Button>
-                          ) : null}
+                          )}
                         </div>
-                        {promotion}
-                        {rowError ? (
-                          <p role="alert" className="text-sm text-destructive">
-                            {rowError}
-                          </p>
-                        ) : null}
-                        {editorFor(item)}
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {promotions.isError ? (
-                <p role="alert" className="text-sm text-destructive">
-                  No se pudieron consultar las promociones vigentes.{" "}
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0"
-                    onClick={() => void promotions.refetch()}
-                  >
-                    Reintentar
-                  </Button>
-                </p>
-              ) : null}
-              {autoCredit > 0 ? (
-                <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
-                  <span>Se usa su saldo a favor</span>
-                  <span className="font-medium tabular-nums">
-                    − {formatAmountPlain(autoCredit, currency, locale)}
-                  </span>
-                </p>
-              ) : null}
-              {otherCurrencyCount > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {otherCurrencyCount === 1
-                    ? "Tiene 1 concepto en otra moneda, que no entra en este cobro."
-                    : `Tiene ${otherCurrencyCount} conceptos en otra moneda, que no entran en este cobro.`}
-                </p>
-              ) : null}
-              {adding ? (
-                <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-otro-concepto`}>Concepto</FieldLabel>
-                    <Input
-                      id={`${uid}-otro-concepto`}
-                      autoFocus
-                      maxLength={MAX_REASON}
-                      value={adding.description}
-                      onChange={(event) => setAdding({ ...adding, description: event.target.value })}
-                      onKeyDown={onEnter(addConcept)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={`${uid}-otro-importe`}>Importe</FieldLabel>
-                    <MoneyInput
-                      id={`${uid}-otro-importe`}
-                      currency={currency}
-                      locale={locale}
-                      value={adding.amountText}
-                      onChange={(value) => setAdding({ ...adding, amountText: value })}
-                      onKeyDown={onEnter(addConcept)}
-                    />
-                  </Field>
-                  {inlineError?.at === "agregar" ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {inlineError.message}
-                    </p>
-                  ) : null}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <SubmitButton
-                      size="sm"
-                      pending={conceptBusy("agregar")}
-                      disabled={conceptMutation.isPending}
-                      onClick={addConcept}
-                    >
-                      Agregar
-                    </SubmitButton>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={conceptMutation.isPending}
-                      onClick={closeInline}
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
-                </div>
-              ) : addingProduct ? (
-                // «+ Agregar producto» (tablero 19): lo que se vende, con su precio
-                // y lo que hay en la sede del cobro; el importe se calcula.
-                <div className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
-                  <Field data-invalid={inlineError?.at === "producto-elegir" || chosenProduct?.salePriceCents === null ? true : undefined}>
-                    <ResourceSelect
-                      id={`${uid}-producto`}
-                      label="Producto"
-                      value={chosenProduct?.productId ?? ""}
-                      options={(saleProducts.data?.data.items ?? []).map((item) => ({
-                        id: item.productId,
-                        label: item.name,
-                        detail: saleDetail(item),
-                      }))}
-                      onQueryChange={setProductQuery}
-                      onChange={(productId) => {
-                        const found = (saleProducts.data?.data.items ?? []).find((item) => item.productId === productId) ?? null
-                        setAddingProduct((current) => (current ? { ...current, product: found } : current))
-                        setInlineError(null)
-                      }}
-                      empty={
-                        !branchId
-                          ? "Elige la sede del cobro para ver lo que se vende."
-                          : saleProducts.isPending
-                            ? "Buscando productos…"
-                            : productSearch
-                              ? `Ningún producto a la venta coincide con «${productSearch}».`
-                              : "Aún no hay productos a la venta. Se marcan con «Se vende» en Inventario."
-                      }
-                    />
-                    {inlineError?.at === "producto-elegir" ? (
-                      <FieldError>{inlineError.message}</FieldError>
-                    ) : chosenProduct?.salePriceCents === null ? (
-                      <FieldError>Ponle precio de venta en Inventario: sin precio no se puede cobrar.</FieldError>
-                    ) : productStockNote ? (
-                      <FieldDescription role="status" className="font-medium text-warning">
-                        {productStockNote}
-                      </FieldDescription>
-                    ) : chosenProduct ? (
-                      <FieldDescription>{saleDetail(chosenProduct)}</FieldDescription>
-                    ) : (
-                      <FieldDescription>
-                        Solo lo que se vende, con su precio y lo que hay en {sedeName || "la sede del cobro"}.
-                      </FieldDescription>
-                    )}
-                  </Field>
-                  {saleProducts.isError && !saleProducts.data ? (
-                    <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
-                      {financeErrorMessage(saleProducts.error)}
-                      <Button type="button" size="sm" variant="outline" onClick={() => void saleProducts.refetch()}>
-                        Reintentar
-                      </Button>
-                    </p>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field data-invalid={inlineError?.at === "producto-cantidad" ? true : undefined}>
-                      <FieldLabel htmlFor={`${uid}-producto-cantidad`}>
-                        Cantidad
-                        {chosenProduct ? <span className="sr-only">, en {unitFor(2, chosenProduct.unit)}</span> : null}
-                      </FieldLabel>
-                      <InputGroup>
-                        <InputGroupInput
-                          id={`${uid}-producto-cantidad`}
-                          inputMode="numeric"
-                          autoComplete="off"
-                          className="tabular-nums"
-                          value={addingProduct.quantityText}
-                          aria-invalid={inlineError?.at === "producto-cantidad" ? true : undefined}
-                          onChange={(event) => {
-                            const quantityText = event.target.value
-                            setAddingProduct((current) => (current ? { ...current, quantityText } : current))
-                            if (inlineError?.at === "producto-cantidad") setInlineError(null)
-                          }}
-                          onKeyDown={onEnter(addProduct)}
-                        />
-                        {chosenProduct ? (
-                          <InputGroupAddon align="inline-end">{unitFor(productQuantity ?? 2, chosenProduct.unit)}</InputGroupAddon>
-                        ) : null}
-                      </InputGroup>
-                      {inlineError?.at === "producto-cantidad" ? <FieldError>{inlineError.message}</FieldError> : null}
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={`${uid}-producto-importe`}>Importe</FieldLabel>
-                      <output
-                        id={`${uid}-producto-importe`}
-                        aria-live="polite"
-                        className="flex min-h-9 items-center text-base font-semibold tabular-nums"
-                      >
-                        {productAmount !== null && chosenProduct?.currency
-                          ? formatMoney(productAmount, chosenProduct.currency, locale)
-                          : "—"}
-                      </output>
-                    </Field>
-                  </div>
-                  {inlineError?.at === "producto" ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {inlineError.message}
-                    </p>
-                  ) : null}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <SubmitButton
-                      size="sm"
-                      pending={conceptBusy("producto")}
-                      disabled={conceptMutation.isPending || chosenProduct?.salePriceCents === null}
-                      onClick={addProduct}
-                    >
-                      Agregar
-                    </SubmitButton>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={conceptMutation.isPending}
-                      onClick={closeInline}
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
-                </div>
-              ) : canWrite ? (
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => {
-                      setEditor(null)
-                      setAdding(null)
-                      setInlineError(null)
-                      setProductQuery("")
-                      setAddingProduct({ product: null, quantityText: "1", requestId: crypto.randomUUID() })
-                    }}
-                  >
-                    <Plus aria-hidden />
-                    Agregar producto
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => {
-                      setEditor(null)
-                      setAddingProduct(null)
-                      setInlineError(null)
-                      setAdding({ description: "", amountText: "" })
-                    }}
-                  >
-                    <Plus aria-hidden />
-                    Agregar otro concepto
-                  </Button>
-                  {advanceMode ? (
-                    pending.length > 0 ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => {
-                          setAdvanceMode(false)
-                          setAmountTouched(false)
-                          setDirty(true)
-                        }}
-                      >
-                        Cobrar lo pendiente
-                      </Button>
-                    ) : null
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      onClick={() => {
-                        closeInline()
-                        setAdvanceMode(true)
-                        setAmountText("")
-                        setAmountTouched(false)
-                        setSplit(null)
-                        setDirty(true)
-                      }}
-                    >
-                      Cobrar un adelanto
-                    </Button>
+                      ) : null}
+                    </>
                   )}
-                </div>
-              ) : null}
-            </fieldset>
+                </chargesField.Group>
+              )}
+            </form.AppField>
 
             {creditOnly ? (
               <p className="rounded-xl bg-muted/60 px-3 py-2 text-sm">
@@ -1618,154 +1406,206 @@ export function CollectDrawer({
               />
             ) : (
               <>
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-importe`}>Importe</FieldLabel>
-                  <MoneyInput
-                    id={`${uid}-importe`}
-                    currency={currency}
-                    locale={locale}
-                    value={amountText}
-                    onChange={changeAmount}
-                    aria-describedby={`${uid}-importe-ayuda`}
-                  />
-                  <FieldDescription id={`${uid}-importe-ayuda`}>
-                    {advanceMode
-                      ? "Todo queda como saldo a favor."
-                      : "Si paga una parte, el resto queda por cobrar."}
-                  </FieldDescription>
-                </Field>
+                <form.AppField name="amount">
+                  {(field) => (
+                    <field.Control
+                      label="Importe"
+                      id={`${uid}-importe`}
+                      description={
+                        values.advance ? "Todo queda como saldo a favor." : "Si paga una parte, el resto queda por cobrar."
+                      }
+                    >
+                      {(control) => (
+                        <MoneyInput
+                          id={control.id}
+                          currency={currency}
+                          locale={locale}
+                          value={field.state.value}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          onChange={(value) => {
+                            field.handleChange(value)
+                            setAmountTouched(true)
+                            followAmount(parseMoneyOrNull(value, currency, locale))
+                          }}
+                        />
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
 
                 <div className="flex flex-col gap-3">
-                  <span id={`${uid}-medio`} className="text-sm font-medium">
-                    {split ? "Medios de pago" : "Medio de pago"}
-                  </span>
                   {split ? (
-                    <>
-                      <ul className="flex flex-col gap-3" aria-labelledby={`${uid}-medio`}>
-                        {split.map((line, index) => {
-                          const lineMethod = methodById(line.paymentMethodId)
-                          const lineName = lineMethod?.name ?? `medio ${index + 1}`
-                          return (
-                            <li key={line.key} className="flex flex-col gap-2 rounded-xl border p-3">
-                              <div className="flex items-center gap-2">
-                                <ChoiceSelect
-                                  aria-label={`Medio de pago ${index + 1}`}
-                                  className="min-w-0 flex-1"
-                                  placeholder="Elige el medio"
-                                  value={line.paymentMethodId}
-                                  onChange={(event) =>
-                                    patchSplitLine(line.key, { paymentMethodId: event.target.value })
-                                  }
-                                >
-                                  {methodList.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.name}
-                                    </option>
-                                  ))}
-                                </ChoiceSelect>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon-sm"
-                                  className="shrink-0"
-                                  aria-label={`Quitar ${lineName}`}
-                                  onClick={() => removeSplitLine(line.key)}
-                                >
-                                  <X aria-hidden />
-                                </Button>
-                              </div>
-                              <MoneyInput
-                                aria-label={`Importe por ${lineName}`}
-                                currency={currency}
-                                locale={locale}
-                                value={line.amountText}
-                                onChange={(value) =>
-                                  patchSplitLine(line.key, { amountText: value, auto: false })
-                                }
-                              />
-                              {lineMethod && lineMethod.typeCode !== CASH_TYPE_CODE ? (
-                                <Field>
-                                  <FieldLabel htmlFor={`${uid}-operacion-${line.key}`}>
-                                    N.º de operación (opcional)
-                                  </FieldLabel>
-                                  <Input
-                                    id={`${uid}-operacion-${line.key}`}
-                                    autoComplete="off"
-                                    maxLength={MAX_REFERENCE}
-                                    value={line.reference}
-                                    onChange={(event) =>
-                                      patchSplitLine(line.key, { reference: event.target.value })
-                                    }
-                                  />
-                                </Field>
-                              ) : null}
-                            </li>
-                          )
-                        })}
-                      </ul>
-                      <p
-                        className={cn(
-                          "text-sm tabular-nums",
-                          amountCents !== null && splitTotal !== amountCents
-                            ? "text-destructive"
-                            : "text-muted-foreground",
-                        )}
-                        role="status"
-                      >
-                        Suman {formatMoney(splitTotal, currency, locale)}
-                        {amountCents !== null && splitTotal < amountCents
-                          ? ` · faltan ${formatMoney(amountCents - splitTotal, currency, locale)}`
-                          : amountCents !== null && splitTotal > amountCents
-                            ? ` · sobran ${formatMoney(splitTotal - amountCents, currency, locale)}`
-                            : ""}
-                      </p>
-                    </>
+                    <form.AppField name="payments" mode="array">
+                      {(paymentsField) => (
+                        <paymentsField.Group legend="Medios de pago" className="gap-3">
+                          {() => (
+                            <>
+                              <ul className="flex flex-col gap-3">
+                                {paymentsField.state.value.map((line, index) => {
+                                  const lineMethod = figures.methodById(line.methodId)
+                                  const lineName = lineMethod?.name ?? `medio ${index + 1}`
+                                  return (
+                                    <li key={line.key} className="flex flex-col gap-2 rounded-xl border p-3">
+                                      <div className="flex items-start gap-2">
+                                        <form.AppField name={`payments[${index}].methodId`}>
+                                          {(field) => (
+                                            <field.Control
+                                              label={`Medio de pago ${index + 1}`}
+                                              hideLabel
+                                              id={`${uid}-medio-${line.key}`}
+                                              className="min-w-0 flex-1"
+                                            >
+                                              {(control) => (
+                                                <ChoiceSelect
+                                                  id={control.id}
+                                                  aria-invalid={control.invalid || undefined}
+                                                  aria-describedby={control.describedBy}
+                                                  placeholder="Elige el medio"
+                                                  onBlur={control.onBlur}
+                                                  value={field.state.value}
+                                                  onChange={(event) => field.handleChange(event.target.value)}
+                                                >
+                                                  {methodList.map((item) => (
+                                                    <option key={item.id} value={item.id}>
+                                                      {item.name}
+                                                    </option>
+                                                  ))}
+                                                </ChoiceSelect>
+                                              )}
+                                            </field.Control>
+                                          )}
+                                        </form.AppField>
+                                        <Button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon-sm"
+                                          className="mt-0.5 shrink-0"
+                                          aria-label={`Quitar ${lineName}`}
+                                          onClick={() => removeSplitLine(index)}
+                                        >
+                                          <X aria-hidden />
+                                        </Button>
+                                      </div>
+                                      <form.AppField name={`payments[${index}].amount`}>
+                                        {(field) => (
+                                          <field.Control
+                                            label={`Importe por ${lineName}`}
+                                            hideLabel
+                                            id={`${uid}-importe-${line.key}`}
+                                          >
+                                            {(control) => (
+                                              <MoneyInput
+                                                id={control.id}
+                                                currency={currency}
+                                                locale={locale}
+                                                value={field.state.value}
+                                                invalid={control.invalid}
+                                                aria-describedby={control.describedBy}
+                                                onBlur={control.onBlur}
+                                                onChange={(value) => {
+                                                  field.handleChange(value)
+                                                  form.setFieldValue(`payments[${index}].auto`, false, {
+                                                    dontUpdateMeta: true,
+                                                  })
+                                                  followAmount(parseMoneyOrNull(form.state.values.amount, currency, locale))
+                                                }}
+                                              />
+                                            )}
+                                          </field.Control>
+                                        )}
+                                      </form.AppField>
+                                      {lineMethod && lineMethod.typeCode !== CASH_TYPE_CODE ? (
+                                        <form.AppField name={`payments[${index}].reference`}>
+                                          {(field) => (
+                                            <field.TextField
+                                              label="N.º de operación (opcional)"
+                                              id={`${uid}-operacion-${line.key}`}
+                                              autoComplete="off"
+                                              maxLength={MAX_REFERENCE}
+                                            />
+                                          )}
+                                        </form.AppField>
+                                      ) : null}
+                                    </li>
+                                  )
+                                })}
+                              </ul>
+                              <p
+                                className={cn(
+                                  "text-sm tabular-nums",
+                                  amountCents !== null && splitTotal !== amountCents
+                                    ? "text-destructive"
+                                    : "text-muted-foreground",
+                                )}
+                                role="status"
+                              >
+                                Suman {formatMoney(splitTotal, currency, locale)}
+                                {amountCents !== null && splitTotal < amountCents
+                                  ? ` · faltan ${formatMoney(amountCents - splitTotal, currency, locale)}`
+                                  : amountCents !== null && splitTotal > amountCents
+                                    ? ` · sobran ${formatMoney(splitTotal - amountCents, currency, locale)}`
+                                    : ""}
+                              </p>
+                            </>
+                          )}
+                        </paymentsField.Group>
+                      )}
+                    </form.AppField>
                   ) : (
                     <>
-                      <PaymentMethodButtons
-                        labelId={`${uid}-medio`}
-                        methods={methodList}
-                        value={method?.id ?? ""}
-                        onChange={(id) => {
-                          setMethodId(id)
-                          setDirty(true)
-                        }}
-                      />
+                      <form.AppField name="methodId">
+                        {(field) => (
+                          <field.Group legend="Medio de pago" className="gap-3">
+                            {(control) => (
+                              <PaymentMethodButtons
+                                id={control.id}
+                                methods={methodList}
+                                value={method?.id ?? ""}
+                                invalid={control.invalid}
+                                aria-describedby={control.describedBy}
+                                onBlur={control.onBlur}
+                                onChange={(id) => field.handleChange(id)}
+                              />
+                            )}
+                          </field.Group>
+                        )}
+                      </form.AppField>
                       {method && !hasCash ? (
-                        <Field>
-                          <FieldLabel htmlFor={`${uid}-operacion`}>
-                            N.º de operación (opcional)
-                          </FieldLabel>
-                          <Input
-                            id={`${uid}-operacion`}
-                            autoComplete="off"
-                            maxLength={MAX_REFERENCE}
-                            value={reference}
-                            onChange={(event) => {
-                              setReference(event.target.value)
-                              setDirty(true)
-                            }}
-                          />
-                        </Field>
+                        <form.AppField name="reference">
+                          {(field) => (
+                            <field.TextField
+                              label="N.º de operación (opcional)"
+                              id={`${uid}-operacion`}
+                              autoComplete="off"
+                              maxLength={MAX_REFERENCE}
+                            />
+                          )}
+                        </form.AppField>
                       ) : null}
                     </>
                   )}
                   {hasCash ? (
                     <div className="grid grid-cols-2 items-end gap-3">
-                      <Field>
-                        <FieldLabel htmlFor={`${uid}-recibes`}>Recibes en efectivo</FieldLabel>
-                        <MoneyInput
-                          id={`${uid}-recibes`}
-                          currency={currency}
-                          locale={locale}
-                          value={cashReceived}
-                          invalid={change !== null && change < 0}
-                          onChange={(value) => {
-                            setCashReceived(value)
-                            setDirty(true)
-                          }}
-                        />
-                      </Field>
+                      <form.AppField name="cashReceived">
+                        {(field) => (
+                          <field.Control label="Recibes en efectivo" id={`${uid}-recibes`}>
+                            {(control) => (
+                              <MoneyInput
+                                id={control.id}
+                                currency={currency}
+                                locale={locale}
+                                value={field.state.value}
+                                invalid={control.invalid || (change !== null && change < 0)}
+                                aria-describedby={control.describedBy}
+                                onBlur={control.onBlur}
+                                onChange={(value) => field.handleChange(value)}
+                              />
+                            )}
+                          </field.Control>
+                        )}
+                      </form.AppField>
                       <div className="flex min-h-9 flex-col justify-center" role="status">
                         <span className="text-sm text-muted-foreground">
                           {change !== null && change < 0 ? "Falta" : "Vuelto"}
@@ -1798,62 +1638,16 @@ export function CollectDrawer({
             )}
 
             <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="min-w-0 break-words">
-                  Paga{" "}
-                  <strong className="font-semibold">
-                    {payer ? payer.name : displayName || "el paciente"}
-                  </strong>
-                  {payer ? `, ${payer.role}` : displayName ? `, ${patientNoun(displaySex)}` : ""}
-                </span>
-                {payerOptions.length > 0 ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-expanded={payerOpen}
-                    aria-controls={payerOpen ? `${uid}-quien-paga` : undefined}
-                    onClick={() => setPayerOpen((value) => !value)}
-                  >
-                    Cambiar
-                  </Button>
-                ) : null}
-              </div>
-              {payerOpen ? (
-                <RadioGroup
-                  id={`${uid}-quien-paga`}
-                  aria-label="Quién paga"
-                  value={payerContactId || "paciente"}
-                  onValueChange={(next) => {
-                    setPayerContactId(next === "paciente" ? "" : String(next))
-                    setPayerOpen(false)
-                    setDirty(true)
-                  }}
-                >
-                  {[
-                    {
-                      value: "paciente",
-                      label: `${displayName || "El paciente"}, ${patientNoun(displaySex)}`,
-                    },
-                    ...payerOptions.map((option) => ({
-                      value: option.contactId,
-                      label: `${option.name}, ${option.role}`,
-                    })),
-                  ].map((option) => (
-                    <FieldLabel
-                      key={option.value}
-                      className={cn(
-                        "flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
-                        (payerContactId || "paciente") === option.value &&
-                          "border-primary bg-primary-soft",
-                      )}
-                    >
-                      <RadioGroupItem value={option.value} />
-                      <span className="min-w-0 break-words">{option.label}</span>
-                    </FieldLabel>
-                  ))}
-                </RadioGroup>
-              ) : null}
+              <form.AppField name="payerContactId">
+                {() => (
+                  <PayerField
+                    id={`${uid}-quien-paga`}
+                    options={payerOptions}
+                    displayName={displayName}
+                    displaySex={displaySex}
+                  />
+                )}
+              </form.AppField>
               {responsibilities.isError ? (
                 <p role="alert" className="text-sm text-destructive">
                   No se pudieron consultar sus responsables.{" "}
@@ -1877,7 +1671,635 @@ export function CollectDrawer({
             </p>
           </>
         ) : null}
+
+        {blockedReason ? (
+          // «Cobrar» queda deshabilitado por esto: se dice al final, junto al pie.
+          <p role="status" className="text-sm font-medium">
+            {blockedReason}
+          </p>
+        ) : null}
       </div>
     </FormDrawer>
+  )
+}
+
+/** «Paga …» y, al tocar «Cambiar», quién paga: el paciente o uno de sus responsables vigentes. */
+function PayerField({
+  id,
+  options,
+  displayName,
+  displaySex,
+}: {
+  id: string
+  options: Array<{ contactId: string; name: string; role: string }>
+  displayName: string
+  displaySex: string | null
+}) {
+  const field = useFieldContext<string>()
+  const { control, errors, errorId } = useFieldControl({ id, hasDescription: false })
+  const [open, setOpen] = useState(false)
+  const value = field.state.value
+  const payer = options.find((option) => option.contactId === value) ?? null
+  // Con un rechazo del servidor la elección queda a la vista para corregirla.
+  const expanded = open || control.invalid
+  return (
+    <div className="flex flex-col gap-2" data-invalid={control.invalid || undefined}>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span className="min-w-0 break-words">
+          Paga{" "}
+          <strong className="font-semibold">{payer ? payer.name : displayName || "el paciente"}</strong>
+          {payer ? `, ${payer.role}` : displayName ? `, ${patientNoun(displaySex)}` : ""}
+        </span>
+        {options.length > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-expanded={expanded}
+            aria-controls={expanded ? control.id : undefined}
+            onClick={() => setOpen((current) => !current)}
+          >
+            Cambiar
+          </Button>
+        ) : null}
+      </div>
+      {expanded ? (
+        <RadioGroup
+          id={control.id}
+          aria-label="Quién paga"
+          aria-invalid={control.invalid || undefined}
+          aria-describedby={control.describedBy}
+          value={value || "paciente"}
+          onValueChange={(next) => {
+            field.handleChange(next === "paciente" ? "" : String(next))
+            field.handleBlur()
+            setOpen(false)
+          }}
+        >
+          {[
+            {
+              value: "paciente",
+              label: `${displayName || "El paciente"}, ${patientNoun(displaySex)}`,
+            },
+            ...options.map((option) => ({
+              value: option.contactId,
+              label: `${option.name}, ${option.role}`,
+            })),
+          ].map((option) => (
+            <FieldLabel
+              key={option.value}
+              className={cn(
+                "flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border px-3 text-sm font-normal",
+                (value || "paciente") === option.value && "border-primary bg-primary-soft",
+              )}
+            >
+              <RadioGroupItem value={option.value} />
+              <span className="min-w-0 break-words">{option.label}</span>
+            </FieldLabel>
+          ))}
+        </RadioGroup>
+      ) : null}
+      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
+    </div>
+  )
+}
+
+/** El error general de un bloque en línea, junto a sus botones. */
+function InlineFormError({ message }: { message: string | null }) {
+  if (!message) return null
+  return (
+    <p role="alert" className="text-sm text-destructive">
+      {message}
+    </p>
+  )
+}
+
+/** Corregir el importe de un concepto (con motivo) o quitarlo. */
+function AmountEditor({
+  idPrefix,
+  editorId,
+  item,
+  currency,
+  locale,
+  removeQuestion,
+  busy,
+  savePending,
+  removePending,
+  onSave,
+  onRemove,
+  onCancel,
+}: {
+  idPrefix: string
+  editorId: string
+  item: AccountPendingItem
+  currency: string
+  locale: string
+  removeQuestion: string
+  busy: boolean
+  savePending: boolean
+  removePending: boolean
+  onSave: (cents: number, reason: string) => Promise<unknown>
+  onRemove: (reason: string) => Promise<unknown>
+  onCancel: () => void
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  /** «Guardar cambio» pide importe y motivo; «Quitar concepto», solo el motivo. */
+  const intent = useRef<"save" | "remove">("save")
+  const [confirmRemove, setConfirmRemove] = useState(false)
+  const form = useAppForm({
+    defaultValues: { amount: formatMoneyInput(item.totalCents, currency, locale), reason: "" },
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (intent.current === "save") {
+          const cents = parseMoneyOrNull(value.amount, currency, locale)
+          if (cents === null || cents <= 0) fields.amount = "Escribe el nuevo importe."
+          else if (cents === item.totalCents) fields.amount = "Es el mismo importe: no hay nada que guardar."
+          if (!value.reason.trim()) fields.reason = "Escribe el motivo del cambio."
+        } else if (!value.reason.trim()) {
+          fields.reason = "Escribe el motivo para quitarlo."
+        }
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      if (intent.current === "remove") {
+        // Primero se pregunta; «Sí, quitar» lo quita.
+        if (!confirmRemove) {
+          setConfirmRemove(true)
+          return
+        }
+        await onRemove(value.reason.trim())
+        return
+      }
+      await onSave(parseMoneyOrNull(value.amount, currency, locale) as number, value.reason.trim())
+    },
+  })
+  const error = useFormSubmitError(form)
+  const run = (next: "save" | "remove") => {
+    intent.current = next
+    void submitForm(form, { fieldMap: CONCEPT_FIELDS, formMessage: financeFormMessage, root: root.current })
+  }
+  const unconfirm = { onChange: () => setConfirmRemove(false) }
+  return (
+    <div ref={root} id={editorId} className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+      <form.AppField name="amount" listeners={unconfirm}>
+        {(field) => (
+          <field.Control label="Nuevo importe" id={`${idPrefix}-nuevo-importe`}>
+            {(control) => (
+              <MoneyInput
+                id={control.id}
+                autoFocus
+                currency={currency}
+                locale={locale}
+                value={field.state.value}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+                onChange={(value) => field.handleChange(value)}
+                onKeyDown={onEnter(() => run("save"))}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      <form.AppField name="reason" listeners={unconfirm}>
+        {(field) => (
+          <field.TextField
+            label="Motivo"
+            id={`${idPrefix}-motivo`}
+            maxLength={MAX_REASON}
+            onKeyDown={onEnter(() => run("save"))}
+          />
+        )}
+      </form.AppField>
+      <InlineFormError message={error} />
+      {confirmRemove ? (
+        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Confirmar quitar concepto">
+          <p className="min-w-0 flex-1 basis-full text-sm sm:basis-0">{removeQuestion}</p>
+          <SubmitButton
+            size="sm"
+            variant="destructive"
+            pending={removePending}
+            disabled={busy}
+            onClick={() => run("remove")}
+          >
+            Sí, quitar
+          </SubmitButton>
+          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setConfirmRemove(false)}>
+            No
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <SubmitButton size="sm" pending={savePending} disabled={busy} onClick={() => run("save")}>
+            Guardar cambio
+          </SubmitButton>
+          <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
+            Cancelar
+          </Button>
+          <span className="flex-1" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            disabled={busy}
+            onClick={() => run("remove")}
+          >
+            Quitar concepto
+          </Button>
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">Queda registrado quién lo cambió, cuándo y por qué.</p>
+    </div>
+  )
+}
+
+/** El precio final de una promoción «desde»: el motivo solo si baja del mínimo. */
+function PromoPriceEditor({
+  idPrefix,
+  editorId,
+  promotionName,
+  floorCents,
+  currency,
+  locale,
+  busy,
+  pending,
+  onSave,
+  onCancel,
+}: {
+  idPrefix: string
+  editorId: string
+  promotionName: string
+  floorCents: number
+  currency: string
+  locale: string
+  busy: boolean
+  pending: boolean
+  onSave: (cents: number, reason: string) => Promise<unknown>
+  onCancel: () => void
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  const form = useAppForm({
+    defaultValues: { amount: formatMoneyInput(floorCents, currency, locale), reason: "" },
+    validators: {
+      onSubmit: ({ value }) => {
+        const cents = parseMoneyOrNull(value.amount, currency, locale)
+        if (cents === null || cents <= 0) return { fields: { amount: "Escribe el precio final." } }
+        if (cents < floorCents && !value.reason.trim()) {
+          return {
+            fields: { reason: `El precio baja de ${formatMoney(floorCents, currency, locale)}: escribe el motivo.` },
+          }
+        }
+        return undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await onSave(parseMoneyOrNull(value.amount, currency, locale) as number, value.reason.trim())
+    },
+  })
+  const error = useFormSubmitError(form)
+  const typed = useStore(form.store, (state) => parseMoneyOrNull(state.values.amount, currency, locale))
+  const belowFloor = typed !== null && typed < floorCents
+  const save = () =>
+    void submitForm(form, { fieldMap: CONCEPT_FIELDS, formMessage: financeFormMessage, root: root.current })
+  return (
+    <div ref={root} id={editorId} className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+      <p className="text-sm font-medium">Promoción: {promotionName}</p>
+      <form.AppField name="amount">
+        {(field) => (
+          <field.Control
+            label="Precio final"
+            id={`${idPrefix}-promo-precio`}
+            description={`Solo pide un motivo si el precio baja de ${formatMoney(floorCents, currency, locale)}.`}
+          >
+            {(control) => (
+              <MoneyInput
+                id={control.id}
+                autoFocus
+                currency={currency}
+                locale={locale}
+                value={field.state.value}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+                onChange={(value) => field.handleChange(value)}
+                onKeyDown={onEnter(save)}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      {belowFloor ? (
+        <form.AppField name="reason">
+          {(field) => (
+            <field.TextField
+              label="Motivo"
+              id={`${idPrefix}-promo-motivo`}
+              maxLength={MAX_REASON}
+              onKeyDown={onEnter(save)}
+            />
+          )}
+        </form.AppField>
+      ) : null}
+      <InlineFormError message={error} />
+      <div className="flex flex-wrap items-center gap-2">
+        <SubmitButton size="sm" pending={pending} disabled={busy} onClick={save}>
+          Aplicar promoción
+        </SubmitButton>
+        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** «+ Agregar otro concepto»: qué se cobra y cuánto. */
+function OtherConceptForm({
+  idPrefix,
+  currency,
+  locale,
+  branchId,
+  busy,
+  pending,
+  onAdd,
+  onCancel,
+}: {
+  idPrefix: string
+  currency: string
+  locale: string
+  branchId: string
+  busy: boolean
+  pending: boolean
+  onAdd: (description: string, cents: number) => Promise<unknown>
+  onCancel: () => void
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  const form = useAppForm({
+    defaultValues: { description: "", amount: "" },
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (!value.description.trim()) fields.description = "Escribe qué es lo que se cobra."
+        const cents = parseMoneyOrNull(value.amount, currency, locale)
+        if (cents === null || cents <= 0) fields.amount = "Escribe el importe."
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      if (!branchId) throw new Error("Elige la sede antes de agregar un concepto.")
+      await onAdd(value.description.trim(), parseMoneyOrNull(value.amount, currency, locale) as number)
+    },
+  })
+  const error = useFormSubmitError(form)
+  const add = () =>
+    void submitForm(form, { fieldMap: CONCEPT_FIELDS, formMessage: financeFormMessage, root: root.current })
+  return (
+    <div ref={root} className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+      <form.AppField name="description">
+        {(field) => (
+          <field.TextField
+            label="Concepto"
+            id={`${idPrefix}-otro-concepto`}
+            autoFocus
+            maxLength={MAX_REASON}
+            onKeyDown={onEnter(add)}
+          />
+        )}
+      </form.AppField>
+      <form.AppField name="amount">
+        {(field) => (
+          <field.Control label="Importe" id={`${idPrefix}-otro-importe`}>
+            {(control) => (
+              <MoneyInput
+                id={control.id}
+                currency={currency}
+                locale={locale}
+                value={field.state.value}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+                onChange={(value) => field.handleChange(value)}
+                onKeyDown={onEnter(add)}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      <InlineFormError message={error} />
+      <div className="flex flex-wrap items-center gap-2">
+        <SubmitButton size="sm" pending={pending} disabled={busy} onClick={add}>
+          Agregar
+        </SubmitButton>
+        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+const NO_SALE_PRICE = "Ponle precio de venta en Inventario: sin precio no se puede cobrar."
+
+/**
+ * «+ Agregar producto» (tablero 19): lo que se vende, con su precio y lo que
+ * hay en la sede del cobro; el importe se calcula. Cada vez que se abre lleva
+ * su clave: si se corta la red y se vuelve a tocar «Agregar», el servidor
+ * devuelve la misma venta sin descontar otra vez.
+ */
+function ProductForm({
+  idPrefix,
+  open,
+  branchId,
+  sedeName,
+  locale,
+  busy,
+  pending,
+  onAdd,
+  onCancel,
+}: {
+  idPrefix: string
+  open: boolean
+  branchId: string
+  sedeName: string
+  locale: string
+  busy: boolean
+  pending: boolean
+  onAdd: (product: SaleProduct, quantity: number, requestId: string) => Promise<unknown>
+  onCancel: () => void
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  const saleKey = useRef<string>(crypto.randomUUID())
+  const [productQuery, setProductQuery] = useState("")
+  // Busca en el servidor lo que se vende en la sede del cobro (la misma de los conceptos).
+  const productSearch = useDeferredValue(productQuery.trim())
+  const saleProducts = useQuery({
+    queryKey: ["sale-products", branchId, productSearch],
+    queryFn: () => fetchSaleProducts({ branchId, q: productSearch || undefined, limit: 20 }),
+    enabled: open && Boolean(branchId),
+    placeholderData: (previous) => previous,
+    staleTime: 15_000,
+  })
+  const form = useAppForm({
+    defaultValues: { product: null as SaleProduct | null, quantity: "1" },
+    validators: {
+      onSubmit: ({ value }) => {
+        const fields: Record<string, string> = {}
+        if (!value.product) fields.product = "Busca y elige el producto."
+        else if (value.product.salePriceCents === null) fields.product = NO_SALE_PRICE
+        const quantity = parseWholeQuantity(value.quantity, locale)
+        if (quantity === null || quantity < 1 || quantity > SALE_QUANTITY_MAX) {
+          fields.quantity = `La cantidad va de 1 a ${SALE_QUANTITY_MAX}, sin decimales.`
+        }
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      if (!branchId) throw new Error("Elige la sede antes de agregar un producto.")
+      await onAdd(value.product as SaleProduct, parseWholeQuantity(value.quantity, locale) as number, saleKey.current)
+    },
+  })
+  const error = useFormSubmitError(form)
+  const chosenProduct = useStore(form.store, (state) => state.values.product)
+  const quantityText = useStore(form.store, (state) => state.values.quantity)
+  const productQuantity = parseWholeQuantity(quantityText, locale)
+  const productAmount =
+    chosenProduct && chosenProduct.salePriceCents !== null && productQuantity !== null && productQuantity > 0
+      ? chosenProduct.salePriceCents * productQuantity
+      : null
+  const productStockNote =
+    chosenProduct && chosenProduct.salePriceCents !== null
+      ? saleStockNote(chosenProduct, productQuantity ?? 1, sedeName || "esta sede")
+      : null
+  const saleDetail = (item: SaleProduct) =>
+    [
+      item.salePriceCents !== null && item.currency
+        ? formatMoney(item.salePriceCents, item.currency, locale)
+        : "Sin precio de venta",
+      item.onHandText ? `hay ${item.onHandText}` : `no hay en ${sedeName || "esta sede"}`,
+    ].join(" · ")
+  const add = () =>
+    void submitForm(form, { fieldMap: { productId: "product" }, formMessage: financeFormMessage, root: root.current })
+  return (
+    <div ref={root} className="flex flex-col gap-3 rounded-xl border bg-muted/40 p-3">
+      <form.AppField
+        name="product"
+        validators={{ onChange: ({ value }) => (value && value.salePriceCents === null ? NO_SALE_PRICE : undefined) }}
+      >
+        {(field) => (
+          <field.Control
+            label="Producto"
+            id={`${idPrefix}-producto`}
+            description={
+              productStockNote ? (
+                <span role="status" className="font-medium text-warning">
+                  {productStockNote}
+                </span>
+              ) : chosenProduct ? (
+                saleDetail(chosenProduct)
+              ) : (
+                `Solo lo que se vende, con su precio y lo que hay en ${sedeName || "la sede del cobro"}.`
+              )
+            }
+          >
+            {(control) => (
+              <ResourceSelect
+                id={control.id}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+                placeholder="Buscar producto…"
+                value={field.state.value?.productId ?? ""}
+                options={(saleProducts.data?.data.items ?? []).map((item) => ({
+                  id: item.productId,
+                  label: item.name,
+                  detail: saleDetail(item),
+                }))}
+                onQueryChange={setProductQuery}
+                onChange={(productId) => {
+                  const found =
+                    (saleProducts.data?.data.items ?? []).find((item) => item.productId === productId) ?? null
+                  field.handleChange(found)
+                  // Sin precio de venta se dice en el acto, no al pulsar «Agregar».
+                  field.handleBlur()
+                }}
+                empty={
+                  !branchId
+                    ? "Elige la sede del cobro para ver lo que se vende."
+                    : saleProducts.isPending
+                      ? "Buscando productos…"
+                      : productSearch
+                        ? `Ningún producto a la venta coincide con «${productSearch}».`
+                        : "Aún no hay productos a la venta. Se marcan con «Se vende» en Inventario."
+                }
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      {saleProducts.isError && !saleProducts.data ? (
+        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+          {financeErrorMessage(saleProducts.error)}
+          <Button type="button" size="sm" variant="outline" onClick={() => void saleProducts.refetch()}>
+            Reintentar
+          </Button>
+        </p>
+      ) : null}
+      <div className="grid grid-cols-2 gap-3">
+        <form.AppField name="quantity">
+          {(field) => (
+            <field.Control
+              label={
+                <>
+                  Cantidad
+                  {chosenProduct ? <span className="sr-only">, en {unitFor(2, chosenProduct.unit)}</span> : null}
+                </>
+              }
+              id={`${idPrefix}-producto-cantidad`}
+            >
+              {(control) => (
+                <InputGroup>
+                  <InputGroupInput
+                    {...control.props}
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className="tabular-nums"
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    onKeyDown={onEnter(add)}
+                  />
+                  {chosenProduct ? (
+                    <InputGroupAddon align="inline-end">{unitFor(productQuantity ?? 2, chosenProduct.unit)}</InputGroupAddon>
+                  ) : null}
+                </InputGroup>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <Field>
+          <FieldLabel htmlFor={`${idPrefix}-producto-importe`}>Importe</FieldLabel>
+          <output
+            id={`${idPrefix}-producto-importe`}
+            aria-live="polite"
+            className="flex min-h-9 items-center text-base font-semibold tabular-nums"
+          >
+            {productAmount !== null && chosenProduct?.currency
+              ? formatMoney(productAmount, chosenProduct.currency, locale)
+              : "—"}
+          </output>
+        </Field>
+      </div>
+      <InlineFormError message={error} />
+      <div className="flex flex-wrap items-center gap-2">
+        <SubmitButton size="sm" pending={pending} disabled={busy} onClick={add}>
+          Agregar
+        </SubmitButton>
+        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }

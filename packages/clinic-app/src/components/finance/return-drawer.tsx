@@ -6,14 +6,16 @@
  * queda a favor. Al terminar, la devolución se imprime y se envía como el ticket.
  */
 import { formatMoney } from "@odentia/clinical"
-import { Button, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
-import { ErrorState, FormDrawer, SubmitButton } from "@odentia/ui-patterns"
+import { Button } from "@odentia/ui"
+import { ErrorState, FormDrawer, SubmitButton, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Check, CreditCard, Minus, Plus, Printer } from "lucide-react"
-import { useId, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { SendFinancialDocument } from "../finance-documents/SendFinancialDocument"
 import { ChoiceButtons } from "../choice-buttons"
-import { financeErrorMessage } from "../../lib/finance"
+import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
   createTicketReturnApi,
@@ -22,6 +24,8 @@ import {
   returnPdfPath,
   type PaymentReturnRow,
   type ReturnableLine,
+  type ReturnBody,
+  type ReturnLineBody,
 } from "../../lib/finance-collect"
 import { byCount } from "../../lib/inventory"
 import { MoneyInput, parseMoneyOrNull } from "./collect-drawer"
@@ -32,14 +36,25 @@ const CARD_TYPE_CODE = "48"
 const LEAVE_AS_CREDIT = "__a_favor__"
 const MAX_REASON = 2000
 
-interface LineChoice {
+/** Lo que se elige de una línea que se puede devolver (las bloqueadas no entran). */
+interface LineDraft {
+  chargeId: string
   /** Producto: unidades que devuelve. */
   quantity: number
   /** Producto: vuelve a la sede. */
   backToStock: boolean
   /** Servicio: importe escrito. */
-  amountText: string
+  amount: string
 }
+
+interface ReturnValues {
+  lines: LineDraft[]
+  /** Medio elegido; null = el que se propone (con el que pagó). */
+  payout: string | null
+  reason: string
+}
+
+const EMPTY: ReturnValues = { lines: [], payout: null, reason: "" }
 
 export function ReturnDrawer({
   open,
@@ -65,7 +80,6 @@ export function ReturnDrawer({
   locale: string
   onReturned: () => void
 }): React.JSX.Element {
-  const uid = useId()
   const returnable = useQuery({
     queryKey: ["ticket-returnable", patientId, ticketId],
     queryFn: () => fetchTicketReturnable(patientId, ticketId),
@@ -77,21 +91,14 @@ export function ReturnDrawer({
   const money = (cents: number) => formatMoney(cents, currency, locale)
   const lines = data?.lines ?? []
   const methodList = methods.data?.data ?? []
+  const lineOf = useMemo(() => new Map(lines.map((line) => [line.chargeId, line])), [lines])
 
-  const [choices, setChoices] = useState<Record<string, LineChoice>>({})
-  const [payout, setPayout] = useState<string | null>(null)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
   const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const [done, setDone] = useState<PaymentReturnRow | null>(null)
   const [printing, setPrinting] = useState(false)
-
-  const choiceOf = (line: ReturnableLine): LineChoice =>
-    choices[line.chargeId] ?? { quantity: 0, backToStock: true, amountText: "" }
-  const setChoice = (line: ReturnableLine, patch: Partial<LineChoice>) => {
-    setError(null)
-    setChoices((current) => ({ ...current, [line.chargeId]: { ...choiceOf(line), ...patch } }))
-  }
+  const [printError, setPrintError] = useState<string | null>(null)
+  /** Fila del formulario de cada línea enviada, en el orden del cuerpo (`lines[i]` del servidor). */
+  const sentRows = useRef<number[]>([])
 
   // El medio con que pagó va primero y es el que se propone.
   const paidWith = data?.methods[0]?.paymentMethodId ?? null
@@ -102,67 +109,172 @@ export function ReturnDrawer({
       label: method.id === paidWith ? `${method.name} (como pagó)` : method.name,
     }))
   }, [methodList, paidWith])
-  const chosenPayout = payout ?? (methodList.some((method) => method.id === paidWith) ? paidWith : (methodList[0]?.id ?? null))
+  const proposedPayout = methodList.some((method) => method.id === paidWith) ? paidWith : (methodList[0]?.id ?? null)
+
+  /** Cuánto devuelve una línea, con el mismo redondeo que el servidor; null si el importe no vale. */
+  const centsOf = (line: ReturnableLine, draft: LineDraft): number | null => {
+    if (line.kind === "producto") {
+      const sold = line.quantity ?? 1
+      const quantity = Math.min(Math.max(draft.quantity, 0), sold)
+      return quantity === 0 ? 0 : quantity === sold ? line.amountCents : Math.round((line.amountCents * quantity) / sold)
+    }
+    const raw = draft.amount.trim()
+    if (!raw) return 0
+    const cents = parseMoneyOrNull(raw, currency, locale)
+    return cents === null || cents < 0 || cents > line.paidCents ? null : cents
+  }
+
+  const schema = useMemo(
+    () =>
+      z
+        .object({
+          lines: z.array(
+            z.object({ chargeId: z.string(), quantity: z.number(), backToStock: z.boolean(), amount: z.string() }),
+          ),
+          payout: z.string().nullable(),
+          reason: z
+            .string()
+            .trim()
+            .min(1, "Escribe el motivo de la devolución.")
+            .max(MAX_REASON, `Escribe el motivo en ${MAX_REASON} caracteres como mucho.`),
+        })
+        .superRefine((value, ctx) => {
+          let picked = 0
+          let invalid = false
+          value.lines.forEach((draft, index) => {
+            const line = lineOf.get(draft.chargeId)
+            if (!line) return
+            if (line.kind === "producto") {
+              if (draft.quantity > 0) picked += 1
+              return
+            }
+            const raw = draft.amount.trim()
+            if (!raw) return
+            const cents = parseMoneyOrNull(raw, currency, locale)
+            if (cents === null || cents < 0) {
+              invalid = true
+              ctx.addIssue({
+                code: "custom",
+                path: ["lines", index, "amount"],
+                message: "No se entiende el importe: escribe solo la cifra, sin letras ni signos.",
+              })
+            } else if (cents > line.paidCents) {
+              invalid = true
+              ctx.addIssue({
+                code: "custom",
+                path: ["lines", index, "amount"],
+                message: `Es más de lo que pagó en este ticket: como mucho ${formatMoney(line.paidCents, currency, locale)}.`,
+              })
+            } else if (cents > 0) picked += 1
+          })
+          if (picked === 0 && !invalid)
+            ctx.addIssue({
+              code: "custom",
+              path: ["lines"],
+              message: "Elige qué devuelve: un producto o un importe de un servicio.",
+            })
+          if (!(value.payout ?? proposedPayout))
+            ctx.addIssue({ code: "custom", path: ["payout"], message: "Elige cómo se lo devuelves." })
+        }),
+    [lineOf, currency, locale, proposedPayout],
+  )
+
+  const mutation = useMutation({
+    mutationFn: (body: ReturnBody) => createTicketReturnApi(patientId, ticketId, body),
+    onSuccess: (result) => {
+      setDone(result.data.paymentReturn)
+      onReturned()
+    },
+  })
+
+  const form = useAppForm({
+    defaultValues: EMPTY,
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      if (done) return
+      const rows: number[] = []
+      const body: ReturnLineBody[] = []
+      value.lines.forEach((draft, index) => {
+        const line = lineOf.get(draft.chargeId)
+        if (!line) return
+        const cents = centsOf(line, draft) ?? 0
+        if (cents <= 0) return
+        rows.push(index)
+        const sold = line.quantity ?? 1
+        body.push(
+          line.kind === "producto"
+            ? { chargeId: line.chargeId, quantity: Math.min(draft.quantity, sold), backToStock: draft.backToStock }
+            : { chargeId: line.chargeId, amountCents: cents },
+        )
+      })
+      sentRows.current = rows
+      const payout = value.payout ?? proposedPayout
+      await mutation.mutateAsync({
+        branchId,
+        lines: body,
+        paymentMethodId: payout === LEAVE_AS_CREDIT ? null : payout,
+        reason: value.reason.trim(),
+        requestId,
+      })
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+
+  // El servidor nombra cada línea por su lugar en el cuerpo (`lines[1].amountCents`):
+  // va a la fila de la pantalla de donde salió, y el medio, al grupo del medio.
+  const surface = useFormSurface(form, {
+    formMessage: financeFormMessage,
+    fieldMap: (key) => {
+      if (key === "paymentMethodId") return "payout"
+      const match = /^lines\[(\d+)\]\./.exec(key)
+      if (!match) return undefined
+      const row = sentRows.current[Number(match[1])]
+      const draft = row === undefined ? undefined : form.state.values.lines[row]
+      if (row === undefined || !draft) return undefined
+      return `lines[${row}].${lineOf.get(draft.chargeId)?.kind === "producto" ? "quantity" : "amount"}`
+    },
+  })
+
+  // Las líneas llegan con la consulta: el borrador se arma una vez por apertura.
+  const seeded = useRef(false)
+  useEffect(() => {
+    if (!open || !data || seeded.current) return
+    seeded.current = true
+    form.reset({
+      lines: data.lines
+        .filter((line) => !line.blockedReason)
+        .map((line) => ({ chargeId: line.chargeId, quantity: 0, backToStock: true, amount: "" })),
+      payout: null,
+      reason: "",
+    })
+  }, [open, data, form])
+
+  const rowOf = new Map(values.lines.map((draft, index) => [draft.chargeId, index]))
+  const chosenPayout = values.payout ?? proposedPayout
   const chosenMethod = methodList.find((method) => method.id === chosenPayout) ?? null
 
   // Lo que se devuelve, línea por línea, con el mismo redondeo que el servidor.
-  const picked = lines
-    .filter((line) => !line.blockedReason)
-    .map((line) => {
-      const choice = choiceOf(line)
-      if (line.kind === "producto") {
-        const sold = line.quantity ?? 1
-        const quantity = Math.min(Math.max(choice.quantity, 0), sold)
-        const cents = quantity === 0 ? 0 : quantity === sold ? line.amountCents : Math.round((line.amountCents * quantity) / sold)
-        return { line, quantity, cents, backToStock: choice.backToStock, invalid: false }
-      }
-      const raw = choice.amountText.trim()
-      const cents = raw ? parseMoneyOrNull(raw, currency, locale) : 0
-      const invalid = cents === null || cents < 0 || cents > line.paidCents
-      return { line, quantity: null, cents: invalid ? 0 : (cents ?? 0), backToStock: null, invalid }
-    })
-  const chosen = picked.filter((item) => item.cents > 0)
-  const total = chosen.reduce((sum, item) => sum + item.cents, 0)
-  const backWords = chosen
-    .filter((item) => item.line.kind === "producto" && item.backToStock)
-    .map((item) => `${item.quantity} ${item.line.productName ?? item.line.description}`)
-  const wasteWords = chosen
-    .filter((item) => item.line.kind === "producto" && !item.backToStock)
-    .map((item) => `${item.quantity} ${item.line.productName ?? item.line.description}`)
-
-  const reset = () => {
-    setChoices({})
-    setPayout(null)
-    setReason("")
-    setError(null)
-    setDone(null)
-    setRequestId(crypto.randomUUID())
-  }
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      createTicketReturnApi(patientId, ticketId, {
-        branchId,
-        lines: chosen.map((item) =>
-          item.line.kind === "producto"
-            ? { chargeId: item.line.chargeId, quantity: item.quantity ?? 0, backToStock: item.backToStock ?? true }
-            : { chargeId: item.line.chargeId, amountCents: item.cents },
-        ),
-        paymentMethodId: chosenPayout === LEAVE_AS_CREDIT ? null : chosenPayout,
-        reason: reason.trim(),
-        requestId,
-      }),
-    onSuccess: (result) => {
-      setDone(result.data.paymentReturn)
-      setError(null)
-      onReturned()
-    },
-    onError: (err) => setError(financeErrorMessage(err)),
+  const chosen = values.lines.flatMap((draft) => {
+    const line = lineOf.get(draft.chargeId)
+    const cents = line ? (centsOf(line, draft) ?? 0) : 0
+    return line && cents > 0 ? [{ line, draft, cents }] : []
   })
+  const total = chosen.reduce((sum, item) => sum + item.cents, 0)
+  const productWords = (back: boolean) =>
+    chosen
+      .filter((item) => item.line.kind === "producto" && item.draft.backToStock === back)
+      .map((item) => `${item.draft.quantity} ${item.line.productName ?? item.line.description}`)
+  const backWords = productWords(true)
+  const wasteWords = productWords(false)
 
   const close = () => {
-    if (mutation.isPending) return
-    reset()
+    if (surface.isSubmitting) return
+    form.reset(EMPTY)
+    seeded.current = false
+    sentRows.current = []
+    setDone(null)
+    setPrintError(null)
+    setRequestId(crypto.randomUUID())
     onClose()
   }
 
@@ -170,6 +282,8 @@ export function ReturnDrawer({
 
   return (
     <FormDrawer
+      {...surface}
+      isDirty={surface.isDirty && done === null}
       dock={false}
       open={open}
       title={done ? `Devolución N.º ${numberLabel}` : "Devolver"}
@@ -181,34 +295,11 @@ export function ReturnDrawer({
           </div>
         )
       }
-      error={error}
-      isSubmitting={mutation.isPending}
       isLoading={returnable.isPending || methods.isPending}
       hideSubmit={done !== null}
       submitLabel={total > 0 ? `Devolver ${money(total)}` : "Devolver"}
       cancelLabel={done ? "Listo" : "Cancelar"}
       onClose={close}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (done || mutation.isPending) return
-        if (picked.some((item) => item.invalid)) {
-          setError("Revisa el importe: no puede ser más de lo que pagó en este ticket.")
-          return
-        }
-        if (total <= 0) {
-          setError("Elige qué devuelve: un producto o un importe de un servicio.")
-          return
-        }
-        if (!chosenPayout) {
-          setError("Elige cómo se lo devuelves.")
-          return
-        }
-        if (!reason.trim()) {
-          setError("Escribe el motivo de la devolución.")
-          return
-        }
-        mutation.mutate()
-      }}
     >
       {done ? (
         <div className="flex flex-col gap-4">
@@ -252,14 +343,20 @@ export function ReturnDrawer({
             pending={printing}
             onClick={() => {
               setPrinting(true)
+              setPrintError(null)
               void openServerPdf(returnPdfPath(patientId, done.id))
-                .catch((err: unknown) => setError(financeErrorMessage(err)))
+                .catch((err: unknown) => setPrintError(financeErrorMessage(err)))
                 .finally(() => setPrinting(false))
             }}
           >
             <Printer aria-hidden />
             Imprimir
           </SubmitButton>
+          {printError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {printError}
+            </p>
+          ) : null}
           <SendFinancialDocument
             patientId={patientId}
             documentType="return"
@@ -279,113 +376,135 @@ export function ReturnDrawer({
         />
       ) : (
         <div className="flex flex-col gap-5">
-          <fieldset className="flex flex-col gap-3">
-            <legend className="mb-2 text-sm font-semibold">Qué devuelve</legend>
-            {lines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">De este ticket ya no queda nada por devolver.</p>
-            ) : null}
-            {lines.map((line) => {
-              const choice = choiceOf(line)
-              if (line.blockedReason) {
-                return (
-                  <div key={line.chargeId} className="flex flex-col gap-1 rounded-xl border px-3.5 py-3 text-sm">
-                    <span className="font-medium">{line.description}</span>
-                    <span className="text-muted-foreground">{line.blockedReason}</span>
-                  </div>
-                )
-              }
-              if (line.kind === "producto") {
-                const sold = line.quantity ?? 1
-                const name = line.productName ?? line.description
-                return (
-                  <div key={line.chargeId} className="flex flex-col gap-3 rounded-xl border px-3.5 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex min-w-0 flex-col">
-                        <span className="break-words text-sm font-medium">{name}</span>
-                        <span className="text-sm text-muted-foreground">
-                          {byCount(sold, "Se vendió", "Se vendieron")} {sold} · {money(line.amountCents)}
-                        </span>
-                      </div>
-                      <QuantityStepper
-                        name={name}
-                        value={choice.quantity}
-                        max={sold}
-                        onChange={(quantity) => setChoice(line, { quantity })}
-                      />
-                    </div>
-                    {choice.quantity > 0 ? (
-                      <div className="flex flex-col gap-1.5">
-                        <span className="text-sm font-medium">¿Vuelve a {branchName}?</span>
-                        <ChoiceButtons
-                          label={`¿${name} vuelve a ${branchName}?`}
-                          columns={2}
-                          value={choice.backToStock ? "si" : "no"}
-                          options={[
-                            { value: "si", label: "Sí, está en buen estado" },
-                            { value: "no", label: "No, no vuelve a la venta" },
-                          ]}
-                          onChange={(value) => setChoice(line, { backToStock: value === "si" })}
-                        />
-                      </div>
+          <form.AppField name="lines" mode="array">
+            {(linesField) => (
+              <linesField.Group legend="Qué devuelve" className="flex flex-col gap-3">
+                {() => (
+                  <>
+                    {lines.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">De este ticket ya no queda nada por devolver.</p>
                     ) : null}
-                  </div>
-                )
-              }
-              const id = `${uid}-${line.chargeId}`
-              return (
-                <Field key={line.chargeId} className="rounded-xl border px-3.5 py-3">
-                  <FieldLabel htmlFor={id}>{line.description}</FieldLabel>
-                  <MoneyInput
-                    id={id}
-                    currency={currency}
-                    locale={locale}
-                    value={choice.amountText}
-                    onChange={(value) => setChoice(line, { amountText: value })}
-                    aria-label={`Cuánto devuelve de ${line.description}`}
-                  />
-                  <FieldDescription>
-                    Pagó {money(line.paidCents)} en este ticket. Devolver por un reclamo no cambia su historia clínica.
-                  </FieldDescription>
-                </Field>
-              )
-            })}
-          </fieldset>
-
-          <div className="flex flex-col gap-2">
-            <span id={`${uid}-medio`} className="text-sm font-semibold">
-              ¿Cómo se lo devuelves?
-            </span>
-            {methods.isError ? (
-              <ErrorState
-                title="No se pudieron consultar los medios de pago"
-                message={financeErrorMessage(methods.error)}
-                onRetry={() => void methods.refetch()}
-              />
-            ) : (
-              <ChoiceButtons
-                label="Cómo se lo devuelves"
-                tone="primary"
-                columns={2}
-                value={chosenPayout}
-                options={[...methodOptions, { value: LEAVE_AS_CREDIT, label: "Dejarlo a favor" }]}
-                onChange={(value) => {
-                  setError(null)
-                  setPayout(value)
-                }}
-              />
+                    {lines.map((line) => {
+                      if (line.blockedReason) {
+                        return (
+                          <div key={line.chargeId} className="flex flex-col gap-1 rounded-xl border px-3.5 py-3 text-sm">
+                            <span className="font-medium">{line.description}</span>
+                            <span className="text-muted-foreground">{line.blockedReason}</span>
+                          </div>
+                        )
+                      }
+                      const row = rowOf.get(line.chargeId)
+                      if (row === undefined) return null
+                      if (line.kind === "producto") {
+                        const sold = line.quantity ?? 1
+                        const name = line.productName ?? line.description
+                        return (
+                          <form.AppField key={line.chargeId} name={`lines[${row}].quantity`}>
+                            {(field) => (
+                              <field.Group
+                                legend={name}
+                                description={`${byCount(sold, "Se vendió", "Se vendieron")} ${sold} · ${money(line.amountCents)}`}
+                                className="flex flex-col gap-3 rounded-xl border px-3.5 py-3"
+                              >
+                                {(control) => (
+                                  <>
+                                    <QuantityStepper
+                                      name={name}
+                                      value={field.state.value}
+                                      max={sold}
+                                      invalid={control.invalid}
+                                      aria-describedby={control.describedBy}
+                                      onBlur={control.onBlur}
+                                      onChange={(quantity) => field.handleChange(quantity)}
+                                    />
+                                    {field.state.value > 0 ? (
+                                      <form.Field name={`lines[${row}].backToStock`}>
+                                        {(stock) => (
+                                          <div className="flex flex-col gap-1.5">
+                                            <span className="text-sm font-medium">¿Vuelve a {branchName}?</span>
+                                            <ChoiceButtons
+                                              aria-label={`¿${name} vuelve a ${branchName}?`}
+                                              columns={2}
+                                              value={stock.state.value ? "si" : "no"}
+                                              options={[
+                                                { value: "si", label: "Sí, está en buen estado" },
+                                                { value: "no", label: "No, no vuelve a la venta" },
+                                              ]}
+                                              onChange={(value) => stock.handleChange(value === "si")}
+                                            />
+                                          </div>
+                                        )}
+                                      </form.Field>
+                                    ) : null}
+                                  </>
+                                )}
+                              </field.Group>
+                            )}
+                          </form.AppField>
+                        )
+                      }
+                      return (
+                        <form.AppField key={line.chargeId} name={`lines[${row}].amount`}>
+                          {(field) => (
+                            <field.Control
+                              label={line.description}
+                              description={`Pagó ${money(line.paidCents)} en este ticket. Devolver por un reclamo no cambia su historia clínica.`}
+                              className="rounded-xl border px-3.5 py-3"
+                            >
+                              {(control) => (
+                                <MoneyInput
+                                  id={control.id}
+                                  invalid={control.invalid}
+                                  aria-describedby={control.describedBy}
+                                  onBlur={control.onBlur}
+                                  currency={currency}
+                                  locale={locale}
+                                  value={field.state.value}
+                                  onChange={(value) => field.handleChange(value)}
+                                />
+                              )}
+                            </field.Control>
+                          )}
+                        </form.AppField>
+                      )
+                    })}
+                  </>
+                )}
+              </linesField.Group>
             )}
-          </div>
+          </form.AppField>
 
-          <Field>
-            <FieldLabel htmlFor={`${uid}-motivo`}>Motivo</FieldLabel>
-            <Textarea
-              id={`${uid}-motivo`}
-              rows={2}
-              maxLength={MAX_REASON}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
+          <form.AppField name="payout">
+            {(field) => (
+              <field.Group legend="¿Cómo se lo devuelves?" className="flex flex-col gap-2">
+                {(control) =>
+                  methods.isError ? (
+                    <ErrorState
+                      title="No se pudieron consultar los medios de pago"
+                      message={financeErrorMessage(methods.error)}
+                      onRetry={() => void methods.refetch()}
+                    />
+                  ) : (
+                    <ChoiceButtons
+                      id={control.id}
+                      invalid={control.invalid}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      tone="primary"
+                      columns={2}
+                      value={chosenPayout}
+                      options={[...methodOptions, { value: LEAVE_AS_CREDIT, label: "Dejarlo a favor" }]}
+                      onChange={(value) => field.handleChange(value)}
+                    />
+                  )
+                }
+              </field.Group>
+            )}
+          </form.AppField>
+
+          <form.AppField name="reason">
+            {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_REASON} />}
+          </form.AppField>
 
           {total > 0 ? (
             <div className="flex flex-col gap-2">
@@ -432,15 +551,30 @@ function QuantityStepper({
   name,
   value,
   max,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
   onChange,
 }: {
   name: string
   value: number
   max: number
+  invalid?: boolean
+  "aria-describedby"?: string
+  onBlur?: () => void
   onChange: (value: number) => void
 }): React.JSX.Element {
   return (
-    <fieldset className="m-0 flex items-center gap-1 border-0 p-0">
+    <fieldset
+      className="m-0 flex items-center gap-1 border-0 p-0"
+      onBlur={
+        onBlur
+          ? (event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
+    >
       <legend className="sr-only">Cuántos {name} devuelve</legend>
       <Button
         type="button"
@@ -448,6 +582,8 @@ function QuantityStepper({
         size="icon"
         className="size-11"
         aria-label={`Uno menos de ${name}`}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
         disabled={value <= 0}
         onClick={() => onChange(Math.max(0, value - 1))}
       >
@@ -462,6 +598,8 @@ function QuantityStepper({
         size="icon"
         className="size-11"
         aria-label={`Uno más de ${name}`}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
         disabled={value >= max}
         onClick={() => onChange(Math.min(max, value + 1))}
       >

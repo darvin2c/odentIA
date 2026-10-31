@@ -15,25 +15,27 @@
  * Las demos de producción ya no salen de aquí: se crean desde la
  * administración, con «Crear demo» (ADR 0096).
  */
-import { LEGAL } from "@odentia/auth/legal"
-import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
-import { encodeDemoCtSlice, encodeDemoDicom } from "@odentia/clinical"
-import { generateCbctPhantom } from "@odentia/dental"
-import { PDFDocument, StandardFonts } from "pdf-lib"
-import sharp from "sharp"
+
 import { randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { deflateSync } from "node:zlib"
-import { DEFAULT_REGISTRATION_CONFIG, DICOM_SAMPLES } from "@odentia/clinical"
-import { TREATMENT_KIND_KEYS } from "@odentia/dental"
+import { LEGAL } from "@odentia/auth/legal"
+import type { PatientGuide } from "@odentia/clinical"
+import {
+  DEFAULT_REGISTRATION_CONFIG,
+  DICOM_SAMPLES,
+  encodeDemoCtSlice,
+  encodeDemoDicom,
+} from "@odentia/clinical"
 import { createOwnerDb, withOrgContext } from "@odentia/db"
+import { saasDemo } from "@odentia/db/schema/admin-demos"
 import { supportNotice } from "@odentia/db/schema/admin-support"
-import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
 import { appointment, calendarFeed, calendarFeedUse, scheduleRoom } from "@odentia/db/schema/agenda"
 import { agentSearchItem, aiUsage } from "@odentia/db/schema/agent"
 import { account, invitation, member, organization, user } from "@odentia/db/schema/auth"
 import {
+  appointmentPlanItem,
   clinicalFollowUp,
   clinicalNote,
   encounter,
@@ -60,7 +62,6 @@ import {
   prescription,
   prescriptionItem,
   serviceCatalog,
-  appointmentPlanItem,
   treatmentBudget,
   treatmentBudgetItem,
   treatmentBudgetOption,
@@ -69,13 +70,10 @@ import {
   treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
-  odontogramAssessment,
-  odontogramEntry,
-  periodontalChart,
-  periodontalTooth,
-  planItemFinding,
-} from "@odentia/db/schema/dental"
-import { consentDocument, consentTemplate, professionalProfile } from "@odentia/db/schema/clinical-forms"
+  consentDocument,
+  consentTemplate,
+  professionalProfile,
+} from "@odentia/db/schema/clinical-forms"
 import {
   agentConfig,
   channelConnection,
@@ -88,17 +86,29 @@ import {
   pipeline,
   pipelineStage,
 } from "@odentia/db/schema/crm"
+import {
+  odontogramAssessment,
+  odontogramEntry,
+  periodontalChart,
+  periodontalTooth,
+  planItemFinding,
+} from "@odentia/db/schema/dental"
 import { auditEvent, branch, orgProfile, patientRegistrationConfig } from "@odentia/db/schema/org"
+import { saasAction, saasSubscription, storageUsageDay } from "@odentia/db/schema/saas-billing"
+import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
+import { generateCbctPhantom, TREATMENT_KIND_KEYS } from "@odentia/dental"
 import { hashPassword } from "better-auth/crypto"
 import { and, asc, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm"
-import { saasDemo } from "@odentia/db/schema/admin-demos"
+import { PDFDocument, StandardFonts } from "pdf-lib"
+import sharp from "sharp"
 import { claimHandoff, createHandoff, recordTopicAskedAgain } from "../agent-operations.js"
-import { ANSWER_READY_MESSAGE, replyId } from "../automation-messages.js"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { addPatientAllergy, removePatientAllergy } from "../allergies.js"
 import { createAppointment, createRoom, setAppointmentArrival } from "../appointments.js"
-import { createMyCalendarFeed } from "../calendar-feeds.js"
+import { setConsent, setMessageChoice } from "../automation.js"
+import { ANSWER_READY_MESSAGE, replyId } from "../automation-messages.js"
 import { createScheduleBlock, setProfessionalSchedule } from "../availability.js"
+import { issuePersonalLink } from "../booking-links.js"
 import {
   addBudgetItems,
   adjustBudgetLines,
@@ -108,7 +118,9 @@ import {
   duplicateBudgetOption,
   removeBudgetItems,
   reviseBudget,
+  updateBudgetPresentation,
 } from "../budgets.js"
+import { createMyCalendarFeed } from "../calendar-feeds.js"
 import {
   addClinicalNote,
   addDeclaredAllergies,
@@ -117,23 +129,27 @@ import {
   retirePatientDocument,
   savePatientHealth,
 } from "../clinical.js"
-import { addOdontogramEntries, createOdontogramAssessment, voidOdontogramEntry } from "./odontogram.js"
-import { createConnection } from "../connections.js"
-import { createContact, updateContact } from "../contacts.js"
-import { blockContact, markSpam } from "../contact-screen.js"
-import { decideActionReview, requestActionReview } from "../saas-action-review.js"
-import { CLIO_DETAIL, SOFI_DETAIL } from "../saas-actions.js"
 import {
-  markImagingFilesUploaded,
-  pendingImagingFiles,
-  setImagingThumbnail,
-  startImagingStudyUpload,
-} from "../imaging-studies.js"
+  createClinicalOrder,
+  markConsentSentByLink,
+  setProfessionalSpecialties,
+  signConsentDocument,
+} from "../clinical-forms.js"
+import { createConnection } from "../connections.js"
+import { generateConsentPdf } from "../consent-pdf.js"
+import { respondConsumerComplaint, submitConsumerComplaint } from "../consumer-complaints.js"
+import { blockContact, markSpam } from "../contact-screen.js"
+import { createContact, updateContact } from "../contacts.js"
 import { createContactNote } from "../crm-workspace.js"
 import { grantDataConsent } from "../data-consents.js"
 import { eraseForDataRequest } from "../data-erasure.js"
-import { addCalendarDays, createDataRequest, respondDataRequest, verifyDataRequest } from "../data-requests.js"
-import { clinicToday } from "../inventory-stock.js"
+import {
+  addCalendarDays,
+  createDataRequest,
+  respondDataRequest,
+  verifyDataRequest,
+} from "../data-requests.js"
+import { buildDemo, DEMO_BUILD_STEPS, purgeDemoOrganization } from "../demo-build.js"
 import { addEncounterDiagnosis, voidEncounterDiagnosis } from "../encounter-diagnoses.js"
 import {
   addEncounterAddendum,
@@ -144,9 +160,28 @@ import {
   voidEncounter,
 } from "../encounters.js"
 import { createFieldDef } from "../fields.js"
-import { cancelFollowUp, completeFollowUp, createFollowUp, scheduleFollowUp } from "../follow-ups.js"
 import { setCommissionRate } from "../finance.js"
-import { closeOpportunity, createOpportunity, listOpportunities, moveOpportunity, setOpportunityTask } from "../opportunities.js"
+import {
+  cancelFollowUp,
+  completeFollowUp,
+  createFollowUp,
+  scheduleFollowUp,
+} from "../follow-ups.js"
+import {
+  markImagingFilesUploaded,
+  pendingImagingFiles,
+  setImagingThumbnail,
+  startImagingStudyUpload,
+} from "../imaging-studies.js"
+import { clinicToday } from "../inventory-stock.js"
+import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
+import {
+  closeOpportunity,
+  createOpportunity,
+  listOpportunities,
+  moveOpportunity,
+  setOpportunityTask,
+} from "../opportunities.js"
 import {
   createPatientRegistrationLink,
   leaveRegistrationHold,
@@ -154,60 +189,25 @@ import {
   savePatientRegistrationConfig,
 } from "../patient-registration.js"
 import { createPatient, patientPersonId, RegistrationHeld, updatePatient } from "../patients.js"
-import { collectCharge, createCharge, refundCredit } from "../payments.js"
 import { ensureDefaultPaymentMethods, listPaymentMethods } from "../payment-methods.js"
+import { collectCharge, createCharge, refundCredit } from "../payments.js"
 import { ensureDefaultPipeline } from "../pipelines.js"
-import { setConsent, setMessageChoice } from "../automation.js"
 import { addPlanItem, createTreatmentPlan, setPlanItemStatus } from "../plan.js"
 import { cancelPrescription, createPrescription } from "../prescriptions.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
 import { createPromotion } from "../promotions.js"
 import { grantResponsibility } from "../responsibilities.js"
+import { decideActionReview, requestActionReview } from "../saas-action-review.js"
+import { CLIO_DETAIL, SOFI_DETAIL } from "../saas-actions.js"
 import { secretsKeyFromEnv } from "../secrets.js"
+import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
+import { seedAdminOrganizations } from "../seed-admin-organizations.js"
+import { seedAdminSupport } from "../seed-admin-support.js"
 import { seedAgent } from "../seed-agent.js"
 import { seedAutomation, seedChannelTemplates } from "../seed-automation.js"
 import { seedAvailability } from "../seed-availability.js"
 import { seedChannels } from "../seed-channels.js"
-import { seedPeriodontalCase } from "./seed-periodontal.js"
-import { generateConsentPdf } from "../consent-pdf.js"
-import { makeImageThumbnail } from "../thumbnails.js"
-import { registerToothFinding } from "./tooth-panel.js"
-import { issuePersonalLink } from "../booking-links.js"
-import {
-  createClinicalOrder,
-  markConsentSentByLink,
-  setProfessionalSpecialties,
-  signConsentDocument,
-} from "../clinical-forms.js"
 import { seedClinicalForms } from "../seed-clinical-forms.js"
-import { seedCrmActivity } from "../seed-crm-activity.js"
-import { seedFinance } from "../seed-finance.js"
-import { seedInventory } from "../seed-inventory.js"
-import { seedMaterialsAndSales } from "../seed-materials.js"
-import { seedMailbox } from "../seed-mailbox.js"
-import { seedOpportunities } from "../seed-opportunities.js"
-import { seedPortal } from "../seed-portal.js"
-import { seedReports } from "../seed-reports.js"
-import { seedReportsAgent } from "../seed-reports-agent.js"
-import { seedReportsArgos } from "../seed-reports-argos.js"
-import { seedReportsFinance } from "../seed-reports-finance.js"
-import { seedReportsPatients } from "../seed-reports-patients.js"
-import { seedReportsProgress } from "../seed-reports-progress.js"
-import { seedRoles } from "../seed-roles.js"
-import { seedWebchat } from "../seed-webchat.js"
-import { seedWorkspace } from "../seed-workspace.js"
-import { SEED_STAFF_ADMIN_ID, SEED_STAFF_SUPPORT_ID, seedAdminCore } from "../seed-admin-core.js"
-import { seedAdminOrganizations } from "../seed-admin-organizations.js"
-import { seedAdminSupport } from "../seed-admin-support.js"
-import { respondConsumerComplaint, submitConsumerComplaint } from "../consumer-complaints.js"
-import { seedClinicNoticesDemo, seedSaasBillingDemo } from "../seed-saas-billing.js"
-import { seedSaasCostDemo } from "../seed-saas-cost.js"
-import { createService, quickAddServices, updateService } from "../service-catalog.js"
-import { librarySpecialtyIds } from "../specialties.js"
-import type { DentalFinalizeParts } from "./hooks.js"
-import { MEDICAL_DEMO_ORG, seedMedicalDemo, VELA_ID } from "../medical/seed-demo.js"
-import { buildDemo, DEMO_BUILD_STEPS, purgeDemoOrganization } from "../demo-build.js"
-import { createStorage } from "../storage.js"
 import {
   countWhereIn,
   daysAgo,
@@ -220,7 +220,37 @@ import {
   seedMessageIn,
   storageEnvFromProcess,
 } from "../seed-common.js"
+import { seedCrmActivity } from "../seed-crm-activity.js"
+import { seedFinance } from "../seed-finance.js"
+import { seedInventory } from "../seed-inventory.js"
+import { seedMailbox } from "../seed-mailbox.js"
+import { seedMaterialsAndSales } from "../seed-materials.js"
+import { seedOpportunities } from "../seed-opportunities.js"
+import { seedPortal } from "../seed-portal.js"
+import { seedReports } from "../seed-reports.js"
+import { seedReportsAgent } from "../seed-reports-agent.js"
+import { seedReportsArgos } from "../seed-reports-argos.js"
+import { seedReportsFinance } from "../seed-reports-finance.js"
+import { seedReportsPatients } from "../seed-reports-patients.js"
+import { seedReportsProgress } from "../seed-reports-progress.js"
+import { seedRoles } from "../seed-roles.js"
+import { seedClinicNoticesDemo, seedSaasBillingDemo } from "../seed-saas-billing.js"
+import { seedSaasCostDemo } from "../seed-saas-cost.js"
+import { seedWebchat } from "../seed-webchat.js"
+import { seedWorkspace } from "../seed-workspace.js"
+import { createService, quickAddServices, updateService } from "../service-catalog.js"
+import { librarySpecialtyIds } from "../specialties.js"
+import { createStorage } from "../storage.js"
 import { completeTask, createTask, settleTask, updateTask } from "../tasks.js"
+import { makeImageThumbnail } from "../thumbnails.js"
+import type { DentalFinalizeParts } from "./hooks.js"
+import {
+  addOdontogramEntries,
+  createOdontogramAssessment,
+  voidOdontogramEntry,
+} from "./odontogram.js"
+import { seedPeriodontalCase } from "./seed-periodontal.js"
+import { registerToothFinding } from "./tooth-panel.js"
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error("DATABASE_URL es obligatoria para sembrar (rol owner)")
@@ -249,7 +279,10 @@ async function demoClinicalImage(kind: "rx" | "foto", variant = 0): Promise<Buff
     .join("")
   const lesion = `<ellipse cx="${160 + variant * 6}" cy="${120 + variant * 4}" rx="${26 - variant}" ry="${20 - variant}" fill="${kind === "rx" ? "#3d3d3d" : "#4a3420"}"/>`
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect width="100%" height="100%" fill="${bg}"/>${teeth}${lesion}</svg>`
-  return sharp(Buffer.from(svg)).blur(kind === "rx" ? 2.2 : 0.6).png().toBuffer()
+  return sharp(Buffer.from(svg))
+    .blur(kind === "rx" ? 2.2 : 0.6)
+    .png()
+    .toBuffer()
 }
 
 /** Guarda la imagen demo y su miniatura, como hace la subida real. */
@@ -283,7 +316,9 @@ const db = createOwnerDb(databaseUrl)
 
 // La semilla de desarrollo crea administradores con la clave de la semilla: nunca en producción.
 if (process.env.NODE_ENV === "production") {
-  throw new Error("La semilla de desarrollo no corre en producción: las demos se crean en la administración, con «Crear demo»")
+  throw new Error(
+    "La semilla de desarrollo no corre en producción: las demos se crean en la administración, con «Crear demo»",
+  )
 }
 const ID = "seed"
 const ORG_A = `${ID}-org-dental-smile`
@@ -445,22 +480,20 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db
     .delete(patientPaymentApplication)
     .where(inArray(patientPaymentApplication.organizationId, orgs))
-  await db
-    .delete(patientPaymentRefund)
-    .where(inArray(patientPaymentRefund.organizationId, orgs))
+  await db.delete(patientPaymentRefund).where(inArray(patientPaymentRefund.organizationId, orgs))
   // Las devoluciones (ADR 0068) después de lo que las nombra y antes de sus tickets.
   await db.execute(sql`delete from payment_return where organization_id in (${orgList})`)
   await db.delete(patientCharge).where(inArray(patientCharge.organizationId, orgs))
   await db.delete(patientPayment).where(inArray(patientPayment.organizationId, orgs))
   await db.execute(sql`delete from payment_ticket where organization_id in (${orgList})`)
   await db.execute(sql`delete from ticket_counter where organization_id in (${orgList})`)
-  await db.execute(sql`delete from organization_payment_method where organization_id in (${orgList})`)
+  await db.execute(
+    sql`delete from organization_payment_method where organization_id in (${orgList})`,
+  )
   await db.delete(prescriptionItem).where(inArray(prescriptionItem.organizationId, orgs))
   await db.delete(prescription).where(inArray(prescription.organizationId, orgs))
   await db.delete(clinicalFollowUp).where(inArray(clinicalFollowUp.organizationId, orgs))
-  await db
-    .delete(patientResponsibility)
-    .where(inArray(patientResponsibility.organizationId, orgs))
+  await db.delete(patientResponsibility).where(inArray(patientResponsibility.organizationId, orgs))
   await db.delete(patientRegistration).where(inArray(patientRegistration.organizationId, orgs))
   await db
     .delete(patientRegistrationLink)
@@ -486,9 +519,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   // referencia antes de borrar el odontograma (los ítems se borran después).
   await db.delete(planItemFinding).where(inArray(planItemFinding.organizationId, orgs))
   await db.delete(odontogramEntry).where(inArray(odontogramEntry.organizationId, orgs))
-  await db
-    .delete(odontogramAssessment)
-    .where(inArray(odontogramAssessment.organizationId, orgs))
+  await db.delete(odontogramAssessment).where(inArray(odontogramAssessment.organizationId, orgs))
   // Contextos antes que documentos; vínculos atención-plan antes que ítems y
   // presupuestos (FK en cascada parcial, orden explícito e idempotente).
   await db
@@ -507,9 +538,7 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
     await tx.execute(
       sql`alter table treatment_budget_item disable trigger treatment_budget_item_guard_trigger`,
     )
-    await tx
-      .delete(treatmentBudgetItem)
-      .where(inArray(treatmentBudgetItem.organizationId, orgs))
+    await tx.delete(treatmentBudgetItem).where(inArray(treatmentBudgetItem.organizationId, orgs))
     await tx.execute(
       sql`alter table treatment_budget_item enable trigger treatment_budget_item_guard_trigger`,
     )
@@ -578,7 +607,9 @@ async function wipeSeed(orgs: string[] = SEED_ORGS, users: string[] = WIPED_USER
   await db.delete(member).where(inArray(member.organizationId, orgs))
   await db.delete(invitation).where(inArray(invitation.organizationId, orgs))
   await db.delete(organization).where(inArray(organization.id, orgs))
-  await db.execute(sql`delete from "verification" where "identifier" ilike ${`%@${SEED_EMAIL_DOMAIN}%`}`)
+  await db.execute(
+    sql`delete from "verification" where "identifier" ilike ${`%@${SEED_EMAIL_DOMAIN}%`}`,
+  )
   // Las clínicas demo de los avisos (`seedClinicNoticesDemo`) quedan entre
   // corridas, pero su contrato lo aceptó Ana: esa aceptación se va con ella y
   // la semilla la vuelve a poner junto con su membresía (que se va en cascada).
@@ -611,7 +642,9 @@ for (const row of await db
   .from(saasDemo)
   .where(like(saasDemo.slug, "seed-%"))) {
   const purged = await db.transaction(async (tx) => {
-    const result = row.organizationId ? await purgeDemoOrganization(tx, row.id, row.organizationId) : { storageKeys: [] }
+    const result = row.organizationId
+      ? await purgeDemoOrganization(tx, row.id, row.organizationId)
+      : { storageKeys: [] }
     await tx.delete(saasDemo).where(eq(saasDemo.id, row.id))
     return result
   })
@@ -625,7 +658,10 @@ await db.transaction(async (tx) => {
     { id: ORG_A, name: "Dental Smile", slug: "dental-smile", createdAt: new Date() },
     { id: ORG_B, name: "Clínica Norte", slug: "clinica-norte", createdAt: new Date() },
   ])
-  await tx.update(saasSubscription).set({ isDemo: true }).where(inArray(saasSubscription.organizationId, SEED_ORGS))
+  await tx
+    .update(saasSubscription)
+    .set({ isDemo: true })
+    .where(inArray(saasSubscription.organizationId, SEED_ORGS))
 })
 // Las cuentas semilla ya aceptaron los documentos vigentes; si no, entrar las
 // llevaría a «Un paso antes de seguir» (lienzo «Términos con Google»).
@@ -719,7 +755,13 @@ await db.insert(member).values([
     role: "clinician",
     createdAt: new Date(),
   },
-  { id: randomUUID(), organizationId: ORG_A, userId: CAJA_ID, role: "cashier", createdAt: new Date() },
+  {
+    id: randomUUID(),
+    organizationId: ORG_A,
+    userId: CAJA_ID,
+    role: "cashier",
+    createdAt: new Date(),
+  },
   {
     id: randomUUID(),
     organizationId: ORG_B,
@@ -750,21 +792,32 @@ await setProfessionalProfile(db, ORG_A, ANA_ID, ANA_ID, {
   registrationNumber: "12345",
   specialtyRegistration: "RNE 1024",
 })
-await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, { ...PERU_PROFESSIONAL, registrationNumber: "23456" })
-await setProfessionalProfile(db, ORG_A, ANA_ID, SALAS_ID, { ...PERU_PROFESSIONAL, signatureName: "Diego Salas", registrationNumber: "56789" })
+await setProfessionalProfile(db, ORG_A, ANA_ID, LUIS_ID, {
+  ...PERU_PROFESSIONAL,
+  registrationNumber: "23456",
+})
+await setProfessionalProfile(db, ORG_A, ANA_ID, SALAS_ID, {
+  ...PERU_PROFESSIONAL,
+  signatureName: "Diego Salas",
+  registrationNumber: "56789",
+})
 await setProfessionalProfile(db, ORG_A, ANA_ID, ROJAS_ID, {
   ...PERU_PROFESSIONAL,
   signatureName: "Elena Rojas",
   registrationNumber: "45678",
   specialtyRegistration: "RNE 2048",
 })
-await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, { ...PERU_PROFESSIONAL, registrationNumber: "34567" })
+await setProfessionalProfile(db, ORG_B, CORA_ID, CORA_ID, {
+  ...PERU_PROFESSIONAL,
+  registrationNumber: "34567",
+})
 await db.insert(orgProfile).values([
   {
     organizationId: ORG_A,
     legalName: "Dental Smile S.A.C.",
     // El nombre que ven los pacientes en todo (decisión 19); la razón social, solo en el comprobante.
     tradeName: "Dental Smile",
+    fiscalDocType: "RUC",
     fiscalDocNumber: "20601234567",
     // Explicito: país, moneda, idioma y zona son el contrato de la agenda y del
     // formato de los teléfonos (IANA canónico y ISO-3166-1).
@@ -781,6 +834,7 @@ await db.insert(orgProfile).values([
     organizationId: ORG_B,
     legalName: "Clínica Norte S.A.C.",
     tradeName: "Clínica Norte",
+    fiscalDocType: "RUC",
     fiscalDocNumber: "20550987654",
     countryCode: "PE",
     currency: "PEN",
@@ -951,43 +1005,111 @@ const contactIdByName = new Map<string, string>()
  * interés concreto y está donde la dejó lo que pasó de verdad. Un «hola» no
  * crea ninguna: las demás personas no tienen oportunidad.
  */
-const stageOf = (moment: (typeof pipeA.stages)[number]["moment"]) => pipeA.stages.find((stage) => stage.moment === moment)!
+const stageOf = (moment: (typeof pipeA.stages)[number]["moment"]) =>
+  pipeA.stages.find((stage) => stage.moment === moment)!
 const SEED_SALES: Record<string, (contactId: string) => Promise<void>> = {
   // Lo pidió por WhatsApp: lo registró el agente y queda en Recepción.
   "Rosa Quispe": async (contactId) => {
-    await createOpportunity(db, ORG_A, { contactId, title: "Blanqueamiento", interestText: "Preguntó cuánto cuesta el blanqueamiento" }, { userId: null, origin: "agente" })
+    await createOpportunity(
+      db,
+      ORG_A,
+      {
+        contactId,
+        title: "Blanqueamiento",
+        interestText: "Preguntó cuánto cuesta el blanqueamiento",
+      },
+      { userId: null, origin: "agente" },
+    )
   },
   // Interesado, con su tarea: «Llamar · vence mañana».
   "Jorge Mamani": async (contactId) => {
-    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Implante", interestText: "Implante en la pieza 36" }, { userId: ANA_ID })
-    await setOpportunityTask(db, ORG_A, opp.id, { title: "Llamar a Jorge por su implante", dueAt: new Date(Date.now() + 24 * 3600_000).toISOString() }, { userId: ANA_ID, createdBy: "user" })
+    const opp = await createOpportunity(
+      db,
+      ORG_A,
+      { contactId, title: "Implante", interestText: "Implante en la pieza 36" },
+      { userId: ANA_ID },
+    )
+    await setOpportunityTask(
+      db,
+      ORG_A,
+      opp.id,
+      {
+        title: "Llamar a Jorge por su implante",
+        dueAt: new Date(Date.now() + 24 * 3600_000).toISOString(),
+      },
+      { userId: ANA_ID, createdBy: "user" },
+    )
   },
   // Pasó sola: agendó su evaluación.
   "Elena Huamán": async (contactId) => {
-    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Ortodoncia", interestText: "Evaluación de ortodoncia" }, { userId: null, origin: "agente" })
+    const opp = await createOpportunity(
+      db,
+      ORG_A,
+      { contactId, title: "Ortodoncia", interestText: "Evaluación de ortodoncia" },
+      { userId: null, origin: "agente" },
+    )
     await moveOpportunity(db, ORG_A, opp.id, stageOf("evaluacion_agendada").id, {
-      userId: null, origin: "automatico", cause: "cita_agendada", causeAt: new Date(Date.now() + 2 * 24 * 3600_000),
+      userId: null,
+      origin: "automatico",
+      cause: "cita_agendada",
+      causeAt: new Date(Date.now() + 2 * 24 * 3600_000),
     })
   },
   // Pasó sola: presupuesto presentado.
   "Carlos Paredes": async (contactId) => {
-    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Endodoncia", assignedUserId: ANA_ID }, { userId: ANA_ID })
-    await moveOpportunity(db, ORG_A, opp.id, stageOf("presupuesto_enviado").id, { userId: null, origin: "automatico", cause: "presupuesto_presentado" })
+    const opp = await createOpportunity(
+      db,
+      ORG_A,
+      { contactId, title: "Endodoncia", assignedUserId: ANA_ID },
+      { userId: ANA_ID },
+    )
+    await moveOpportunity(db, ORG_A, opp.id, stageOf("presupuesto_enviado").id, {
+      userId: null,
+      origin: "automatico",
+      cause: "presupuesto_presentado",
+    })
   },
   // Ganada: aceptó el presupuesto.
   "Lucía Fernández": async (contactId) => {
-    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Limpieza" }, { userId: ANA_ID })
-    await closeOpportunity(db, ORG_A, opp.id, { outcome: "won", reason: "acepto_presupuesto" }, { userId: null, origin: "automatico" })
+    const opp = await createOpportunity(
+      db,
+      ORG_A,
+      { contactId, title: "Limpieza" },
+      { userId: ANA_ID },
+    )
+    await closeOpportunity(
+      db,
+      ORG_A,
+      opp.id,
+      { outcome: "won", reason: "acepto_presupuesto" },
+      { userId: null, origin: "automatico" },
+    )
   },
   // Perdida: «Precio».
   "Miguel Torres": async (contactId) => {
-    const opp = await createOpportunity(db, ORG_A, { contactId, title: "Carillas" }, { userId: ANA_ID })
-    await closeOpportunity(db, ORG_A, opp.id, { outcome: "lost", reason: "precio" }, { userId: ANA_ID })
+    const opp = await createOpportunity(
+      db,
+      ORG_A,
+      { contactId, title: "Carillas" },
+      { userId: ANA_ID },
+    )
+    await closeOpportunity(
+      db,
+      ORG_A,
+      opp.id,
+      { outcome: "lost", reason: "precio" },
+      { userId: ANA_ID },
+    )
   },
 }
 for (let i = 0; i < CONTACTS_A.length; i++) {
   const c = CONTACTS_A[i]!
-  const created = await createContact(db, ORG_A, { displayName: c.name, phone: c.phone }, { userId: ANA_ID })
+  const created = await createContact(
+    db,
+    ORG_A,
+    { displayName: c.name, phone: c.phone },
+    { userId: ANA_ID },
+  )
   // Las notas de la persona son `crm_note`, con autor (fase 4, «un dato, un lugar»).
   if (c.name === "Jorge Mamani") {
     await createContactNote(
@@ -1262,7 +1384,14 @@ await seedMessage({
   status: "delivered",
   createdAt: hoursAgo(2),
 })
-const CLOSED_SEED: Array<{ name: string; thread: string; reason: "sin_respuesta" | "equipo" | "manual"; by: string | null; said: string; answer: string }> = [
+const CLOSED_SEED: Array<{
+  name: string
+  thread: string
+  reason: "sin_respuesta" | "equipo" | "manual"
+  by: string | null
+  said: string
+  answer: string
+}> = [
   {
     name: "Miguel Torres",
     thread: "seed-thread-6",
@@ -1327,13 +1456,48 @@ for (const [index, item] of CLOSED_SEED.entries()) {
 // llegar a Spam (el mismo texto muchas veces, una venta a la clínica y una
 // estafa) y una bloqueada por recepción. Ninguna es paciente; no se envía nada.
 const SEED_SCREENED = [
-  { name: "+1 202 555 0142", phone: "+12025550142", reason: "repeticion", texts: Array.from({ length: 6 }, () => "GANA S/ 500 DIARIOS desde casa 💸 Escribe YA 👉 bit.ly/gana-ya") },
-  { name: "MarketDent", phone: "+51944100200", reason: "venta", texts: ["Hola, somos MarketDent 👋 Hacemos páginas web y campañas para clínicas dentales. ¿Con quién puedo hablar para enviarle nuestra propuesta?"] },
-  { name: "+51 913 004 221", phone: "+51913004221", reason: "estafa", texts: ["Su paquete está retenido en aduanas. Pague S/ 8,90 aquí para liberarlo: correos-pe.info/pago"] },
-  { name: "Kevin Ramos", phone: "+51951220418", reason: "amenazas", texts: ["¿Por qué me cobraron la consulta si no me atendieron?", "Esto no se queda así. Voy a ir a la clínica y van a ver."] },
+  {
+    name: "+1 202 555 0142",
+    phone: "+12025550142",
+    reason: "repeticion",
+    texts: Array.from(
+      { length: 6 },
+      () => "GANA S/ 500 DIARIOS desde casa 💸 Escribe YA 👉 bit.ly/gana-ya",
+    ),
+  },
+  {
+    name: "MarketDent",
+    phone: "+51944100200",
+    reason: "venta",
+    texts: [
+      "Hola, somos MarketDent 👋 Hacemos páginas web y campañas para clínicas dentales. ¿Con quién puedo hablar para enviarle nuestra propuesta?",
+    ],
+  },
+  {
+    name: "+51 913 004 221",
+    phone: "+51913004221",
+    reason: "estafa",
+    texts: [
+      "Su paquete está retenido en aduanas. Pague S/ 8,90 aquí para liberarlo: correos-pe.info/pago",
+    ],
+  },
+  {
+    name: "Kevin Ramos",
+    phone: "+51951220418",
+    reason: "amenazas",
+    texts: [
+      "¿Por qué me cobraron la consulta si no me atendieron?",
+      "Esto no se queda así. Voy a ir a la clínica y van a ver.",
+    ],
+  },
 ] as const
 for (const [index, item] of SEED_SCREENED.entries()) {
-  const person = await createContact(db, ORG_A, { displayName: item.name, phone: item.phone }, { userId: ANA_ID })
+  const person = await createContact(
+    db,
+    ORG_A,
+    { displayName: item.name, phone: item.phone },
+    { userId: ANA_ID },
+  )
   await db.insert(contactIdentity).values({
     organizationId: ORG_A,
     contactId: person.id,
@@ -1374,7 +1538,12 @@ for (const [index, item] of SEED_SCREENED.entries()) {
       note: "Amenazó a recepción después de que le cobramos la consulta.",
     })
   } else {
-    await markSpam(db, ORG_A, { contactId: person.id, reason: item.reason, userId: null, messageId: firstMessageId })
+    await markSpam(db, ORG_A, {
+      contactId: person.id,
+      reason: item.reason,
+      userId: null,
+      messageId: firstMessageId,
+    })
   }
 }
 
@@ -1426,8 +1595,11 @@ await upsertAgentConfig(db, ORG_A, {
   personaName: "Sofi",
   treatment: "tu",
   tone: "cercano",
-  about: "Clínica dental familiar con dos sedes. Atendemos sin apuro y explicamos cada tratamiento antes de empezar.",
-  functionNotes: { agendar: "Ofrece primero los horarios de la mañana; las tardes se llenan rápido." },
+  about:
+    "Clínica dental familiar con dos sedes. Atendemos sin apuro y explicamos cada tratamiento antes de empezar.",
+  functionNotes: {
+    agendar: "Ofrece primero los horarios de la mañana; las tardes se llenan rápido.",
+  },
 })
 
 // --- Derivaciones del agente: cola con plazo visible y caso ya tomado ---
@@ -1598,7 +1770,8 @@ await seedMessage({
   status: "delivered",
   createdAt: new Date(hoursAgo(2).getTime() + 60_000),
 })
-if (patriciaTopic.taskId) await updateTask(db, ORG_A, patriciaTopic.taskId, { status: "done", actorUserId: ANA_ID })
+if (patriciaTopic.taskId)
+  await updateTask(db, ORG_A, patriciaTopic.taskId, { status: "done", actorUserId: ANA_ID })
 
 // Tablero 4b: Lucía escribió por Instagram hace más de un día y nadie le
 // respondió. Instagram ya no deja escribirle; tiene su WhatsApp marcado, así
@@ -1768,7 +1941,13 @@ const rosaHealthV1 = await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
   ],
   // Con su DCI de la lista (queda con su ATC), la dosis con número y unidad y la frecuencia de la lista.
   medications: [
-    { name: "Cozaar", genericName: "losartán", doseValue: 50, doseUnit: "mg", frequencyCode: "cada_24_h" },
+    {
+      name: "Cozaar",
+      genericName: "losartán",
+      doseValue: 50,
+      doseUnit: "mg",
+      frequencyCode: "cada_24_h",
+    },
   ],
   anamnesis: {
     expectedVersion: 0,
@@ -1849,11 +2028,21 @@ await savePatientHealth(db, ORG_A, ANA_ID, rosaPatientId, {
 // (sin codificar, para «Elegir de la lista»); el ibuprofeno se quitó porque
 // «era otra cosa». La última revisión fue hace 8 meses: la atención pide
 // preguntarle por alergias nuevas.
-await addDeclaredAllergies(db, ORG_A, ANA_ID, rosaPatientId, [{ substance: "Látex", reaction: "Ronchas con los guantes" }], {
-  entity: "seed",
-  entityId: "seed-rosa-alergias",
+await addDeclaredAllergies(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  [{ substance: "Látex", reaction: "Ronchas con los guantes" }],
+  {
+    entity: "seed",
+    entityId: "seed-rosa-alergias",
+  },
+)
+await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, {
+  substance: "amoxi",
+  severity: "moderada",
 })
-await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, { substance: "amoxi", severity: "moderada" })
 const rosaIbuprofen = await addPatientAllergy(db, ORG_A, ANA_ID, rosaPatientId, {
   substance: "Ibuprofeno",
   severity: "leve",
@@ -1908,6 +2097,18 @@ const seedOffers: Array<{
     specialty: "endodoncia",
     scope: "tooth",
     priceCents: 45000,
+    durationMin: 90,
+    priceDisclosure: "desde",
+    leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
+  },
+  // Un molar no es unirradicular: la endodoncia de la 46 es esta.
+  {
+    code: "ENDODONCIA_POSTERIOR",
+    officialCode: "D3330",
+    name: "Endodoncia posterior vital",
+    specialty: "endodoncia",
+    scope: "tooth",
+    priceCents: 65000,
     durationMin: 90,
     priceDisclosure: "desde",
     leavesFinding: { condition: "root_canal_treatment", variant: "root_canal" },
@@ -1974,7 +2175,9 @@ const specialtiesA = await librarySpecialtyIds(db, ORG_A, TREATMENT_KIND_KEYS)
 const specialtiesB = await librarySpecialtyIds(db, ORG_B, TREATMENT_KIND_KEYS)
 const catalogA: Array<Awaited<ReturnType<typeof createService>>> = []
 for (const { specialty, ...offer } of seedOffers) {
-  catalogA.push(await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }))
+  catalogA.push(
+    await createService(db, ORG_A, ANA_ID, { ...offer, specialtyId: specialtiesA.get(specialty) }),
+  )
   await createService(db, ORG_B, CORA_ID, { ...offer, specialtyId: specialtiesB.get(specialty) })
 }
 // Implantología sin nadie que la atienda (decisión 2 de la fase 4): la agenda
@@ -1997,8 +2200,40 @@ const serviceIdA = (code: string): string => {
   return found.id
 }
 // Lo que no se dice con precio exacto ofrece la evaluación de la clínica.
-for (const code of ["ENDODONCIA", "CORONA", "EXODONCIA"]) {
-  await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { evaluationServiceId: serviceIdA("EVALUACION") })
+for (const code of ["ENDODONCIA", "ENDODONCIA_POSTERIOR", "CORONA", "EXODONCIA"]) {
+  await updateService(db, ORG_A, ANA_ID, serviceIdA(code), {
+    evaluationServiceId: serviceIdA("EVALUACION"),
+  })
+}
+// Las explicaciones de los servicios del presupuesto de Rosa, como las deja la clínica.
+// Textos breves de demostración: los sugeridos reales van en la biblioteca.
+const demoGuides: Record<string, PatientGuide> = {
+  ENDODONCIA_POSTERIOR: {
+    visits: "1 a 2",
+    visitLength: "60 a 90 minutos",
+    how: "Con anestesia y el diente aislado, se retira el nervio dañado y se limpian y sellan sus conductos. Queda con una obturación provisional.",
+    includes: "anestesia, radiografías durante el tratamiento y obturación provisional.",
+    excludes: "Medicamentos de farmacia\nRepetir la endodoncia o una cirugía, si hiciera falta",
+    aftercare:
+      "molestia de 2 a 3 días al morder, que es normal. No mastique cosas duras de ese lado hasta tener la corona.",
+  },
+  OBTURACION: {
+    visits: "1",
+    visitLength: "45 minutos",
+    how: "Con anestesia, se quita la caries y se rellena con resina del color del diente.",
+    includes: "anestesia y ajuste de la mordida.",
+  },
+  CORONA: {
+    visits: "2 a 3",
+    visitLength: "30 a 45 minutos",
+    how: "Se talla el diente, se toma la impresión y se coloca una corona provisional. El laboratorio la fabrica; se prueba, se ajusta y se cementa.",
+    includes: "trabajo de laboratorio, corona provisional, elección del color y ajustes.",
+    aftercare:
+      "no conviene postergarla. Sin corona, un molar con endodoncia puede fracturarse y perderse.",
+  },
+}
+for (const [code, patientGuide] of Object.entries(demoGuides)) {
+  await updateService(db, ORG_A, ANA_ID, serviceIdA(code), { patientGuide })
 }
 await db.transaction(async (tx) => {
   await createPromotion(tx, ORG_A, ANA_ID, {
@@ -2024,7 +2259,8 @@ const [resinaTemplate] = await db
   .from(treatmentTemplate)
   .where(eq(treatmentTemplate.key, "resina-fotocurable-1-superficie-posterior"))
   .limit(1)
-if (!resinaTemplate) throw new Error("Falta la resina posterior de la biblioteca: ejecuta seed:procedures")
+if (!resinaTemplate)
+  throw new Error("Falta la resina posterior de la biblioteca: ejecuta seed:procedures")
 const resinaCpmsA = await createService(db, ORG_A, ANA_ID, {
   templateId: resinaTemplate.id,
   code: "RESINA-CPMS",
@@ -2044,7 +2280,12 @@ await createService(db, ORG_B, CORA_ID, {
 const consultaTemplates = await db
   .select()
   .from(treatmentTemplate)
-  .where(inArray(treatmentTemplate.key, ["consulta-odontologica-general", "reevaluacion-postoperatoria"]))
+  .where(
+    inArray(treatmentTemplate.key, [
+      "consulta-odontologica-general",
+      "reevaluacion-postoperatoria",
+    ]),
+  )
 if (consultaTemplates.length !== 2) {
   throw new Error("Faltan las consultas de la biblioteca: ejecuta seed:procedures")
 }
@@ -2081,7 +2322,8 @@ const libraryForSeed = await db
   .limit(140)
 const ownedTemplates = new Set(catalogA.map((service) => service.templateId).filter(Boolean))
 const extraTemplates = libraryForSeed.filter((row) => !ownedTemplates.has(row.id)).slice(0, 96)
-if (extraTemplates.length < 90) throw new Error("La biblioteca tiene pocas prestaciones: ejecuta seed:procedures")
+if (extraTemplates.length < 90)
+  throw new Error("La biblioteca tiene pocas prestaciones: ejecuta seed:procedures")
 for (const [index, priceDisclosure] of (["exacto", "desde", "evaluacion"] as const).entries()) {
   const items = extraTemplates
     .filter((_, position) => position % 3 === index)
@@ -2124,7 +2366,8 @@ const obt36 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
   detail: "Obturación pieza 36",
 })
 const endo46 = await addPlanItem(db, ORG_A, ANA_ID, rosaPatientId, {
-  serviceId: serviceIdA("ENDODONCIA"),
+  serviceId: serviceIdA("ENDODONCIA_POSTERIOR"),
+  phase: "urgencia",
   planId: planRestaurador.id,
   sourceEncounterId: draft.id,
   toothNumber: 46,
@@ -2149,6 +2392,21 @@ const budgetRestaurador = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Plan restaurador molar",
   notes: "Obturación 36 + endodoncia 46; corona diferida a segunda etapa.",
 })
+await updateBudgetPresentation(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  budgetRestaurador.id,
+  {
+    findings:
+      "Una caries profunda llegó al nervio del molar 46 y por eso le duele. En el 36 hay una caries en la cara de masticar que aún no llega al nervio.",
+    proposal:
+      "Primero quitar el dolor y salvar el molar 46; luego detener la caries del 36 y, al final, proteger el 46 con una corona para que no se fracture.",
+    validUntil: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10),
+  },
+  { clinicalAccess: true },
+)
 await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id)
 await decideBudget(db, ORG_A, ANA_ID, rosaPatientId, budgetRestaurador.id, {
   decisions: [
@@ -2462,7 +2720,9 @@ for (const previa of [
       Math.max(0, Math.min(255, Math.round(((stored - 1000 - 699.5) / 2999 + 0.5) * 255))),
     ),
   )
-  const thumb = await sharp(gray, { raw: { width: phantom.size, height: phantom.size, channels: 1 } })
+  const thumb = await sharp(gray, {
+    raw: { width: phantom.size, height: phantom.size, channels: 1 },
+  })
     .resize(320)
     .webp()
     .toBuffer()
@@ -2585,7 +2845,14 @@ const opciones46 = await createBudget(db, ORG_A, ANA_ID, rosaPatientId, {
   title: "Restauración definitiva pieza 46",
   notes: "Dos caminos para la 46: elige uno.",
 })
-const conCorona = await duplicateBudgetOption(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, opciones46.options[0]!.id)
+const conCorona = await duplicateBudgetOption(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  opciones46.id,
+  opciones46.options[0]!.id,
+)
 const opcionB = conCorona.options[1]!.id
 await removeBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
   itemIds: [resinaOpcion46.id],
@@ -2595,6 +2862,33 @@ await addBudgetItems(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id, {
   itemIds: [coronaOpcion46.id],
   optionId: opcionB,
 })
+await updateBudgetPresentation(
+  db,
+  ORG_A,
+  ANA_ID,
+  rosaPatientId,
+  opciones46.id,
+  {
+    findings:
+      "Tras la endodoncia, el molar 46 necesita una restauración definitiva. Hay dos caminos para protegerlo.",
+    proposal: "Le recomendamos la corona: es lo que mejor protege un molar con endodoncia.",
+    options: [
+      {
+        optionId: conCorona.options[0]!.id,
+        name: "Restaurar con resina",
+        pros: "Es de menor costo y se resuelve en una sola visita.",
+        cons: "Un molar con endodoncia queda frágil: la resina protege menos y puede fracturarse.",
+      },
+      {
+        optionId: opcionB,
+        name: "Proteger con corona",
+        pros: "Cubre todo el diente y es lo que mejor lo protege de una fractura.",
+        cons: "Cuesta más y lleva varias visitas, porque el laboratorio la fabrica.",
+      },
+    ],
+  },
+  { clinicalAccess: true },
+)
 await deliverBudget(db, ORG_A, ANA_ID, rosaPatientId, opciones46.id)
 
 // El cierre clínico requiere atención finalizada, no una reserva retrospectiva.
@@ -2696,7 +2990,9 @@ await db.transaction(async (tx) => {
     payments: [{ paymentMethodId: cash.id, amountCents: 5000 }],
   })
   await refundCredit(tx, ORG_A, ANA_ID, rosaPatientId, {
-    branchId: miraflores.id, amountCents: 2000, paymentMethodId: cash.id,
+    branchId: miraflores.id,
+    amountCents: 2000,
+    paymentMethodId: cash.id,
     reason: "Devolución parcial del adelanto solicitada por la paciente.",
   })
 })
@@ -2743,14 +3039,28 @@ const elenaBudget = await createBudget(db, ORG_A, ANA_ID, elenaPatientId, {
   itemIds: [elenaItem.id],
   title: "Plan profilaxis",
 })
-await db.transaction((tx) => adjustBudgetLines(tx, ORG_A, ANA_ID, elenaPatientId, elenaBudget.id, {
-  lines: [{ planItemId: elenaItem.id, priceCents: 10000, reason: "Precio acordado para la demostración" }],
-}))
+await db.transaction((tx) =>
+  adjustBudgetLines(tx, ORG_A, ANA_ID, elenaPatientId, elenaBudget.id, {
+    lines: [
+      {
+        planItemId: elenaItem.id,
+        priceCents: 10000,
+        reason: "Precio acordado para la demostración",
+      },
+    ],
+  }),
+)
 // Ningún borrador queda abandonado (decisión 12): el de Elena quedó armado ayer
 // y nadie lo envió, así que hoy le sale a recepción en «Te espera».
-await db.update(treatmentBudget).set({ createdAt: daysAgo(1) }).where(eq(treatmentBudget.id, elenaBudget.id))
+await db
+  .update(treatmentBudget)
+  .set({ createdAt: daysAgo(1) })
+  .where(eq(treatmentBudget.id, elenaBudget.id))
 // «Armado» es cuando entró su último tratamiento: también ayer.
-await db.update(treatmentBudgetItem).set({ createdAt: daysAgo(1) }).where(eq(treatmentBudgetItem.budgetId, elenaBudget.id))
+await db
+  .update(treatmentBudgetItem)
+  .set({ createdAt: daysAgo(1) })
+  .where(eq(treatmentBudgetItem.budgetId, elenaBudget.id))
 
 // Lucía (tablero 3): la Dra. Ana encontró caries en la 16, la 26 y la 36 e
 // indicó una resina en cada una, S/ 180 por pieza. Al firmar la evaluación
@@ -2764,7 +3074,9 @@ const luciaPorError = await createEncounter(db, ORG_A, ANA_ID, luciaPatientId, {
   reason: "Consulta",
   branchId: miraflores.id,
 })
-await voidEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaPorError.id, { reason: "Abierta por error" })
+await voidEncounter(db, ORG_A, ANA_ID, luciaPatientId, luciaPorError.id, {
+  reason: "Abierta por error",
+})
 const luciaEval = await createEncounter(db, ORG_A, ANA_ID, luciaPatientId, {
   reason: "Evaluación: molestia al masticar",
   branchId: miraflores.id,
@@ -2822,8 +3134,23 @@ await seedPeriodontalCase(db, {
 
 // --- Volumen para paginación: 40 contactos+pacientes con nombres de verdad
 // (la demo se muestra en ventas: nada de «Paciente 01»).
-const PAGINACION_NOMBRES = ["Andrea", "Bruno", "Camila", "Diego", "Fiorella", "Gonzalo", "Héctor", "Isabel"]
-const PAGINACION_APELLIDOS = ["Alvarado Ríos", "Cárdenas Soto", "Espinoza Luna", "Gutiérrez Paz", "Medina Rojas"]
+const PAGINACION_NOMBRES = [
+  "Andrea",
+  "Bruno",
+  "Camila",
+  "Diego",
+  "Fiorella",
+  "Gonzalo",
+  "Héctor",
+  "Isabel",
+]
+const PAGINACION_APELLIDOS = [
+  "Alvarado Ríos",
+  "Cárdenas Soto",
+  "Espinoza Luna",
+  "Gutiérrez Paz",
+  "Medina Rojas",
+]
 for (let i = 0; i < 40; i++) {
   const given = PAGINACION_NOMBRES[i % PAGINACION_NOMBRES.length]!
   const family = PAGINACION_APELLIDOS[Math.floor(i / PAGINACION_NOMBRES.length)]!
@@ -2840,13 +3167,22 @@ for (let i = 0; i < 40; i++) {
 
 // --- «Nueva conversación» y «Reservar cita» desde «Contexto» (ADR 0027): alguien
 // que recepción anotó por teléfono, todavía sin WhatsApp ni ficha de paciente.
-const carmen = await createContact(db, ORG_A, { displayName: "Carmen Huamán", phone: "+51987654100" })
+const carmen = await createContact(db, ORG_A, {
+  displayName: "Carmen Huamán",
+  phone: "+51987654100",
+})
 
 // --- Una persona, una página (ADR 0029): Carmen está «Por registrar» y tiene
 // una nota de recepción; Martín Salas no es paciente, es el responsable de su
 // hija Sofía (menor), que sí lo es: su página dice «Responsable de Sofía Salas»
 // y la de ella, «Habla por ella: Martín Salas».
-await createContactNote(db, ORG_A, carmen.id, { body: "Llamó para preguntar por blanqueamiento; prefiere la tarde." }, { userId: ANA_ID })
+await createContactNote(
+  db,
+  ORG_A,
+  carmen.id,
+  { body: "Llamó para preguntar por blanqueamiento; prefiere la tarde." },
+  { userId: ANA_ID },
+)
 
 // --- Lo repetido: personas, citas y dinero (fase 4, paso 7b-2) ---
 // Carmen Huamán tiene su teléfono en «Teléfono», pero nadie lo marcó como su
@@ -2858,7 +3194,12 @@ await createContactNote(db, ORG_A, carmen.id, { body: "Llamó para preguntar por
 // recomendada, nunca la suma (G1).
 // Una madre registra a sus dos hijos con su mismo DNI: es la misma persona,
 // representante legal de los dos (G2).
-const hijoVargas = (displayName: string, givenNames: string, birthDate: string, docNumber: string) =>
+const hijoVargas = (
+  displayName: string,
+  givenNames: string,
+  birthDate: string,
+  docNumber: string,
+) =>
   db.transaction((tx) =>
     registerPatient(
       tx,
@@ -2867,7 +3208,14 @@ const hijoVargas = (displayName: string, givenNames: string, birthDate: string, 
       {
         submissionId: randomUUID(),
         answers: {
-          demographics: { displayName, givenNames, familyName: "Vargas", birthDate, docType: "DNI", docNumber },
+          demographics: {
+            displayName,
+            givenNames,
+            familyName: "Vargas",
+            birthDate,
+            docType: "DNI",
+            docNumber,
+          },
           respondent: "representative",
           representative: {
             displayName: "Gabriela Vargas Soto",
@@ -2965,7 +3313,9 @@ await db.transaction(async (tx) => {
     payments: [{ paymentMethodId: cash.id, amountCents: 50000 }],
   })
   await refundCredit(tx, ORG_A, ANA_ID, marco.id, {
-    branchId: miraflores.id, amountCents: 10000, paymentMethodId: cash.id,
+    branchId: miraflores.id,
+    amountCents: 10000,
+    paymentMethodId: cash.id,
     reason: "Devolución de parte del adelanto: empieza el mes que viene.",
   })
 })
@@ -2988,9 +3338,25 @@ const sofia = await createContact(db, ORG_B, {
 const hugo = await createContact(db, ORG_B, {
   displayName: "Hugo Díaz",
 })
-await createOpportunity(db, ORG_B, { contactId: sofia.id, title: "Ortodoncia" }, { userId: CORA_ID })
-const hugoSale = await createOpportunity(db, ORG_B, { contactId: hugo.id, title: "Limpieza" }, { userId: CORA_ID })
-await moveOpportunity(db, ORG_B, hugoSale.id, pipeB.stages.find((stage) => stage.moment === "evaluacion_agendada")!.id, { userId: CORA_ID })
+await createOpportunity(
+  db,
+  ORG_B,
+  { contactId: sofia.id, title: "Ortodoncia" },
+  { userId: CORA_ID },
+)
+const hugoSale = await createOpportunity(
+  db,
+  ORG_B,
+  { contactId: hugo.id, title: "Limpieza" },
+  { userId: CORA_ID },
+)
+await moveOpportunity(
+  db,
+  ORG_B,
+  hugoSale.id,
+  pipeB.stages.find((stage) => stage.moment === "evaluacion_agendada")!.id,
+  { userId: CORA_ID },
+)
 await db.insert(contactIdentity).values([
   {
     organizationId: ORG_B,
@@ -3114,7 +3480,13 @@ const elena = await createPatient(db, ORG_A, ANA_ID, {
   phone: "+51987650214",
   email: "elena.huaman@example.com",
 })
-await createContactNote(db, ORG_A, elena.personId, { body: "Prefiere que la llamen en la tarde." }, { userId: ANA_ID })
+await createContactNote(
+  db,
+  ORG_A,
+  elena.personId,
+  { body: "Prefiere que la llamen en la tarde." },
+  { userId: ANA_ID },
+)
 // Borrar usa `erase_person_data`, que solo actúa dentro de la clínica activa.
 await withOrgContext(db, ORG_A, async (tx) => {
   const today = await clinicToday(tx, ORG_A)
@@ -3140,7 +3512,12 @@ const pedroRios = await db.transaction((tx) =>
     {
       submissionId: randomUUID(),
       answers: {
-        demographics: { displayName: "Pedro Ríos", givenNames: "Pedro", familyName: "Ríos", phone: "+51987111222" },
+        demographics: {
+          displayName: "Pedro Ríos",
+          givenNames: "Pedro",
+          familyName: "Ríos",
+          phone: "+51987111222",
+        },
         respondent: "staff",
         privacyAccepted: false,
       },
@@ -3149,7 +3526,11 @@ const pedroRios = await db.transaction((tx) =>
 )
 const pedroRiosPerson = await patientPersonId(db, ORG_A, pedroRios.id)
 if (pedroRiosPerson) {
-  await setConsent(db, ORG_A, ANA_ID, pedroRiosPerson, { purpose: "novedades", granted: true, source: "telefono" })
+  await setConsent(db, ORG_A, ANA_ID, pedroRiosPerson, {
+    purpose: "novedades",
+    granted: true,
+    source: "telefono",
+  })
 }
 const telegramConnection = await createConnection(
   db,
@@ -3268,12 +3649,17 @@ await db.transaction((tx) =>
         privacyAccepted: false,
       },
       contacts: [
-        { contactId: martin.id, relationship: "guardian", relationshipDetail: "Padre", kinship: "FTH", isPreferred: true },
+        {
+          contactId: martin.id,
+          relationship: "guardian",
+          relationshipDetail: "Padre",
+          kinship: "FTH",
+          isPreferred: true,
+        },
       ],
     },
   ),
 )
-
 
 // Rosa ya es representante legal vigente desde el alta: decide por el menor.
 // Recorrido del menor: la propuesta se presenta y queda SIN decisión a propósito,
@@ -3416,7 +3802,10 @@ await db
           },
           respondent: "patient",
           health: {
-            allergies: { state: "recorded", items: [{ substance: "Penicilina", severity: "desconocida" }] },
+            allergies: {
+              state: "recorded",
+              items: [{ substance: "Penicilina", severity: "desconocida" }],
+            },
             conditions: { state: "unanswered", items: [] },
             medications: { state: "unanswered", items: [] },
           },
@@ -3486,9 +3875,15 @@ const sanIsidro = await db.query.branch.findFirst({
 })
 if (!sanIsidro) throw new Error("Falta la Sede San Isidro")
 const roomsSanIsidro = await Promise.all(
-  ["Unidad dental 1", "Unidad dental 2"].map((name) => createRoom(db, ORG_A, { branchId: sanIsidro.id, name })),
+  ["Unidad dental 1", "Unidad dental 2"].map((name) =>
+    createRoom(db, ORG_A, { branchId: sanIsidro.id, name }),
+  ),
 )
-await setProfessionalSchedule(db, ORG_A, ANA_ID, { branchId: miraflores.id, professionalUserId: SALAS_ID, rules: [] })
+await setProfessionalSchedule(db, ORG_A, ANA_ID, {
+  branchId: miraflores.id,
+  professionalUserId: SALAS_ID,
+  rules: [],
+})
 await setProfessionalSchedule(db, ORG_A, ANA_ID, {
   branchId: sanIsidro.id,
   professionalUserId: SALAS_ID,
@@ -3514,10 +3909,28 @@ const lima = (dayOffset: number, hhmm: string): string => {
 // unidad dental en mantenimiento.
 const limaDay = (dayOffset: number): string => lima(dayOffset, "00:00")
 for (const block of [
-  { professionalUserId: ANA_ID, kind: "ausencia", reason: "Permiso", startsAt: lima(4, "15:00"), endsAt: lima(4, "18:00") },
-  { professionalUserId: LUIS_ID, kind: "ausencia", reason: "Vacaciones", startsAt: limaDay(6), endsAt: limaDay(9) },
+  {
+    professionalUserId: ANA_ID,
+    kind: "ausencia",
+    reason: "Permiso",
+    startsAt: lima(4, "15:00"),
+    endsAt: lima(4, "18:00"),
+  },
+  {
+    professionalUserId: LUIS_ID,
+    kind: "ausencia",
+    reason: "Vacaciones",
+    startsAt: limaDay(6),
+    endsAt: limaDay(9),
+  },
   { kind: "bloqueo", reason: "Feriado", startsAt: limaDay(12), endsAt: limaDay(13) },
-  { roomId: roomA(2), kind: "bloqueo", reason: "Mantenimiento", startsAt: lima(3, "09:00"), endsAt: lima(3, "12:00") },
+  {
+    roomId: roomA(2),
+    kind: "bloqueo",
+    reason: "Mantenimiento",
+    startsAt: lima(3, "09:00"),
+    endsAt: lima(3, "12:00"),
+  },
 ]) {
   await createScheduleBlock(db, ORG_A, ANA_ID, { branchId: miraflores.id, ...block })
 }
@@ -3825,7 +4238,12 @@ await db.transaction(async (tx) => {
 // desde su teléfono: en su página dice «Se le envió para firmar».
 if (pedroRiosPerson) {
   const pedroLink = await db.transaction((tx) =>
-    issuePersonalLink(tx, ORG_A, { contactId: pedroRiosPerson, patientId: pedroRios.id, createdBy: ANA_ID }, { secretsKey }),
+    issuePersonalLink(
+      tx,
+      ORG_A,
+      { contactId: pedroRiosPerson, patientId: pedroRios.id, createdBy: ANA_ID },
+      { secretsKey },
+    ),
   )
   console.log(`«Su enlace» de Pedro Ríos (dental-smile): /reserva?token=${pedroLink.token}`)
 }
@@ -3843,7 +4261,8 @@ if (pedroRiosPerson) {
       ),
     )
     .limit(1)
-  if (exodonciaPending) await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
+  if (exodonciaPending)
+    await db.transaction((tx) => markConsentSentByLink(tx, ORG_A, ANA_ID, exodonciaPending.id))
 }
 // Consentimientos firmados en la semilla: su PDF con huella, como al firmar
 // desde la API (mismo generador).
@@ -3883,7 +4302,14 @@ const reportsHistory = await db.transaction((tx) => {
   const service = (code: string, weight: number, firstVisit = false) => {
     const found = catalogA.find((item) => item.code === code)
     if (!found || found.priceCents === null) throw new Error(`Falta el servicio semilla ${code}`)
-    return { id: found.id, name: found.name, priceCents: found.priceCents, durationMin: found.durationMin ?? 30, weight, firstVisit }
+    return {
+      id: found.id,
+      name: found.name,
+      priceCents: found.priceCents,
+      durationMin: found.durationMin ?? 30,
+      weight,
+      firstVisit,
+    }
   }
   return seedReports(tx, {
     orgId: ORG_A,
@@ -3893,10 +4319,39 @@ const reportsHistory = await db.transaction((tx) => {
       { id: sanIsidro.id, roomIds: roomsSanIsidro.map((room) => room.id), rent: 4_800_00 },
     ],
     professionals: [
-      { userId: ANA_ID, signerName: "Ana Torres", registration: "12345", branchId: miraflores.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.8 },
-      { userId: LUIS_ID, signerName: "Luis Prado", registration: "23456", branchId: miraflores.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.66 },
-      { userId: ROJAS_ID, signerName: "Elena Rojas", registration: "45678", branchId: miraflores.id, weekdays: [2, 4], afternoonOnly: true, occupancy: 0.85 },
-      { userId: SALAS_ID, signerName: "Diego Salas", registration: "56789", branchId: sanIsidro.id, weekdays: [1, 2, 3, 4, 5, 6], occupancy: 0.7 },
+      {
+        userId: ANA_ID,
+        signerName: "Ana Torres",
+        registration: "12345",
+        branchId: miraflores.id,
+        weekdays: [1, 2, 3, 4, 5, 6],
+        occupancy: 0.8,
+      },
+      {
+        userId: LUIS_ID,
+        signerName: "Luis Prado",
+        registration: "23456",
+        branchId: miraflores.id,
+        weekdays: [1, 2, 3, 4, 5, 6],
+        occupancy: 0.66,
+      },
+      {
+        userId: ROJAS_ID,
+        signerName: "Elena Rojas",
+        registration: "45678",
+        branchId: miraflores.id,
+        weekdays: [2, 4],
+        afternoonOnly: true,
+        occupancy: 0.85,
+      },
+      {
+        userId: SALAS_ID,
+        signerName: "Diego Salas",
+        registration: "56789",
+        branchId: sanIsidro.id,
+        weekdays: [1, 2, 3, 4, 5, 6],
+        occupancy: 0.7,
+      },
     ],
     services: [
       service("EVALUACION", 1, true),
@@ -3912,23 +4367,54 @@ const reportsHistory = await db.transaction((tx) => {
   })
 })
 // Lo que contó el cobro por acción de esa historia (Reportes › Agente): la suscripción pasa a activa.
-await db.transaction((tx) => seedReportsAgent(tx, { orgId: ORG_A, dictating: [{ userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] }, { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] }] }))
+await db.transaction((tx) =>
+  seedReportsAgent(tx, {
+    orgId: ORG_A,
+    dictating: [
+      { userId: ANA_ID, fromMonthsAgo: 10, share: [0.25, 0.55] },
+      { userId: LUIS_ID, fromMonthsAgo: 4, share: [0.3, 0.3] },
+    ],
+  }),
+)
 // Fase 3 de Reportes: comisiones pagadas, compras en cada estado de pago, promociones usadas y horarios con su historia.
-const reportsFinance = await db.transaction((tx) => seedReportsFinance(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID] }))
+const reportsFinance = await db.transaction((tx) =>
+  seedReportsFinance(tx, {
+    orgId: ORG_A,
+    ownerUserId: ANA_ID,
+    professionalIds: [ANA_ID, LUIS_ID, ROJAS_ID, SALAS_ID],
+  }),
+)
 // Reportes › Pacientes: cuándo y por dónde nos buscó cada persona, cómo nos conoció y sus controles.
-const patientsHistory = await db.transaction((tx) => seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }))
+const patientsHistory = await db.transaction((tx) =>
+  seedReportsPatients(tx, { orgId: ORG_A, ownerUserId: ANA_ID }),
+)
 // Fases 5 y 6 de Reportes: dos respuestas de Argos fijadas en el Resumen y las metas del mes, con la del mes anterior.
-const reportsArgos = await db.transaction((tx) => seedReportsArgos(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalUserId: LUIS_ID }))
+const reportsArgos = await db.transaction((tx) =>
+  seedReportsArgos(tx, { orgId: ORG_A, ownerUserId: ANA_ID, professionalUserId: LUIS_ID }),
+)
 // Examen de Argos (issue 192): el avance de lo aceptado y los materiales que usaron las atenciones de los últimos 90 días.
 const reportsProgress = await db.transaction((tx) =>
-  seedReportsProgress(tx, { orgId: ORG_A, ownerUserId: ANA_ID, branchIds: [miraflores.id, sanIsidro.id] }),
+  seedReportsProgress(tx, {
+    orgId: ORG_A,
+    ownerUserId: ANA_ID,
+    branchIds: [miraflores.id, sanIsidro.id],
+  }),
 )
 // «Mi calendario» (issue 46): Luis comparte su agenda; Google la pide todos los
 // días y ayer la abrió un navegador que no reconoció, para ver el aviso.
 await db.transaction(async (tx) => {
-  await createMyCalendarFeed(tx, ORG_A, LUIS_ID, { secretsKey, feedBaseUrl: process.env.BETTER_AUTH_URL ?? null })
-  const [feed] = await tx.select().from(calendarFeed).where(and(eq(calendarFeed.organizationId, ORG_A), eq(calendarFeed.userId, LUIS_ID)))
-  await tx.update(calendarFeed).set({ knownClients: ["google"], createdAt: new Date(Date.now() - 20 * 86_400_000) }).where(eq(calendarFeed.id, feed!.id))
+  await createMyCalendarFeed(tx, ORG_A, LUIS_ID, {
+    secretsKey,
+    feedBaseUrl: process.env.BETTER_AUTH_URL ?? null,
+  })
+  const [feed] = await tx
+    .select()
+    .from(calendarFeed)
+    .where(and(eq(calendarFeed.organizationId, ORG_A), eq(calendarFeed.userId, LUIS_ID)))
+  await tx
+    .update(calendarFeed)
+    .set({ knownClients: ["google"], createdAt: new Date(Date.now() - 20 * 86_400_000) })
+    .where(eq(calendarFeed.id, feed!.id))
   /** Ese día a esa hora UTC, nunca después de ahora. */
   const at = (days: number, hour: number) => {
     const date = new Date()
@@ -3938,10 +4424,23 @@ await db.transaction(async (tx) => {
   }
   await tx.insert(calendarFeedUse).values([
     ...Array.from({ length: 7 }, (_, days) => ({
-      organizationId: ORG_A, feedId: feed!.id, day: at(days, 15).toISOString().slice(0, 10), client: "google", hits: 6,
-      firstAt: at(days, 11), lastAt: at(days, 15),
+      organizationId: ORG_A,
+      feedId: feed!.id,
+      day: at(days, 15).toISOString().slice(0, 10),
+      client: "google",
+      hits: 6,
+      firstAt: at(days, 11),
+      lastAt: at(days, 15),
     })),
-    { organizationId: ORG_A, feedId: feed!.id, day: at(1, 3).toISOString().slice(0, 10), client: "navegador", hits: 1, firstAt: at(1, 3), lastAt: at(1, 3) },
+    {
+      organizationId: ORG_A,
+      feedId: feed!.id,
+      day: at(1, 3).toISOString().slice(0, 10),
+      client: "navegador",
+      hits: 1,
+      firstAt: at(1, 3),
+      lastAt: at(1, 3),
+    },
   ])
 })
 // Lo de la plataforma (administración, planes ficticios, clínicas de prueba,
@@ -3950,9 +4449,17 @@ await db.transaction(async (tx) => {
   const staff = await seedAdminCore(tx)
   await seedSaasBillingDemo(tx, storage)
   // Clínicas de Ana con los avisos de cobro de la franja (ADR 0065).
-  await seedClinicNoticesDemo(tx, { ownerUserId: ANA_ID, professionalUserId: LUIS_ID, acceptedVersion: LEGAL.agreement.version })
+  await seedClinicNoticesDemo(tx, {
+    ownerUserId: ANA_ID,
+    professionalUserId: LUIS_ID,
+    acceptedVersion: LEGAL.agreement.version,
+  })
   await seedAdminOrganizations(tx)
-  await seedAdminSupport(tx, { organizationId: ORG_A, userId: ANA_ID, staffUserId: staff.supportUserId })
+  await seedAdminSupport(tx, {
+    organizationId: ORG_A,
+    userId: ANA_ID,
+    staffUserId: staff.supportUserId,
+  })
 })
 // Libro de Reclamaciones de odentIA (tabla global de la plataforma): una hoja
 // de ejemplo, con datos ficticios. Idempotente por su submissionId fijo; no envía correos.
@@ -4021,80 +4528,87 @@ await db.transaction(async (tx) => {
     { tier: "estandar", micros: 300_000, hours: 44 },
     { tier: "completa", micros: 500_000, hours: 70 },
   ] as const
-  await db.insert(saasAction).values([
-    ...people.map((contactId, index) => {
-      const tier = sofi[index] ?? "informa"
-      const channel = index % 2 === 0 ? "WhatsApp" : "Instagram"
-      return {
+  await db
+    .insert(saasAction)
+    .values([
+      ...people.map((contactId, index) => {
+        const tier = sofi[index] ?? "informa"
+        const channel = index % 2 === 0 ? "WhatsApp" : "Instagram"
+        return {
+          organizationId: ORG_A,
+          kind: "conversacion",
+          tier,
+          occurredAt: hoursAgo(6 + index * 30),
+          contactId,
+          channel: channel.toLowerCase(),
+          detail: `${SOFI_DETAIL[tier]} por ${channel}`,
+          currency: "USD",
+          basePriceMicros: sofiMicros[tier],
+          priceMicros: sofiMicros[tier],
+          dedupeKey: `semilla:conversacion:${index}`,
+        }
+      }),
+      // La persona vino a la cita que le reservó Sofi: la diferencia de Gestiona a Agenda.
+      {
         organizationId: ORG_A,
         kind: "conversacion",
-        tier,
-        occurredAt: hoursAgo(6 + index * 30),
-        contactId,
-        channel: channel.toLowerCase(),
-        detail: `${SOFI_DETAIL[tier]} por ${channel}`,
+        tier: "agenda",
+        occurredAt: hoursAgo(10),
+        contactId: people[2] ?? null,
+        channel: "whatsapp",
+        detail: "Vino a la cita que reservó Sofi: sube de Gestiona a Agenda",
         currency: "USD",
-        basePriceMicros: sofiMicros[tier],
-        priceMicros: sofiMicros[tier],
-        dedupeKey: `semilla:conversacion:${index}`,
-      }
-    }),
-    // La persona vino a la cita que le reservó Sofi: la diferencia de Gestiona a Agenda.
-    {
-      organizationId: ORG_A,
-      kind: "conversacion",
-      tier: "agenda",
-      occurredAt: hoursAgo(10),
-      contactId: people[2] ?? null,
-      channel: "whatsapp",
-      detail: "Vino a la cita que reservó Sofi: sube de Gestiona a Agenda",
-      currency: "USD",
-      basePriceMicros: 500_000,
-      priceMicros: 500_000,
-      dedupeKey: "semilla:agenda:0",
-    },
-    ...clio.map((item, index) => ({
-      organizationId: ORG_A,
-      kind: "consulta",
-      tier: item.tier,
-      occurredAt: hoursAgo(item.hours),
-      contactId: people[index] ?? null,
-      detail: `${CLIO_DETAIL[item.tier]} por Ana Torres`,
-      currency: "USD",
-      basePriceMicros: item.micros,
-      priceMicros: item.micros,
-      dedupeKey: `semilla:consulta:${index}`,
-    })),
-    {
-      organizationId: ORG_A,
-      kind: "cita",
-      occurredAt: hoursAgo(50),
-      contactId: people[1] ?? null,
-      channel: "enlace",
-      windowStart: hoursAgo(120),
-      detail: "Volvió tras «Seguir un presupuesto» y reservó desde el enlace",
-      currency: "USD",
-      basePriceMicros: 2_000_000,
-      priceMicros: 2_000_000,
-      dedupeKey: "semilla:cita:0",
-    },
-    {
-      organizationId: ORG_A,
-      kind: "preguntas",
-      units: 100,
-      occurredAt: hoursAgo(30),
-      detail: "Sumó 100 preguntas a Argos",
-      currency: "USD",
-      basePriceMicros: 3_000_000,
-      priceMicros: 3_000_000,
-      dedupeKey: "semilla:preguntas:0",
-    },
-  ]).onConflictDoNothing()
+        basePriceMicros: 500_000,
+        priceMicros: 500_000,
+        dedupeKey: "semilla:agenda:0",
+      },
+      ...clio.map((item, index) => ({
+        organizationId: ORG_A,
+        kind: "consulta",
+        tier: item.tier,
+        occurredAt: hoursAgo(item.hours),
+        contactId: people[index] ?? null,
+        detail: `${CLIO_DETAIL[item.tier]} por Ana Torres`,
+        currency: "USD",
+        basePriceMicros: item.micros,
+        priceMicros: item.micros,
+        dedupeKey: `semilla:consulta:${index}`,
+      })),
+      {
+        organizationId: ORG_A,
+        kind: "cita",
+        occurredAt: hoursAgo(50),
+        contactId: people[1] ?? null,
+        channel: "enlace",
+        windowStart: hoursAgo(120),
+        detail: "Volvió tras «Seguir un presupuesto» y reservó desde el enlace",
+        currency: "USD",
+        basePriceMicros: 2_000_000,
+        priceMicros: 2_000_000,
+        dedupeKey: "semilla:cita:0",
+      },
+      {
+        organizationId: ORG_A,
+        kind: "preguntas",
+        units: 100,
+        occurredAt: hoursAgo(30),
+        detail: "Sumó 100 preguntas a Argos",
+        currency: "USD",
+        basePriceMicros: 3_000_000,
+        priceMicros: 3_000_000,
+        dedupeKey: "semilla:preguntas:0",
+      },
+    ])
+    .onConflictDoNothing()
   // Lo guardado hoy (ADR 0085): 14,2 de los 20 GB incluidos, para ver el medidor de Plan y pagos.
   // El reloj SaaS lo vuelve a medir con lo que de verdad hay guardado.
   await db
     .insert(storageUsageDay)
-    .values({ organizationId: ORG_A, day: new Date().toISOString().slice(0, 10), bytes: Math.round(14.2 * 1024 ** 3) })
+    .values({
+      organizationId: ORG_A,
+      day: new Date().toISOString().slice(0, 10),
+      bytes: Math.round(14.2 * 1024 ** 3),
+    })
     .onConflictDoNothing()
   // «Pedir revisión» (issue 77, ADR 0054): Ana, la dueña, pidió revisar dos
   // conversaciones; odentIA mantuvo una con su respuesta y la otra espera en
@@ -4102,7 +4616,12 @@ await db.transaction(async (tx) => {
   const reviewed = await db
     .select({ id: saasAction.id, key: saasAction.dedupeKey })
     .from(saasAction)
-    .where(and(eq(saasAction.organizationId, ORG_A), inArray(saasAction.dedupeKey, ["semilla:conversacion:2", "semilla:conversacion:4"])))
+    .where(
+      and(
+        eq(saasAction.organizationId, ORG_A),
+        inArray(saasAction.dedupeKey, ["semilla:conversacion:2", "semilla:conversacion:4"]),
+      ),
+    )
   const actionOf = (key: string) => reviewed.find((row) => row.key === key)?.id
   const ana = { userId: ANA_ID, roleLabel: "Dueño" }
   const caseIds: string[] = []
@@ -4115,11 +4634,16 @@ await db.transaction(async (tx) => {
     })
     if (asked.caseId) {
       caseIds.push(asked.caseId)
-      await decideActionReview(db, { userId: SEED_STAFF_ADMIN_ID, role: "admin" }, {
-        caseId: asked.caseId,
-        accept: false,
-        answer: "Ejemplo de la semilla: es una sola conversación ese día; la del día anterior fue con otra persona.",
-      })
+      await decideActionReview(
+        db,
+        { userId: SEED_STAFF_ADMIN_ID, role: "admin" },
+        {
+          caseId: asked.caseId,
+          accept: false,
+          answer:
+            "Ejemplo de la semilla: es una sola conversación ese día; la del día anterior fue con otra persona.",
+        },
+      )
     }
   }
   // Los pedidos de revisión abren casos en Soporte de odentIA.
@@ -4133,7 +4657,10 @@ await db.transaction(async (tx) => {
     if (asked.caseId) caseIds.push(asked.caseId)
   }
   if (caseIds.length) {
-    await db.update(supportNotice).set({ emailState: "enviado", emailedAt: new Date() }).where(inArray(supportNotice.caseId, caseIds))
+    await db
+      .update(supportNotice)
+      .set({ emailState: "enviado", emailedAt: new Date() })
+      .where(inArray(supportNotice.caseId, caseIds))
   }
 }
 // Uso de IA del mes para la ficha de la clínica en la administración (ADR 0031).
@@ -4142,13 +4669,54 @@ await db.transaction(async (tx) => {
 // Lo de cada acción (pausas de Clío, respuestas de Sofi y preguntas a Argos)
 // lo pone `seedSaasCostDemo`, para ver «Gastos» acción por acción.
 const saasCost = await db.transaction((tx) =>
-  seedSaasCostDemo(tx, { orgId: ORG_A, askers: [{ userId: ANA_ID, weight: 6 }, { userId: CAJA_ID, weight: 3 }, { userId: LUIS_ID, weight: 1 }] }),
+  seedSaasCostDemo(tx, {
+    orgId: ORG_A,
+    askers: [
+      { userId: ANA_ID, weight: 6 },
+      { userId: CAJA_ID, weight: 3 },
+      { userId: LUIS_ID, weight: 1 },
+    ],
+  }),
 )
 await db.insert(aiUsage).values([
-  { organizationId: ORG_A, origin: "probar", provider: "openai", model: "gpt-6-luna", calls: 9, inputTokens: 27_000, outputTokens: 900, costMicros: 3_150 },
-  { organizationId: ORG_A, origin: "transcripcion", provider: "transcripcion", model: "whisper-1", calls: 6, audioSeconds: 240, costMicros: 24_000 },
-  { organizationId: ORG_A, origin: "vectores", provider: "vectores", model: "text-embedding-3-small", calls: 3, inputTokens: 15_000, costMicros: 300 },
-  { organizationId: ORG_A, origin: "ya_aviso", provider: "jev", model: "jev-1.13.0", calls: 4, inputTokens: 1_200, outputTokens: 8, costMicros: null },
+  {
+    organizationId: ORG_A,
+    origin: "probar",
+    provider: "openai",
+    model: "gpt-6-luna",
+    calls: 9,
+    inputTokens: 27_000,
+    outputTokens: 900,
+    costMicros: 3_150,
+  },
+  {
+    organizationId: ORG_A,
+    origin: "transcripcion",
+    provider: "transcripcion",
+    model: "whisper-1",
+    calls: 6,
+    audioSeconds: 240,
+    costMicros: 24_000,
+  },
+  {
+    organizationId: ORG_A,
+    origin: "vectores",
+    provider: "vectores",
+    model: "text-embedding-3-small",
+    calls: 3,
+    inputTokens: 15_000,
+    costMicros: 300,
+  },
+  {
+    organizationId: ORG_A,
+    origin: "ya_aviso",
+    provider: "jev",
+    model: "jev-1.13.0",
+    calls: 4,
+    inputTokens: 1_200,
+    outputTokens: 8,
+    costMicros: null,
+  },
 ])
 
 // --- Una demo para presentar (ADR 0096): Clínicas › «Demos» de la administración ---
@@ -4171,10 +4739,21 @@ await db.transaction(async (tx) => {
     })
     .returning()
   if (!demo) throw new Error("No se pudo pedir la demo de la semilla")
-  const built = await buildDemo(tx, { ...demo, product: "medical", size: "pequeno" }, { secretsKey, fetch })
+  const built = await buildDemo(
+    tx,
+    { ...demo, product: "medical", size: "pequeno" },
+    { secretsKey, fetch },
+  )
   await tx
     .update(saasDemo)
-    .set({ organizationId: built.organizationId, slug: built.slug, status: "lista", historyThrough: built.historyThrough, readyAt: new Date(), progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS } })
+    .set({
+      organizationId: built.organizationId,
+      slug: built.slug,
+      status: "lista",
+      historyThrough: built.historyThrough,
+      readyAt: new Date(),
+      progress: { step: "listo", done: DEMO_BUILD_STEPS, total: DEMO_BUILD_STEPS },
+    })
     .where(eq(saasDemo.id, demo.id))
 })
 
@@ -4218,7 +4797,13 @@ console.log(
   `historia de Pacientes (dental-smile): ${patientsHistory.moved} primeras visitas tras su mensaje, ${patientsHistory.channels} conversaciones por canal, ${patientsHistory.referrals} «cómo nos conoció», ${patientsHistory.controls} controles, ${patientsHistory.invitations} invitaciones a volver`,
   `Argos en Reportes (dental-smile): ${reportsArgos.pins} respuestas fijadas en el Resumen, meta de cobrado ${reportsArgos.goalText} desde este mes`,
   `gastos del mes (dental-smile): ${saasCost.pauses} pausas de Clío, ${saasCost.runs} respuestas de Sofi y ${saasCost.questions} preguntas a Argos con su costo`,
-  `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress).map(([status, count]) => `${count} ${status}`).join(", ")}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
+  `avance y materiales (dental-smile): ${Object.entries(reportsProgress.progress)
+    .map(([status, count]) => `${count} ${status}`)
+    .join(
+      ", ",
+    )}; ${reportsProgress.discounted} atenciones con materiales descontados en ${reportsProgress.services} servicios; ${reportsProgress.today} atenciones cobradas hoy`,
 )
-console.log("credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev")
+console.log(
+  "credenciales (password Demo1234): ana@odentia.dev, luis@odentia.dev, cora@odentia.dev; latidIA: vela@odentia.dev",
+)
 process.exit(0)

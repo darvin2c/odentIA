@@ -1,11 +1,11 @@
-import { Checkbox, Field, FieldError } from "@odentia/ui"
-import { AuthAside, AuthSplit, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { AuthAside, AuthSplit, LoadingState, SubmitButton, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import { accountInvitationsQuery } from "../lib/account-organizations"
 import { API_URL, authClient } from "../lib/auth-client"
+import { authError, authFailureOf, authFormMessage } from "../lib/auth-error"
 import { AuthAlert, AuthLegal } from "../lib/auth-screens"
 import { creditText } from "../lib/credit"
 import { requireVerifiedSession } from "../lib/guards"
@@ -30,6 +30,15 @@ const statusSchema = z.object({
 const offerSchema = z.object({
   offer: z.object({ currency: z.string(), creditCents: z.number(), days: z.number() }).nullable(),
 })
+
+const acceptance = z.object({
+  accepted: z.literal(true, { error: "Marca la casilla para seguir." }),
+})
+
+/** Ya trabaja en una clínica o entra invitado: no abre una (acepta términos y aviso). */
+function joins(orgCount: number, invitationCount: number, next: string | undefined): boolean {
+  return orgCount > 0 || invitationCount > 0 || (next ?? "").includes("accept-invitation")
+}
 
 /** Adónde vuelve: una ruta del panel o una dirección https del dominio. */
 function target(next: string | undefined): { path: string } | { href: string } | null {
@@ -73,10 +82,40 @@ function TermsStepPage() {
     queryFn: async () =>
       offerSchema.parse(await (await fetch(`${API_URL}/api/public/sign-up`)).json()).offer,
   })
-  const [checked, setChecked] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  // Los documentos cambiaron mientras tanto: el aviso ofrece recargar.
+  const [outdated, setOutdated] = useState(false)
   const back = target(next)
+
+  const form = useAppForm({
+    defaultValues: { accepted: false as boolean },
+    validators: { onSubmit: acceptance },
+    onSubmit: async () => {
+      if (!status.data) return
+      setOutdated(false)
+      const opens = !joins(orgs.data?.length ?? 0, invitations.data?.length ?? 0, next)
+      const { error: failure } = await authClient.$fetch("/legal/accept", {
+        method: "POST",
+        body: {
+          termsVersion: status.data.terms.version,
+          ...(opens ? { processingAgreementVersion: status.data.agreement.version } : {}),
+        },
+      })
+      if (failure) {
+        if (authFailureOf(failure).code === "TERMS_OUTDATED") setOutdated(true)
+        throw authError(failure)
+      }
+      if (back && "href" in back) {
+        window.location.assign(back.href)
+        return
+      }
+      // Quien abre su clínica sigue a crearla aunque viniera de «/» (que sin clínica no tiene nada).
+      await navigate({
+        to: opens && (!back || back.path === "/") ? "/onboarding" : (back?.path ?? "/"),
+      })
+    },
+  })
+  const onSubmit = useFormSubmit(form, { formMessage: authFormMessage })
+  const submitError = useFormSubmitError(form)
 
   // Ya aceptó: no hay nada que hacer aquí.
   useEffect(() => {
@@ -101,9 +140,7 @@ function TermsStepPage() {
 
   const invitation = invitations.data?.[0]
   const clinic = orgs.data?.length === 1 ? orgs.data[0]?.name : undefined
-  const joining =
-    (orgs.data?.length ?? 0) > 0 || !!invitation || (next ?? "").includes("accept-invitation")
-  const opens = !joining
+  const opens = !joins(orgs.data?.length ?? 0, invitations.data?.length ?? 0, next)
   const credit =
     opens && offer.data && offer.data.creditCents > 0
       ? creditText(offer.data.currency, offer.data.creditCents)
@@ -119,35 +156,6 @@ function TermsStepPage() {
       : clinic
         ? `Entrar a ${clinic}`
         : "Seguir"
-
-  async function accept() {
-    if (!checked || !status.data) {
-      setError("Marca la casilla para seguir.")
-      return
-    }
-    setSaving(true)
-    setError(null)
-    const { error: failure } = await authClient.$fetch("/legal/accept", {
-      method: "POST",
-      body: {
-        termsVersion: status.data.terms.version,
-        ...(opens ? { processingAgreementVersion: status.data.agreement.version } : {}),
-      },
-    })
-    setSaving(false)
-    if (failure) {
-      setError(failure.message ?? "No pudimos guardarlo. Inténtalo de nuevo.")
-      return
-    }
-    if (back && "href" in back) {
-      window.location.assign(back.href)
-      return
-    }
-    // Quien abre su clínica sigue a crearla aunque viniera de «/» (que sin clínica no tiene nada).
-    await navigate({
-      to: opens && (!back || back.path === "/") ? "/onboarding" : (back?.path ?? "/"),
-    })
-  }
 
   return (
     <AuthSplit
@@ -214,60 +222,70 @@ function TermsStepPage() {
           </span>
         ) : null}
       </div>
-      <Field>
-        <div className="flex items-start gap-2.5 text-sm text-muted-foreground">
-          <Checkbox
-            id="acepto"
-            className="mt-0.5"
-            checked={checked}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? "acepto-error" : undefined}
-            onCheckedChange={(value) => {
-              setChecked(value === true)
-              setError(null)
-            }}
-          />
-          <label htmlFor="acepto">
-            Acepto los{" "}
-            <a
-              href={legalLinks.terms}
-              target="_blank"
-              rel="noreferrer"
-              className="text-foreground underline"
-            >
-              Términos del servicio
-            </a>
-            {opens ? ", el " : " y el "}
-            <a
-              href={legalLinks.privacy}
-              target="_blank"
-              rel="noreferrer"
-              className="text-foreground underline"
-            >
-              Aviso de privacidad
-            </a>
-            {opens ? (
-              <>
-                {" "}
-                y el{" "}
-                <a
-                  href={legalLinks.agreement}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-foreground underline"
-                >
-                  Contrato de encargo de tratamiento
-                </a>
-              </>
+      <form noValidate onSubmit={onSubmit} className="flex flex-col gap-4">
+        <form.AppField name="accepted">
+          {(field) => (
+            <field.CheckboxField
+              id="acepto"
+              className="text-muted-foreground"
+              label={
+                <span className="font-normal">
+                  Acepto los{" "}
+                  <a
+                    href={legalLinks.terms}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground underline"
+                  >
+                    Términos del servicio
+                  </a>
+                  {opens ? ", el " : " y el "}
+                  <a
+                    href={legalLinks.privacy}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-foreground underline"
+                  >
+                    Aviso de privacidad
+                  </a>
+                  {opens ? (
+                    <>
+                      {" "}
+                      y el{" "}
+                      <a
+                        href={legalLinks.agreement}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-foreground underline"
+                      >
+                        Contrato de encargo de tratamiento
+                      </a>
+                    </>
+                  ) : null}
+                  .
+                </span>
+              }
+            />
+          )}
+        </form.AppField>
+        {submitError ? (
+          <AuthAlert>
+            {submitError}{" "}
+            {outdated ? (
+              <button type="button" className="font-semibold underline" onClick={() => window.location.reload()}>
+                Recargar
+              </button>
             ) : null}
-            .
-          </label>
-        </div>
-        <FieldError id="acepto-error">{error}</FieldError>
-      </Field>
-      <SubmitButton type="button" pending={saving} className="w-full" onClick={() => void accept()}>
-        <span className="truncate">{cta}</span>
-      </SubmitButton>
+          </AuthAlert>
+        ) : null}
+        <form.Subscribe selector={(state) => state.isSubmitting}>
+          {(isSubmitting) => (
+            <SubmitButton type="submit" pending={isSubmitting} className="w-full">
+              <span className="truncate">{cta}</span>
+            </SubmitButton>
+          )}
+        </form.Subscribe>
+      </form>
     </AuthSplit>
   )
 }

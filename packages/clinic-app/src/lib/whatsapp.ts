@@ -1,6 +1,6 @@
+import { ADMIN_NAME } from "./agent-names"
 import type { ConnectionItem, OwnAppState } from "./crm"
 import { type ChannelField, channelAccount } from "./integrations"
-import { ADMIN_NAME } from "./agent-names"
 import { appWords } from "./product-words"
 
 /**
@@ -73,7 +73,8 @@ export interface ClinicMessage {
 
 export interface MessageCheck {
   ok: boolean
-  checks: { ok: boolean; text: string }[]
+  /** `field`: el dato del cuerpo (`title`, `body`, `buttonTitle`) donde se dice cada comprobación. */
+  checks: { ok: boolean; text: string; field: "title" | "body" | "buttonTitle" }[]
   previewParts: PreviewPart[]
 }
 
@@ -671,10 +672,26 @@ export function closedWindowNotice(
   }
 }
 
-/** Los datos que escribió quien envía, en el orden que pide el mensaje; nada si no pide ninguno. */
-export function approvedValues(option: Pick<ApprovedMessageOption, "fields">, typed: Record<number, string>): string[] | undefined {
+/**
+ * Los datos que escribe quien envía, en el orden que pide el mensaje: la
+ * posición de cada uno es la de `values[i]` al enviar (y la del error que
+ * devuelve el servidor para ese dato).
+ */
+export function approvedFields(option: Pick<ApprovedMessageOption, "fields">): ApprovedMessageOption["fields"] {
+  return [...option.fields].sort((a, b) => a.index - b.index)
+}
+
+/**
+ * Lo escrito para un mensaje, como `values` del envío: recortado y en el orden
+ * de `approvedFields` (`typed[i]`); lo que falta viaja vacío y el servidor dice
+ * qué completar. Un mensaje sin datos no envía ninguno.
+ */
+export function approvedValues(
+  option: Pick<ApprovedMessageOption, "fields">,
+  typed: ReadonlyArray<string | undefined> | undefined,
+): string[] | undefined {
   if (option.fields.length === 0) return undefined
-  return [...option.fields].sort((a, b) => a.index - b.index).map((field) => (typed[field.index] ?? "").trim())
+  return option.fields.map((_, at) => (typed?.[at] ?? "").trim())
 }
 
 /* ---------- Claves de consulta ---------- */

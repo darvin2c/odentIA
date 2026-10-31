@@ -12,5 +12,5 @@ export const PRODUCT_LIBRARIES = [dentalLibrary, medicalLibrary] as const
 
 /** El catálogo entero: las listas oficiales y las bibliotecas de los dos productos, en una transacción. */
 export function seedCatalog(db: Db) {
-  return seedProcedureCodes(db, PRODUCT_LIBRARIES)
+  return seedProcedureCodes(db, PRODUCT_LIBRARIES, { partial: false })
 }

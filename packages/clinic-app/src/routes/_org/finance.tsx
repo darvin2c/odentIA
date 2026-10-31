@@ -839,7 +839,6 @@ function CashTab({
     queryFn: () => fetchDebtList(branchId, { when: "hoy" }, null, ATTENDED_TODAY_LIMIT),
   })
   const [voiding, setVoiding] = useState<DayEntry | null>(null)
-  const [voidError, setVoidError] = useState<string | null>(null)
   const [earlierOpen, setEarlierOpen] = useState(false)
 
   const state = cash.data?.data ?? null
@@ -863,9 +862,7 @@ function CashTab({
       invalidateFinance(queryClient)
       toast.success("Movimiento anulado")
       setVoiding(null)
-      setVoidError(null)
     },
-    onError: (err) => setVoidError(cashErrorMessage(err)),
   })
 
   const entries = useMemo(
@@ -1132,10 +1129,7 @@ function CashTab({
                 onOpenTicket={onOpenTicket}
                 onVoid={
                   canWrite && (entry.type === "aporte" || entry.type === "retiro")
-                    ? () => {
-                        setVoidError(null)
-                        setVoiding(entry)
-                      }
+                    ? () => setVoiding(entry)
                     : undefined
                 }
               />
@@ -1164,17 +1158,9 @@ function CashTab({
         open={voiding !== null}
         title={voiding?.type === "aporte" ? "Anular ingreso de efectivo" : "Anular retiro de efectivo"}
         description="Queda en el historial con su motivo y deja de contar en la caja."
-        isSubmitting={voidMutation.isPending}
-        error={voidError}
-        onClose={() => {
-          setVoiding(null)
-          setVoidError(null)
-        }}
-        onConfirm={(reason) => {
-          if (voiding && voiding.type !== "cobro") {
-            setVoidError(null)
-            voidMutation.mutate({ id: voiding.movementId, reason })
-          }
+        onClose={() => setVoiding(null)}
+        onConfirm={async (reason) => {
+          if (voiding && voiding.type !== "cobro") await voidMutation.mutateAsync({ id: voiding.movementId, reason })
         }}
       />
     </div>

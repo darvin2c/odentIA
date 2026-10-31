@@ -4,10 +4,12 @@
  * Frases, campos, límites y desde cuándo rige cada cambio los entrega el
  * servidor; el servidor comprueba lo mismo al guardar.
  */
-import { Button, FieldLabel, Input, Skeleton, Textarea, toast } from "@odentia/ui"
-import { DetailDrawer, ErrorState, FormDrawer } from "@odentia/ui-patterns"
+import { Button, Input, Skeleton, toast } from "@odentia/ui"
+import { DetailDrawer, ErrorState, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useState } from "react"
+import { Fragment, useMemo, useState } from "react"
+import { z } from "zod"
 import { ApiError, api } from "../lib/api"
 
 interface TermField {
@@ -183,6 +185,37 @@ function fieldError(field: TermField, text: string): string | null {
   return null
 }
 
+/**
+ * Las cifras del grupo (los límites que entrega el servidor) y el motivo. Cada
+ * cifra es texto con su error en su campo (`values.<clave>`, como en el cuerpo
+ * de la petición).
+ */
+function termsSchema(fields: TermField[]) {
+  return z
+    .object({
+      values: z.record(z.string(), z.string()),
+      reason: z.string().max(500, "Escribe como mucho 500 caracteres."),
+    })
+    .superRefine((form, ctx) => {
+      for (const field of fields) {
+        const message = fieldError(field, form.values[field.key] ?? "")
+        if (message) ctx.addIssue({ code: "custom", path: ["values", field.key], message })
+      }
+      // El aviso va antes que la alarma (la misma regla que el servidor).
+      const warn = fields.find((field) => field.key === "warnPercent")
+      const alarm = fields.find((field) => field.key === "alarmPercent")
+      const warnText = form.values.warnPercent ?? ""
+      const alarmText = form.values.alarmPercent ?? ""
+      if (warn && alarm && !fieldError(warn, warnText) && !fieldError(alarm, alarmText) && Number(warnText) >= Number(alarmText)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["values", "warnPercent"],
+          message: `El aviso va antes que la alarma: escribe menos de ${alarmText.trim()} %.`,
+        })
+      }
+    })
+}
+
 function TermsDrawer({
   group,
   values,
@@ -195,43 +228,13 @@ function TermsDrawer({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const [texts, setTexts] = useState<Record<string, string>>(() =>
-    Object.fromEntries(group.fields.map((field) => [field.key, String(values[field.key] ?? "")])),
-  )
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [tried, setTried] = useState(false)
-
-  const changed = group.fields.filter(
-    (field) => texts[field.key]?.trim() !== String(values[field.key]),
-  )
-  const errors: Record<string, string> = {}
-  for (const field of group.fields) {
-    const message = fieldError(field, texts[field.key] ?? "")
-    if (message) errors[field.key] = message
-  }
-  // El aviso va antes que la alarma (la misma regla que el servidor).
-  if (
-    !errors.warnPercent &&
-    !errors.alarmPercent &&
-    "warnPercent" in texts &&
-    "alarmPercent" in texts
-  ) {
-    if (Number(texts.warnPercent) >= Number(texts.alarmPercent)) {
-      errors.warnPercent = `El aviso va antes que la alarma: escribe menos de ${texts.alarmPercent} %.`
-    }
-  }
+  const schema = useMemo(() => termsSchema(group.fields), [group.fields])
+  // Lo que cambió respecto de lo que rige: solo eso se envía.
+  const changedOf = (texts: Record<string, string>) => group.fields.filter((field) => texts[field.key]?.trim() !== String(values[field.key]))
 
   const save = useMutation({
-    mutationFn: () =>
-      api<TermsView>("/api/admin/billing/terms", {
-        method: "PUT",
-        body: JSON.stringify({
-          values: Object.fromEntries(changed.map((field) => [field.key, Number(texts[field.key])])),
-          basedOn,
-          reason: reason.trim() || null,
-        }),
-      }),
+    mutationFn: (body: { values: Record<string, number>; basedOn: string | null; reason: string | null }) =>
+      api<TermsView>("/api/admin/billing/terms", { method: "PUT", body: JSON.stringify(body) }),
     onSuccess: (data) => {
       queryClient.setQueryData(TERMS_KEY, data)
       void queryClient.invalidateQueries({ queryKey: ["admin", "billing", "terms-history"] })
@@ -239,14 +242,33 @@ function TermsDrawer({
       onClose()
     },
     onError: (e) => {
-      setError(
-        e instanceof ApiError ? (e.shape.message ?? "No se pudo guardar") : "No se pudo guardar",
-      )
       // Si alguien guardó antes, se traen sus cifras: «antes» pasa a decir lo que rige ahora.
       if (e instanceof ApiError && e.status === 409)
         void queryClient.invalidateQueries({ queryKey: TERMS_KEY })
     },
   })
+
+  const [initial] = useState(() => ({
+    values: Object.fromEntries(group.fields.map((field) => [field.key, String(values[field.key] ?? "")])),
+    reason: "",
+  }))
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const changed = changedOf(value.values)
+      if (changed.length === 0) return onClose()
+      await save.mutateAsync({
+        values: Object.fromEntries(changed.map((field) => [field.key, Number(value.values[field.key])])),
+        basedOn,
+        reason: value.reason.trim() || null,
+      })
+    },
+  })
+  const surface = useFormSurface(form)
+  const texts = useStore(form.store, (state) => state.values.values)
+  const reason = useStore(form.store, (state) => state.values.reason)
+  const changed = changedOf(texts)
 
   // Cada fila: un campo, o dos que se leen juntos («3 días más, 1 vez por cargo»).
   const rows: TermField[][] = []
@@ -258,78 +280,48 @@ function TermsDrawer({
 
   return (
     <FormDrawer
+      {...surface}
+      // Sin cambios de verdad (volver a la cifra que rige) se cierra sin preguntar.
+      isDirty={changed.length > 0 || reason.trim() !== ""}
       open
       title={`Cambiar: ${group.title}`}
       description="Rige desde que guardas. Lo que ya empezó conserva la regla que tenía."
       submitLabel="Guardar"
-      isDirty={changed.length > 0 || reason.trim() !== ""}
-      isSubmitting={save.isPending}
-      error={error}
       onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setTried(true)
-        setError(null)
-        if (changed.length === 0) return onClose()
-        if (Object.keys(errors).length > 0) return
-        save.mutate()
-      }}
     >
       <div className="flex flex-col gap-5">
         {rows.map((row) => {
           const [first] = row as [TermField, ...TermField[]]
           const rowChanged = row.filter((field) => changed.includes(field))
-          const rowValid = row.every((field) => !errors[field.key])
+          const rowValid = row.every((field) => !fieldError(field, texts[field.key] ?? ""))
           return (
             <div key={first.key} className="flex flex-col gap-1.5">
-              <FieldLabel htmlFor={`term-${first.key}`}>{first.label}</FieldLabel>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
                 {row.map((field) => (
-                  <Fragment key={field.key}>
-                    <Input
-                      id={`term-${field.key}`}
-                      className="w-20 tabular-nums"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      aria-label={field === first ? undefined : field.label}
-                      aria-invalid={
-                        (tried || changed.includes(field)) && errors[field.key] ? true : undefined
-                      }
-                      aria-describedby={`term-${field.key}-hint`}
-                      value={texts[field.key] ?? ""}
-                      onChange={(event) =>
-                        setTexts((prev) => ({ ...prev, [field.key]: event.target.value }))
-                      }
-                    />
-                    <span className="text-sm text-muted-foreground">{field.unit}</span>
-                  </Fragment>
+                  <form.AppField key={field.key} name={`values.${field.key}`}>
+                    {(input) => (
+                      <input.Control id={`term-${field.key}`} label={field.label} description={field.hint} className="w-auto">
+                        {(control) => (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Input
+                              {...control.props}
+                              className="w-20 tabular-nums"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              value={input.state.value ?? ""}
+                              onChange={(event) => input.handleChange(event.target.value)}
+                            />
+                            <span className="text-sm text-muted-foreground">{field.unit}</span>
+                            {changed.includes(field) ? (
+                              <span className="text-xs font-semibold text-warning">antes {values[field.key]}</span>
+                            ) : null}
+                          </div>
+                        )}
+                      </input.Control>
+                    )}
+                  </form.AppField>
                 ))}
-                {rowChanged.length ? (
-                  <span className="text-xs font-semibold text-warning">
-                    antes {rowChanged.map((field) => values[field.key]).join(" y ")}
-                  </span>
-                ) : null}
               </div>
-              {row.map((field) =>
-                (tried || changed.includes(field)) && errors[field.key] ? (
-                  <p
-                    key={field.key}
-                    id={`term-${field.key}-hint`}
-                    role="alert"
-                    className="text-xs text-destructive"
-                  >
-                    {errors[field.key]}
-                  </p>
-                ) : (
-                  <p
-                    key={field.key}
-                    id={`term-${field.key}-hint`}
-                    className="text-xs text-muted-foreground"
-                  >
-                    {field.hint}
-                  </p>
-                ),
-              )}
               {rowChanged.length && rowValid ? (
                 <div className="flex flex-col gap-0.5 rounded-lg bg-primary/10 px-3 py-2 text-xs">
                   <span className="font-semibold">Desde cuándo rige</span>
@@ -339,16 +331,11 @@ function TermsDrawer({
             </div>
           )
         })}
-        <div className="flex flex-col gap-1.5">
-          <FieldLabel htmlFor="term-reason">Por qué lo cambias (opcional)</FieldLabel>
-          <Textarea
-            id="term-reason"
-            value={reason}
-            maxLength={500}
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <p className="text-xs text-muted-foreground">Lo ve el equipo en «Ver cambios».</p>
-        </div>
+        <form.AppField name="reason">
+          {(field) => (
+            <field.TextareaField id="term-reason" label="Por qué lo cambias (opcional)" description="Lo ve el equipo en «Ver cambios»." maxLength={500} />
+          )}
+        </form.AppField>
       </div>
     </FormDrawer>
   )

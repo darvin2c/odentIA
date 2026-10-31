@@ -1,83 +1,123 @@
 import type { PlatformDecisions, PlatformLlm } from "@odentia/agent"
 import type { Auth } from "@odentia/auth"
-import { type ClinicalProduct, TAX_CATEGORIES } from "@odentia/clinical"
+import { type ClinicalProduct, configureZodMessages, TAX_CATEGORIES } from "@odentia/clinical"
 import { type Db, withOrgContext } from "@odentia/db"
 import { message } from "@odentia/db/schema/crm"
 import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import type { Mailer } from "@odentia/mail"
-import { CLINIC_LOGO_MAX_BYTES, CLINIC_LOGO_MIME_EXT, clinicLogoFolder, getAgentConfig, getClinicLogo, RESERVED_ORG_SLUGS, setClinicLogo } from "@odentia/services"
-import { configurePublicLinks, onDomain, productOfHost, trustedOriginsOn, CONVERSATION_STATE_ACTIONS, createBranch, updateBranch, getBackofficeOverview, getOrganizationBillingSummary, initialOrgRegion, setOrgDiagnosisSystem, type MailboxEnv, regionPresetForCountry, type SearchEmbedder, ServiceError, setBranchActive, startSaasTrial, type Storage, ensureClinicSpecialties, turnOnNewClinicLines, updateOrgRegion } from "@odentia/services"
+import {
+  CLINIC_LOGO_MAX_BYTES,
+  CLINIC_LOGO_MIME_EXT,
+  CONVERSATION_STATE_ACTIONS,
+  clinicLogoFolder,
+  configureDocumentChecks,
+  configureDocumentLogos,
+  configurePublicLinks,
+  createBranch,
+  ensureClinicSpecialties,
+  getAgentConfig,
+  getBackofficeOverview,
+  getClinicLogo,
+  getOrganizationBillingSummary,
+  initialOrgRegion,
+  type MailboxEnv,
+  onDomain,
+  productOfHost,
+  RESERVED_ORG_SLUGS,
+  regionPresetForCountry,
+  type SearchEmbedder,
+  ServiceError,
+  type Storage,
+  setBranchActive,
+  setClinicLogo,
+  setOrgDiagnosisSystem,
+  startSaasTrial,
+  trustedOriginsOn,
+  turnOnNewClinicLines,
+  updateBranch,
+  updateOrgRegion,
+} from "@odentia/services"
 import { and, eq, gt, inArray, sql } from "drizzle-orm"
 import { type Context, Hono } from "hono"
 import { cors } from "hono/cors"
 import { requestId } from "hono/request-id"
 import { streamSSE } from "hono/streaming"
 import { z } from "zod"
+import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
 import { canAccess, orgContextOf, requireOrgContext, requireSession } from "./lib/context.js"
 import { errorBody } from "./lib/error.js"
 import { createOrgEventsHub, type NotifyPayload } from "./lib/org-events.js"
-import { adminContextOf, requireAdminContext } from "./lib/admin-context.js"
-import { createAdminCoreRoute, createAccountAdminAccessRoute, createAdminFactorBoundary } from "./routes/admin-core.js"
 import { createAccountRoute } from "./routes/account.js"
-import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
-import { createAdminDemosRoute } from "./routes/admin-demos.js"
-import { createAdminImportsRoute } from "./routes/admin-imports.js"
-import { createAccountBillingRoute, createSaasBillingRoute, createSaasPreAuthGuard, requireSaasAccess } from "./routes/saas-billing.js"
-import { createAdminSupportRoute } from "./routes/admin-support.js"
-import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
-import { createAdminFoundersRoute } from "./routes/admin-founders.js"
 import { createAccountSupportRoute } from "./routes/account-support.js"
+import { type AddressProviders, createAddressRoute } from "./routes/address.js"
+import { createAdminConsumerComplaintsRoute } from "./routes/admin-consumer-complaints.js"
+import {
+  createAccountAdminAccessRoute,
+  createAdminCoreRoute,
+  createAdminFactorBoundary,
+} from "./routes/admin-core.js"
+import { createAdminDemosRoute } from "./routes/admin-demos.js"
+import { createAdminFoundersRoute } from "./routes/admin-founders.js"
+import { createAdminImportsRoute } from "./routes/admin-imports.js"
+import { createAdminOrganizationsRoute } from "./routes/admin-organizations.js"
+import { createAdminSupportRoute } from "./routes/admin-support.js"
 import { createAgentRoute } from "./routes/agent.js"
 import { createAgentAdminRoute } from "./routes/agent-admin.js"
 import { createAgentKnowledgeRoute } from "./routes/agent-knowledge.js"
-import { createHelpRoute } from "./routes/help.js"
 import { createAgentLearningRoute } from "./routes/agent-learning.js"
 import { createAgentOpsRoute } from "./routes/agent-ops.js"
 import { createAgendaRoute, createAppointmentsRoute } from "./routes/appointments.js"
-import { createSearchRoute } from "./routes/search.js"
 import { createPublicAutomationsRoute } from "./routes/automations.js"
-import { type AddressProviders, createAddressRoute } from "./routes/address.js"
-import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
+import { createCalendarFeedRoute, createPublicCalendarRoute } from "./routes/calendar-feeds.js"
 import { createClinicalFormsRoute } from "./routes/clinical-forms.js"
+import { createCommissionsRoute } from "./routes/commissions.js"
 import { createConnectionsRoute } from "./routes/connections.js"
 import { createContactsRoute } from "./routes/contacts.js"
 import { createConversationsRoute } from "./routes/conversations.js"
 import { createCrmWorkspaceRoute } from "./routes/crm-workspace.js"
+import { createDataProtectionRoute } from "./routes/data-protection.js"
+import { createDiagnosisCodesRoute } from "./routes/diagnosis-codes.js"
 import { createFieldsRoute } from "./routes/fields.js"
 import { createFinanceRoute } from "./routes/finance.js"
 import { createFinancialDocumentsRoute } from "./routes/financial-documents.js"
+import { createHelpRoute } from "./routes/help.js"
+import { runService, validationError } from "./routes/helpers.js"
 import { createInventoryRoute } from "./routes/inventory.js"
-import { createCommissionsRoute } from "./routes/commissions.js"
-import { runService } from "./routes/helpers.js"
+import { createLegalRoute } from "./routes/legal.js"
 import { createMailboxesRoute } from "./routes/mailboxes.js"
 import { createOpportunitiesRoute } from "./routes/opportunities.js"
 import { createPatientRegistrationRoute } from "./routes/patient-registration.js"
 import { createPatientsRoute } from "./routes/patients.js"
-import { createPeopleRoute } from "./routes/people.js"
-import { createTeamTwoFactorRoute } from "./routes/team-two-factor.js"
-import { createDataProtectionRoute } from "./routes/data-protection.js"
 import { createPaymentMethodsRoute } from "./routes/payment-methods.js"
-import { createPromotionsRoute } from "./routes/promotions.js"
+import { createPeopleRoute } from "./routes/people.js"
 import { createPipelinesRoute } from "./routes/pipelines.js"
 import { createPortalRoute } from "./routes/portal.js"
+import { createPromotionsRoute } from "./routes/promotions.js"
+import { createPublicBookingRoute } from "./routes/public-booking.js"
+import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
+import { createPublicDocumentsRoute } from "./routes/public-documents.js"
+import { createPublicFoundersRoute } from "./routes/public-founders.js"
 import {
   createPublicPatientRegistrationRoute,
   type RegistrationRemoteAddress,
 } from "./routes/public-patient-registration.js"
-import { createCalendarFeedRoute, createPublicCalendarRoute } from "./routes/calendar-feeds.js"
-import { createPublicBookingRoute } from "./routes/public-booking.js"
-import { createPublicConsumerComplaintsRoute } from "./routes/public-consumer-complaints.js"
-import { createPublicFoundersRoute } from "./routes/public-founders.js"
 import { createPublicPortalRoute } from "./routes/public-portal.js"
-import { createLegalRoute } from "./routes/legal.js"
 import { createPublicSignUpRoute } from "./routes/public-sign-up.js"
+import { createPublicReportDigestRoute } from "./routes/report-digest-public.js"
+import { createReportsRoute } from "./routes/reports.js"
+import {
+  createAccountBillingRoute,
+  createSaasBillingRoute,
+  createSaasPreAuthGuard,
+  requireSaasAccess,
+} from "./routes/saas-billing.js"
+import { createSearchRoute } from "./routes/search.js"
 import { createServicesRoute } from "./routes/services.js"
 import { createTasksRoute } from "./routes/tasks.js"
+import { createTeamTwoFactorRoute } from "./routes/team-two-factor.js"
 import { createWebchatAdminRoute, createWebchatPublicRoute } from "./routes/webchat.js"
 import { createWebhooksRoute } from "./routes/webhooks.js"
 import { createWhatsAppSignupRoute, type MetaSignupConfig } from "./routes/whatsapp-signup.js"
-import { createPublicReportDigestRoute } from "./routes/report-digest-public.js"
-import { createReportsRoute } from "./routes/reports.js"
 import { createWorkspaceRoute } from "./routes/workspace.js"
 
 export interface AppDeps {
@@ -130,6 +170,11 @@ export interface AppDeps {
   /** La app de odentIA en Meta (META_*): «Conectar con Facebook» de WhatsApp. Sin ella no hay botón. */
   metaSignup?: MetaSignupConfig | undefined
 }
+
+// Lo que dice una regla sin mensaje propio, en el español de la interfaz: el
+// error de un dato se pinta junto a su campo (`fields`), nunca en inglés.
+configureZodMessages()
+
 // La dirección tiene la forma de la del paciente (issue 36); la valida el servicio según el país.
 const branchInput = z.object({
   name: z.string().min(1).max(120),
@@ -148,17 +193,27 @@ const branchInput = z.object({
 
 const branchPatch = branchInput.partial()
 
-const taxRateInput = z.object({ category: z.enum(TAX_CATEGORIES), rateBps: z.number().int().min(0).max(10_000) }).strict()
+const taxRateInput = z
+  .object({ category: z.enum(TAX_CATEGORIES), rateBps: z.number().int().min(0).max(10_000) })
+  .strict()
 
 const orgProfileInput = z.object({
-  legalName: z.string().min(1).max(200),
+  legalName: z.string().trim().min(1, "Escribe la razón social").max(200),
   // El nombre que ve la persona en todo (decisión 19): obligatorio; ausente, queda como estaba.
-  tradeName: z.string().trim().min(1, "Escribe el nombre comercial: así te verán tus pacientes").max(200).optional(),
+  tradeName: z
+    .string()
+    .trim()
+    .min(1, "Escribe el nombre comercial: así te verán tus pacientes")
+    .max(200)
+    .optional(),
   fiscalDocType: z.string().max(20).nullish(),
   fiscalDocNumber: z.string().max(20).nullish(),
   fiscalAddress: z.string().max(300).nullish(),
   // Teléfono para urgencias (ADR 0050), en E.164 como lo entrega el campo de teléfono.
-  emergencyPhone: z.string().regex(/^\+[1-9]\d{7,14}$/, "Ingresa el teléfono con su código de país, empezando por «+»").nullish(),
+  emergencyPhone: z
+    .string()
+    .regex(/^\+[1-9]\d{7,14}$/, "Ingresa el teléfono con su código de país, empezando por «+»")
+    .nullish(),
   countryCode: z.string().length(2).optional(),
   currency: z.string().length(3).optional(),
   timezone: z.string().max(60).optional(),
@@ -180,9 +235,24 @@ const orgProfileInput = z.object({
 
 /** Lo que se imprime: se edita en «Medios de pago y ticket», aparte de los datos de la clínica. */
 const orgPrintingInput = z.object({
-  receiptWidth: z.enum(["58", "80"]),
-  sheetSize: z.enum(["A4", "Letter"]),
-  ticketFooter: z.string().trim().min(1, "Escribe la frase al pie del ticket").max(280),
+  // Todo opcional: cada formulario guarda lo suyo; lo que llega se valida con su mensaje.
+  receiptWidth: z.enum(["58", "80"], "Elige el ancho del ticket: 58 u 80 mm").optional(),
+  sheetSize: z.enum(["A4", "Letter"], "Elige el tamaño de hoja: A4 o Carta").optional(),
+  ticketFooter: z
+    .string()
+    .trim()
+    .min(1, "Escribe la frase al pie del ticket")
+    .max(280, "La frase al pie admite hasta 280 caracteres")
+    .optional(),
+  // Las condiciones del presupuesto: vacías, esa sección no sale en la hoja.
+  budgetValidDays: z
+    .number("Escribe los días de vigencia")
+    .int("Escribe los días de vigencia en un número entero")
+    .min(1, "La vigencia es de 1 a 365 días")
+    .max(365, "La vigencia es de 1 a 365 días")
+    .optional(),
+  budgetPaymentTerms: z.string().trim().max(2000, "Escribe como mucho 2000 caracteres.").nullish(),
+  budgetChangeTerms: z.string().trim().max(2000, "Escribe como mucho 2000 caracteres.").nullish(),
 })
 
 type AuditRow = typeof auditEvent.$inferSelect
@@ -224,9 +294,18 @@ export function createApp(deps: AppDeps) {
   const orgEvents = createOrgEventsHub(deps.listenUrl)
   // «Su enlace» de cada persona vive en el subdominio de su clínica: los
   // mensajes y las plantillas de WhatsApp que lo llevan leen esta dirección.
-  configurePublicLinks({ webURL: deps.webURL, cookieDomain: deps.cookieDomain, productDomains: deps.productDomains ?? {} })
+  configurePublicLinks({
+    webURL: deps.webURL,
+    cookieDomain: deps.cookieDomain,
+    productDomains: deps.productDomains ?? {},
+  })
+  configureDocumentChecks(deps.secretsKey)
+  configureDocumentLogos(deps.storage)
   // Cada producto en su dominio: odentIA en `cookieDomain` y latidIA en el suyo.
-  const domains: Partial<Record<ClinicalProduct, string>> = { dental: deps.cookieDomain, ...deps.productDomains }
+  const domains: Partial<Record<ClinicalProduct, string>> = {
+    dental: deps.cookieDomain,
+    ...deps.productDomains,
+  }
   const adminOrigin = new URL(deps.adminURL).origin
   // Los orígenes de confianza de odentIA y, llevados a su dominio, los de cada otro producto (sin la administración).
   const trustedOrigins = [
@@ -238,14 +317,21 @@ export function createApp(deps: AppDeps) {
   // El puerto es opcional: prod sirve en 443 (sin puerto en Origin) y el
   // harness e2e expone el proxy en :4463.
   const tenantOrigins = Object.values(domains).flatMap((domain) =>
-    domain ? [new RegExp(`^https://[a-z0-9-]+\\.${domain.replace(/^\./, "").replaceAll(".", "\\.")}(:\\d+)?$`)] : [],
+    domain
+      ? [
+          new RegExp(
+            `^https://[a-z0-9-]+\\.${domain.replace(/^\./, "").replaceAll(".", "\\.")}(:\\d+)?$`,
+          ),
+        ]
+      : [],
   )
   /**
    * El producto del dominio de la petición: el de la clínica que nace ahí y el
    * de una solicitud de Fundadores (entrega 3 del issue 229). Fuera de los
    * dominios conocidos, odentIA.
    */
-  const productOfRequest = (c: Context): ClinicalProduct => productOfHost(new URL(c.req.url).hostname, domains) ?? "dental"
+  const productOfRequest = (c: Context): ClinicalProduct =>
+    productOfHost(new URL(c.req.url).hostname, domains) ?? "dental"
   /** El panel de un producto: el de odentIA llevado a su dominio. Sin ese dominio, el de odentIA. */
   const panelUrlOf = (product: ClinicalProduct): string => {
     const domain = domains[product]
@@ -261,7 +347,9 @@ export function createApp(deps: AppDeps) {
     "*",
     cors({
       origin: (origin) =>
-        trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin)) ? origin : "",
+        trustedOrigins.includes(origin) || tenantOrigins.some((pattern) => pattern.test(origin))
+          ? origin
+          : "",
       credentials: true,
       // El nombre de un archivo que se descarga (un CSV de Reportes, un papel en PDF) lo dice el servidor.
       exposeHeaders: ["Content-Disposition"],
@@ -278,14 +366,18 @@ export function createApp(deps: AppDeps) {
     const origin = c.req.header("origin")
     const readOnly = c.req.method === "GET" || c.req.method === "HEAD"
     if ((origin && origin !== adminOrigin) || (!readOnly && origin !== adminOrigin)) {
-      return c.json(errorBody(c, "ADMIN_ORIGIN_REQUIRED", "Abre esta operación desde la administración"), 403)
+      return c.json(
+        errorBody(c, "ADMIN_ORIGIN_REQUIRED", "Abre esta operación desde la administración"),
+        403,
+      )
     }
     c.header("Cache-Control", "no-store")
     await next()
   })
 
   app.onError((err, c) => {
-    if (err instanceof ServiceError) return c.json(errorBody(c, err.code, err.message), err.status)
+    if (err instanceof ServiceError)
+      return c.json(errorBody(c, err.code, err.message, err.fields), err.status)
     console.error(err)
     return c.json(errorBody(c, "INTERNAL", "Error interno"), 500)
   })
@@ -311,7 +403,10 @@ export function createApp(deps: AppDeps) {
     return next()
   })
 
-  app.use("/api/auth/organization/*", createSaasPreAuthGuard({ ...deps, productOf: productOfRequest }))
+  app.use(
+    "/api/auth/organization/*",
+    createSaasPreAuthGuard({ ...deps, productOf: productOfRequest }),
+  )
   app.use("/api/auth/*", createAdminFactorBoundary(deps))
 
   // Better Auth: montado ANTES de los guards.
@@ -319,32 +414,51 @@ export function createApp(deps: AppDeps) {
 
   app.use("/api/admin/*", requireAdminContext(deps))
   app.route("/api/admin/access", createAdminCoreRoute(deps))
-  app.route("/api/admin/organizations", createAdminOrganizationsRoute({
-    ...deps,
-    panelUrlOf,
-    getBillingSummary: getOrganizationBillingSummary,
-    startTrial: startSaasTrial,
-  }))
+  app.route(
+    "/api/admin/organizations",
+    createAdminOrganizationsRoute({
+      ...deps,
+      panelUrlOf,
+      getBillingSummary: getOrganizationBillingSummary,
+      startTrial: startSaasTrial,
+    }),
+  )
   app.route("/api/admin/billing", createSaasBillingRoute(deps))
   app.route("/api/admin/demos", createAdminDemosRoute(deps))
   app.route("/api/admin/imports", createAdminImportsRoute(deps))
   app.route("/api/admin/support", createAdminSupportRoute(deps))
   app.route("/api/admin/consumer-complaints", createAdminConsumerComplaintsRoute(deps))
-  app.route("/api/admin/waitlist", createAdminFoundersRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf, replyTo: deps.foundersEmail }))
-  app.get("/api/admin/overview", (c) => runService(c, 200, () =>
-    deps.ownerDb.transaction((tx) =>
-      getBackofficeOverview(tx, adminContextOf(c), {
-        ...(deps.addressProviders?.paciente && deps.geoapifyDailyLimit ? { geoapifyDailyLimit: deps.geoapifyDailyLimit } : {}),
-        expectBackups: deps.expectBackups === true,
-      }),
+  app.route(
+    "/api/admin/waitlist",
+    createAdminFoundersRoute({
+      ownerDb: deps.ownerDb,
+      mailer: deps.mailer,
+      panelUrlOf,
+      replyTo: deps.foundersEmail,
+    }),
+  )
+  app.get("/api/admin/overview", (c) =>
+    runService(c, 200, () =>
+      deps.ownerDb.transaction((tx) =>
+        getBackofficeOverview(tx, adminContextOf(c), {
+          ...(deps.addressProviders?.paciente && deps.geoapifyDailyLimit
+            ? { geoapifyDailyLimit: deps.geoapifyDailyLimit }
+            : {}),
+          expectBackups: deps.expectBackups === true,
+        }),
+      ),
     ),
-  ))
-  app.all("/api/admin/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso administrativo no encontrado"), 404))
+  )
+  app.all("/api/admin/*", (c) =>
+    c.json(errorBody(c, "NOT_FOUND", "Recurso administrativo no encontrado"), 404),
+  )
   app.route("/api/account/admin-access", createAccountAdminAccessRoute(deps))
   app.route("/api/account/billing", createAccountBillingRoute(deps))
   app.route("/api/account/support", createAccountSupportRoute(deps))
   app.route("/api/account", createAccountRoute(deps))
-  app.all("/api/account/*", (c) => c.json(errorBody(c, "NOT_FOUND", "Recurso de cuenta no encontrado"), 404))
+  app.all("/api/account/*", (c) =>
+    c.json(errorBody(c, "NOT_FOUND", "Recurso de cuenta no encontrado"), 404),
+  )
 
   app.route(
     "/api/public/patient-registration",
@@ -364,7 +478,10 @@ export function createApp(deps: AppDeps) {
     }),
   )
   // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.
-  app.route("/api/public/sign-up", createPublicSignUpRoute({ ownerDb: deps.ownerDb, productOf: productOfRequest }))
+  app.route(
+    "/api/public/sign-up",
+    createPublicSignUpRoute({ ownerDb: deps.ownerDb, productOf: productOfRequest }),
+  )
   // Fundadores (issue 165): precios que publica la web, solicitudes de la lista de espera y la invitación.
   app.route(
     "/api/public/founders",
@@ -387,13 +504,30 @@ export function createApp(deps: AppDeps) {
       remoteAddress: deps.registrationRemoteAddress,
     }),
   )
-  app.route("/api/public/automations", createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }))
-  app.route("/api/public/report-digest", createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }))
-  app.route("/api/public/calendar", createPublicCalendarRoute({
+  app.route(
+    "/api/public/automations",
+    createPublicAutomationsRoute({ db, ownerDb: deps.ownerDb, secretsKey: deps.secretsKey }),
+  )
+  app.route(
+    "/api/public/report-digest",
+    createPublicReportDigestRoute({ db, secretsKey: deps.secretsKey }),
+  )
+  app.route(
+    "/api/public/documents",
+    createPublicDocumentsRoute({
+      db,
+      secretsKey: deps.secretsKey,
+      remoteAddress: deps.registrationRemoteAddress,
+    }),
+  )
+  app.route(
+    "/api/public/calendar",
+    createPublicCalendarRoute({
       db,
       ownerDb: deps.ownerDb,
       ...(deps.registrationRemoteAddress ? { remoteAddress: deps.registrationRemoteAddress } : {}),
-    }))
+    }),
+  )
   app.route(
     "/api/public/booking",
     createPublicBookingRoute({
@@ -439,14 +573,27 @@ export function createApp(deps: AppDeps) {
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
     if (!(file instanceof File)) {
-      return c.json(errorBody(c, "VALIDATION", "Adjunta un archivo"), 400)
+      return c.json(
+        errorBody(c, "VALIDATION", "Adjunta un archivo", { file: "Adjunta un archivo" }),
+        400,
+      )
     }
     const ext = AVATAR_MIME[file.type]
     if (!ext) {
-      return c.json(errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP"), 400)
+      return c.json(
+        errorBody(c, "VALIDATION", "Solo se admiten PNG, JPG o WebP", {
+          file: "Solo se admiten PNG, JPG o WebP",
+        }),
+        400,
+      )
     }
     if (file.size > AVATAR_MAX_BYTES) {
-      return c.json(errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB"), 400)
+      return c.json(
+        errorBody(c, "VALIDATION", "La imagen no puede superar 2 MB", {
+          file: "La imagen no puede superar 2 MB",
+        }),
+        400,
+      )
     }
     const userId = (c as Context).get("userId") as string
     const previousImage = (c as Context).get("userImage") as string | null
@@ -469,9 +616,7 @@ export function createApp(deps: AppDeps) {
     const parsed = z
       .object({ countryCode: z.string().regex(/^[A-Za-z]{2}$/) })
       .safeParse(c.req.query())
-    if (!parsed.success) {
-      return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Datos inválidos"), 400)
-    }
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     return c.json({ data: regionPresetForCountry(parsed.data.countryCode) })
   })
 
@@ -506,13 +651,15 @@ export function createApp(deps: AppDeps) {
     return requireOrgContext(deps)(c, next)
   })
   guarded.use("*", async (c, next) => {
-    if (isWebhook(c) || c.req.method === "GET" || c.req.method === "HEAD" || c.req.path.startsWith("/api/help/")) return next()
+    if (
+      isWebhook(c) ||
+      c.req.method === "GET" ||
+      c.req.method === "HEAD" ||
+      c.req.path.startsWith("/api/help/")
+    )
+      return next()
     return requireSaasAccess(db, "operar")(c, next)
   })
-
-  function validationError(c: Context, issues: z.ZodIssue[]) {
-    return c.json(errorBody(c, "VALIDATION", issues[0]?.message ?? "Datos inválidos"), 400)
-  }
 
   guarded.get("/org-profile", async (c) => {
     const { orgId } = orgContextOf(c)
@@ -524,7 +671,13 @@ export function createApp(deps: AppDeps) {
         .limit(1)
       // El logo de la clínica viaja con sus datos: se sube en «Datos de la clínica». El nombre de su
       // agente de recepción también: todas las pantallas lo dicen y vale solo para esta clínica.
-      return found ? { ...found, logo: await getClinicLogo(tx, orgId), receptionName: (await getAgentConfig(tx, orgId)).personaName } : null
+      return found
+        ? {
+            ...found,
+            logo: await getClinicLogo(tx, orgId),
+            receptionName: (await getAgentConfig(tx, orgId)).personaName,
+          }
+        : null
     })
     return c.json({ data: row })
   })
@@ -537,10 +690,28 @@ export function createApp(deps: AppDeps) {
     }
     const form = await c.req.formData().catch(() => null)
     const file = form?.get("file")
-    if (!(file instanceof File)) return c.json(errorBody(c, "VALIDATION", "Adjunta la imagen del logo"), 400)
+    if (!(file instanceof File))
+      return c.json(
+        errorBody(c, "VALIDATION", "Adjunta la imagen del logo", {
+          file: "Adjunta la imagen del logo",
+        }),
+        400,
+      )
     const ext = CLINIC_LOGO_MIME_EXT[file.type]
-    if (!ext) return c.json(errorBody(c, "VALIDATION", "El logo debe ser PNG, JPG o WebP"), 400)
-    if (file.size > CLINIC_LOGO_MAX_BYTES) return c.json(errorBody(c, "VALIDATION", "El logo no puede superar 2 MB"), 400)
+    if (!ext)
+      return c.json(
+        errorBody(c, "VALIDATION", "El logo debe ser PNG, JPG o WebP", {
+          file: "El logo debe ser PNG, JPG o WebP",
+        }),
+        400,
+      )
+    if (file.size > CLINIC_LOGO_MAX_BYTES)
+      return c.json(
+        errorBody(c, "VALIDATION", "El logo no puede superar 2 MB", {
+          file: "El logo no puede superar 2 MB",
+        }),
+        400,
+      )
     // Va a la carpeta de la clínica dentro del bucket público de imágenes.
     const { url } = await deps.storage.putAvatar({
       userId: clinicLogoFolder(orgId),
@@ -550,7 +721,8 @@ export function createApp(deps: AppDeps) {
     })
     return runService(c, 200, async () => {
       const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, url))
-      if (saved.previous) await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
+      if (saved.previous)
+        await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
       return { logo: saved.logo }
     })
   })
@@ -562,7 +734,8 @@ export function createApp(deps: AppDeps) {
     }
     return runService(c, 200, async () => {
       const saved = await withOrgContext(db, orgId, (tx) => setClinicLogo(tx, orgId, userId, null))
-      if (saved.previous) await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
+      if (saved.previous)
+        await deps.storage.deleteByUrl(saved.previous, clinicLogoFolder(orgId)).catch(() => {})
       return { logo: null }
     })
   })
@@ -576,55 +749,76 @@ export function createApp(deps: AppDeps) {
     if (!parsed.success) return validationError(c, parsed.error.issues)
     const input = parsed.data
 
-    return runService(c, 200, () => withOrgContext(db, orgId, async (tx) => {
-      const [current] = await tx
-        .select({ id: orgProfile.organizationId })
-        .from(orgProfile)
-        .where(eq(orgProfile.organizationId, orgId))
-        .for("update")
-      const { countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, applyCountryPreset, taxes, ...identity } = input
-      if (current) {
-        await tx
-          .update(orgProfile)
-          .set({ ...identity, updatedAt: new Date() })
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, async (tx) => {
+        const [current] = await tx
+          .select({ id: orgProfile.organizationId })
+          .from(orgProfile)
           .where(eq(orgProfile.organizationId, orgId))
-      } else {
-        // El perfil nace con su región explícita: la base no asume ningún país. Y
-        // con el producto del dominio donde se creó la clínica, que ya no cambia.
-        await tx
-          .insert(orgProfile)
-          .values({
+          .for("update")
+        const {
+          countryCode,
+          currency,
+          timezone,
+          locale,
+          receiptWidth,
+          sheetSize,
+          ticketFooter,
+          applyCountryPreset,
+          taxes,
+          ...identity
+        } = input
+        if (current) {
+          await tx
+            .update(orgProfile)
+            .set({ ...identity, updatedAt: new Date() })
+            .where(eq(orgProfile.organizationId, orgId))
+        } else {
+          // El perfil nace con su región explícita: la base no asume ningún país. Y
+          // con el producto del dominio donde se creó la clínica, que ya no cambia.
+          await tx.insert(orgProfile).values({
             organizationId: orgId,
             product: productOfRequest(c),
             ...identity,
             ...initialOrgRegion({ countryCode, currency, timezone, locale, sheetSize }),
           })
-      }
-      const updated = await updateOrgRegion(tx, orgId, userId, {
-        countryCode, currency, timezone, locale, receiptWidth, sheetSize, ticketFooter, taxes,
-        applyCountryPreset: applyCountryPreset ?? !current,
-      })
-      // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
-      if (!current) await turnOnNewClinicLines(tx, orgId, userId)
-      // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
-      if (!current) await ensureClinicSpecialties(tx, orgId)
-      await tx.insert(auditEvent).values({
-        organizationId: orgId,
-        actorUserId: userId,
-        action: "org_profile.upsert",
-        entity: "org_profile",
-        entityId: orgId,
-        metadata: input,
-      })
-      return updated
-    }))
+        }
+        const updated = await updateOrgRegion(tx, orgId, userId, {
+          countryCode,
+          currency,
+          timezone,
+          locale,
+          receiptWidth,
+          sheetSize,
+          ticketFooter,
+          taxes,
+          applyCountryPreset: applyCountryPreset ?? !current,
+        })
+        // Una clínica nueva trae prendido «Recordar la cita», a nombre de quien la crea (ADR 0026).
+        if (!current) await turnOnNewClinicLines(tx, orgId, userId)
+        // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
+        if (!current) await ensureClinicSpecialties(tx, orgId)
+        await tx.insert(auditEvent).values({
+          organizationId: orgId,
+          actorUserId: userId,
+          action: "org_profile.upsert",
+          entity: "org_profile",
+          entityId: orgId,
+          metadata: input,
+        })
+        return updated
+      }),
+    )
   })
 
   // Lista de diagnósticos de la clínica (decisión 26): los nuevos se eligen en ella; nada se reescribe.
   guarded.put("/org-profile/diagnosis-system", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     if (!canAccess(memberRole, "settings.write")) {
-      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar la lista de diagnósticos"), 403)
+      return c.json(
+        errorBody(c, "FORBIDDEN", "No tienes permiso para cambiar la lista de diagnósticos"),
+        403,
+      )
     }
     const parsed = z
       .object({ diagnosisSystem: z.string().min(1).max(20) })
@@ -632,7 +826,9 @@ export function createApp(deps: AppDeps) {
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, (tx) => setOrgDiagnosisSystem(tx, orgId, userId, parsed.data.diagnosisSystem)),
+      withOrgContext(db, orgId, (tx) =>
+        setOrgDiagnosisSystem(tx, orgId, userId, parsed.data.diagnosisSystem),
+      ),
     )
   })
 
@@ -664,7 +860,9 @@ export function createApp(deps: AppDeps) {
     }
     const parsed = branchInput.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 201, () => withOrgContext(db, orgId, (tx) => createBranch(tx, orgId, userId, parsed.data)))
+    return runService(c, 201, () =>
+      withOrgContext(db, orgId, (tx) => createBranch(tx, orgId, userId, parsed.data)),
+    )
   })
 
   guarded.patch("/branches/:id", async (c) => {
@@ -675,7 +873,9 @@ export function createApp(deps: AppDeps) {
     const id = c.req.param("id")
     const parsed = branchPatch.safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
-    return runService(c, 200, () => withOrgContext(db, orgId, (tx) => updateBranch(tx, orgId, userId, id, parsed.data)))
+    return runService(c, 200, () =>
+      withOrgContext(db, orgId, (tx) => updateBranch(tx, orgId, userId, id, parsed.data)),
+    )
   })
 
   guarded.delete("/branches/:id", async (c) => {
@@ -684,7 +884,9 @@ export function createApp(deps: AppDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para desactivar sedes"), 403)
     }
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), false)),
+      withOrgContext(db, orgId, (tx) =>
+        setBranchActive(tx, orgId, userId, c.req.param("id"), false),
+      ),
     )
   })
 
@@ -695,7 +897,9 @@ export function createApp(deps: AppDeps) {
       return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para reactivar sedes"), 403)
     }
     return runService(c, 200, () =>
-      withOrgContext(db, orgId, (tx) => setBranchActive(tx, orgId, userId, c.req.param("id"), true)),
+      withOrgContext(db, orgId, (tx) =>
+        setBranchActive(tx, orgId, userId, c.req.param("id"), true),
+      ),
     )
   })
 
@@ -713,7 +917,11 @@ export function createApp(deps: AppDeps) {
             .where(
               and(
                 eq(auditEvent.organizationId, orgId),
-                inArray(auditEvent.action, ["message.created", "message.updated", ...CONVERSATION_STATE_ACTIONS]),
+                inArray(auditEvent.action, [
+                  "message.created",
+                  "message.updated",
+                  ...CONVERSATION_STATE_ACTIONS,
+                ]),
                 gt(auditEvent.createdAt, new Date(lastEventId)),
               ),
             )
@@ -767,7 +975,10 @@ export function createApp(deps: AppDeps) {
       webURL: deps.webURL,
     }),
   )
-  guarded.route("/team/two-factor", createTeamTwoFactorRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf }))
+  guarded.route(
+    "/team/two-factor",
+    createTeamTwoFactorRoute({ ownerDb: deps.ownerDb, mailer: deps.mailer, panelUrlOf }),
+  )
   guarded.route("/conversations", createConversationsRoute(crmDeps))
   guarded.route("/contacts", createContactsRoute(crmDeps))
   guarded.route("/crm", createCrmWorkspaceRoute(crmDeps))
@@ -781,10 +992,16 @@ export function createApp(deps: AppDeps) {
   guarded.route("/promotions", createPromotionsRoute(crmDeps))
   guarded.route("/commissions", createCommissionsRoute(crmDeps))
   guarded.route("/diagnosis-codes", createDiagnosisCodesRoute(crmDeps))
-  guarded.route("/address", createAddressRoute({ db: deps.db, providers: deps.addressProviders ?? {} }))
+  guarded.route(
+    "/address",
+    createAddressRoute({ db: deps.db, providers: deps.addressProviders ?? {} }),
+  )
   guarded.route("/pipelines", createPipelinesRoute(crmDeps))
   guarded.route("/channels/connections", createConnectionsRoute(crmDeps))
-  guarded.route("/channels/whatsapp/signup", createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }))
+  guarded.route(
+    "/channels/whatsapp/signup",
+    createWhatsAppSignupRoute({ ...crmDeps, meta: deps.metaSignup }),
+  )
   guarded.route("/agent", createAgentRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb }))
   guarded.route("/tasks", createTasksRoute(crmDeps))
   guarded.route("/agenda/calendar", createCalendarFeedRoute(crmDeps))
@@ -797,11 +1014,29 @@ export function createApp(deps: AppDeps) {
   guarded.route("/reports", createReportsRoute({ ...crmDeps, llm, decisions: deps.decisions }))
   guarded.route("/inventory", createInventoryRoute(crmDeps))
   guarded.route("/opportunities", createOpportunitiesRoute(crmDeps))
-  guarded.route("/help", createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }))
-  guarded.route("/agent/admin", createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }))
+  guarded.route(
+    "/help",
+    createHelpRoute({ ...crmDeps, appVersion: process.env["APP_VERSION"] ?? null }),
+  )
+  guarded.route(
+    "/agent/admin",
+    createAgentAdminRoute({ ...crmDeps, llm, decisions: deps.decisions }),
+  )
   guarded.route("/agent/knowledge", createAgentKnowledgeRoute(crmDeps))
-  guarded.route("/agent/learning", createAgentLearningRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions }))
-  guarded.route("/agent", createAgentOpsRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions, embedder: deps.embedder }))
+  guarded.route(
+    "/agent/learning",
+    createAgentLearningRoute({ ...crmDeps, llm, ownerDb: deps.ownerDb, decisions: deps.decisions }),
+  )
+  guarded.route(
+    "/agent",
+    createAgentOpsRoute({
+      ...crmDeps,
+      llm,
+      ownerDb: deps.ownerDb,
+      decisions: deps.decisions,
+      embedder: deps.embedder,
+    }),
+  )
   guarded.route("/finance", createFinanceRoute(crmDeps))
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(

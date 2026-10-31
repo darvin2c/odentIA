@@ -4,14 +4,15 @@
  * atención que cambió el gráfico y, para lo judicial, lo personal y el
  * reingreso, «Firmar odontograma». Fuera de Perú se imprime una hoja neutra.
  */
+
+import { apiFetch } from "@odentia/clinic-app/lib/api"
+import type { SiteFinding } from "@odentia/clinic-app/lib/patients"
 import {
   activeFindingsAsOf,
   type FindingDetails,
   type ManualOdontogramPurpose,
   type SignedOdontogramPurpose,
 } from "@odentia/dental"
-import { apiFetch } from "@odentia/clinic-app/lib/api"
-import type { SiteFinding } from "@odentia/clinic-app/lib/patients"
 
 /** Un hallazgo del odontograma, con lo propio de odentIA (sus detalles, su revisión, lo que lo dejó). */
 export interface OdontogramEntry extends SiteFinding {
@@ -117,13 +118,19 @@ export interface PrintEstablishment {
   fiscalDocType: string | null
   fiscalDocNumber: string | null
   address: string | null
+  logo?: string | null
+  /** Con una sola sede, su nombre y su teléfono. */
+  branchName?: string | null
+  phone?: string | null
 }
 
 function base(patientId: string): string {
   return `/api/patients/${patientId}/odontogram`
 }
 
-export function fetchSignedOdontograms(patientId: string): Promise<{ data: OdontogramAssessment[] }> {
+export function fetchSignedOdontograms(
+  patientId: string,
+): Promise<{ data: OdontogramAssessment[] }> {
   return apiFetch<{ data: OdontogramAssessment[] }>(`${base(patientId)}/assessments`)
 }
 
@@ -142,7 +149,13 @@ export function fetchSignedOdontogramPrint(
   patientId: string,
   assessmentId: string,
 ): Promise<{
-  data: { assessment: OdontogramAssessment; patient: PrintPatient; establishment: PrintEstablishment | null }
+  data: {
+    assessment: OdontogramAssessment
+    patient: PrintPatient
+    establishment: PrintEstablishment | null
+    /** La dirección del QR; null: el papel sale sin QR. */
+    checkUrl: string | null
+  }
 }> {
   return apiFetch(`${base(patientId)}/assessments/${assessmentId}/print`)
 }

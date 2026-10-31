@@ -9,33 +9,61 @@ import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-grou
  * opciones ocupan celdas iguales (textos largos o muchas opciones) en vez de
  * ir una detrás de otra. Con `onClear`, tocar otra vez lo elegido lo desmarca
  * (el examen por sistemas vuelve a «No examinado»).
+ *
+ * No pinta etiqueta: el grupo se nombra desde fuera, con `aria-labelledby`
+ * hacia el texto visible que lo nombra (o la leyenda del `FieldSet` que lo
+ * envuelve) o con `aria-label` cuando no hay texto visible. `id` va en la raíz
+ * del grupo; `invalid` marca la raíz y cada opción, y `onBlur` avisa al salir
+ * del grupo (no al pasar de una opción a otra). Con `id`, cada opción lleva
+ * `${id}-${valor}`.
  */
 export function ChoiceButtons<T extends string>({
+  id,
   value,
   options,
   onChange,
   onClear,
-  label,
   tone = "neutral",
   columns,
   disabled = false,
+  invalid = false,
+  onBlur,
   className,
+  ...aria
 }: {
+  id?: string
   value: T | null
   options: ReadonlyArray<{ value: T; label: string }>
   onChange: (value: T) => void
   /** Tocar otra vez lo elegido lo desmarca; sin él, lo elegido se queda. */
   onClear?: () => void
-  /** Nombre accesible del grupo cuando no lo da una etiqueta visible. */
-  label: string
   tone?: "neutral" | "primary"
   columns?: 2 | 3 | 4
   disabled?: boolean
+  invalid?: boolean
+  /** Al salir del grupo. */
+  onBlur?: () => void
+  /** Id del texto visible que nombra al grupo. */
+  "aria-labelledby"?: string
+  /** Nombre accesible cuando no hay un texto visible que lo nombre. */
+  "aria-label"?: string
+  "aria-describedby"?: string
   className?: string
 }) {
   return (
     <ToggleGroup
-      aria-label={label}
+      id={id}
+      aria-label={aria["aria-label"]}
+      aria-labelledby={aria["aria-labelledby"]}
+      aria-describedby={aria["aria-describedby"]}
+      aria-invalid={invalid || undefined}
+      onBlur={
+        onBlur
+          ? (event: React.FocusEvent<HTMLDivElement>) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
       value={value ? [value] : []}
       onValueChange={(next: unknown[]) => {
         const picked = next[0]
@@ -45,7 +73,7 @@ export function ChoiceButtons<T extends string>({
       disabled={disabled}
       spacing={1}
       className={cn(
-        "max-w-full rounded-3xl bg-muted p-1",
+        "max-w-full rounded-3xl bg-muted p-1 aria-invalid:ring-1 aria-invalid:ring-destructive",
         columns ? "grid w-full" : "flex-wrap",
         columns === 2 && "grid-cols-2",
         columns === 3 && "grid-cols-3",
@@ -57,6 +85,8 @@ export function ChoiceButtons<T extends string>({
         <ToggleGroupItem
           key={option.value}
           value={option.value}
+          id={id ? `${id}-${option.value}` : undefined}
+          aria-invalid={invalid || undefined}
           className={itemClass(Boolean(columns), tone)}
         >
           {option.label}

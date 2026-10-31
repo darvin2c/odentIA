@@ -90,6 +90,8 @@ async function rasterize(
 export async function renderAdjustedImage(
   value: ImageAdjustValue,
   size = ADJUSTED_IMAGE_SIZE,
+  /** PNG siempre: lo que también se imprime en un PDF, que no lee WebP (el logo de la clínica). */
+  options: { png?: boolean } = {},
 ): Promise<{ blob: Blob; ext: "webp" | "jpg" | "png" }> {
   const image = await loadImage(value.source)
   const { area } = value
@@ -115,6 +117,11 @@ export async function renderAdjustedImage(
     canvas.width,
     canvas.height,
   )
+  if (options.png) {
+    const png = await canvasBlob(canvas, "image/png", 1)
+    if (!png) throw new Error("No se pudo generar la imagen.")
+    return { blob: png, ext: "png" }
+  }
   const webp = await canvasBlob(canvas, "image/webp", 0.86)
   if (webp?.type === "image/webp") return { blob: webp, ext: "webp" }
   const fallbackType = value.shape === "person" ? "image/jpeg" : "image/png"
@@ -132,6 +139,11 @@ export interface ImageAdjustProps {
   disabled?: boolean
   /** Imagen con la que empieza (stories y pruebas). */
   defaultSource?: string
+  /** Del campo del formulario: va a la raíz (los botones conservan su propio nombre). */
+  id?: string
+  /** El campo tiene un error (falta la imagen, el servidor la rechazó). */
+  invalid?: boolean
+  "aria-describedby"?: string
 }
 
 /**
@@ -148,8 +160,12 @@ export function ImageAdjust({
   onChange,
   disabled = false,
   defaultSource,
+  id: fieldId,
+  invalid = false,
+  "aria-describedby": describedBy,
 }: ImageAdjustProps) {
   const id = useId()
+  const errorId = `${id}-error`
   const types = shape === "logo" ? LOGO_TYPES : PERSON_TYPES
   const [source, setSource] = useState<string | null>(defaultSource ?? null)
   const [error, setError] = useState<string | null>(null)
@@ -225,7 +241,7 @@ export function ImageAdjust({
 
   const locked = disabled || busy
   return (
-    <div className="flex flex-col gap-4">
+    <div id={fieldId} className="flex flex-col gap-4">
       <input
         ref={fileInput}
         id={`${id}-file`}
@@ -281,7 +297,15 @@ export function ImageAdjust({
               <RotateCw aria-hidden />
               Girar
             </Button>
-            <Button type="button" variant="ghost" size="sm" disabled={locked} onClick={reset}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-invalid={invalid || undefined}
+              aria-describedby={describedBy}
+              disabled={locked}
+              onClick={reset}
+            >
               Volver a elegir
             </Button>
           </div>
@@ -302,7 +326,7 @@ export function ImageAdjust({
           }}
           className={cn(
             "flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed p-6 text-center transition-colors",
-            dragging ? "border-primary bg-primary-soft" : "border-border bg-muted/40",
+            dragging ? "border-primary bg-primary-soft" : invalid ? "border-destructive" : "border-border bg-muted/40",
           )}
         >
           <ImageUp aria-hidden className="size-8 text-muted-foreground" />
@@ -319,6 +343,8 @@ export function ImageAdjust({
             <Button
               type="button"
               variant="secondary"
+              aria-invalid={invalid || undefined}
+              aria-describedby={[describedBy, error ? errorId : null].filter(Boolean).join(" ") || undefined}
               disabled={locked}
               onClick={() => fileInput.current?.click()}
             >
@@ -339,7 +365,7 @@ export function ImageAdjust({
         </section>
       )}
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p id={errorId} role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}

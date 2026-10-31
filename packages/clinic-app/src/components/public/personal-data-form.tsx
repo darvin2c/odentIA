@@ -188,6 +188,8 @@ export function PersonalDataForm({
             await send.mutateAsync(input)
           } catch (error) {
             if (error instanceof ApiError && error.shape.code === "DATA_ALREADY_SENT") return
+            // Lo que es de un dato, el cuestionario lo dice en su campo.
+            if (error instanceof ApiError && Object.keys(error.shape.fields ?? {}).length > 0) throw error
             throw new Error(
               error instanceof ApiError
                 ? (error.shape.message ?? "No pudimos guardar tus datos.")

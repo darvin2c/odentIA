@@ -21,7 +21,7 @@ import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, lte } from "drizzle-orm"
 import { setMessageChoice } from "./automation.js"
 import { SWITCHABLE_PURPOSES } from "./automation-messages.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
@@ -83,16 +83,17 @@ export function dataRequestDueOn(requestedOn: string): string {
   return addCalendarDays(requestedOn, DATA_REQUEST_DAYS)
 }
 
-function assertDay(value: string, label: string): string {
+/** `field`: el nombre del dato en el cuerpo, para decir el error junto a él. */
+function assertDay(value: string, label: string, field: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
-    throw validation(`${label}: fecha inválida`)
+    throw invalidField(field, `${label}: fecha inválida`)
   return value
 }
 
-function cleanText(value: string | null | undefined, label: string, max: number): string | null {
+function cleanText(value: string | null | undefined, label: string, max: number, field: string): string | null {
   const text = (value ?? "").trim()
   if (!text) return null
-  if (text.length > max) throw validation(`${label} admite hasta ${max} caracteres`)
+  if (text.length > max) throw invalidField(field, `${label} admite hasta ${max} caracteres`)
   return text
 }
 
@@ -138,22 +139,21 @@ export async function createDataRequest(
   input: CreateDataRequestInput,
 ): Promise<DataRequestItem> {
   await requirePatient(tx, orgId, patientId)
-  if (!(DATA_REQUEST_KINDS as readonly string[]).includes(input.kind)) throw validation("Elige qué pide")
-  if (!(DATA_REQUEST_CHANNELS as readonly string[]).includes(input.channel)) throw validation("Elige por dónde llegó")
+  if (!(DATA_REQUEST_KINDS as readonly string[]).includes(input.kind)) throw invalidField("kind", "Elige qué pide")
+  if (!(DATA_REQUEST_CHANNELS as readonly string[]).includes(input.channel))
+    throw invalidField("channel", "Elige por dónde llegó")
   const kind = input.kind as DataRequestKind
   const channel = input.channel as DataRequestChannel
   const recipients = await listDecisionRecipients(tx, orgId, patientId)
   const requester = recipients.find((r) => r.contactId === input.requesterContactId)
-  if (!requester)
-    throw new ServiceError(
-      "DATA_REQUEST_NOT_AUTHORIZED",
-      403,
-      "Solo lo pide la propia persona, si es mayor de edad, o su representante legal vigente",
-    )
+  if (!requester) {
+    const message = "Solo lo pide la propia persona, si es mayor de edad, o su representante legal vigente"
+    throw new ServiceError("DATA_REQUEST_NOT_AUTHORIZED", 403, message, { requesterContactId: message })
+  }
   const today = await clinicToday(tx, orgId)
-  const requestedOn = input.requestedOn ? assertDay(input.requestedOn, "Cuándo lo pidió") : today
-  if (requestedOn > today) throw validation("Cuándo lo pidió: no puede ser una fecha futura")
-  const said = cleanText(input.said, "Lo que dijo", 1000)
+  const requestedOn = input.requestedOn ? assertDay(input.requestedOn, "Cuándo lo pidió", "requestedOn") : today
+  if (requestedOn > today) throw invalidField("requestedOn", "Cuándo lo pidió: no puede ser una fecha futura")
+  const said = cleanText(input.said, "Lo que dijo", 1000, "said")
   // «No recibir mensajes» se cumple al registrarlo: apaga lo que la persona
   // puede apagar en el contacto del paciente (lo que recibe por él).
   const messagesOff = kind === "mensajes"
@@ -220,7 +220,7 @@ export async function verifyDataRequest(
   input: { how: string },
 ): Promise<DataRequestItem> {
   if (!(DATA_REQUEST_VERIFICATIONS as readonly string[]).includes(input.how))
-    throw validation("Elige cómo comprobaste que es ella")
+    throw invalidField("how", "Elige cómo comprobaste que es ella")
   const row = await lockPendingDataRequest(tx, orgId, patientId, requestId)
   await tx
     .update(patientDataRequest)
@@ -242,8 +242,8 @@ export async function respondDataRequest(
   requestId: string,
   input: { resolution: string },
 ): Promise<DataRequestItem> {
-  const resolution = cleanText(input.resolution, "La respuesta", 1000)
-  if (!resolution) throw validation("Escribe qué se entregó o qué se hizo")
+  const resolution = cleanText(input.resolution, "La respuesta", 1000, "resolution")
+  if (!resolution) throw invalidField("resolution", "Escribe qué se entregó o qué se hizo")
   const row = await lockPendingDataRequest(tx, orgId, patientId, requestId)
   if (!row.verifiedAt)
     throw new ServiceError("DATA_REQUEST_NOT_VERIFIED", 409, "Primero comprueba que es ella o su representante")
@@ -267,8 +267,8 @@ export async function denyDataRequest(
   requestId: string,
   input: { reason: string },
 ): Promise<DataRequestItem> {
-  const reason = cleanText(input.reason, "El motivo", 1000)
-  if (!reason) throw validation("Escribe por qué se deniega")
+  const reason = cleanText(input.reason, "El motivo", 1000, "reason")
+  if (!reason) throw invalidField("reason", "Escribe por qué se deniega")
   const row = await lockPendingDataRequest(tx, orgId, patientId, requestId)
   const now = new Date()
   await tx

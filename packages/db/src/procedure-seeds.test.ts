@@ -1,9 +1,10 @@
-import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
-import { TextDecoder } from "node:util"
 import { fileURLToPath } from "node:url"
+import { TextDecoder } from "node:util"
+import { TREATMENT_KIND_KEYS, TREATMENT_SCOPES, validateLeavesFinding } from "@odentia/dental"
 import { expect, it } from "vitest"
+import { loadPatientGuides } from "./procedure-codes.js"
 
 // Los seeds se leen como UTF-8 estricto en runtime: un byte latin-1 suelto
 // se convierte en U+FFFD silencioso (mojibake en pantalla). Estos tests lo
@@ -45,7 +46,11 @@ const RELEASES = strictRead("procedure_catalog_release.csv")
   .filter(Boolean)
   .map((line) => {
     const [systemKey, version] = line.split(",")
-    return { systemKey: systemKey!, version: version!, file: `procedure_codes_${systemKey!.toLowerCase()}.csv` }
+    return {
+      systemKey: systemKey!,
+      version: version!,
+      file: `procedure_codes_${systemKey!.toLowerCase()}.csv`,
+    }
   })
 
 const FILES = [
@@ -81,7 +86,9 @@ function head(line: string, n: number): string[] {
 
 it("una edición vigente por lista, con sha válido y expected_count que concilia sus códigos", () => {
   const systems = new Set(
-    linesOf("procedure_code_systems.csv", "key,title,publisher,country,license,source_url").map((l) => head(l, 6)[0]),
+    linesOf("procedure_code_systems.csv", "key,title,publisher,country,license,source_url").map(
+      (l) => head(l, 6)[0],
+    ),
   )
   const rows = linesOf("procedure_catalog_release.csv", RELEASE_HEADER).map((l) => head(l, 7))
   expect(new Set(rows.map((row) => row[0])).size).toBe(rows.length)
@@ -113,18 +120,32 @@ it("una edición vigente por lista, con sha válido y expected_count que concili
 })
 
 it("los códigos de cada producto existen en su lista y odentIA usa los odontológicos", () => {
-  const codes = new Map(RELEASES.map((release) => [release.systemKey, new Map(codesOf(release.file).map((c) => [c[1]!, c]))]))
-  const rows = linesOf("procedure_code_products.csv", "system_key,product,code").map((l) => head(l, 3))
+  const codes = new Map(
+    RELEASES.map((release) => [
+      release.systemKey,
+      new Map(codesOf(release.file).map((c) => [c[1]!, c])),
+    ]),
+  )
+  const rows = linesOf("procedure_code_products.csv", "system_key,product,code").map((l) =>
+    head(l, 3),
+  )
   expect(new Set(rows.map((row) => row.join(":"))).size).toBe(rows.length)
   for (const [system, product, code] of rows) {
     expect(product).toMatch(/^[a-z]+$/)
-    expect(codes.get(system!)?.has(code!), `código de un producto que no está: ${system} ${code}`).toBe(true)
+    expect(
+      codes.get(system!)?.has(code!),
+      `código de un producto que no está: ${system} ${code}`,
+    ).toBe(true)
   }
   // Cada lista tiene su parte dental.
-  const dental = (system: string) => rows.filter(([s, product]) => s === system && product === "dental").map((row) => row[2]!)
-  for (const release of RELEASES) expect(dental(release.systemKey).length, release.systemKey).toBeGreaterThan(0)
+  const dental = (system: string) =>
+    rows.filter(([s, product]) => s === system && product === "dental").map((row) => row[2]!)
+  for (const release of RELEASES)
+    expect(dental(release.systemKey).length, release.systemKey).toBeGreaterThan(0)
   // En la CPMS, lo dental son exactamente las secciones 1.3 Odontología y 2.7 Salud Bucal.
-  const bySection = [...codes.get("CPMS")!.values()].filter((c) => c[3] === "1.3" || c[3] === "2.7").map((c) => c[1]!)
+  const bySection = [...codes.get("CPMS")!.values()]
+    .filter((c) => c[3] === "1.3" || c[3] === "2.7")
+    .map((c) => c[1]!)
   expect(dental("CPMS").sort()).toEqual(bySection.sort())
   expect(bySection).toHaveLength(505)
 })
@@ -154,7 +175,18 @@ it("la biblioteca es de consultorio: claves y nombres únicos, ámbito y lo que 
   const keys = rows.map(([key]) => key!)
   expect(new Set(keys).size).toBe(keys.length)
   expect(new Set(rows.map((row) => row[9]!.toLowerCase())).size).toBe(rows.length)
-  for (const [key, kind, scope, minRaw, maxRaw, condition, variant, common, codedOnly, name] of rows) {
+  for (const [
+    key,
+    kind,
+    scope,
+    minRaw,
+    maxRaw,
+    condition,
+    variant,
+    common,
+    codedOnly,
+    name,
+  ] of rows) {
     expect(key).toMatch(/^[a-z0-9-]+$/)
     expect(TREATMENT_KIND_KEYS).toContain(kind)
     expect(TREATMENT_SCOPES).toContain(scope)
@@ -247,9 +279,37 @@ it("la lista oficial conserva sus denominaciones y la biblioteca tiene nombres p
     }),
   )
   const d2391 = library.get(keyOf.get("D2391")!)!
-  expect(d2391).toMatchObject({ scope: "surfaces", minRaw: "1", maxRaw: "1", condition: "definitive_restoration", variant: "resin" })
+  expect(d2391).toMatchObject({
+    scope: "surfaces",
+    minRaw: "1",
+    maxRaw: "1",
+    condition: "definitive_restoration",
+    variant: "resin",
+  })
   expect(d2391.name).toBe("Resina fotocurable, 1 superficie, posterior")
   expect(d2391.name).not.toBe(byCode.get("D2391"))
   // El sellante se dibuja en las caras: va por superficies (revisión del tablero 7b).
-  expect(library.get(keyOf.get("D1351")!)).toMatchObject({ scope: "surfaces", condition: "sealant" })
+  expect(library.get(keyOf.get("D1351")!)).toMatchObject({
+    scope: "surfaces",
+    condition: "sealant",
+  })
+})
+
+it("las explicaciones sugeridas: una clave que no es de la biblioteca falla antes de tocar la base", () => {
+  expect(loadPatientGuides(["endo"], '{"endo":{"how":"  Paso a paso  "}}').get("endo")).toEqual({
+    how: "Paso a paso",
+  })
+  expect(() => loadPatientGuides(["endo"], '{"no_existe":{"how":"Algo"}}')).toThrow(/no_existe/)
+  // Sembrar una sola biblioteca no choca con las claves de la otra.
+  expect(loadPatientGuides(["endo"], '{"otra":{"how":"Algo"}}', { partial: true }).size).toBe(0)
+  expect(() => loadPatientGuides(["endo"], '{"endo":{"how":"   "}}')).toThrow(/vacía/)
+  // El archivo vigente en el repositorio se lee sin error.
+  const keys = ["biblioteca.csv", "biblioteca_medica.csv"].flatMap((file) =>
+    strictRead(file)
+      .split("\n")
+      .slice(1)
+      .filter(Boolean)
+      .map((line) => line.split(",")[0]!),
+  )
+  expect(() => loadPatientGuides(keys)).not.toThrow()
 })

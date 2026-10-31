@@ -62,7 +62,6 @@ import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, validationError } from "./helpers.js"
 
 const uuid = z.string().uuid()
-const text200 = z.string().trim().min(1).max(200)
 const keySchema = z
   .string()
   .trim()
@@ -70,18 +69,30 @@ const keySchema = z
   .regex(/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/)
   .nullish()
 
+/** El nombre de una especialidad, con la voz de Configuración › Especialidades. */
+const specialtyName = z
+  .string()
+  .trim()
+  .min(1, "Escribe el nombre de la especialidad")
+  .max(120, "El nombre de la especialidad admite hasta 120 caracteres")
+const specialtyDescription = z
+  .string()
+  .trim()
+  .max(2000, "La descripción admite hasta 2000 caracteres")
+  .nullish()
+
 const specialtyCreate = z
   .object({
     key: keySchema,
-    name: text200,
-    description: z.string().trim().max(2000).nullish(),
+    name: specialtyName,
+    description: specialtyDescription,
   })
   .strict()
 
 const specialtyPatch = z
   .object({
-    name: text200.optional(),
-    description: z.string().trim().max(2000).nullish(),
+    name: specialtyName.optional(),
+    description: specialtyDescription,
     isActive: z.boolean().optional(),
   })
   .strict()
@@ -107,7 +118,7 @@ const fieldSchema: z.ZodType<unknown> = z.lazy(() =>
         "adjunto",
       ]),
       required: z.boolean().optional(),
-      options: z.array(z.string()).optional(),
+      options: z.array(z.string()).max(50, "Una pregunta admite hasta 50 opciones").optional(),
       unit: z.string().max(20).nullish(),
       min: z.number().nullish(),
       max: z.number().nullish(),
@@ -116,6 +127,8 @@ const fieldSchema: z.ZodType<unknown> = z.lazy(() =>
         .object({ field: z.string().min(1).max(50), equals: z.union([z.string(), z.boolean()]) })
         .strict()
         .nullish(),
+      // Lo que responde el paciente en el portal y pasa a sus antecedentes (`FIELD_DEFINITIONS`).
+      definition: z.enum(["AllergyIntolerance.code"]).nullish(),
     })
     .strict(),
 )
@@ -128,12 +141,15 @@ const formSchemaInput = z
           .object({
             id: z.string().min(1).max(50),
             title: z.string().min(1).max(120),
-            fields: z.array(fieldSchema).min(1).max(60),
+            fields: z
+              .array(fieldSchema)
+              .min(1, "Cada sección necesita al menos un campo")
+              .max(60, "Una sección admite hasta 60 campos"),
           })
           .strict(),
       )
-      .min(1)
-      .max(30),
+      .min(1, "Agrega al menos una sección")
+      .max(30, "El formulario admite hasta 30 secciones"),
   })
   .strict()
 
@@ -191,14 +207,35 @@ const responsePatch = z
   })
   .strict()
 
-const addendumInput = z.object({ text: z.string().trim().min(1).max(5000) }).strict()
+const addendumInput = z
+  .object({
+    text: z
+      .string()
+      .trim()
+      .min(1, "Escribe la adenda.")
+      .max(5000, "La adenda admite hasta 5000 caracteres."),
+  })
+  .strict()
+
+/** Una lista del consentimiento (una línea por elemento), con su nombre en cada mensaje. */
+const consentList = (one: string, many: string, a: "un" | "una") =>
+  z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(1, `Indica al menos ${a} ${one}`)
+        .max(500, `Cada ${one} admite hasta 500 caracteres`),
+    )
+    .min(1, `Indica al menos ${a} ${one}`)
+    .max(20, `Escribe como mucho 20 ${many}`)
 
 const consentSections = z.object({
-  procedure: z.string().trim().min(10).max(4000),
-  benefits: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
-  risks: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
-  alternatives: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
-  consequences: z.string().trim().min(10).max(4000),
+  procedure: z.string().trim().min(10, "Describe el procedimiento (al menos 10 caracteres)").max(4000),
+  benefits: consentList("beneficio", "beneficios", "un"),
+  risks: consentList("riesgo", "riesgos", "un"),
+  alternatives: consentList("alternativa", "alternativas", "una"),
+  consequences: z.string().trim().min(10, "Describe las consecuencias de no tratarse (al menos 10 caracteres)").max(4000),
   notes: z.string().trim().max(4000).nullish(),
 })
 
@@ -224,7 +261,7 @@ const consentTemplatePatch = z
 
 const consentCreate = z
   .object({
-    templateId: uuid,
+    templateId: z.uuid({ message: "Elige una plantilla publicada" }),
     patientId: uuid,
     encounterId: uuid.nullish(),
     planItemId: uuid.nullish(),
@@ -257,10 +294,11 @@ const consentSign = z
   .strict()
   .refine(
     (d) => d.method === "papel" || (d.signatureData !== null && d.signatureData !== undefined),
-    { message: "La firma manuscrita es obligatoria" },
+    { message: "La firma manuscrita es obligatoria", path: ["signatureData"] },
   )
   .refine((d) => d.method !== "papel" || Boolean(d.paperDocumentId), {
     message: "Sube la foto de la hoja firmada",
+    path: ["paperDocumentId"],
   })
 
 const consentNeedsQuery = z.object({ patientId: uuid, encounterId: uuid })
@@ -273,17 +311,21 @@ const consentPrepare = z
   })
   .strict()
 
-const consentTemplateServicesInput = z.object({ serviceIds: uuidList(100) }).strict()
+const consentTemplateServicesInput = z
+  .object({ serviceIds: z.array(uuid).max(100, "Elige como mucho 100 servicios") })
+  .strict()
 
 const consentRevoke = z
   .object({
-    reason: z.string().trim().min(1).max(2000),
+    reason: z.string().trim().min(1, "La revocación necesita un motivo").max(2000),
     revokerContactId: z.uuid({ message: "Indica quién revoca" }),
     signatureData: z.unknown(),
   })
   .strict()
 
-const consentCancel = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const consentCancel = z
+  .object({ reason: z.string().trim().min(1, "Escribe el motivo").max(2000) })
+  .strict()
 
 const orderCreate = z
   .object({
@@ -293,7 +335,7 @@ const orderCreate = z
     encounterId: uuid.nullish(),
     recipient: z.string().trim().max(200).nullish(),
     recipientUserId: z.string().min(1).max(200).nullish(),
-    title: z.string().trim().min(1).max(200),
+    title: z.string().trim().min(1, "Escribe qué se pide").max(200),
     detail: z.string().trim().max(5000).nullish(),
     diagnosisCode: z.string().trim().max(10).nullish(),
     diagnosisSystem: z.string().max(20).nullish(),
@@ -301,6 +343,7 @@ const orderCreate = z
   .strict()
   .refine((d) => Boolean(d.recipient?.trim() || d.recipientUserId), {
     message: "Indica para quién es la orden",
+    path: ["recipient"],
   })
 
 const orderStatus = z
@@ -315,6 +358,7 @@ const orderStatus = z
   .strict()
   .refine((d) => d.toStatus !== "cancelado" || Boolean(d.reason?.trim()), {
     message: "Cancelar la orden pide el motivo",
+    path: ["reason"],
   })
 
 export function createClinicalFormsRoute(deps: CrmDeps) {
@@ -397,7 +441,11 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
       return forbidden(c, "Solo administración asigna especialidades")
     }
     const parsed = z
-      .object({ userIds: z.array(z.string().min(1).max(200)).max(100) })
+      .object({
+        userIds: z
+          .array(z.string().min(1).max(200))
+          .max(100, "Marca como mucho 100 personas"),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
@@ -437,11 +485,21 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
   // --- Perfil profesional (firma de atenciones, actas, recetas y consentimientos) ---
   const profileInput = z
     .object({
-      signatureName: z.string().max(200).nullish(),
-      professionalTitle: z.string().trim().min(1).max(120).optional(),
-      registrationBody: z.string().trim().min(1).max(40).optional(),
-      registrationNumber: z.string().max(20).nullish(),
-      specialtyRegistration: z.string().max(40).nullish(),
+      signatureName: z.string().max(200, "El nombre de firma admite hasta 200 caracteres").nullish(),
+      professionalTitle: z
+        .string()
+        .trim()
+        .min(1, "El título profesional es obligatorio")
+        .max(120, "El título profesional admite hasta 120 caracteres")
+        .optional(),
+      registrationBody: z
+        .string()
+        .trim()
+        .min(1, "El colegio profesional es obligatorio")
+        .max(40, "El colegio profesional admite hasta 40 caracteres")
+        .optional(),
+      registrationNumber: z.string().max(20, "La colegiatura admite hasta 20 caracteres").nullish(),
+      specialtyRegistration: z.string().max(40, "El registro de especialista admite hasta 40 caracteres").nullish(),
     })
     .strict()
 
@@ -615,7 +673,13 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
       return forbidden(c, "Sin permiso para descartar formularios")
     }
     const parsed = z
-      .object({ reason: z.string().trim().min(1).max(2000) })
+      .object({
+        reason: z
+          .string()
+          .trim()
+          .min(1, "Indica el motivo del descarte.")
+          .max(2000, "El motivo admite hasta 2000 caracteres."),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)

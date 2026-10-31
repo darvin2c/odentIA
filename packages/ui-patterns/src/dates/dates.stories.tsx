@@ -234,7 +234,16 @@ export const DiaYHora: Story = {
       const [value, setValue] = React.useState<string | null>(null)
       return (
         <Card>
-          <DueAtField value={value} onChange={setValue} description="Al elegir solo el día, vence a las 9:00." />
+          <Field>
+            <FieldLabel id="vence-label">Vence</FieldLabel>
+            <DueAtField
+              value={value}
+              onChange={setValue}
+              aria-labelledby="vence-label"
+              aria-describedby="vence-ayuda"
+            />
+            <FieldDescription id="vence-ayuda">Al elegir solo el día, vence a las 9:00.</FieldDescription>
+          </Field>
           <Lectura value={value} />
         </Card>
       )

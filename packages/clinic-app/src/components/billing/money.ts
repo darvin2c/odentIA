@@ -26,18 +26,30 @@ export function currencyDigits(currency: string): number {
   }
 }
 
+/** Lo escrito como importe: la unidad menor, o por qué no vale (dicho junto al campo). */
+export type MajorReading = { ok: true; cents: number } | { ok: false; error: string }
+
 /**
  * Lo escrito en unidades mayores → unidad menor, con los separadores de la
  * clínica, los mismos con que se muestra: «50.000» son cincuenta mil en Chile.
- * null si no es un importe válido.
+ * Si no vale, el motivo de `parseMoney` («Esta moneda admite hasta 2
+ * decimales») o que no es mayor que cero.
  */
-export function majorToCents(text: string, currency: string, locale?: string): number | null {
+export function readMajor(text: string, currency: string, locale?: string): MajorReading {
+  let cents: number
   try {
-    const cents = parseMoney(text, currency, clinicLocale(locale))
-    return cents > 0 ? cents : null
-  } catch {
-    return null
+    cents = parseMoney(text, currency, clinicLocale(locale))
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? `${error.message}.` : "Escribe un importe válido." }
   }
+  if (cents <= 0) return { ok: false, error: "El importe debe ser mayor que cero." }
+  return { ok: true, cents }
+}
+
+/** Como `readMajor`, sin el motivo: null si no es un importe válido mayor que cero. */
+export function majorToCents(text: string, currency: string, locale?: string): number | null {
+  const reading = readMajor(text, currency, locale)
+  return reading.ok ? reading.cents : null
 }
 
 /** Unidad menor → texto para editar, el que lee `majorToCents`. */

@@ -303,6 +303,24 @@ export class ProviderThrottledError extends ProviderRejectedError {
   override readonly name: string = "ProviderThrottledError"
 }
 
+/** El dato de una conexión que el proveedor no aceptó: la clave o el identificador de la cuenta. */
+export type ConnectionRejectedPart = "token" | "id"
+
+/**
+ * El proveedor respondió que no acepta los datos de una conexión (no es que
+ * no respondiera). `part` dice cuál, cuando su respuesta lo distingue; nulo si
+ * puede ser cualquiera de los dos.
+ */
+export class ConnectionRejectedError extends Error {
+  override readonly name: string = "ConnectionRejectedError"
+  constructor(
+    message: string,
+    readonly part: ConnectionRejectedPart | null = null,
+  ) {
+    super(message)
+  }
+}
+
 export interface ChannelAdapterDeps {
   fetch: typeof fetch
   /** Clave de la conexión para firmar lo que se envía a un tercero (el aviso al sitio del chat web). */

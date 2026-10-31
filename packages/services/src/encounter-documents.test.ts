@@ -27,6 +27,7 @@ import {
   setConsentTemplateServices,
   setProfessionalSpecialties,
   createSpecialty,
+  cancelConsentDocument,
   revokeConsentDocument,
   signConsentDocument,
 } from "./clinical-forms.js"
@@ -294,6 +295,32 @@ it("el consentimiento sale con el PDF guardado al firmar, y la revocación tiene
   expect(revoked.revokePdfSha256).not.toBe(withPdf.pdfSha256)
   // Una segunda vez no guarda otro.
   expect((await pdf(consent.id)).revokePdfDocumentId).toBe(revoked.revokePdfDocumentId)
+
+  // Quien lo abre ve el de la revocación, no el firmado que ya no vale.
+  const [revokedFile] = await ownerDb.select().from(patientDocument).where(eq(patientDocument.id, revoked.revokePdfDocumentId!))
+  const opened = await v.run((tx) =>
+    renderHealthDocumentPdf(tx, "org_a", v.lucia.id, "consent", consent.id, storage, { viewing: true }),
+  )
+  expect(opened.bytes).toEqual(files.get(revokedFile!.storageKey))
+})
+
+it("abrir un consentimiento sin PDF guardado no traba: firmado o anulado, sale al vuelo y no se guarda", async () => {
+  const v = await visit()
+  const exodoncia = await v.template("Exodoncia simple o quirúrgica")
+  await v.run((tx) => setConsentTemplateServices(tx, "org_a", v.actor, exodoncia.id, [v.extraction.id]))
+  await v.run((tx) =>
+    addEncounterProcedure(tx, "org_a", v.actor, v.lucia.id, v.draft.id, { serviceId: v.extraction.id, toothNumber: 18 }),
+  )
+  const { created } = await v.run((tx) => prepareEncounterConsents(tx, "org_a", v.actor, v.lucia.id, v.draft.id))
+  const consent = created[0]!
+  const open = () =>
+    v.run((tx) => renderHealthDocumentPdf(tx, "org_a", v.lucia.id, "consent", consent.id, {}, { viewing: true }))
+  await v.run((tx) => cancelConsentDocument(tx, "org_a", v.actor, consent.id, "Se cambió el plan"))
+  expect(Buffer.from((await open()).bytes.slice(0, 5)).toString("latin1")).toBe("%PDF-")
+  // Enviarlo sigue pidiendo el guardado.
+  await expect(
+    v.run((tx) => renderHealthDocumentPdf(tx, "org_a", v.lucia.id, "consent", consent.id, {})),
+  ).rejects.toMatchObject({ code: "CONSENT_PDF_MISSING" })
 })
 
 it("sin plantilla publicada se firma en papel y quien configura lo ve hasta publicarla", async () => {

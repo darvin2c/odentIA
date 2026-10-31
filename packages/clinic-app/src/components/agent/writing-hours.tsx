@@ -6,7 +6,10 @@ import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { QueryErrorState } from "../../lib/query-error"
 import { WRITING_HOURS_KEY, type WritingWeek, writingWeekRows } from "../../lib/writing-hours"
-import { useWeeklyTurns, type WeeklyRule, WeeklyScheduleFields } from "../agenda/schedule-editor"
+import { type TurnDraft, useWeeklyTurns, type WeeklyRule, WeeklyScheduleFields } from "../agenda/schedule-editor"
+
+/** Tramos por día que acepta el servidor (`MAX_RANGES_PER_DAY` de writing-hours). */
+const MAX_RANGES_PER_DAY = 4
 
 function rulesOf(week: WritingWeek): WeeklyRule[] {
   return week.flatMap((ranges, weekday) => ranges.map(([startMin, endMin]) => ({ weekday, startMin, endMin })))
@@ -16,6 +19,19 @@ function weekOf(rules: WeeklyRule[]): WritingWeek {
   const week: WritingWeek = Array.from({ length: 7 }, () => [])
   for (const rule of rules) week[rule.weekday]?.push([rule.startMin, rule.endMin])
   return week
+}
+
+/**
+ * Lo que el servidor señala (`week[d]` el día, `week[d][j]` su j-ésimo tramo)
+ * va a la hora final de ese tramo en el editor; un día, a su último tramo.
+ */
+function turnFieldOf(serverField: string, turns: TurnDraft[]): string | undefined {
+  const match = /^week\[(\d+)\](?:\[(\d+)\])?/.exec(serverField)
+  if (!match) return undefined
+  const weekday = Number(match[1])
+  const ofDay = turns.flatMap((turn, index) => (turn.weekday === weekday ? [index] : []))
+  const index = match[2] === undefined ? ofDay.at(-1) : ofDay[Number(match[2])]
+  return index === undefined ? undefined : `turns[${index}].to`
 }
 
 export function useWritingHours(enabled = true) {
@@ -101,6 +117,9 @@ function WritingHoursDrawer({ week, onClose }: { week: WritingWeek; onClose: () 
     failed: false,
     retry: () => undefined,
     save: (rules) => apiFetch("/api/agent/writing-hours", { method: "PUT", body: JSON.stringify({ week: weekOf(rules) }) }),
+    maxPerDay: MAX_RANGES_PER_DAY,
+    unit: "tramo",
+    fieldMap: turnFieldOf,
     savedMessage: "Horario de recontacto guardado",
     onSaved: async () => {
       await Promise.all([

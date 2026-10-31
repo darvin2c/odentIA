@@ -1,15 +1,16 @@
-import { Badge, Button, Field, FieldDescription, FieldLabel, Input, Textarea } from "@odentia/ui"
-import { FormDrawer } from "@odentia/ui-patterns"
+import { Badge } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Lock } from "lucide-react"
-import { type FormEvent, useEffect, useState } from "react"
+import { useEffect, useRef } from "react"
+import { z } from "zod"
 import { voicePreview } from "../../lib/agent"
 import { ADMIN_NAME, CLINICAL_NAME, RECEPTION_DEFAULT_NAME, useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import type { AgentConfig } from "../../lib/crm"
-import { sameDraft } from "../../lib/page-draft-guard"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { appWords } from "../../lib/product-words"
+import { ChoiceButtons } from "../choice-buttons"
 
 interface VoiceDraft {
   personaName: string
@@ -34,6 +35,9 @@ const TONE_HINT: Record<VoiceDraft["tone"], string> = {
   neutro: "Amable y directo, sin confianzas ni formalidades.",
   formal: "Respetuoso y cuidado, sin confianzas.",
 }
+const PERSONA_NAME_MAX = "El nombre puede tener como mucho 40 caracteres."
+const ABOUT_MAX = "Escribe como mucho 600 caracteres."
+
 const EMOJIS: Array<{ value: VoiceDraft["emojis"]; label: string }> = [
   { value: "no", label: "No usar" },
   { value: "pocos", label: "Pocos" },
@@ -49,52 +53,14 @@ function toDraft(config: AgentConfig): VoiceDraft {
   }
 }
 
-function Choice<T extends string>({
-  label,
-  hint,
-  options,
-  value,
-  onChange,
-}: {
-  label: string
-  /** Una línea bajo las opciones que explica lo elegido. */
-  hint?: string
-  options: Array<{ value: T; label: string }>
-  value: T
-  onChange: (value: T) => void
-}) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium" id={`voz-${label}`}>
-        {label}
-      </span>
-      <fieldset
-        className="m-0 min-w-0 border-0 p-0 flex flex-wrap gap-1.5"
-        aria-labelledby={`voz-${label}`}
-        aria-describedby={hint ? `voz-${label}-ayuda` : undefined}
-      >
-        {options.map((option) => (
-          <Button
-            key={option.value}
-            type="button"
-            size="sm"
-            variant={value === option.value ? "default" : "outline"}
-            className="min-h-11 rounded-full sm:min-h-8"
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </fieldset>
-      {hint ? (
-        <p id={`voz-${label}-ayuda`} className="text-sm text-muted-foreground">
-          {hint}
-        </p>
-      ) : null}
-    </div>
-  )
-}
+/** Los mismos topes que `putInput` de `/api/agent/config`. */
+const voiceSchema = z.object({
+  personaName: z.string().max(40, PERSONA_NAME_MAX),
+  treatment: z.enum(["tu", "usted"]),
+  tone: z.enum(["cercano", "neutro", "formal"]),
+  emojis: z.enum(["no", "pocos"]),
+  about: z.string().max(600, ABOUT_MAX),
+})
 
 /**
  * La base: lo que odentIA fija para todos los agentes (no se cambia) y la voz
@@ -120,19 +86,9 @@ export function AgentBaseDrawer({
 }) {
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
-  const [draft, setDraft] = useState<VoiceDraft>(() => toDraft(config))
-  const [baseline, setBaseline] = useState<VoiceDraft>(() => toDraft(config))
-  // Al abrir se parte de lo guardado: un borrador descartado no reaparece.
-  useEffect(() => {
-    if (!open) return
-    const saved = toDraft(config)
-    setDraft(saved)
-    setBaseline(saved)
-  }, [open, config])
-
   const save = useMutation({
     retry: false,
-    mutationFn: () =>
+    mutationFn: (draft: VoiceDraft) =>
       apiFetch("/api/agent/config", {
         method: "PUT",
         body: JSON.stringify({
@@ -144,31 +100,34 @@ export function AgentBaseDrawer({
           about: draft.about,
         }),
       }),
-    onSuccess: () => {
+  })
+  const form = useAppForm({
+    defaultValues: toDraft(config),
+    validators: { onSubmit: voiceSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value)
       void queryClient.invalidateQueries({ queryKey: ["agent-config"] })
       // El nombre de recepción viaja con los datos de la clínica: todas las pantallas lo dicen.
       void queryClient.invalidateQueries({ queryKey: ["org-profile"] })
       onClose()
     },
   })
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (!save.isPending) save.mutate()
-  }
+  // Al abrir se parte de lo guardado: un borrador descartado no reaparece, y
+  // un refresco de la configuración con el cajón abierto no pisa lo escrito.
+  const latest = useRef(config)
+  latest.current = config
+  useEffect(() => {
+    if (open) form.reset(toDraft(latest.current))
+  }, [open, form])
+  const surface = useFormSurface(form)
+  const draft = useStore(form.store, (state) => state.values)
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
-      onClose={() => {
-        save.reset()
-        onClose()
-      }}
+      onClose={onClose}
       title="La base"
-      onSubmit={submit}
-      isSubmitting={save.isPending}
-      isDirty={!sameDraft(draft, baseline)}
-      error={mutationErrorMessage(save.error)}
       submitLabel="Guardar"
       cancelLabel={canWrite ? "Cancelar" : "Cerrar"}
       hideSubmit={!canWrite}
@@ -202,53 +161,89 @@ export function AgentBaseDrawer({
           </h4>
           {canWrite ? <Badge variant="outline">La editas tú</Badge> : null}
         </div>
-        <Field>
-          <FieldLabel htmlFor="base-nombre">Se presenta como</FieldLabel>
-          <Input
-            id="base-nombre"
-            value={draft.personaName}
-            maxLength={40}
-            disabled={!canWrite}
-            onChange={(event) => setDraft({ ...draft, personaName: event.target.value })}
-            placeholder={RECEPTION_DEFAULT_NAME}
-          />
-          <FieldDescription>
-            El nombre de tu agente de recepción. Si lo dejas vacío, se llama {RECEPTION_DEFAULT_NAME}. Siempre dice que es un asistente virtual.
-          </FieldDescription>
-        </Field>
-        <Choice
-          label="Trato"
-          options={TREATMENTS}
-          value={draft.treatment}
-          onChange={(treatment) => canWrite && setDraft({ ...draft, treatment })}
-        />
-        <Choice
-          label="Tono"
-          hint={TONE_HINT[draft.tone]}
-          options={TONES}
-          value={draft.tone}
-          onChange={(tone) => canWrite && setDraft({ ...draft, tone })}
-        />
-        <Choice
-          label="Emojis"
-          hint="Uno de vez en cuando hace el mensaje más cálido. Nunca en urgencias, dolor ni pagos."
-          options={EMOJIS}
-          value={draft.emojis}
-          onChange={(emojis) => canWrite && setDraft({ ...draft, emojis })}
-        />
-        <Field>
-          <FieldLabel htmlFor="base-quienes">Quiénes somos, en pocas líneas</FieldLabel>
-          <Textarea
-            id="base-quienes"
-            rows={4}
-            maxLength={600}
-            value={draft.about}
-            disabled={!canWrite}
-            onChange={(event) => setDraft({ ...draft, about: event.target.value })}
-            placeholder="Clínica familiar con dos sedes. Atendemos sin apuro y no presionamos para vender tratamientos."
-          />
-          <FieldDescription>Tres o cuatro líneas bastan. Los datos concretos van en Conocimiento.</FieldDescription>
-        </Field>
+        <form.AppField name="personaName">
+          {(field) => (
+            <field.TextField
+              id="base-nombre"
+              label="Se presenta como"
+              maxLength={40}
+              disabled={!canWrite}
+              placeholder={RECEPTION_DEFAULT_NAME}
+              description={`El nombre de tu agente de recepción. Si lo dejas vacío, se llama ${RECEPTION_DEFAULT_NAME}. Siempre dice que es un asistente virtual.`}
+            />
+          )}
+        </form.AppField>
+        <form.AppField name="treatment">
+          {(field) => (
+            <field.Group id="voz-trato" legend="Trato">
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  options={TREATMENTS}
+                  value={field.state.value}
+                  disabled={!canWrite}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.AppField name="tone">
+          {(field) => (
+            <field.Group id="voz-tono" legend="Tono" description={TONE_HINT[field.state.value]}>
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  options={TONES}
+                  value={field.state.value}
+                  disabled={!canWrite}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.AppField name="emojis">
+          {(field) => (
+            <field.Group
+              id="voz-emojis"
+              legend="Emojis"
+              description="Uno de vez en cuando hace el mensaje más cálido. Nunca en urgencias, dolor ni pagos."
+            >
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  options={EMOJIS}
+                  value={field.state.value}
+                  disabled={!canWrite}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.AppField name="about">
+          {(field) => (
+            <field.TextareaField
+              id="base-quienes"
+              label="Quiénes somos, en pocas líneas"
+              rows={4}
+              maxLength={600}
+              disabled={!canWrite}
+              placeholder="Clínica familiar con dos sedes. Atendemos sin apuro y no presionamos para vender tratamientos."
+              description="Tres o cuatro líneas bastan. Los datos concretos van en Conocimiento."
+            />
+          )}
+        </form.AppField>
         <div className="flex flex-col gap-1 rounded-xl border border-agent-border bg-agent-soft p-3">
           <span className="text-xs font-semibold text-primary-soft-foreground">Así sonaría</span>
           <p className="text-sm">

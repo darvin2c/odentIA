@@ -16,6 +16,7 @@
  *   entonces pasa a `enviado`. Nunca se presenta encolado como entregado.
  */
 import { channelAdapters } from "@odentia/channels"
+import { budgetStateText } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import {
   patientContact,
@@ -23,33 +24,27 @@ import {
   paymentTicket,
   treatmentBudget,
 } from "@odentia/db/schema/clinical"
-import {
-  channelConnection,
-  contact,
-  contactIdentity,
-  conversation,
-} from "@odentia/db/schema/crm"
+import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { NOTICE_PURPOSE } from "./automation-messages.js"
-import { findChannelIdentity, lockChannelIdentity, normalizeChannelIdentity, updateContact } from "./contacts.js"
+import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
+import { deliverBudget, requireOwnBudget } from "./budgets.js"
+import {
+  findChannelIdentity,
+  lockChannelIdentity,
+  normalizeChannelIdentity,
+  updateContact,
+} from "./contacts.js"
 import { reopenIfClosed, sendOutbound, startContactConversation } from "./conversations.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
+import { buildTicketSnapshot, renderReturnPdf, renderTicketPdf } from "./financial-document-pdf.js"
 import { mayWriteFirst, permitsMessage } from "./message-permission.js"
 import { windowOpen } from "./message-window.js"
-import { budgetStateText } from "@odentia/clinical"
-import { deliverBudget, requireOwnBudget } from "./budgets.js"
-import { getPaymentReturn } from "./payments.js"
-import {
-  buildBudgetSnapshot,
-  buildTicketSnapshot,
-  renderBudgetPdf,
-  renderReturnPdf,
-  renderTicketPdf,
-} from "./financial-document-pdf.js"
-import type { Storage } from "./storage.js"
 import { requirePatient } from "./patients.js"
+import { getPaymentReturn } from "./payments.js"
 import { listDecisionRecipients } from "./responsibilities.js"
+import type { Storage } from "./storage.js"
 
 export const FINANCIAL_DOCUMENT_TYPES = ["ticket", "budget", "return"] as const
 export type FinancialDocumentType = (typeof FINANCIAL_DOCUMENT_TYPES)[number]
@@ -147,11 +142,18 @@ export async function listDocumentRecipients(
   }
   if (self) push(self.contact, "paciente")
   for (const r of responsibilities) {
-    if (r.kind === "representante_legal" || r.kind === "responsable_economico" || r.kind === "autorizado_informacion") {
+    if (
+      r.kind === "representante_legal" ||
+      r.kind === "responsable_economico" ||
+      r.kind === "autorizado_informacion"
+    ) {
       push(r.contact, r.kind)
     }
   }
-  const preferred = out.find((r) => r.contactId === preferContactId) ?? out.find((r) => r.relation === "paciente") ?? out[0]
+  const preferred =
+    out.find((r) => r.contactId === preferContactId) ??
+    out.find((r) => r.relation === "paciente") ??
+    out[0]
   if (preferred) preferred.isDefault = true
   return out
 }
@@ -164,7 +166,13 @@ async function requireAuthorizedRecipient(
   preferContactId?: string | null,
   documentType: FinancialDocumentType = "ticket",
 ): Promise<DocumentRecipient> {
-  const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId, documentType)
+  const recipients = await listDocumentRecipients(
+    tx,
+    orgId,
+    patientId,
+    preferContactId,
+    documentType,
+  )
   if (recipients.length === 0) throw notFound("Destinatario del documento")
   const chosen = contactId
     ? recipients.find((r) => r.contactId === contactId)
@@ -225,12 +233,12 @@ function proposeMessage(
         ? `Hola, ${recipient.displayName}. Te enviamos la constancia de tu devolución${where}.`
         : `Hola, ${recipient.displayName}. Te enviamos la constancia de la devolución de ${patientName}${where}.`
       : documentType === "ticket"
-      ? own
-        ? `Hola, ${recipient.displayName}. Te enviamos el ticket de tu pago${where}. Gracias por tu visita.`
-        : `Hola, ${recipient.displayName}. Te enviamos el ticket del pago de ${patientName}${where}. Gracias por tu visita.`
-      : own
-        ? `Hola, ${recipient.displayName}. Te enviamos el presupuesto de tu tratamiento${where}.`
-        : `Hola, ${recipient.displayName}. Te enviamos el presupuesto del tratamiento de ${patientName}${where}.`
+        ? own
+          ? `Hola, ${recipient.displayName}. Te enviamos el ticket de tu pago${where}. Gracias por tu visita.`
+          : `Hola, ${recipient.displayName}. Te enviamos el ticket del pago de ${patientName}${where}. Gracias por tu visita.`
+        : own
+          ? `Hola, ${recipient.displayName}. Te enviamos el presupuesto de tu tratamiento${where}.`
+          : `Hola, ${recipient.displayName}. Te enviamos el presupuesto del tratamiento de ${patientName}${where}.`
   return text.slice(0, 500)
 }
 
@@ -329,7 +337,12 @@ async function listMediaConnections(tx: Db, orgId: string): Promise<UsableConnec
       const adapter = channelAdapters[row.provider as keyof typeof channelAdapters]
       return !!adapter && adapter.capabilities.media
     })
-    .map((row) => ({ id: row.id, channel: row.channel, provider: row.provider, displayName: row.displayName }))
+    .map((row) => ({
+      id: row.id,
+      channel: row.channel,
+      provider: row.provider,
+      displayName: row.displayName,
+    }))
 }
 
 /**
@@ -338,9 +351,16 @@ async function listMediaConnections(tx: Db, orgId: string): Promise<UsableConnec
  * El presupuesto, que hay que leer enseguida (`first: "whatsapp"`): WhatsApp
  * utilizable > correo > lo demás.
  */
-export function proposeChannel<T extends { channel: string; usable: boolean; hasThread: boolean; connectionId: string }>(
+export function proposeChannel<
+  T extends { channel: string; usable: boolean; hasThread: boolean; connectionId: string },
+>(
   options: T[],
-  input: { email: string | null; preferredChannel: string | null; lastChannel: string | null; first?: "email" | "whatsapp" },
+  input: {
+    email: string | null
+    preferredChannel: string | null
+    lastChannel: string | null
+    first?: "email" | "whatsapp"
+  },
 ): T | null {
   const usable = options.filter((o) => o.usable)
   if (usable.length === 0) return null
@@ -374,15 +394,32 @@ export async function getDocumentSendOptions(
   const documentType = assertDocumentType(input.documentType)
   if (documentType === "budget" && actor.memberRole === "clinician" && actor.actorUserId)
     await requireProfessionalOwnPlan(tx, orgId, actor.actorUserId, patientId, input.documentId)
-  const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, patientId, documentType, input.documentId)
-  const recipients = await listDocumentRecipients(tx, orgId, patientId, preferContactId, documentType)
+  const { meta, preferContactId } = await loadDocumentMeta(
+    tx,
+    orgId,
+    patientId,
+    documentType,
+    input.documentId,
+  )
+  const recipients = await listDocumentRecipients(
+    tx,
+    orgId,
+    patientId,
+    preferContactId,
+    documentType,
+  )
   if (recipients.length === 0) throw notFound("Destinatario del documento")
   const recipient =
-    (input.recipientContactId && recipients.find((r) => r.contactId === input.recipientContactId)) ||
+    (input.recipientContactId &&
+      recipients.find((r) => r.contactId === input.recipientContactId)) ||
     recipients.find((r) => r.isDefault) ||
     recipients[0]
   if (!recipient) throw notFound("Destinatario del documento")
-  const { channels, preferredChannel, lastChannel } = await documentChannelsFor(tx, orgId, recipient)
+  const { channels, preferredChannel, lastChannel } = await documentChannelsFor(
+    tx,
+    orgId,
+    recipient,
+  )
   const proposed = proposeChannel(channels, {
     email: recipient.email,
     preferredChannel,
@@ -415,7 +452,11 @@ export async function documentChannelsFor(
   tx: Db,
   orgId: string,
   recipient: Pick<DocumentRecipient, "contactId" | "email">,
-): Promise<{ channels: DocumentChannelOption[]; preferredChannel: string | null; lastChannel: string | null }> {
+): Promise<{
+  channels: DocumentChannelOption[]
+  preferredChannel: string | null
+  lastChannel: string | null
+}> {
   const [recipientRow] = await tx
     .select({ preferredChannel: contact.preferredChannel })
     .from(contact)
@@ -424,14 +465,21 @@ export async function documentChannelsFor(
   const identities = await tx
     .select()
     .from(contactIdentity)
-    .where(and(eq(contactIdentity.organizationId, orgId), eq(contactIdentity.contactId, recipient.contactId)))
+    .where(
+      and(
+        eq(contactIdentity.organizationId, orgId),
+        eq(contactIdentity.contactId, recipient.contactId),
+      ),
+    )
   const threads = await tx
     .select({ conversation, connection: channelConnection })
     .from(conversation)
     .innerJoin(channelConnection, eq(conversation.channelConnectionId, channelConnection.id))
     // Abiertas o cerradas: escribir reabre (ADR 0024). Cuenta desde cuándo
     // escribió la persona, con la misma ventana que todo lo demás (ADR 0042).
-    .where(and(eq(conversation.organizationId, orgId), eq(conversation.contactId, recipient.contactId)))
+    .where(
+      and(eq(conversation.organizationId, orgId), eq(conversation.contactId, recipient.contactId)),
+    )
     .orderBy(desc(conversation.lastMessageAt))
   const connections = await listMediaConnections(tx, orgId)
   const now = Date.now()
@@ -444,13 +492,17 @@ export async function documentChannelsFor(
     const own = threads.filter((t) => t.conversation.channelConnectionId === conn.id)
     const thread = own[0]
     const lastInboundAt = own.reduce<Date | null>(
-      (latest, t) => (t.conversation.lastInboundAt && (!latest || t.conversation.lastInboundAt > latest) ? t.conversation.lastInboundAt : latest),
+      (latest, t) =>
+        t.conversation.lastInboundAt && (!latest || t.conversation.lastInboundAt > latest)
+          ? t.conversation.lastInboundAt
+          : latest,
       null,
     )
     const withinWindow = windowOpen(lastInboundAt, now)
     if (conn.channel === "email") {
       const hasThread =
-        !!thread && EMAIL_THREAD_PREFIXES.some((p) => thread.conversation.externalThreadId.startsWith(p))
+        !!thread &&
+        EMAIL_THREAD_PREFIXES.some((p) => thread.conversation.externalThreadId.startsWith(p))
       if (!recipient.email) {
         return {
           channel: conn.channel,
@@ -480,57 +532,103 @@ export async function documentChannelsFor(
       const identity = identities.find((i) => i.channel === "whatsapp")
       if (!identity) {
         return {
-          channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-          usable: false, reason: "Esta persona no tiene WhatsApp vinculado", hasThread: false,
-          isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+          channel: conn.channel,
+          connectionId: conn.id,
+          connectionName: conn.displayName,
+          provider: conn.provider,
+          usable: false,
+          reason: "Esta persona no tiene WhatsApp vinculado",
+          hasThread: false,
+          isPreferred: recipientRow?.preferredChannel === conn.channel,
+          isProposed: false,
         }
       }
       if (!withinWindow) {
         return {
-          channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-          usable: false, reason: "Fuera de la ventana de 24 h de WhatsApp: necesita un mensaje reciente", hasThread: !!thread,
-          isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+          channel: conn.channel,
+          connectionId: conn.id,
+          connectionName: conn.displayName,
+          provider: conn.provider,
+          usable: false,
+          reason: "Fuera de la ventana de 24 h de WhatsApp: necesita un mensaje reciente",
+          hasThread: !!thread,
+          isPreferred: recipientRow?.preferredChannel === conn.channel,
+          isProposed: false,
         }
       }
       return {
-        channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-        usable: true, reason: null, hasThread: !!thread,
-        isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+        channel: conn.channel,
+        connectionId: conn.id,
+        connectionName: conn.displayName,
+        provider: conn.provider,
+        usable: true,
+        reason: null,
+        hasThread: !!thread,
+        isPreferred: recipientRow?.preferredChannel === conn.channel,
+        isProposed: false,
       }
     }
     if (conn.channel === "messenger" || conn.channel === "instagram") {
       if (!thread || !withinWindow) {
         return {
-          channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-          usable: false, reason: "Necesita un mensaje reciente de la persona (ventana de 24 h)", hasThread: !!thread,
-          isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+          channel: conn.channel,
+          connectionId: conn.id,
+          connectionName: conn.displayName,
+          provider: conn.provider,
+          usable: false,
+          reason: "Necesita un mensaje reciente de la persona (ventana de 24 h)",
+          hasThread: !!thread,
+          isPreferred: recipientRow?.preferredChannel === conn.channel,
+          isProposed: false,
         }
       }
       return {
-        channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-        usable: true, reason: null, hasThread: true,
-        isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+        channel: conn.channel,
+        connectionId: conn.id,
+        connectionName: conn.displayName,
+        provider: conn.provider,
+        usable: true,
+        reason: null,
+        hasThread: true,
+        isPreferred: recipientRow?.preferredChannel === conn.channel,
+        isProposed: false,
       }
     }
     if (!thread) {
       return {
-        channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-        usable: false, reason: "La persona aún no escribió por este canal", hasThread: false,
-        isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+        channel: conn.channel,
+        connectionId: conn.id,
+        connectionName: conn.displayName,
+        provider: conn.provider,
+        usable: false,
+        reason: "La persona aún no escribió por este canal",
+        hasThread: false,
+        isPreferred: recipientRow?.preferredChannel === conn.channel,
+        isProposed: false,
       }
     }
     return {
-      channel: conn.channel, connectionId: conn.id, connectionName: conn.displayName, provider: conn.provider,
-      usable: true, reason: null, hasThread: true,
-      isPreferred: recipientRow?.preferredChannel === conn.channel, isProposed: false,
+      channel: conn.channel,
+      connectionId: conn.id,
+      connectionName: conn.displayName,
+      provider: conn.provider,
+      usable: true,
+      reason: null,
+      hasThread: true,
+      isPreferred: recipientRow?.preferredChannel === conn.channel,
+      isProposed: false,
     }
   })
   const channels = options.map((option, index) => {
     // Dentro de la ventana es una respuesta: sale aunque haya pedido no recibir mensajes.
     const conn = connections[index]
-    const inWindow = !!conn && threads.some(
-      (t) => t.conversation.channelConnectionId === conn.id && windowOpen(t.conversation.lastInboundAt, now),
-    )
+    const inWindow =
+      !!conn &&
+      threads.some(
+        (t) =>
+          t.conversation.channelConnectionId === conn.id &&
+          windowOpen(t.conversation.lastInboundAt, now),
+      )
     return inWindow ? option : refused(option)
   })
   return {
@@ -541,7 +639,8 @@ export async function documentChannelsFor(
 }
 
 /** Lo que dice la pantalla de un documento cuando la persona pidió no recibir nada. */
-export const DOCUMENT_OPTED_OUT = "Pidió no recibir ningún mensaje de la clínica: entrégaselo impreso, o envíaselo si te escribe."
+export const DOCUMENT_OPTED_OUT =
+  "Pidió no recibir ningún mensaje de la clínica: entrégaselo impreso, o envíaselo si te escribe."
 
 // --- Entrega de borrador --------------------------------------------------------
 // Enviar un borrador lo entrega en la misma transacción (equivale a entregar):
@@ -647,15 +746,17 @@ function cleanMessage(value: string | undefined): string | null {
   if (value === undefined) return null
   const text = value.trim()
   if (!text) return null
-  if (text.length > 500) throw validation("El mensaje admite hasta 500 caracteres")
-  if (/[\r]/.test(text)) throw validation("El mensaje no admite saltos de línea especiales")
+  if (text.length > 500) throw invalidField("message", "El mensaje admite hasta 500 caracteres")
+  if (/[\r]/.test(text))
+    throw invalidField("message", "El mensaje no admite saltos de línea especiales")
   return text
 }
 
-function assertEmail(value: string): string {
+/** `field`: cómo se llama el correo en el cuerpo de la petición. */
+function assertEmail(value: string, field: string): string {
   const email = value.trim().toLowerCase()
   if (email.length > 200 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-    throw validation("El correo no tiene un formato válido")
+    throw invalidField(field, "El correo no tiene un formato válido")
   return email
 }
 
@@ -682,7 +783,8 @@ async function ensureEmailIdentity(
   recipient: EmailRecipient,
 ): Promise<typeof contactIdentity.$inferSelect> {
   const email = recipient.email?.trim().toLowerCase()
-  if (!email || !email.includes("@")) throw validation("La persona no tiene correo registrado")
+  if (!email || !email.includes("@"))
+    throw invalidField("connectionId", "La persona no tiene correo registrado")
   const externalUserId = `mail:${email}`
   await lockChannelIdentity(tx, orgId, "email", externalUserId)
   const existing = await findChannelIdentity(tx, orgId, "email", externalUserId)
@@ -709,7 +811,11 @@ async function ensureEmailIdentity(
       isPrimary: false,
     })
     .onConflictDoNothing({
-      target: [contactIdentity.organizationId, contactIdentity.channel, contactIdentity.externalUserId],
+      target: [
+        contactIdentity.organizationId,
+        contactIdentity.channel,
+        contactIdentity.externalUserId,
+      ],
     })
     .returning()
   const row = created ?? (await findChannelIdentity(tx, orgId, "email", externalUserId))
@@ -740,18 +846,23 @@ export async function openEmailThread(
 ): Promise<{ id: string }> {
   {
     const identity = await ensureEmailIdentity(tx, orgId, recipient)
-    const [thread] = exactAddress ? [] : await tx
-      .select({ id: conversation.id, status: conversation.status })
-      .from(conversation)
-      .where(
-        and(
-          eq(conversation.organizationId, orgId),
-          eq(conversation.contactId, recipient.contactId),
-          eq(conversation.channelConnectionId, conn.id),
-        ),
-      )
-      .orderBy(sql`${conversation.status} = 'open' desc`, sql`${conversation.lastMessageAt} desc nulls last`)
-      .limit(1)
+    const [thread] = exactAddress
+      ? []
+      : await tx
+          .select({ id: conversation.id, status: conversation.status })
+          .from(conversation)
+          .where(
+            and(
+              eq(conversation.organizationId, orgId),
+              eq(conversation.contactId, recipient.contactId),
+              eq(conversation.channelConnectionId, conn.id),
+            ),
+          )
+          .orderBy(
+            sql`${conversation.status} = 'open' desc`,
+            sql`${conversation.lastMessageAt} desc nulls last`,
+          )
+          .limit(1)
     if (thread) {
       await reopenIfClosed(tx, orgId, thread.id, { userId: actorUserId, via: "envio" })
       return { id: thread.id }
@@ -782,7 +893,11 @@ export async function openEmailThread(
       return { id: created.id }
     }
     const [retry] = await tx
-      .select({ id: conversation.id, contactId: conversation.contactId, status: conversation.status })
+      .select({
+        id: conversation.id,
+        contactId: conversation.contactId,
+        status: conversation.status,
+      })
       .from(conversation)
       .where(
         and(
@@ -813,10 +928,11 @@ async function resolveConversation(
   /** Con otro correo el hilo es el de esa dirección, no el último abierto de la persona. */
   exactAddress = false,
 ): Promise<{ id: string }> {
-  if (conn.channel === "email") return openEmailThread(tx, orgId, actorUserId, recipient, conn, exactAddress)
+  if (conn.channel === "email")
+    return openEmailThread(tx, orgId, actorUserId, recipient, conn, exactAddress)
   if (conn.channel === "whatsapp") {
     const phone = recipient.phone?.trim()
-    if (!phone) throw validation("La persona no tiene teléfono registrado")
+    if (!phone) throw invalidField("connectionId", "La persona no tiene teléfono registrado")
     const normalized = normalizeChannelIdentity("whatsapp", phone)
     const identity = await findChannelIdentity(tx, orgId, "whatsapp", normalized.externalUserId)
     if (!identity || identity.contactId !== recipient.contactId) {
@@ -843,7 +959,10 @@ async function resolveConversation(
         eq(conversation.channelConnectionId, conn.id),
       ),
     )
-    .orderBy(sql`${conversation.status} = 'open' desc`, sql`${conversation.lastMessageAt} desc nulls last`)
+    .orderBy(
+      sql`${conversation.status} = 'open' desc`,
+      sql`${conversation.lastMessageAt} desc nulls last`,
+    )
     .limit(1)
   if (!thread) {
     throw new ServiceError(
@@ -868,14 +987,31 @@ export async function requireDocumentConnection(
     .limit(1)
   if (!conn) throw notFound("Conexión")
   if (conn.status !== "active") {
-    throw new ServiceError("CONNECTION_DISABLED", 409, "Conexión desactivada: elige otra o conéctala de nuevo")
+    throw new ServiceError(
+      "CONNECTION_DISABLED",
+      409,
+      "Conexión desactivada: elige otra o conéctala de nuevo",
+      {
+        connectionId: "Conexión desactivada: elige otra o conéctala de nuevo",
+      },
+    )
   }
   const adapter = channelAdapters[conn.provider as keyof typeof channelAdapters]
-  if (!adapter) throw new ServiceError("PROVIDER_NOT_REGISTERED", 409, `Proveedor no registrado: ${conn.provider}`)
+  if (!adapter)
+    throw new ServiceError(
+      "PROVIDER_NOT_REGISTERED",
+      409,
+      `Proveedor no registrado: ${conn.provider}`,
+    )
   if (!adapter.capabilities.media) {
-    throw validation("Esa conexión no admite adjuntos: elige otro canal")
+    throw invalidField("connectionId", "Esa conexión no admite adjuntos: elige otro canal")
   }
-  return { id: conn.id, channel: conn.channel, provider: conn.provider, displayName: conn.displayName }
+  return {
+    id: conn.id,
+    channel: conn.channel,
+    provider: conn.provider,
+    displayName: conn.displayName,
+  }
 }
 
 /**
@@ -903,13 +1039,22 @@ export async function deliverDocumentPdf(
   },
   deps: SendDeps,
 ): Promise<{ conversationId: string; messageId: string }> {
-  if (input.pdf.byteLength > 20 * 1024 * 1024) throw validation("El documento supera 20 MB: no se puede adjuntar")
+  if (input.pdf.byteLength > 20 * 1024 * 1024)
+    throw validation("El documento supera 20 MB: no se puede adjuntar")
   let conversationId = input.conversationId
   if (!conversationId) {
-    if (!input.conn) throw validation("Elige el canal de envío")
-    if (!actorUserId) throw validation("Sin conversación elegida, el envío lo hace una persona del equipo")
+    if (!input.conn) throw invalidField("connectionId", "Elige el canal de envío")
+    if (!actorUserId)
+      throw validation("Sin conversación elegida, el envío lo hace una persona del equipo")
     conversationId = (
-      await resolveConversation(tx, orgId, actorUserId, input.recipient, input.conn, input.exactAddress ?? false)
+      await resolveConversation(
+        tx,
+        orgId,
+        actorUserId,
+        input.recipient,
+        input.conn,
+        input.exactAddress ?? false,
+      )
     ).id
   }
   // La misma puerta que todo envío (ADR 0042): un aviso que manda el equipo
@@ -920,8 +1065,16 @@ export async function deliverDocumentPdf(
     .where(and(eq(conversation.id, conversationId), eq(conversation.organizationId, orgId)))
     .limit(1)
   const via = windowOpen(thread?.lastInboundAt) ? "respuesta" : "otra"
-  if (!(await permitsMessage(tx, orgId, input.recipient.contactId, { purpose: "avisos", initiative: "equipo", via }))) {
-    throw new ServiceError("DOCUMENT_OPTED_OUT", 409, DOCUMENT_OPTED_OUT)
+  if (
+    !(await permitsMessage(tx, orgId, input.recipient.contactId, {
+      purpose: "avisos",
+      initiative: "equipo",
+      via,
+    }))
+  ) {
+    throw new ServiceError("DOCUMENT_OPTED_OUT", 409, DOCUMENT_OPTED_OUT, {
+      recipientContactId: DOCUMENT_OPTED_OUT,
+    })
   }
   const ref = await deps.storage.putAttachment({
     orgId,
@@ -953,8 +1106,14 @@ export async function sendFinancialDocument(
   deps: SendDeps,
 ): Promise<SendFinancialDocumentResult> {
   const documentType = assertDocumentType(input.documentType)
-  if (!input.connectionId) throw validation("Elige el canal de envío")
-  const { meta, preferContactId } = await loadDocumentMeta(tx, orgId, input.patientId, documentType, input.documentId)
+  if (!input.connectionId) throw invalidField("connectionId", "Elige el canal de envío")
+  const { meta, preferContactId } = await loadDocumentMeta(
+    tx,
+    orgId,
+    input.patientId,
+    documentType,
+    input.documentId,
+  )
   if (input.requestId) {
     // Mismo intento = un solo envío: se serializa por clave y se devuelve lo ya hecho.
     await tx.execute(
@@ -980,7 +1139,11 @@ export async function sendFinancialDocument(
         sentToEmail?: string | null
       }
       if (sent.documentId !== input.documentId)
-        throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave de envío ya se usó con otro documento")
+        throw new ServiceError(
+          "REQUEST_ID_CONFLICT",
+          409,
+          "Esa clave de envío ya se usó con otro documento",
+        )
       return {
         conversationId: sent.conversationId ?? "",
         messageId: previous.entityId ?? "",
@@ -992,15 +1155,24 @@ export async function sendFinancialDocument(
       }
     }
   }
-  const registered = await requireAuthorizedRecipient(tx, orgId, input.patientId, input.recipientContactId, preferContactId, documentType)
+  const registered = await requireAuthorizedRecipient(
+    tx,
+    orgId,
+    input.patientId,
+    input.recipientContactId,
+    preferContactId,
+    documentType,
+  )
   // Otro correo: lo decide quien envía, de forma explícita, y queda registrado.
-  const otherEmail = input.otherEmail?.trim() ? assertEmail(input.otherEmail) : null
+  const otherEmail = input.otherEmail?.trim() ? assertEmail(input.otherEmail, "otherEmail") : null
   if (otherEmail && !input.confirmOtherEmail)
-    throw validation("Confirma que la persona pidió recibirlo en ese correo")
-  const recipient: DocumentRecipient = otherEmail ? { ...registered, email: otherEmail } : registered
+    throw invalidField("confirmOtherEmail", "Confirma que la persona pidió recibirlo en ese correo")
+  const recipient: DocumentRecipient = otherEmail
+    ? { ...registered, email: otherEmail }
+    : registered
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (otherEmail && conn.channel !== "email")
-    throw validation("Otro correo solo se puede usar enviando por correo")
+    throw invalidField("connectionId", "Otro correo solo se puede usar enviando por correo")
 
   let filename: string
   let subject: string
@@ -1008,7 +1180,13 @@ export async function sendFinancialDocument(
   let pdf: Uint8Array
   let deliveredBudget = false
   if (documentType === "return") {
-    const done = await renderReturnPdf(tx, orgId, input.patientId, input.documentId, input.paper ?? null)
+    const done = await renderReturnPdf(
+      tx,
+      orgId,
+      input.patientId,
+      input.documentId,
+      input.paper ?? null,
+    )
     pdf = done.bytes
     filename = asciiFilename(done.filename)
     subject = `Devolución N.º ${done.numberLabel} · ${done.tradeName}`
@@ -1023,13 +1201,25 @@ export async function sendFinancialDocument(
     if (memberRole === "clinician") {
       await requireProfessionalOwnPlan(tx, orgId, actorUserId, input.patientId, input.documentId)
     }
-    deliveredBudget = await deliverIfDraft(tx, orgId, actorUserId, memberRole, input.patientId, input.documentId)
+    deliveredBudget = await deliverIfDraft(
+      tx,
+      orgId,
+      actorUserId,
+      memberRole,
+      input.patientId,
+      input.documentId,
+    )
     const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.documentId, {
       actorUserId,
       memberRole,
+      recipientContactId: recipient.contactId,
+      // Una dirección escrita, sin verificar: nada clínico ni su enlace personal.
+      unverifiedAddress: !!otherEmail,
     })
     pdf = await renderBudgetPdf(snap, input.paper ?? null)
-    filename = asciiFilename(`Presupuesto-${snap.numberLabel.replace(/\D/g, "")}-r${snap.sourceId.slice(0, 4)}.pdf`)
+    filename = asciiFilename(
+      `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}-r${snap.sourceId.slice(0, 4)}.pdf`,
+    )
     subject = `Presupuesto ${snap.numberLabel} · ${snap.org.tradeName}`
     defaultBody = "Te enviamos tu presupuesto en PDF."
   }
@@ -1055,7 +1245,8 @@ export async function sendFinancialDocument(
       .set({ preferredChannel: conn.channel, updatedAt: new Date() })
       .where(and(eq(contact.id, recipient.contactId), eq(contact.organizationId, orgId)))
   }
-  const sentToEmail = conn.channel === "email" ? (recipient.email?.trim().toLowerCase() ?? null) : null
+  const sentToEmail =
+    conn.channel === "email" ? (recipient.email?.trim().toLowerCase() ?? null) : null
   await tx.insert(auditEvent).values({
     organizationId: orgId,
     actorUserId,
@@ -1073,7 +1264,9 @@ export async function sendFinancialDocument(
       deliveredBudget,
       sentToEmail,
       // Dirección distinta de la registrada: decisión explícita de quien envió.
-      ...(otherEmail ? { otherEmail: true, registeredEmail: registered.email, decidedBy: actorUserId } : {}),
+      ...(otherEmail
+        ? { otherEmail: true, registeredEmail: registered.email, decidedBy: actorUserId }
+        : {}),
       ...(input.requestId ? { requestId: input.requestId } : {}),
     },
   })
@@ -1091,9 +1284,16 @@ export async function sendFinancialDocument(
 export type TicketReceiptOutcome =
   | { sent: "correo"; email: string; conversationId: string; messageId: string }
   /** Lo que dice Caja: «Sin correo: entrégalo impreso o pídele su correo». */
-  | { sent: null; reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"; text: string }
+  | {
+      sent: null
+      reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"
+      text: string
+    }
 
-const RECEIPT_WORDS: Record<"sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso", string> = {
+const RECEIPT_WORDS: Record<
+  "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso",
+  string
+> = {
   sin_correo: "Sin correo: entrégalo impreso o pídele su correo",
   sin_conexion: "La clínica no tiene un correo conectado: entrégalo impreso",
   correo_ajeno: "Su correo está vinculado a otra persona: entrégalo impreso",
@@ -1116,14 +1316,23 @@ export async function sendTicketReceiptByEmail(
   deps: SendDeps,
 ): Promise<TicketReceiptOutcome> {
   const { preferContactId } = await loadDocumentMeta(tx, orgId, patientId, "ticket", ticketId)
-  const recipient = await requireAuthorizedRecipient(tx, orgId, patientId, undefined, preferContactId)
-  const no = (reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso"): TicketReceiptOutcome => ({
+  const recipient = await requireAuthorizedRecipient(
+    tx,
+    orgId,
+    patientId,
+    undefined,
+    preferContactId,
+  )
+  const no = (
+    reason: "sin_correo" | "sin_conexion" | "correo_ajeno" | "sin_permiso",
+  ): TicketReceiptOutcome => ({
     sent: null,
     reason,
     text: RECEIPT_WORDS[reason],
   })
   if (!recipient.email?.trim()) return no("sin_correo")
-  if (!(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE))) return no("sin_permiso")
+  if (!(await mayWriteFirst(tx, orgId, recipient.contactId, NOTICE_PURPOSE)))
+    return no("sin_permiso")
   const [mailbox] = await tx
     .select()
     .from(channelConnection)
@@ -1159,7 +1368,8 @@ export async function sendTicketReceiptByEmail(
       deps,
     )
   } catch (error) {
-    if (error instanceof ServiceError && error.code === "AMBIGUOUS_CHANNEL_HISTORY") return no("correo_ajeno")
+    if (error instanceof ServiceError && error.code === "AMBIGUOUS_CHANNEL_HISTORY")
+      return no("correo_ajeno")
     throw error
   }
   const email = recipient.email.trim().toLowerCase()
@@ -1256,7 +1466,7 @@ export async function saveRecipientEmail(
   input: { recipientContactId: string; email: string },
 ): Promise<DocumentRecipient> {
   const recipient = await requireAuthorizedRecipient(tx, orgId, patientId, input.recipientContactId)
-  const email = assertEmail(input.email)
+  const email = assertEmail(input.email, "email")
   await updateContact(tx, orgId, recipient.contactId, { email }, { userId: actorUserId })
   return { ...recipient, email }
 }
@@ -1269,7 +1479,7 @@ export async function getFinancialDocumentPdf(
   input: { documentType: string; documentId: string; paper?: string | null },
   /** Quién lo pide: un odontólogo solo obtiene presupuestos de sus planes. */
   actor: { actorUserId?: string; memberRole?: string } = {},
-): Promise<{ bytes: Uint8Array; filename: string }> {
+): Promise<{ bytes: Uint8Array; filename: string; carriesClinical?: boolean }> {
   const documentType = assertDocumentType(input.documentType)
   if (documentType === "return") {
     const done = await renderReturnPdf(tx, orgId, patientId, input.documentId, input.paper ?? null)
@@ -1286,5 +1496,6 @@ export async function getFinancialDocumentPdf(
   return {
     bytes: await renderBudgetPdf(snap, input.paper ?? null),
     filename: asciiFilename(`Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`),
+    carriesClinical: snap.carriesClinical,
   }
 }

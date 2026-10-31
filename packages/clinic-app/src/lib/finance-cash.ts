@@ -13,7 +13,7 @@ import { parseMoney } from "@odentia/clinical"
 import { minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { type QueryClient, useQuery } from "@tanstack/react-query"
 import { ApiError, apiFetch } from "./api"
-import { financeErrorMessage } from "./finance"
+import { financeErrorMessage, financeFormMessage } from "./finance"
 import type { DebtRow } from "./finance-debt"
 
 /** Efectivo según UN/CEFACT 4461: lo único que se cuenta al cerrar. */
@@ -847,20 +847,30 @@ export function isForbidden(err: unknown): boolean {
   return err instanceof ApiError && err.status === 403
 }
 
-/** Rechazos conocidos de caja en lenguaje llano; el resto, el mensaje del servidor. */
+/** Códigos de caja que el servidor dice con palabras técnicas: se explican en lenguaje llano. */
+const CASH_PLAIN_BY_CODE: Record<string, string> = {
+  CASH_WINDOW_CHANGED:
+    "La caja tuvo movimientos mientras contabas. Los importes ya están actualizados: revísalos y vuelve a cerrar.",
+  MOVEMENT_NOT_MANUAL:
+    "Ese movimiento viene de un cobro, un gasto o una devolución: se anula desde su ticket o su gasto.",
+  EXPENSE_IS_COMMISSION: "Ese gasto es el pago de una comisión: se anula desde Comisiones.",
+}
+
+/**
+ * `formMessage` de un formulario de caja: los códigos de caja en lenguaje
+ * llano; `null` deja el mensaje del servidor. `INSUFFICIENT_CASH` se deja tal
+ * cual: el servidor dice qué pasó («Anularlo dejaría la caja en negativo») y,
+ * si es del importe, lo señala en ese campo.
+ */
+export function cashFormMessage(err: unknown): string | null {
+  const code = errorCode(err)
+  return (code ? CASH_PLAIN_BY_CODE[code] : undefined) ?? financeFormMessage(err)
+}
+
+/** Rechazos de caja fuera de un formulario (una consulta, una acción suelta). */
 export function cashErrorMessage(err: unknown): string {
-  switch (errorCode(err)) {
-    case "INSUFFICIENT_CASH":
-      return "En la caja no hay tanto efectivo. Revisa el importe."
-    case "CASH_WINDOW_CHANGED":
-      return "La caja tuvo movimientos mientras contabas. Los importes ya están actualizados: revísalos y vuelve a cerrar."
-    case "MOVEMENT_NOT_MANUAL":
-      return "Ese movimiento viene de un cobro, un gasto o una devolución: se anula desde su ticket o su gasto."
-    case "EXPENSE_IS_COMMISSION":
-      return "Ese gasto es el pago de una comisión: se anula desde Comisiones."
-    default:
-      return financeErrorMessage(err)
-  }
+  const code = errorCode(err)
+  return (code ? CASH_PLAIN_BY_CODE[code] : undefined) ?? financeErrorMessage(err)
 }
 
 // --- Dinero y fechas ------------------------------------------------------------------------

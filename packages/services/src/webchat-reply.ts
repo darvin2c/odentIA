@@ -16,11 +16,17 @@ import { findOrgCountry } from "./locale.js"
  *   rechazó, ni uno que no puede ser un WhatsApp (un fijo o un celular
  *   incompleto del país de la clínica). Nunca se une a otra ficha por el número.
  * - Correo: con un buzón de la clínica conectado.
+ *
+ * Un número que es de otra persona queda en `othersPhone`: no sirve para
+ * avisarle, pero al visitante no se le dice (le revelaría quién es de la
+ * clínica); el equipo lo ve en «Sin forma de avisarle» y decide.
  */
 export interface WebchatReplyRoutes {
   /** `claim`: el número que dejó pasa a ser su WhatsApp al responderle (lo decide quien responde). */
   whatsapp: { claim: boolean; phone: string } | null
   correo: { mailboxId: string; email: string } | null
+  /** El número que dejó ya es de otra persona de la clínica: no se usa sin que el equipo lo confirme. */
+  othersPhone: string | null
 }
 
 export async function webchatReplyRoutes(
@@ -30,7 +36,8 @@ export async function webchatReplyRoutes(
 ): Promise<WebchatReplyRoutes> {
   const [person] = await tx.execute<{ phone: string | null; email: string | null }>(sql`
     select phone, email from contact where organization_id = ${orgId} and id = ${contactId}::uuid`)
-  if (!person) return { whatsapp: null, correo: null }
+  if (!person) return { whatsapp: null, correo: null, othersPhone: null }
+  let othersPhone: string | null = null
   let whatsapp: WebchatReplyRoutes["whatsapp"] = null
   if (await whatsappOf(tx, orgId, contactId)) {
     whatsapp = { claim: false, phone: person.phone ?? "" }
@@ -46,7 +53,8 @@ export async function webchatReplyRoutes(
         or exists (select 1 from contact other
           where other.organization_id = ${orgId} and other.id <> ${contactId}::uuid
             and regexp_replace(coalesce(other.phone, ''), '[^0-9]', '', 'g') = ${digits}) as taken`)
-    if (!taken?.taken) whatsapp = { claim: true, phone: person.phone }
+    if (taken?.taken) othersPhone = person.phone
+    else whatsapp = { claim: true, phone: person.phone }
   }
   let correo: WebchatReplyRoutes["correo"] = null
   if (person.email) {
@@ -56,7 +64,7 @@ export async function webchatReplyRoutes(
       order by created_at, id limit 1`)
     if (mailbox) correo = { mailboxId: mailbox.id, email: person.email }
   }
-  return { whatsapp, correo }
+  return { whatsapp, correo, othersPhone }
 }
 
 /** La clínica puede avisarle por algún lado: tiene WhatsApp o un buzón conectado. */

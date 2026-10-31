@@ -1,8 +1,8 @@
 import { Button, Skeleton, toast } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { type ReactNode, useEffect, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { apiFetch } from "../../lib/api"
 import { brandedQrDataUrl } from "../../lib/branded-qr"
 import { formatDate } from "../../lib/clinical-journey"
 
@@ -46,12 +46,6 @@ function useShownLink(patientId: string) {
   })
 }
 
-function linkProblem(error: unknown): string {
-  return error instanceof ApiError
-    ? (error.shape.message ?? "No se pudo preparar su enlace.")
-    : "No se pudo preparar su enlace. Revisa tu conexión."
-}
-
 /**
  * Las vías de su enlace en «Pendientes» (lienzo «Su enlace y el código QR»):
  * «Enviarle su enlace» cuando se puede enviar; si no (fuera de las 24 horas,
@@ -92,7 +86,7 @@ export function PersonalLinkActions({
                   toast.error("No pudimos copiarlo. Usa «Mostrar su código» o vuelve a intentarlo.")
                 }
               },
-              onError: (error) => toast.error(linkProblem(error)),
+              onError: (error) => toast.error(submitErrorMessage(error)),
             })
           }
         >
@@ -166,7 +160,7 @@ export function ShowPersonalCodeButton({
         title="Mostrar su código"
         description="Gira la pantalla: lo escanea con su celular y completa sus datos mientras espera."
         closeLabel="Listo"
-        error={link.isError ? linkProblem(link.error) : null}
+        error={link.isError ? submitErrorMessage(link.error) : null}
         actions={
           url ? (
             <Button
@@ -233,7 +227,7 @@ export function SendPersonalLinkButton({ patientId, size = "sm" }: { patientId: 
     onSuccess: () => void preview.refetch(),
   })
   const data = preview.data?.data
-  const problem = send.error instanceof ApiError ? (send.error.shape.message ?? "No se pudo enviar.") : send.error ? "No se pudo enviar. Revisa tu conexión." : null
+  const problem = send.error ? submitErrorMessage(send.error) : null
   const by = data?.channel === "email" ? "por correo" : "por WhatsApp"
   const description = send.isSuccess
     ? `Listo: le llegó a ${send.data.data.recipientName}. Cuando lo envíe, lo verás en su página.`
@@ -301,7 +295,7 @@ export function SendPersonalLinkButton({ patientId, size = "sm" }: { patientId: 
             >
               Quitar enlace
             </Button>
-            {revoke.isError ? <span className="block text-destructive">No se pudo quitar. Vuelve a intentarlo.</span> : null}
+            {revoke.isError ? <span className="block text-destructive">{submitErrorMessage(revoke.error)}</span> : null}
           </p>
         ) : null}
       </ConfirmDialog>

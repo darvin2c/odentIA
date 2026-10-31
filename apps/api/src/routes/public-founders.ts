@@ -14,6 +14,7 @@ import {
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { errorBody } from "../lib/error.js"
+import { validationError } from "./helpers.js"
 import type { RegistrationRemoteAddress } from "./public-patient-registration.js"
 
 const WINDOW_MS = 10 * 60 * 1000
@@ -56,7 +57,7 @@ export function createPublicFoundersRoute(deps: {
     })
 
   app.onError((error, c) => {
-    if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message), error.status)
+    if (error instanceof ServiceError) return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
     // Sin el error: podría llevar los datos de quien pidió.
     console.error("Fundadores: error en la ruta pública")
     return c.json(errorBody(c, "INTERNAL", "No pudimos guardar tu solicitud. Intenta nuevamente."), 500)
@@ -114,9 +115,7 @@ export function createPublicFoundersRoute(deps: {
     if (blocked) return blocked
     const product = deps.productOf?.(c) ?? "dental"
     const parsed = waitlistInputSchemaFor(product).safeParse(await c.req.json().catch(() => null))
-    if (!parsed.success) {
-      return c.json(errorBody(c, "VALIDATION", parsed.error.issues[0]?.message ?? "Revisa los datos de la solicitud"), 400)
-    }
+    if (!parsed.success) return validationError(c, parsed.error.issues)
     const result = await deps.ownerDb.transaction((tx) => submitWaitlistRequest(tx, parsed.data, product))
     // La copia sale una sola vez: si ya estaba en la lista, no se repite.
     if (!result.existing) {

@@ -1,6 +1,7 @@
 import type { Db } from "@odentia/db"
 import {
   CONSENT_DECLARATION,
+  CONSENT_SECTION_LABELS,
   type ConsentSections,
   consentSectionsToText,
   normalizeDrugText,
@@ -34,7 +35,7 @@ import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { addDeclaredAllergies, type DeclaredAllergy } from "./clinical.js"
 import { requirePatient } from "./patients.js"
 import { requireProfessionalSignature } from "./professional-profiles.js"
@@ -146,13 +147,15 @@ async function requireSpecialty(tx: Db, orgId: string, specialtyId: string) {
   return row
 }
 
-async function requireMemberUserId(tx: Db, orgId: string, userId: string): Promise<void> {
+/** `field`: el nombre del dato en el cuerpo, para decir el rechazo junto a él. */
+async function requireMemberUserId(tx: Db, orgId: string, userId: string, field?: string): Promise<void> {
   const [row] = await tx
     .select({ userId: member.userId })
     .from(member)
     .where(and(eq(member.organizationId, orgId), eq(member.userId, userId)))
     .limit(1)
-  if (!row) throw validation("El profesional debe ser miembro de la organización")
+  const message = "El profesional debe ser miembro de la organización"
+  if (!row) throw field ? invalidField(field, message) : validation(message)
 }
 
 // ---------------------------------------------------------------------------
@@ -181,12 +184,13 @@ function slugify(name: string): string {
 
 /**
  * Clave generada a partir del nombre que escribió la clínica. Nadie la ve: si
- * del nombre no sale ninguna, el problema se dice del nombre, no de la clave.
+ * del nombre no sale ninguna, el problema se dice del nombre (`field`, su dato
+ * en el cuerpo), no de la clave.
  */
-function keyFromName(name: string): string {
+function keyFromName(name: string, field: string): string {
   // El recorte a 40 puede dejar un guion al final.
   const key = slugify(name).replace(/-+$/, "")
-  if (key.length < 2) throw validation("El nombre necesita al menos dos letras o números")
+  if (key.length < 2) throw invalidField(field, "El nombre necesita al menos dos letras o números")
   return assertKey(key, "Clave")
 }
 
@@ -213,7 +217,7 @@ export async function createSpecialty(
   input: CreateSpecialtyInput,
 ): Promise<SpecialtyRow> {
   const name = assertName(input.name, "Nombre de la especialidad")
-  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(name)
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(name, "name")
   const description = assertOptionalText(input.description, "Descripción", 2000)
   try {
     const [row] = await tx
@@ -226,7 +230,10 @@ export async function createSpecialty(
     })
     return row
   } catch (e) {
-    if (isUniqueViolation(e)) throw conflict("DUPLICATE", "Ya existe una especialidad con ese nombre o uno muy parecido")
+    if (isUniqueViolation(e)) {
+      const message = "Ya existe una especialidad con ese nombre o uno muy parecido"
+      throw new ServiceError("DUPLICATE", 409, message, { name: message })
+    }
     throw e
   }
 }
@@ -392,8 +399,8 @@ export async function setSpecialtyProfessionals(
 ): Promise<{ specialtyId: string; userIds: string[] }> {
   await requireSpecialty(tx, orgId, specialtyId)
   const unique = [...new Set(userIds)]
-  if (unique.length > 100) throw validation("Máximo 100 profesionales por especialidad")
-  for (const userId of unique) await requireMemberUserId(tx, orgId, userId)
+  if (unique.length > 100) throw invalidField("userIds", "Marca como mucho 100 personas")
+  for (const userId of unique) await requireMemberUserId(tx, orgId, userId, "userIds")
   await tx
     .delete(professionalSpecialty)
     .where(
@@ -518,151 +525,182 @@ export interface FormSchemaDef {
   sections: FormSectionDef[]
 }
 
-function assertFieldId(id: unknown): string {
-  if (typeof id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,48}$/i.test(id.trim())) {
-    throw validation("Cada campo necesita un id estable (letras, números, guion)")
-  }
-  return id.trim()
-}
+const FIELD_ID_RE = /^[a-z0-9][a-z0-9_-]{0,48}$/i
 
-/** Valida el esquema de la plantilla (secciones, campos tipados, opciones, unidades). */
-export function assertFormSchema(raw: unknown): FormSchemaDef {
+/**
+ * Valida el esquema de la plantilla (secciones, campos tipados, opciones,
+ * unidades). Cada problema va a su dato en el cuerpo, con `at` delante
+ * (`schema.sections[0].fields[2].options`), y se dice con el título de la
+ * sección o el texto de la pregunta, nunca con su clave interna.
+ */
+export function assertFormSchema(raw: unknown, at = "schema"): FormSchemaDef {
+  const pathOf = (rest: string) => (at ? `${at}.${rest}` : rest)
   if (!raw || typeof raw !== "object" || !("sections" in raw)) {
     throw validation("El esquema del formulario es obligatorio")
   }
   const sections: unknown = raw.sections
   if (!Array.isArray(sections) || sections.length === 0 || sections.length > 30) {
-    throw validation("El formulario necesita entre 1 y 30 secciones")
+    throw invalidField(pathOf("sections"), "El formulario necesita entre 1 y 30 secciones")
+  }
+  const errors: Record<string, string> = {}
+  const fail = (path: string, message: string) => {
+    errors[pathOf(path)] ??= message
   }
   const seenSections = new Set<string>()
   const seenFields = new Set<string>()
   const seenFieldDefs = new Map<string, FormFieldDef>()
-  const parsed: FormSectionDef[] = sections.map((s, si) => {
-    if (!s || typeof s !== "object") throw validation(`La sección ${si + 1} es inválida`)
+  const parsed: FormSectionDef[] = []
+  sections.forEach((s: unknown, si) => {
+    const sectionPath = `sections[${si}]`
+    if (!s || typeof s !== "object") {
+      fail(sectionPath, `La sección ${si + 1} es inválida`)
+      return
+    }
     const id: unknown = "id" in s ? s.id : undefined
     const title: unknown = "title" in s ? s.title : undefined
     const fields: unknown = "fields" in s ? s.fields : undefined
-    const sectionId = assertFieldId(typeof id === "string" ? id : `seccion-${si + 1}`)
-    if (seenSections.has(sectionId)) throw validation(`Sección duplicada: ${sectionId}`)
-    seenSections.add(sectionId)
     const sectionTitle = typeof title === "string" ? title.trim() : ""
-    if (!sectionTitle) throw validation("Cada sección necesita un título")
-    if (sectionTitle.length > 120) throw validation("El título de sección supera 120 caracteres")
-    if (!Array.isArray(fields) || fields.length === 0 || fields.length > 60) {
-      throw validation(`La sección "${sectionTitle}" necesita entre 1 y 60 campos`)
+    const sectionName = sectionTitle ? `«${sectionTitle}»` : String(si + 1)
+    if (!sectionTitle) fail(`${sectionPath}.title`, `Escribe el título de la sección ${si + 1}`)
+    else if (sectionTitle.length > 120)
+      fail(`${sectionPath}.title`, `El título de la sección ${si + 1} supera 120 caracteres`)
+    const sectionId = typeof id === "string" ? id.trim() : `seccion-${si + 1}`
+    if (!FIELD_ID_RE.test(sectionId)) {
+      fail(`${sectionPath}.title`, `La sección ${sectionName} no tiene una clave válida: quítala y vuelve a agregarla`)
+    } else if (seenSections.has(sectionId)) {
+      fail(`${sectionPath}.title`, `La sección ${sectionName} está repetida: quítala y vuelve a agregarla`)
     }
-    return {
-      id: sectionId,
-      title: sectionTitle,
-      fields: fields.map((f, fi) => {
-        if (!f || typeof f !== "object") {
-          throw validation(`Campo ${fi + 1} de "${sectionTitle}" inválido`)
-        }
-        const rawId: unknown = "id" in f ? f.id : undefined
-        const rawLabel: unknown = "label" in f ? f.label : undefined
-        const rawType: unknown = "type" in f ? f.type : undefined
-        const rawRequired: unknown = "required" in f ? f.required : undefined
-        const rawUnit: unknown = "unit" in f ? f.unit : undefined
-        const rawHelp: unknown = "help" in f ? f.help : undefined
-        const rawOptions: unknown = "options" in f ? f.options : undefined
-        const rawMin: unknown = "min" in f ? f.min : undefined
-        const rawMax: unknown = "max" in f ? f.max : undefined
-        const rawShowIf: unknown = "showIf" in f ? f.showIf : undefined
-        const rawDefinition: unknown = "definition" in f ? f.definition : undefined
-        const fieldId = assertFieldId(typeof rawId === "string" ? rawId : "")
-        if (seenFields.has(fieldId)) throw validation(`Campo duplicado: ${fieldId}`)
-        seenFields.add(fieldId)
-        const label = typeof rawLabel === "string" ? rawLabel.trim() : ""
-        if (!label) throw validation("Cada campo necesita una etiqueta")
-        if (label.length > 200) throw validation(`El campo "${fieldId}" supera 200 caracteres`)
-        const type = typeof rawType === "string" ? rawType : ""
-        if (!(FIELD_TYPES as readonly string[]).includes(type)) {
-          throw validation(`Tipo inválido en "${label}": ${type || "?"}`)
-        }
-        const field: FormFieldDef = { id: fieldId, label, type: type as FieldType }
-        if (typeof rawRequired === "boolean") field.required = rawRequired
-        if (rawUnit !== undefined && rawUnit !== null) {
-          const unit = String(rawUnit).trim()
-          if (!unit) throw validation(`Unidad vacía en "${label}"`)
-          if (unit.length > 20) throw validation(`Unidad muy larga en "${label}"`)
-          field.unit = unit
-        }
-        if (rawHelp !== undefined && rawHelp !== null) {
-          const help = String(rawHelp).trim()
-          if (help.length > 500) throw validation(`Ayuda muy larga en "${label}"`)
-          field.help = help || null
-        }
-        if (type === "opcion_unica" || type === "opcion_multiple") {
-          if (!Array.isArray(rawOptions) || rawOptions.length < 2 || rawOptions.length > 50) {
-            throw validation(`"${label}" necesita entre 2 y 50 opciones`)
-          }
-          const options = rawOptions.map((o) => String(o).trim()).filter(Boolean)
-          if (options.length < 2) throw validation(`"${label}" necesita entre 2 y 50 opciones`)
-          if (new Set(options).size !== options.length) {
-            throw validation(`"${label}" tiene opciones duplicadas`)
-          }
-          if (options.some((o) => o.length > 120)) {
-            throw validation(`"${label}" tiene opciones muy largas (máx. 120)`)
-          }
-          field.options = options
-        }
-        if (type === "escala") {
-          const min = rawMin ?? 0
-          const max = rawMax ?? 10
-          if (!Number.isInteger(min) || !Number.isInteger(max) || (min as number) >= (max as number)) {
-            throw validation(`La escala "${label}" necesita extremos enteros (mínimo < máximo)`)
-          }
-          if ((max as number) - (min as number) > 100) throw validation(`La escala "${label}" es demasiado amplia`)
-          field.min = min as number
-          field.max = max as number
-        }
-        if (rawShowIf !== undefined && rawShowIf !== null) {
-          if (typeof rawShowIf !== "object" || Array.isArray(rawShowIf))
-            throw validation(`Condición inválida en "${label}"`)
-          const cond = rawShowIf as Record<string, unknown>
-          const target = typeof cond.field === "string" ? cond.field : ""
-          const source = seenFieldDefs.get(target)
-          if (!source)
-            throw validation(`"${label}" depende de un campo anterior que no existe: ${target || "?"}`)
-          if (source.type === "booleano") {
-            if (typeof cond.equals !== "boolean") throw validation(`"${label}": la condición debe ser Sí o No`)
-          } else if (source.type === "opcion_unica" || source.type === "opcion_multiple") {
-            if (typeof cond.equals !== "string" || !source.options?.includes(cond.equals))
-              throw validation(`"${label}": la condición debe ser una opción de "${source.label}"`)
-          } else {
-            throw validation(`"${label}" solo puede depender de un campo Sí/No o de opciones`)
-          }
-          field.showIf = { field: target, equals: cond.equals }
-        }
-        if (rawDefinition !== undefined && rawDefinition !== null) {
-          if (!(FIELD_DEFINITIONS as readonly string[]).includes(String(rawDefinition)))
-            throw validation(`"${label}" va a un dato de los antecedentes que no existe`)
-          if (type !== "texto" && type !== "texto_largo")
-            throw validation(`"${label}" pasa a los antecedentes: debe ser una respuesta de texto`)
-          field.definition = rawDefinition as FieldDefinition
-        }
-        if (type === "numero") {
-          if (rawMin !== undefined && rawMin !== null) {
-            if (typeof rawMin !== "number" || !Number.isFinite(rawMin)) {
-              throw validation(`Mínimo inválido en "${label}"`)
-            }
-            field.min = rawMin
-          }
-          if (rawMax !== undefined && rawMax !== null) {
-            if (typeof rawMax !== "number" || !Number.isFinite(rawMax)) {
-              throw validation(`Máximo inválido en "${label}"`)
-            }
-            field.max = rawMax
-          }
-          if (field.min != null && field.max != null && field.min > field.max) {
-            throw validation(`Rango inválido en "${label}"`)
-          }
-        }
-        seenFieldDefs.set(fieldId, field)
-        return field
-      }),
+    seenSections.add(sectionId)
+    if (!Array.isArray(fields) || fields.length === 0) {
+      fail(`${sectionPath}.fields`, `La sección ${sectionName} necesita al menos un campo`)
+      return
     }
+    if (fields.length > 60) fail(`${sectionPath}.fields`, `La sección ${sectionName} admite hasta 60 campos`)
+    const parsedFields: FormFieldDef[] = []
+    fields.forEach((f: unknown, fi) => {
+      const fieldPath = `${sectionPath}.fields[${fi}]`
+      const where = `la pregunta ${fi + 1} de la sección ${sectionName}`
+      if (!f || typeof f !== "object") {
+        fail(`${fieldPath}.label`, `Revisa ${where}`)
+        return
+      }
+      const rawId: unknown = "id" in f ? f.id : undefined
+      const rawLabel: unknown = "label" in f ? f.label : undefined
+      const rawType: unknown = "type" in f ? f.type : undefined
+      const rawRequired: unknown = "required" in f ? f.required : undefined
+      const rawUnit: unknown = "unit" in f ? f.unit : undefined
+      const rawHelp: unknown = "help" in f ? f.help : undefined
+      const rawOptions: unknown = "options" in f ? f.options : undefined
+      const rawMin: unknown = "min" in f ? f.min : undefined
+      const rawMax: unknown = "max" in f ? f.max : undefined
+      const rawShowIf: unknown = "showIf" in f ? f.showIf : undefined
+      const rawDefinition: unknown = "definition" in f ? f.definition : undefined
+      const label = typeof rawLabel === "string" ? rawLabel.trim() : ""
+      // Sin texto, la pregunta se nombra por su lugar («la pregunta 2 de la sección «General»»).
+      const named = label ? `«${label}»` : where
+      const Named = label ? named : `${where.charAt(0).toUpperCase()}${where.slice(1)}`
+      if (!label) fail(`${fieldPath}.label`, `Escribe ${where}`)
+      else if (label.length > 200) fail(`${fieldPath}.label`, `${Named} supera 200 caracteres`)
+      const fieldId = typeof rawId === "string" ? rawId.trim() : ""
+      if (!FIELD_ID_RE.test(fieldId)) {
+        fail(`${fieldPath}.label`, `${Named} no tiene una clave válida: quítala y vuelve a agregarla`)
+      } else if (seenFields.has(fieldId)) {
+        fail(`${fieldPath}.label`, `${Named} repite la clave de otra pregunta: quítala y vuelve a agregarla`)
+      }
+      seenFields.add(fieldId)
+      const type = typeof rawType === "string" ? rawType : ""
+      if (!(FIELD_TYPES as readonly string[]).includes(type)) {
+        fail(`${fieldPath}.type`, `Elige el tipo de respuesta de ${named}`)
+        return
+      }
+      const field: FormFieldDef = { id: fieldId, label, type: type as FieldType }
+      if (typeof rawRequired === "boolean") field.required = rawRequired
+      if (rawUnit !== undefined && rawUnit !== null) {
+        const unit = String(rawUnit).trim()
+        if (!unit) fail(`${fieldPath}.unit`, `La unidad de ${named} está vacía`)
+        else if (unit.length > 20) fail(`${fieldPath}.unit`, `La unidad de ${named} admite hasta 20 caracteres`)
+        else field.unit = unit
+      }
+      if (rawHelp !== undefined && rawHelp !== null) {
+        const help = String(rawHelp).trim()
+        if (help.length > 500) fail(`${fieldPath}.help`, `La ayuda de ${named} admite hasta 500 caracteres`)
+        field.help = help || null
+      }
+      if (type === "opcion_unica" || type === "opcion_multiple") {
+        const options = Array.isArray(rawOptions) ? rawOptions.map((o) => String(o).trim()).filter(Boolean) : []
+        if (options.length < 2 || options.length > 50) {
+          fail(`${fieldPath}.options`, `${Named} necesita entre 2 y 50 opciones`)
+        } else if (new Set(options).size !== options.length) {
+          fail(`${fieldPath}.options`, `${Named} tiene opciones repetidas`)
+        } else if (options.some((o) => o.length > 120)) {
+          fail(`${fieldPath}.options`, `${Named} tiene opciones de más de 120 caracteres`)
+        }
+        field.options = options
+      }
+      if (type === "escala") {
+        const min = rawMin ?? 0
+        const max = rawMax ?? 10
+        if (typeof min !== "number" || !Number.isInteger(min)) {
+          fail(`${fieldPath}.min`, `El extremo inferior de ${named} debe ser un número entero`)
+        } else if (typeof max !== "number" || !Number.isInteger(max)) {
+          fail(`${fieldPath}.max`, `El extremo superior de ${named} debe ser un número entero`)
+        } else if (min >= max) {
+          fail(`${fieldPath}.max`, `El extremo superior de ${named} debe ser mayor que el inferior`)
+        } else if (max - min > 100) {
+          fail(`${fieldPath}.max`, `La escala de ${named} abarca más de 100 puntos`)
+        } else {
+          field.min = min
+          field.max = max
+        }
+      }
+      if (rawShowIf !== undefined && rawShowIf !== null) {
+        const cond =
+          typeof rawShowIf === "object" && !Array.isArray(rawShowIf) ? (rawShowIf as Record<string, unknown>) : null
+        const target = typeof cond?.field === "string" ? cond.field : ""
+        const source = seenFieldDefs.get(target)
+        if (!cond || !source) {
+          fail(`${fieldPath}.showIf.field`, `${Named} depende de una pregunta anterior que ya no existe`)
+        } else if (source.type === "booleano") {
+          if (typeof cond.equals !== "boolean")
+            fail(`${fieldPath}.showIf.equals`, `Elige si ${named} se muestra con Sí o con No`)
+          else field.showIf = { field: target, equals: cond.equals }
+        } else if (source.type === "opcion_unica" || source.type === "opcion_multiple") {
+          if (typeof cond.equals !== "string" || !source.options?.includes(cond.equals))
+            fail(`${fieldPath}.showIf.equals`, `Elige qué opción de «${source.label}» muestra ${named}`)
+          else field.showIf = { field: target, equals: cond.equals }
+        } else {
+          fail(`${fieldPath}.showIf.field`, `${Named} solo puede depender de una pregunta Sí/No o de opciones`)
+        }
+      }
+      if (rawDefinition !== undefined && rawDefinition !== null) {
+        if (!(FIELD_DEFINITIONS as readonly string[]).includes(String(rawDefinition)))
+          fail(`${fieldPath}.definition`, `${Named} va a un dato de los antecedentes que no existe`)
+        else if (type !== "texto" && type !== "texto_largo")
+          fail(`${fieldPath}.definition`, `${Named} pasa a los antecedentes: debe ser una respuesta de texto`)
+        else field.definition = rawDefinition as FieldDefinition
+      }
+      if (type === "numero") {
+        if (rawMin !== undefined && rawMin !== null) {
+          if (typeof rawMin !== "number" || !Number.isFinite(rawMin))
+            fail(`${fieldPath}.min`, `El mínimo de ${named} debe ser un número`)
+          else field.min = rawMin
+        }
+        if (rawMax !== undefined && rawMax !== null) {
+          if (typeof rawMax !== "number" || !Number.isFinite(rawMax))
+            fail(`${fieldPath}.max`, `El máximo de ${named} debe ser un número`)
+          else field.max = rawMax
+        }
+        if (field.min != null && field.max != null && field.min > field.max) {
+          fail(`${fieldPath}.max`, `El máximo de ${named} no puede ser menor que el mínimo`)
+        }
+      }
+      seenFieldDefs.set(fieldId, field)
+      parsedFields.push(field)
+    })
+    parsed.push({ id: sectionId, title: sectionTitle, fields: parsedFields })
   })
+  const failure = fieldsError(errors)
+  if (failure) throw failure
   return { sections: parsed }
 }
 
@@ -699,7 +737,11 @@ async function assertAttachmentAnswers(
     )
   const found = new Set(rows.map((row) => row.id))
   const missing = ids.find((id) => !found.has(id))
-  if (missing) throw validation("El archivo adjunto no pertenece al paciente o está retirado")
+  if (missing) {
+    const field = schema.sections.flatMap((section) => section.fields).find((f) => answers[f.id] === missing)
+    const message = "El archivo adjunto no pertenece al paciente o está retirado"
+    throw field ? invalidField(`answers.${field.id}`, message) : validation(message)
+  }
 }
 
 function isEmptyAnswer(value: unknown): boolean {
@@ -715,7 +757,8 @@ function isEmptyAnswer(value: unknown): boolean {
  * Valida respuestas contra el snapshot del esquema: tipos, opciones, rangos y
  * unidades declaradas. Con requireAll exige obligatorios (cierre); en borrador
  * permite captura parcial pero rechaza claves desconocidas y tipos inválidos.
- * Lanza 400 con el campo culpable. `false` booleano es respuesta válida.
+ * Lanza 400 con todos los campos culpables en `fields` (`answers.<id>`), para
+ * decirlo junto a cada pregunta. `false` booleano es respuesta válida.
  */
 export function assertAnswers(
   schema: FormSchemaDef,
@@ -730,6 +773,7 @@ export function assertAnswers(
   const input: Record<string, unknown> = Object.fromEntries(Object.entries(answers))
   const allowed = new Set<string>()
   const out: Record<string, unknown> = {}
+  const errors: Record<string, string> = {}
   for (const section of schema.sections) {
     for (const field of section.fields) {
       allowed.add(field.id)
@@ -739,117 +783,123 @@ export function assertAnswers(
         out[field.id] = null
         continue
       }
-      if (isEmptyAnswer(value)) {
-        if (requireAll && field.required) throw validation(`"${field.label}" es obligatorio`)
+      try {
+        out[field.id] = assertAnswer(field, value, requireAll, options.site)
+      } catch (error) {
+        if (!(error instanceof ServiceError) || error.code !== "VALIDATION") throw error
+        errors[`answers.${field.id}`] = error.message
         out[field.id] = null
-        continue
-      }
-      switch (field.type) {
-        case "texto":
-        case "texto_largo": {
-          if (typeof value !== "string") throw validation(`"${field.label}" debe ser texto`)
-          const text = value.trim()
-          if (!text) {
-            if (requireAll && field.required) throw validation(`"${field.label}" es obligatorio`)
-            out[field.id] = null
-            break
-          }
-          if (text.length > (field.type === "texto" ? 500 : 5000)) {
-            throw validation(`"${field.label}" supera el máximo de caracteres`)
-          }
-          out[field.id] = text
-          break
-        }
-        case "numero": {
-          const num = typeof value === "number" ? value : Number(value)
-          if (!Number.isFinite(num)) throw validation(`"${field.label}" debe ser un número`)
-          if (field.min != null && num < field.min) {
-            throw validation(`"${field.label}" debe ser ≥ ${field.min}`)
-          }
-          if (field.max != null && num > field.max) {
-            throw validation(`"${field.label}" debe ser ≤ ${field.max}`)
-          }
-          out[field.id] = num
-          break
-        }
-        case "booleano": {
-          if (typeof value !== "boolean") throw validation(`"${field.label}" debe ser sí/no`)
-          out[field.id] = value
-          break
-        }
-        case "opcion_unica": {
-          if (typeof value !== "string" || !field.options!.includes(value)) {
-            throw validation(`"${field.label}" tiene una opción inválida`)
-          }
-          out[field.id] = value
-          break
-        }
-        case "opcion_multiple": {
-          if (!Array.isArray(value) || value.length === 0) {
-            throw validation(`"${field.label}" necesita al menos una opción`)
-          }
-          for (const v of value) {
-            if (typeof v !== "string" || !field.options!.includes(v)) {
-              throw validation(`"${field.label}" tiene una opción inválida`)
-            }
-          }
-          if (new Set(value).size !== value.length) {
-            throw validation(`"${field.label}" tiene opciones repetidas`)
-          }
-          out[field.id] = [...value]
-          break
-        }
-        case "fecha": {
-          if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-            throw validation(`"${field.label}" debe ser una fecha (AAAA-MM-DD)`)
-          }
-          const date = new Date(`${value}T00:00:00Z`)
-          if (Number.isNaN(date.getTime())) throw validation(`"${field.label}" no es una fecha válida`)
-          out[field.id] = value
-          break
-        }
-        case "firma": {
-          // Trazo manuscrito con su firmante; límites de tamaño y coordenadas
-          // iguales a los del consentimiento. Sin afirmación de certificación.
-          if (typeof value !== "object" || value === null || Array.isArray(value)) {
-            throw validation(`"${field.label}" necesita la firma manuscrita`)
-          }
-          const raw = value as Record<string, unknown>
-          const signerName = typeof raw.signerName === "string" ? raw.signerName.trim() : ""
-          if (!signerName || signerName.length > 200)
-            throw validation(`"${field.label}" necesita el nombre de quien firma`)
-          const signature = assertSignatureData({ strokes: raw.strokes }, `La firma de "${field.label}"`)
-          out[field.id] = { ...signature, signerName }
-          break
-        }
-        case "pieza": {
-          // Un sitio suelto del producto (odentIA: una pieza FDI).
-          const tooth = typeof value === "number" ? value : Number(value)
-          if (!options.site || options.site.code(tooth) === null)
-            throw validation(`"${field.label}": ${options.site?.invalid(value) ?? "esta clínica no registra dónde"}`)
-          out[field.id] = tooth
-          break
-        }
-        case "escala": {
-          const num = typeof value === "number" ? value : Number(value)
-          if (!Number.isInteger(num) || num < (field.min ?? 0) || num > (field.max ?? 10))
-            throw validation(`"${field.label}" debe ser un entero de ${field.min ?? 0} a ${field.max ?? 10}`)
-          out[field.id] = num
-          break
-        }
-        case "adjunto": {
-          if (typeof value !== "string" || !UUID_RE.test(value))
-            throw validation(`"${field.label}" debe ser un archivo del paciente`)
-          out[field.id] = value
-          break
-        }
       }
     }
   }
   for (const key of Object.keys(input)) {
-    if (!allowed.has(key)) throw validation(`Campo desconocido: ${key}`)
+    if (!allowed.has(key)) errors[`answers.${key}`] ??= `Campo desconocido: ${key}`
   }
+  const first = Object.values(errors)[0]
+  if (first) throw validation(first, errors)
   return out
+}
+
+/** Una respuesta validada (o `null` si está vacía y se permite); lanza el problema de esa pregunta. */
+function assertAnswer(
+  field: FormFieldDef,
+  value: unknown,
+  requireAll: boolean,
+  site: ProductSite | undefined,
+): unknown {
+  if (isEmptyAnswer(value)) {
+    if (requireAll && field.required) throw validation(`"${field.label}" es obligatorio`)
+    return null
+  }
+  switch (field.type) {
+    case "texto":
+    case "texto_largo": {
+      if (typeof value !== "string") throw validation(`"${field.label}" debe ser texto`)
+      const text = value.trim()
+      if (!text) {
+        if (requireAll && field.required) throw validation(`"${field.label}" es obligatorio`)
+        return null
+      }
+      if (text.length > (field.type === "texto" ? 500 : 5000)) {
+        throw validation(`"${field.label}" supera el máximo de caracteres`)
+      }
+      return text
+    }
+    case "numero": {
+      const num = typeof value === "number" ? value : Number(value)
+      if (!Number.isFinite(num)) throw validation(`"${field.label}" debe ser un número`)
+      if (field.min != null && num < field.min) {
+        throw validation(`"${field.label}" debe ser ≥ ${field.min}`)
+      }
+      if (field.max != null && num > field.max) {
+        throw validation(`"${field.label}" debe ser ≤ ${field.max}`)
+      }
+      return num
+    }
+    case "booleano": {
+      if (typeof value !== "boolean") throw validation(`"${field.label}" debe ser sí/no`)
+      return value
+    }
+    case "opcion_unica": {
+      if (typeof value !== "string" || !field.options!.includes(value)) {
+        throw validation(`"${field.label}" tiene una opción inválida`)
+      }
+      return value
+    }
+    case "opcion_multiple": {
+      if (!Array.isArray(value) || value.length === 0) {
+        throw validation(`"${field.label}" necesita al menos una opción`)
+      }
+      for (const v of value) {
+        if (typeof v !== "string" || !field.options!.includes(v)) {
+          throw validation(`"${field.label}" tiene una opción inválida`)
+        }
+      }
+      if (new Set(value).size !== value.length) {
+        throw validation(`"${field.label}" tiene opciones repetidas`)
+      }
+      return [...value]
+    }
+    case "fecha": {
+      if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        throw validation(`"${field.label}" debe ser una fecha (AAAA-MM-DD)`)
+      }
+      const date = new Date(`${value}T00:00:00Z`)
+      if (Number.isNaN(date.getTime())) throw validation(`"${field.label}" no es una fecha válida`)
+      return value
+    }
+    case "firma": {
+      // Trazo manuscrito con su firmante; límites de tamaño y coordenadas
+      // iguales a los del consentimiento. Sin afirmación de certificación.
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw validation(`"${field.label}" necesita la firma manuscrita`)
+      }
+      const raw = value as Record<string, unknown>
+      const signerName = typeof raw.signerName === "string" ? raw.signerName.trim() : ""
+      if (!signerName || signerName.length > 200)
+        throw validation(`"${field.label}" necesita el nombre de quien firma`)
+      const signature = assertSignatureData({ strokes: raw.strokes }, `La firma de "${field.label}"`)
+      return { ...signature, signerName }
+    }
+    case "pieza": {
+      // Un sitio suelto del producto (odentIA: una pieza FDI).
+      const tooth = typeof value === "number" ? value : Number(value)
+      if (!site || site.code(tooth) === null)
+        throw validation(`"${field.label}": ${site?.invalid(value) ?? "esta clínica no registra dónde"}`)
+      return tooth
+    }
+    case "escala": {
+      const num = typeof value === "number" ? value : Number(value)
+      if (!Number.isInteger(num) || num < (field.min ?? 0) || num > (field.max ?? 10))
+        throw validation(`"${field.label}" debe ser un entero de ${field.min ?? 0} a ${field.max ?? 10}`)
+      return num
+    }
+    case "adjunto": {
+      if (typeof value !== "string" || !UUID_RE.test(value))
+        throw validation(`"${field.label}" debe ser un archivo del paciente`)
+      return value
+    }
+  }
 }
 
 export type FormTemplateRow = typeof clinicalFormTemplate.$inferSelect
@@ -870,12 +920,19 @@ function assertRespondent(raw: unknown): "staff" | "portal" {
   return raw
 }
 
-/** El paciente no adjunta archivos clínicos desde el portal. */
+/** El paciente no adjunta archivos clínicos desde el portal: cada pregunta de archivo, en su tipo. */
 function assertPortalSchema(respondent: "staff" | "portal", schema: FormSchemaDef): void {
   if (respondent !== "portal") return
-  const attachment = schema.sections.flatMap((s) => s.fields).find((f) => f.type === "adjunto")
-  if (attachment)
-    throw validation(`«${attachment.label}»: el cuestionario del portal no admite archivos adjuntos`)
+  const errors: Record<string, string> = {}
+  schema.sections.forEach((section, si) => {
+    section.fields.forEach((field, fi) => {
+      if (field.type === "adjunto")
+        errors[`schema.sections[${si}].fields[${fi}].type`] =
+          `«${field.label}»: el cuestionario del portal no admite archivos adjuntos`
+    })
+  })
+  const failure = fieldsError(errors)
+  if (failure) throw failure
 }
 
 export async function listFormTemplates(
@@ -927,13 +984,13 @@ export async function createFormTemplate(
   input: CreateFormTemplateInput,
 ): Promise<FormTemplateRow> {
   const title = assertName(input.title, "Título del formulario", 200)
-  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title)
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title, "title")
   const description = assertOptionalText(input.description, "Descripción", 2000)
   const schema = assertFormSchema(input.schema)
   let specialtyId: string | null = null
   if (input.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, input.specialtyId)
-    if (!specialty.isActive) throw validation("La especialidad está inactiva")
+    if (!specialty.isActive) throw invalidField("specialtyId", "La especialidad está inactiva")
     specialtyId = specialty.id
   }
   // La versión arranca en 1; si la clave ya existe se crea la siguiente versión.
@@ -942,8 +999,10 @@ export async function createFormTemplate(
     .from(clinicalFormTemplate)
     .where(and(eq(clinicalFormTemplate.organizationId, orgId), eq(clinicalFormTemplate.key, key)))
     .orderBy(desc(clinicalFormTemplate.version))
-  if (existing.some((row) => row.status === "borrador"))
-    throw conflict("DRAFT_EXISTS", "Ya hay un borrador de este formulario: edítalo o publícalo")
+  if (existing.some((row) => row.status === "borrador")) {
+    const message = "Ya hay un borrador de este formulario: edítalo o publícalo"
+    throw new ServiceError("DRAFT_EXISTS", 409, message, { title: message })
+  }
   const version = (existing[0]?.version ?? 0) + 1
   const respondent = assertRespondent(input.respondent)
   assertPortalSchema(respondent, schema)
@@ -1171,7 +1230,7 @@ export async function createFormResponse(
     .limit(1)
   if (!template) throw notFound("Plantilla")
   if (template.status !== "publicado") {
-    throw validation("Solo una plantilla publicada admite capturas")
+    throw invalidField("templateId", "Solo una plantilla publicada admite capturas")
   }
   const schema = assertFormSchema(template.schema)
   let encounterId: string | null = null
@@ -1183,7 +1242,7 @@ export async function createFormResponse(
   }
   let professionalUserId: string | null = null
   if (input.professionalUserId) {
-    await requireMemberUserId(tx, orgId, input.professionalUserId)
+    await requireMemberUserId(tx, orgId, input.professionalUserId, "professionalUserId")
     professionalUserId = input.professionalUserId
   } else if (attendingUserId) {
     // Desde la atención, el responsable por defecto es quien atiende.
@@ -1245,7 +1304,7 @@ export async function updateFormResponseDraft(
     if (input.professionalUserId === null) {
       professionalUserId = null
     } else {
-      await requireMemberUserId(tx, orgId, input.professionalUserId)
+      await requireMemberUserId(tx, orgId, input.professionalUserId, "professionalUserId")
       professionalUserId = input.professionalUserId
     }
   }
@@ -1351,7 +1410,7 @@ export async function discardFormResponse(
   if (current.status !== "borrador")
     throw conflict("FINALIZED", "Solo un borrador se descarta; uno finalizado se corrige con adenda")
   const clean = (reason ?? "").trim()
-  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!clean || clean.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const [row] = await tx
     .update(clinicalFormResponse)
     .set({
@@ -1390,8 +1449,8 @@ export async function addFormAddendum(
     throw validation("La adenda solo aplica a formularios finalizados")
   }
   const clean = (text ?? "").trim()
-  if (!clean) throw validation("La adenda no puede estar vacía")
-  if (clean.length > 5000) throw validation("La adenda supera 5000 caracteres")
+  if (!clean) throw invalidField("text", "La adenda no puede estar vacía")
+  if (clean.length > 5000) throw invalidField("text", "La adenda supera 5000 caracteres")
   const [row] = await tx
     .insert(clinicalFormAddendum)
     .values({ organizationId: orgId, responseId, text: clean, createdBy: actorUserId })
@@ -1495,12 +1554,24 @@ export async function listConsentTemplates(
 
 function assertConsentBody(raw: string | null | undefined): string {
   const body = (raw ?? "").trim()
-  if (body.length < 50) throw validation("El texto del consentimiento es muy corto (mín. 50 caracteres)")
-  if (body.length > 20000) throw validation("El texto supera 20000 caracteres")
+  if (body.length < 50) throw invalidField("body", "El texto del consentimiento es muy corto (mín. 50 caracteres)")
+  if (body.length > 20000) throw invalidField("body", "El texto supera 20000 caracteres")
   return body
 }
 
-/** Secciones validadas y su texto equivalente; sin secciones, el texto libre. */
+const CONSENT_SECTION_KEYS = ["procedure", "benefits", "risks", "alternatives", "consequences", "notes"] as const
+
+/** Lo que ocupa una sección en el texto: con ella se elige cuál acortar. */
+function consentSectionLength(sections: ConsentSections, key: (typeof CONSENT_SECTION_KEYS)[number]): number {
+  const value = sections[key]
+  return Array.isArray(value) ? value.join("\n").length : (value ?? "").length
+}
+
+/**
+ * Secciones validadas y su texto equivalente; sin secciones, el texto libre.
+ * Un problema de una sección va a ella (`sections.risks`); si el total pasa
+ * del tope, a la sección más larga, que es la que conviene acortar.
+ */
 function consentContent(input: { sections?: unknown; body?: string | null }): {
   sections: ConsentSections | null
   body: string
@@ -1510,9 +1581,19 @@ function consentContent(input: { sections?: unknown; body?: string | null }): {
     try {
       sections = parseConsentSections(input.sections)
     } catch (e) {
-      throw validation(e instanceof Error ? e.message : "Secciones inválidas")
+      const message = e instanceof Error ? e.message : "Secciones inválidas"
+      // `parseConsentSections` empieza cada mensaje con el nombre de la sección.
+      const key = CONSENT_SECTION_KEYS.find((k) => message.startsWith(`${CONSENT_SECTION_LABELS[k]}:`))
+      throw key ? invalidField(`sections.${key}`, message) : validation(message)
     }
-    return { sections, body: assertConsentBody(consentSectionsToText(sections)) }
+    const body = consentSectionsToText(sections)
+    if (body.length > 20000) {
+      const longest = CONSENT_SECTION_KEYS.reduce((a, b) =>
+        consentSectionLength(sections, b) > consentSectionLength(sections, a) ? b : a,
+      )
+      throw invalidField(`sections.${longest}`, "El consentimiento supera 20000 caracteres en total: acorta esta sección")
+    }
+    return { sections, body }
   }
   return { sections: null, body: assertConsentBody(input.body) }
 }
@@ -1525,11 +1606,11 @@ export async function createConsentTemplate(
 ): Promise<ConsentTemplateRow> {
   const title = assertName(input.title, "Título del consentimiento", 200)
   const { sections, body } = consentContent(input)
-  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title)
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title, "title")
   let specialtyId: string | null = null
   if (input.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, input.specialtyId)
-    if (!specialty.isActive) throw validation("La especialidad está inactiva")
+    if (!specialty.isActive) throw invalidField("specialtyId", "La especialidad está inactiva")
     specialtyId = specialty.id
   }
   const existing = await tx
@@ -1537,8 +1618,10 @@ export async function createConsentTemplate(
     .from(consentTemplate)
     .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, key)))
     .orderBy(desc(consentTemplate.version))
-  if (existing.some((row) => row.status === "borrador"))
-    throw conflict("DRAFT_EXISTS", "Ya hay un borrador de esta plantilla: edítalo o publícalo")
+  if (existing.some((row) => row.status === "borrador")) {
+    const message = "Ya hay un borrador de esta plantilla: edítalo o publícalo"
+    throw new ServiceError("DRAFT_EXISTS", 409, message, { title: message })
+  }
   const version = (existing[0]?.version ?? 0) + 1
   try {
     const [row] = await tx
@@ -1727,7 +1810,7 @@ export async function createConsentDocument(
     .limit(1)
   if (!template) throw notFound("Plantilla de consentimiento")
   if (template.status !== "publicado") {
-    throw validation("Solo una plantilla publicada genera consentimientos")
+    throw invalidField("templateId", "Solo una plantilla publicada genera consentimientos")
   }
   let encounterId: string | null = null
   if (input.encounterId) {
@@ -1759,16 +1842,20 @@ export async function createConsentDocument(
     planDiagnosis = item.diagnosisCode ? { code: item.diagnosisCode, system: item.diagnosisSystem } : null
   }
   if (!encounterId && !planItemId && !input.procedureRef?.trim()) {
-    throw validation("Indica la atención, el tratamiento o el procedimiento al que aplica")
+    throw invalidField("procedureRef", "Indica la atención, el tratamiento o el procedimiento al que aplica")
   }
   const procedureRef = assertOptionalText(input.procedureRef, "Procedimiento", 500)
-  const diagnosis = await resolveOptionalDiagnosisCode(
-    tx,
-    orgId,
-    input.diagnosisCode?.trim()
-      ? { code: input.diagnosisCode, system: input.diagnosisSystem }
-      : { code: planDiagnosis?.code ?? null, system: planDiagnosis?.system ?? null },
-  )
+  const diagnosis = input.diagnosisCode?.trim()
+    ? await resolveOptionalDiagnosisCode(
+        tx,
+        orgId,
+        { code: input.diagnosisCode, system: input.diagnosisSystem },
+        "diagnosisCode",
+      )
+    : await resolveOptionalDiagnosisCode(tx, orgId, {
+        code: planDiagnosis?.code ?? null,
+        system: planDiagnosis?.system ?? null,
+      })
   const [row] = await tx
     .insert(consentDocument)
     .values({
@@ -1841,40 +1928,46 @@ export const CONSENT_SIGNATURE_WORDS: Record<"clinica" | "papel" | "enlace", str
   enlace: "Firma simple · por enlace",
 }
 
-function assertSignatureData(raw: unknown, label = "La firma manuscrita"): Record<string, unknown> {
+/** `field`: el nombre del trazo en el cuerpo, para decir el rechazo junto a su recuadro. */
+function assertSignatureData(
+  raw: unknown,
+  label = "La firma manuscrita",
+  field = "signatureData",
+): Record<string, unknown> {
+  const fail = (message: string) => invalidField(field, message)
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw validation(`${label} es obligatoria`)
+    throw fail(`${label} es obligatoria`)
   }
   const strokes: unknown = "strokes" in raw ? raw.strokes : undefined
   const image: unknown = "image" in raw ? raw.image : undefined
   if (strokes !== undefined) {
     if (!Array.isArray(strokes) || strokes.length === 0) {
-      throw validation(`${label} está vacía`)
+      throw fail(`${label} está vacía`)
     }
-    if (strokes.length > 500) throw validation(`${label} supera el tamaño permitido`)
+    if (strokes.length > 500) throw fail(`${label} supera el tamaño permitido`)
     let points = 0
     for (const stroke of strokes) {
       if (!Array.isArray(stroke) || stroke.length < 2 || stroke.length > 5000)
-        throw validation(`${label} tiene un trazo inválido`)
+        throw fail(`${label} tiene un trazo inválido`)
       for (const point of stroke) {
         if (
           !Array.isArray(point) ||
           point.length !== 2 ||
           !point.every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1000)
         )
-          throw validation(`${label} tiene coordenadas fuera del recuadro`)
+          throw fail(`${label} tiene coordenadas fuera del recuadro`)
       }
       points += stroke.length
     }
-    if (points > 20000) throw validation(`${label} supera el tamaño permitido`)
+    if (points > 20000) throw fail(`${label} supera el tamaño permitido`)
     return { strokes }
   }
   if (typeof image !== "string" || image.length < 100) {
-    throw validation(`${label} está vacía`)
+    throw fail(`${label} está vacía`)
   }
-  if (image.length > 500_000) throw validation(`${label} supera el tamaño permitido`)
+  if (image.length > 500_000) throw fail(`${label} supera el tamaño permitido`)
   if (!image.startsWith("data:image/png;base64,"))
-    throw validation(`${label} debe ser una imagen PNG`)
+    throw fail(`${label} debe ser una imagen PNG`)
   return { image }
 }
 
@@ -1908,27 +2001,31 @@ export async function signConsentDocument(
     throw validation("Firmante inválido: paciente|representante")
   }
   if (!input.signerContactId)
-    throw validation("Elige a la persona que firma: el paciente o su representante legal vigente")
+    throw invalidField("signerContactId", "Elige a la persona que firma: el paciente o su representante legal vigente")
   if (input.comprehensionConfirmed !== true)
-    throw validation("La persona firmante debe confirmar que comprendió la información")
+    throw invalidField("comprehensionConfirmed", "La persona firmante debe confirmar que comprendió la información")
   const subject = await requirePatient(tx, orgId, current.patientId)
   const now = new Date()
   // La edad con el día de la clínica: la misma regla que decide quién firma.
   const minor = await patientIsMinor(tx, orgId, current.patientId)
   if (minor && input.signerKind !== "representante")
-    throw validation("El paciente es menor de edad: firma su representante legal vigente")
+    throw invalidField("signerContactId", "El paciente es menor de edad: firma su representante legal vigente")
   let verified: { displayName: string; docNumber: string | null; docType: string | null }
   if (input.signerKind === "paciente") {
     const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
-    if (linked.relationship !== "self")
-      throw conflict("SIGNER_NOT_AUTHORIZED", "Solo la propia persona firma como paciente")
+    if (linked.relationship !== "self") {
+      const message = "Solo la propia persona firma como paciente"
+      throw new ServiceError("SIGNER_NOT_AUTHORIZED", 409, message, { signerContactId: message })
+    }
     verified = linked.contact
   } else {
     const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.signerContactId)
-    if (linked.relationship === "self")
-      throw conflict("SIGNER_NOT_AUTHORIZED", "La propia persona firma como paciente, no como representante")
+    if (linked.relationship === "self") {
+      const message = "La propia persona firma como paciente, no como representante"
+      throw new ServiceError("SIGNER_NOT_AUTHORIZED", 409, message, { signerContactId: message })
+    }
     // Facultad legal vigente sobre este paciente, no un vínculo cualquiera.
-    verified = await requireDecisionContact(tx, orgId, current.patientId, input.signerContactId)
+    verified = await requireDecisionContact(tx, orgId, current.patientId, input.signerContactId, "signerContactId")
   }
   const signerName = assertName(verified.displayName, "Nombre de quien firma", 200)
   const signerDoc = assertOptionalText(
@@ -1941,7 +2038,7 @@ export async function signConsentDocument(
     representativeRelation =
       assertOptionalText(input.representativeRelation, "Parentesco o relación", 120) ??
       "Representante legal"
-    if (!signerDoc) throw validation("El representante necesita documento de identidad")
+    if (!signerDoc) throw invalidField("signerDoc", "El representante necesita documento de identidad")
   }
   const method = input.method ?? "clinica"
   if (method !== "clinica" && method !== "papel")
@@ -1952,7 +2049,7 @@ export async function signConsentDocument(
     signatureData = assertSignatureData(input.signatureData)
   } else {
     // La hoja firmada es la evidencia: debe estar ya en los documentos de esta persona.
-    if (!input.paperDocumentId) throw validation("Sube la foto de la hoja firmada")
+    if (!input.paperDocumentId) throw invalidField("paperDocumentId", "Sube la foto de la hoja firmada")
     const [paper] = await tx
       .select({
         id: patientDocument.id,
@@ -1964,16 +2061,16 @@ export async function signConsentDocument(
       .where(and(eq(patientDocument.id, input.paperDocumentId), eq(patientDocument.organizationId, orgId)))
       .limit(1)
     if (!paper || paper.patientId !== current.patientId || paper.retiredAt)
-      throw validation("La hoja firmada debe ser un documento vigente de esta persona")
+      throw invalidField("paperDocumentId", "La hoja firmada debe ser un documento vigente de esta persona")
     if (paper.category !== "consentimiento")
-      throw validation("La hoja firmada se guarda como consentimiento")
+      throw invalidField("paperDocumentId", "La hoja firmada se guarda como consentimiento")
     paperDocumentId = paper.id
   }
   // El profesional firma con su perfil; un trazo, si viene, queda como evidencia.
   const professionalSignature =
     input.professionalSignature === undefined || input.professionalSignature === null
       ? null
-      : assertSignatureData(input.professionalSignature, "La firma del profesional")
+      : assertSignatureData(input.professionalSignature, "La firma del profesional", "professionalSignature")
   const informer = await requireProfessionalSignature(tx, orgId, actorUserId)
   let informedAt = now
   if (input.informedAt) {
@@ -2132,7 +2229,8 @@ export async function signConsentByLink(
   if (current.status !== "pendiente" || !current.linkSentAt || current.personSignedAt) {
     throw conflict("SIGNED", "Este consentimiento ya no se firma desde aquí")
   }
-  if (input.comprehensionConfirmed !== true) throw validation("Marca que entendiste lo que te explicaron y aceptas")
+  if (input.comprehensionConfirmed !== true)
+    throw invalidField("comprehensionConfirmed", "Marca que entendiste lo que te explicaron y aceptas")
   const subject = await requirePatient(tx, orgId, current.patientId)
   const now = new Date()
   const minor = await patientIsMinor(tx, orgId, current.patientId)
@@ -2153,9 +2251,9 @@ export async function signConsentByLink(
     verified = await requireDecisionContact(tx, orgId, current.patientId, signerContactId)
   }
   const typed = assertOptionalText(input.docNumber, "Tu documento", 40)
-  if (!typed) throw validation("Escribe tu documento")
+  if (!typed) throw invalidField("docNumber", "Escribe tu documento")
   if (verified.docNumber && !sameDocument(typed, verified.docNumber))
-    throw validation("Ese documento no coincide con el que tenemos registrado")
+    throw invalidField("docNumber", "Ese documento no coincide con el que tenemos registrado")
   const signerDoc = verified.docNumber ? `${verified.docType ?? ""} ${verified.docNumber}`.trim() : typed
   const signatureData = assertSignatureData(input.signatureData)
   const [row] = await tx
@@ -2268,7 +2366,7 @@ export async function cancelConsentDocument(
   if (current.status !== "pendiente")
     throw conflict("CONSENT_STATUS", "Solo un consentimiento pendiente se anula; uno firmado se revoca")
   const clean = (reason ?? "").trim()
-  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!clean || clean.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const [row] = await tx
     .update(consentDocument)
     .set({
@@ -2322,18 +2420,18 @@ export async function revokeConsentDocument(
     throw conflict("CONSENT_STATUS", "Solo un consentimiento firmado puede revocarse")
   }
   const clean = (input.reason ?? "").trim()
-  if (!clean) throw validation("La revocación necesita un motivo")
-  if (clean.length > 2000) throw validation("El motivo supera 2000 caracteres")
-  if (!input.revokerContactId) throw validation("Indica quién revoca")
+  if (!clean) throw invalidField("reason", "La revocación necesita un motivo")
+  if (clean.length > 2000) throw invalidField("reason", "El motivo supera 2000 caracteres")
+  if (!input.revokerContactId) throw invalidField("revokerContactId", "Indica quién revoca")
   await requirePatient(tx, orgId, current.patientId)
   const minor = await patientIsMinor(tx, orgId, current.patientId)
   const linked = await requireLinkedActiveContact(tx, orgId, current.patientId, input.revokerContactId)
   if (linked.relationship === "self" && minor)
-    throw validation("El paciente es menor de edad: revoca su representante legal vigente")
+    throw invalidField("revokerContactId", "El paciente es menor de edad: revoca su representante legal vigente")
   const revoker =
     linked.relationship === "self"
       ? linked.contact
-      : await requireDecisionContact(tx, orgId, current.patientId, input.revokerContactId)
+      : await requireDecisionContact(tx, orgId, current.patientId, input.revokerContactId, "revokerContactId")
   const revokeSignature = assertSignatureData(input.signatureData, "La firma de quien revoca")
   const [row] = await tx
     .update(consentDocument)
@@ -2572,13 +2670,13 @@ export async function setConsentTemplateServices(
     .limit(1)
   if (!template) throw notFound("Plantilla de consentimiento")
   const wanted = [...new Set(serviceIds)]
-  if (wanted.length > 100) throw validation("Elige como mucho 100 servicios")
+  if (wanted.length > 100) throw invalidField("serviceIds", "Elige como mucho 100 servicios")
   if (wanted.length > 0) {
     const found = await tx
       .select({ id: serviceCatalog.id })
       .from(serviceCatalog)
       .where(and(eq(serviceCatalog.organizationId, orgId), inArray(serviceCatalog.id, wanted)))
-    if (found.length !== wanted.length) throw validation("Hay servicios que no son de esta clínica")
+    if (found.length !== wanted.length) throw invalidField("serviceIds", "Hay servicios que no son de esta clínica")
   }
   const current = await tx
     .select({ serviceId: consentTemplateService.serviceId })
@@ -3080,7 +3178,7 @@ export async function createClinicalOrder(
   let specialtyId: string | null = null
   if (input.specialtyId) {
     const specialty = await requireSpecialty(tx, orgId, input.specialtyId)
-    if (!specialty.isActive) throw validation("La especialidad está inactiva")
+    if (!specialty.isActive) throw invalidField("specialtyId", "La especialidad está inactiva")
     specialtyId = specialty.id
   }
   let encounterId: string | null = null
@@ -3091,18 +3189,18 @@ export async function createClinicalOrder(
   let recipientUserId: string | null = null
   let recipientName: string | null = null
   if (input.recipientUserId) {
-    if (kind !== "interconsulta") throw validation("Solo una derivación va a un colega de la clínica")
-    if (input.recipientUserId === actorUserId) throw validation("Deriva a otro profesional, no a ti")
+    if (kind !== "interconsulta") throw invalidField("recipientUserId", "Solo una derivación va a un colega de la clínica")
+    if (input.recipientUserId === actorUserId) throw invalidField("recipientUserId", "Deriva a otro profesional, no a ti")
     const [colleague] = await tx
       .select({ role: member.role, name: user.name })
       .from(member)
       .innerJoin(user, eq(user.id, member.userId))
       .where(and(eq(member.organizationId, orgId), eq(member.userId, input.recipientUserId)))
       .limit(1)
-    if (!colleague) throw validation("El colega debe ser miembro de la clínica")
+    if (!colleague) throw invalidField("recipientUserId", "El colega debe ser miembro de la clínica")
     // Solo a quien atiende: recepción y caja no reciben una derivación clínica.
     if (!canAccess(colleague.role, "clinical.write"))
-      throw validation("Deriva a un profesional que atiende, no a recepción ni a caja")
+      throw invalidField("recipientUserId", "Deriva a un profesional que atiende, no a recepción ni a caja")
     recipientUserId = input.recipientUserId
     recipientName = colleague.name
   }
@@ -3128,7 +3226,13 @@ export async function createClinicalOrder(
       .limit(1)
     if (first) requested = first
   }
-  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, requested)
+  // Lo elegido en el formulario se dice junto a su campo; el de la atención no tiene campo.
+  const diagnosis = await resolveOptionalDiagnosisCode(
+    tx,
+    orgId,
+    requested,
+    input.diagnosisCode?.trim() ? "diagnosisCode" : undefined,
+  )
   const [row] = await tx
     .insert(clinicalOrder)
     .values({
@@ -3212,11 +3316,11 @@ export async function advanceClinicalOrder(
       .where(and(eq(patientDocument.id, options.resultDocumentId), eq(patientDocument.organizationId, orgId)))
       .limit(1)
     if (!document || document.patientId !== current.patientId || document.retiredAt)
-      throw validation("El resultado debe ser un documento vigente de esta persona")
+      throw invalidField("resultDocumentId", "El resultado debe ser un documento vigente de esta persona")
     resultDocumentId = options.resultDocumentId
   }
   if (toStatus === "completado" && !result && !resultDocumentId) {
-    throw validation("Completar la orden necesita el resultado: escríbelo o sube el archivo")
+    throw invalidField("resultDocumentId", "Completar la orden necesita el resultado: escríbelo o sube el archivo")
   }
   const completed = toStatus === "completado"
   const [row] = await tx
@@ -3262,7 +3366,7 @@ export async function cancelClinicalOrder(
   if (!ORDER_TRANSITIONS[current.status]?.includes("cancelado"))
     throw conflict("TRANSITION", "Solo se cancela una orden pedida o en proceso")
   const clean = (reason ?? "").trim()
-  if (!clean || clean.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!clean || clean.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const now = new Date()
   const [row] = await tx
     .update(clinicalOrder)

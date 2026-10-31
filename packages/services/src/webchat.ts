@@ -14,15 +14,15 @@ import type { Db } from "@odentia/db"
 import { member, organization, user } from "@odentia/db/schema/auth"
 import { channelConnection, contact, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { webchatRateLimit, webchatSite, type WebchatSiteStatus } from "@odentia/db/schema/webchat"
+import { type WebchatSiteStatus, webchatRateLimit, webchatSite } from "@odentia/db/schema/webchat"
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm"
 import { z } from "zod"
 import { getAgentConfig } from "./agentConfig.js"
 import { findClinicName } from "./automation-routing.js"
 import { createConnection, setConnectionStatus } from "./connections.js"
 import { updateContact } from "./contacts.js"
-import { notFound, ServiceError, validation } from "./errors.js"
 import { TEST_KEEP_MS } from "./conversation-state.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { handoffOpenSql } from "./handoff-state.js"
 import { findOrgCountry } from "./locale.js"
 import { resolvePersonalLinkRefs } from "./personal-link-token.js"
@@ -45,9 +45,9 @@ import { createWorkspaceNotification } from "./workspace.js"
 /** Proveedor del chat web embebible propio (sin red externa). */
 export const WEBCHAT_PROVIDER = "web_chat"
 
+export type { WebchatConnectionConfig }
 /** Re-export del canal lógico para rutas y seeds. */
 export { WEBCHAT_CHANNEL }
-export type { WebchatConnectionConfig }
 
 const DEFAULT_COLOR = "#0f766e"
 export const WEBCHAT_DEFAULT_GREETING = "Hola, ¿en qué podemos ayudarte?"
@@ -710,11 +710,13 @@ async function saveVisitorContact(
   if (known?.known) throw new ServiceError("WEBCHAT_CONTACT_KNOWN", 409, "Ya tenemos cómo avisarte.")
   const typedPhone = input.whatsapp?.trim() || null
   const typedEmail = input.email?.trim() || null
-  if (!typedPhone && !typedEmail) throw validation("Escribe tu WhatsApp o tu correo.")
+  // Cada error a su dato (`whatsapp`/`email` en el cuerpo); sin ninguno, el de los dos.
+  if (!typedPhone && !typedEmail) throw validation("Escribe tu WhatsApp o tu correo.", { whatsapp: "Escribe tu WhatsApp o tu correo." })
   const phone = typedPhone ? normalizePhone(typedPhone, (await findOrgCountry(tx, orgId)) ?? undefined) : null
-  if (typedPhone && !phone) throw validation("Escribe tu WhatsApp con el código de tu país, por ejemplo +51 987 654 321.")
+  if (typedPhone && !phone)
+    throw invalidField("whatsapp", "Escribe tu WhatsApp con el código de tu país, por ejemplo +51 987 654 321.")
   const email = typedEmail ? emailSchema.safeParse(typedEmail) : null
-  if (email && !email.success) throw validation("Revisa tu correo: falta algo, como la @.")
+  if (email && !email.success) throw invalidField("email", "Revisa tu correo: falta algo, como la @.")
   await updateContact(
     tx,
     orgId,
@@ -722,14 +724,14 @@ async function saveVisitorContact(
     { ...(phone ? { phone } : {}), ...(email?.success ? { email: email.data } : {}) },
     { userId: null },
   )
-  // Lo que deja tiene que servir para avisarle: un número que ya es de otra persona no se usa, y se le pide otro.
+  // Lo que deja tiene que servir para avisarle. Un número que ya es de otra persona se guarda
+  // igual y sin decírselo (le revelaría quién es de la clínica): no se usa para avisarle, y el
+  // equipo lo ve en «Sin forma de avisarle» (`othersPhone`) y decide.
   const routes = await webchatReplyRoutes(tx, orgId, conv.contactId)
-  if (!routes.whatsapp && !routes.correo) {
-    throw validation(
-      typedEmail
-        ? "No podemos avisarte por ahí. Revisa tu correo o déjanos tu WhatsApp."
-        : "No podemos avisarte por ese WhatsApp. Déjanos otro número o tu correo.",
-    )
+  if (!routes.whatsapp && !routes.correo && !routes.othersPhone) {
+    throw typedEmail
+      ? invalidField("email", "No podemos avisarte por ahí. Revisa tu correo o déjanos tu WhatsApp.")
+      : invalidField("whatsapp", "No podemos avisarte por ese WhatsApp. Déjanos otro número o tu correo.")
   }
   await tx.insert(auditEvent).values({
     organizationId: orgId,
