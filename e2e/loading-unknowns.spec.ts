@@ -106,7 +106,10 @@ test("la clínica pide los dos pasos con la pestaña abierta: su pantalla sale s
   await gotoHydrated(page, tenant(org.slug, "/home"))
   await expect(page.getByRole("heading", { level: 1, name: "Inicio" })).toBeVisible()
   await fixtureDb.update(orgProfile).set({ requireTwoFactor: true }).where(eq(orgProfile.organizationId, org.id))
-  expect((await api(page, "GET", "/api/org-profile", org.slug)).status).toBe(403)
+  // Un pedido de la página puede adelantarse y llevarla a su pantalla: eso corta esta consulta y se repite.
+  await expect
+    .poll(() => api(page, "GET", "/api/org-profile", org.slug).then((reply) => reply.status, () => null))
+    .toBe(403)
   // El próximo pedido de cualquier pantalla lleva a la suya; el que sea puede adelantarse al clic.
   await page.getByRole("link", { name: "Agenda" }).first().click({ timeout: 3_000 }).catch(() => undefined)
   await expect(page.getByRole("heading", { level: 1 })).toContainText("pide verificación en dos pasos", { timeout: 15_000 })
