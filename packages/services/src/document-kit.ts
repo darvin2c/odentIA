@@ -1134,6 +1134,17 @@ export class DocumentKit {
   }
 
   /** Un recuadro con cuerpo escrito: la declaración, las señales de alarma. */
+  /** Lo que ocupará `panel`: para no dejarlo separado de lo que debe ir con él. */
+  panelHeight(input: { title?: string; body: string; size?: number }): number {
+    const size = input.size ?? SIZE.table
+    const inner = this.width - 28
+    const title = input.title
+      ? this.lay(input.title, inner, { face: "sansBold", size, leading: 1.35 })
+      : []
+    const body = this.lay(input.body, inner, { size, leading: 1.45 })
+    return [...title, ...body].reduce((sum, line) => sum + line.height, 0) + 22
+  }
+
   panel(input: { title?: string; body: string; thickness?: number; size?: number }): void {
     const size = input.size ?? SIZE.table
     const padX = 14
@@ -1143,7 +1154,7 @@ export class DocumentKit {
       ? this.lay(input.title, inner, { face: "sansBold", size, leading: 1.35 })
       : []
     const body = this.lay(input.body, inner, { size, leading: 1.45 })
-    const height = [...title, ...body].reduce((sum, line) => sum + line.height, 0) + padY * 2
+    const height = this.panelHeight(input)
     if (height > this.pageRoom) {
       if (input.title) this.subheading(input.title)
       this.text(input.body, { size })
@@ -1295,15 +1306,21 @@ export class DocumentKit {
     return [...heading, ...lines].reduce((sum, line) => sum + line.height, 0) + boxHeight + 10
   }
 
+  /** Lo que ocuparán `penSignatures`: para no dejar una firma separada de lo que se firma. */
+  penSignaturesHeight(signatures: PenSignature[], options: { boxHeight?: number } = {}): number {
+    const columns = Math.max(signatures.length, 1)
+    const width = (this.width - 21 * (columns - 1)) / columns
+    const boxHeight = options.boxHeight ?? 66
+    return Math.max(...signatures.map((signature) => this.penColumnHeight(signature, width, boxHeight)))
+  }
+
   /** Firmas con su trazo en columnas; un trazo vacío deja el recuadro para firmar en papel. */
   penSignatures(signatures: PenSignature[], options: { boxHeight?: number } = {}): void {
     const columns = Math.max(signatures.length, 1)
     const gapX = 21
     const width = (this.width - gapX * (columns - 1)) / columns
     const boxHeight = options.boxHeight ?? 66
-    const height = Math.max(
-      ...signatures.map((signature) => this.penColumnHeight(signature, width, boxHeight)),
-    )
+    const height = this.penSignaturesHeight(signatures, options)
     this.ensure(height)
     const top = this.y
     signatures.forEach((signature, index) => {

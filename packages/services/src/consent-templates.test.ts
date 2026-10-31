@@ -221,10 +221,7 @@ it("la atención no pide uno que la clínica apagó, ni «Te espera» se lo recu
 it("la vista previa sale del mismo generador y un dato incompleto se dice en su campo", async () => {
   const { orgId, run } = await newClinic()
   const clinic = await run((tx) => loadDocumentClinic(tx, orgId))
-  const bytes = await renderConsentPreviewPdf(clinic, {
-    ...parseConsentDraft({ title: "Exodoncia", sections }),
-    version: 1,
-  })
+  const bytes = await renderConsentPreviewPdf(clinic, parseConsentDraft({ title: "Exodoncia", sections }))
   expect(Buffer.from(bytes).subarray(0, 5).toString()).toBe("%PDF-")
   expect(() => parseConsentDraft({ title: "Exodoncia", sections: { ...sections, risks: [] } })).toThrow(/Riesgos/)
 })

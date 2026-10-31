@@ -277,7 +277,6 @@ const consentTemplatePreview = z
   .object({
     title: z.string().trim().min(1, "Escribe el título").max(200),
     sections: consentSections,
-    version: z.number().int().min(1).optional(),
   })
   .strict()
 
@@ -831,7 +830,7 @@ export function createClinicalFormsRoute(deps: CrmDeps) {
     try {
       const draft = parseConsentDraft(parsed.data)
       const clinic = await withOrgContext(deps.db, orgId, (tx) => loadDocumentClinic(tx, orgId))
-      const bytes = await renderConsentPreviewPdf(clinic, { ...draft, version: parsed.data.version ?? 1 })
+      const bytes = await renderConsentPreviewPdf(clinic, draft)
       return new Response(Buffer.from(bytes), {
         status: 200,
         headers: {
