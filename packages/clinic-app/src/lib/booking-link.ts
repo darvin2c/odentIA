@@ -61,10 +61,13 @@ export interface PersonalLinkView {
   appointment: BookingAppointment | null
   /** Qué falta de sus datos y si se le pregunta su salud (opcional); `missing` vacío: solo su salud. */
   data: { missing: MissingDatum[]; health: boolean } | null
-  /** Quien ya es paciente, al reservar: lo que ya sabemos, con el documento abreviado. */
-  you: { name: string; document: string | null; phone: string | null } | null
-  /** Lo que aún no aceptó (el aviso) o no respondió (promociones): se pide en el mismo paso. */
-  pending: { privacy: boolean; promotions: boolean } | null
+  /** Quien ya es paciente, al reservar: lo que ya sabemos, con el documento abreviado; sus nombres, para corregirlos. */
+  you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
+  /**
+   * Lo que aún no aceptó (el aviso) o no respondió (promociones): se pide en el mismo paso.
+   * `promotionsOffer`: dijo que no a promociones; se le ofrece una casilla sin marcar.
+   */
+  pending: { privacy: boolean; promotions: boolean; promotionsOffer: boolean } | null
   budgets: PortalBudget[]
   consents: Array<{ id: string; title: string }>
   questionnaire: { title: string } | null
@@ -243,6 +246,8 @@ export interface BookingYou {
   data: Partial<Record<string, string>>
   privacyAccepted?: boolean
   acceptsPromotions?: boolean
+  /** Su nombre, si el de su ficha no es el suyo; con documento guardado, el documento entero. */
+  name?: { givenNames: string; familyName: string; docNumber?: string }
 }
 
 export function reserveBooking(

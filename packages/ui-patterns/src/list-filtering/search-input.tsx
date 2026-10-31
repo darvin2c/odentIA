@@ -13,8 +13,9 @@ export interface SearchInputProps {
    */
   expandable?: boolean
   /**
-   * Revalidación en curso (p. ej. `isFetching` de React Query): muestra el
-   * Spinner B dentro del input sin bloquear escritura ni limpieza.
+   * Revalidación en curso (p. ej. `isFetching` de React Query): el Spinner B
+   * ocupa el lugar de la lupa, sin quitarle ancho al texto ni bloquear escritura
+   * o limpieza.
    */
   isFetching?: boolean
   className?: string
@@ -61,7 +62,7 @@ export function SearchInput({
     >
       <InputGroup className="h-9">
         <InputGroupAddon align="inline-start">
-          <Search aria-hidden />
+          {isFetching ? <Spinner className="size-5" aria-label={common.states.loading} /> : <Search aria-hidden />}
         </InputGroupAddon>
         <InputGroupInput
           type="search"
@@ -74,7 +75,6 @@ export function SearchInput({
           aria-busy={isFetching}
         />
         <InputGroupAddon align="inline-end">
-          {isFetching ? <Spinner className="size-6" aria-label={common.states.loading} /> : null}
           {value ? (
             <InputGroupButton
               size="icon-xs"

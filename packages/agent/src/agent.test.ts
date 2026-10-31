@@ -50,6 +50,7 @@ import {
   listPersonFacts,
   listProposals,
   moveAppointment,
+  pendingSpokenName,
   moveContactIdentity,
   nextPatientNumber,
   noteSandboxTurn,
@@ -1615,6 +1616,49 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
   const after = await withOrgContext(appDb, "org_a", (tx) =>
     listOpportunities(tx, "org_a", { contactId: conv!.contactId }))
   expect(after.items.map((row) => row.id)).toEqual(before.items.map((row) => row.id))
+})
+
+it("si un paciente dice que se llama distinto, su ficha no cambia y recepción recibe una tarea para revisarla", async () => {
+  const { conversationId } = await ingestText("tg:otro-nombre", "evt-otro-nombre", "Hola, te saluda Darvin")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const actorId = `agent-actor-nombre-${Date.now()}`
+  await ownerDb.insert(user).values({ id: actorId, name: "Recepción Nombre", email: `${actorId}@example.test` })
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now())`)
+  const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
+  const [created] = await insertTestPatients(ownerDb, {
+    organizationId: "org_a", displayName: "Paciente Prueba WhatsApp", givenNames: "Paciente", familyName: "Prueba WhatsApp", patientNumber,
+  })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", actorId, created!.id, { contactId, relationship: "self", isPreferred: true }))
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: "trig-otro-nombre", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const updateContactTool = makeAgentTools(ctx).find((t) => t.name === "update_contact")!
+  const tasksOf = () => withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.organizationId, "org_a"), eq(crmTask.contactId, contactId))))
+
+  // Lo que ya está en su ficha no avisa a nadie, aunque lo escriba sin tildes ni mayúsculas.
+  expect(String(await updateContactTool.invoke({ givenNames: "paciente" }))).toContain("Úsalo tal como figura")
+  expect(await tasksOf()).toEqual([])
+
+  // Otro nombre: la ficha sigue igual y recepción recibe una sola tarea, aunque lo repita.
+  const told = String(await updateContactTool.invoke({ givenNames: "Darvin" }))
+  expect(told).toContain("quedó una tarea para que recepción la revise")
+  expect(told).toContain("Háblale por el nombre que te dijo")
+  await updateContactTool.invoke({ givenNames: "Darvin" })
+  const tasks = await tasksOf()
+  expect(tasks.map((task) => [task.title, task.area, task.patientId])).toEqual([["Revisar su nombre: Paciente Prueba WhatsApp", "recepcion", created!.id]])
+  expect(tasks[0]!.reason).toContain("dijo llamarse «Darvin»")
+  const [person] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(contact).where(eq(contact.id, contactId)))
+  expect(person).toMatchObject({ displayName: "Paciente Prueba WhatsApp", givenNames: "Paciente" })
+  // En los turnos siguientes se le sigue llamando como dijo, mientras recepción no revise su ficha.
+  expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBe("Darvin")
+  await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, tasks[0]!.id))
+  expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBeNull()
 })
 
 it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {

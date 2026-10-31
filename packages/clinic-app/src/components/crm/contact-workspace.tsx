@@ -121,6 +121,16 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
   const [wide, setWide] = useState<{ id: string; label: string } | null>(null)
   const [noteDirty, setNoteDirty] = useState(false)
   const headingRef = useRef<HTMLHeadingElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  // Al entrar a una sección el foco va a su título; al volver, a la fila de la que salió. Sin esto, se pierde.
+  const lastSection = useRef(section)
+  useEffect(() => {
+    const previous = lastSection.current
+    if (previous === section) return
+    lastSection.current = section
+    if (section) headingRef.current?.focus()
+    else rootRef.current?.querySelector<HTMLElement>(`[data-context-row="${previous}"]`)?.focus()
+  }, [section])
   const onRefreshRef = useRef(onRefresh)
   onRefreshRef.current = onRefresh
   const noteDirtyRef = useRef(noteDirty)
@@ -239,7 +249,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
 
   return (
     // El desplazamiento de la columna es el de la aplicación (ScrollArea), no la barra nativa.
-    <div className={bare ? "flex min-h-0 flex-1 flex-col" : "elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"}>
+    <div ref={rootRef} className={bare ? "flex min-h-0 flex-1 flex-col" : "elevated flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"}>
       <section aria-label="Contexto del contacto" className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-1.5 border-b px-3 py-2.5">
           {current ? (
@@ -275,6 +285,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
                   <li key={row.id}>
                     <button
                       type="button"
+                      data-context-row={row.id}
                       className="flex min-h-11 w-full items-center gap-2 px-3.5 py-2.5 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                       onClick={() => (row.id === "recuerda" ? setMemoryOpen(true) : onSectionChange(row.id))}
                     >
@@ -328,15 +339,13 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
   )
 }
 
-/**
- * Sus citas y un solo «Reservar cita», que se abre al lado sin salir de la
- * conversación y deja la cita unida a ella. Quien aún no es paciente se reserva
- * con su ficha mínima, como en la Agenda.
- */
+/** Sus citas y «Reservar cita»: quien aún no es paciente se reserva con su ficha mínima (la crea la Agenda). */
 function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
   const can = useCan()
   const { patientId, contactId, name, phone } = context
+  // Quien ya es paciente reserva desde su panel, sin salir de la Bandeja.
   if (patientId) return <CitasPanel patientId={patientId} patientName={name} conversationId={conversationId} />
+  // Quien aún no lo es también: «Nueva cita» se abre al lado y crea su ficha mínima, como la Agenda.
   return (
     <>
       {can("appointments.write") ? (
