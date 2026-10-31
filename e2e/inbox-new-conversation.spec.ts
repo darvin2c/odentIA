@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { member } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
@@ -133,4 +134,45 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   const lines = await call<{ lines: Record<string, string> }>(page, "GET", `/api/conversations/${conversationId}/context`, org.slug)
   expect(lines.lines).not.toHaveProperty("ventas")
   expect(lines.lines).not.toHaveProperty("recuerda")
+})
+
+test("«Contexto» de quien lleva a un paciente: la cita que anuncia la fila también se ve al entrar", async ({ owner }) => {
+  const { page, org, branchId } = owner
+  await call(page, "POST", "/api/channels/connections", org.slug, {
+    channel: "whatsapp", provider: "whatsapp_cloud_api", displayName: "WA E2E",
+    config: { phoneNumberId: "E2E-PNID-LLEVA", wabaId: "E2E-WABA", accessToken: "e2e", appSecret: "e2e-secret", templates: [] },
+  }, 201)
+  // La madre escribe y no es paciente; su hijo sí, con cita la semana que viene.
+  const mother = await call<{ id: string }>(page, "POST", "/api/people", org.slug, { givenNames: "Marta", familyName: "Salas", phone: "+51987654101" }, 201)
+  const { conversationId } = await call<{ conversationId: string }>(page, "POST", `/api/contacts/${mother.id}/write`, org.slug, {})
+  const son = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
+    submissionId: randomUUID(),
+    answers: { demographics: { displayName: "Lucas Salas", docType: "DNI", docNumber: "45678901" }, respondent: "staff", privacyAccepted: false },
+  }, 201)
+  await call(page, "PUT", `/api/patients/${son.id}/contacts/${mother.id}`, org.slug, { relationship: "guardian", isPreferred: false })
+  const room = await call<{ id: string }>(page, "POST", "/api/agenda/rooms", org.slug, { branchId, name: "Unidad dental 1" }, 201)
+  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+    branchId, professionalUserId: owner.user.id,
+    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
+  })
+  const date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  await call(page, "POST", "/api/appointments", org.slug, {
+    patientId: son.id, professionalUserId: owner.user.id, roomId: room.id,
+    // 15:00 en UTC son las 10:00 en Lima.
+    startsAt: `${date}T15:00:00.000Z`, endsAt: `${date}T15:30:00.000Z`, reason: "Control",
+  }, 201)
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
+  await page.getByRole("button", { name: "Contexto", exact: true }).click()
+  const context = page.getByRole("region", { name: "Contexto del contacto" })
+  await expect(context.getByRole("button", { name: /^Citas/ })).toContainText("Lucas Salas")
+  await context.getByRole("button", { name: /^Citas/ }).click()
+
+  // Se ve la cita del hijo, cada reserva bajo el nombre de quien la recibe, y sin salir de la Bandeja.
+  await expect(context.getByRole("heading", { name: "Lucas Salas", exact: true })).toBeVisible()
+  await expect(context.getByRole("button", { name: "Ver cita", exact: true })).toHaveCount(1)
+  await expect(context.getByRole("heading", { name: "Marta Salas", exact: true })).toBeVisible()
+  await expect(context).toContainText("Marta todavía no es paciente")
+  await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
 })
