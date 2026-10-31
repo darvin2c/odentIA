@@ -439,8 +439,13 @@ export interface AvailabilityCheck {
   startsAt: Date
   endsAt: Date
   ignoreAppointmentId?: string
-  /** Urgencia: se reserva aunque el horario del profesional no cubra ese momento. */
+  /** Excepción del equipo: se reserva aunque el horario del profesional no cubra ese momento. */
   allowOutsideSchedule?: boolean
+  /**
+   * Excepción del equipo: se reserva aunque haya un bloqueo, una ausencia u otra
+   * cita del mismo profesional. Una unidad nunca recibe a dos personas a la vez.
+   */
+  allowBusy?: boolean
   /**
    * Cita de prueba (ADR 0094): choca con todo, como en real. Una real solo
    * choca con las reales: una prueba no ocupa el horario de nadie.
@@ -483,10 +488,12 @@ async function overlappingAppointment(
 ): Promise<typeof appointment.$inferSelect | undefined> {
   const conditions = [
     eq(appointment.organizationId, orgId),
-    or(
-      eq(appointment.professionalUserId, check.professionalUserId),
-      eq(appointment.roomId, check.roomId),
-    ),
+    check.allowBusy
+      ? eq(appointment.roomId, check.roomId)
+      : or(
+          eq(appointment.professionalUserId, check.professionalUserId),
+          eq(appointment.roomId, check.roomId),
+        ),
     inArray(appointment.status, ["programada", "confirmada"]),
     lt(appointment.startsAt, check.endsAt),
     gt(appointment.endsAt, check.startsAt),
@@ -558,7 +565,7 @@ export async function validateAvailability(
     cursor = segmentEnd
     if (guard === 7) throw validation("El intervalo supera el máximo admitido")
   }
-  const block = await overlappingBlocks(tx, orgId, check)
+  const block = check.allowBusy ? undefined : await overlappingBlocks(tx, orgId, check)
   if (block) {
     // Lo que se cerró dice qué dato cambiar: su profesional, su unidad o, si es la sede entera, la hora.
     const message =
@@ -569,7 +576,7 @@ export async function validateAvailability(
   const clash = await overlappingAppointment(tx, orgId, check)
   if (clash) {
     throw appointmentConflict(
-      clash.professionalUserId === check.professionalUserId ? "professionalUserId" : "roomId",
+      !check.allowBusy && clash.professionalUserId === check.professionalUserId ? "professionalUserId" : "roomId",
       (await roomWord(tx, orgId)).one,
     )
   }

@@ -608,6 +608,37 @@ it("fuera de horario solo se reserva como urgencia", async () => {
   ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT" })
 })
 
+it("una persona del equipo puede dar otra cita a la misma hora, pero no en la misma unidad", async () => {
+  // Sábado 2026-11-21: fuera de horario, para no depender de los turnos.
+  const slot = {
+    branchId,
+    patientId,
+    professionalUserId: PROFESSIONAL,
+    startsAt: "2026-11-21T15:00:00Z",
+    durationMin: 30,
+    outsideSchedule: true,
+  }
+  const first = await run((tx) => createAppointment(tx, ORG, ACTOR, slot))
+  // Sin la excepción sigue chocando; con ella entra en otra unidad.
+  await expect(run((tx) => createAppointment(tx, ORG, ACTOR, slot))).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT" })
+  const second = await run((tx) => createAppointment(tx, ORG, ACTOR, { ...slot, overrideBusy: true }))
+  expect(second.professionalUserId).toBe(PROFESSIONAL)
+  expect(second.roomId).not.toBe(first.roomId)
+  // La misma unidad a la misma hora nunca, ni con la excepción.
+  await expect(
+    run((tx) => createAppointment(tx, ORG, ACTOR, { ...slot, overrideBusy: true, roomId: first.roomId })),
+  ).rejects.toMatchObject({ code: "APPOINTMENT_CONFLICT" })
+  // Mover sin la excepción fuera del horario se rechaza; con ella, no.
+  const later = "2026-11-21T17:00:00Z"
+  await expect(
+    run((tx) => moveAppointment(tx, ORG, ACTOR, first.id, { expectedVersion: first.version, startsAt: later })),
+  ).rejects.toMatchObject({ status: 400 })
+  const moved = await run((tx) =>
+    moveAppointment(tx, ORG, ACTOR, first.id, { expectedVersion: first.version, startsAt: later, outsideSchedule: true }),
+  )
+  expect(moved.startsAt).toBe(later.replace("Z", ".000Z"))
+})
+
 it("la duración de una cita regular se configura por sede", async () => {
   await expect(
     run((tx) => setBranchDefaultDuration(tx, ORG, ACTOR, { branchId, minutes: 50 })),

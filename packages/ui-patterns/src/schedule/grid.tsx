@@ -3,11 +3,12 @@
  * recurso en un día. Con varios recursos del mismo día es la vista Día; con
  * un recurso y varios días, la vista Semana; con un solo carril, el teléfono.
  *
- * Blanco es lo que se puede reservar y gris lo que no (fuera de horario o ya
- * pasado); un bloqueo va rayado porque es la excepción dentro del horario. Lo
- * libre se toca: el cursor anticipa «Reservar a las 11:00» y el clic avisa al
- * consumidor. La rejilla nunca decide si el hueco es válido: eso lo confirma
- * el servicio al reservar. El arrastre mueve la cita de hora, de recurso o de
+ * Blanco es lo que se reserva sin más y gris lo que queda fuera de horario o ya
+ * pasó; un bloqueo va rayado porque es la excepción dentro del horario. Lo libre
+ * se toca: el cursor anticipa «Reservar a las 11:00» y el clic avisa al
+ * consumidor. Con `onCreateException`, lo gris y lo bloqueado que no pasó también
+ * se tocan, con otro aviso. La rejilla nunca decide si el hueco es válido: eso lo
+ * confirma el servicio al reservar. El arrastre mueve la cita de hora, de recurso o de
  * día, con el teclado como vía completa (Alt+Intro).
  */
 
@@ -80,6 +81,13 @@ export interface ScheduleGridProps {
   /** Clic en un hueco libre. Sin él la rejilla no ofrece reservar. */
   onCreate?: (target: ScheduleCreateTarget) => void
   /**
+   * Clic en lo gris o lo bloqueado: reservar como excepción. Sin él esas zonas no
+   * responden. Solo para el equipo: lo decide quien pinta la rejilla, y el servidor.
+   */
+  onCreateException?: (target: ScheduleCreateTarget) => void
+  /** Al pie de las horas, dentro del scroll («Ver de 6:00 a 22:00»). */
+  footer?: React.ReactNode
+  /**
    * Sin cabecera de carriles: con un solo carril cuyo recurso ya se nombra
    * fuera (las fichas del teléfono), repetirlo solo quita sitio a la agenda.
    */
@@ -98,6 +106,11 @@ interface LaneBlock extends MinuteRange {
 interface LaneItem {
   entry: ScheduleEntry
   range: MinuteRange
+}
+
+/** Lo que se reservaría bajo el puntero y si sería una excepción. */
+interface Candidate extends MinuteRange {
+  exception: "outside" | "blocked" | null
 }
 
 interface LaneModel {
@@ -136,6 +149,8 @@ export function ScheduleGrid({
   onEntryMove,
   onEntryResize,
   onCreate,
+  onCreateException,
+  footer,
   hideHeader = false,
   label = "Agenda",
   emptyLabel = "No hay a quién mostrar en la agenda",
@@ -237,16 +252,27 @@ export function ScheduleGrid({
   })
 
   // Hueco bajo el cursor: solo anticipa; el clic lo propone al consumidor.
-  const [hint, setHint] = React.useState<(MinuteRange & { laneId: string }) | null>(null)
-  const candidateAt = (model: LaneModel, clientY: number, rect: DOMRect): MinuteRange | null => {
+  const [hint, setHint] = React.useState<(Candidate & { laneId: string }) | null>(null)
+  const candidateAt = (model: LaneModel, clientY: number, rect: DOMRect): Candidate | null => {
     const pointed = window.startMinutes + (clientY - rect.top) / pxPerMinute
     const start = Math.floor(pointed / snapMinutes) * snapMinutes
     const room = model.free.find((range) => range.startMinutes <= start && range.endMinutes > start)
-    if (!room) return null
-    const end = Math.min(start + createMinutes, room.endMinutes)
-    return end - start >= snapMinutes ? { startMinutes: start, endMinutes: end } : null
+    if (room) {
+      const end = Math.min(start + createMinutes, room.endMinutes)
+      return end - start >= snapMinutes ? { startMinutes: start, endMinutes: end, exception: null } : null
+    }
+    if (!onCreateException || start < window.startMinutes) return null
+    // Lo que ya pasó no se reserva, ni como excepción.
+    if (nowDate !== null && (model.lane.date < nowDate || (model.lane.date === nowDate && start < nowMinutes))) return null
+    const end = Math.min(start + createMinutes, window.endMinutes)
+    if (end - start < snapMinutes) return null
+    const blocked = model.blocks.some((block) => block.startMinutes <= start && block.endMinutes > start)
+    const inHours = (model.open ?? []).some((range) => range.startMinutes <= start && range.endMinutes > start)
+    // En horario y sin bloqueo solo queda lo ocupado: se toca la cita, no el carril.
+    if (!blocked && inHours) return null
+    return { startMinutes: start, endMinutes: end, exception: blocked ? "blocked" : "outside" }
   }
-  const creating = onCreate != null && drag.session == null
+  const creating = (onCreate != null || onCreateException != null) && drag.session == null
 
   // Al abrir o cambiar de día: la hora actual a un tercio del alto; otro día,
   // el comienzo de la atención. Nunca al llegar datos nuevos del mismo día.
@@ -442,7 +468,8 @@ export function ScheduleGrid({
                               ? null
                               : current?.laneId === lane.id &&
                                   current.startMinutes === candidate.startMinutes &&
-                                  current.endMinutes === candidate.endMinutes
+                                  current.endMinutes === candidate.endMinutes &&
+                                  current.exception === candidate.exception
                                 ? current
                                 : { ...candidate, laneId: lane.id },
                           )
@@ -461,7 +488,7 @@ export function ScheduleGrid({
                           )
                           if (!candidate) return
                           setHint(null)
-                          onCreate?.({
+                          ;(candidate.exception ? onCreateException : onCreate)?.({
                             columnId: lane.columnId,
                             date: lane.date,
                             start: minutesToInstant(lane.date, candidate.startMinutes, timeZone),
@@ -533,7 +560,13 @@ export function ScheduleGrid({
                   {laneHint ? (
                     <div
                       data-create-hint
-                      className="pointer-events-none absolute inset-x-1.5 z-[2] flex items-center justify-center gap-1.5 overflow-hidden rounded-[10px] border-[1.5px] border-dashed border-primary bg-agent-soft px-2 text-[13px] font-semibold whitespace-nowrap text-primary-soft-foreground"
+                      data-exception={laneHint.exception ?? undefined}
+                      className={cn(
+                        "pointer-events-none absolute inset-x-1.5 z-[2] flex items-center justify-center gap-1.5 overflow-hidden rounded-[10px] border-[1.5px] border-dashed px-2 text-[13px] font-semibold whitespace-nowrap",
+                        laneHint.exception
+                          ? "border-warning bg-warning-soft text-warning"
+                          : "border-primary bg-agent-soft text-primary-soft-foreground",
+                      )}
                       style={{
                         top: topOf(laneHint.startMinutes) + 1,
                         height: (laneHint.endMinutes - laneHint.startMinutes) * pxPerMinute - 2,
@@ -541,7 +574,11 @@ export function ScheduleGrid({
                     >
                       <Plus aria-hidden className="size-4 shrink-0" />
                       <span className="truncate">
-                        Reservar a las {hourLabel(laneHint.startMinutes)}
+                        {laneHint.exception === "outside"
+                          ? `${hourLabel(laneHint.startMinutes)} · Fuera de horario`
+                          : laneHint.exception === "blocked"
+                            ? `${hourLabel(laneHint.startMinutes)} · Hora bloqueada`
+                            : `Reservar a las ${hourLabel(laneHint.startMinutes)}`}
                       </span>
                     </div>
                   ) : null}
@@ -618,7 +655,9 @@ export function ScheduleGrid({
                         "pointer-events-none absolute inset-x-1.5 z-[5] flex items-start rounded-[10px] border-2 border-dashed px-2 pt-0.5 text-xs font-semibold",
                         targetFits
                           ? "border-primary bg-primary/10 text-primary-soft-foreground"
-                          : "border-destructive bg-destructive/10 text-destructive",
+                          : onCreateException
+                            ? "border-warning bg-warning-soft text-warning"
+                            : "border-destructive bg-destructive/10 text-destructive",
                       )}
                       style={{
                         top: topOf(target.startMinutes),
@@ -654,6 +693,7 @@ export function ScheduleGrid({
               />
             ) : null}
           </div>
+          {footer ? <div className="sticky left-0 flex justify-center border-t p-2">{footer}</div> : null}
         </div>
         <DragLiveRegion text={drag.announcement} />
       </ScrollArea>

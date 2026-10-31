@@ -16,7 +16,7 @@ import { SubmitButton } from "../form/submit-button.js"
 import { type RowActionItem, RowActions } from "../row-actions.js"
 import { formatSpan } from "./occupancy.js"
 import { entryState, entryStateLabel, StatusIcon, statusSurfaceClass, statusTextClass } from "./status.js"
-import { dayMinutesIn, durationMinutes, hourLabel, zonedDateOf } from "./time.js"
+import { dayMinutesIn, durationMinutes, formatDateLong, formatMonthLong, hourLabel, zonedDateOf } from "./time.js"
 import { ResourceAvatar } from "./tone.js"
 import type { ScheduleEntry, ScheduleStatus, ScheduleTone } from "./types.js"
 
@@ -70,6 +70,63 @@ function outcomeSummary(items: ScheduleAgendaItem[]): string {
       return `${count} ${count === 1 ? one : many}`
     })
     .join(" · ")
+}
+
+/**
+ * El encabezado de un día en la vista Agenda: el cuadro con su fecha, el nombre
+ * del día y su resumen. Queda fijo arriba al bajar, hasta que llega el del día
+ * siguiente, para saber siempre en qué día se está.
+ */
+export function ScheduleDayHeader({
+  date,
+  today,
+  summary,
+  className,
+}: {
+  date: string
+  /** Hoy en la zona de la sede: lo resalta. */
+  today?: string
+  /** «11 citas · 4 por confirmar». */
+  summary?: string
+  className?: string
+}) {
+  const isToday = date === today
+  const [weekday = ""] = formatDateLong(date).split(" ")
+  return (
+    <header
+      data-day-header={date}
+      className={cn("sticky top-0 z-20 flex items-center gap-3 border-b bg-canvas py-2 sm:gap-3.5", className)}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex size-12 shrink-0 flex-col items-center justify-center rounded-xl border sm:size-14",
+          isToday ? "border-primary bg-primary text-primary-foreground" : "bg-card",
+        )}
+      >
+        <span className="text-lg leading-5 font-bold tabular-nums sm:text-[21px] sm:leading-6">
+          {Number(date.slice(8, 10))}
+        </span>
+        <span className="text-[10px] leading-3 font-bold tracking-wide uppercase sm:text-[11px] sm:leading-3.5">
+          {formatMonthLong(date).slice(0, 3)}
+        </span>
+      </span>
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 text-base leading-6 font-bold sm:text-lg">
+          <span className="sr-only">{formatDateLong(date)}</span>
+          <span aria-hidden className="first-letter:uppercase">
+            {weekday}
+          </span>
+          {isToday ? (
+            <span className="rounded-full bg-primary-soft px-2 text-xs leading-5 font-bold text-primary-soft-foreground">
+              Hoy
+            </span>
+          ) : null}
+        </h2>
+        {summary ? <p className="text-[13px] leading-5 text-muted-foreground sm:text-sm">{summary}</p> : null}
+      </div>
+    </header>
+  )
 }
 
 function AgendaRow({
@@ -255,19 +312,15 @@ export function ScheduleAgendaList({
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      {now !== undefined && (current.length > 0 || past.length > 0 || unclosed.length > 0) ? (
-        <div className="flex items-center gap-2.5 px-1 pt-1" data-now>
-          <span className="shrink-0 rounded-full bg-destructive px-2.5 text-xs leading-[22px] font-bold text-background tabular-nums">
-            Ahora · {hourLabel(dayMinutesIn(now, timeZone))}
-          </span>
-          <span aria-hidden className="h-0 flex-1 border-t-2 border-destructive" />
-        </div>
-      ) : null}
-
       {current.length > 0 ? (
-        <ul aria-label="En la clínica" className="flex flex-col gap-2">
-          {current.map(row)}
-        </ul>
+        <>
+          <h3 className="px-1 pt-1 text-sm font-bold text-muted-foreground">
+            En la clínica · {current.length}
+          </h3>
+          <ul aria-label="En la clínica" className="flex flex-col gap-2">
+            {current.map(row)}
+          </ul>
+        </>
       ) : null}
 
       {upcoming.length > 0 ? (

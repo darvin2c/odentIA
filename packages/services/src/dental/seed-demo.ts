@@ -4103,6 +4103,19 @@ for (const item of agendaSeed) {
     ...(item.planItemIds ? { planItemIds: item.planItemIds } : {}),
   })
   reservedAt.set(`${item.patient}|${item.day}|${item.start}`, reserved.id)
+  // Una excepción de recepción para ver cómo se marca en la Agenda: mañana, antes de que abra.
+  if (item.patient === "Rosa Quispe" && item.day === 0 && item.start === "09:00") {
+    await createAppointment(db, ORG_A, ANA_ID, {
+      branchId: miraflores.id,
+      patientId: seedPatientId,
+      professionalUserId: item.professional,
+      serviceId: serviceIdA("LIMPIEZA"),
+      startsAt: lima(1, "07:00"),
+      endsAt: lima(1, "07:30"),
+      outsideSchedule: true,
+      notice: false,
+    })
+  }
   if (item.patient === "Rosa Quispe" && item.day === 1) {
     await db.transaction(async (tx) => {
       const control = await createFollowUp(tx, ORG_A, ANA_ID, rosaPatientId, {

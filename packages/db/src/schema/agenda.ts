@@ -94,6 +94,12 @@ export const appointment = pgTable(
      */
     isTest: boolean("is_test").notNull().default(false),
     /**
+     * Excepción que aceptó una persona del equipo: esta cita puede compartir hora
+     * con otra del mismo profesional (`appointment_no_overlap_professional` no la
+     * mira). La exclusión de la unidad sigue valiendo: una unidad, una persona.
+     */
+    overlapAllowed: boolean("overlap_allowed").notNull().default(false),
+    /**
      * «Llegó» (ADR 0032): cuándo llegó la persona y quién lo marcó. Es un hecho
      * con hora, no un estado: solo lo tiene una cita confirmada o atendida, y no
      * cambia lo que ocupa (la exclusión de solapamientos no lo mira).

@@ -54,7 +54,7 @@ import { WriteToPersonDialog } from "../write-to-person"
 import { useAppointmentArrival } from "./arrival"
 import { TestAppointmentDrawer } from "./test-appointment-drawer"
 import { dayShort, rangeSaid, whenSaid } from "./shared"
-import { EMPTY_WHEN, useWhen, WHEN_FIELD_MAP, WhenFields } from "./when"
+import { EMPTY_WHEN, exceptionFlags, useWhen, WHEN_FIELD_MAP, WhenFields } from "./when"
 import { PersonLink } from "../person-link"
 import { PhoneWhatsAppNote } from "../person/phone-whatsapp"
 import { ServiceSelect } from "../service-select"
@@ -260,6 +260,7 @@ function RealAppointmentDrawer({
           startsAt: range.start,
           endsAt: range.end,
           professionalUserId: range.columnId,
+          ...exceptionFlags(when.state === "outside" || when.state === "taken" ? when.state : null),
         }),
       }),
   })
@@ -351,6 +352,10 @@ function RealAppointmentDrawer({
         >
           {!target || unmoved
             ? "Mover cita"
+            : when.state === "outside"
+              ? "Mover fuera de horario"
+              : when.state === "taken"
+                ? "Mover igual"
             : targetSaid.startsWith("el ")
               ? `Mover al ${targetSaid.slice(3)}`
               : `Mover a ${targetSaid}`}

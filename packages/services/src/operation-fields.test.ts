@@ -64,6 +64,17 @@ describe("mismas validaciones para la pantalla y para el agente", () => {
     }
   })
 
+  it("las excepciones de la agenda las hace una persona: el agente no recibe esos campos", () => {
+    for (const id of ["cita.reservar", "cita.mover"] as const) {
+      const body = (operationBodySchema(id) as unknown as { shape: Record<string, unknown> }).shape
+      const agent = (operationAgentSchema(id) as unknown as { shape: Record<string, unknown> }).shape
+      for (const field of ["outsideSchedule", "overrideBusy"]) {
+        expect(Object.keys(body), `${id}.${field}`).toContain(field)
+        expect(Object.keys(agent), `${id}.${field}`).not.toContain(field)
+      }
+    }
+  })
+
   it("los límites de texto y las opciones coinciden", () => {
     for (const schema of [operationBodySchema("oportunidad.cerrar"), operationAgentSchema("oportunidad.cerrar")]) {
       // El motivo es de la lista; el texto libre solo va como nota.
