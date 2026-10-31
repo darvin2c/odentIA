@@ -13,17 +13,29 @@ import {
   FOLLOW_UP_REPEAT_MONTHS,
   followUpRepeatWords,
 } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, Field, FieldDescription, FieldLabel, Input, Textarea, toast } from "@odentia/ui"
-import { addDays, DatePickerButton, EmptyState, FormDrawer, regionToday, SkeletonRegion } from "@odentia/ui-patterns"
-import { ControlRowsSkeleton } from "../skeletons/person-sections"
+import { Badge, Button, FieldLegend, FieldSet, Input, toast } from "@odentia/ui"
+import {
+  addDays,
+  DatePickerButton,
+  EmptyState,
+  FormDrawer,
+  FormField,
+  regionToday,
+  submitErrorMessage,
+  useAppForm,
+  useFieldContext,
+  useFormSurface,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { invalidateAppointmentQueries } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import {
   cancelFollowUpApi,
-  cancelPrescriptionApi,
   completeFollowUpApi,
   createFollowUpApi,
   createPrescriptionApi,
@@ -37,22 +49,23 @@ import {
   formatDate,
   formatDateTime,
   instantFromClinicValue,
-  mutationMessage,
   PRESCRIPTION_STATUS_LABELS,
   type Prescription,
   stopFollowUpRepeatApi,
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
-import { ChoiceSelect } from "../ui/choice-select"
-import { DiagnosisSearch } from "./diagnosis-search"
-import { FollowUpScheduler } from "./follow-up-scheduler"
-import { HealthDocumentSendDrawer } from "./health-document-send"
 import { productUi } from "../../product/product-ui"
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
+import { ChoiceSelect } from "../ui/choice-select"
+import { DiagnosisSearch } from "./diagnosis-search"
+import { PrescriptionPaper } from "./document-papers"
+import { FollowUpScheduler } from "./follow-up-scheduler"
+import { ControlRowsSkeleton } from "../skeletons/person-sections"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
+/** Las indicaciones de un control: el límite de `POST /follow-ups`. */
 const MAX_INSTRUCTIONS = 4000
 /** Un control previsto vence a las 9:00 de la clínica del día elegido (la hora la pone su cita). */
 const CONTROL_HOUR = "09:00"
@@ -64,6 +77,93 @@ function statusBadge(status: string): "default" | "secondary" | "success" | "des
   return "secondary"
 }
 
+/**
+ * Una opción de una lista (`ChoiceSelect`) como campo de `useAppForm`: su
+ * etiqueta, su ayuda y su error, que sale al salir del campo o al enviar.
+ */
+function ChoiceField({
+  label,
+  description,
+  onPick,
+  children,
+}: {
+  label: string
+  description?: string
+  onPick?: (value: string) => void
+  children: React.ReactNode
+}): React.JSX.Element {
+  const field = useFieldContext<string>()
+  return (
+    <FormField label={label} description={description}>
+      {(control) => (
+        <ChoiceSelect
+          id={control.id}
+          name={control.name}
+          aria-invalid={control.invalid || undefined}
+          aria-describedby={control.describedBy}
+          onBlur={control.onBlur}
+          value={field.state.value}
+          onChange={(event) => {
+            field.handleChange(event.target.value)
+            onPick?.(event.target.value)
+          }}
+        >
+          {children}
+        </ChoiceSelect>
+      )}
+    </FormField>
+  )
+}
+
+/** El motivo de cancelar o anular: lo pide la ruta (1–2000 caracteres). */
+function reasonSchema(required: string) {
+  return z.object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, required)
+      .max(MAX_TEXT, `El motivo tiene como mucho ${MAX_TEXT} caracteres.`),
+  })
+}
+
+/** Lo de «Indicar control», con los límites de `POST /follow-ups`. */
+function followUpSchema(fixedItem: boolean) {
+  return z
+    .object({
+      kind: z.string(),
+      planItemId: z.string(),
+      title: z
+        .string()
+        .trim()
+        .min(1, "Indica el título del control.")
+        .max(MAX_TITLE, `El título tiene como mucho ${MAX_TITLE} caracteres.`),
+      dueDay: z.string().min(1, "Indica la fecha prevista del control."),
+      repeat: z.string(),
+      instructions: z
+        .string()
+        .max(
+          MAX_INSTRUCTIONS,
+          `Las indicaciones tienen como mucho ${MAX_INSTRUCTIONS} caracteres.`,
+        ),
+    })
+    .superRefine((value, ctx) => {
+      if (!fixedItem && value.kind === "tratamiento" && !value.planItemId)
+        ctx.addIssue({
+          code: "custom",
+          path: ["planItemId"],
+          message: "Elige el tratamiento que sigue este control.",
+        })
+    })
+}
+
+const completeSchema = z.object({
+  encounterId: z.string().min(1, "Elige la atención finalizada donde se atendió el control."),
+  outcome: z
+    .string()
+    .trim()
+    .min(1, "Registra el resultado del control.")
+    .max(MAX_TEXT, `El resultado tiene como mucho ${MAX_TEXT} caracteres.`),
+})
 
 /** Controles longitudinales del paciente, acotables a un tratamiento o atención. */
 export function ControlesPanel({
@@ -87,7 +187,6 @@ export function ControlesPanel({
   /** Indicaciones del paciente para elegir el tratamiento del control. */
   items?: PlanItem[]
 }): React.JSX.Element {
-  const uid = useId()
   const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
   const canSchedule = usePermission("appointments.write")
@@ -115,85 +214,109 @@ export function ControlesPanel({
     void invalidateAppointmentQueries(queryClient)
   }
 
-  const [kindState, setKind] = useState<"tratamiento" | "mantenimiento">(
-    itemId ? "tratamiento" : "mantenimiento",
-  )
-  const [planItemIdState, setPlanItemId] = useState(itemId ?? "")
-  // El tratamiento del recorrido manda siempre: el panel nunca conserva la
-  // selección anterior cuando se cambia de tratamiento en la ficha.
-  const kind = itemId ? "tratamiento" : kindState
-  const planItemId = itemId ?? planItemIdState
-  const [title, setTitle] = useState("")
-  // El día previsto se elige en la zona de la clínica, no en la del navegador:
-  // un control es para un día, no para una hora (la hora la pone la cita).
-  const [dueDay, setDueDay] = useState(() => addDays(regionToday(), 1))
-  const [instructions, setInstructions] = useState("")
   // Controles que se repiten (latidIA, decisión 16 del issue 229): "" es una sola vez.
   const repeats = productUi().plan.repeatingControls
-  const [repeat, setRepeat] = useState("")
   const [createOpen, setCreateOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [scheduling, setScheduling] = useState<FollowUp | null>(null)
   const [completing, setCompleting] = useState<FollowUp | null>(null)
-  const [completeEncounterId, setCompleteEncounterId] = useState("")
-  const [outcome, setOutcome] = useState("")
   const [cancelling, setCancelling] = useState<FollowUp | null>(null)
-  const [reason, setReason] = useState("")
+  // «Dejar de repetir» es un botón suelto, no un formulario: su error va junto a la lista.
+  const [repeatError, setRepeatError] = useState<string | null>(null)
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      createFollowUpApi(patientId, {
+    mutationFn: (body: Parameters<typeof createFollowUpApi>[1]) =>
+      createFollowUpApi(patientId, body),
+  })
+  const createForm = useAppForm({
+    defaultValues: {
+      kind: (itemId ? "tratamiento" : "mantenimiento") as string,
+      planItemId: itemId ?? "",
+      title: "",
+      // El día previsto se elige en la zona de la clínica, no en la del navegador:
+      // un control es para un día, no para una hora (la hora la pone la cita).
+      dueDay: addDays(regionToday(), 1),
+      repeat: "",
+      instructions: "",
+    },
+    validators: { onSubmit: followUpSchema(Boolean(itemId)) },
+    onSubmit: async ({ value }) => {
+      // El tratamiento del recorrido manda siempre: el panel nunca conserva la
+      // selección anterior cuando se cambia de tratamiento en la ficha.
+      const kind = itemId
+        ? "tratamiento"
+        : value.kind === "tratamiento"
+          ? "tratamiento"
+          : "mantenimiento"
+      const planItemId = itemId ?? value.planItemId
+      await createMutation.mutateAsync({
         kind,
-        title: title.trim(),
-        dueAt: instantFromClinicValue(`${dueDay}T${CONTROL_HOUR}`) ?? "",
-        instructions: instructions.trim() || null,
+        title: value.title.trim(),
+        dueAt: instantFromClinicValue(`${value.dueDay}T${CONTROL_HOUR}`) ?? "",
+        instructions: value.instructions.trim() || null,
         planItemId: kind === "tratamiento" ? planItemId || null : null,
         originEncounterId: encounterId ?? null,
-        repeatEveryMonths: repeats && repeat ? Number(repeat) : null,
-      }),
-    onSuccess: () => {
-      setTitle("")
-      setInstructions("")
-      setRepeat("")
+        repeatEveryMonths: repeats && value.repeat ? Number(value.repeat) : null,
+      })
+      createForm.reset({ ...value, title: "", instructions: "", repeat: "" })
       setCreateOpen(false)
-      setError(null)
       invalidate()
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const createSurface = useFormSurface(createForm, {
+    fieldMap: { dueAt: "dueDay", repeatEveryMonths: "repeat" },
+  })
+  const kind = useStore(createForm.store, (state) => (itemId ? "tratamiento" : state.values.kind))
+
   const completeMutation = useMutation({
-    mutationFn: () =>
-      completeFollowUpApi(patientId, completing?.id ?? "", {
-        encounterId: completeEncounterId,
-        outcome: outcome.trim(),
+    mutationFn: (input: { followUpId: string; encounterId: string; outcome: string }) =>
+      completeFollowUpApi(patientId, input.followUpId, {
+        encounterId: input.encounterId,
+        outcome: input.outcome,
       }),
-    onSuccess: () => {
+  })
+  const completeForm = useAppForm({
+    defaultValues: { encounterId: "", outcome: "" },
+    validators: { onSubmit: completeSchema },
+    onSubmit: async ({ value }) => {
+      if (!completing) return
+      await completeMutation.mutateAsync({
+        followUpId: completing.id,
+        encounterId: value.encounterId,
+        outcome: value.outcome.trim(),
+      })
       setCompleting(null)
-      setOutcome("")
-      setError(null)
+      completeForm.reset({ encounterId: "", outcome: "" })
       invalidate()
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const completeSurface = useFormSurface(completeForm)
+
   const stopRepeatMutation = useMutation({
     mutationFn: (followUpId: string) => stopFollowUpRepeatApi(patientId, followUpId),
     onSuccess: () => {
       toast.success("Ya no se repite: al completarlo no queda indicado otro.")
-      setError(null)
+      setRepeatError(null)
       invalidate()
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
+    onError: (mutationError) => setRepeatError(submitErrorMessage(mutationError)),
   })
+
   const cancelMutation = useMutation({
-    mutationFn: () => cancelFollowUpApi(patientId, cancelling?.id ?? "", { reason: reason.trim() }),
-    onSuccess: () => {
+    mutationFn: (input: { followUpId: string; reason: string }) =>
+      cancelFollowUpApi(patientId, input.followUpId, { reason: input.reason }),
+  })
+  const cancelForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema("Indica el motivo de la cancelación.") },
+    onSubmit: async ({ value }) => {
+      if (!cancelling) return
+      await cancelMutation.mutateAsync({ followUpId: cancelling.id, reason: value.reason.trim() })
       setCancelling(null)
-      setReason("")
-      setError(null)
+      cancelForm.reset({ reason: "" })
       invalidate()
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const cancelSurface = useFormSurface(cancelForm)
 
   const rows = (list.data?.data ?? []).filter(
     (row) =>
@@ -229,7 +352,6 @@ export function ControlesPanel({
             type="button"
             size="sm"
             onClick={() => {
-              setError(null)
               setCreateOpen(true)
             }}
           >
@@ -264,17 +386,18 @@ export function ControlesPanel({
                   {FOLLOW_UP_STATUS_LABELS[row.status]}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
-                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto{" "}
-                  {formatDate(row.dueAt)}
+                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto {formatDate(row.dueAt)}
                   {row.legacyScheduledAt && !row.appointment
                     ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
                     : ""}
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
-              {row.repeatEveryMonths && (row.status === "pendiente" || row.status === "programado") ? (
+              {row.repeatEveryMonths &&
+              (row.status === "pendiente" || row.status === "programado") ? (
                 <p className="text-sm text-muted-foreground">
-                  Se repite {followUpRepeatWords(row.repeatEveryMonths)}: al completarlo queda indicado el siguiente.
+                  Se repite {followUpRepeatWords(row.repeatEveryMonths)}: al completarlo queda
+                  indicado el siguiente.
                 </p>
               ) : null}
               {row.appointment &&
@@ -316,7 +439,6 @@ export function ControlesPanel({
                       size="sm"
                       variant="default"
                       onClick={() => {
-                        setError(null)
                         setScheduling(row)
                       }}
                     >
@@ -330,8 +452,7 @@ export function ControlesPanel({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          setError(null)
-                          setCompleteEncounterId(finalized[0]?.id ?? "")
+                          completeForm.reset({ encounterId: finalized[0]?.id ?? "", outcome: "" })
                           setCompleting(row)
                         }}
                       >
@@ -344,7 +465,7 @@ export function ControlesPanel({
                           variant="outline"
                           disabled={stopRepeatMutation.isPending}
                           onClick={() => {
-                            setError(null)
+                            setRepeatError(null)
                             stopRepeatMutation.mutate(row.id)
                           }}
                         >
@@ -356,7 +477,6 @@ export function ControlesPanel({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          setError(null)
                           setCancelling(row)
                         }}
                       >
@@ -379,38 +499,20 @@ export function ControlesPanel({
         </ul>
       )}
 
-      {error && !createOpen && scheduling == null && completing == null && cancelling == null ? (
+      {repeatError ? (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {repeatError}
         </p>
       ) : null}
 
       <FormDrawer
+        {...createSurface}
         open={createOpen}
         title="Indicar control"
         description="El control queda ligado al tratamiento o al mantenimiento del paciente."
-        error={createOpen ? error : null}
-        isSubmitting={createMutation.isPending}
-        isDirty={title.trim().length > 0}
         submitLabel="Indicar control"
         onClose={() => {
-          if (!createMutation.isPending) setCreateOpen(false)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (kind === "tratamiento" && !planItemId) {
-            setError("Elige el tratamiento que sigue este control.")
-            return
-          }
-          if (!title.trim()) {
-            setError("Indica el título del control.")
-            return
-          }
-          if (!dueDay) {
-            setError("Indica la fecha prevista del control.")
-            return
-          }
-          createMutation.mutate()
+          if (!createSurface.isSubmitting) setCreateOpen(false)
         }}
       >
         <div className="flex flex-col gap-4">
@@ -418,92 +520,76 @@ export function ControlesPanel({
             <p className="text-sm text-muted-foreground">
               Tratamiento: {planItemLabel(itemId) ?? "el tratamiento abierto"}
             </p>
-          ) : null}
-          {itemId ? null : (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-kind`}>Tipo de control</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-kind`}
-                
-                value={kind}
-                onChange={(event) => {
-                  const next = event.target.value as "tratamiento" | "mantenimiento"
-                  setKind(next)
-                  if (next === "mantenimiento") setPlanItemId("")
-                }}
-              >
-                <option value="mantenimiento">Mantenimiento</option>
-                <option value="tratamiento">Seguimiento de un tratamiento</option>
-              </ChoiceSelect>
-            </Field>
+          ) : (
+            <createForm.AppField name="kind">
+              {() => (
+                <ChoiceField
+                  label="Tipo de control"
+                  onPick={(next) => {
+                    if (next === "mantenimiento") createForm.setFieldValue("planItemId", "")
+                  }}
+                >
+                  <option value="mantenimiento">Mantenimiento</option>
+                  <option value="tratamiento">Seguimiento de un tratamiento</option>
+                </ChoiceField>
+              )}
+            </createForm.AppField>
           )}
-          {kind === "tratamiento" ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-item`}>Tratamiento</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-item`}
-                
-                value={planItemId}
-                onChange={(event) => setPlanItemId(event.target.value)}
-              >
-                <option value="">Seleccionar tratamiento</option>
-                {(items ?? []).map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title}
-                    {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
-                  </option>
-                ))}
-              </ChoiceSelect>
-            </Field>
+          {kind === "tratamiento" && !itemId ? (
+            <createForm.AppField name="planItemId">
+              {() => (
+                <ChoiceField label="Tratamiento">
+                  <option value="">Seleccionar tratamiento</option>
+                  {(items ?? []).map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.title}
+                      {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
+                    </option>
+                  ))}
+                </ChoiceField>
+              )}
+            </createForm.AppField>
           ) : null}
-          <Field>
-            <FieldLabel htmlFor={`${uid}-title`}>Título del control</FieldLabel>
-            <Input
-              id={`${uid}-title`}
-              maxLength={MAX_TITLE}
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-due`}>Fecha prevista</FieldLabel>
-            <DatePickerButton
-              id={`${uid}-due`}
-              className="w-56"
-              min={regionToday()}
-              value={dueDay}
-              onChange={setDueDay}
-            />
-          </Field>
+          <createForm.AppField name="title">
+            {(field) => <field.TextField label="Título del control" maxLength={MAX_TITLE} />}
+          </createForm.AppField>
+          <createForm.AppField name="dueDay">
+            {(field) => (
+              <field.Control label="Fecha prevista">
+                {(control) => (
+                  <DatePickerButton
+                    {...control.props}
+                    className="w-56"
+                    min={regionToday()}
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                  />
+                )}
+              </field.Control>
+            )}
+          </createForm.AppField>
           {repeats ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-repeat`}>Se repite</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-repeat`}
-                value={repeat}
-                onChange={(event) => setRepeat(event.target.value)}
-              >
-                <option value="">Una sola vez</option>
-                {FOLLOW_UP_REPEAT_MONTHS.map((months) => (
-                  <option key={months} value={String(months)}>
-                    {followUpRepeatWords(months).replace(/^c/, "C")}
-                  </option>
-                ))}
-              </ChoiceSelect>
-              <FieldDescription>
-                Al completarlo queda indicado el siguiente, hasta que lo detengas.
-              </FieldDescription>
-            </Field>
+            <createForm.AppField name="repeat">
+              {() => (
+                <ChoiceField
+                  label="Se repite"
+                  description="Al completarlo queda indicado el siguiente, hasta que lo detengas."
+                >
+                  <option value="">Una sola vez</option>
+                  {FOLLOW_UP_REPEAT_MONTHS.map((months) => (
+                    <option key={months} value={String(months)}>
+                      {followUpRepeatWords(months).replace(/^c/, "C")}
+                    </option>
+                  ))}
+                </ChoiceField>
+              )}
+            </createForm.AppField>
           ) : null}
-          <Field>
-            <FieldLabel htmlFor={`${uid}-instructions`}>Indicaciones del control</FieldLabel>
-            <Textarea
-              id={`${uid}-instructions`}
-              maxLength={MAX_INSTRUCTIONS}
-              value={instructions}
-              onChange={(event) => setInstructions(event.target.value)}
-            />
-          </Field>
+          <createForm.AppField name="instructions">
+            {(field) => (
+              <field.TextareaField label="Indicaciones del control" maxLength={MAX_INSTRUCTIONS} />
+            )}
+          </createForm.AppField>
         </div>
       </FormDrawer>
 
@@ -517,75 +603,43 @@ export function ControlesPanel({
       ) : null}
 
       <FormDrawer
+        {...completeSurface}
         open={completing != null}
         title="Completar control"
         description="Se registra el resultado contra una atención finalizada del paciente."
-        error={completing != null ? error : null}
-        isSubmitting={completeMutation.isPending}
         submitLabel="Completar"
         onClose={() => {
-          if (!completeMutation.isPending) setCompleting(null)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!completeEncounterId) {
-            setError("Elige la atención finalizada donde se atendió el control.")
-            return
-          }
-          if (!outcome.trim()) {
-            setError("Registra el resultado del control.")
-            return
-          }
-          completeMutation.mutate()
+          if (!completeSurface.isSubmitting) setCompleting(null)
         }}
       >
         <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor={`${uid}-complete-encounter`}>Atención finalizada</FieldLabel>
-            <ChoiceSelect
-              id={`${uid}-complete-encounter`}
-              
-              value={completeEncounterId}
-              onChange={(event) => setCompleteEncounterId(event.target.value)}
-            >
-              <option value="">Seleccionar atención</option>
-              {finalized.map((encounter) => (
-                <option key={encounter.id} value={encounter.id}>
-                  {formatDateTime(encounter.createdAt)} · {encounter.reason || "Atención"}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-outcome`}>Resultado del control</FieldLabel>
-            <Textarea
-              id={`${uid}-outcome`}
-              maxLength={MAX_TEXT}
-              value={outcome}
-              onChange={(event) => setOutcome(event.target.value)}
-            />
-          </Field>
+          <completeForm.AppField name="encounterId">
+            {() => (
+              <ChoiceField label="Atención finalizada">
+                <option value="">Seleccionar atención</option>
+                {finalized.map((encounter) => (
+                  <option key={encounter.id} value={encounter.id}>
+                    {formatDateTime(encounter.createdAt)} · {encounter.reason || "Atención"}
+                  </option>
+                ))}
+              </ChoiceField>
+            )}
+          </completeForm.AppField>
+          <completeForm.AppField name="outcome">
+            {(field) => <field.TextareaField label="Resultado del control" maxLength={MAX_TEXT} />}
+          </completeForm.AppField>
         </div>
       </FormDrawer>
 
       <FormDrawer
+        {...cancelSurface}
         dock={false}
         open={cancelling != null}
         title="Cancelar control"
         description="El control se conserva con su motivo. Cancelar el control NO cancela la cita: cualquier reserva vigente permanece en agenda."
-        error={cancelling != null ? error : null}
-        isSubmitting={cancelMutation.isPending}
         submitLabel="Cancelar control"
         onClose={() => {
-          if (!cancelMutation.isPending) setCancelling(null)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo de la cancelación.")
-            return
-          }
-          cancelMutation.mutate()
+          if (!cancelSurface.isSubmitting) setCancelling(null)
         }}
       >
         {cancelling?.appointment && canReadAgenda ? (
@@ -600,15 +654,9 @@ export function ControlesPanel({
             </Link>
           </p>
         ) : null}
-        <Field>
-          <FieldLabel htmlFor={`${uid}-cancel-reason`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${uid}-cancel-reason`}
-            maxLength={MAX_TEXT}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
+        <cancelForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo" maxLength={MAX_TEXT} />}
+        </cancelForm.AppField>
       </FormDrawer>
     </div>
   )
@@ -623,33 +671,16 @@ export function PrescriptionEntry({
   patientId: string
   prescription: Prescription
   items?: PlanItem[]
-  /** Abierta al mostrarse sola (Documentos la abre al lado). */
+  /** Abierta al mostrarse sola. */
   defaultOpen?: boolean
 }): React.JSX.Element {
-  const uid = useId()
-  const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
-  const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ["prescription", patientId, prescription.id],
     queryFn: () => fetchPrescriptionDetail(patientId, prescription.id),
     enabled: canRead,
   })
-  const [cancelling, setCancelling] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [reason, setReason] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const cancelMutation = useMutation({
-    mutationFn: () => cancelPrescriptionApi(patientId, prescription.id, { reason: reason.trim() }),
-    onSuccess: () => {
-      setCancelling(false)
-      setReason("")
-      setError(null)
-      void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
-      void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId] })
-    },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
-  })
+  const [viewing, setViewing] = useState(false)
   const rows = detail.data?.data.items ?? prescription.items ?? []
   const planItem = items?.find((item) => item.id === prescription.planItemId) ?? null
   return (
@@ -687,11 +718,6 @@ export function PrescriptionEntry({
         {prescription.cancelReason ? (
           <p className="text-sm text-muted-foreground">Anulada: {prescription.cancelReason}</p>
         ) : null}
-        {error && !cancelling ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
         {prescription.prescriberName ? (
           <p className="text-xs text-muted-foreground">
             Prescribe {prescription.prescriberName}
@@ -701,78 +727,19 @@ export function PrescriptionEntry({
               : ""}
           </p>
         ) : null}
-        {prescription.status === "emitida" ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to="/patients/$patientId/prescriptions/$prescriptionId/print"
-              params={{ patientId, prescriptionId: prescription.id }}
-              target="_blank"
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-            >
-              Imprimir
-            </Link>
-            {canWrite ? (
-              <Button type="button" size="sm" variant="outline" onClick={() => setSending(true)}>
-                Enviar a la persona
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {sending ? (
-          <HealthDocumentSendDrawer
-            open
-            patientId={patientId}
-            documentType="prescription"
-            documentId={prescription.id}
-            onClose={() => setSending(false)}
-          />
-        ) : null}
-        {canWrite && prescription.status === "emitida" ? (
-          <div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setError(null)
-                setCancelling(true)
-              }}
-            >
-              Anular receta
-            </Button>
-          </div>
-        ) : null}
+        <div>
+          <Button type="button" size="sm" variant="outline" onClick={() => setViewing(true)}>
+            Ver
+          </Button>
+        </div>
       </div>
-      <FormDrawer
-        dock={false}
-        open={cancelling}
-        title="Anular receta"
-        description="La receta conserva su contenido original y el motivo de anulación."
-        error={cancelling ? error : null}
-        isSubmitting={cancelMutation.isPending}
-        submitLabel="Anular receta"
-        onClose={() => {
-          if (!cancelMutation.isPending) setCancelling(false)
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!reason.trim()) {
-            setError("Indica el motivo de la anulación.")
-            return
-          }
-          cancelMutation.mutate()
-        }}
-      >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-rx-cancel`}>Motivo de anulación</FieldLabel>
-          <Textarea
-            id={`${uid}-rx-cancel`}
-            maxLength={MAX_TEXT}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </Field>
-      </FormDrawer>
+      {viewing ? (
+        <PrescriptionPaper
+          patientId={patientId}
+          prescription={prescription}
+          onClose={() => setViewing(false)}
+        />
+      ) : null}
     </details>
   )
 }
@@ -806,6 +773,40 @@ function emptyMedication(): MedicationDraft {
     instructions: "",
   }
 }
+
+/** Como mucho, los medicamentos de una receta (`POST /prescriptions`). */
+const MAX_MEDICATIONS = 20
+const QUANTITY_RANGE = "La cantidad es un número entero de 1 a 9999."
+const WEIGHT_RANGE = "Escribe el peso en kilos, de 0,5 a 400."
+
+/** El peso escrito («12,5»), si está entre 0,5 y 400 kg como pide la ruta; si no, null. */
+function weightOf(text: string): number | null {
+  const kg = Number(text.trim().replace(",", "."))
+  return text.trim() !== "" && Number.isFinite(kg) && kg >= 0.5 && kg <= 400 ? kg : null
+}
+
+const required = (max: number, missing: string) =>
+  z.string().trim().min(1, missing).max(max, `Escribe como mucho ${max} caracteres.`)
+
+/** Cada medicamento, con los límites de `POST /prescriptions` (sus nombres en el cuerpo: `items[i].…`). */
+const medicationSchema = z.object({
+  key: z.string(),
+  genericName: required(MAX_TITLE, "Escribe la DCI."),
+  brandName: z.string().trim().max(MAX_TITLE, `Escribe como mucho ${MAX_TITLE} caracteres.`),
+  strength: required(60, "Escribe la concentración."),
+  dosageForm: z.string().min(1, "Elige la forma farmacéutica."),
+  dose: required(MAX_TITLE, "Escribe la dosis."),
+  route: z.string().min(1, "Elige la vía."),
+  frequency: required(MAX_TITLE, "Escribe la frecuencia."),
+  duration: required(MAX_TITLE, "Escribe la duración."),
+  quantity: z.string().refine((text) => {
+    const value = text.trim()
+    if (value === "") return true
+    const count = Number(value)
+    return /^\d+$/.test(value) && count >= 1 && count <= 9999
+  }, QUANTITY_RANGE),
+  instructions: z.string().max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
+})
 
 /** Recetas del paciente, acotables a un tratamiento. Emitir nunca cobra ni ejecuta. */
 export function RecetasPanel({
@@ -859,17 +860,6 @@ export function RecetasPanel({
     queryFn: () => fetchPrescriptions(patientId),
     enabled: canRead,
   })
-  const [planItemIdState, setPlanItemId] = useState(itemId ?? "")
-  // Igual que en controles: desde el recorrido el tratamiento es el del
-  // recorrido abierto y no una selección previa de otra pantalla.
-  const planItemId = itemId ?? planItemIdState
-  const [notes, setNotes] = useState("")
-  const [diagnosisCode, setDiagnosisCode] = useState(defaultDiagnosisCode ?? "")
-  const [diagnosisSystem, setDiagnosisSystem] = useState<string | null>(defaultDiagnosisSystem ?? null)
-  const [validUntil, setValidUntil] = useState("")
-  // Recetar igual pese al aviso pide un motivo escrito, que queda en la receta (decisión 10).
-  const [overriding, setOverriding] = useState(startOverriding)
-  const [overrideReason, setOverrideReason] = useState("")
   const [createOpenState, setCreateOpenState] = useState(false)
   const createOpen = createOpenProp ?? createOpenState
   const setCreateOpen = (open: boolean) => {
@@ -879,10 +869,6 @@ export function RecetasPanel({
   // La lista y las reglas de la receta son las del producto (latidIA: controlados, embarazo, peso; issue 229).
   const prescribing = productUi().prescribing
   const rules = prescribing.useRules(patientId, canRead && createOpen)
-  const [weight, setWeight] = useState("")
-  const [medications, setMedications] = useState<MedicationDraft[]>(() =>
-    initialMedications?.length ? initialMedications.map((medication) => ({ ...emptyMedication(), ...medication })) : [emptyMedication()],
-  )
   // Alergias activas, también las declaradas sin confirmar: el aviso aparece al
   // escribir la DCI, antes de emitir, con la misma regla que el servidor.
   const healthQuery = useQuery({
@@ -893,34 +879,118 @@ export function RecetasPanel({
   const activeAllergies = (healthQuery.data?.data.allergies ?? []).filter(
     (allergy) => allergy.isActive,
   )
-  const conflictsByMedication = medications.map((medication) =>
-    allergyWarnings(medication.genericName, activeAllergies, prescribing.catalog),
+  /** Lo que se receta solo con motivo para un medicamento: sus alergias y lo que avisan las reglas. */
+  const conflictsOf = (genericName: string) => [
+    ...allergyWarnings(genericName, activeAllergies, prescribing.catalog),
+    ...rules.check([{ genericName }], 1).warnings,
+  ]
+  // El esquema se arma una vez; las reglas y las alergias llegan después y cambian.
+  const latest = useRef({ rules, conflictsOf })
+  latest.current = { rules, conflictsOf }
+  const schema = useMemo(
+    () =>
+      z
+        .object({
+          planItemId: z.string(),
+          items: z
+            .array(medicationSchema)
+            .min(1, "Añade al menos un medicamento.")
+            .max(MAX_MEDICATIONS, `La receta lleva hasta ${MAX_MEDICATIONS} medicamentos.`),
+          patientWeightKg: z.string(),
+          overriding: z.boolean(),
+          allergyOverrideReason: z
+            .string()
+            .max(500, "El motivo para recetar igual tiene como mucho 500 caracteres."),
+          diagnosisCode: z.string(),
+          diagnosisSystem: z.string().nullable(),
+          validUntil: z.string(),
+          notes: z.string().max(MAX_TEXT, `Las notas tienen como mucho ${MAX_TEXT} caracteres.`),
+        })
+        .superRefine((value, ctx) => {
+          const { rules, conflictsOf } = latest.current
+          let warned = false
+          value.items.forEach((medication, index) => {
+            const name = medication.genericName.trim()
+            if (!name) return
+            const path = ["items", index, "genericName"]
+            // Con un peso cualquiera, la revisión de un medicamento solo dice lo suyo.
+            if (rules.check([{ genericName: name }], 1).errors.length > 0) {
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message: "Este medicamento no va en la receta común.",
+              })
+              return
+            }
+            if (conflictsOf(name).length === 0) return
+            warned = true
+            if (!value.overriding)
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message: "Tiene un aviso: cámbialo o recétalo igual con un motivo.",
+              })
+          })
+          if (rules.weight.required && weightOf(value.patientWeightKg) === null)
+            ctx.addIssue({
+              code: "custom",
+              path: ["patientWeightKg"],
+              message: value.patientWeightKg.trim() ? WEIGHT_RANGE : "Escribe su peso en kilos.",
+            })
+          if (warned && value.overriding && !value.allergyOverrideReason.trim())
+            ctx.addIssue({
+              code: "custom",
+              path: ["allergyOverrideReason"],
+              message: "Escribe por qué la recetas igual.",
+            })
+        }),
+    [],
   )
-  const weightKg = weight.trim() ? Number(weight.replace(",", ".")) : null
-  const ruleCheck = rules.check(medications, weightKg !== null && Number.isFinite(weightKg) ? weightKg : null)
-  // Lo contraindicado en el embarazo va como una alergia: se cambia o se receta con motivo.
-  const conflicts = [...conflictsByMedication.flat(), ...ruleCheck.warnings]
-  const onlyAllergies = ruleCheck.warnings.length === 0
-  // El peso del último registro se propone una vez; quien receta lo corrige.
-  useEffect(() => {
-    if (rules.weight.required && rules.weight.suggested !== null && weight === "")
-      setWeight(String(rules.weight.suggested))
-  }, [rules.weight.required, rules.weight.suggested, weight])
-  const acknowledged = overriding && overrideReason.trim() !== ""
-  const [error, setError] = useState<string | null>(null)
+  // Los medicamentos de partida se arman una vez: cada uno lleva una clave al
+  // azar y TanStack Form vuelve a aplicar unos `defaultValues` distintos en
+  // cada render mientras no se toque el formulario (un ciclo sin fin).
+  const [initialItems] = useState(() =>
+    initialMedications?.length
+      ? initialMedications.map((medication) => ({ ...emptyMedication(), ...medication }))
+      : [emptyMedication()],
+  )
   const createMutation = useMutation({
-    mutationFn: () =>
-      createPrescriptionApi(patientId, {
+    mutationFn: (body: Parameters<typeof createPrescriptionApi>[1]) =>
+      createPrescriptionApi(patientId, body),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      // Igual que en controles: desde el recorrido el tratamiento es el del
+      // recorrido abierto y no una selección previa de otra pantalla.
+      planItemId: itemId ?? "",
+      items: initialItems,
+      patientWeightKg: "",
+      // Recetar igual pese al aviso pide un motivo escrito, que queda en la receta (decisión 10).
+      overriding: startOverriding,
+      allergyOverrideReason: "",
+      diagnosisCode: defaultDiagnosisCode ?? "",
+      diagnosisSystem: defaultDiagnosisSystem ?? (null as string | null),
+      validUntil: "",
+      notes: "",
+    },
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const { rules, conflictsOf } = latest.current
+      const warned = value.items.some(
+        (medication) => conflictsOf(medication.genericName.trim()).length > 0,
+      )
+      const acknowledged = warned && value.overriding && value.allergyOverrideReason.trim() !== ""
+      const result = await createMutation.mutateAsync({
         encounterId: encounterId ?? null,
-        planItemId: planItemId || null,
-        notes: notes.trim() || null,
-        diagnosisCode: diagnosisCode || null,
-        diagnosisSystem: diagnosisCode ? diagnosisSystem : null,
-        validUntil: validUntil || null,
-        acknowledgeAllergies: conflicts.length > 0 && acknowledged,
-        allergyOverrideReason: conflicts.length > 0 && acknowledged ? overrideReason.trim() : null,
-        patientWeightKg: rules.weight.required && weightKg !== null && Number.isFinite(weightKg) ? weightKg : null,
-        items: medications.map((medication) => ({
+        planItemId: (itemId ?? value.planItemId) || null,
+        notes: value.notes.trim() || null,
+        diagnosisCode: value.diagnosisCode || null,
+        diagnosisSystem: value.diagnosisCode ? value.diagnosisSystem : null,
+        validUntil: value.validUntil || null,
+        acknowledgeAllergies: acknowledged,
+        allergyOverrideReason: acknowledged ? value.allergyOverrideReason.trim() : null,
+        patientWeightKg: rules.weight.required ? weightOf(value.patientWeightKg) : null,
+        items: value.items.map((medication) => ({
           genericName: medication.genericName.trim(),
           brandName: medication.brandName.trim() || null,
           strength: medication.strength.trim(),
@@ -929,385 +999,349 @@ export function RecetasPanel({
           route: medication.route,
           frequency: medication.frequency.trim(),
           duration: medication.duration.trim(),
-          quantity: medication.quantity.trim() ? Number(medication.quantity) : null,
+          quantity: medication.quantity.trim() ? Number(medication.quantity.trim()) : null,
           instructions: medication.instructions.trim() || null,
         })),
-      }),
-    onSuccess: (result) => {
+      })
       onIssued?.(result.data.id)
-      setMedications([emptyMedication()])
-      setNotes("")
-      setDiagnosisCode("")
-      setValidUntil("")
-      setOverriding(false)
-      setOverrideReason("")
-      setWeight("")
+      form.reset({
+        planItemId: value.planItemId,
+        items: [emptyMedication()],
+        patientWeightKg: "",
+        overriding: false,
+        allergyOverrideReason: "",
+        diagnosisCode: "",
+        diagnosisSystem: value.diagnosisSystem,
+        validUntil: "",
+        notes: "",
+      })
       setCreateOpen(false)
-      setError(null)
       toast.success("Receta emitida.")
       void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
       void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId] })
     },
-    onError: (mutationError) => setError(mutationMessage(mutationError)),
   })
+  const surface = useFormSurface(form)
+
+  const medications = useStore(form.store, (state) => state.values.items)
+  const weight = useStore(form.store, (state) => state.values.patientWeightKg)
+  const overriding = useStore(form.store, (state) => state.values.overriding)
+  const conflictsByMedication = medications.map((medication) => conflictsOf(medication.genericName))
+  const typedWeight = weight.trim() ? Number(weight.replace(",", ".")) : null
+  const ruleCheck = rules.check(
+    medications,
+    typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null,
+  )
+  // Lo contraindicado en el embarazo va como una alergia: se cambia o se receta con motivo.
+  const conflicts = [...new Set(conflictsByMedication.flat())]
+  const onlyAllergies = ruleCheck.warnings.length === 0
+  // El peso del último registro se propone una vez; quien receta lo corrige.
+  useEffect(() => {
+    if (rules.weight.required && rules.weight.suggested !== null && weight === "")
+      form.setFieldValue("patientWeightKg", String(rules.weight.suggested), {
+        dontUpdateMeta: true,
+      })
+  }, [rules.weight.required, rules.weight.suggested, weight, form])
 
   const rows = (list.data?.data ?? []).filter(
     (row) =>
       (!itemId || row.planItemId === itemId) &&
       (!encounterOnly || encounterId === undefined || row.encounterId === encounterId),
   )
-  const patchMedication = (index: number, patch: Partial<MedicationDraft>) =>
-    setMedications((current) =>
-      current.map((medication, position) =>
-        position === index ? { ...medication, ...patch } : medication,
-      ),
-    )
+  const dciId = (key: string | undefined) => `${uid}-med-${key}`
 
-  const submitCreate = (event: React.FormEvent) => {
-          event.preventDefault()
-          const incomplete = medications.some(
-            (medication) =>
-              !medication.genericName.trim() ||
-              !medication.strength.trim() ||
-              !medication.dosageForm.trim() ||
-              !medication.dose.trim() ||
-              !medication.frequency.trim() ||
-              !medication.duration.trim(),
-          )
-          if (incomplete) {
-            setError(
-              "Completa DCI, concentración, forma farmacéutica, dosis, frecuencia y duración.",
-            )
-            return
-          }
-          if (ruleCheck.errors.length > 0) {
-            setError(ruleCheck.errors.join(" "))
-            return
-          }
-          if (conflicts.length > 0 && !acknowledged) {
-            setError(
-              overriding
-                ? "Escribe por qué la recetas igual."
-                : onlyAllergies
-                  ? "Hay un aviso de alergia: cambia el medicamento o recétalo igual con un motivo."
-                  : "Hay un aviso: cambia el medicamento o recétalo igual con un motivo.",
-            )
-            return
-          }
-          createMutation.mutate()
-  }
   const createBody = (
-        <div className="flex flex-col gap-4">
-          {itemId ? (
-            <p className="text-sm text-muted-foreground">
-              Tratamiento:{" "}
-              {(items ?? []).find((item) => item.id === itemId)?.title ?? "el tratamiento abierto"}
-            </p>
-          ) : null}
-          {itemId ? null : (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-rx-item`}>Tratamiento</FieldLabel>
-              <ChoiceSelect
-                id={`${uid}-rx-item`}
-                
-                value={planItemId}
-                onChange={(event) => setPlanItemId(event.target.value)}
-              >
-                <option value="">Sin tratamiento asociado</option>
-                {(items ?? []).map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title}
-                    {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
-                  </option>
-                ))}
-              </ChoiceSelect>
-            </Field>
+    <div className="flex flex-col gap-4">
+      {itemId ? (
+        <p className="text-sm text-muted-foreground">
+          Tratamiento:{" "}
+          {(items ?? []).find((item) => item.id === itemId)?.title ?? "el tratamiento abierto"}
+        </p>
+      ) : (
+        <form.AppField name="planItemId">
+          {() => (
+            <ChoiceField label="Tratamiento">
+              <option value="">Sin tratamiento asociado</option>
+              {(items ?? []).map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.title}
+                  {item.toothNumber != null ? ` · Pieza ${item.toothNumber}` : ""}
+                </option>
+              ))}
+            </ChoiceField>
           )}
-          {medications.map((medication, index) => (
-            <fieldset
-              key={medication.key}
-              className="grid gap-3 rounded-md border p-3 sm:grid-cols-2"
-            >
-              <legend className="px-1 text-sm font-medium">Medicamento {index + 1}</legend>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-med-${medication.key}`}>
-                  DCI (denominación común)
-                </FieldLabel>
-                <Input
-                  id={`${uid}-med-${medication.key}`}
-                  list={`${uid}-dci`}
-                  maxLength={MAX_TITLE}
-                  value={medication.genericName}
-                  onChange={(event) => patchMedication(index, { genericName: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-brand-${medication.key}`}>
-                  Nombre comercial (opcional)
-                </FieldLabel>
-                <Input
-                  id={`${uid}-brand-${medication.key}`}
-                  maxLength={MAX_TITLE}
-                  value={medication.brandName}
-                  onChange={(event) => patchMedication(index, { brandName: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-strength-${medication.key}`}>Concentración</FieldLabel>
-                <Input
-                  id={`${uid}-strength-${medication.key}`}
-                  maxLength={60}
-                  placeholder="Ej.: 500 mg"
-                  value={medication.strength}
-                  onChange={(event) => patchMedication(index, { strength: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-form-${medication.key}`}>
-                  Forma farmacéutica
-                </FieldLabel>
-                <ChoiceSelect
-                  id={`${uid}-form-${medication.key}`}
-                  
-                  value={medication.dosageForm}
-                  onChange={(event) => patchMedication(index, { dosageForm: event.target.value })}
-                >
-                  <option value="">Elige la forma…</option>
-                  {DOSAGE_FORMS.map((form) => (
-                    <option key={form} value={form}>
-                      {form}
-                    </option>
-                  ))}
-                </ChoiceSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-dose-${medication.key}`}>Dosis</FieldLabel>
-                <Input
-                  id={`${uid}-dose-${medication.key}`}
-                  maxLength={MAX_TITLE}
-                  placeholder="Ej.: 1 tableta"
-                  value={medication.dose}
-                  onChange={(event) => patchMedication(index, { dose: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-route-${medication.key}`}>Vía</FieldLabel>
-                <ChoiceSelect
-                  id={`${uid}-route-${medication.key}`}
-                  
-                  value={medication.route}
-                  onChange={(event) => patchMedication(index, { route: event.target.value })}
-                >
-                  {ADMINISTRATION_ROUTES.map((route) => (
-                    <option key={route} value={route}>
-                      {route}
-                    </option>
-                  ))}
-                </ChoiceSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-frequency-${medication.key}`}>Frecuencia</FieldLabel>
-                <Input
-                  id={`${uid}-frequency-${medication.key}`}
-                  maxLength={MAX_TITLE}
-                  value={medication.frequency}
-                  onChange={(event) => patchMedication(index, { frequency: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-duration-${medication.key}`}>Duración</FieldLabel>
-                <Input
-                  id={`${uid}-duration-${medication.key}`}
-                  maxLength={MAX_TITLE}
-                  value={medication.duration}
-                  onChange={(event) => patchMedication(index, { duration: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-qty-${medication.key}`}>Cantidad total</FieldLabel>
-                <Input
-                  id={`${uid}-qty-${medication.key}`}
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  max={9999}
-                  value={medication.quantity}
-                  onChange={(event) => patchMedication(index, { quantity: event.target.value })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${uid}-med-notes-${medication.key}`}>
-                  Instrucciones
-                </FieldLabel>
-                <Input
-                  id={`${uid}-med-notes-${medication.key}`}
-                  maxLength={MAX_INSTRUCTIONS}
-                  value={medication.instructions}
-                  onChange={(event) => patchMedication(index, { instructions: event.target.value })}
-                />
-              </Field>
-            </fieldset>
-          ))}
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={medications.length >= 20}
-              onClick={() => setMedications((current) => [...current, emptyMedication()])}
-            >
-              Añadir medicamento
-            </Button>
-            {medications.length > 1 ? (
+        </form.AppField>
+      )}
+      <form.AppField name="items" mode="array">
+        {(itemsField) => (
+          <>
+            {itemsField.state.value.map((medication, index) => (
+              <FieldSet
+                key={medication.key}
+                className="grid gap-3 rounded-md border p-3 sm:grid-cols-2"
+              >
+                <FieldLegend variant="label" className="mb-0 px-1">
+                  Medicamento {index + 1}
+                </FieldLegend>
+                <form.AppField name={`items[${index}].genericName`}>
+                  {(field) => (
+                    <field.TextField
+                      label="DCI (denominación común)"
+                      id={dciId(medication.key)}
+                      list={`${uid}-dci`}
+                      maxLength={MAX_TITLE}
+                    />
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].brandName`}>
+                  {(field) => (
+                    <field.TextField label="Nombre comercial (opcional)" maxLength={MAX_TITLE} />
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].strength`}>
+                  {(field) => (
+                    <field.TextField
+                      label="Concentración"
+                      maxLength={60}
+                      placeholder="Ej.: 500 mg"
+                    />
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].dosageForm`}>
+                  {() => (
+                    <ChoiceField label="Forma farmacéutica">
+                      <option value="">Elige la forma…</option>
+                      {DOSAGE_FORMS.map((dosageForm) => (
+                        <option key={dosageForm} value={dosageForm}>
+                          {dosageForm}
+                        </option>
+                      ))}
+                    </ChoiceField>
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].dose`}>
+                  {(field) => (
+                    <field.TextField
+                      label="Dosis"
+                      maxLength={MAX_TITLE}
+                      placeholder="Ej.: 1 tableta"
+                    />
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].route`}>
+                  {() => (
+                    <ChoiceField label="Vía">
+                      {ADMINISTRATION_ROUTES.map((route) => (
+                        <option key={route} value={route}>
+                          {route}
+                        </option>
+                      ))}
+                    </ChoiceField>
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].frequency`}>
+                  {(field) => <field.TextField label="Frecuencia" maxLength={MAX_TITLE} />}
+                </form.AppField>
+                <form.AppField name={`items[${index}].duration`}>
+                  {(field) => <field.TextField label="Duración" maxLength={MAX_TITLE} />}
+                </form.AppField>
+                <form.AppField name={`items[${index}].quantity`}>
+                  {(field) => (
+                    <field.TextField label="Cantidad total" inputMode="numeric" maxLength={4} />
+                  )}
+                </form.AppField>
+                <form.AppField name={`items[${index}].instructions`}>
+                  {(field) => <field.TextField label="Instrucciones" maxLength={MAX_TEXT} />}
+                </form.AppField>
+              </FieldSet>
+            ))}
+            <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setMedications((current) => current.slice(0, -1))}
+                disabled={itemsField.state.value.length >= MAX_MEDICATIONS}
+                onClick={() => itemsField.pushValue(emptyMedication())}
               >
-                Quitar el último
+                Añadir medicamento
               </Button>
-            ) : null}
-          </div>
-          <datalist id={`${uid}-dci`}>
-            {prescribing.catalog.medications.map((medication) => (
-              <option key={medication.dci} value={medication.dci} />
-            ))}
-          </datalist>
-          {rules.weight.required ? (
-            <Field>
-              <FieldLabel htmlFor={`${uid}-rx-weight`}>Peso (kg)</FieldLabel>
-              <Input
-                id={`${uid}-rx-weight`}
-                className="w-32"
-                inputMode="decimal"
-                maxLength={5}
-                value={weight}
-                onChange={(event) => setWeight(event.target.value.replace(/[^\d.,]/g, ""))}
-              />
-              <FieldDescription>
-                Es menor de 12 años: la receta va con su peso.
-                {rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}
-              </FieldDescription>
-            </Field>
-          ) : null}
-          {ruleCheck.errors.length > 0 ? (
-            <div role="alert" className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
-              <p className="font-medium">No se puede emitir así</p>
-              <ul className="list-disc pl-5">
-                {ruleCheck.errors.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {ruleCheck.reminders.length > 0 ? (
-            <div role="note" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
-              {ruleCheck.reminders.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-            </div>
-          ) : null}
-          {conflicts.length > 0 ? (
-            <div
-              role="alert"
-              className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
-            >
-              <p className="font-medium">{onlyAllergies ? "Aviso de alergia" : "Aviso"}</p>
-              <ul className="list-disc pl-5">
-                {conflicts.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-              {overriding ? (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-rx-override`}>¿Por qué la recetas igual?</FieldLabel>
-                  <Textarea
-                    id={`${uid}-rx-override`}
-                    autoFocus
-                    maxLength={500}
-                    value={overrideReason}
-                    placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
-                    onChange={(event) => setOverrideReason(event.target.value)}
-                  />
-                  <FieldDescription>Queda en la receta, con tu nombre.</FieldDescription>
-                </Field>
-              ) : null}
-              <div className="flex flex-wrap gap-2">
+              {itemsField.state.value.length > 1 ? (
                 <Button
                   type="button"
-                  size="sm"
                   variant="outline"
-                  onClick={() => {
-                    // Lleva al primer medicamento que choca para cambiarlo.
-                    const allergyIndex = conflictsByMedication.findIndex((lines) => lines.length > 0)
-                    const index = allergyIndex >= 0 ? allergyIndex : 0
-                    const field = document.getElementById(`${uid}-med-${medications[index]?.key}`)
-                    if (field instanceof HTMLInputElement) {
-                      field.focus()
-                      field.select()
-                    }
-                    setOverriding(false)
-                    setOverrideReason("")
-                  }}
+                  size="sm"
+                  onClick={() => itemsField.removeValue(itemsField.state.value.length - 1)}
                 >
-                  Cambiar medicamento
+                  Quitar el último
                 </Button>
-                {overriding ? null : (
-                  <Button type="button" size="sm" variant="outline" onClick={() => setOverriding(true)}>
-                    Recetar igual, con motivo
-                  </Button>
-                )}
-              </div>
+              ) : null}
             </div>
-          ) : null}
-          <DiagnosisSearch
-            label="Diagnóstico (opcional)"
-            value={diagnosisCode}
-            system={diagnosisSystem}
-            onChange={(code, _description, system) => {
-              setDiagnosisCode(code)
-              setDiagnosisSystem(system)
-            }}
-          />
-          <Field>
-            <FieldLabel htmlFor={`${uid}-rx-valid`}>Válida hasta (opcional)</FieldLabel>
-            <DatePickerButton
-              id={`${uid}-rx-valid`}
-              className="w-56"
-              min={regionToday()}
-              value={validUntil}
-              emptyLabel="Sin fecha"
-              onChange={setValidUntil}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-rx-notes`}>Notas de la receta</FieldLabel>
-            <Textarea
-              id={`${uid}-rx-notes`}
-              maxLength={MAX_INSTRUCTIONS}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-            />
-          </Field>
+          </>
+        )}
+      </form.AppField>
+      <datalist id={`${uid}-dci`}>
+        {prescribing.catalog.medications.map((medication) => (
+          <option key={medication.dci} value={medication.dci} />
+        ))}
+      </datalist>
+      {rules.weight.required ? (
+        <form.AppField name="patientWeightKg">
+          {(field) => (
+            <field.Control
+              label="Peso (kg)"
+              description={`Es menor de 12 años: la receta va con su peso.${rules.weight.suggested !== null ? ` El último registrado es ${rules.weight.suggested} kg.` : ""}`}
+            >
+              {(control) => (
+                <Input
+                  {...control.props}
+                  className="w-32"
+                  inputMode="decimal"
+                  maxLength={5}
+                  value={field.state.value}
+                  onChange={(event) =>
+                    field.handleChange(event.target.value.replace(/[^\d.,]/g, ""))
+                  }
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+      ) : null}
+      {ruleCheck.errors.length > 0 ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+        >
+          <p className="font-medium">No se puede emitir así</p>
+          <ul className="list-disc pl-5">
+            {ruleCheck.errors.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
         </div>
+      ) : null}
+      {ruleCheck.reminders.length > 0 ? (
+        <div
+          role="note"
+          className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm"
+        >
+          {ruleCheck.reminders.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      ) : null}
+      {conflicts.length > 0 ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+        >
+          <p className="font-medium">{onlyAllergies ? "Aviso de alergia" : "Aviso"}</p>
+          <ul className="list-disc pl-5">
+            {conflicts.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {overriding ? (
+            <form.AppField name="allergyOverrideReason">
+              {(field) => (
+                <field.TextareaField
+                  label="¿Por qué la recetas igual?"
+                  description="Queda en la receta, con tu nombre."
+                  autoFocus
+                  maxLength={500}
+                  placeholder="Por ejemplo, la reacción fue un malestar, no una alergia"
+                />
+              )}
+            </form.AppField>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                // Lleva al primer medicamento que choca para cambiarlo.
+                const allergyIndex = conflictsByMedication.findIndex((lines) => lines.length > 0)
+                const index = allergyIndex >= 0 ? allergyIndex : 0
+                const field = document.getElementById(dciId(medications[index]?.key))
+                if (field instanceof HTMLInputElement) {
+                  field.focus()
+                  field.select()
+                }
+                form.setFieldValue("overriding", false)
+                form.setFieldValue("allergyOverrideReason", "")
+              }}
+            >
+              Cambiar medicamento
+            </Button>
+            {overriding ? null : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => form.setFieldValue("overriding", true)}
+              >
+                Recetar igual, con motivo
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : null}
+      <form.AppField name="diagnosisCode">
+        {(field) => (
+          <field.Control label="Diagnóstico (opcional)">
+            {(control) => (
+              <DiagnosisSearch
+                id={control.id}
+                invalid={control.invalid}
+                aria-describedby={control.describedBy}
+                onBlur={control.onBlur}
+                value={field.state.value}
+                system={form.getFieldValue("diagnosisSystem")}
+                onChange={(code, _description, system) => {
+                  field.handleChange(code)
+                  form.setFieldValue("diagnosisSystem", system)
+                }}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      <form.AppField name="validUntil">
+        {(field) => (
+          <field.Control label="Válida hasta (opcional)">
+            {(control) => (
+              <DatePickerButton
+                {...control.props}
+                className="w-56"
+                min={regionToday()}
+                value={field.state.value}
+                emptyLabel="Sin fecha"
+                onChange={field.handleChange}
+              />
+            )}
+          </field.Control>
+        )}
+      </form.AppField>
+      <form.AppField name="notes">
+        {(field) => <field.TextareaField label="Notas de la receta" maxLength={MAX_TEXT} />}
+      </form.AppField>
+    </div>
   )
   const createDrawer = (
-      <FormDrawer
-        open={createOpen}
-        title="Emitir receta"
-        description="La receta queda inmutable: para corregirla se anula con motivo."
-        error={createOpen ? error : null}
-        isSubmitting={createMutation.isPending}
-        submitLabel="Emitir receta"
-        className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
-        onClose={() => {
-          if (!createMutation.isPending) setCreateOpen(false)
-        }}
-        onSubmit={submitCreate}
-      >
-        {createBody}
-      </FormDrawer>
+    <FormDrawer
+      {...surface}
+      open={createOpen}
+      title="Emitir receta"
+      description="La receta queda inmutable: para corregirla se anula con motivo."
+      submitLabel="Emitir receta"
+      className="sm:[--drawer-content-width:min(46rem,calc(100vw-2rem))]"
+      onClose={() => {
+        if (!surface.isSubmitting) setCreateOpen(false)
+      }}
+    >
+      {createBody}
+    </FormDrawer>
   )
   if (drawerOnly) return createDrawer
 
@@ -1322,14 +1356,7 @@ export function RecetasPanel({
           </p>
         </div>
         {canWrite && allowCreate ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => {
-              setError(null)
-              setCreateOpen(true)
-            }}
-          >
+          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
             Emitir receta
           </Button>
         ) : null}

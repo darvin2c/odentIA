@@ -27,7 +27,6 @@ import { plainAmount } from "../../lib/commissions"
 import { usePermission } from "../../lib/crm"
 import { financeErrorMessage } from "../../lib/finance"
 import {
-  cashErrorMessage,
   daysBetween,
   dayKeyOf,
   EXPENSE_CATEGORIES,
@@ -82,7 +81,6 @@ export function ExpensesTab({
   const listSearch = useListSearch()
   const canInventory = usePermission("inventory.read")
   const [voiding, setVoiding] = useState<ExpenseRow | null>(null)
-  const [voidError, setVoidError] = useState<string | null>(null)
   const q = listSearch.get("q") ?? ""
   const tipo = listSearch.get("tipo") ?? ""
   const category = (EXPENSE_CATEGORIES as readonly string[]).includes(tipo) ? tipo : ""
@@ -103,9 +101,7 @@ export function ExpensesTab({
       invalidateFinance(queryClient)
       toast.success("Gasto anulado")
       setVoiding(null)
-      setVoidError(null)
     },
-    onError: (err) => setVoidError(cashErrorMessage(err)),
   })
 
   const data = expenses.data?.data ?? null
@@ -207,10 +203,7 @@ export function ExpensesTab({
                 variant="ghost"
                 size="sm"
                 aria-label={`Anular el gasto ${row.original.concept}`}
-                onClick={() => {
-                  setVoidError(null)
-                  setVoiding(row.original)
-                }}
+                onClick={() => setVoiding(row.original)}
               >
                 Anular
               </Button>
@@ -343,16 +336,9 @@ export function ExpensesTab({
             ? "Queda en el historial con su motivo, deja de sumar en el mes y el efectivo vuelve a contar en la caja si aún no se cerró."
             : "Queda en el historial con su motivo y deja de sumar en el mes."
         }
-        isSubmitting={voidMutation.isPending}
-        error={voidError}
-        onClose={() => {
-          setVoiding(null)
-          setVoidError(null)
-        }}
-        onConfirm={(reason) => {
-          if (!voiding) return
-          setVoidError(null)
-          voidMutation.mutate({ id: voiding.id, reason })
+        onClose={() => setVoiding(null)}
+        onConfirm={async (reason) => {
+          if (voiding) await voidMutation.mutateAsync({ id: voiding.id, reason })
         }}
       />
     </div>

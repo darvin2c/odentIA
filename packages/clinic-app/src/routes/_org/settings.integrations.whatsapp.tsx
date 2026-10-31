@@ -1,4 +1,3 @@
-import { Skeleton } from "@odentia/ui"
 import { EmptyState, ErrorState, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"

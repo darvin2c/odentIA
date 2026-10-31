@@ -117,7 +117,14 @@ export function createAdminSupportRoute(deps: AdminSupportDeps) {
   /** Devolver o mantener un cobro revisado: decide quien ve la facturación (rol admin), siempre con lo que se le dice a la clínica. */
   app.post("/cases/:id/review/decide", async (c) => {
     const parsed = z
-      .object({ accept: z.boolean(), answer: z.string().trim().min(1).max(1000) })
+      .object({
+        accept: z.boolean(),
+        answer: z
+          .string()
+          .trim()
+          .min(1, "Escribe qué le dices a la clínica")
+          .max(1000, "Escribe como mucho 1000 caracteres"),
+      })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)

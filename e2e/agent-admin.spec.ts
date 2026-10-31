@@ -79,6 +79,7 @@ test("administrador: apagado, encenderlo, una línea con su flujo, recomendació
   const ready = page.getByRole("region", { name: "Listas para activar" })
   await expect(ready.getByRole("switch")).toHaveCount(8)
   for (const item of await ready.getByRole("switch").all()) await expect(item).toBeDisabled()
+  await expect(ready).toContainText("Lo que podrá hacer cuando lo enciendas: hasta entonces no se prenden ni se ajustan.")
   // Cada línea dice quién lo hace, con palabras. «Seguimiento sin responsable» ya no existe: la oportunidad sin responsable es de Recepción.
   await expect(ready.getByText("Lo hace Argos")).toHaveCount(5)
   await expect(ready.getByText("Le toca a una persona")).toHaveCount(3)
@@ -210,7 +211,11 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   await expect(page.getByRole("heading", { level: 1, name: "Argos, tu agente administrador" })).toBeVisible()
   const ask = page.getByRole("textbox", { name: "Dile qué quieres que haga" })
   const send = page.getByRole("button", { name: "Armar el cambio" })
-  await expect(send).toBeDisabled()
+  // «Armar el cambio» no se deshabilita por lo escrito: al enviar, el campo dice qué falta.
+  await ask.fill("Hol")
+  await send.click()
+  await expect(ask).toHaveAttribute("aria-invalid", "true")
+  await expect(page.getByText("Escribe al menos 4 caracteres.")).toBeVisible()
 
   // Lo que no reconoce lo dice, y no arma nada.
   await ask.fill("Felicita a quien cumple años")
@@ -295,7 +300,6 @@ test("administrador: pedirle algo con palabras deja un borrador que una persona 
   expect((await admin()).lines.find((line) => line.key === "cita_cancelada")).toMatchObject({ teamPart: true })
   // Lo que el agente no hace puede quedar como indicación para la persona que reciba la tarea.
   const note = editing.getByRole("textbox", { name: "Lo que sí puedo: dejarlo como indicación en la tarea" })
-  await expect(editing.getByRole("button", { name: "Sí, ponlo en la tarea" })).toBeDisabled()
   await note.fill("Ofrecer 10 % si reprograma")
   await editing.getByRole("button", { name: "Sí, ponlo en la tarea" }).click()
   await expect(editing).toContainText("Nueva: La tarea para el equipo de recepción dirá: «Ofrecer 10 % si reprograma». Sofi no lo dice: lo hace una persona.")
@@ -339,9 +343,9 @@ test("administrador: permisos en el registro y en la ficha, mensajes aprobados, 
   await gotoHydrated(page, tenant(org.slug, "/settings/integrations/whatsapp"))
   const approved = page.getByRole("region", { name: "Mensajes", exact: true })
   // Al conectar se piden todos: el que la cuenta ya tenía aprobado y los demás, en revisión.
-  await expect(approved.getByRole("listitem")).toHaveCount(16)
+  await expect(approved.getByRole("listitem")).toHaveCount(18)
   await expect(approved.getByRole("listitem").filter({ has: page.getByText("Recordar la cita", { exact: true }) })).toContainText("Aprobado")
-  await expect(approved).toContainText("1 aprobado · 15 en revisión")
+  await expect(approved).toContainText("1 aprobado · 17 en revisión")
   await expect(approved).not.toContainText("odentia_recordatorio_cita_v2")
   await expect(approved).toContainText("WhatsApp revisa cada mensaje y cada cambio de texto")
   expect(await overflow(page)).toBeLessThanOrEqual(0)

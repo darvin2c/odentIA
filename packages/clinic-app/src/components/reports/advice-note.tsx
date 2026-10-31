@@ -5,12 +5,11 @@
  * «porque»: no afirma causas.
  */
 import { Button } from "@odentia/ui"
-import { AgentMark, AgentSurface } from "@odentia/ui-patterns"
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { AgentMark, AgentSurface, submitErrorMessage } from "@odentia/ui-patterns"
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
 import { refreshAdmin } from "../../lib/admin"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { fetchReportAdvice, type ReportAdvice, type ReportAdviceTab, reportKey, type ReportQuery } from "../../lib/reports"
 import { ADMIN_NAME } from "../../lib/agent-names"
 
@@ -50,7 +49,7 @@ export function AdviceNote({ advice, onOpen }: { advice: ReportAdvice; onOpen: (
         {advice.rate !== null ? <span className="text-[13px] text-muted-foreground">{advice.title}.</span> : null}
         {snooze.isError ? (
           <span role="alert" className="text-[13px] text-destructive">
-            {mutationErrorMessage(snooze.error)}
+            {submitErrorMessage(snooze.error)}
           </span>
         ) : null}
       </div>

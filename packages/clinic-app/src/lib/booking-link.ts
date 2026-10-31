@@ -59,7 +59,15 @@ export interface PersonalLinkView {
   booking: { needsRegistration: boolean; service: { name: string; durationMin: number | null } | null; branchId: string | null } | null
   branches: BookingLinkBranch[]
   appointment: BookingAppointment | null
+  /** Qué falta de sus datos y si se le pregunta su salud (opcional); `missing` vacío: solo su salud. */
   data: { missing: MissingDatum[]; health: boolean } | null
+  /** Quien ya es paciente, al reservar: lo que ya sabemos, con el documento abreviado; sus nombres, para corregirlos. */
+  you: { name: string; givenNames: string | null; familyName: string | null; document: string | null; phone: string | null } | null
+  /**
+   * Lo que aún no aceptó (el aviso) o no respondió (promociones): se pide en el mismo paso.
+   * `promotionsOffer`: dijo que no a promociones; se le ofrece una casilla sin marcar.
+   */
+  pending: { privacy: boolean; promotions: boolean; promotionsOffer: boolean } | null
   budgets: PortalBudget[]
   consents: Array<{ id: string; title: string }>
   questionnaire: { title: string } | null
@@ -164,10 +172,34 @@ function linkPost(url: string, body: Record<string, unknown>): Promise<Response>
 export function fetchBookingSlots(
   slug: string,
   token: string,
-  range: { branchId: string; from: string; to: string },
+  range: { branchId: string; from: string; to: string; changing?: boolean },
 ): Promise<{ data: { slots: BookingSlot[]; timeZone: string; truncated: boolean } }> {
-  const query = new URLSearchParams({ token, branchId: range.branchId, from: range.from, to: range.to })
+  const query = new URLSearchParams({ token, branchId: range.branchId, from: range.from, to: range.to, ...(range.changing ? { mode: "cambiar" } : {}) })
   return publicFetch(`${base(slug)}/slots?${query.toString()}`)
+}
+
+export interface BookingProfessional {
+  id: string
+  name: string
+  /** Su primer horario libre en las próximas semanas; null si no tiene ninguno. */
+  next: { startsAt: string; endsAt: string } | null
+  /** Tiene hoy la cita que se está cambiando. */
+  current: boolean
+}
+
+export interface BookingProfessionals {
+  professionals: BookingProfessional[]
+  /** El primer horario libre de cualquiera de ellos. */
+  first: { startsAt: string; professionalUserId: string } | null
+  /** Hasta cuándo se buscó. */
+  until: string
+  timeZone: string
+}
+
+/** Con quién se puede reservar en la sede y el próximo horario libre de cada uno: lo entrega el servidor. */
+export function fetchBookingProfessionals(slug: string, token: string, branchId: string, changing = false): Promise<{ data: BookingProfessionals }> {
+  const query = new URLSearchParams({ token, branchId, ...(changing ? { mode: "cambiar" } : {}) })
+  return publicFetch(`${base(slug)}/professionals?${query.toString()}`)
 }
 
 export interface BookingRegistrationForm {
@@ -178,6 +210,22 @@ export interface BookingRegistrationForm {
   phone: string | null
   /** País de la clínica: de él dependen los documentos que se ofrecen (ADR 0036). */
   countryCode: string | null
+  /** Lo que ya sabemos de quien escribe: viene escrito y se puede corregir. */
+  known: {
+    givenNames: string | null
+    familyName: string | null
+    /** De dónde salió el nombre: lo que dijo en la conversación o su perfil de WhatsApp. */
+    from: "conversacion" | "perfil" | null
+    email: string | null
+    docType: string | null
+    docNumber: string | null
+    birthDate: string | null
+    sex: string | null
+  }
+  /** Nunca respondió lo de novedades y promociones: se le pregunta al reservar. */
+  asksPromotions: boolean
+  /** Quien escribe ya tiene su registro: la cita es para otra persona, a quien se registra aquí. */
+  ownRecord: boolean
 }
 
 /** Lo que hace falta para pedir sus datos a quien aún no es paciente. */
@@ -193,9 +241,18 @@ export function submitBookingRegistration(
   return post(`${base(slug)}/registration`, input)
 }
 
+/** Lo que guarda la reserva de quien ya es paciente: lo que le faltaba y lo que acepta. */
+export interface BookingYou {
+  data: Partial<Record<string, string>>
+  privacyAccepted?: boolean
+  acceptsPromotions?: boolean
+  /** Su nombre, si el de su ficha no es el suyo; con documento guardado, el documento entero. */
+  name?: { givenNames: string; familyName: string; docNumber?: string }
+}
+
 export function reserveBooking(
   slug: string,
-  input: { token: string; branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[] },
+  input: { token: string; branchId: string; startsAt: string; professionalUserId: string; roomId?: string; planItemIds?: string[]; you?: BookingYou },
 ): Promise<{ data: BookingAppointment }> {
   return post(`${base(slug)}/reserve`, input)
 }
@@ -229,6 +286,8 @@ export interface PersonalDataForm {
   /** Si se le pregunta su salud (nadie la registró aún en su ficha). */
   asksHealth: boolean
   firstName: string | null
+  /** Lo que aún no aceptó o respondió (registrada por teléfono, por ejemplo): va antes de enviar. */
+  pending: { privacy: boolean; promotions: boolean }
 }
 
 export function fetchPersonalDataForm(slug: string, token: string): Promise<{ data: PersonalDataForm }> {
@@ -246,6 +305,10 @@ export interface PersonalDataInput {
     relationshipDetail?: string
   } | null
   health?: RegistrationAnswers["health"] | null
+  privacyAccepted?: boolean
+  acceptsPromotions?: boolean
+  /** Se le dijo que le escribiremos por WhatsApp al celular que dejó. */
+  acceptsReminders?: boolean
 }
 
 /** «Tus datos»: solo lo que falta, una sola vez. */

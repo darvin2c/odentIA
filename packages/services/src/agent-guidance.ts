@@ -4,7 +4,7 @@ import { user } from "@odentia/db/schema/auth"
 import { contact, conversation } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 
 /**
  * «Lo que el agente debe saber» (decisión 24 de la fase 4): una sola lista con
@@ -44,10 +44,10 @@ const activeRules = (orgId: string) =>
   and(eq(agentLesson.organizationId, orgId), eq(agentLesson.status, "activa"), eq(agentLesson.kind, "regla"), eq(agentLesson.scope, AGENT))
 
 function clean(value: unknown): string {
-  if (typeof value !== "string") throw validation("Escribe qué debe saber el agente")
+  if (typeof value !== "string") throw invalidField("body", "Escribe qué debe saber el agente")
   const text = value.trim().replace(/\s+/g, " ")
-  if (!text) throw validation("Escribe qué debe saber el agente")
-  if (text.length > BODY_CHARS) throw validation(`Como mucho ${BODY_CHARS} caracteres`)
+  if (!text) throw invalidField("body", "Escribe qué debe saber el agente")
+  if (text.length > BODY_CHARS) throw invalidField("body", `Como mucho ${BODY_CHARS} caracteres`)
   return text
 }
 

@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { pipeline, pipelineStage } from "@odentia/db/schema/crm"
 import { and, asc, eq } from "drizzle-orm"
-import { isUniqueViolation, notFound, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound } from "./errors.js"
 
 /**
  * Los cuatro pasos fijos de una venta (ADR 0028). Cada uno tiene su «momento»:
@@ -181,8 +181,8 @@ export async function renameStage(
   input: { name: string },
 ): Promise<Stage> {
   const name = input.name.trim()
-  if (!name) throw validation("Escribe el nombre del paso")
-  if (name.length > 120) throw validation("El nombre del paso no puede superar 120 caracteres")
+  if (!name) throw invalidField("name", "Escribe el nombre del paso")
+  if (name.length > 120) throw invalidField("name", "El nombre del paso no puede superar 120 caracteres")
   const [updated] = await tx
     .update(pipelineStage)
     .set({ name })

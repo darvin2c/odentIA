@@ -1,8 +1,13 @@
 import {
   Button,
   Checkbox,
+  cn,
   Field,
+  FieldDescription,
+  FieldError,
   FieldLabel,
+  FieldLegend,
+  FieldSet,
   Input,
   Select,
   SelectContent,
@@ -11,10 +16,11 @@ import {
   SelectValue,
   Textarea,
 } from "@odentia/ui"
-import { DatePickerButton } from "@odentia/ui-patterns"
+import { DatePickerButton, useFieldContext, useFieldControl } from "@odentia/ui-patterns"
 import { useId } from "react"
 import type { FormFieldDef, FormSchemaDef } from "../../lib/clinical-forms"
 import { FirmaPad, FirmaView } from "./firma-pad"
+import { productUi } from "../../product/product-ui"
 import { PlacesField } from "../../product/site-fields"
 
 /** ¿Se muestra el campo con las respuestas actuales? (misma regla que el servidor). */
@@ -86,26 +92,23 @@ export interface AttachmentOption {
 }
 
 /**
- * Campo de formulario clínico con su etiqueta asociada, obligatoriedad
- * anunciada y ayuda vinculada. Sí/No es una elección explícita (sin respuesta
- * por defecto), la pieza usa el selector único y la firma pide quién firma.
+ * ¿La respuesta se da con varios controles (opciones, casillas, piezas,
+ * firma)? Entonces va en `FieldSet` + `FieldLegend`; si no, en `Field` +
+ * `FieldLabel htmlFor`.
  */
-export function AnswerInput({
-  field,
-  value,
-  disabled = false,
-  onChange,
-  attachments = [],
-}: {
-  field: FormFieldDef
-  value: unknown
-  disabled?: boolean
-  onChange: (value: unknown) => void
-  attachments?: AttachmentOption[]
-}): React.JSX.Element {
-  const id = useId()
-  const helpId = field.help ? `${id}-help` : undefined
-  const label = (
+export function answerIsGroup(field: FormFieldDef): boolean {
+  return (
+    field.type === "booleano" ||
+    field.type === "escala" ||
+    field.type === "opcion_multiple" ||
+    field.type === "pieza" ||
+    field.type === "firma"
+  )
+}
+
+/** La etiqueta visible de un campo: su nombre, su unidad y si es obligatorio. */
+export function AnswerLabel({ field }: { field: FormFieldDef }): React.JSX.Element {
+  return (
     <>
       {field.label}
       {field.unit ? ` (${field.unit})` : ""}
@@ -117,62 +120,211 @@ export function AnswerInput({
       ) : null}
     </>
   )
+}
+
+/**
+ * El marco de una respuesta: etiqueta (o leyenda), ayuda y error alrededor del
+ * control que pinta `children` (recibe el id de la leyenda si es un grupo).
+ */
+function AnswerFrame({
+  field,
+  id,
+  helpId,
+  invalid = false,
+  error,
+  children,
+}: {
+  field: FormFieldDef
+  id: string
+  helpId: string | undefined
+  invalid?: boolean
+  error?: React.ReactNode
+  children: (labelId: string | undefined) => React.ReactNode
+}): React.JSX.Element {
+  const labelId = `${id}-label`
   const help = field.help ? (
-    <p id={helpId} className="text-xs text-muted-foreground">
+    <FieldDescription id={helpId} className="text-xs">
       {field.help}
-    </p>
+    </FieldDescription>
   ) : null
+  if (answerIsGroup(field)) {
+    return (
+      <FieldSet data-invalid={invalid || undefined} className="gap-1.5">
+        <FieldLegend id={labelId} variant="label" className={cn("mb-0", invalid && "text-destructive")}>
+          <AnswerLabel field={field} />
+        </FieldLegend>
+        {children(labelId)}
+        {help}
+        {error}
+      </FieldSet>
+    )
+  }
+  return (
+    <Field data-invalid={invalid || undefined}>
+      <FieldLabel htmlFor={id}>
+        <AnswerLabel field={field} />
+      </FieldLabel>
+      {children(undefined)}
+      {help}
+      {error}
+    </Field>
+  )
+}
+
+/**
+ * Un campo de formulario clínico con su etiqueta (o leyenda), su ayuda y la
+ * respuesta unidos. Para las pantallas que pintan el formulario sin
+ * `useAppForm`; con `useAppForm`, `AnswerAppField`.
+ */
+export function AnswerField(props: {
+  field: FormFieldDef
+  value: unknown
+  disabled?: boolean
+  onChange: (value: unknown) => void
+  attachments?: AttachmentOption[]
+}): React.JSX.Element | null {
+  const { field } = props
+  const id = useId()
+  const helpId = field.help ? `${id}-help` : undefined
+  // Sin lugares en el producto, la pieza no se pregunta.
+  if (field.type === "pieza" && !productUi().site) return null
+  return (
+    <AnswerFrame field={field} id={id} helpId={helpId}>
+      {(labelId) => <AnswerInput {...props} id={id} aria-labelledby={labelId} aria-describedby={helpId} />}
+    </AnswerFrame>
+  )
+}
+
+/**
+ * La respuesta de un formulario clínico dentro de
+ * ``<form.AppField name={`answers.${field.id}`}>``: etiqueta, ayuda y el error
+ * de esa pregunta (del cliente o del servidor, `answers.<id>`) unidos al
+ * control, que se marca y recibe el foco si hay que corregirla.
+ */
+export function AnswerAppField({
+  field,
+  disabled = false,
+  attachments,
+}: {
+  field: FormFieldDef
+  disabled?: boolean
+  attachments?: AttachmentOption[]
+}): React.JSX.Element | null {
+  const formField = useFieldContext<unknown>()
+  const { control, errors, descriptionId, errorId } = useFieldControl({ hasDescription: !!field.help })
+  if (field.type === "pieza" && !productUi().site) return null
+  return (
+    <AnswerFrame
+      field={field}
+      id={control.id}
+      helpId={descriptionId}
+      invalid={control.invalid}
+      error={
+        control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null
+      }
+    >
+      {(labelId) => (
+        <AnswerInput
+          field={field}
+          value={formField.state.value}
+          disabled={disabled}
+          attachments={attachments}
+          onChange={(next) => formField.handleChange(next)}
+          id={control.id}
+          invalid={control.invalid}
+          onBlur={control.onBlur}
+          aria-labelledby={labelId}
+          aria-describedby={control.describedBy}
+        />
+      )}
+    </AnswerFrame>
+  )
+}
+
+/**
+ * La respuesta de un campo de formulario clínico, sin etiqueta ni ayuda (las
+ * pinta quien la usa: `AnswerLabel` y, según `answerIsGroup`, `Field` o
+ * `FieldSet`). Sí/No es una elección explícita (sin respuesta por defecto), la
+ * pieza usa el selector único y la firma pide quién firma. `id` va en el
+ * control enfocable o en la raíz del grupo; `aria-labelledby` nombra los
+ * grupos; `onBlur` avisa al salir del control o del grupo.
+ */
+export function AnswerInput({
+  field,
+  value,
+  disabled = false,
+  onChange,
+  attachments = [],
+  id: givenId,
+  invalid = false,
+  onBlur,
+  ...aria
+}: {
+  field: FormFieldDef
+  value: unknown
+  disabled?: boolean
+  onChange: (value: unknown) => void
+  attachments?: AttachmentOption[]
+  id?: string
+  invalid?: boolean
+  onBlur?: () => void
+  /** Id del texto visible que nombra la respuesta cuando es un grupo. */
+  "aria-labelledby"?: string
+  "aria-describedby"?: string
+}): React.JSX.Element | null {
+  const fallbackId = useId()
+  const id = givenId ?? fallbackId
+  const describedBy = aria["aria-describedby"]
+  const labelledBy = aria["aria-labelledby"]
+  const ariaInvalid = invalid || undefined
+  const required = field.required ? true : undefined
+  // Al salir del grupo, no al pasar de una opción a otra.
+  const groupBlur = onBlur
+    ? (event: React.FocusEvent<HTMLElement>) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+      }
+    : undefined
   const common = {
     id,
     disabled,
-    "aria-required": field.required ? true : undefined,
-    "aria-describedby": helpId,
+    "aria-required": required,
+    "aria-describedby": describedBy,
+    "aria-invalid": ariaInvalid,
+    onBlur,
   } as const
   switch (field.type) {
     case "texto":
       return (
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <Input
-            {...common}
-            value={typeof value === "string" ? value : ""}
-            maxLength={500}
-            onChange={(event) => onChange(event.target.value)}
-          />
-          {help}
-        </Field>
+        <Input
+          {...common}
+          value={typeof value === "string" ? value : ""}
+          maxLength={500}
+          onChange={(event) => onChange(event.target.value)}
+        />
       )
     case "texto_largo":
       return (
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <Textarea
-            {...common}
-            value={typeof value === "string" ? value : ""}
-            rows={3}
-            maxLength={5000}
-            onChange={(event) => onChange(event.target.value)}
-          />
-          {help}
-        </Field>
+        <Textarea
+          {...common}
+          value={typeof value === "string" ? value : ""}
+          rows={3}
+          maxLength={5000}
+          onChange={(event) => onChange(event.target.value)}
+        />
       )
     case "numero":
       return (
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <Input
-            {...common}
-            type="number"
-            inputMode="decimal"
-            value={typeof value === "number" ? value : ""}
-            min={field.min ?? undefined}
-            max={field.max ?? undefined}
-            onChange={(event) =>
-              onChange(event.target.value === "" ? null : Number(event.target.value))
-            }
-          />
-          {help}
-        </Field>
+        <Input
+          {...common}
+          type="number"
+          inputMode="decimal"
+          value={typeof value === "number" ? value : ""}
+          min={field.min ?? undefined}
+          max={field.max ?? undefined}
+          onChange={(event) =>
+            onChange(event.target.value === "" ? null : Number(event.target.value))
+          }
+        />
       )
     case "booleano":
     case "escala": {
@@ -187,123 +339,124 @@ export function AnswerInput({
               return { value: n, text: String(n) }
             })
       return (
-        <fieldset aria-describedby={helpId} className="flex flex-col gap-1.5">
-          <legend className="text-sm font-medium">{label}</legend>
-          <div
-            role="radiogroup"
-            aria-required={field.required ? true : undefined}
-            aria-label={field.label}
-            className="flex flex-wrap gap-1.5"
-          >
-            {options.map((option) => {
-              const checked = value === option.value
-              return (
-                <Button
-                  key={String(option.value)}
-                  type="button"
-                  size="sm"
-                  role="radio"
-                  aria-checked={checked}
-                  variant={checked ? "default" : "outline"}
-                  className={field.type === "escala" ? "w-10" : "min-w-16"}
-                  disabled={disabled}
-                  onClick={() => onChange(checked ? null : option.value)}
-                >
-                  {option.text}
-                </Button>
-              )
-            })}
-          </div>
-          {help}
-        </fieldset>
+        <div
+          id={id}
+          role="radiogroup"
+          aria-required={required}
+          aria-labelledby={labelledBy}
+          aria-describedby={describedBy}
+          aria-invalid={ariaInvalid}
+          onBlur={groupBlur}
+          className="flex flex-wrap gap-1.5"
+        >
+          {options.map((option) => {
+            const checked = value === option.value
+            return (
+              <Button
+                key={String(option.value)}
+                type="button"
+                size="sm"
+                role="radio"
+                aria-checked={checked}
+                aria-invalid={ariaInvalid}
+                variant={checked ? "default" : "outline"}
+                className={field.type === "escala" ? "w-10" : "min-w-16"}
+                disabled={disabled}
+                onClick={() => onChange(checked ? null : option.value)}
+              >
+                {option.text}
+              </Button>
+            )
+          })}
+        </div>
       )
     }
     case "opcion_unica":
       return (
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <Select
-            items={Object.fromEntries((field.options ?? []).map((o) => [o, o]))}
-            value={typeof value === "string" ? value : ""}
-            onValueChange={(v) => onChange(v ?? null)}
-            disabled={disabled}
+        <Select
+          items={Object.fromEntries((field.options ?? []).map((o) => [o, o]))}
+          value={typeof value === "string" ? value : ""}
+          onValueChange={(v) => onChange(v ?? null)}
+          disabled={disabled}
+        >
+          <SelectTrigger
+            id={id}
+            aria-required={required}
+            aria-describedby={describedBy}
+            aria-invalid={ariaInvalid}
+            onBlur={onBlur}
           >
-            <SelectTrigger
-              id={id}
-              aria-required={field.required ? true : undefined}
-              aria-describedby={helpId}
-            >
-              <SelectValue placeholder="Elige una opción" />
-            </SelectTrigger>
-            <SelectContent>
-              {(field.options ?? []).map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {help}
-        </Field>
+            <SelectValue placeholder="Elige una opción" />
+          </SelectTrigger>
+          <SelectContent>
+            {(field.options ?? []).map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )
     case "opcion_multiple": {
       const selected = Array.isArray(value) ? (value as string[]) : []
       return (
-        <fieldset aria-describedby={helpId}>
-          <legend className="text-sm font-medium">{label}</legend>
-          <div className="mt-1 flex flex-col gap-1">
-            {(field.options ?? []).map((option) => (
-              <label key={option} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={selected.includes(option)}
-                  disabled={disabled}
-                  onCheckedChange={(checked) =>
-                    onChange(
-                      checked === true
-                        ? [...selected, option]
-                        : selected.filter((v) => v !== option),
-                    )
-                  }
-                />
-                {option}
-              </label>
-            ))}
-          </div>
-          {help}
+        <fieldset
+          id={id}
+          aria-labelledby={labelledBy}
+          aria-describedby={describedBy}
+          aria-invalid={ariaInvalid}
+          onBlur={groupBlur}
+          className="flex min-w-0 flex-col gap-1"
+        >
+          {(field.options ?? []).map((option) => (
+            <label key={option} className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={selected.includes(option)}
+                disabled={disabled}
+                aria-invalid={ariaInvalid}
+                onCheckedChange={(checked) =>
+                  onChange(
+                    checked === true
+                      ? [...selected, option]
+                      : selected.filter((v) => v !== option),
+                  )
+                }
+              />
+              {option}
+            </label>
+          ))}
         </fieldset>
       )
     }
     case "fecha":
       return (
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
-          <DatePickerButton
-            {...common}
-            className="w-56"
-            value={typeof value === "string" ? value : ""}
-            emptyLabel={field.required ? undefined : "Sin fecha"}
-            onChange={(next) => onChange(next || null)}
-          />
-          {help}
-        </Field>
+        <DatePickerButton
+          {...common}
+          className="w-56"
+          value={typeof value === "string" ? value : ""}
+          emptyLabel={field.required ? undefined : "Sin fecha"}
+          onChange={(next) => onChange(next || null)}
+        />
       )
     case "pieza":
       return (
-        <div className="flex flex-col gap-1">
-          <PlacesField
-            single
-            label={`${field.label}${field.required ? " *" : ""}`}
-            value={typeof value === "number" ? [value] : []}
-            disabled={disabled}
-            onChange={(teeth) => onChange(teeth[0] ?? null)}
-          />
-          {help}
-        </div>
+        <PlacesField
+          single
+          id={id}
+          invalid={invalid}
+          aria-labelledby={labelledBy}
+          aria-describedby={describedBy}
+          onBlur={onBlur}
+          value={typeof value === "number" ? [value] : []}
+          disabled={disabled}
+          onChange={(teeth) => onChange(teeth[0] ?? null)}
+        />
       )
-    case "adjunto":
+    case "adjunto": {
+      // Pista propia del control: dónde se suben los archivos que aquí se vinculan.
+      const hintId = `${id}-hint`
       return (
-        <Field>
-          <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <>
           <Select
             items={Object.fromEntries([
               ["", "Sin archivo"],
@@ -315,8 +468,10 @@ export function AnswerInput({
           >
             <SelectTrigger
               id={id}
-              aria-required={field.required ? true : undefined}
-              aria-describedby={helpId}
+              aria-required={required}
+              aria-describedby={[describedBy, hintId].filter(Boolean).join(" ")}
+              aria-invalid={ariaInvalid}
+              onBlur={onBlur}
             >
               <SelectValue placeholder="Elige un archivo del paciente" />
             </SelectTrigger>
@@ -329,19 +484,25 @@ export function AnswerInput({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
+          <p id={hintId} className="text-xs text-muted-foreground">
             Los archivos se suben en Documentos y aquí se vinculan.
           </p>
-          {help}
-        </Field>
+        </>
       )
+    }
     case "firma": {
       const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {}
       const strokes = isStrokes(raw.strokes) ? raw.strokes : []
       const signerName = typeof raw.signerName === "string" ? raw.signerName : ""
       return (
-        <fieldset aria-describedby={helpId} className="flex flex-col gap-2">
-          <legend className="text-sm font-medium">{label}</legend>
+        <fieldset
+          id={id}
+          aria-labelledby={labelledBy}
+          aria-describedby={describedBy}
+          aria-invalid={ariaInvalid}
+          onBlur={groupBlur}
+          className="flex min-w-0 flex-col gap-2"
+        >
           {disabled ? (
             strokes.length > 0 ? (
               <>
@@ -359,16 +520,17 @@ export function AnswerInput({
                   id={`${id}-signer`}
                   value={signerName}
                   maxLength={200}
+                  aria-invalid={ariaInvalid}
                   onChange={(event) => onChange({ strokes, signerName: event.target.value })}
                 />
               </Field>
               <FirmaPad
                 label={field.label}
+                invalid={ariaInvalid === true}
                 onChange={(next) => onChange({ strokes: next, signerName })}
               />
             </>
           )}
-          {help}
         </fieldset>
       )
     }

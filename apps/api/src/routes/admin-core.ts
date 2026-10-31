@@ -61,23 +61,27 @@ async function sendStaffInvite(
   await mailer.send({ to: email, ...staffInvitationTemplate({ url: acceptUrl }) })
 }
 
-const passwordInput = z.object({ password: z.string().min(1).max(200).optional() })
-const codeInput = z.object({ code: z.string().trim().min(4).max(16) })
+const passwordInput = z.object({
+  password: z.string().min(1, "Escribe tu contraseña").max(200, "Escribe como mucho 200 caracteres").optional(),
+})
+const codeInput = z.object({
+  code: z.string().trim().min(4, "Escribe el código completo").max(16, "Escribe como mucho 16 caracteres"),
+})
 const challengeInput = z.object({
-  code: z.string().trim().min(4).max(16),
+  code: z.string().trim().min(4, "Escribe el código completo").max(16, "Escribe como mucho 16 caracteres"),
   method: z.enum(["totp", "recovery"]).optional(),
 })
 const inviteInput = z.object({
-  email: z.string().trim().email("Correo inválido").max(160),
+  email: z.string().trim().email("Correo inválido").max(160, "Escribe como mucho 160 caracteres"),
   role: z.enum(["admin", "support"]),
 })
 const roleInput = z.object({ role: z.enum(["admin", "support"]) })
 const activeInput = z.object({
   active: z.boolean(),
-  reason: z.string().trim().min(8, "El motivo es obligatorio").max(280),
+  reason: z.string().trim().min(8, "Escribe al menos 8 caracteres").max(280, "Escribe como mucho 280 caracteres"),
 })
 const reasonInput = z.object({
-  reason: z.string().trim().min(8, "El motivo es obligatorio").max(280),
+  reason: z.string().trim().min(8, "Escribe al menos 8 caracteres").max(280, "Escribe como mucho 280 caracteres"),
 })
 const acceptInput = z.object({ token: z.string().trim().min(16).max(128) })
 const userIdParam = z.object({ userId: z.string().min(1).max(128) })

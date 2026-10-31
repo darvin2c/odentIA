@@ -85,7 +85,10 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
 
   app.put("/signup-mode", async (c) => {
     const parsed = z
-      .strictObject({ mode: z.enum(["invitacion", "abierta"]), product: z.enum(CLINICAL_PRODUCTS).default("dental") })
+      .strictObject({
+        mode: z.enum(["invitacion", "abierta"], { error: "Elige cómo se abren las clínicas" }),
+        product: z.enum(CLINICAL_PRODUCTS, { error: "Elige el producto" }).default("dental"),
+      })
       .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => ({
@@ -94,7 +97,9 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
   })
 
   app.put("/:id/note", async (c) => {
-    const parsed = z.strictObject({ note: z.string().max(2000).nullable() }).safeParse(await c.req.json().catch(() => null))
+    const parsed = z
+      .strictObject({ note: z.string().max(2000, "La nota puede tener como máximo 2000 caracteres").nullable() })
+      .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       await deps.ownerDb.transaction((tx) => setWaitlistNote(tx, staffOf(c), c.req.param("id"), parsed.data.note))
@@ -103,7 +108,9 @@ export function createAdminFoundersRoute(deps: AdminFoundersDeps) {
   })
 
   app.post("/:id/discard", async (c) => {
-    const parsed = z.strictObject({ reason: z.string().max(500) }).safeParse(await c.req.json().catch(() => null))
+    const parsed = z
+      .strictObject({ reason: z.string().trim().min(1, "Escribe por qué se descarta").max(500, "Usa como máximo 500 caracteres") })
+      .safeParse(await c.req.json().catch(() => null))
     if (!parsed.success) return validationError(c, parsed.error.issues)
     return runService(c, 200, async () => {
       await deps.ownerDb.transaction((tx) => discardWaitlistRequest(tx, adminOf(c), c.req.param("id"), parsed.data.reason))

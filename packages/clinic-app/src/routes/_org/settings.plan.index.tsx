@@ -6,7 +6,7 @@
  * se puede ver el plan y registrar el comprobante.
  */
 import { Button } from "@odentia/ui"
-import { EmptyState, ErrorState, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
+import { EmptyState, ErrorState, PageHeader, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { seesBilling } from "@odentia/auth/permissions"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
@@ -239,6 +239,7 @@ function PlanContent() {
           onChangeCap={summary.isDemo ? undefined : () => setCapOpen(true)}
           onAutoPack={summary.isDemo ? undefined : (on) => autoPack.mutate(on)}
           autoPackPending={autoPack.isPending}
+          autoPackError={autoPack.error ? submitErrorMessage(autoPack.error) : null}
         />
       )}
       {consumption.data ? (

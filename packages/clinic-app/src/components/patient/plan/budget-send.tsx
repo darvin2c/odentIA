@@ -6,8 +6,9 @@
  * atención, «Plan y controles» e Inicio: una sola operación.
  */
 import { Button, toast } from "@odentia/ui"
-import type { ComponentProps } from "react"
+import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { ComponentProps } from "react"
 import { useRef, useState } from "react"
 import {
   fetchBudgetSendPreview,
@@ -16,7 +17,7 @@ import {
   sendBudgetApi,
 } from "../../../lib/budgets"
 import { usePermission } from "../../../lib/crm"
-import { mutationMessage } from "./budget-parts"
+import { BudgetReviewDrawer } from "./budget-review"
 
 /** Lo que dice el aviso cuando sale: «Enviado a Lucía por WhatsApp». */
 function sentText(result: SendBudgetResult): string {
@@ -45,6 +46,7 @@ export function BudgetSendButton({
   size = "default",
   variant = "default",
   beforeSend,
+  reviewable = false,
 }: {
   patientId: string
   budgetId: string
@@ -55,6 +57,8 @@ export function BudgetSendButton({
   variant?: ComponentProps<typeof Button>["variant"]
   /** Lo que hay que guardar antes (el borrador de la atención, por ejemplo). */
   beforeSend?: () => Promise<void>
+  /** Ofrece «Revisar antes», sin obligar: enviar directo sigue siendo un clic. */
+  reviewable?: boolean
 }): React.JSX.Element | null {
   const canSend = usePermission("budgets.send")
   const queryClient = useQueryClient()
@@ -62,6 +66,7 @@ export function BudgetSendButton({
   // Una clave por intento: repetir el clic o reintentar tras un corte no lo envía dos veces.
   const requestId = useRef<string>(crypto.randomUUID())
   const [error, setError] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState(false)
   const send = useMutation({
     mutationFn: async () => {
       await beforeSend?.()
@@ -78,7 +83,7 @@ export function BudgetSendButton({
       )
       onSent?.(result.data)
     },
-    onError: (err) => setError(mutationMessage(err)),
+    onError: (err) => setError(submitErrorMessage(err)),
   })
   if (!canSend) return null
   const data = preview.data?.data
@@ -98,6 +103,30 @@ export function BudgetSendButton({
       >
         {send.isPending ? "Enviando…" : label}
       </Button>
+      {reviewable ? (
+        <Button
+          type="button"
+          variant="link"
+          className="h-auto justify-start p-0 text-xs"
+          onClick={() => {
+            setError(null)
+            void Promise.resolve(beforeSend?.())
+              .then(() => setReviewing(true))
+              .catch((cause: unknown) => setError(submitErrorMessage(cause)))
+          }}
+        >
+          Revisar antes
+        </Button>
+      ) : null}
+      {reviewing ? (
+        <BudgetReviewDrawer
+          patientId={patientId}
+          budgetId={budgetId}
+          beforeSend={beforeSend}
+          onSent={() => onSent?.({} as SendBudgetResult)}
+          onClose={() => setReviewing(false)}
+        />
+      ) : null}
       {showRecipient && data && !blocked ? (
         <span className="text-xs text-muted-foreground">
           Le llega a {data.recipient.name}
@@ -111,7 +140,7 @@ export function BudgetSendButton({
       ) : null}
       {preview.isError ? (
         <span role="alert" className="text-xs text-destructive">
-          {mutationMessage(preview.error)}
+          {submitErrorMessage(preview.error)}
         </span>
       ) : null}
       {error ? (

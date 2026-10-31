@@ -84,29 +84,22 @@ export async function checkOwnAppKeys(
     token = await inspectOwnAppToken(graphApp(), config(value, "accessToken"), config(value, "appSecret"), { fetch: deps.fetch })
   } catch (error) {
     if (error instanceof OwnAppTokenError && error.problem === "clave-secreta") {
-      throw new ServiceError(
-        "WHATSAPP_APP_SECRET_REJECTED",
-        400,
-        "La clave secreta no es de la misma app que la clave de acceso. Cópiala de esa app, en Configuración › Básica › «Clave secreta de la app».",
-      )
+      const message =
+        "La clave secreta no es de la misma app que la clave de acceso. Cópiala de esa app, en Configuración › Básica › «Clave secreta de la app»."
+      throw new ServiceError("WHATSAPP_APP_SECRET_REJECTED", 400, message, { "config.appSecret": message })
     }
     return { checked: false, tokenExpiresAt: null }
   }
   if (token.type === "USER" || (token.expiresAt && token.expiresAt.getTime() - now.getTime() < TEMPORARY_KEY_MS)) {
-    throw new ServiceError(
-      "WHATSAPP_TEMPORARY_KEY",
-      400,
-      "Esa es la clave temporal de 24 horas: mañana dejaría de funcionar. Genera la permanente en Usuarios del sistema, con caducidad «Nunca» (paso 5 de la guía).",
-    )
+    const message =
+      "Esa es la clave temporal de 24 horas: mañana dejaría de funcionar. Genera la permanente en Usuarios del sistema, con caducidad «Nunca» (paso 5 de la guía)."
+    throw new ServiceError("WHATSAPP_TEMPORARY_KEY", 400, message, { "config.accessToken": message })
   }
   // Meta no siempre lista los permisos; solo se rechaza lo que dice que falta.
   const missing = token.scopes.length > 0 ? REQUIRED_SCOPES.filter(([scope]) => !token.scopes.includes(scope)) : []
   if (missing.length > 0) {
-    throw new ServiceError(
-      "WHATSAPP_KEY_SCOPES",
-      400,
-      `A la clave le falta el permiso para ${missing.map(([, words]) => words).join(" y ")}. Genérala de nuevo marcando los tres permisos: business_management, whatsapp_business_management y whatsapp_business_messaging.`,
-    )
+    const message = `A la clave le falta el permiso para ${missing.map(([, words]) => words).join(" y ")}. Genérala de nuevo marcando los tres permisos: business_management, whatsapp_business_management y whatsapp_business_messaging.`
+    throw new ServiceError("WHATSAPP_KEY_SCOPES", 400, message, { "config.accessToken": message })
   }
   return { checked: true, tokenExpiresAt: token.expiresAt }
 }

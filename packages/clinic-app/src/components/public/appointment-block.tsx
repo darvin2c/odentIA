@@ -74,7 +74,7 @@ export function AppointmentBlock({
       </div>
       <div className="flex flex-col gap-0.5 text-sm">
         <p className="text-base font-semibold">{when}</p>
-        <p>{[appointment.serviceName, `Sede ${appointment.branchName}`, appointment.professionalName].filter(Boolean).join(" · ")}</p>
+        <p>{[appointment.serviceName, appointment.branchName, appointment.professionalName].filter(Boolean).join(" · ")}</p>
         {appointment.branchAddress ? <p className="text-muted-foreground">{appointment.branchAddress}</p> : null}
       </div>
       {error || calendarError ? (

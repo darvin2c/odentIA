@@ -1,5 +1,7 @@
-import { Badge, Button, buttonVariants, cn, Textarea } from "@odentia/ui"
-import { AgentMark } from "@odentia/ui-patterns"
+import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
+import { AgentMark, useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { z } from "zod"
 import { dueWords } from "../../lib/data-requests"
 import { Link } from "@tanstack/react-router"
 import { CalendarClock, CalendarX2, CheckCircle2, FileText, KeyRound, Lightbulb, type LucideIcon, MessageCircle, MessagesSquare, Package, ShieldCheck, SquareCheckBig, Stethoscope, UserRound, UsersRound } from "lucide-react"
@@ -22,9 +24,10 @@ export interface WaitingHandlers {
   onTake?: (row: RowOf<"case">) => void
   /**
    * «Responder» un tema aquí mismo (R3 y decisión 3 del pulido de la Bandeja):
-   * el odontólogo, su duda clínica; caja, un pago. Devuelve el error en palabras, o nulo.
+   * el odontólogo, su duda clínica; caja, un pago. Si el servidor lo rechaza, lanza su error:
+   * la respuesta lo dice junto al campo o a sus botones.
    */
-  onReply?: (row: RowOf<"case">, text: string) => Promise<string | null>
+  onReply?: (row: RowOf<"case">, text: string) => Promise<void>
   /** Quien no abre el resumen del caso (caja): la fila de un tema que responde abre la respuesta. */
   noCaseBrief?: boolean
   /** «Hecha» en una tarea; sin esto (sin permiso) la fila solo la abre. */
@@ -230,45 +233,60 @@ function quickActions(row: WaitingRow, handlers: WaitingHandlers, reply: { open:
   return []
 }
 
+/** El mismo tope que `POST /api/workspace/topics/:id/reply`. */
+const TOPIC_REPLY_MAX = 4000
+const topicReplySchema = z.object({
+  text: z
+    .string()
+    .trim()
+    .min(1, "Escribe tu respuesta.")
+    .max(TOPIC_REPLY_MAX, `Escribe como mucho ${TOPIC_REPLY_MAX} caracteres.`),
+})
+
 /**
  * Responder un tema sin salir de Inicio (tablero 4d del pulido de la Bandeja):
  * su pregunta, la respuesta y «Enviar y resolver». Es la misma respuesta de la
  * Bandeja: cita su pregunta y el tema queda resuelto.
  */
 function TopicReply({ row, context, onReply, onClose }: { row: RowOf<"case">; context: HomeTextContext; onReply: NonNullable<WaitingHandlers["onReply"]>; onClose: () => void }) {
-  const id = useId()
-  const [text, setText] = useState("")
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
+  const form = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: topicReplySchema },
+    onSubmit: async ({ value }) => {
+      await onReply(row, value.text.trim())
+      form.reset({ text: "" })
+    },
+  })
+  const submit = useFormSubmit(form)
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
   return (
-    <form
-      className="flex basis-full flex-col gap-2 pb-3 pl-11 pr-2"
-      onSubmit={async (event) => {
-        event.preventDefault()
-        if (!text.trim() || pending) return
-        setPending(true)
-        const failed = await onReply(row, text.trim())
-        setPending(false)
-        setError(failed)
-        if (!failed) setText("")
-      }}
-    >
+    <form className="flex basis-full flex-col gap-2 pb-3 pl-11 pr-2" noValidate onSubmit={submit}>
       {row.quote ? <p className="text-sm">«{row.quote}»</p> : null}
-      <label htmlFor={id} className="sr-only">
-        Tu respuesta para {first}
-      </label>
-      <Textarea id={id} rows={2} value={text} placeholder={`Escribe tu respuesta para ${first}…`} onChange={(event) => setText(event.target.value)} />
-      <p className="text-xs text-muted-foreground">
-        Se envía por {row.channel ? channelLabel(row.channel) : "su conversación"}, citando su pregunta. {context.receptionName} sigue con lo demás.
-      </p>
+      <form.AppField name="text">
+        {(field) => (
+          <field.TextareaField
+            label={`Tu respuesta para ${first}`}
+            hideLabel
+            rows={2}
+            maxLength={TOPIC_REPLY_MAX}
+            placeholder={`Escribe tu respuesta para ${first}…`}
+            description={
+              <span className="text-xs">
+                Se envía por {row.channel ? channelLabel(row.channel) : "su conversación"}, citando su pregunta. {context.receptionName} sigue con lo demás.
+              </span>
+            }
+          />
+        )}
+      </form.AppField>
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
       <span className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" className="min-h-11 sm:min-h-8" disabled={pending || !text.trim()}>
+        <Button type="submit" size="sm" className="min-h-11 sm:min-h-8" disabled={pending}>
           {pending ? "Enviando…" : "Enviar y resolver"}
         </Button>
         <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-8" disabled={pending} onClick={onClose}>

@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { serviceCatalog, treatmentTemplate } from "@odentia/db/schema/clinical"
 import { dentalTemplateRule, serviceFinding } from "@odentia/db/schema/dental"
-import { type LeavesFinding, validateLeavesFinding } from "@odentia/dental"
+import { type LeavesFinding, leavesFindingIssues, validateLeavesFinding } from "@odentia/dental"
 import { and, eq, sql } from "drizzle-orm"
 import { validation } from "../errors.js"
 import { orgProduct } from "../locale.js"
@@ -87,19 +87,29 @@ export type ServiceLeaves = LeavesFinding
  * Lo que deja el servicio en la pieza al completarse (lo tratado queda
  * dibujado): `null` = nada. Se valida con el ámbito del servicio y la regla
  * del país de la clínica (en Perú, con su variante). Una clínica de otro
- * producto no registra nada de esto.
+ * producto no registra nada de esto. Con `field` (el nombre del dato en el
+ * cuerpo, p. ej. `leavesFinding`), cada error va a su dato:
+ * `leavesFinding.condition` o `leavesFinding.variant`.
  */
 export async function checkServiceFinding(
   tx: Db,
   orgId: string,
   leaves: unknown,
   scope: string | null | undefined,
+  field?: string,
 ): Promise<LeavesFinding | null> {
   if (leaves === null || leaves === undefined) return null
-  if ((await orgProduct(tx, orgId)) !== "dental") throw validation("Esta clínica no registra lo que deja un servicio")
+  if ((await orgProduct(tx, orgId)) !== "dental") {
+    const message = "Esta clínica no registra lo que deja un servicio"
+    throw validation(message, field ? { [field]: message } : undefined)
+  }
   const strictVariants = (await orgDentalProfile(tx, orgId)).odontogram?.strictVariants ?? false
-  const errors = validateLeavesFinding(leaves, { scope, strictVariants })
-  if (errors.length) throw validation(errors.join(" "))
+  const issues = leavesFindingIssues(leaves, { scope, strictVariants })
+  if (issues.length) {
+    const fields: Record<string, string> = {}
+    for (const issue of issues) fields[`${field}.${issue.field}`] ??= issue.message
+    throw validation(issues.map((issue) => issue.message).join(" "), field ? fields : undefined)
+  }
   const { condition, variant } = leaves as LeavesFinding
   return variant ? { condition, variant } : { condition }
 }

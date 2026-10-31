@@ -423,34 +423,43 @@ describe("lo que ve el visitante", () => {
     expect(sent[1]?.body).toContain("Hola, te escribimos de nuevo.")
   })
 
-  it("un número que ya es de otra persona no se usa para avisarle: se le pide otro, y el correo sirve", async () => {
+  it("un número que ya es de otra persona se acepta sin decírselo y no se usa: el equipo lo ve, y el correo sirve", async () => {
     const c = await clinic()
     await c.connect("whatsapp")
     // Rosa es de la clínica, con su teléfono anotado, aunque nunca escribió por WhatsApp.
     await ownerDb
       .insert(contact)
       .values({ organizationId: c.orgId, displayName: "Rosa Quispe", phone: "+51911111111" })
-    const sessionId = `webchat:${randomUUID()}`
-    const asked = await c.visitorSays(sessionId, "¿Atienden niños?")
-    await c.run((tx) =>
-      createHandoff(tx, c.orgId, null, {
-        conversationId: asked.conversationId,
-        reason: "Niños",
-        summary: "Niños",
-        createdBy: "agent",
-        kind: "otro",
-      }),
-    )
+    const leave = async (whatsapp: string) => {
+      const sessionId = `webchat:${randomUUID()}`
+      const asked = await c.visitorSays(sessionId, "¿Atienden niños?")
+      await c.run((tx) =>
+        createHandoff(tx, c.orgId, null, {
+          conversationId: asked.conversationId,
+          reason: "Niños",
+          summary: "Niños",
+          createdBy: "agent",
+          kind: "otro",
+        }),
+      )
+      const saved = await c.run((tx) => saveWebchatVisitorContact(tx, c.orgId, c.chat.id, sessionId, { whatsapp }))
+      return { sessionId, asked, saved }
+    }
+    // Al visitante se le responde igual que con un número libre: no sabe si es de alguien de la clínica.
+    const free = await leave("922 222 222")
+    const { sessionId, asked, saved } = await leave("911 111 111")
+    expect(free.saved).toEqual({ whatsapp: "•••• 2222", email: null })
+    expect(saved).toEqual({ whatsapp: "•••• 1111", email: null })
+    // El equipo sí lo ve: no hay por dónde avisarle y por qué.
+    const held = await c.run((tx) => getInboxConversationDetail(tx, c.orgId, asked.conversationId))
+    expect(held.attention).toMatchObject({ unreachable: true, othersPhone: "+51911111111" })
+    const freeDetail = await c.run((tx) => getInboxConversationDetail(tx, c.orgId, free.asked.conversationId))
+    expect(freeDetail.attention).toMatchObject({ unreachable: false, othersPhone: null })
+    // Sin buzón de la clínica el correo solo no sirve; con buzón, sí.
+    const onlyMail = `webchat:${randomUUID()}`
+    await c.visitorSays(onlyMail, "¿Atienden sábados?")
     await expect(
-      c.run((tx) =>
-        saveWebchatVisitorContact(tx, c.orgId, c.chat.id, sessionId, { whatsapp: "911 111 111" }),
-      ),
-    ).rejects.toThrow("No podemos avisarte por ese WhatsApp")
-    // Sin buzón de la clínica el correo tampoco sirve; con buzón, sí.
-    await expect(
-      c.run((tx) =>
-        saveWebchatVisitorContact(tx, c.orgId, c.chat.id, sessionId, { email: "vale@correo.pe" }),
-      ),
+      c.run((tx) => saveWebchatVisitorContact(tx, c.orgId, c.chat.id, onlyMail, { email: "otra@correo.pe" })),
     ).rejects.toThrow("No podemos avisarte por ahí")
     const mailbox = await c.connect("email")
     expect(

@@ -5,12 +5,21 @@
  * gabinete en el consultorio). Cada cambio se guarda al momento y lo confirma el
  * aviso flotante; el principal no se desactiva.
  */
-import { Badge, Button, Field, FieldDescription, FieldError, FieldLabel, Input, Skeleton, toast } from "@odentia/ui"
-import { ConfirmDialog, RowActions } from "@odentia/ui-patterns"
+import { Badge, Button, Skeleton, toast } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  RowActions,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-import { useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useId, useRef, useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 
 interface BranchWarehouse {
   id: string
@@ -20,9 +29,10 @@ interface BranchWarehouse {
   isActive: boolean
 }
 
-function messageOf(error: unknown, fallback: string): string {
-  return error instanceof ApiError && error.status < 500 && error.shape.message ? error.shape.message : fallback
-}
+/** Los mismos topes que `warehouseInput` de la API. */
+const warehouseNameSchema = z.object({
+  name: z.string().trim().min(1, "Escribe el nombre del almacén").max(200, "Escribe como mucho 200 caracteres"),
+})
 
 export function BranchWarehouses({ branchId, branchName }: { branchId: string; branchName: string }) {
   const queryClient = useQueryClient()
@@ -32,26 +42,11 @@ export function BranchWarehouses({ branchId, branchName }: { branchId: string; b
     queryKey: key,
     queryFn: () => apiFetch<{ data: BranchWarehouse[] }>(`/api/inventory/warehouses?branchId=${encodeURIComponent(branchId)}`),
   })
-  /** El almacén que se está nombrando o renombrando: `null` = uno nuevo. */
+  /** El almacén que se está nombrando o renombrando: `id: null` = uno nuevo. */
   const [naming, setNaming] = useState<{ id: string | null; name: string } | null>(null)
-  const [nameError, setNameError] = useState<string | null>(null)
   const [deactivating, setDeactivating] = useState<BranchWarehouse | null>(null)
 
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["inventory"] })
-
-  const save = useMutation({
-    retry: false,
-    mutationFn: (input: { id: string | null; name: string }) =>
-      input.id
-        ? apiFetch(`/api/inventory/warehouses/${input.id}`, { method: "PATCH", body: JSON.stringify({ name: input.name }) })
-        : apiFetch("/api/inventory/warehouses", { method: "POST", body: JSON.stringify({ branchId, name: input.name }) }),
-    onSuccess: (_, input) => {
-      toast.success(input.id ? "Almacén renombrado" : `Almacén agregado a ${branchName}`)
-      setNaming(null)
-      refresh()
-    },
-    onError: (error) => setNameError(messageOf(error, "No se guardó el almacén. Inténtalo de nuevo.")),
-  })
 
   const activation = useMutation({
     retry: false,
@@ -65,19 +60,13 @@ export function BranchWarehouses({ branchId, branchName }: { branchId: string; b
       setDeactivating(null)
       refresh()
     },
-    onError: (error) => toast.error(messageOf(error, "No se guardó el cambio. Inténtalo de nuevo.")),
+    // Reactivar es una acción de la fila; el rechazo de desactivar lo dice su diálogo.
+    onError: (error, input) => {
+      if (input.isActive) toast.error(submitErrorMessage(error))
+    },
   })
-
-  const submitName = () => {
-    if (!naming) return
-    const name = naming.name.trim()
-    if (!name) {
-      setNameError("Escribe el nombre del almacén")
-      return
-    }
-    setNameError(null)
-    save.mutate({ id: naming.id, name })
-  }
+  const deactivationError =
+    activation.isError && activation.variables?.isActive === false ? submitErrorMessage(activation.error) : null
 
   const rows = query.data?.data ?? []
   return (
@@ -95,10 +84,7 @@ export function BranchWarehouses({ branchId, branchName }: { branchId: string; b
             variant="secondary"
             size="sm"
             className="min-h-11 sm:min-h-8"
-            onClick={() => {
-              setNameError(null)
-              setNaming({ id: null, name: "" })
-            }}
+            onClick={() => setNaming({ id: null, name: "" })}
           >
             <Plus aria-hidden />
             Almacén
@@ -139,10 +125,7 @@ export function BranchWarehouses({ branchId, branchName }: { branchId: string; b
                   {
                     key: "renombrar",
                     label: "Renombrar",
-                    onSelect: () => {
-                      setNameError(null)
-                      setNaming({ id: item.id, name: item.name })
-                    },
+                    onSelect: () => setNaming({ id: item.id, name: item.name }),
                   },
                   ...(item.isDefault
                     ? []
@@ -164,50 +147,113 @@ export function BranchWarehouses({ branchId, branchName }: { branchId: string; b
       )}
 
       {naming !== null ? (
-        <div className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
-          <Field>
-            <FieldLabel htmlFor={`${fieldId}-nombre`}>{naming.id ? "Nuevo nombre" : "Nombre del almacén"}</FieldLabel>
-            <Input
-              id={`${fieldId}-nombre`}
-              autoFocus
-              maxLength={200}
-              placeholder="Gabinete del consultorio 2"
-              aria-invalid={nameError ? true : undefined}
-              value={naming.name}
-              onChange={(event) => setNaming({ ...naming, name: event.target.value })}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  submitName()
-                }
-              }}
-            />
-            {naming.id ? null : (
-              <FieldDescription>Solo si hace falta: sin elegir otro, todo usa el principal.</FieldDescription>
-            )}
-            <FieldError>{nameError}</FieldError>
-          </Field>
-          <div className="flex gap-2">
-            <Button type="button" size="sm" disabled={save.isPending} onClick={submitName}>
-              {naming.id ? "Renombrar" : "Agregar"}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" disabled={save.isPending} onClick={() => setNaming(null)}>
-              Cancelar
-            </Button>
-          </div>
-        </div>
+        <WarehouseNameForm
+          // Cada almacén (o uno nuevo) empieza con su nombre y sin errores de otro.
+          key={naming.id ?? "nuevo"}
+          id={`${fieldId}-nombre`}
+          branchId={branchId}
+          branchName={branchName}
+          target={naming}
+          onClose={() => setNaming(null)}
+          onSaved={() => {
+            setNaming(null)
+            refresh()
+          }}
+        />
       ) : null}
 
       <ConfirmDialog
         open={deactivating !== null}
-        onClose={() => setDeactivating(null)}
+        onClose={() => {
+          activation.reset()
+          setDeactivating(null)
+        }}
         onConfirm={() => deactivating && activation.mutate({ warehouse: deactivating, isActive: false })}
         title={`Desactivar ${deactivating?.name ?? ""}`}
         description="No se podrá elegir para compras ni traslados. Lo que tiene sigue contando en la sede hasta que se use o se traslade, y puedes reactivarlo cuando quieras."
         confirmLabel="Desactivar"
         variant="destructive"
         pending={activation.isPending}
+        error={deactivationError}
       />
     </section>
+  )
+}
+
+/**
+ * Nombrar o renombrar un almacén. Va dentro del `<form>` de la sede: no lleva
+ * `<form>` propio (no se anidan), se envía con su botón o con Enter. Lo que el
+ * servidor dice del nombre va en el campo; lo demás, junto a los botones.
+ */
+function WarehouseNameForm({
+  id,
+  branchId,
+  branchName,
+  target,
+  onClose,
+  onSaved,
+}: {
+  id: string
+  branchId: string
+  branchName: string
+  target: { id: string | null; name: string }
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  const save = useMutation({
+    retry: false,
+    mutationFn: (name: string) =>
+      target.id
+        ? apiFetch(`/api/inventory/warehouses/${target.id}`, { method: "PATCH", body: JSON.stringify({ name }) })
+        : apiFetch("/api/inventory/warehouses", { method: "POST", body: JSON.stringify({ branchId, name }) }),
+  })
+  const form = useAppForm({
+    defaultValues: { name: target.name },
+    validators: { onSubmit: warehouseNameSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value.name.trim())
+      toast.success(target.id ? "Almacén renombrado" : `Almacén agregado a ${branchName}`)
+      onSaved()
+    },
+  })
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const submit = () => void submitForm(form, { root: root.current })
+
+  return (
+    <div ref={root} className="flex flex-col gap-2 rounded-xl border bg-muted/40 p-3">
+      <form.AppField name="name">
+        {(field) => (
+          <field.TextField
+            id={id}
+            label={target.id ? "Nuevo nombre" : "Nombre del almacén"}
+            description={target.id ? undefined : "Solo si hace falta: sin elegir otro, todo usa el principal."}
+            autoFocus
+            maxLength={200}
+            placeholder="Gabinete del consultorio 2"
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault()
+                submit()
+              }
+            }}
+          />
+        )}
+      </form.AppField>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex gap-2">
+        <Button type="button" size="sm" disabled={pending} onClick={submit}>
+          {target.id ? "Renombrar" : "Agregar"}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={onClose}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }

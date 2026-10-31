@@ -41,17 +41,30 @@ export const REGISTRATION_MODE_LABELS: Record<RegistrationFieldMode, string> = {
   required: "Obligatorio",
 }
 /**
- * Alcance del registro. `essentials` son los datos esenciales para reservar:
- * desde el enlace de cita, identidad y un celular; cuando el equipo registra
- * al reservar a la persona de una conversación, su nombre. Lo demás que la
- * clínica configuró no se pide ahí y queda por completar en la clínica.
+ * Alcance del registro. `essentials` son los datos para reservar: desde el
+ * enlace de cita, todo lo que la clínica necesita para atenderla (identidad,
+ * celular, fecha de nacimiento y lo que marca «Obligatorio»), sin lo censal ni
+ * la salud; cuando el equipo registra al reservar, su nombre. Lo demás queda
+ * por completar en la clínica.
  */
 export type RegistrationScope = "full" | "essentials"
-/** Datos de la persona que admite el alcance `essentials`; cualquier otro se rechaza. */
+/** Datos de la persona que admite el alcance `essentials` del equipo; cualquier otro se rechaza. */
 export const ESSENTIAL_DEMOGRAPHICS = [
   "displayName", "givenNames", "familyName",
   "docType", "docNumber", "docCountry", "phone", "birthDate",
 ] as const
+/**
+ * Lo que el enlace de reserva nunca pide: lo censal y «Cómo nos conoció», que
+ * no son obligatorios para ninguna clínica. Lo demás de la persona sí, si la
+ * clínica lo exige.
+ */
+const NOT_FOR_BOOKING: readonly string[] = ["maritalStatus", "educationLevel", "occupation", "origin", "referralKind", "referralSource"]
+/**
+ * Lo obligatorio de la clínica que se pide en la misma pantalla de reservar.
+ * Lo demás que exija (dirección, contacto de emergencia, seguro…) lo pide
+ * «Tus datos» justo después de reservar, con sus propias pantallas.
+ */
+export const BOOKING_ASKED_FIELDS: readonly string[] = ["birthDate", "sex", "email", "docType", "docNumber"]
 export const DOC_TYPES = IDENTITY_DOC_TYPES
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -471,10 +484,10 @@ export function registrationFieldAsked(
  * o el equipo (al reservar): solo datos de identidad y contacto, nada de salud,
  * y nombres y apellidos.
  */
-function essentialIdentityErrors(data: RegistrationAnswers, errors: Record<string, string>): void {
+function essentialIdentityErrors(data: RegistrationAnswers, errors: Record<string, string>, allowed: (key: string) => boolean): void {
   const demographics = data.demographics
   for (const [key, value] of Object.entries(demographics)) {
-    if (!(ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key) && value !== null && value !== "") errors[`demographics.${key}`] ??= "Este dato se completa en la clínica"
+    if (!allowed(key) && value !== null && value !== "") errors[`demographics.${key}`] ??= "Este dato se completa en la clínica"
   }
   if (data.health !== undefined) errors.health = "Los datos de salud se completan en la clínica"
   if (!demographics.givenNames) errors["demographics.givenNames"] ??= "Escribe los nombres"
@@ -522,17 +535,21 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     if (minor && data.respondent !== "representative") errors.respondent = "El responsable debe registrar al menor"
     if (!data.privacyAccepted) errors.privacyAccepted = "Debes aceptar el aviso de privacidad"
     if (context.scope === "essentials") {
-      // Datos esenciales para reservar: la identidad y un celular, siempre los
-      // mismos. La configuración de la clínica no los quita ni añade otros: lo
-      // que ella exige y aquí no se pide queda pendiente (`pendingRegistrationFields`).
-      essentialIdentityErrors(data, errors)
+      // Al reservar desde su enlace se pide, una sola vez, lo que la clínica
+      // necesita para atenderla: la identidad, un celular, la fecha de
+      // nacimiento y lo que ella marca «Obligatorio» de `BOOKING_ASKED_FIELDS`
+      // (la misma regla de «Faltan datos», `missingPersonData`). Lo demás que
+      // exija queda pendiente y lo pide «Tus datos» justo después. Lo censal y
+      // la salud no se piden aquí.
+      essentialIdentityErrors(data, errors, (key) => !NOT_FOR_BOOKING.includes(key))
       const demographics = data.demographics
       if (!demographics.docType) errors["demographics.docType"] ??= "Elige el tipo de documento"
       if (!demographics.docNumber) errors["demographics.docNumber"] ??= "Escribe el número de documento"
       if (!demographics.phone && !representativeContact) errors["demographics.phone"] ??= "Escribe un celular"
-      // De la edad depende que haga falta un representante legal: se pide solo
-      // cuando alguien registra a otra persona.
-      if (data.respondent === "representative" && !demographics.birthDate) errors["demographics.birthDate"] ??= "Escribe su fecha de nacimiento"
+      for (const datum of missingPersonData(config, demographics, { representativeContact })) {
+        if (!BOOKING_ASKED_FIELDS.includes(datum.key)) continue
+        errors[`demographics.${datum.key}`] ??= datum.key === "birthDate" ? "Escribe la fecha de nacimiento" : `Completa: ${datum.label.toLowerCase()}`
+      }
       return errors
     }
     for (const field of REGISTRATION_FIELDS) {
@@ -556,7 +573,7 @@ export function validateRegistrationAnswers(config: RegistrationConfig, answers:
     // llega por la Agenda el servicio le exige el teléfono). Como en el enlace
     // de reserva, lo que la clínica exige y aquí no se pide no bloquea: queda
     // pendiente (`pendingRegistrationFields`).
-    essentialIdentityErrors(data, errors)
+    essentialIdentityErrors(data, errors, (key) => (ESSENTIAL_DEMOGRAPHICS as readonly string[]).includes(key))
   } else if (config.version > 0) {
     // Alta interna: lo que la clínica configuró como obligatorio también lo es
     // para recepción (el aviso de privacidad y los campos ocultos no aplican).

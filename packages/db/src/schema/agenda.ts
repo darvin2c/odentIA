@@ -185,6 +185,11 @@ export const appointmentBookingLink = pgTable(
     booking: boolean("booking").notNull().default(true),
     /** «Tus datos» se envían una sola vez: después dice «Recibido». */
     dataSubmittedAt: timestamp("data_submitted_at", { withTimezone: true }),
+    /**
+     * Para registrar a alguien nuevo aunque quien lo abre ya tenga pacientes (su hijo,
+     * por ejemplo, ADR 0109): no se une solo a su único paciente; lo será quien registre ahí.
+     */
+    newPerson: boolean("new_person").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

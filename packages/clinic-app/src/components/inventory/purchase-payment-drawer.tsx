@@ -6,13 +6,34 @@
  * Materiales de la sede del almacén, enlazado a la orden.
  */
 import { formatMoney, formatMoneyInput } from "@odentia/clinical"
-import { Checkbox, Field, FieldContent, FieldDescription, FieldLabel, Input, toast } from "@odentia/ui"
-import { DatePickerButton, FormDrawer } from "@odentia/ui-patterns"
+import { toast } from "@odentia/ui"
+import { DatePickerButton, FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
-import { cashErrorMessage, formatDayKey, invalidateFinance, noonOf, parseAmount, payPurchaseApi, todayIn, useCashState } from "../../lib/finance-cash"
+import { useEffect, useMemo, useRef } from "react"
+import { z } from "zod"
+import { cashFormMessage, errorCode, formatDayKey, invalidateFinance, noonOf, parseAmount, payPurchaseApi, todayIn, useCashState } from "../../lib/finance-cash"
 import type { PurchaseOrderDetail } from "../../lib/inventory"
 import { purchaseOrderLabel } from "../../lib/reports"
+
+interface PaymentValues {
+  amount: string
+  useCredit: boolean
+  fromCash: boolean
+  day: string
+  receiptKind: string
+  receiptNumber: string
+}
+
+/** El servidor nombra los datos como el cuerpo; el formulario, como la pantalla. */
+const SERVER_FIELDS: Record<string, string> = {
+  amountCents: "amount",
+  creditCents: "useCredit",
+  spentAt: "day",
+}
+
+/** La compra cambió mientras se escribía (otro pago): se vuelve a leer antes de reintentar. */
+const CHANGED: Record<string, true> = { PURCHASE_PAID_CHANGED: true, PURCHASE_DUE_CHANGED: true }
 
 export function PurchasePaymentDrawer({
   order,
@@ -42,58 +63,75 @@ export function PurchasePaymentDrawer({
   const rest = balance ? Math.max(0, balance.orderedCents - balance.paidCents) : 0
   const suggested = due > 0 ? due : rest
   const credit = Math.min(order.supplierCreditCents, rest)
-  const [amount, setAmount] = useState("")
-  const [useCredit, setUseCredit] = useState(false)
-  const [fromCash, setFromCash] = useState(false)
-  const [day, setDay] = useState(today)
-  const [receiptKind, setReceiptKind] = useState("")
-  const [receiptNumber, setReceiptNumber] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  const money = (cents: number) => formatMoney(cents, order.currency, locale)
+  const state = cash.data?.data ?? null
 
-  // Se llena al abrir y solo entonces: si la compra se vuelve a consultar (otro `suggested`),
-  // lo que ya se escribió se queda.
-  const filled = useRef(false)
   // Lo que se vio al abrir: si la compra cambia mientras tanto (otro pago, o este mismo
   // enviado dos veces), el servidor lo dice en vez de pagar sobre otra cifra.
   const paid = balance?.paidCents ?? 0
   const seen = useRef({ due, paid })
+  // Tras «la compra cambió», lo nuevo que llega es lo que se ve: el reintento paga sobre eso.
+  const stale = useRef(false)
   useEffect(() => {
-    if (!open) {
-      filled.current = false
-      return
-    }
-    if (filled.current) return
-    filled.current = true
+    if (!stale.current) return
+    stale.current = false
     seen.current = { due, paid }
-    setAmount(suggested > 0 ? formatMoneyInput(suggested, order.currency, locale) : "")
-    setUseCredit(false)
-    setFromCash(false)
-    setDay(todayIn(timeZone))
-    setReceiptKind("")
-    setReceiptNumber("")
-    setError(null)
-  }, [open, suggested, due, paid, order.currency, locale, timeZone])
+  }, [due, paid])
 
-  const money = (cents: number) => formatMoney(cents, order.currency, locale)
-  const cents = amount.trim() === "" ? 0 : parseAmount(amount, order.currency, locale)
-  const creditCents = useCredit ? Math.min(credit, Math.max(0, suggested)) : 0
-  const total = (cents ?? 0) + creditCents
-  const state = cash.data?.data ?? null
-  const label = advance ? `Registrar adelanto de ${money(total)}` : `Registrar pago de ${money(total)}`
+  const creditOf = (useCredit: boolean) => (useCredit ? Math.min(credit, Math.max(0, suggested)) : 0)
+  const centsOf = (amount: string) => (amount.trim() === "" ? 0 : parseAmount(amount, order.currency, locale))
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `centsOf`, `creditOf` y `money` se rehacen en cada render; se lista lo que leen (caja, día, crédito, sugerido, moneda e idioma).
+  const schema = useMemo(
+    () =>
+      z.custom<PaymentValues>().superRefine((value, ctx) => {
+        const cents = centsOf(value.amount)
+        if (cents === null) ctx.addIssue({ code: "custom", path: ["amount"], message: "Escribe un importe válido." })
+        else if (cents + creditOf(value.useCredit) <= 0) ctx.addIssue({ code: "custom", path: ["amount"], message: "Escribe un importe mayor que cero." })
+        else if (value.fromCash && state && cents > state.cashOnHandCents)
+          ctx.addIssue({ code: "custom", path: ["fromCash"], message: `En la caja solo hay ${money(state.cashOnHandCents)}: no alcanza para pagar con el efectivo.` })
+        if (value.day > today) ctx.addIssue({ code: "custom", path: ["day"], message: "La fecha del pago no puede ser futura." })
+        if (value.receiptKind.trim().length > 60) ctx.addIssue({ code: "custom", path: ["receiptKind"], message: "Escribe como mucho 60 caracteres." })
+        if (value.receiptNumber.trim().length > 60) ctx.addIssue({ code: "custom", path: ["receiptNumber"], message: "Escribe como mucho 60 caracteres." })
+      }),
+    [state, today, credit, suggested, order.currency, locale],
+  )
 
   const mutation = useMutation({
-    mutationFn: () =>
-      payPurchaseApi(order.id, {
-        amountCents: cents ?? 0,
+    mutationFn: (value: PaymentValues) => {
+      const creditCents = creditOf(value.useCredit)
+      return payPurchaseApi(order.id, {
+        amountCents: centsOf(value.amount) ?? 0,
         ...(creditCents > 0 ? { creditCents } : {}),
-        fromCash,
-        ...(day === today ? {} : { spentAt: noonOf(day, timeZone) }),
-        ...(receiptKind.trim() ? { receiptKind: receiptKind.trim() } : {}),
-        ...(receiptNumber.trim() ? { receiptNumber: receiptNumber.trim() } : {}),
+        fromCash: value.fromCash,
+        ...(value.day === today ? {} : { spentAt: noonOf(value.day, timeZone) }),
+        ...(value.receiptKind.trim() ? { receiptKind: value.receiptKind.trim() } : {}),
+        ...(value.receiptNumber.trim() ? { receiptNumber: value.receiptNumber.trim() } : {}),
         expectedDueCents: seen.current.due,
         expectedPaidCents: seen.current.paid,
-      }),
-    onSuccess: (result) => {
+      })
+    },
+  })
+
+  const initialValues = (): PaymentValues => ({
+    amount: suggested > 0 ? formatMoneyInput(suggested, order.currency, locale) : "",
+    useCredit: false,
+    fromCash: false,
+    day: todayIn(timeZone),
+    receiptKind: "",
+    receiptNumber: "",
+  })
+  const form = useAppForm({
+    defaultValues: initialValues(),
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const result = await mutation.mutateAsync(value).catch((error: unknown) => {
+        if (CHANGED[errorCode(error) ?? ""]) {
+          stale.current = true
+          invalidateFinance(queryClient)
+        }
+        throw error
+      })
       invalidateFinance(queryClient)
       const left = result.data.balance.dueCents
       const label = purchaseOrderLabel(order.orderNumber)
@@ -109,107 +147,105 @@ export function PurchasePaymentDrawer({
       )
       onClose()
     },
-    onError: (err) => setError(cashErrorMessage(err)),
   })
+  const surface = useFormSurface(form, { fieldMap: SERVER_FIELDS, formMessage: cashFormMessage })
+
+  // Se llena al abrir y solo entonces: si la compra se vuelve a consultar (otro `suggested`),
+  // lo que ya se escribió se queda.
+  const filled = useRef(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo al abrir.
+  useEffect(() => {
+    if (!open) {
+      filled.current = false
+      return
+    }
+    if (filled.current) return
+    filled.current = true
+    seen.current = { due, paid }
+    form.reset(initialValues())
+  }, [open])
+
+  const values = useStore(form.store, (s) => s.values)
+  const total = (centsOf(values.amount) ?? 0) + creditOf(values.useCredit)
+  const label = advance ? `Registrar adelanto de ${money(total)}` : `Registrar pago de ${money(total)}`
 
   return (
     <FormDrawer
+      {...surface}
       open={open}
       title={`Registrar pago · ${purchaseOrderLabel(order.orderNumber)}`}
       description={`${order.supplierName ?? "Proveedor"} · ${balance?.branchName ?? ""}`}
-      error={error}
-      isSubmitting={mutation.isPending}
-      isDirty={receiptKind !== "" || receiptNumber !== "" || useCredit}
       submitLabel={label}
       onClose={() => {
-        if (!mutation.isPending) onClose()
-      }}
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (cents === null) {
-          setError("Escribe un importe válido.")
-          return
-        }
-        if (total <= 0) {
-          setError("Escribe un importe mayor que cero.")
-          return
-        }
-        if (fromCash && state && (cents ?? 0) > state.cashOnHandCents) {
-          setError(`En la caja solo hay ${money(state.cashOnHandCents)}: no alcanza para pagar con el efectivo.`)
-          return
-        }
-        if (day > today) {
-          setError("La fecha del pago no puede ser futura.")
-          return
-        }
-        setError(null)
-        mutation.mutate()
+        if (!surface.isSubmitting) onClose()
       }}
     >
       <div className="flex flex-col gap-5">
-        <Field>
-          <FieldLabel htmlFor="pago-monto">Monto</FieldLabel>
-          <Input
-            id="pago-monto"
-            inputMode="decimal"
-            autoComplete="off"
-            aria-describedby="pago-monto-ayuda"
-            placeholder={formatMoneyInput(0, order.currency, locale)}
-            aria-invalid={amount.trim() !== "" && cents === null}
-            value={amount}
-            onChange={(event) => setAmount(event.target.value)}
-          />
-          <FieldDescription id="pago-monto-ayuda">
-            {due > 0
-              ? `Por pagar: ${money(due)}. Puedes pagar una parte.`
-              : ahead
-                ? `Aún no llega nada: queda como adelanto${rest > 0 ? `. Falta adelantar ${money(rest)} del total` : ""}.`
-                : "Lo recibido ya está pagado: esto queda como adelanto de lo que falta recibir."}
-          </FieldDescription>
-        </Field>
-        {credit > 0 ? (
-          <Field orientation="horizontal">
-            <Checkbox
-              id="pago-favor"
-              checked={useCredit}
-              onCheckedChange={(checked) => {
-                const on = checked === true
-                setUseCredit(on)
-                // Lo que se usa a favor se descuenta del monto: así no se paga de más.
-                const left = on ? Math.max(0, suggested - Math.min(credit, suggested)) : suggested
-                setAmount(left > 0 ? formatMoneyInput(left, order.currency, locale) : "")
-              }}
+        <form.AppField name="amount">
+          {(field) => (
+            <field.TextField
+              id="pago-monto"
+              label="Monto"
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={formatMoneyInput(0, order.currency, locale)}
+              description={
+                due > 0
+                  ? `Por pagar: ${money(due)}. Puedes pagar una parte.`
+                  : ahead
+                    ? `Aún no llega nada: queda como adelanto${rest > 0 ? `. Falta adelantar ${money(rest)} del total` : ""}.`
+                    : "Lo recibido ya está pagado: esto queda como adelanto de lo que falta recibir."
+              }
             />
-            <FieldContent>
-              <FieldLabel htmlFor="pago-favor">
-                Usar lo que tienes a favor con {order.supplierName ?? "el proveedor"} ({money(order.supplierCreditCents)})
-              </FieldLabel>
-              <FieldDescription>Se descuenta {money(Math.min(credit, suggested))} de lo que hay que pagar. No es un gasto nuevo: ese dinero ya salió.</FieldDescription>
-            </FieldContent>
-          </Field>
+          )}
+        </form.AppField>
+        {credit > 0 ? (
+          <form.AppField
+            name="useCredit"
+            listeners={{
+              // Lo que se usa a favor se descuenta del monto: así no se paga de más.
+              onChange: ({ value }) => {
+                const left = value ? Math.max(0, suggested - Math.min(credit, suggested)) : suggested
+                form.setFieldValue("amount", left > 0 ? formatMoneyInput(left, order.currency, locale) : "")
+              },
+            }}
+          >
+            {(field) => (
+              <field.CheckboxField
+                id="pago-favor"
+                label={`Usar lo que tienes a favor con ${order.supplierName ?? "el proveedor"} (${money(order.supplierCreditCents)})`}
+                description={`Se descuenta ${money(Math.min(credit, suggested))} de lo que hay que pagar. No es un gasto nuevo: ese dinero ya salió.`}
+              />
+            )}
+          </form.AppField>
         ) : null}
-        <Field>
-          <FieldLabel htmlFor="pago-fecha">Fecha del pago</FieldLabel>
-          <DatePickerButton id="pago-fecha" className="justify-start font-normal" value={day} max={today} onChange={setDay}>
-            {formatDayKey(day, locale, today)}
-          </DatePickerButton>
-        </Field>
-        <Field orientation="horizontal">
-          <Checkbox id="pago-caja" checked={fromCash} onCheckedChange={(checked) => setFromCash(checked === true)} />
-          <FieldContent>
-            <FieldLabel htmlFor="pago-caja">Sale del efectivo de la caja</FieldLabel>
-            <FieldDescription>Si no, es transferencia u otro medio.</FieldDescription>
-          </FieldContent>
-        </Field>
+        <form.AppField name="day">
+          {(field) => (
+            <field.Control id="pago-fecha" label="Fecha del pago">
+              {(control) => (
+                <DatePickerButton
+                  {...control.props}
+                  className="justify-start font-normal"
+                  value={field.state.value}
+                  max={today}
+                  onChange={(next) => field.handleChange(next)}
+                >
+                  {formatDayKey(field.state.value, locale, today)}
+                </DatePickerButton>
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="fromCash">
+          {(field) => <field.CheckboxField id="pago-caja" label="Sale del efectivo de la caja" description="Si no, es transferencia u otro medio." />}
+        </form.AppField>
         <div className="grid gap-4 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
-          <Field>
-            <FieldLabel htmlFor="pago-comprobante">Comprobante</FieldLabel>
-            <Input id="pago-comprobante" maxLength={60} placeholder="Factura, recibo…" value={receiptKind} onChange={(event) => setReceiptKind(event.target.value)} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="pago-numero">Número</FieldLabel>
-            <Input id="pago-numero" maxLength={60} autoComplete="off" value={receiptNumber} onChange={(event) => setReceiptNumber(event.target.value)} />
-          </Field>
+          <form.AppField name="receiptKind">
+            {(field) => <field.TextField id="pago-comprobante" label="Comprobante" maxLength={60} placeholder="Factura, recibo…" />}
+          </form.AppField>
+          <form.AppField name="receiptNumber">
+            {(field) => <field.TextField id="pago-numero" label="Número" maxLength={60} autoComplete="off" />}
+          </form.AppField>
         </div>
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-sm text-foreground/80">
           Queda como gasto de <strong>Materiales</strong> de {balance?.branchName ?? "la sede del almacén"}, enlazado a esta compra. En Finanzas se ve como cualquier gasto, con el enlace a la compra.

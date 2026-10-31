@@ -30,21 +30,25 @@ import {
   replyId,
   withLinkLine,
 } from "./automation-messages.js"
-import { issuePersonalLink } from "./booking-links.js"
-import { personalLinkRef } from "./personal-link-token.js"
-import { personalLinkMessageUrl } from "./public-links.js"
 import { clinicName, firstName } from "./automation-routing.js"
-import { openRoute, previewRoute } from "./message-gate.js"
+import { issuePersonalLink } from "./booking-links.js"
+import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { type BudgetWithTotals, deliverBudget, getBudgetDetail, valueOptionOf } from "./budgets.js"
 import { currentCatalogMessage } from "./clinic-messages.js"
 import { sendTemplateOutbound } from "./conversations.js"
 import { notFound, ServiceError } from "./errors.js"
-import { buildBudgetSnapshot, renderBudgetPdf } from "./financial-document-pdf.js"
-import { type DocumentRecipient, deliverDocumentPdf, type RecipientRelation } from "./financial-documents.js"
-import { listDecisionRecipients } from "./responsibilities.js"
+import {
+  type DocumentRecipient,
+  deliverDocumentPdf,
+  type RecipientRelation,
+} from "./financial-documents.js"
 import { findOrgLocale } from "./locale.js"
-import type { Storage } from "./storage.js"
+import { openRoute, previewRoute } from "./message-gate.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
+import { personalLinkRef } from "./personal-link-token.js"
+import { personalLinkMessageUrl } from "./public-links.js"
+import { listDecisionRecipients } from "./responsibilities.js"
+import type { Storage } from "./storage.js"
 
 /** Estados en los que el presupuesto se puede enviar (o reenviar). */
 const SENDABLE = ["borrador", "presentado", "pospuesto", "parcial", "aceptado"] as const
@@ -87,7 +91,8 @@ export async function serviceRecipient(
 
 /** «3 tratamientos por S/ 540», o «2 opciones: S/ 540 o S/ 1 260». */
 function budgetSummary(budget: BudgetWithTotals, locale: string): string {
-  const money = (cents: number | null) => (cents == null ? "un precio por definir" : formatMoney(cents, budget.currency, locale))
+  const money = (cents: number | null) =>
+    cents == null ? "un precio por definir" : formatMoney(cents, budget.currency, locale)
   if (budget.options.length > 1) {
     const totals = budget.options.map((option) => money(option.totalCents))
     const last = totals.pop()
@@ -142,14 +147,36 @@ export async function previewBudgetSend(
   const recipient = await serviceRecipient(tx, orgId, patientId)
   const patientName = await patientFirstName(tx, orgId, patientId)
   const { spec, text } = await readyMessage(tx, orgId, budget, recipient, patientName)
-  const base = { recipient: { contactId: recipient.contactId, name: recipient.displayName, relation: recipient.relation }, text }
+  const base = {
+    recipient: {
+      contactId: recipient.contactId,
+      name: recipient.displayName,
+      relation: recipient.relation,
+    },
+    text,
+  }
   if (!(SENDABLE as readonly string[]).includes(budget.status)) {
-    return { ...base, channel: null, via: null, label: null, blocked: "Este presupuesto ya no se envía." }
+    return {
+      ...base,
+      channel: null,
+      via: null,
+      label: null,
+      blocked: "Este presupuesto ya no se envía.",
+    }
   }
   // La puerta para escribirle a alguien (ADR 0042): un aviso que manda el equipo.
-  const route = await previewRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  const route = await previewRoute(tx, orgId, recipient.contactId, spec, {
+    purpose: NOTICE_PURPOSE,
+    initiative: "equipo",
+  })
   if ("cause" in route) {
-    return { ...base, channel: null, via: null, label: null, blocked: route.cause === "sin_permiso" ? OPTED_OUT : route.detail }
+    return {
+      ...base,
+      channel: null,
+      via: null,
+      label: null,
+      blocked: route.cause === "sin_permiso" ? OPTED_OUT : route.detail,
+    }
   }
   return {
     ...base,
@@ -239,7 +266,11 @@ export async function sendBudget(
     if (previous) {
       const sent = previous.metadata as Partial<SendBudgetResult> & { documentId?: string }
       if (sent.documentId !== input.budgetId)
-        throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave de envío ya se usó con otro documento")
+        throw new ServiceError(
+          "REQUEST_ID_CONFLICT",
+          409,
+          "Esa clave de envío ya se usó con otro documento",
+        )
       return {
         conversationId: sent.conversationId ?? "",
         messageId: previous.entityId ?? "",
@@ -260,9 +291,16 @@ export async function sendBudget(
   if (budget.status === "borrador") {
     // El agente reenvía lo ya preparado: un borrador espera a la clínica (decisión 4).
     if (actor.by === "agente") {
-      throw new ServiceError("BUDGET_NOT_READY", 409, "El presupuesto todavía no está listo para enviar")
+      throw new ServiceError(
+        "BUDGET_NOT_READY",
+        409,
+        "El presupuesto todavía no está listo para enviar",
+      )
     }
-    await deliverBudget(tx, orgId, actor.userId, input.patientId, input.budgetId, { memberRole: actor.memberRole, by: "persona" })
+    await deliverBudget(tx, orgId, actor.userId, input.patientId, input.budgetId, {
+      memberRole: actor.memberRole,
+      by: "persona",
+    })
     deliveredBudget = true
     budget = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
   }
@@ -272,30 +310,49 @@ export async function sendBudget(
   // Es un aviso (ADR 0040): solo deja de salir con «No quiero ningún mensaje».
   // Responder a quien acaba de escribir siempre se puede. El permiso se mira
   // antes de abrir el hilo (`openRoute`, ADR 0042).
-  const route = await openRoute(tx, orgId, recipient.contactId, spec, { purpose: NOTICE_PURPOSE, initiative: "equipo" })
+  const route = await openRoute(tx, orgId, recipient.contactId, spec, {
+    purpose: NOTICE_PURPOSE,
+    initiative: "equipo",
+  })
   if ("cause" in route) {
     if (route.cause === "sin_permiso") throw new ServiceError("BUDGET_OPTED_OUT", 409, OPTED_OUT)
-    throw new ServiceError("BUDGET_NO_ROUTE", 409, `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`)
+    throw new ServiceError(
+      "BUDGET_NO_ROUTE",
+      409,
+      `No se pudo enviar: ${route.detail}. Imprímelo y entrégaselo.`,
+    )
   }
-  const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId)
-  const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   const senderKind = actor.by === "agente" || !actor.userId ? "agent" : "user"
   // «Ver y responder» abre su enlace: el mismo que ya tenga, donde el presupuesto aparece.
+  // Va antes de armar la hoja: así el primer envío a quien decide ya lleva su QR.
   const link =
     spec.link && deps.secretsKey
       ? await issuePersonalLink(
           tx,
           orgId,
-          { contactId: recipient.contactId, patientId: input.patientId, createdBy: senderKind === "user" ? actor.userId : null },
+          {
+            contactId: recipient.contactId,
+            patientId: input.patientId,
+            createdBy: senderKind === "user" ? actor.userId : null,
+          },
           { secretsKey: deps.secretsKey },
         )
       : null
+  const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.budgetId, {
+    recipientContactId: recipient.contactId,
+  })
+  const filename = `Presupuesto-${snap.numberLabel.replace(/\D/g, "")}.pdf`
   // En el mensaje no queda el token: lo pone el worker al enviarlo.
   const url = link ? await personalLinkMessageUrl(tx, orgId, link.linkId) : null
   let sent: { conversationId: string; messageId: string }
   if (route.via === "plantilla" && route.template) {
     // Pasadas las 24 horas solo sale el mensaje aprobado, con el botón de su enlace.
-    if (spec.link && !link) throw new ServiceError("BUDGET_NO_ROUTE", 409, "No se pudo preparar su enlace. Imprímelo y entrégaselo.")
+    if (spec.link && !link)
+      throw new ServiceError(
+        "BUDGET_NO_ROUTE",
+        409,
+        "No se pudo preparar su enlace. Imprímelo y entrégaselo.",
+      )
     const message = await sendTemplateOutbound(tx, orgId, deps.secretsKey ?? Buffer.alloc(0), {
       conversationId: route.conversationId,
       senderKind,
@@ -304,7 +361,10 @@ export async function sendBudget(
       language: route.template.language,
       params,
       category: spec.category,
-      buttons: spec.buttons.map((button) => ({ id: replyId(button.action, input.budgetId), title: button.title })),
+      buttons: spec.buttons.map((button) => ({
+        id: replyId(button.action, input.budgetId),
+        title: button.title,
+      })),
       ...(link ? { link: personalLinkRef(link.linkId) } : {}),
       preview: text,
     })
@@ -392,8 +452,12 @@ export async function answerBudgetButton(
         select 1 from patient_responsibility r where r.organization_id = b.organization_id
         and r.patient_id = b.patient_id and r.contact_id = ${input.contactId} and r.revoked_at is null
         and r.kind in ('representante_legal','responsable_economico','autorizado_informacion'))`)
-  if (!row || !(SENDABLE as readonly string[]).includes(row.status) || row.status === "borrador") return false
-  const snap = await buildBudgetSnapshot(tx, orgId, row.patientId, input.budgetId)
+  if (!row || !(SENDABLE as readonly string[]).includes(row.status) || row.status === "borrador")
+    return false
+  // Quien tocó el botón puede ser responsable económico: recibe lo que le corresponde a él.
+  const snap = await buildBudgetSnapshot(tx, orgId, row.patientId, input.budgetId, {
+    recipientContactId: input.contactId,
+  })
   const pdf = await renderBudgetPdf(snap, null)
   await deliverDocumentPdf(
     tx,

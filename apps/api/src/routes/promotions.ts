@@ -53,13 +53,16 @@ const promotionItemInput = z
   })
   .strict()
 
+const ITEMS_MIN = "Agrega al menos un servicio con su precio"
+const ITEMS_MAX = "Una promoción lleva como mucho 100 servicios"
+
 const promotionCreateInput = z
   .object({
     name: z.string().trim().min(1).max(120),
     startsAt: z.iso.datetime({ offset: true }),
     endsAt: z.iso.datetime({ offset: true }).nullish(),
     conditions: z.string().trim().max(500).nullish(),
-    items: z.array(promotionItemInput).min(1).max(100),
+    items: z.array(promotionItemInput).min(1, ITEMS_MIN).max(100, ITEMS_MAX),
   })
   .strict()
 
@@ -70,7 +73,7 @@ const promotionPatchInput = z
     endsAt: z.iso.datetime({ offset: true }).nullish(),
     conditions: z.string().trim().max(500).nullish(),
     isActive: z.boolean().optional(),
-    items: z.array(promotionItemInput).min(1).max(100).optional(),
+    items: z.array(promotionItemInput).min(1, ITEMS_MIN).max(100, ITEMS_MAX).optional(),
   })
   .strict()
 

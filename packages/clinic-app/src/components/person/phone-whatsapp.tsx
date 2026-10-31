@@ -1,9 +1,9 @@
 import { Badge, Button } from "@odentia/ui"
+import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "../../lib/api"
 import { useCan } from "../../lib/crm"
 import type { PhoneWhatsApp } from "../../lib/people"
-import { mutationErrorMessage } from "../../lib/query-error"
 
 /**
  * Junto a su teléfono (decisión 23): si ese número aún no es su WhatsApp,
@@ -46,7 +46,7 @@ export function PhoneWhatsAppNote({ contactId, value }: { contactId: string; val
       ) : null}
       {use.error ? (
         <span role="alert" className="w-full text-xs text-destructive">
-          {mutationErrorMessage(use.error)}
+          {submitErrorMessage(use.error)}
         </span>
       ) : null}
     </span>

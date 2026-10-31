@@ -1,12 +1,23 @@
-import { Button, Field, FieldDescription, FieldLabel, Input } from "@odentia/ui"
-import { DetailDrawer, DetailSection, LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { Button } from "@odentia/ui"
+import {
+  DetailDrawer,
+  DetailSection,
+  LoadingState,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Lock, Plus, X } from "lucide-react"
-import { type FormEvent, useEffect, useId, useRef, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { useReceptionName } from "../../lib/agent-names"
+import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 
 interface PersonFact {
   id: string
@@ -73,11 +84,16 @@ function lastTimeLines(last: PersonLastTime): string[] {
   return lines
 }
 
-/** El rechazo por dato de salud trae su propia explicación; lo demás usa el mensaje común. */
-function saveError(error: unknown): string | null {
-  if (error instanceof ApiError && error.status === 400 && error.shape.message) return error.shape.message
-  if (error instanceof ApiError && error.status === 409 && error.shape.message) return error.shape.message
-  return mutationErrorMessage(error)
+/** Los mismos topes que la ruta (`text` de 3 a 200 caracteres). */
+function factSchema(previous: string | undefined) {
+  return z.object({
+    text: z
+      .string()
+      .trim()
+      .min(3, "Escribe al menos 3 caracteres.")
+      .max(200, "Escribe como mucho 200 caracteres.")
+      .refine((text) => text !== previous, "Cambia el dato para guardar la corrección."),
+  })
 }
 
 /**
@@ -101,23 +117,22 @@ export function PersonMemoryDrawer({
   const queryClient = useQueryClient()
   const receptionName = useReceptionName()
   const baseId = useId()
-  const [draft, setDraft] = useState("")
   const [editing, setEditing] = useState<Editing | null>(null)
   const addButton = useRef<HTMLButtonElement>(null)
   /** Al cerrar el campo de un dato nuevo, el foco vuelve al botón que lo abrió. */
   const refocusAdd = useRef(false)
   // biome-ignore lint/correctness/useExhaustiveDependencies: el borrador se vacía al cambiar de persona.
   useEffect(() => {
-    setDraft("")
     setEditing(null)
   }, [contactId])
   // biome-ignore lint/correctness/useExhaustiveDependencies: se ejecuta cuando el campo se cierra.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (editing === null && refocusAdd.current) {
       refocusAdd.current = false
-      // Tras el repintado: el cajón modal, al ver desaparecer el botón que tenía
-      // el foco, se lo lleva a sí mismo en el cuadro siguiente; esto va después.
-      requestAnimationFrame(() => addButton.current?.focus())
+      // En el mismo commit que quita el campo: el cajón modal, al perder el foco
+      // al body, lo toma para sí en una microtarea (y otra vez en el cuadro
+      // siguiente); con el foco ya en el botón no lo hace. Un rAF perdía esa carrera.
+      addButton.current?.focus()
     }
   }, [editing])
 
@@ -132,20 +147,27 @@ export function PersonMemoryDrawer({
   function closeEditor() {
     refocusAdd.current = editing?.mode === "add"
     setEditing(null)
-    setDraft("")
   }
   const save = useMutation({
     retry: false,
-    mutationFn: () =>
+    mutationFn: (text: string) =>
       apiFetch(`/api/contacts/${contactId}/agent-memory`, {
         method: "POST",
-        body: JSON.stringify({ text: draft.trim(), ...(fixing ? { replacesId: fixing.id } : {}) }),
+        body: JSON.stringify({ text, ...(fixing ? { replacesId: fixing.id } : {}) }),
       }),
-    onSuccess: () => {
+  })
+  const form = useAppForm({
+    defaultValues: { text: "" },
+    validators: { onSubmit: factSchema(fixing?.text) },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value.text.trim())
       closeEditor()
       refresh()
     },
   })
+  const onSubmit = useFormSubmit(form)
+  const formError = useFormSubmitError(form)
+  const draft = useStore(form.store, (state) => state.values.text)
   const remove = useMutation({
     retry: false,
     mutationFn: (factId: string) => apiFetch(`/api/contacts/${contactId}/agent-memory/${factId}/remove`, { method: "POST" }),
@@ -158,41 +180,35 @@ export function PersonMemoryDrawer({
   const changed = editing !== null && clean.length > 0 && clean !== fixing?.text
 
   function open(next: Editing) {
-    save.reset()
     setEditing(next)
-    setDraft(next.mode === "fix" ? next.fact.text : "")
-  }
-
-  function submit(event: FormEvent) {
-    event.preventDefault()
-    if (clean.length >= 3 && changed && !save.isPending) save.mutate()
+    form.reset({ text: next.mode === "fix" ? next.fact.text : "" })
   }
 
   const editor = editing ? (
-    <form onSubmit={submit} className="flex flex-col gap-2">
-      <Field>
-        <FieldLabel htmlFor={`${baseId}-dato`}>{fixing ? "Corregir el dato" : "Agregar un dato"}</FieldLabel>
-        <Input
-          id={`${baseId}-dato`}
-          // biome-ignore lint/a11y/noAutofocus: el campo aparece porque la persona lo pidió; escribir es el siguiente paso.
-          autoFocus
-          value={draft}
-          maxLength={200}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-        <FieldDescription>
-          {fixing
-            ? "El nuevo reemplaza al anterior, que queda en la historia."
-            : "Algo práctico que servirá otra vez: horario que le viene bien, cómo quiere que la llamen, por quién escribe."}
-        </FieldDescription>
-      </Field>
-      {save.isError ? (
+    <form noValidate onSubmit={onSubmit} className="flex flex-col gap-2">
+      <form.AppField name="text">
+        {(field) => (
+          <field.TextField
+            id={`${baseId}-dato`}
+            label={fixing ? "Corregir el dato" : "Agregar un dato"}
+            // biome-ignore lint/a11y/noAutofocus: el campo aparece porque la persona lo pidió; escribir es el siguiente paso.
+            autoFocus
+            maxLength={200}
+            description={
+              fixing
+                ? "El nuevo reemplaza al anterior, que queda en la historia."
+                : "Algo práctico que servirá otra vez: horario que le viene bien, cómo quiere que la llamen, por quién escribe."
+            }
+          />
+        )}
+      </form.AppField>
+      {formError ? (
         <p role="alert" className="text-sm text-destructive">
-          {saveError(save.error)}
+          {formError}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
-        <SubmitButton type="submit" pending={save.isPending} disabled={clean.length < 3 || !changed} className="min-h-11 sm:min-h-9">
+        <SubmitButton type="submit" pending={save.isPending} className="min-h-11 sm:min-h-9">
           {fixing ? "Guardar la corrección" : "Agregar"}
         </SubmitButton>
         <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={save.isPending} onClick={closeEditor}>
@@ -288,7 +304,7 @@ export function PersonMemoryDrawer({
             )}
             {remove.isError ? (
               <p role="alert" className="text-sm text-destructive">
-                {mutationErrorMessage(remove.error)}
+                {submitErrorMessage(remove.error)}
               </p>
             ) : null}
             {canWrite && editing?.mode === "add" ? editor : null}

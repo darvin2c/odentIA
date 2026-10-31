@@ -1,4 +1,5 @@
 import {
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -18,7 +19,6 @@ import {
   ScrollArea,
   Spinner,
   toast,
-  Badge,
 } from "@odentia/ui"
 import {
   Attachment,
@@ -81,11 +81,11 @@ import {
 import { activeOrgLocale } from "../../lib/locale"
 import { createPersonalLinkForContact, createRegistrationLink } from "../../lib/patient-registration"
 import { filiationGapsText } from "../../lib/patients"
-import { invalidateAgentPanelQueries } from "../agent-panel"
 import { AnswerTraceDrawer } from "../agent/answer-trace"
 import { CaseBriefDrawer } from "../agent/case-brief"
 import { CorrectDrawer, type CorrectionTarget } from "../agent/correct-drawer"
 import { LessonDrawer } from "../agent/lesson-drawer"
+import { invalidateAgentPanelQueries } from "../agent-panel"
 import { BlockPersonDialog, ContactScreenBanner, conversationTarget, useContactScreenActions } from "../inbox-contact-screen"
 import { InboxApprovedMessages } from "../integrations/whatsapp/inbox-approved-messages"
 import { AgentActionCard, type AgentActionItem, AgentActionLines, useAgentActions } from "./agent-actions"
@@ -363,7 +363,7 @@ export function ThreadView({
       createPersonalLinkForContact(input.contactId, id, input.patientId),
     onSuccess: (result) => {
       const firstName = detail?.contact.displayName.split(" ")[0] ?? ""
-      setComposer(`${firstName ? `${firstName}, c` : "C"}ompleta tus datos y tu salud aquí (toma 2 minutos): ${result.data.url}`)
+      setComposer(`${firstName ? `${firstName}, c` : "C"}ompleta tus datos aquí (toma 2 minutos): ${result.data.url}`)
       setLinkPasted(true)
       setRegistrationError(null)
     },
@@ -680,7 +680,12 @@ export function ThreadView({
   const notice: { text: string; warn?: boolean; agent?: boolean } | null = promises
     ? { text: "Prometes responder después: usa «Enviar, sigue pendiente» para que el tema no se dé por resuelto.", warn: true }
     : threadAttention?.unreachable === true && topics.length > 0
-      ? { text: "Sin forma de avisarle: no hay un WhatsApp ni un correo suyo por donde llegarle. Si cierra la pestaña del chat, no le llega la respuesta.", warn: true }
+      ? {
+          text: threadAttention.othersPhone
+            ? `Sin forma de avisarle: el WhatsApp que dejó (${threadAttention.othersPhone}) ya es de otra persona de la clínica, y no se usa sin confirmar quién es. Al visitante no se le dijo. Si cierra la pestaña del chat, no le llega la respuesta.`
+            : "Sin forma de avisarle: no hay un WhatsApp ni un correo suyo por donde llegarle. Si cierra la pestaña del chat, no le llega la respuesta.",
+          warn: true,
+        }
       : closed && canWrite
         ? { text: "Está cerrada: si le escribes, se vuelve a abrir." }
         : threadAttention?.teamLive && threadAttention.agentAttending && !doneTopic
@@ -1228,7 +1233,7 @@ export function ThreadView({
                     aria-label="Mensaje"
                     rows={1}
                     className="max-sm:min-h-10"
-                    placeholder={replyTopic ? "Escribe tu respuesta… (Enter envía y resuelve)" : "Escribe un mensaje… (Enter para enviar)"}
+                    placeholder={replyTopic ? "Tu respuesta… (Enter envía y resuelve)" : "Escribe un mensaje… (Enter para enviar)"}
                     value={composer}
                     onChange={(e) => {
                       setComposer(e.target.value)
@@ -1236,8 +1241,8 @@ export function ThreadView({
                     }}
                   />
                 </PromptInputBody>
-                <PromptInputFooter>
-                  <PromptInputTools className="min-w-0 flex-1">
+                <PromptInputFooter className="flex-wrap max-sm:gap-y-1">
+                  <PromptInputTools className="min-w-0 flex-1 basis-24">
                     {/* Una respuesta por entregar es solo texto: un adjunto no espera a «Ver respuesta». */}
                     {holdReply || viaWhatsapp ? null : (
                       <PromptInputActionMenu>
@@ -1270,13 +1275,14 @@ export function ThreadView({
                       </Button>
                     ) : null}
                   </PromptInputTools>
-                  <div className="flex shrink-0 items-center gap-1.5">
+                  {/* En celular los dos botones de un tema no caben junto a las herramientas: van en su propia fila, a todo el ancho. */}
+                  <div className={`ml-auto flex shrink-0 items-center gap-1.5${replyTopic ? " max-sm:w-full max-sm:flex-wrap" : ""}`}>
                     {replyTopic ? (
                       <Button
                         type="submit"
                         variant="outline"
                         size="sm"
-                        className="min-h-11 sm:min-h-8"
+                        className="min-h-11 max-sm:flex-1 max-sm:px-1.5 max-sm:text-[13px] sm:min-h-8"
                         disabled={sendMutation.isPending || uploading || switching}
                         onClick={() => {
                           keepPendingRef.current = true
@@ -1288,13 +1294,13 @@ export function ThreadView({
                     {replyTopic ? (
                       <PromptInputSubmit
                         size="sm"
-                        className="min-h-11 sm:min-h-8"
+                        className="min-h-11 max-sm:flex-1 max-sm:px-1.5 max-sm:text-[13px] sm:min-h-8"
                         aria-label="Enviar y resolver"
                         title="Enviar y resolver (Enter)"
                         disabled={sendMutation.isPending || uploading || switching}
                       >
                         Enviar y resolver
-                        <CornerDownLeft className="size-4" aria-hidden />
+                        <CornerDownLeft className="size-4 max-sm:hidden" aria-hidden />
                       </PromptInputSubmit>
                     ) : (
                       <PromptInputSubmit aria-label="Enviar" title="Enviar (Enter)" disabled={sendMutation.isPending || uploading || switching} />
@@ -1355,7 +1361,8 @@ function PassTopicDialog({
           {topic ? <DialogDescription>«{topicQuote(topic, 120)}»</DialogDescription> : null}
         </DialogHeader>
         <Input aria-label="Buscar en el equipo" placeholder="Buscar en el equipo" value={query} onChange={(event) => setQuery(event.target.value)} />
-        <ul className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
+        <ScrollArea className="max-h-64 [&_[data-slot=scroll-area-viewport]]:max-h-64">
+        <ul className="flex flex-col gap-0.5">
           {options.map((member) => (
             <li key={member.userId}>
               <Button
@@ -1374,6 +1381,7 @@ function PassTopicDialog({
           ))}
           {options.length === 0 ? <li className="px-3 py-2 text-sm text-muted-foreground">Nadie coincide con la búsqueda.</li> : null}
         </ul>
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   )

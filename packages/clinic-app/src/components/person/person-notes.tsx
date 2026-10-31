@@ -1,16 +1,17 @@
-import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
-import { AgentMark, FormDrawer, LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
-import { NotesListSkeleton } from "../skeletons/person-sections"
+import { Button } from "@odentia/ui"
+import { AgentMark, FormDrawer, LoadingState, useAppForm, useFormSurface, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
+import { useState } from "react"
+import { z } from "zod"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { timeAgo, useCan, usePermission } from "../../lib/crm"
 import { activeOrgLocale } from "../../lib/locale"
 import type { PersonNote } from "../../lib/people"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { SummaryCard } from "../patient/resumen-tab"
 import { appWords } from "../../lib/product-words"
+import { NotesListSkeleton } from "../skeletons/person-sections"
 
 interface MemoryFact {
   id: string
@@ -25,6 +26,12 @@ interface MemoryView {
   derived: Array<{ text: string; origin: string }>
 }
 
+/** El máximo de `createContactNote` (y de la ruta). */
+const NOTE_MAX_LENGTH = 2000
+const noteSchema = z.object({
+  body: z.string().trim().min(1, "Escribe la nota.").max(NOTE_MAX_LENGTH, `La nota admite hasta ${NOTE_MAX_LENGTH} caracteres.`),
+})
+
 /**
  * El único sitio de las notas de una persona (ADR 0029), con quién las
  * escribió: las de «Contexto» en la Bandeja y lo que quedó escrito antes en
@@ -35,9 +42,7 @@ export function PersonNotes({ personId }: { personId: string }) {
   const canRead = usePermission("crm.read")
   const canWrite = usePermission("crm.write")
   const queryClient = useQueryClient()
-  const id = useId()
   const [open, setOpen] = useState(false)
-  const [body, setBody] = useState("")
   const notes = useQuery({
     queryKey: ["person-notes", personId],
     queryFn: () => apiFetch<{ data: PersonNote[] }>(`/api/people/${personId}/notes`),
@@ -45,18 +50,27 @@ export function PersonNotes({ personId }: { personId: string }) {
     retry: false,
   })
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (body: string) =>
       apiFetch(`/api/people/${personId}/notes`, {
         method: "POST",
-        body: JSON.stringify({ body: body.trim() }),
+        body: JSON.stringify({ body }),
       }),
-    onSuccess: () => {
-      setBody("")
+  })
+  const form = useAppForm({
+    defaultValues: { body: "" },
+    validators: { onSubmit: noteSchema },
+    onSubmit: async ({ value }) => {
+      await save.mutateAsync(value.body.trim())
       setOpen(false)
       void queryClient.invalidateQueries({ queryKey: ["person-notes", personId] })
       void queryClient.invalidateQueries({ queryKey: ["crm-activity", personId] })
     },
   })
+  const surface = useFormSurface(form)
+  const write = () => {
+    form.reset()
+    setOpen(true)
+  }
   if (!canRead) return null
   const list = notes.data?.data ?? []
   return (
@@ -68,10 +82,7 @@ export function PersonNotes({ personId }: { personId: string }) {
             type="button"
             size="sm"
             variant="outline"
-            onClick={() => {
-              save.reset()
-              setOpen(true)
-            }}
+            onClick={write}
           >
             Nueva nota
           </Button>
@@ -91,7 +102,7 @@ export function PersonNotes({ personId }: { personId: string }) {
             con quién lo escribió.
           </p>
           {canWrite ? (
-            <Button type="button" size="sm" onClick={() => setOpen(true)}>
+            <Button type="button" size="sm" onClick={write}>
               Escribir la primera nota
             </Button>
           ) : null}
@@ -109,32 +120,18 @@ export function PersonNotes({ personId }: { personId: string }) {
         </ul>
       )}
       <FormDrawer
+        {...surface}
         open={open}
         onClose={() => {
-          if (!save.isPending) setOpen(false)
+          if (!surface.isSubmitting) setOpen(false)
         }}
         title="Nueva nota"
         description="Queda con tu nombre y no se puede editar: una corrección va en otra nota. Lo clínico se anota en la historia."
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (body.trim()) save.mutate()
-        }}
-        isSubmitting={save.isPending}
-        isDirty={body.trim().length > 0}
-        submitDisabled={!body.trim()}
         submitLabel="Guardar nota"
-        error={save.isError ? mutationErrorMessage(save.error) : null}
       >
-        <Field>
-          <FieldLabel htmlFor={id}>Nota</FieldLabel>
-          <Textarea
-            id={id}
-            value={body}
-            rows={5}
-            maxLength={4000}
-            onChange={(event) => setBody(event.target.value)}
-          />
-        </Field>
+        <form.AppField name="body">
+          {(field) => <field.TextareaField label="Nota" rows={5} maxLength={NOTE_MAX_LENGTH} />}
+        </form.AppField>
       </FormDrawer>
     </SummaryCard>
   )

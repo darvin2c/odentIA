@@ -1,7 +1,7 @@
 import { Alert, AlertDescription, AlertTitle, Badge, Button, buttonVariants, cn } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
 import { CapReachedNotice } from "../../components/agent/reception-off-notice"
-import { AgentMark, AgentSurface, ConfirmDialog, EmptyState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
+import { AgentMark, AgentSurface, ConfirmDialog, EmptyState, PageHeader, PageShell, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { ArrowRight, ChevronRight, CircleHelp, Lightbulb, Lock, MessageCircle, Mic } from "lucide-react"
@@ -16,7 +16,7 @@ import { apiFetch } from "../../lib/api"
 import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, timeAgo, usePermission } from "../../lib/crm"
 import { useOrgEvents } from "../../lib/org-events"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { AgentOverviewPageSkeleton, AgentOverviewSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/")({
@@ -428,7 +428,7 @@ function AgentSummaryPage() {
           >
             {turnOff.isError ? (
               <p role="alert" className="text-sm text-destructive">
-                {mutationErrorMessage(turnOff.error) ?? "No pudimos apagarlo."}
+                {submitErrorMessage(turnOff.error)}
               </p>
             ) : null}
           </ConfirmDialog>

@@ -11,6 +11,7 @@ import { workspaceNotification } from "@odentia/db/schema/workspace"
 import { and, eq, sql } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { getAdminUnreached, listAdminLinePeople, tickAutomations } from "./agent-admin.js"
+import { setAppointmentStatus } from "./appointments.js"
 import { deliverDueJobs, enqueueAppointmentNotice, failureRecipients, setLine } from "./automation.js"
 import { createConnection } from "./connections.js"
 import { nextPatientNumber } from "./patients.js"
@@ -279,5 +280,34 @@ describe("pacientes sin contacto no tapan al resto del lote", () => {
     await run(c, (tx) => deliverDueJobs(tx, c.orgId, new Date(), { secretsKey: KEY }, 300))
     const unreached = await run(c, (tx) => getAdminUnreached(tx, c.orgId, all))
     expect(unreached.byCause.map((row) => row.cause)).toContain("sin_destino")
+  })
+})
+
+describe.each(PRODUCTS)("«Confirmó» en Recordar la cita (%s)", (product) => {
+  it("cuenta solo la cita que se confirmó después del recordatorio, no la que ya nació confirmada", async () => {
+    const c = await clinic(product)
+    const appointmentOf = async (patientId: string, status: "programada" | "confirmada", hour: number) => {
+      const startsAt = new Date(Date.now() + DAY + hour * 3_600_000)
+      const [row] = await ownerDb.insert(appointment).values({
+        organizationId: c.orgId, branchId: c.branchId, patientId, professionalUserId: c.professionalId, roomId: c.roomId,
+        startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status,
+      }).returning({ id: appointment.id })
+      return row!.id
+    }
+    // La eligió ella misma en su enlace: nació confirmada (ADR 0109).
+    const chose = await person(c, "Rosa Eligió")
+    const given = await person(c, "Luis Respondió")
+    const chosen = await appointmentOf(chose, "confirmada", 0)
+    const pending = await appointmentOf(given, "programada", 1)
+    const sentAt = new Date(Date.now() - 3_600_000)
+    await ownerDb.insert(automationJob).values([chosen, pending].map((appointmentId, index) => ({
+      organizationId: c.orgId, kind: "recordatorio_cita", status: "enviado", dedupeKey: `recordatorio_cita:${appointmentId}:24`,
+      scheduledFor: sentAt, appointmentId, patientId: index === 0 ? chose : given,
+    })))
+    // Luis la confirma después del recordatorio.
+    await run(c, (tx) => setAppointmentStatus(tx, c.orgId, null, pending, "confirmada", { via: "respuesta" }))
+    const { items } = await run(c, (tx) => listAdminLinePeople(tx, c.orgId, all, "recordatorio_cita"))
+    expect(items.find((row) => row.patientId === given)?.outcome).toBe("confirmo")
+    expect(items.find((row) => row.patientId === chose)?.outcome).not.toBe("confirmo")
   })
 })

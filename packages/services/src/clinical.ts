@@ -49,7 +49,7 @@ import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm"
 import { allergyReviewDue } from "./allergies.js"
 import { decodeCursor, encodeCursor } from "./cursors.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
 import { clinicToday } from "./inventory-stock.js"
 import { requirePatient } from "./patients.js"
 import { type ProductSite, type SiteColumns, withSite } from "./product-hooks.js"
@@ -244,25 +244,42 @@ export interface PatientHealth {
   latestAnamnesis: AnamnesisRow | null
 }
 
+/**
+ * Un texto de antecedentes: `field` es el nombre del dato en el cuerpo
+ * (`conditions[0].name`) para decir el error junto a él.
+ */
 function assertText(
   value: string | null | undefined,
   max: number,
-  name: string,
+  field: string,
+  required: false,
+): string | null
+function assertText(
+  value: string | null | undefined,
+  max: number,
+  field: string,
+  required: true,
+  emptyMessage: string,
+): string
+function assertText(
+  value: string | null | undefined,
+  max: number,
+  field: string,
   required: boolean,
+  emptyMessage?: string,
 ): string | null {
   const trimmed = value?.trim() ?? ""
   if (!trimmed) {
-    if (required) throw validation(`${name} es obligatorio (1–${max} caracteres)`)
+    if (required) throw invalidField(field, emptyMessage ?? "Completa este dato.")
     return null
   }
-  if (trimmed.length > max) throw validation(`${name} debe tener hasta ${max} caracteres`)
+  if (trimmed.length > max) throw invalidField(field, `Escribe como mucho ${max} caracteres.`)
   return trimmed
 }
 
-function assertDateStr(value: string | null | undefined, name: string): string | null {
+function assertDateStr(value: string | null | undefined, field: string): string | null {
   if (value === null || value === undefined || value === "") return null
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value))
-    throw validation(`${name} debe ser una fecha YYYY-MM-DD válida`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw invalidField(field, "Escribe una fecha válida")
   const [y, m, d] = value.split("-").map(Number)
   const date = new Date(Date.UTC(y as number, (m as number) - 1, d as number))
   if (
@@ -270,14 +287,14 @@ function assertDateStr(value: string | null | undefined, name: string): string |
     date.getUTCMonth() !== (m as number) - 1 ||
     date.getUTCDate() !== d
   ) {
-    throw validation(`${name} debe ser una fecha YYYY-MM-DD válida`)
+    throw invalidField(field, "Escribe una fecha válida")
   }
   return value
 }
 
-function assertDateRange(start: string | null, end: string | null): void {
-  if (start && end && start > end)
-    throw validation("La fecha de inicio no puede ser posterior a la de fin")
+/** El fin antes del inicio: se dice en el fin (`endField`). */
+function assertDateRange(start: string | null, end: string | null, endField: string): void {
+  if (start && end && start > end) throw invalidField(endField, "El fin no puede ser anterior al inicio")
 }
 
 /** Claves que la entrevista nueva no acepta: viven en la atención o en listas estructuradas. */
@@ -362,24 +379,26 @@ interface ValidatedMedication {
   notes: string | null
 }
 
-function validateAllergyRow(input: HealthAllergyInput): ValidatedAllergy {
-  const substance = assertText(input.substance, 200, "substance", true) as string
-  const reaction = assertText(input.reaction, 2000, "reaction", false)
+function validateAllergyRow(input: HealthAllergyInput, index: number): ValidatedAllergy {
+  const at = `allergies[${index}]`
+  const substance = assertText(input.substance, 200, `${at}.substance`, true, "Escribe la sustancia")
+  const reaction = assertText(input.reaction, 2000, `${at}.reaction`, false)
   const severity = input.severity?.trim() || "desconocida"
   if (!(ALLERGY_SEVERITIES as readonly string[]).includes(severity)) {
-    throw validation("severity debe ser leve, moderada, severa o desconocida")
+    throw invalidField(`${at}.severity`, "Elige qué tan fuerte fue la reacción: leve, moderada, severa o no se sabe")
   }
   const kind = input.kind?.trim() || "alergia"
-  if (!["alergia", "intolerancia"].includes(kind)) throw validation("kind debe ser alergia o intolerancia")
+  if (!["alergia", "intolerancia"].includes(kind))
+    throw invalidField(`${at}.kind`, "Elige si es alergia o intolerancia")
   const criticality = input.criticality?.trim() || null
   if (criticality && !["baja", "alta", "no_evaluable"].includes(criticality))
-    throw validation("criticality debe ser baja, alta o no_evaluable")
+    throw invalidField(`${at}.criticality`, "Elige la criticidad de la lista")
   const verification = input.verification?.trim() || "no_confirmada"
   if (!["no_confirmada", "confirmada", "descartada"].includes(verification))
-    throw validation("verification debe ser no_confirmada, confirmada o descartada")
+    throw invalidField(`${at}.verification`, "Elige la verificación de la lista")
   const category = input.category?.trim() || null
   if (category && !(ALLERGY_CATEGORIES as readonly string[]).includes(category))
-    throw validation("category inválida para la alergia")
+    throw invalidField(`${at}.category`, "Elige el tipo de alérgeno de la lista")
   return {
     id: input.id ?? null,
     substance,
@@ -393,47 +412,52 @@ function validateAllergyRow(input: HealthAllergyInput): ValidatedAllergy {
   }
 }
 
-function validateConditionRow(input: HealthConditionInput): ValidatedCondition {
-  const name = assertText(input.name, 200, "name", true) as string
+function validateConditionRow(input: HealthConditionInput, index: number): ValidatedCondition {
+  const at = `conditions[${index}]`
+  const name = assertText(input.name, 200, `${at}.name`, true, "Escribe el nombre")
   if (!(CONDITION_STATUSES as readonly string[]).includes(input.status))
-    throw validation("status inválido")
-  const startDate = assertDateStr(input.startDate, "startDate")
-  let endDate = assertDateStr(input.endDate, "endDate")
+    throw invalidField(`${at}.status`, "Elige el estado de la lista")
+  const startDate = assertDateStr(input.startDate, `${at}.startDate`)
+  let endDate = assertDateStr(input.endDate, `${at}.endDate`)
   if (!endDate && input.status === "resuelta") endDate = todayDate()
-  assertDateRange(startDate, endDate)
-  const notes = assertText(input.notes, 2000, "notes", false)
+  assertDateRange(startDate, endDate, `${at}.endDate`)
+  const notes = assertText(input.notes, 2000, `${at}.notes`, false)
   const diagnosisCode = input.diagnosisCode?.trim() || null
   const diagnosisSystem = diagnosisCode ? input.diagnosisSystem?.trim() || null : null
   return { id: input.id ?? null, name, diagnosisCode, diagnosisSystem, status: input.status, startDate, endDate, notes }
 }
 
-function validateMedicationRow(input: HealthMedicationInput): ValidatedMedication {
-  const name = assertText(input.name, 200, "name", true) as string
-  const genericName = assertText(input.genericName, 200, "genericName", false)
+function validateMedicationRow(input: HealthMedicationInput, index: number): ValidatedMedication {
+  const at = `medications[${index}]`
+  const name = assertText(input.name, 200, `${at}.name`, true, "Escribe el nombre")
+  const genericName = assertText(input.genericName, 200, `${at}.genericName`, false)
   // La DCI de la lista lleva su código ATC, el mismo de la receta; lo escrito a mano, ninguno.
   const atcCode = findHabitualMedication(genericName ?? name)?.atc ?? null
   const doseUnit = input.doseUnit?.trim() || null
   const doseValue = input.doseValue ?? null
-  if ((doseValue === null) !== (doseUnit === null))
-    throw validation("La dosis lleva número y unidad, o ninguno de los dos")
-  if (doseUnit && !(DOSE_UNITS as readonly string[]).includes(doseUnit)) throw validation("Elige la unidad de la lista")
+  // La dosis lleva número y unidad, o ninguno de los dos: se dice en el que falta.
+  if (doseValue !== null && doseUnit === null) throw invalidField(`${at}.doseUnit`, "Elige la unidad")
+  if (doseValue === null && doseUnit !== null)
+    throw invalidField(`${at}.doseValue`, "Escribe la dosis o quita la unidad")
+  if (doseUnit && !(DOSE_UNITS as readonly string[]).includes(doseUnit))
+    throw invalidField(`${at}.doseUnit`, "Elige la unidad de la lista")
   if (doseValue !== null && (!Number.isFinite(doseValue) || doseValue <= 0 || doseValue >= 10_000_000))
-    throw validation("La dosis debe ser un número mayor que cero")
+    throw invalidField(`${at}.doseValue`, "Escribe la dosis con un número mayor que cero")
   const frequencyCode = input.frequencyCode?.trim() || null
   if (frequencyCode && !(MEDICATION_FREQUENCIES as readonly string[]).includes(frequencyCode))
-    throw validation("Elige la frecuencia de la lista")
+    throw invalidField(`${at}.frequencyCode`, "Elige la frecuencia de la lista")
   // Lo escrito acompaña siempre a lo estructurado, para leerlo igual que antes.
   const dose =
     doseValue !== null && doseUnit
       ? doseText(doseValue, doseUnit as DoseUnit)
-      : assertText(input.dose, 200, "dose", false)
+      : assertText(input.dose, 200, `${at}.dose`, false)
   const frequency = frequencyCode
     ? MEDICATION_FREQUENCY_LABELS[frequencyCode as MedicationFrequency]
-    : assertText(input.frequency, 200, "frequency", false)
-  const startDate = assertDateStr(input.startDate, "startDate")
-  const endDate = assertDateStr(input.endDate, "endDate")
-  assertDateRange(startDate, endDate)
-  const notes = assertText(input.notes, 2000, "notes", false)
+    : assertText(input.frequency, 200, `${at}.frequency`, false)
+  const startDate = assertDateStr(input.startDate, `${at}.startDate`)
+  const endDate = assertDateStr(input.endDate, `${at}.endDate`)
+  assertDateRange(startDate, endDate, `${at}.endDate`)
+  const notes = assertText(input.notes, 2000, `${at}.notes`, false)
   return {
     id: input.id ?? null,
     name,
@@ -545,7 +569,7 @@ function assertReviewStatus(input: HealthReviewStatusInput): {
   conditions: string
   medications: string
 } {
-  if (!input || typeof input !== "object") throw validation("reviewStatus es obligatorio")
+  if (!input || typeof input !== "object") throw invalidField("reviewStatus", "Elige la revisión de cada grupo")
   const record: Record<string, unknown> = {
     allergies: input.allergies,
     conditions: input.conditions,
@@ -554,11 +578,11 @@ function assertReviewStatus(input: HealthReviewStatusInput): {
   const expected = ["allergies", "conditions", "medications"]
   for (const key of expected) {
     if (!(HEALTH_REVIEW_STATES as readonly string[]).includes(record[key] as string)) {
-      throw validation(`reviewStatus.${key} debe ser unknown, none o recorded`)
+      throw invalidField(`reviewStatus.${key}`, "Elige la revisión del grupo")
     }
   }
   for (const key of Object.keys(input)) {
-    if (!expected.includes(key)) throw validation(`reviewStatus.${key} no es un grupo válido`)
+    if (!expected.includes(key)) throw invalidField(`reviewStatus.${key}`, "Ese grupo no se revisa aquí")
   }
   return {
     allergies: input.allergies,
@@ -726,7 +750,7 @@ async function persistPatientHealth(
 ): Promise<PatientHealth> {
   const actorUserId = context.userId
   if (input.bloodGroup != null && !(BLOOD_GROUPS as readonly string[]).includes(input.bloodGroup))
-    throw validation("Grupo sanguíneo inválido")
+    throw invalidField("bloodGroup", "Elige el grupo sanguíneo de la lista")
   await requirePatient(tx, orgId, patientId)
   // Lock del paciente: serializa revisiones concurrentes del agregado.
   const [locked] = await tx
@@ -843,17 +867,23 @@ async function persistPatientHealth(
   const activeAllergies = allergies.filter((r) => r.isActive).length
   const activeConditions = conditions.filter((r) => r.status === "activa").length
   const activeMeds = medications.filter((r) => !r.endDate).length
-  const checkGroup = (state: string, active: number, name: string): void => {
+  // Se dice en la revisión del grupo (`reviewStatus.<grupo>`), con las palabras de la pantalla.
+  const checkGroup = (group: "allergies" | "conditions" | "medications", state: string, active: number): void => {
+    const words = {
+      allergies: { rows: "alergias vigentes", none: "Hay alergias vigentes" },
+      conditions: { rows: "condiciones activas", none: "Hay condiciones activas" },
+      medications: { rows: "medicamentos vigentes", none: "Hay medicamentos vigentes" },
+    }[group]
     if (state === "none" && active > 0) {
-      throw validation(`${name}: hay registros activos, no puede marcarse ausencia`)
+      throw invalidField(`reviewStatus.${group}`, `${words.none}: no puede marcarse ausencia.`)
     }
     if (active > 0 && state !== "recorded") {
-      throw validation(`${name}: con registros activos la revisión debe ser registrada`)
+      throw invalidField(`reviewStatus.${group}`, `Con ${words.rows} la revisión debe quedar registrada.`)
     }
   }
-  if (sendsAllergies) checkGroup(reviewStatus.allergies, activeAllergies, "alergias")
-  checkGroup(reviewStatus.conditions, activeConditions, "condiciones")
-  checkGroup(reviewStatus.medications, activeMeds, "medicamentos")
+  if (sendsAllergies) checkGroup("allergies", reviewStatus.allergies, activeAllergies)
+  checkGroup("conditions", reviewStatus.conditions, activeConditions)
+  checkGroup("medications", reviewStatus.medications, activeMeds)
   // Entrevista: solo si cambió; versión esperada estricta (0 si no había).
   let interviewChanged = false
   let interviewAnswers: Record<string, unknown> | null = null
@@ -887,8 +917,13 @@ async function persistPatientHealth(
     interviewChanged = !latest || canonicalJson(latest.answers) !== canonicalJson(interviewAnswers)
   }
   // Un código que no está en su lista se rechaza antes de escribir nada.
-  for (const row of conditions) {
-    const resolved = await resolveOptionalDiagnosisCode(tx, orgId, { code: row.diagnosisCode, system: row.diagnosisSystem })
+  for (const [index, row] of conditions.entries()) {
+    const resolved = await resolveOptionalDiagnosisCode(
+      tx,
+      orgId,
+      { code: row.diagnosisCode, system: row.diagnosisSystem },
+      `conditions[${index}].diagnosisCode`,
+    )
     row.diagnosisCode = resolved.diagnosisCode
     row.diagnosisSystem = resolved.diagnosisSystem
   }
@@ -1055,16 +1090,22 @@ async function persistPatientHealth(
   // catálogo, condición y código de diagnóstico opcional).
   if (input.familyHistory !== undefined) {
     if (!Array.isArray(input.familyHistory) || input.familyHistory.length > 50)
-      throw validation("familyHistory debe ser un arreglo de hasta 50 antecedentes")
+      throw invalidField("familyHistory", "Registra como mucho 50 antecedentes familiares")
     const rows = []
-    for (const row of input.familyHistory) {
+    for (const [index, row] of input.familyHistory.entries()) {
+      const at = `familyHistory[${index}]`
       if (!(FAMILY_RELATIONSHIPS as readonly string[]).includes(row.relationship))
-        throw validation("Elige el parentesco de la lista")
+        throw invalidField(`${at}.relationship`, "Elige el parentesco de la lista")
       rows.push({
         relationship: row.relationship,
-        condition: assertText(row.condition, 200, "condition", true) as string,
-        ...(await resolveOptionalDiagnosisCode(tx, orgId, { code: row.diagnosisCode, system: row.diagnosisSystem })),
-        notes: assertText(row.notes, 2000, "notes", false),
+        condition: assertText(row.condition, 200, `${at}.condition`, true, "Escribe la condición"),
+        ...(await resolveOptionalDiagnosisCode(
+          tx,
+          orgId,
+          { code: row.diagnosisCode, system: row.diagnosisSystem },
+          `${at}.diagnosisCode`,
+        )),
+        notes: assertText(row.notes, 2000, `${at}.notes`, false),
       })
     }
     await tx
@@ -1081,7 +1122,7 @@ async function persistPatientHealth(
       )
   }
   if (input.asaClass !== undefined && input.asaClass !== null && !ASA_CLASSES.includes(input.asaClass))
-    throw validation("Clase ASA inválida (I–VI)")
+    throw invalidField("asaClass", "Elige la clasificación ASA de la lista")
   await tx
     .update(patient)
     .set({
@@ -1378,11 +1419,11 @@ async function withImaging(
 /** Piezas FDI múltiples: enteras válidas, únicas y ordenadas. Vacío = imagen general. */
 function normalizeDocumentTeeth(site: ProductSite, input: readonly number[] | null | undefined): number[] {
   if (input == null) return []
-  if (!Array.isArray(input)) throw validation("toothNumbers debe ser un arreglo")
-  if (input.length > 52) throw validation("toothNumbers admite como máximo 52 piezas")
+  if (!Array.isArray(input)) throw invalidField("toothNumbers", "Las piezas deben ir en una lista.")
+  if (input.length > 52) throw invalidField("toothNumbers", "Elige como mucho 52 piezas.")
   const set = new Set<number>()
   for (const tooth of input) {
-    if (site.code(tooth) === null) throw validation(site.invalid(tooth))
+    if (site.code(tooth) === null) throw invalidField("toothNumbers", site.invalid(tooth))
     set.add(tooth)
   }
   return [...set].sort((a, b) => a - b)
@@ -1391,11 +1432,11 @@ function normalizeDocumentTeeth(site: ProductSite, input: readonly number[] | nu
 /** Etiquetas con el helper canónico compartido (@odentia/clinical, TagsData). */
 function normalizeDocumentTags(input: readonly string[] | null | undefined): string[] {
   if (input == null) return []
-  if (!Array.isArray(input)) throw validation("tags debe ser un arreglo")
+  if (!Array.isArray(input)) throw invalidField("tags", "Las etiquetas deben ir en una lista.")
   try {
     return normalizeTags(input)
   } catch (e) {
-    throw validation(e instanceof Error ? e.message : "Etiquetas inválidas")
+    throw invalidField("tags", e instanceof Error ? e.message : "Revisa las etiquetas.")
   }
 }
 
@@ -1419,7 +1460,7 @@ async function requireVisibleEncounter(
       ),
     )
     .limit(1)
-  if (!row) throw notFound("Atención")
+  if (!row) throw new ServiceError("NOT_FOUND", 404, "Atención no encontrada", { encounterId: "Atención no encontrada" })
   return row
 }
 
@@ -1441,7 +1482,7 @@ async function requirePatientPlanItem(
       ),
     )
     .limit(1)
-  if (!row) throw notFound("Tratamiento")
+  if (!row) throw new ServiceError("NOT_FOUND", 404, "Tratamiento no encontrado", { planItemId: "Tratamiento no encontrado" })
   return row
 }
 
@@ -1556,18 +1597,18 @@ async function validateExtendedDocumentLinks(
   patientId: string,
   input: DocumentContextInput,
 ) {
-  for (const [id, table, label] of [
-    [input.budgetId, treatmentBudget, "Presupuesto"],
-    [input.prescriptionId, prescription, "Receta"],
-    [input.followUpId, clinicalFollowUp, "Control"],
-    [input.paymentId, patientPayment, "Pago"],
+  for (const [field, id, table, label] of [
+    ["budgetId", input.budgetId, treatmentBudget, "Presupuesto"],
+    ["prescriptionId", input.prescriptionId, prescription, "Receta"],
+    ["followUpId", input.followUpId, clinicalFollowUp, "Control"],
+    ["paymentId", input.paymentId, patientPayment, "Pago"],
   ] as const) {
     if (!id) continue
     const [row] = await tx
       .select({ id: table.id })
       .from(table)
       .where(and(eq(table.id, id), eq(table.organizationId, orgId), eq(table.patientId, patientId)))
-    if (!row) throw notFound(label)
+    if (!row) throw new ServiceError("NOT_FOUND", 404, `${label} no encontrado`, { [field]: `${label} no encontrado` })
   }
   if (input.encounterProcedureId) {
     const [row] = await tx
@@ -1587,7 +1628,10 @@ async function validateExtendedDocumentLinks(
           eq(encounterProcedure.organizationId, orgId),
         ),
       )
-    if (!row) throw notFound("Procedimiento")
+    if (!row)
+      throw new ServiceError("NOT_FOUND", 404, "Procedimiento no encontrado", {
+        encounterProcedureId: "Procedimiento no encontrado",
+      })
   }
 }
 
@@ -1605,24 +1649,25 @@ function normalizeImageInput(category: string, input: DocumentImageInput, imagin
   if (input.imageType) {
     // Los tipos son los del producto de la clínica (issue 229: latidIA sube ecografías, tomografías…).
     const type = imaging.find((item) => item.value === input.imageType)
-    if (!type) throw validation(`Tipo de imagen no reconocido: ${input.imageType}`)
-    if (type.category !== category) throw validation(`${type.label} no corresponde a la categoría ${category}`)
+    if (!type) throw invalidField("imageType", `Tipo de imagen no reconocido: ${input.imageType}`)
+    if (type.category !== category)
+      throw invalidField("imageType", `${type.label} no corresponde a la categoría ${category}`)
     imageType = type.value
   }
   let capturedAt: Date | null = null
   if (input.capturedAt) {
     capturedAt = input.capturedAt instanceof Date ? input.capturedAt : new Date(input.capturedAt)
-    if (Number.isNaN(capturedAt.getTime())) throw validation("La fecha de toma no es válida")
+    if (Number.isNaN(capturedAt.getTime())) throw invalidField("capturedAt", "La fecha de toma no es válida")
     // Margen de cinco minutos por relojes de equipos desfasados.
     if (capturedAt.getTime() > Date.now() + 5 * 60_000)
-      throw validation("La fecha de toma no puede ser futura")
+      throw invalidField("capturedAt", "La fecha de toma no puede ser futura")
   }
   const source = input.source?.trim() || null
-  if (source && source.length > 120) throw validation("El origen debe tener hasta 120 caracteres")
+  if (source && source.length > 120) throw invalidField("source", "El origen debe tener hasta 120 caracteres")
   let reportStatus: ReportStatus | null = null
   if (input.reportStatus) {
     if (!(REPORT_STATUSES as readonly string[]).includes(input.reportStatus))
-      throw validation(`Estado de informe no reconocido: ${input.reportStatus}`)
+      throw invalidField("reportStatus", `Estado de informe no reconocido: ${input.reportStatus}`)
     reportStatus = input.reportStatus as ReportStatus
   } else if (category === "radiografia") {
     reportStatus = "pendiente"
@@ -1648,16 +1693,22 @@ export async function registerPatientDocument(
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   if (!(DOCUMENT_CATEGORIES as readonly string[]).includes(input.category))
-    throw validation("category inválida")
+    throw invalidField("category", "Elige una categoría de la lista.")
   const label = input.label?.trim() ?? ""
-  if (!label || label.length > 200) throw validation("label debe tener 1–200 caracteres")
+  if (!label) throw invalidField("label", "Escribe el título.")
+  if (label.length > 200) throw invalidField("label", "El título admite hasta 200 caracteres.")
   const image = normalizeImageInput(input.category, input, (await productHooks(tx, orgId)).imaging)
   if (!input.storageKey) throw validation("storageKey es obligatorio")
   const site = await siteOf(tx, orgId)
   const toothNumbers = normalizeDocumentTeeth(site, input.toothNumbers)
   const tags = normalizeDocumentTags(input.tags)
   // Al registrar solo se permite vincular borradores (la atención aún es mutable).
-  if (input.encounterId) await requireDraftLink(tx, orgId, patientId, input.encounterId)
+  // Si no se puede (no existe, finalizada, anulada), se dice junto a la atención elegida.
+  if (input.encounterId)
+    await requireDraftLink(tx, orgId, patientId, input.encounterId).catch((e: unknown) => {
+      if (e instanceof ServiceError && !e.fields) e.fields = { encounterId: e.message }
+      throw e
+    })
   if (input.planItemId) await requirePatientPlanItem(tx, orgId, patientId, input.planItemId)
   await validateExtendedDocumentLinks(tx, orgId, patientId, input)
   const [row] = await tx
@@ -1820,7 +1871,7 @@ export async function retirePatientDocument(
 ): Promise<PatientDocumentWithContext> {
   await requirePatient(tx, orgId, patientId)
   const reason = input.reason?.trim() ?? ""
-  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const [current] = await tx
     .select()
     .from(patientDocument)

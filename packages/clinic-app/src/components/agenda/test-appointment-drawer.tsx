@@ -1,5 +1,5 @@
 import { Badge, Button, buttonVariants, cn } from "@odentia/ui"
-import { DetailDrawer, DetailField, DetailList } from "@odentia/ui-patterns"
+import { DetailDrawer, DetailField, DetailList, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import type { AgendaAppointment } from "../../lib/agenda"
@@ -8,7 +8,6 @@ import { apiFetch } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
 import { usePermission } from "../../lib/crm"
 import { appWords, upperFirst } from "../../lib/product-words"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { rangeSaid, whenSaid } from "./shared"
 
 /**
@@ -74,7 +73,7 @@ export function TestAppointmentDrawer({
       description={rangeSaid(appointment.startsAt, appointment.endsAt, timeZone, today)}
       onClose={onClose}
       isSubmitting={remove.isPending}
-      error={remove.isError ? mutationErrorMessage(remove.error) : null}
+      error={remove.isError ? submitErrorMessage(remove.error) : null}
       actions={
         <>
           {view}

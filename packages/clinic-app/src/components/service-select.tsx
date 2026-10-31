@@ -1,7 +1,7 @@
 import { Button } from "@odentia/ui"
 import { ResourceSelect } from "@odentia/ui-patterns"
 import { useQuery } from "@tanstack/react-query"
-import { useDeferredValue, useState } from "react"
+import { useDeferredValue, useId, useState } from "react"
 import { fetchService, fetchServices, type ServiceCatalogItem } from "../lib/services"
 
 /** Cuántos servicios trae cada búsqueda: el resto se encuentra escribiendo. */
@@ -11,18 +11,22 @@ export const SERVICE_SEARCH_LIMIT = 30
  * Elegir un servicio del tarifario buscando en el servidor (topes B1–B4 de la
  * fase 4): nunca una lista cargada con un tope mudo. Lo que llega elegido se
  * muestra aunque no esté en la primera página, y si hay más de los que se
- * ven, se dice cuántos son.
+ * ven, se dice cuántos son (pista enlazada al campo). No pinta etiqueta: la
+ * pone la pantalla (`FieldLabel htmlFor={id}` o `field.Control`).
  */
 export function ServiceSelect({
-  id,
-  label,
+  id: idProp,
   value,
   onChange,
   excludeId,
   noneLabel,
+  placeholder,
+  invalid = false,
+  "aria-describedby": describedBy,
+  onBlur,
 }: {
-  id: string
-  label: string
+  /** Del campo de búsqueda, para `FieldLabel htmlFor`. */
+  id?: string
   /** Id del servicio elegido; vacío = ninguno. */
   value: string
   onChange: (service: ServiceCatalogItem | null) => void
@@ -30,7 +34,14 @@ export function ServiceSelect({
   excludeId?: string | null
   /** Con esto, la primera opción es «ninguno», con este texto. */
   noneLabel?: string
+  placeholder?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+  onBlur?: () => void
 }) {
+  const fallbackId = useId()
+  const id = idProp ?? fallbackId
+  const hintId = `${id}-pista`
   const [query, setQuery] = useState("")
   const q = useDeferredValue(query.trim())
   const pageQuery = useQuery({
@@ -65,11 +76,15 @@ export function ServiceSelect({
   ]
   const total = page?.total ?? 0
   const more = total > (page?.data.length ?? 0)
+  const failed = pageQuery.isError && !page
   return (
     <div className="grid gap-1.5">
       <ResourceSelect
         id={id}
-        label={label}
+        placeholder={placeholder}
+        invalid={invalid}
+        aria-describedby={[describedBy, failed || more ? hintId : undefined].filter(Boolean).join(" ") || undefined}
+        onBlur={onBlur}
         options={options}
         value={value}
         onChange={(next) => onChange(next ? (services.find((item) => item.id === next) ?? null) : null)}
@@ -82,15 +97,15 @@ export function ServiceSelect({
               : "Aún no hay servicios activos."
         }
       />
-      {pageQuery.isError && !page ? (
-        <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+      {failed ? (
+        <p id={hintId} role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
           No se pudieron cargar los servicios.
           <Button type="button" size="sm" variant="outline" onClick={() => void pageQuery.refetch()}>
             Reintentar
           </Button>
         </p>
       ) : more ? (
-        <p className="text-xs text-muted-foreground">
+        <p id={hintId} className="text-xs text-muted-foreground">
           {q
             ? `${total} coinciden: se ven ${page?.data.length}. Escribe más para acotar.`
             : `La clínica tiene ${total} servicios: escribe para encontrar el que buscas.`}

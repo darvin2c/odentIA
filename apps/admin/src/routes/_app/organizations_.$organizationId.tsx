@@ -17,7 +17,7 @@ import {
   TabsTrigger,
   toast,
 } from "@odentia/ui"
-import { ConfirmDialog, common, ErrorState, PageShell } from "@odentia/ui-patterns"
+import { ConfirmDialog, ErrorState, PageShell, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
@@ -27,11 +27,7 @@ import { OrgImport } from "../../components/org-import"
 import { OrgSpending, type SpendingAgent, type SpendingSearch } from "../../components/org-spending"
 import { type BillingSummary, OrgSummary } from "../../components/org-summary"
 import { ProductMark } from "../../components/product"
-import {
-  OrganizationDetailPageSkeleton,
-  OrganizationDetailSkeleton,
-} from "../../components/skeletons/organization-detail"
-import { ApiError, api } from "../../lib/api"
+import { api } from "../../lib/api"
 import { plural } from "../../lib/cost-format"
 import { DemoBand, DemoShowcase, useDemoOfOrganization, useOpenDemo } from "../../components/demos"
 import { domainOf, platformUrl } from "../../lib/host"
@@ -44,6 +40,7 @@ import {
 } from "../../lib/organization-tabs"
 import { rememberedOrganizationsSearch } from "../../lib/organizations-search"
 import { useIsAdmin } from "../../lib/session"
+import { OrganizationDetailPageSkeleton, OrganizationDetailSkeleton } from "../../components/skeletons/organization-detail"
 
 /** Todo es opcional en la dirección: lo que falta es lo de siempre (Resumen, este mes, todo). */
 const searchSchema = z.object({
@@ -151,8 +148,6 @@ const dateTime = (iso: string) =>
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(iso))
-const messageOf = (error: unknown) =>
-  error instanceof ApiError ? (error.shape.message ?? common.errors.generic) : common.errors.generic
 
 function OrganizationPage() {
   const { organizationId } = Route.useParams()
@@ -185,7 +180,7 @@ function OrganizationPage() {
       toast.success("Invitación reenviada")
       invalidate()
     },
-    onError: (error) => toast.error(messageOf(error)),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
   const cancel = useMutation({
     mutationFn: (id: string) =>
@@ -195,7 +190,6 @@ function OrganizationPage() {
       setCancelTarget(null)
       invalidate()
     },
-    onError: (error) => toast.error(messageOf(error)),
   })
 
   const go = (next: DetailSearch) =>
@@ -468,10 +462,14 @@ function OrganizationPage() {
         confirmLabel="Cancelar invitación"
         variant="destructive"
         pending={cancel.isPending}
+        error={cancel.isError ? submitErrorMessage(cancel.error) : null}
         onConfirm={() => {
           if (cancelTarget) cancel.mutate(cancelTarget.id)
         }}
-        onClose={() => setCancelTarget(null)}
+        onClose={() => {
+          cancel.reset()
+          setCancelTarget(null)
+        }}
       />
     </PageShell>
   )

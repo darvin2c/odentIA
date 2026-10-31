@@ -1,14 +1,25 @@
-import { Badge, Field, FieldDescription, FieldLabel, Textarea } from "@odentia/ui"
+import { Badge } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ErrorState, PageHeader, PageShell, SubmitButton, SkeletonRegion } from "@odentia/ui-patterns"
+import {
+  ErrorState,
+  PageHeader,
+  PageShell,
+  SubmitButton,
+  submitErrorMessage,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { type ReactNode, useState } from "react"
+import type { ReactNode } from "react"
+import { z } from "zod"
 import { type AgentRoles, namedAgentRoles } from "../../lib/agent"
 import { CLINICAL_NAME, clinicalNameReason, useReceptionName } from "../../lib/agent-names"
 import { ApiError, apiFetch } from "../../lib/api"
 import { type AgentConfig, usePermission } from "../../lib/crm"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { productUi } from "../../product/product-ui"
 import { DICTATION_KIND_LABEL, type DictationKind } from "../../components/patient/dictation-session"
 import { ClinicalAssistantPageSkeleton, ClinicalAssistantSkeleton } from "../../components/skeletons/agent"
@@ -19,6 +30,15 @@ export const Route = createFileRoute("/_org/agent/asistente-clinico")({
 })
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8"
+
+/** Mismos límites y palabras que la ruta de práctica (`clio-practice.ts`). */
+const practiceSchema = z.object({
+  transcript: z
+    .string()
+    .trim()
+    .min(3, "Escribe al menos 3 caracteres.")
+    .max(12_000, "Escribe como mucho 12000 caracteres."),
+})
 
 interface PracticeSuggestion {
   kind: string
@@ -47,7 +67,6 @@ function ClinicalAssistantPage() {
   const canRead = usePermission("agent.read")
   const canWrite = usePermission("agent.write")
   const receptionName = useReceptionName()
-  const [practice, setPractice] = useState("")
 
   const configQuery = useQuery({
     queryKey: ["agent-config"],
@@ -68,12 +87,25 @@ function ClinicalAssistantPage() {
   })
   const tryIt = useMutation({
     retry: false,
-    mutationFn: () =>
+    mutationFn: (transcript: string) =>
       apiFetch<{ data: { model: string; suggestions: PracticeSuggestion[] } }>("/api/agent/clinical/practice", {
         method: "POST",
-        body: JSON.stringify({ transcript: practice.trim() }),
+        body: JSON.stringify({ transcript }),
       }),
   })
+  const practiceForm = useAppForm({
+    defaultValues: { transcript: "" },
+    validators: { onSubmit: practiceSchema },
+    onSubmit: async ({ value }) => {
+      await tryIt.mutateAsync(value.transcript.trim())
+    },
+  })
+  // Lo que no es del campo (el modelo, la red) se dice con las palabras de la práctica.
+  const submitPractice = useFormSubmit(practiceForm, {
+    formMessage: (error) =>
+      error instanceof ApiError && error.status < 500 ? null : "No pudimos ordenar ese dictado. Vuelve a intentarlo.",
+  })
+  const practiceError = useFormSubmitError(practiceForm)
 
   if (!canRead) {
     return (
@@ -96,16 +128,24 @@ function ClinicalAssistantPage() {
           <>
             <p className="min-w-0">{clinicalNameReason()}</p>
             {config && canWrite ? (
-              <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
-                {on ? "Encendido" : "Apagado"}
-                <Switch
-                  id="asistente-clinico-encendido"
-                  checked={on}
-                  disabled={toggle.isPending}
-                  aria-label={on ? `Apagar a ${CLINICAL_NAME}` : `Encender a ${CLINICAL_NAME}`}
-                  onCheckedChange={(next) => toggle.mutate(next)}
-                />
-              </label>
+              <span className="flex flex-col gap-1">
+                <label htmlFor="asistente-clinico-encendido" className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold sm:min-h-8">
+                  {on ? "Encendido" : "Apagado"}
+                  <Switch
+                    id="asistente-clinico-encendido"
+                    checked={on}
+                    disabled={toggle.isPending}
+                    aria-label={on ? `Apagar a ${CLINICAL_NAME}` : `Encender a ${CLINICAL_NAME}`}
+                    aria-describedby={toggle.isError ? "asistente-clinico-encendido-error" : undefined}
+                    onCheckedChange={(next) => toggle.mutate(next)}
+                  />
+                </label>
+                {toggle.isError ? (
+                  <span id="asistente-clinico-encendido-error" role="alert" className="text-sm text-destructive">
+                    {submitErrorMessage(toggle.error)}
+                  </span>
+                ) : null}
+              </span>
             ) : config ? (
               <Badge variant={on ? "success" : "secondary"}>{on ? "Encendido" : "Apagado"}</Badge>
             ) : null}
@@ -125,11 +165,6 @@ function ClinicalAssistantPage() {
         <QueryErrorState error={configQuery.error ?? rolesQuery.error} onRetry={() => void configQuery.refetch()} />
       ) : (
         <>
-          {toggle.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {mutationErrorMessage(toggle.error)}
-            </p>
-          ) : null}
           <Card
             id="clinico-hace"
             title="Qué hace"
@@ -200,34 +235,28 @@ function ClinicalAssistantPage() {
           <Card id="clinico-prueba" title="Cómo se prueba" hint={role.testedWith ?? "Con un dictado de práctica."}>
             {canWrite ? (
               <>
-                <Field>
-                  <FieldLabel htmlFor="clinico-practica">Dictado de ejemplo</FieldLabel>
-                  <Textarea
-                    id="clinico-practica"
-                    rows={4}
-                    maxLength={12_000}
-                    value={practice}
-                    onChange={(event) => setPractice(event.target.value)}
-                    placeholder={productUi().dictation?.practice}
-                  />
-                  <FieldDescription>Usa nombres de tus propios servicios para ver cómo los reconoce.</FieldDescription>
-                </Field>
-                <SubmitButton
-                  type="button"
-                  className="min-h-11 self-start sm:min-h-9"
-                  pending={tryIt.isPending}
-                  disabled={practice.trim().length < 3}
-                  onClick={() => tryIt.mutate()}
-                >
+              <form noValidate onSubmit={submitPractice} className="flex flex-col gap-4">
+                <practiceForm.AppField name="transcript">
+                  {(field) => (
+                    <field.TextareaField
+                      id="clinico-practica"
+                      label="Dictado de ejemplo"
+                      description="Usa nombres de tus propios servicios para ver cómo los reconoce."
+                      rows={4}
+                      maxLength={12_000}
+                      placeholder={productUi().dictation?.practice}
+                    />
+                  )}
+                </practiceForm.AppField>
+                <SubmitButton type="submit" className="min-h-11 self-start sm:min-h-9" pending={tryIt.isPending}>
                   Ver qué sugeriría
                 </SubmitButton>
-                {tryIt.isError ? (
+                {practiceError ? (
                   <p role="alert" className="text-sm text-destructive">
-                    {tryIt.error instanceof ApiError && tryIt.error.status < 500 && tryIt.error.shape.message
-                      ? tryIt.error.shape.message
-                      : "No pudimos ordenar ese dictado. Vuelve a intentarlo."}
+                    {practiceError}
                   </p>
                 ) : null}
+              </form>
                 {result ? (
                   <div className="flex flex-col gap-2" aria-live="polite">
                     {result.suggestions.length === 0 ? (

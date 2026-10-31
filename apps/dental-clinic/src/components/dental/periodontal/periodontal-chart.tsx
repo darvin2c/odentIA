@@ -266,6 +266,8 @@ export interface PeriodontalChartProps {
   /** Fila «Placa» con la pieza del odontograma bajo los números. */
   plaque?: boolean
   selected?: number | null
+  /** La pieza que no se pudo guardar: se marca en rojo (el aviso dice cuál y por qué). */
+  failed?: number | null
   onSelect?: (tooth: number) => void
   /** El sitio que se está midiendo, marcado con un triángulo. */
   marker?: { tooth: number; face: ChartFace; position: number } | null
@@ -284,6 +286,7 @@ export function PeriodontalChart({
   arches = FULL_ARCHES,
   plaque = false,
   selected = null,
+  failed = null,
   onSelect,
   marker = null,
   animate = false,
@@ -419,6 +422,7 @@ export function PeriodontalChart({
                 hover === column.tooth && "hover",
                 selected === column.tooth && "sel",
                 focused === column.tooth && "focus",
+                failed === column.tooth && "failed",
               )}
               x={column.x0 + 1}
               y={column.top - 2}

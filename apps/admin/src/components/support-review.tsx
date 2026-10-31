@@ -5,9 +5,10 @@
  * quien tiene el rol admin, siempre con lo que se le dice a la clínica;
  * soporte lo lee y deja notas.
  */
-import { Button, ScrollArea, Textarea } from "@odentia/ui"
+import { Button, ScrollArea } from "@odentia/ui"
+import { useAppForm, useFormSubmit, useFormSubmitError } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
 import { z } from "zod"
 import { api } from "../lib/api"
 
@@ -79,6 +80,16 @@ function speaker(message: z.infer<typeof reviewMessage>): string {
   return message.senderKind === "agent" ? "Agente" : message.senderKind === "user" ? "Equipo" : "Automático"
 }
 
+/** La decisión: lo que se le dice a la clínica (los mismos límites que la ruta) y si se le da la razón. */
+const decideSchema = z.object({
+  answer: z
+    .string()
+    .trim()
+    .min(1, "Escribe qué le dices a la clínica")
+    .max(1000, "Escribe como mucho 1000 caracteres"),
+  accept: z.boolean(),
+})
+
 export function SupportCaseReview({
   caseId,
   review,
@@ -92,8 +103,6 @@ export function SupportCaseReview({
   isAdmin: boolean
 }) {
   const queryClient = useQueryClient()
-  const answerId = useId()
-  const [answer, setAnswer] = useState("")
   const conversation = useQuery({
     queryKey: ["admin-support-review-conversation", caseId],
     queryFn: () =>
@@ -102,17 +111,24 @@ export function SupportCaseReview({
     retry: false,
   })
   const decide = useMutation({
-    mutationFn: (accept: boolean) =>
-      api(`/api/admin/support/cases/${caseId}/review/decide`, {
-        method: "POST",
-        body: JSON.stringify({ accept, answer: answer.trim() }),
-      }),
+    mutationFn: (body: { accept: boolean; answer: string }) =>
+      api(`/api/admin/support/cases/${caseId}/review/decide`, { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => {
-      setAnswer("")
       void queryClient.invalidateQueries({ queryKey: ["admin-support-cases"] })
       void queryClient.invalidateQueries({ queryKey: ["admin-support-case"] })
     },
   })
+  const form = useAppForm({
+    defaultValues: { answer: "", accept: true },
+    validators: { onSubmit: decideSchema },
+    onSubmit: async ({ value, formApi }) => {
+      await decide.mutateAsync({ accept: value.accept, answer: value.answer.trim() })
+      formApi.reset()
+    },
+  })
+  const onSubmit = useFormSubmit(form)
+  const submitError = useFormSubmitError(form)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const { action } = review
   const price = money(action.priceMicros, action.currency)
   const channel = action.channel ? CHANNEL_WORDS[action.channel] : null
@@ -209,44 +225,44 @@ export function SupportCaseReview({
 
       {pending ? (
         isAdmin ? (
-          <div className="flex flex-col gap-1.5">
-            <label htmlFor={answerId} className="font-semibold">
-              Qué le decimos a la clínica (obligatorio)
-            </label>
-            <Textarea
-              id={answerId}
-              rows={3}
-              maxLength={1000}
-              placeholder="Por ejemplo: tienen razón, el agente leyó el horario de verano. Devolvemos la conversación."
-              value={answer}
-              onChange={(event) => setAnswer(event.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">Sale como respuesta del caso y el caso queda resuelto.</p>
+          <form noValidate onSubmit={onSubmit} className="flex flex-col gap-1.5">
+            <form.AppField name="answer">
+              {(field) => (
+                <field.TextareaField
+                  label="Qué le decimos a la clínica (obligatorio)"
+                  description="Sale como respuesta del caso y el caso queda resuelto."
+                  rows={3}
+                  maxLength={1000}
+                  placeholder="Por ejemplo: tienen razón, el agente leyó el horario de verano. Devolvemos la conversación."
+                />
+              )}
+            </form.AppField>
             <div className="flex flex-wrap gap-2">
+              {/* Los dos botones envían el mismo formulario: cada uno dice antes qué se decide. */}
               <Button
-                type="button"
+                type="submit"
                 className="min-h-11 sm:min-h-9"
-                disabled={answer.trim().length === 0 || decide.isPending}
-                onClick={() => decide.mutate(true)}
+                disabled={isSubmitting}
+                onClick={() => form.setFieldValue("accept", true)}
               >
                 {action.charged && action.coveredByCredit ? "Darle la razón" : `Devolver ${price}`}
               </Button>
               <Button
-                type="button"
+                type="submit"
                 variant="outline"
                 className="min-h-11 sm:min-h-9"
-                disabled={answer.trim().length === 0 || decide.isPending}
-                onClick={() => decide.mutate(false)}
+                disabled={isSubmitting}
+                onClick={() => form.setFieldValue("accept", false)}
               >
                 Mantener el cobro
               </Button>
             </div>
-            {decide.isError ? (
+            {submitError ? (
               <p role="alert" className="text-destructive">
-                {decide.error instanceof Error ? decide.error.message : "No se pudo guardar la decisión."}
+                {submitError}
               </p>
             ) : null}
-          </div>
+          </form>
         ) : (
           <p className="text-muted-foreground">Lo decide alguien con el rol Administración. Puedes dejar una nota interna en el caso.</p>
         )

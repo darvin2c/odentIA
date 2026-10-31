@@ -13,12 +13,12 @@ type Story = StoryObj<typeof meta>
 
 /** Después de entrar con el enlace: no se cierra sin guardar. */
 export const ConContraseñaAnterior: Story = {
-  args: { open: true, hasPassword: true, onSave: async () => null },
+  args: { open: true, hasPassword: true, onSave: async () => {} },
 }
 
 /** Quien entra solo con Google puede seguir sin contraseña. */
 export const SoloGoogle: Story = {
-  args: { open: true, hasPassword: false, onSave: async () => null, onSkip: async () => {} },
+  args: { open: true, hasPassword: false, onSave: async () => {}, onSkip: async () => {} },
 }
 
 /** El servidor la rechaza: el mensaje queda bajo el campo. */
@@ -26,13 +26,22 @@ export const Rechazada: Story = {
   args: {
     open: true,
     hasPassword: true,
-    onSave: async () => "Esta contraseña aparece en filtraciones conocidas. Elige otra.",
+    onSave: async () => {
+      throw Object.assign(new Error("Esta contraseña aparece en filtraciones conocidas. Elige otra."), {
+        status: 400,
+        shape: {
+          code: "PASSWORD_COMPROMISED",
+          message: "Esta contraseña aparece en filtraciones conocidas. Elige otra.",
+          fields: { password: "Esta contraseña aparece en filtraciones conocidas. Elige otra." },
+        },
+      })
+    },
   },
 }
 
 /** El campo solo, con «Ver» y los requisitos a la vista. */
 export const Campo: Story = {
-  args: { open: false, hasPassword: true, onSave: async () => null },
+  args: { open: false, hasPassword: true, onSave: async () => {} },
   render: () => {
     const [value, setValue] = useState("sonrisa-miraflores")
     return (

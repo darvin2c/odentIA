@@ -16,6 +16,7 @@ import {
   PageShell,
   ScrollingTabsList,
   SideDockScopeProvider,
+
   useDetailMode,
   useListSearch,
   useMediaQuery,
@@ -637,9 +638,13 @@ function InboxPage() {
       <UnblockDialog
         target={unblockTarget}
         pending={screenActions.unblock.isPending}
-        onClose={() => setUnblockTarget(null)}
+        error={screenActions.unblock.error}
+        onClose={() => {
+          screenActions.unblock.reset()
+          setUnblockTarget(null)
+        }}
         onConfirm={() => {
-          if (unblockTarget) screenActions.unblock.mutate(unblockTarget, { onSettled: () => setUnblockTarget(null) })
+          if (unblockTarget) screenActions.unblock.mutate(unblockTarget, { onSuccess: () => setUnblockTarget(null) })
         }}
       />
       <ConfirmDialog
@@ -658,4 +663,5 @@ function InboxPage() {
     </SideDockScopeProvider>
   )
 }
+
 

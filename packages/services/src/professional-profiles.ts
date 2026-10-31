@@ -9,7 +9,7 @@ import { member, user } from "@odentia/db/schema/auth"
 import { professionalProfile } from "@odentia/db/schema/clinical-forms"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, eq } from "drizzle-orm"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 
 export interface ProfessionalProfile {
   userId: string
@@ -48,11 +48,12 @@ export interface ProfessionalSignature {
 /** Colegiatura: letras, dígitos y guion; sin espacios ni símbolos. */
 const REGISTRATION_RE = /^[A-Za-z0-9-]{1,20}$/
 
-function clean(value: string | null | undefined, field: string, max: number): string | null {
+/** `key`: el nombre del dato en el cuerpo, para decir el error junto a su campo. */
+function clean(value: string | null | undefined, key: string, field: string, max: number): string | null {
   if (value === undefined || value === null) return null
   const trimmed = value.trim()
   if (!trimmed) return null
-  if (trimmed.length > max) throw validation(`${field} admite hasta ${max} caracteres`)
+  if (trimmed.length > max) throw invalidField(key, `${field} admite hasta ${max} caracteres`)
   return trimmed
 }
 
@@ -132,27 +133,27 @@ export async function setProfessionalProfile(
   const professionalTitle =
     input.professionalTitle === undefined
       ? current.professionalTitle
-      : clean(input.professionalTitle, "El título profesional", 120)
-  if (!professionalTitle) throw validation("El título profesional es obligatorio")
+      : clean(input.professionalTitle, "professionalTitle", "El título profesional", 120)
+  if (!professionalTitle) throw invalidField("professionalTitle", "El título profesional es obligatorio")
   const registrationBody =
     input.registrationBody === undefined
       ? current.registrationBody
-      : clean(input.registrationBody, "El colegio profesional", 40)
-  if (!registrationBody) throw validation("El colegio profesional es obligatorio")
+      : clean(input.registrationBody, "registrationBody", "El colegio profesional", 40)
+  if (!registrationBody) throw invalidField("registrationBody", "El colegio profesional es obligatorio")
   const registrationNumber =
     input.registrationNumber === undefined
       ? current.registrationNumber
-      : clean(input.registrationNumber, "La colegiatura", 20)
+      : clean(input.registrationNumber, "registrationNumber", "La colegiatura", 20)
   if (registrationNumber && !REGISTRATION_RE.test(registrationNumber))
-    throw validation("La colegiatura admite solo letras, dígitos y guion, sin espacios")
+    throw invalidField("registrationNumber", "La colegiatura admite solo letras, dígitos y guion, sin espacios")
   const signatureName =
     input.signatureName === undefined
       ? current.signatureName
-      : clean(input.signatureName, "El nombre de firma", 200)
+      : clean(input.signatureName, "signatureName", "El nombre de firma", 200)
   const specialtyRegistration =
     input.specialtyRegistration === undefined
       ? current.specialtyRegistration
-      : clean(input.specialtyRegistration, "El registro de especialista", 40)
+      : clean(input.specialtyRegistration, "specialtyRegistration", "El registro de especialista", 40)
   const values = {
     signatureName,
     professionalTitle,

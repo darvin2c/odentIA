@@ -57,7 +57,9 @@ export interface SurfaceShellProps {
 /**
  * Cabecera fija con la «×», cuerpo con scroll interno y pie opcional. El
  * contenido de `children` no se monta mientras `isLoading` (el esqueleto lo
- * reemplaza) y el error va en un banner `role="alert"` por encima del contenido.
+ * reemplaza). El error (lo que no es de ningún campo: el de un campo va en su
+ * `FieldError`) se dice con `role="alert"` junto a las acciones del pie, que
+ * siempre están a la vista; sin pie, arriba del contenido.
  */
 export function SurfaceShell({
   title,
@@ -118,14 +120,7 @@ export function SurfaceShell({
               </div>
             ) : (
               <>
-                {error ? (
-                  <div
-                    className="mb-4 rounded-md border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger"
-                    role="alert"
-                  >
-                    {error}
-                  </div>
-                ) : null}
+                {error && footer == null ? <SurfaceError error={error} className="mb-4" /> : null}
                 {children}
               </>
             )}
@@ -138,6 +133,7 @@ export function SurfaceShell({
           final y a la derecha. */}
       {footer != null ? (
         <div className="mt-auto flex shrink-0 flex-row flex-wrap items-center justify-end gap-2 border-t border-border bg-surface px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          {error && !isLoading ? <SurfaceError error={error} className="basis-full" /> : null}
           {footer}
         </div>
       ) : null}
@@ -147,6 +143,9 @@ export function SurfaceShell({
   if (onSubmit) {
     return (
       <form
+        // La validación es la del formulario (`useAppForm`), dicha en cada
+        // campo: el globo del navegador se va solo y habla otro idioma.
+        noValidate
         onSubmit={(event) => {
           // Sin esto el navegador envía el formulario y recarga la página: el
           // guardado queda a medias y su error no llega a verse.
@@ -161,6 +160,17 @@ export function SurfaceShell({
   }
 
   return <div className={SURFACE_ROOT_CLASS}>{blocks}</div>
+}
+
+function SurfaceError({ error, className }: { error: string; className?: string }) {
+  return (
+    <p
+      role="alert"
+      className={cn("rounded-md border border-danger/20 bg-danger-soft px-3 py-2 text-sm text-danger", className)}
+    >
+      {error}
+    </p>
+  )
 }
 
 export interface CloseGuardOptions {

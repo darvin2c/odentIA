@@ -19,7 +19,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { personSearchCondition } from "./person-search.js"
 import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { findOrgCountry } from "./locale.js"
@@ -39,7 +39,7 @@ export function normalizeContactTags(tags: readonly string[]): string[] {
   try {
     return normalizeTags(tags)
   } catch (e) {
-    throw validation(e instanceof Error ? e.message : "Etiquetas inválidas")
+    throw invalidField("tags", e instanceof Error ? e.message : "Etiquetas inválidas")
   }
 }
 
@@ -550,14 +550,16 @@ export async function sanitizeCustomFields(
   for (const [key, value] of Object.entries(input)) {
     const def = byKey.get(key)
     if (!def || value === null || value === undefined) continue
+    // Cada rechazo va en su campo (`customFields.<clave>`), con su nombre para quien no lo pinta.
+    const invalid = (message: string) => invalidField(`customFields.${key}`, `Campo ${def.label}: ${message}`)
     switch (def.type) {
       case "text":
-        if (typeof value !== "string") throw validation(`Campo ${def.label}: debe ser texto`)
+        if (typeof value !== "string") throw invalid("debe ser texto")
         out[key] = value
         break
       case "number":
         if (typeof value !== "number" || !Number.isFinite(value)) {
-          throw validation(`Campo ${def.label}: debe ser número`)
+          throw invalid("debe ser número")
         }
         out[key] = value
         break
@@ -567,7 +569,7 @@ export async function sanitizeCustomFields(
           !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
           Number.isNaN(Date.parse(value))
         ) {
-          throw validation(`Campo ${def.label}: debe ser fecha YYYY-MM-DD`)
+          throw invalid("debe ser fecha YYYY-MM-DD")
         }
         out[key] = value
         break
@@ -577,13 +579,13 @@ export async function sanitizeCustomFields(
             ? def.options
             : []
         if (typeof value !== "string" || !options.includes(value)) {
-          throw validation(`Campo ${def.label}: valor fuera de opciones`)
+          throw invalid("valor fuera de opciones")
         }
         out[key] = value
         break
       }
       default:
-        throw validation(`Campo ${def.label}: tipo desconocido`)
+        throw invalid("tipo desconocido")
     }
   }
   return out
@@ -626,7 +628,7 @@ export async function updateContact(
   if (fields.preferredChannel !== undefined) {
     const preferred = fields.preferredChannel?.trim() || null
     if (preferred && !PREFERRED_CHANNELS.includes(preferred as (typeof PREFERRED_CHANNELS)[number]))
-      throw validation("Medio preferido inválido: solo email, whatsapp, telegram, messenger o instagram")
+      throw invalidField("preferredChannel", "Medio preferido inválido: solo email, whatsapp, telegram, messenger o instagram")
     // Solo vale un medio por el que la clínica puede escribirle: uno conectado.
     // La regla vive aquí, no en el desplegable de la pantalla.
     if (preferred) {
@@ -642,7 +644,7 @@ export async function updateContact(
         )
         .limit(1)
       if (!connected)
-        throw validation("La clínica no tiene conectado ese medio: conéctalo antes de elegirlo como preferido")
+        throw invalidField("preferredChannel", "La clínica no tiene conectado ese medio: conéctalo antes de elegirlo como preferido")
     }
     patch.preferredChannel = preferred
     changed.push("preferredChannel")
@@ -737,15 +739,16 @@ export function normalizeChannelIdentity(
   externalUserId: string,
 ): { channel: OmniChannel; externalUserId: string } {
   if (!OMNI_CHANNELS.includes(channel as OmniChannel)) {
-    throw validation("Canal no soportado: solo whatsapp, telegram, messenger o instagram")
+    throw invalidField("channel", "Canal no soportado: solo whatsapp, telegram, messenger o instagram")
   }
   const raw = externalUserId.trim()
-  if (!raw) throw validation("El identificador del canal es obligatorio")
+  // Los rechazos del identificador van en su campo (`externalUserId`, el del cuerpo de la ruta).
+  if (!raw) throw invalidField("externalUserId", "El identificador del canal es obligatorio")
   if (channel === "whatsapp") {
     const withoutPrefix = raw.toLowerCase().startsWith("wa:") ? raw.slice(3) : raw
     const digits = withoutPrefix.replace(/[\s\-()+]/g, "")
     if (!/^\d{7,15}$/.test(digits)) {
-      throw validation("WhatsApp exige un teléfono internacional (7–15 dígitos)")
+      throw invalidField("externalUserId", "WhatsApp exige un teléfono internacional (7–15 dígitos)")
     }
     return { channel, externalUserId: `wa:${digits}` }
   }
@@ -755,7 +758,7 @@ export function normalizeChannelIdentity(
   const label = channel === "messenger" ? "Messenger" : channel === "instagram" ? "Instagram" : "Telegram"
   const withoutPrefix = raw.toLowerCase().startsWith(`${prefix}:`) ? raw.slice(prefix.length + 1) : raw
   if (!/^\d+$/.test(withoutPrefix)) {
-    throw validation(`${label} exige el ID numérico de la plataforma (no @usuario)`)
+    throw invalidField("externalUserId", `${label} exige el ID numérico de la plataforma (no @usuario)`)
   }
   return { channel: channel as OmniChannel, externalUserId: `${prefix}:${withoutPrefix}` }
 }
@@ -975,6 +978,12 @@ async function moveHiddenThreads(
           where o.channel_connection_id = c.channel_connection_id and o.external_thread_id = ${address})`)
 }
 
+/** La cuenta que se agrega ya es de otra persona: se dice en su campo (`externalUserId`). */
+function identityInUse(): ServiceError {
+  const message = "Esa cuenta ya es de otra persona. Si cambió de dueño, pásala desde la página de esa persona."
+  return new ServiceError("IDENTITY_IN_USE", 409, message, { externalUserId: message })
+}
+
 /**
  * Alta manual autorizada de identidad de canal. Idempotente para el mismo
  * contacto; 409 IDENTITY_IN_USE si pertenece a otro contacto.
@@ -992,13 +1001,7 @@ export async function addContactIdentity(
   await lockChannelIdentity(tx, orgId, normalized.channel, normalized.externalUserId)
   const existing = await findChannelIdentity(tx, orgId, normalized.channel, normalized.externalUserId)
   if (existing) {
-    if (existing.contactId !== contactId) {
-      throw new ServiceError(
-        "IDENTITY_IN_USE",
-        409,
-        "Esa identidad de canal ya pertenece a otro contacto",
-      )
-    }
+    if (existing.contactId !== contactId) throw identityInUse()
     return toIdentityItem(existing)
   }
   const [created] = await tx
@@ -1019,13 +1022,7 @@ export async function addContactIdentity(
     .returning()
   const row = created ?? (await findChannelIdentity(tx, orgId, normalized.channel, normalized.externalUserId))
   if (!row) throw new Error("No se pudo crear la identidad de canal")
-  if (row.contactId !== contactId) {
-    throw new ServiceError(
-      "IDENTITY_IN_USE",
-      409,
-      "Esa identidad de canal ya pertenece a otro contacto",
-    )
-  }
+  if (row.contactId !== contactId) throw identityInUse()
   await auditContact(tx, orgId, actor, "contact.identity_added", contactId, {
     fields: ["identityId", "channel"],
     identityId: row.id,
@@ -1050,7 +1047,7 @@ export async function claimWhatsAppNumber(
 ): Promise<{ identityId: string; created: boolean }> {
   // Un celular con un dígito de menos lo rechaza Meta en cada envío: no se guarda como su WhatsApp.
   const problem = whatsappNumberProblem(phone, await findOrgCountry(tx, orgId))
-  if (problem) throw new ServiceError("NOT_WHATSAPP_NUMBER", 400, problem)
+  if (problem) throw new ServiceError("NOT_WHATSAPP_NUMBER", 400, problem, { phone: problem })
   const digits = phone.replace(/\D/g, "")
   const before = await findChannelIdentity(tx, orgId, "whatsapp", `wa:${digits}`)
   try {
@@ -1076,11 +1073,8 @@ export async function claimWhatsAppNumber(
     return { identityId: identity.id, created: !before }
   } catch (error) {
     if (error instanceof ServiceError && error.code === "IDENTITY_IN_USE") {
-      throw new ServiceError(
-        "IDENTITY_IN_USE",
-        409,
-        "Ese número de WhatsApp ya es de otra persona de la clínica. Ábrela desde Contactos o escribe otro número.",
-      )
+      const message = "Ese número de WhatsApp ya es de otra persona de la clínica. Ábrela desde Contactos o escribe otro número."
+      throw new ServiceError("IDENTITY_IN_USE", 409, message, { phone: message })
     }
     throw error
   }
@@ -1273,10 +1267,10 @@ export async function moveContactIdentity(
   const actor = { userId: actorUserId }
   const reason = input.reason.trim()
   if (reason.length < 1 || reason.length > 500) {
-    throw validation("El motivo de la reasignación debe tener entre 1 y 500 caracteres")
+    throw invalidField("reason", "Escribe por qué pasa la cuenta, en 500 caracteres como mucho")
   }
   if (input.fromContactId === input.toContactId) {
-    throw validation("El contacto origen y destino deben ser distintos")
+    throw invalidField("toContactId", "Elige a otra persona: la cuenta ya es de esta")
   }
   const [identity] = await tx
     .select()

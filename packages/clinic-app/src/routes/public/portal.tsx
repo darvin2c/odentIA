@@ -1,32 +1,54 @@
+import { Badge, Button, Field, FieldError, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
+import {
+  EmptyState,
+  ErrorState,
+  focusFirstInvalid,
+  LoadingState,
+  PageShell,
+  SubmitButton,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
 import { startAuthentication, startRegistration } from "@simplewebauthn/browser"
-import { Badge, Button, Field, FieldLabel, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { EmptyState, ErrorState, LoadingState, PageShell, SkeletonRegion, SubmitButton } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Fingerprint } from "lucide-react"
-import { useEffect, useState } from "react"
-import {
-  PortalAccountSkeleton,
-  PortalAppointmentSkeleton,
-  PortalBudgetsSkeleton,
-  PortalDocumentsSkeleton,
-  PortalPageSkeleton,
-} from "../../components/skeletons/public-portal"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
+import { AnswerAppField, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
 import { AppointmentBlock } from "../../components/public/appointment-block"
 import { type BudgetAnswer, BudgetResponder } from "../../components/public/budget-responder"
-import { ProfessionalSelect, longDay, shortDay, timeLabel, useWeekSlots, type WeekSlot, WeekSlotsGrid } from "../../components/public/week-slots"
+import {
+  chosenSlotSchema,
+  longDay,
+  ProfessionalSelect,
+  SLOT_FIELD_MAP,
+  shortDay,
+  slotTakenError,
+  timeLabel,
+  useWeekSlots,
+  type WeekSlot,
+  WeekSlotsField,
+} from "../../components/public/week-slots"
+import { ApiError } from "../../lib/api"
+import { orgSlugFromHostname, requestHostname } from "../../lib/host"
+import { setOrgLocale } from "../../lib/locale"
 import {
   cancelPortalAppointmentApi,
   closePortalSessionApi,
   confirmPortalAppointmentApi,
-  downloadPortalCalendar,
   decidePortalBudgetApi,
+  downloadPortalCalendar,
   exchangePortalTokenApi,
   fetchPortalAccount,
   fetchPortalAppointments,
   fetchPortalBudgets,
-  fetchPortalDocumentUrl,
   fetchPortalDocuments,
+  fetchPortalDocumentUrl,
   fetchPortalQuestionnaire,
   fetchPortalRescheduleSlots,
   fetchPortalSession,
@@ -37,6 +59,7 @@ import {
   markPortalBudgetSeenApi,
   type PortalAppointment,
   type PortalBudget,
+  type PortalQuestionnaire,
   portalErrorMessage,
   rememberPortalSessionApi,
   requestPasskeyAuthOptionsApi,
@@ -47,12 +70,9 @@ import {
   verifyPasskeyAuthApi,
   verifyPasskeyRegistrationApi,
 } from "../../lib/portal"
-import { ApiError } from "../../lib/api"
-import { orgSlugFromHostname, requestHostname } from "../../lib/host"
-import { setOrgLocale } from "../../lib/locale"
-import { AnswerInput, isFieldVisible, missingRequired } from "../../components/patient/form-fields"
 import { appWords } from "../../lib/product-words"
 import { productUi } from "../../product/product-ui"
+import { PortalAccountSkeleton, PortalAppointmentSkeleton, PortalBudgetsSkeleton, PortalDocumentsSkeleton, PortalPageSkeleton } from "../../components/skeletons/public-portal"
 
 /**
  * El portal del paciente (ADR 0037): lo privado, todo junto y cuando quiera.
@@ -136,9 +156,38 @@ function passkeySupported(): boolean {
 }
 
 function passkeyFriendlyMessage(error: unknown): string {
-  if (error instanceof Error && error.name === "NotAllowedError") return "Se canceló. Vuelve a intentarlo cuando quieras."
-  return portalErrorMessage(error)
+  return portalFormMessage(error) ?? portalErrorMessage(error)
 }
+
+/**
+ * Lo que se dice junto a los botones cuando no es de ningún campo: el gesto
+ * cancelado y el acceso que no está disponible, en palabras del paciente. Sin
+ * respuesta, con un 5xx o con un error del navegador (WebAuthn) no se habla de
+ * «guardar» ni se muestra su texto en inglés. Lo demás, como lo dice la API (`null`).
+ */
+function portalFormMessage(error: unknown): string | null {
+  if (error instanceof Error && error.name === "NotAllowedError") return "Se canceló. Vuelve a intentarlo cuando quieras."
+  if (error instanceof ApiError && error.status === 404) return "Este acceso no está disponible."
+  if (!(error instanceof ApiError) || error.status >= 500 || error.status === 408) return "No pudimos completar la solicitud."
+  return null
+}
+
+/** El código de la clínica que escribe el paciente, como lo pide la API (`portalSlugInput`). */
+const CLINIC_CODE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const clinicCodeSchema = z
+  .string()
+  .transform((text) => text.trim().toLowerCase())
+  .pipe(
+    z
+      .string()
+      .min(1, "Escribe el código de la clínica.")
+      .max(100, "El código de la clínica tiene como mucho 100 caracteres.")
+      .regex(CLINIC_CODE, "Revisa el código de la clínica: solo letras, números y guiones."),
+  )
+/** Sin decir si la clínica existe: lo mismo para un código que no es de nadie y para un portal apagado. */
+const CLINIC_NOT_FOUND = "No encontramos un portal con ese código. Revísalo o pídelo en recepción."
+
+const pinSchema = z.object({ pin: z.string().regex(/^\d{6}$/, "Escribe los 6 dígitos del código.") })
 
 function PortalPage() {
   const { token, org } = Route.useSearch()
@@ -149,7 +198,6 @@ function PortalPage() {
   const [sessionToken, setSessionToken] = useState<string | null>(null)
   const [storedOrg, setStoredOrg] = useState<string | null>(null)
   const [closed, setClosed] = useState(false)
-  const [pin, setPin] = useState("")
   // Acaba de entrar con el enlace y el código: se le ofrece guardar su acceso.
   const [firstEntry, setFirstEntry] = useState(false)
   useEffect(() => {
@@ -167,7 +215,6 @@ function PortalPage() {
       setStoredOrg(slug)
     }
     setClosed(false)
-    setPin("")
   }
 
   const exchange = useMutation({
@@ -180,6 +227,15 @@ function PortalPage() {
       void navigate({ search: { org, token: undefined }, replace: true })
     },
   })
+  const pinForm = useAppForm({
+    defaultValues: { pin: "" },
+    validators: { onSubmit: pinSchema },
+    onSubmit: async ({ value }) => {
+      await exchange.mutateAsync(value.pin)
+    },
+  })
+  const submitPin = useFormSubmit(pinForm, { formMessage: portalFormMessage })
+  const pinError = useFormSubmitError(pinForm)
 
   if (!hydrated) {
     return (
@@ -190,38 +246,37 @@ function PortalPage() {
   }
 
   if (!sessionToken && token && !closed) {
-    const pinValid = /^\d{6}$/.test(pin)
     return (
       <PageShell maxWidth="md">
         <header className="mb-6 flex flex-col gap-1">
           <h1 className="text-xl font-semibold">Tu portal</h1>
-          <p className="text-sm text-muted-foreground">Escribe el código de 6 dígitos que te dieron en la clínica. Nunca llega junto con este enlace.</p>
+          <p id="portal-pin-instrucciones" className="text-sm text-muted-foreground">Escribe el código de 6 dígitos que te dieron en la clínica. Nunca llega junto con este enlace.</p>
         </header>
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (pinValid) exchange.mutate(pin)
-          }}
-        >
-          <Field>
-            <FieldLabel htmlFor="portal-pin">Código</FieldLabel>
-            <Input
-              id="portal-pin"
-              className="min-h-11 text-lg tracking-widest"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              value={pin}
-              onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))}
-            />
-          </Field>
-          {exchange.isError ? (
+        <form className="flex flex-col gap-3" onSubmit={submitPin} noValidate>
+          <pinForm.AppField name="pin">
+            {(field) => (
+              <field.Control label="Código" id="portal-pin">
+                {(control) => (
+                  <Input
+                    {...control.props}
+                    aria-describedby={[control.describedBy, "portal-pin-instrucciones"].filter(Boolean).join(" ")}
+                    className="min-h-11 text-lg tracking-widest"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={field.state.value}
+                    onChange={(event) => field.handleChange(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                  />
+                )}
+              </field.Control>
+            )}
+          </pinForm.AppField>
+          {pinError ? (
             <p role="alert" className="text-sm text-destructive">
-              {portalErrorMessage(exchange.error)}
+              {pinError}
             </p>
           ) : null}
-          <SubmitButton type="submit" className="min-h-11 w-full" pending={exchange.isPending} disabled={!pinValid}>
+          <SubmitButton type="submit" className="min-h-11 w-full" pending={exchange.isPending}>
             Entrar
           </SubmitButton>
           <p className="text-sm text-muted-foreground">Si el enlace venció o el código no funciona, pide uno nuevo en recepción.</p>
@@ -253,11 +308,25 @@ function PortalPage() {
 
 /** Sin sesión: entrar con su huella o su cara. El acceso lo da recepción. */
 function PortalLanding({ initialOrg, closed, onSession }: { initialOrg: string; closed: boolean; onSession: (token: string, slug: string) => void }) {
-  const [orgInput, setOrgInput] = useState(initialOrg)
-  const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+  const queryClient = useQueryClient()
   const hostnameOrg = defaultOrgSlug()
-  const slug = (hostnameOrg !== "" ? hostnameOrg : orgInput).trim()
+  const form = useAppForm({
+    defaultValues: { orgSlug: initialOrg },
+    // Con la clínica en la dirección no se escribe nada: el campo no está y siempre pasa.
+    validators: { onSubmit: z.object({ orgSlug: hostnameOrg !== "" ? z.string() : clinicCodeSchema }) },
+    onSubmit: async ({ value }) => {
+      const slug = hostnameOrg !== "" ? hostnameOrg : value.orgSlug.trim().toLowerCase()
+      const challenge = await requestPasskeyAuthOptionsApi(slug)
+      const response = await startAuthentication({ optionsJSON: challenge.options })
+      const result = await verifyPasskeyAuthApi(slug, { challengeId: challenge.challengeId, response })
+      onSession(result.sessionToken, slug)
+    },
+  })
+  const login = useFormSubmit(form, { formMessage: portalFormMessage })
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const typed = useStore(form.store, (state) => state.values.orgSlug.trim().toLowerCase())
+  const slug = hostnameOrg !== "" ? hostnameOrg : typed.length <= 100 && CLINIC_CODE.test(typed) ? typed : ""
   const policy = useQuery({
     queryKey: ["public-portal-policy", slug],
     queryFn: () => fetchPublicPortalPolicyApi(slug),
@@ -265,21 +334,6 @@ function PortalLanding({ initialOrg, closed, onSession }: { initialOrg: string; 
     retry: false,
   })
   const supported = passkeySupported()
-  async function login() {
-    if (slug === "" || pending) return
-    setPending(true)
-    setError(null)
-    try {
-      const challenge = await requestPasskeyAuthOptionsApi(slug)
-      const response = await startAuthentication({ optionsJSON: challenge.options })
-      const result = await verifyPasskeyAuthApi(slug, { challengeId: challenge.challengeId, response })
-      onSession(result.sessionToken, slug)
-    } catch (e) {
-      setError(passkeyFriendlyMessage(e))
-    } finally {
-      setPending(false)
-    }
-  }
   return (
     <PageShell maxWidth="md">
       <header className="mb-6 flex flex-col gap-1">
@@ -287,19 +341,47 @@ function PortalLanding({ initialOrg, closed, onSession }: { initialOrg: string; 
         <h1 className="text-xl font-semibold">{closed ? "Cerraste tu sesión" : "Tu portal"}</h1>
         <p className="text-sm text-muted-foreground">Tus citas, presupuestos y documentos, cuando quieras.</p>
       </header>
-      <div className="flex flex-col gap-4">
+      <form className="flex flex-col gap-4" onSubmit={login} noValidate>
         {hostnameOrg === "" ? (
-          <Field>
-            <FieldLabel htmlFor="portal-org">Código de la clínica</FieldLabel>
-            <Input id="portal-org" className="min-h-11" maxLength={128} value={orgInput} onChange={(event) => setOrgInput(event.target.value)} />
-          </Field>
+          <form.AppField
+            name="orgSlug"
+            validators={{
+              // Un código bien escrito que no lleva a un portal encendido se dice aquí, sin decir si la clínica existe.
+              onChangeAsyncDebounceMs: 400,
+              onChangeAsync: async ({ value }) => {
+                const code = value.trim().toLowerCase()
+                if (code.length > 100 || !CLINIC_CODE.test(code)) return undefined
+                const found = await queryClient
+                  .fetchQuery({
+                    queryKey: ["public-portal-policy", code],
+                    queryFn: () => fetchPublicPortalPolicyApi(code),
+                    retry: false,
+                    staleTime: 30_000,
+                  })
+                  .catch(() => null)
+                return found && !found.enabled ? CLINIC_NOT_FOUND : undefined
+              },
+            }}
+          >
+            {(field) => (
+              <field.TextField
+                label="Código de la clínica"
+                id="portal-org"
+                inputClassName="min-h-11"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                maxLength={100}
+              />
+            )}
+          </form.AppField>
         ) : null}
-        {policy.data && !policy.data.enabled ? (
+        {hostnameOrg !== "" && policy.data && !policy.data.enabled ? (
           <p className="text-sm text-muted-foreground" role="note">
             Esta clínica no tiene el portal encendido.
           </p>
         ) : supported ? (
-          <SubmitButton type="button" className="min-h-11 w-full" pending={pending} disabled={slug === ""} onClick={() => void login()}>
+          <SubmitButton type="submit" className="min-h-11 w-full" pending={pending}>
             <Fingerprint className="size-4" aria-hidden />
             Entrar con mi huella o mi cara
           </SubmitButton>
@@ -314,7 +396,7 @@ function PortalLanding({ initialOrg, closed, onSession }: { initialOrg: string; 
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">¿Aún no tienes acceso? Pídelo en recepción.</p>
-      </div>
+      </form>
     </PageShell>
   )
 }
@@ -585,7 +667,6 @@ function NextAppointment({ sessionToken }: { sessionToken: string }) {
 
 /** Cambiar la cita: la semana de horarios de «Su enlace», en la misma sede y con la misma duración. */
 function Reschedule({ sessionToken, appointment, onDone, onKeep }: { sessionToken: string; appointment: PortalAppointment; onDone: () => void; onKeep: () => void }) {
-  const [chosen, setChosen] = useState<WeekSlot | null>(null)
   const week = useWeekSlots({
     queryKey: ["portal-slots", sessionToken, appointment.id],
     fetchSlots: (range) => fetchPortalRescheduleSlots(sessionToken, appointment.id, range),
@@ -601,37 +682,54 @@ function Reschedule({ sessionToken, appointment, onDone, onKeep }: { sessionToke
         professionalUserId: slot.professionalUserId,
         ...(slot.roomId ? { roomId: slot.roomId } : {}),
       }),
-    onSuccess: onDone,
-    onError: () => {
-      setChosen(null)
-      week.refresh()
+  })
+  const form = useAppForm({
+    defaultValues: { slot: null as WeekSlot | null },
+    validators: { onSubmit: z.object({ slot: chosenSlotSchema("Elige un día y una hora para cambiarla.") }) },
+    onSubmit: async ({ value, formApi }) => {
+      if (!value.slot) return
+      try {
+        await move.mutateAsync(value.slot)
+      } catch (error) {
+        const shown = slotTakenError(error)
+        // Solo si el horario se ocupó se vuelve a pedir lo libre; con otro motivo la elección se conserva.
+        if (shown !== error) {
+          formApi.setFieldValue("slot", null)
+          week.refresh()
+        }
+        throw shown
+      }
+      onDone()
     },
   })
+  const submit = useFormSubmit(form, { fieldMap: SLOT_FIELD_MAP, formMessage: portalFormMessage })
+  const error = useFormSubmitError(form)
+  const chosen = useStore(form.store, (state) => state.values.slot)
   const zone = week.timeZone
   return (
-    <section aria-label="Cambiar tu cita" className="flex flex-col gap-4">
+    <form aria-label="Cambiar tu cita" className="flex flex-col gap-4" onSubmit={submit} noValidate>
       <div className="flex flex-col gap-1">
         <h2 className="font-semibold">Cambia tu cita</h2>
         <p className="text-sm text-muted-foreground">
           Hoy la tienes el {longDay(appointment.startsAt, appointment.timeZone ?? zone).toLowerCase()}, {timeLabel(appointment.startsAt, appointment.timeZone ?? zone)} · Sede {appointment.branchName}.
         </p>
       </div>
-      <ProfessionalSelect state={week} id="portal-profesional" onChange={() => setChosen(null)} />
-      <WeekSlotsGrid state={week} chosen={chosen} onChoose={setChosen} minutes={minutes} />
-      {move.isError ? (
+      <ProfessionalSelect state={week} id="portal-profesional" onChange={() => form.setFieldValue("slot", null)} />
+      <form.AppField name="slot">{() => <WeekSlotsField state={week} minutes={minutes} />}</form.AppField>
+      {error ? (
         <p role="alert" className="text-sm text-destructive">
-          {portalErrorMessage(move.error)}
+          {error}
         </p>
       ) : null}
       <div className="flex flex-col gap-2 sm:flex-row">
-        <SubmitButton type="button" className="min-h-11" pending={move.isPending} disabled={chosen === null} onClick={() => chosen && move.mutate(chosen)}>
+        <SubmitButton type="submit" className="min-h-11" pending={move.isPending}>
           {chosen ? `Cambiar a ${shortDay(chosen.startsAt, zone)}, ${timeLabel(chosen.startsAt, zone)}` : "Cambiar a este horario"}
         </SubmitButton>
         <Button type="button" variant="outline" className="min-h-11" onClick={onKeep}>
           Conservar mi cita
         </Button>
       </div>
-    </section>
+    </form>
   )
 }
 
@@ -727,7 +825,12 @@ function GrantSwitcher({ sessionToken, currentPatientId, onSessionToken }: { ses
           if (value && value !== current?.id) select.mutate(value)
         }}
       >
-        <SelectTrigger id="portal-grant-switch" className="min-h-11 w-full">
+        <SelectTrigger
+          id="portal-grant-switch"
+          className="min-h-11 w-full"
+          aria-invalid={select.isError || undefined}
+          aria-describedby={select.isError ? "portal-grant-switch-error" : undefined}
+        >
           <SelectValue>{current?.patientName ?? "Elige"}</SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -738,7 +841,7 @@ function GrantSwitcher({ sessionToken, currentPatientId, onSessionToken }: { ses
           ))}
         </SelectContent>
       </Select>
-      {select.isError ? <p className="text-sm text-destructive">{portalErrorMessage(select.error)}</p> : null}
+      {select.isError ? <FieldError id="portal-grant-switch-error">{portalErrorMessage(select.error)}</FieldError> : null}
     </Field>
   )
 }
@@ -748,25 +851,11 @@ function GrantSwitcher({ sessionToken, currentPatientId, onSessionToken }: { ses
  * pasos (una sección por paso); se guarda el avance al cambiar de paso.
  */
 function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
-  const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ["portal-questionnaire", sessionToken],
     queryFn: () => fetchPortalQuestionnaire(sessionToken),
   })
-  const [answers, setAnswers] = useState<Record<string, unknown> | null>(null)
-  const [step, setStep] = useState(0)
-  const [error, setError] = useState<string | null>(null)
   const [sentNow, setSentNow] = useState(false)
-  const save = useMutation({
-    mutationFn: (submit: boolean) =>
-      savePortalQuestionnaireApi(sessionToken, { answers: answers ?? {}, submit }),
-    onSuccess: (data, submit) => {
-      setError(null)
-      if (submit) setSentNow(true)
-      queryClient.setQueryData(["portal-questionnaire", sessionToken], data)
-    },
-    onError: (e) => setError(portalErrorMessage(e)),
-  })
   if (query.isPending) return null
   if (query.isError) return <ErrorState message={portalErrorMessage(query.error)} onRetry={() => void query.refetch()} />
   const { template, response, respondent } = query.data
@@ -779,18 +868,98 @@ function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
       </p>
     )
   }
-  const current = answers ?? response?.answers ?? {}
+  return (
+    <QuestionnaireForm
+      // Las respuestas iniciales se toman una vez por respuesta: guardar el avance no reinicia lo escrito.
+      key={`${template.id}:${response?.id ?? "nueva"}`}
+      sessionToken={sessionToken}
+      template={template}
+      initialAnswers={response?.answers ?? {}}
+      respondent={respondent}
+      onSent={() => setSentNow(true)}
+    />
+  )
+}
+
+/** Lo que hace el paso al enviarse: volver, seguir (con lo obligatorio del paso) o enviar todo. */
+type QuestionnaireIntent = { kind: "back" | "next"; to: number } | { kind: "send" }
+
+function QuestionnaireForm({
+  sessionToken,
+  template,
+  initialAnswers,
+  respondent,
+  onSent,
+}: {
+  sessionToken: string
+  template: NonNullable<PortalQuestionnaire["template"]>
+  initialAnswers: Record<string, unknown>
+  respondent: PortalQuestionnaire["respondent"]
+  onSent: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [step, setStep] = useState(0)
+  const intent = useRef<QuestionnaireIntent>({ kind: "send" })
   const sections = template.schema.sections
-  const section = sections[Math.min(step, sections.length - 1)]!
+  const index = Math.min(step, sections.length - 1)
+  const section = sections[index]!
   const last = step >= sections.length - 1
-  const sectionMissing = missingRequired({ sections: [section] }, current)
-  const goTo = async (next: number) => {
-    if (answers) await save.mutateAsync(false).catch(() => {})
-    setStep(next)
-    window.scrollTo({ top: 0 })
+  const save = useMutation({
+    mutationFn: (input: { answers: Record<string, unknown>; submit: boolean }) => savePortalQuestionnaireApi(sessionToken, input),
+  })
+  const form = useAppForm({
+    defaultValues: { answers: initialAnswers },
+    validators: {
+      // Lo obligatorio que falta se dice en su pregunta: del paso al seguir, de todo al enviar.
+      onSubmit: ({ value }) => {
+        const now = intent.current
+        if (now.kind === "back") return undefined
+        const scope = now.kind === "send" ? template.schema : { sections: sections.slice(now.to - 1, now.to) }
+        const missing = missingRequired(scope, value.answers)
+        if (missing.length === 0) return undefined
+        return { fields: Object.fromEntries(missing.map((field) => [`answers.${field.id}`, "Responde esta pregunta."])) }
+      },
+    },
+    onSubmit: async ({ value, formApi }) => {
+      const now = intent.current
+      // Volver o seguir sin cambios no guarda nada; con cambios, el avance se guarda antes de pasar.
+      if (now.kind === "send" || formApi.state.isDirty) {
+        const data = await save.mutateAsync({ answers: value.answers, submit: now.kind === "send" })
+        queryClient.setQueryData(["portal-questionnaire", sessionToken], data)
+        formApi.reset(value)
+      }
+      if (now.kind === "send") {
+        onSent()
+        return
+      }
+      setStep(now.to)
+      window.scrollTo({ top: 0 })
+    },
+  })
+  const error = useFormSubmitError(form)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const answers = useStore(form.store, (state) => state.values.answers)
+  const run = async (next: QuestionnaireIntent) => {
+    intent.current = next
+    if (await submitForm(form, { formMessage: portalFormMessage })) return
+    // Lo que hay que corregir puede estar en otro paso (lo dice el servidor): se va a ese paso.
+    const meta = form.state.fieldMeta as Record<string, { errors?: unknown[] } | undefined>
+    const wrong = sections.findIndex((item) => item.fields.some((field) => (meta[`answers.${field.id}`]?.errors?.length ?? 0) > 0))
+    if (wrong >= 0 && wrong !== index) {
+      setStep(wrong)
+      focusFirstInvalid(null)
+    }
   }
   return (
-    <section aria-labelledby="questionnaire-title" className="flex flex-col gap-4 rounded-2xl border bg-card p-4">
+    <form
+      aria-labelledby="questionnaire-title"
+      className="flex flex-col gap-4 rounded-2xl border bg-card p-4"
+      noValidate
+      onSubmit={(event) => {
+        event.preventDefault()
+        void run(last ? { kind: "send" } : { kind: "next", to: step + 1 })
+      }}
+    >
       <div>
         <h2 id="questionnaire-title" className="text-lg font-semibold">
           Antes de tu cita · {template.title}
@@ -800,24 +969,21 @@ function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
           {respondent.relationship === "self" ? " (tú)" : ""}
         </p>
         <p className="mt-1 text-sm font-medium" aria-live="polite">
-          Paso {step + 1} de {sections.length} · {section.title}
+          Paso {index + 1} de {sections.length} · {section.title}
         </p>
       </div>
-      <div className="flex flex-col gap-4">
-        {section.fields
-          .filter((field) => isFieldVisible(field, current))
-          .map((field) => (
-            <AnswerInput
-              key={field.id}
-              field={field}
-              value={current[field.id]}
-              onChange={(value) => {
-                setError(null)
-                setAnswers({ ...current, [field.id]: value })
-              }}
-            />
-          ))}
-      </div>
+      {/* Todos los pasos quedan montados (solo se ve el actual) para que cada error llegue a su pregunta. */}
+      {sections.map((item, position) => (
+        <div key={item.title + String(position)} hidden={position !== index} className="flex flex-col gap-4">
+          {item.fields
+            .filter((field) => isFieldVisible(field, answers))
+            .map((field) => (
+              <form.AppField key={field.id} name={`answers.${field.id}`}>
+                {() => <AnswerAppField field={field} />}
+              </form.AppField>
+            ))}
+        </div>
+      ))}
       <p className="text-xs text-muted-foreground">
         Tu {appWords().clinician.one} revisará estas respuestas contigo en la cita. Guardamos tu avance; puedes
         continuar más tarde desde el mismo enlace.
@@ -828,42 +994,14 @@ function QuestionnaireBlock({ sessionToken }: { sessionToken: string }) {
         </p>
       ) : null}
       <div className="flex justify-between gap-2">
-        <Button type="button" variant="outline" disabled={step === 0 || save.isPending} onClick={() => void goTo(step - 1)}>
+        <Button type="button" variant="outline" disabled={step === 0 || pending} onClick={() => void run({ kind: "back", to: step - 1 })}>
           Atrás
         </Button>
-        {last ? (
-          <Button
-            type="button"
-            disabled={save.isPending}
-            onClick={() => {
-              const pending = missingRequired(template.schema, current)
-              if (pending.length > 0) {
-                setError(`Falta responder: ${pending.map((f) => f.label).join(", ")}`)
-                return
-              }
-              save.mutate(true)
-            }}
-          >
-            {save.isPending ? "Enviando…" : "Enviar respuestas"}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            disabled={save.isPending}
-            onClick={() => {
-              if (sectionMissing.length > 0) {
-                setError(`Falta responder: ${sectionMissing.map((f) => f.label).join(", ")}`)
-                return
-              }
-              setError(null)
-              void goTo(step + 1)
-            }}
-          >
-            Continuar
-          </Button>
-        )}
+        <Button type="submit" disabled={pending}>
+          {last ? (pending ? "Enviando…" : "Enviar respuestas") : "Continuar"}
+        </Button>
       </div>
-    </section>
+    </form>
   )
 }
 

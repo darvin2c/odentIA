@@ -1,11 +1,10 @@
-import { ConfirmDialog } from "@odentia/ui-patterns"
+import { ConfirmDialog, submitErrorMessage } from "@odentia/ui-patterns"
 import { useQueryClient } from "@tanstack/react-query"
 import { type ReactNode, useState } from "react"
 import { useReceptionName } from "../../lib/agent-names"
 import { apiFetch } from "../../lib/api"
 import { resolveWords } from "../../lib/conversation-state"
 import type { ResolvePreview } from "../../lib/crm"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { invalidateAgentPanelQueries } from "../agent-panel"
 
 /**
@@ -80,7 +79,7 @@ export function useCompleteTask(onCompleted: () => void): {
       }
       await markDone(taskId)
     } catch (cause) {
-      setError(mutationErrorMessage(cause) ?? "No se pudo completar la tarea. Inténtalo de nuevo.")
+      setError(submitErrorMessage(cause))
     } finally {
       setPendingId(null)
     }
@@ -93,7 +92,7 @@ export function useCompleteTask(onCompleted: () => void): {
       await markDone(confirming.taskId)
       setConfirming(null)
     } catch (cause) {
-      setError(mutationErrorMessage(cause) ?? "No se pudo completar la tarea. Inténtalo de nuevo.")
+      setError(submitErrorMessage(cause))
     } finally {
       setPendingId(null)
     }
@@ -108,15 +107,11 @@ export function useCompleteTask(onCompleted: () => void): {
       confirmLabel="Completar y resolver"
       variant="default"
       pending={pendingId !== null && confirming !== null}
+      error={confirming ? error : null}
       onClose={() => setConfirming(null)}
       onConfirm={() => void confirm()}
     >
       {confirming ? <ResolvePreviewDetails name={name} preview={confirming.result.preview} /> : null}
-      {confirming && error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
     </ConfirmDialog>
   )
   return { complete, pendingId, error: confirming ? null : error, dialog }

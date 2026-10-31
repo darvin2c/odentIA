@@ -1,7 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { member, user } from "@odentia/db/schema/auth"
 import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { automationConsent } from "@odentia/db/schema/automation"
 import { opportunityEvent } from "@odentia/db/schema/opportunities"
 import type { Page } from "@playwright/test"
 import { eq } from "drizzle-orm"
@@ -433,7 +435,9 @@ test("crm ventas: un «hola» no crea oportunidad; mover una no mueve las otras;
   await page.getByRole("button", { name: "Acciones de Control preventivo", exact: true }).click()
   await page.getByRole("menuitem", { name: "Perdida", exact: true }).click()
   const closing = page.getByRole("alertdialog", { name: "Perdida: Control preventivo" })
-  await expect(closing.getByRole("button", { name: "Marcar perdida" })).toBeDisabled()
+  // Sin motivo no se deshabilita: al confirmar, el motivo dice qué falta.
+  await closing.getByRole("button", { name: "Marcar perdida" }).click()
+  await expect(closing.getByText("Elige por qué se perdió.")).toBeVisible()
   await closing.getByRole("radio", { name: "Precio" }).check()
   await closing.getByRole("button", { name: "Marcar perdida" }).click()
   await expect(closing).toBeHidden()
@@ -610,15 +614,32 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
 }, info) => {
   const { page, org } = owner
   await call(page, "POST", "/api/agenda/rooms", org.slug, { branchId: owner.branchId, name: "Unidad dental 1" }, 201)
+  // Ya es paciente y le falta un dato que la clínica necesita: su fecha de nacimiento (con el registro de siempre,
+  // lo demás que la ficha no tiene es opcional).
   const patient = await call<{ id: string }>(page, "POST", "/api/patients", org.slug, {
     submissionId: randomUUID(),
-    answers: { demographics: { displayName: "Eva Rojas", docType: "DNI", docNumber: "45678902" }, respondent: "staff", privacyAccepted: false },
+    answers: {
+      demographics: { displayName: "Eva Rojas", givenNames: "Eva", familyName: "Rojas", docType: "DNI", docNumber: "45678902", phone: "+51987650302" },
+      respondent: "staff",
+      privacyAccepted: false,
+    },
   }, 201)
-  await call(page, "PUT", "/api/agenda/schedules", org.slug, {
-    branchId: owner.branchId,
-    professionalUserId: owner.user.id,
-    rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
-  }, 200)
+  // Tres personas atienden: con «Cualquiera», la fila de «¿Con quién?» no cabe en el teléfono y se desliza.
+  const milagros = `${org.id}-milagros`
+  const silvia = `${org.id}-silvia`
+  const colleagues = [milagros, silvia]
+  await fixtureDb.insert(user).values([
+    { id: milagros, name: "Dra. Milagros Díaz", email: `${milagros}@crm.test`, emailVerified: true },
+    { id: silvia, name: "Dra. Silvia Rojas", email: `${silvia}@crm.test`, emailVerified: true },
+  ])
+  await fixtureDb.insert(member).values(colleagues.map((userId) => ({ id: randomUUID(), organizationId: org.id, userId, role: "clinician", createdAt: new Date() })))
+  for (const professionalUserId of [owner.user.id, ...colleagues]) {
+    await call(page, "PUT", "/api/agenda/schedules", org.slug, {
+      branchId: owner.branchId,
+      professionalUserId,
+      rules: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({ weekday, startMin: 7 * 60, endMin: 22 * 60 })),
+    }, 200)
+  }
   const tg = await createTelegramConnection(page, org.slug)
   const tgUser = nextEventId()
   expect(await simulateTelegramInbound(page, API, tg.id, tg.webhookSecret, { fromId: tgUser, chatId: tgUser, text: "Quiero una cita", updateId: nextEventId() })).toBe(200)
@@ -637,49 +658,95 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
     expiresAt: new Date(Date.now() + 3_600_000),
   })
 
-  // Teléfono: elegir día y hora.
+  // Teléfono: con quién y cuándo, en una sola pantalla.
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, `/reserva?token=${token}`))
-  await expect(page.getByRole("heading", { name: "Elige tu cita" })).toBeVisible()
-  // Es para ella misma: «para Eva» solo se dice cuando la cita es de otra persona (su hijo, por ejemplo).
-  await expect(page.getByRole("region", { name: "Para qué es la cita" })).toContainText("Consulta")
-  await expect(page.getByRole("region", { name: "Para qué es la cita" })).not.toContainText("para Eva")
-  // En teléfono el contexto va en una tarjeta compacta; «Cambiar» abre con quién: cualquier profesional o uno en concreto.
-  await expect(page.getByText(/paso 1 de 2/)).toBeVisible()
-  // La semana siguiente siempre tiene horarios: la de hoy depende del día y la hora en que corre la prueba.
-  await page.getByRole("button", { name: "Semana siguiente", exact: true }).click()
-  await expect(page.getByLabel("Profesional")).toBeHidden()
-  await page.getByRole("button", { name: "Cambiar", exact: true }).click()
-  await expect(page.getByLabel("Profesional")).toBeVisible()
-  await page.getByRole("button", { name: "Listo", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Reserva tu cita" })).toBeVisible()
+  // Una sola sede: dos pasos, con quién y cuándo, y revisar.
+  await expect(page.getByText(/Paso 1 de 2 · Con quién y cuándo/)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "¿Con quién?" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^Cualquiera/ })).toBeVisible()
+  // Lo que no cabe se desliza dentro de su fila: la página no se ensancha.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+  // Los 7 días siguientes siempre tienen horarios: los de hoy dependen de la hora en que corre la prueba.
+  await page.getByRole("button", { name: "Los 7 días siguientes", exact: true }).click()
   const slots = page.getByRole("group", { name: /Mañana|Tarde/ }).first()
   await expect(slots.getByRole("button").first()).toBeVisible()
   // La página no muestra tarifas.
   expect(await page.locator("body").innerText()).not.toMatch(/S\/|precio|tarifa/i)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await slots.getByRole("button").first().click()
-  // El botón que reserva queda fijo abajo y dice el horario elegido.
-  await expect(page.getByRole("button", { name: /^Reservar \S+ \d+, / })).toBeInViewport()
+  // El botón que avanza queda fijo abajo y dice el horario elegido.
+  const continueTo = page.getByRole("button", { name: /^Continuar · / })
+  await expect(continueTo).toBeInViewport()
   await info.attach("reserva-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
-  // Web: la misma página, con el resumen al lado.
+  // Web: la misma página, con «Tu cita» al lado; se puede elegir otra hora ahí mismo.
   await page.setViewportSize({ width: 1280, height: 800 })
-  // En pantalla ancha la semana se ve entera, un día por columna; se puede elegir otra hora ahí mismo.
-  const semana = page.getByTestId("semana")
-  // Se ve la semana de calendario, sin los días que ya pasaron.
-  await expect(page.getByRole("region", { name: "Horarios libres" })).toContainText(/Semana del \d+ al \d+ de /)
-  await semana.getByRole("group").last().getByRole("button").first().click()
-  await expect(page.getByRole("complementary", { name: "Tu cita" })).toContainText("Consulta")
+  const summary = page.getByRole("complementary", { name: "Tu cita" })
+  await expect(summary).toContainText("Consulta")
+  await page.getByRole("group", { name: /Mañana|Tarde/ }).last().getByRole("button").first().click()
   await info.attach("reserva-web", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
-  await expect(page.getByRole("complementary", { name: "Tu cita" })).toContainText("Podrás cambiarla o cancelarla desde este mismo enlace.")
-  await page.getByRole("complementary", { name: "Tu cita" }).getByRole("button", { name: "Reservar" }).click()
+  await summary.getByRole("button", { name: "Continuar", exact: true }).click()
+
+  // «Revisa y reserva»: lo que ya sabemos de ella (el documento abreviado) y solo lo que falta.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole("heading", { name: "Revisa y reserva" })).toBeVisible()
+  await expect(page.getByText(/Paso 2 de 2 · Revisa y reserva/)).toBeVisible()
+  // Es para ella misma: «Para Eva» solo se dice cuando la cita es de otra persona (su hijo, por ejemplo).
+  await expect(page.getByRole("region", { name: "Tu cita" })).toContainText("Consulta")
+  await expect(page.getByRole("region", { name: "Tu cita" })).not.toContainText("Para Eva")
+  const yourData = page.getByRole("region", { name: "Tus datos" })
+  await expect(yourData).toContainText("Eva Rojas")
+  await expect(yourData).toContainText("DNI ••••8902")
+  await expect(yourData).not.toContainText("45678902")
+  await expect(page.getByText("Nos falta un dato:", { exact: true })).toBeVisible()
+  // Si el nombre de su ficha no es el suyo, lo corrige ahí mismo: con su documento entero, porque el enlace prueba su chat, no quién es.
+  await yourData.getByRole("button", { name: "Corregir tu nombre" }).click()
+  await expect(yourData.getByLabel("Nombres")).toHaveValue("Eva")
+  await expect(yourData.getByLabel("Apellidos")).toHaveValue("Rojas")
+  await yourData.getByLabel("Nombres").fill("Eva María")
+  await yourData.getByLabel("Tu DNI completo").fill("45678902")
+  await expect(page.getByText(/^Te escribiremos por WhatsApp al .+ sobre esta cita: la confirmación, los recordatorios y los cambios\.$/)).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
+  // Sin lo que falta no reserva: lo dice junto a cada campo y lleva el foco al primero.
+  const reserve = page.getByRole("button", { name: "Reservar mi cita", exact: true })
+  await expect(reserve).toBeInViewport()
+  await reserve.click()
+  await expect(page.getByText("Escribe tu fecha de nacimiento")).toBeVisible()
+  await expect(page.getByText("Elige una opción")).toBeVisible()
+  await expect(page.getByLabel("Fecha de nacimiento")).toBeFocused()
+  await page.getByLabel("Fecha de nacimiento").fill("14/02/1990")
+  // Novedades y promociones: nunca respondió, se pregunta sin nada marcado.
+  await expect(page.getByRole("radio", { name: "Sí, quiero" })).not.toBeChecked()
+  await expect(page.getByRole("radio", { name: "No, gracias" })).not.toBeChecked()
+  await page.getByRole("radio", { name: "Sí, quiero" }).click()
+  await info.attach("reserva-revisa-paciente", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" })
+  await reserve.click()
+  // Lo que eligió ella misma queda confirmado: no se le pide «Confirmar» después.
   await expect(page.getByRole("heading", { name: "Tu cita quedó reservada" })).toBeVisible()
+  await expect(page.getByText("Te lo confirmamos también por el chat.")).toBeVisible()
+  await expect(page.getByRole("region", { name: "Tu cita" })).toContainText("Confirmada")
+  await expect(page.getByRole("button", { name: "Confirmar", exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Añadir al calendario" })).toBeVisible()
+  // Ya no le falta ningún dato; su salud queda como opcional.
+  await expect(page.getByRole("region", { name: "Tu salud" })).toContainText("Opcional")
   await info.attach("reserva-lista", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
 
   // Queda en la agenda como cualquier cita, con su origen, y la confirmación va a la conversación.
   const rows = await fixtureDb.select().from(appointment).where(eq(appointment.patientId, patient.id))
-  expect(rows.map((row) => [row.status, row.source, row.conversationId])).toEqual([["programada", "enlace", conversation.id]])
+  expect(rows.map((row) => [row.status, row.source, row.conversationId])).toEqual([["confirmada", "enlace", conversation.id]])
+  // Lo que faltaba y lo que aceptó se guardó en el mismo paso: su fecha, los mensajes de su cita y las novedades.
+  const saved = await call<{ patient: { birthDate: string | null; displayName: string } }>(page, "GET", `/api/patients/${patient.id}`, org.slug)
+  expect(saved.patient.birthDate).toBe("1990-02-14")
+  expect(saved.patient.displayName).toBe("Eva María Rojas")
+  const permissions = await fixtureDb.select().from(automationConsent).where(eq(automationConsent.contactId, conversation.contact.id))
+  expect(permissions.map((row) => [row.purpose, row.status])).toEqual(
+    expect.arrayContaining([
+      ["recordatorio", "granted"],
+      ["novedades", "granted"],
+    ]),
+  )
   const confirmations = await fixtureDb.select().from(agentProposal).where(eq(agentProposal.conversationId, conversation.id))
   expect(confirmations.filter((row) => row.action === "enviar_mensaje").map((row) => String((row.payload as { text?: string }).text))).toEqual([
     expect.stringMatching(/^Listo: tu cita quedó para el /),
@@ -704,18 +771,25 @@ test("reserva por enlace: la persona elige su cita viendo los horarios libres, s
   await expect(yourAppointment).toBeVisible()
   const firstStart = rows[0]!.startsAt.toISOString()
   await yourAppointment.getByRole("button", { name: "Cambiar", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Cambia tu cita" })).toBeVisible()
-  await page.getByRole("button", { name: "Semana siguiente", exact: true }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Cambia tu cita" })).toBeVisible()
+  // Una semana más allá: otra hora, siempre libre, distinta de la que tiene.
+  await page.getByRole("button", { name: "Los 7 días siguientes", exact: true }).click()
   await page.getByRole("group", { name: /Mañana|Tarde/ }).first().getByRole("button").first().click()
   // En teléfono el botón que avanza queda fijo abajo y dice el horario elegido.
-  const changeTo = page.getByRole("button", { name: /^Cambiar a \S+ \d+, / })
+  const changeTo = page.getByRole("button", { name: /^Continuar · / })
   await expect(changeTo).toBeInViewport()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0)
   await info.attach("reserva-cambiar-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await changeTo.click()
+  await expect(page.getByRole("heading", { name: "Revisa el cambio" })).toBeVisible()
+  await expect(page.getByText("Es la misma cita en otro horario: no se crea otra.", { exact: false })).toBeVisible()
+  // Ya respondió lo de novedades al reservar: no se le vuelve a preguntar.
+  await expect(page.getByRole("radio", { name: "Sí, quiero" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Cambiar mi cita", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Tu cita quedó cambiada" })).toBeVisible()
   const movedRows = await fixtureDb.select().from(appointment).where(eq(appointment.patientId, patient.id))
-  expect(movedRows.map((row) => [row.id, row.status])).toEqual([[rows[0]!.id, "programada"]])
+  // Es la misma cita, y sigue confirmada.
+  expect(movedRows.map((row) => [row.id, row.status])).toEqual([[rows[0]!.id, "confirmada"]])
   expect(movedRows[0]!.startsAt.toISOString()).not.toBe(firstStart)
 
   await yourAppointment.getByRole("button", { name: "Cancelar", exact: true }).click()

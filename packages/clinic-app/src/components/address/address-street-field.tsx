@@ -10,9 +10,12 @@ import type { AddressPick, AddressSource, AddressSuggestion } from "../../lib/ad
  * su nombre); elegir una llena lo demás, que se puede corregir. Las
  * sugerencias nunca obligan: lo escrito se guarda tal cual. Sin proveedor, sin
  * respuesta o pasado el tope del día, es un campo de texto como cualquiera.
+ *
+ * La etiqueta, la ayuda y el error los pinta la pantalla; el campo solo suma
+ * su pista (qué hacer si no aparece, qué llenó la elección) a `aria-describedby`.
  */
 export function AddressStreetField({
-  id,
+  id: idProp,
   value,
   onChange,
   onPick,
@@ -22,8 +25,10 @@ export function AddressStreetField({
   maxLength = 300,
   invalid = false,
   autoComplete = "street-address",
+  onBlur,
+  "aria-describedby": describedBy,
 }: {
-  id: string
+  id?: string
   value: string
   /** Lo escrito: también cuando no se elige ninguna sugerencia. */
   onChange: (value: string) => void
@@ -35,9 +40,14 @@ export function AddressStreetField({
   /** Lo que se dice después de elegir: «Lo llenó Google Maps; puedes corregirlo…». */
   pickedHint: string
   maxLength?: number
+  /** El error lo dice la pantalla: el campo solo se marca. */
   invalid?: boolean
   autoComplete?: string
+  onBlur?: () => void
+  "aria-describedby"?: string
 }) {
+  const fallbackId = useId()
+  const id = idProp ?? fallbackId
   const hintId = useId()
   // Una sesión por búsqueda: termina al elegir (el proveedor cobra la búsqueda entera una sola vez).
   const [session, setSession] = useState(() => crypto.randomUUID())
@@ -113,7 +123,8 @@ export function AddressStreetField({
           maxLength={maxLength}
           autoComplete={autoComplete}
           aria-invalid={invalid || undefined}
-          aria-describedby={picked || (source && !off) ? hintId : undefined}
+          aria-describedby={[describedBy, picked || (source && !off) ? hintId : undefined].filter(Boolean).join(" ") || undefined}
+          onBlur={() => onBlur?.()}
           showTrigger={false}
         />
         <ComboboxContent aria-label="Direcciones sugeridas">

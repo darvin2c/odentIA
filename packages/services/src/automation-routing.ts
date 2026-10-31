@@ -150,6 +150,8 @@ export async function composeJobMessage(
   const upcoming =
     spec.key === "recordatorio_cita" ||
     spec.key === "recordatorio_cita_datos" ||
+    spec.key === "recordatorio_cita_confirmada" ||
+    spec.key === "cita_sin_llegar" ||
     spec.key === "aviso_cita_reservada" ||
     spec.key === "aviso_cita_reservada_datos" ||
     spec.key === "aviso_cita_movida"

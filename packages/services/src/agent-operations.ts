@@ -29,11 +29,11 @@ import {
   pipelineStage,
 } from "@odentia/db/schema/crm"
 import { patient, patientResponsibility, treatmentBudget } from "@odentia/db/schema/clinical"
-import { appointment, scheduleRoom } from "@odentia/db/schema/agenda"
+import { appointment, appointmentBookingLink, scheduleRoom } from "@odentia/db/schema/agenda"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { and, asc, avg, count, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or, type SQL, sql, sum } from "drizzle-orm"
 import { type TopicKind, topicIsUrgent, topicKindOf, topicUrgentAt } from "./topic-urgency.js"
-import { listAvailableSlots, validateAvailability, zonedTimeToUtc } from "./availability.js"
+import { listAvailableSlots, selfBookingNotBefore, validateAvailability, zonedTimeToUtc } from "./availability.js"
 import { professionalRef, resolveProfessionalRef } from "./agent-clinic-info.js"
 import {
   createAppointment,
@@ -274,6 +274,81 @@ export async function listAgentContextCandidates(tx: Db, orgId: string, contactI
     displayName: l.displayName,
     relationship: l.relationship,
   }))
+}
+
+/** La clave de la tarea «Revisar su nombre», por paciente y nombre dicho. */
+const NAME_REVIEW_KEY = "nombre-distinto:"
+
+/** Sus palabras sin tildes y en minúsculas: «José» y «jose» son la misma. */
+const nameWords = (value: string): string[] =>
+  value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}]+/u)
+    .filter(Boolean)
+
+/**
+ * Quien ya es paciente dice en el chat que se llama distinto de como figura
+ * en su ficha (ADR 0116). El chat no prueba un nombre (un apodo, un familiar
+ * que escribe desde su celular), así que su ficha no cambia: queda una tarea
+ * para que recepción la revise, una por nombre dicho. Ella misma puede
+ * corregirlo al reservar desde su enlace, con su documento entero.
+ * `no_es_paciente`: su nombre se guarda como siempre; `mismo_nombre`: lo que
+ * dijo ya está en su ficha; `prueba`: la persona de «Probar», que no se avisa.
+ */
+export async function reportPatientNameMismatch(
+  tx: Db,
+  orgId: string,
+  input: { contactId: string; conversationId: string | null; said: string },
+): Promise<"no_es_paciente" | "mismo_nombre" | "prueba" | "avisado"> {
+  const own = (await listPatientsByContact(tx, orgId, input.contactId)).find((item) => item.relationship === "self")
+  if (!own) return "no_es_paciente"
+  const said = nameWords(input.said)
+  const saved = new Set(nameWords(own.displayName))
+  if (said.length === 0 || said.every((word) => saved.has(word))) return "mismo_nombre"
+  const [person] = await tx
+    .select({ isTest: contact.isTest })
+    .from(contact)
+    .where(and(eq(contact.organizationId, orgId), eq(contact.id, input.contactId)))
+    .limit(1)
+  if (person?.isTest) return "prueba"
+  const spoken = input.said.trim().replace(/\s+/g, " ")
+  await createTask(tx, orgId, {
+    title: `Revisar su nombre: ${own.displayName}`,
+    contactId: input.contactId,
+    conversationId: input.conversationId,
+    patientId: own.id,
+    area: "recepcion",
+    createdBy: "agent",
+    reason: `En el chat dijo llamarse «${spoken}», pero su ficha dice «${own.displayName}». Si su ficha está mal, corrígela; ella también puede corregirla al reservar desde su enlace.`,
+    idempotencyKey: `${NAME_REVIEW_KEY}${own.id}:${said.join("-")}`,
+  })
+  return "avisado"
+}
+
+
+/**
+ * Cómo dijo llamarse quien es paciente, mientras su tarea «Revisar su nombre»
+ * siga abierta: cada turno de Sofi se arma desde su ficha y, sin esto, en el
+ * siguiente lo volvía a llamar por el nombre de la ficha. Al revisarla el
+ * equipo (corregida o no), vuelve a mandar la ficha.
+ */
+export async function pendingSpokenName(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  const [row] = await tx
+    .select({ reason: crmTask.reason })
+    .from(crmTask)
+    .where(
+      and(
+        eq(crmTask.organizationId, orgId),
+        eq(crmTask.contactId, contactId),
+        eq(crmTask.status, "open"),
+        sql`${crmTask.idempotencyKey} like ${`${NAME_REVIEW_KEY}%`}`,
+      ),
+    )
+    .orderBy(desc(crmTask.createdAt))
+    .limit(1)
+  return row?.reason ? (/dijo llamarse «([^»]+)»/.exec(row.reason)?.[1] ?? null) : null
 }
 
 export interface AgentPatientSummary {
@@ -1146,8 +1221,8 @@ export async function findFreeGaps(tx: Db, orgId: string, input: FreeGapInput): 
     from: from.toISOString(),
     to: to.toISOString(),
     ...(durationMin === undefined ? {} : { durationMin }),
-    // El agente nunca ofrece una hora que ya pasó.
-    notBefore: new Date().toISOString(),
+    // El agente nunca ofrece una hora que ya pasó ni una a la que no alcanza a llegar.
+    notBefore: selfBookingNotBefore(),
     perProfessionalPerDay: GAPS_PER_PROFESSIONAL_PER_DAY,
     ...(input.forTest ? { forTest: true } : {}),
   })
@@ -2882,6 +2957,8 @@ export async function executeProposal(
         endsAt: typeof payload.endsAt === "string" ? (payload.endsAt as string) : undefined,
         durationMin: typeof payload.durationMin === "number" ? (payload.durationMin as number) : undefined,
         reason: typeof payload.reason === "string" ? (payload.reason as string) : undefined,
+        // La eligió la persona con su sí: queda confirmada, sin pedirle «Confirmar» después.
+        status: "confirmada",
         source: "agent",
         conversationId: locked.conversationId ?? undefined,
         // El agente y el interlocutor que confirma no son usuarios: la cita
@@ -2890,6 +2967,25 @@ export async function executeProposal(
         // Se le dijo en la misma conversación: «Recordar la cita» no repite el aviso.
         notice: false,
       })
+      // Ya reservó por el chat: su enlace deja de ofrecer reservar otra (como al reservar en la página).
+      if (locked.contactId) {
+        await tx
+          .update(appointmentBookingLink)
+          .set({ booking: false })
+          .where(
+            and(
+              eq(appointmentBookingLink.organizationId, orgId),
+              eq(appointmentBookingLink.contactId, locked.contactId),
+              // También el de antes de registrarse, que aún no tenía paciente, si se registró a sí misma.
+              fresh && !fresh.forOther
+                ? or(eq(appointmentBookingLink.patientId, patientId), isNull(appointmentBookingLink.patientId))
+                : eq(appointmentBookingLink.patientId, patientId),
+              eq(appointmentBookingLink.booking, true),
+              isNull(appointmentBookingLink.usedAt),
+              isNull(appointmentBookingLink.revokedAt),
+            ),
+          )
+      }
       result = {
         appointmentId: created.id,
         startsAt: created.startsAt,

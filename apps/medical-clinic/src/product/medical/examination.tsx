@@ -1,9 +1,10 @@
 import { ChoiceButtons } from "@odentia/clinic-app/components/choice-buttons"
 import { activeOrgLocale, activeOrgTimeZone } from "@odentia/clinic-app/lib/locale"
 import { fetchPatientVitals } from "@odentia/clinic-app/lib/patients"
-import type {
-  ExaminationFieldsProps,
-  ProductExaminationUi,
+import {
+  type ExaminationFieldsProps,
+  type ProductExaminationUi,
+  subFieldError,
 } from "@odentia/clinic-app/product/product-ui"
 import { bodyMassIndex, type Vitals } from "@odentia/clinical"
 import {
@@ -19,7 +20,7 @@ import {
   readSystemsExam,
   type SystemsExam,
 } from "@odentia/medical"
-import { Button, Field, FieldLabel, Textarea } from "@odentia/ui"
+import { Button, Field, FieldError, FieldLabel, Textarea } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
 
 const STATE_OPTIONS: ReadonlyArray<{ value: ExamState; label: string }> = [
@@ -56,7 +57,7 @@ function countsLine(exam: SystemsExam | null): string {
  * escribe con la parte del cuerpo); tocar otra vez lo marcado lo devuelve a
  * «No examinado». El botón marca solo lo que falta, nunca cambia lo marcado.
  */
-function SystemsExamFields({ idPrefix, draft, onChange, disabled }: ExaminationFieldsProps) {
+function SystemsExamFields({ idPrefix, draft, onChange, disabled, errors }: ExaminationFieldsProps) {
   const exam = draft as SystemsExam | null
   const { notExamined } = examCounts(exam)
   const set = (
@@ -89,20 +90,32 @@ function SystemsExamFields({ idPrefix, draft, onChange, disabled }: ExaminationF
       </div>
       {EXAM_SYSTEMS.map((system) => {
         const entry = exam?.sistemas[system.key]
+        // El error del estado («sistemas.<sistema>» o «….estado») va bajo los botones; el del hallazgo, bajo su texto.
+        const stateErrorId = `${idPrefix}-estado-${system.key}`
+        const stateKey = errors?.[`sistemas.${system.key}.estado`]
+          ? `sistemas.${system.key}.estado`
+          : `sistemas.${system.key}`
+        const stateError = subFieldError(errors, stateKey, stateErrorId)
+        const findingId = `${idPrefix}-hallazgo-${system.key}`
+        const findingError = subFieldError(errors, `sistemas.${system.key}.hallazgo`, findingId)
         return (
           <div key={system.key} className="flex flex-col gap-2 border-t py-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="flex flex-col">
-                <span className="text-sm font-medium">{system.label}</span>
+                <span id={`${idPrefix}-sistema-${system.key}`} className="text-sm font-medium">
+                  {system.label}
+                </span>
                 {entry ? null : <span className="text-xs text-muted-foreground">No examinado</span>}
               </span>
               <ChoiceButtons
-                label={system.label}
+                aria-labelledby={`${idPrefix}-sistema-${system.key}`}
                 value={entry?.estado ?? null}
                 options={STATE_OPTIONS}
                 columns={2}
                 className="sm:w-auto"
                 disabled={disabled}
+                invalid={stateError.invalid}
+                aria-describedby={stateError.describedBy}
                 onChange={(estado) =>
                   set(
                     system.key,
@@ -114,25 +127,31 @@ function SystemsExamFields({ idPrefix, draft, onChange, disabled }: ExaminationF
                 onClear={() => set(system.key, null)}
               />
             </div>
+            {stateError.message ? <FieldError id={stateError.errorId}>{stateError.message}</FieldError> : null}
             {entry?.estado === "con_hallazgos" ? (
-              <Field>
+              <Field data-invalid={findingError.invalid}>
                 <FieldLabel
-                  htmlFor={`${idPrefix}-hallazgo-${system.key}`}
+                  htmlFor={findingId}
                   className="text-xs text-muted-foreground"
                 >
                   Qué encontraste
                 </FieldLabel>
                 <Textarea
-                  id={`${idPrefix}-hallazgo-${system.key}`}
+                  id={findingId}
                   rows={2}
                   maxLength={EXAM_FINDING_MAX}
                   value={entry.hallazgo ?? ""}
                   disabled={disabled}
+                  aria-invalid={findingError.invalid}
+                  aria-describedby={findingError.describedBy}
                   placeholder="Qué y dónde: «Adenopatías submandibulares en ambos lados, de 1 cm»"
                   onChange={(event) =>
                     set(system.key, { estado: "con_hallazgos", hallazgo: event.target.value })
                   }
                 />
+                {findingError.message ? (
+                  <FieldError id={findingError.errorId}>{findingError.message}</FieldError>
+                ) : null}
               </Field>
             ) : null}
           </div>

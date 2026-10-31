@@ -18,18 +18,26 @@ const listQuery = z
   .object({ activeOnly: z.enum(["0", "1"]).transform((value) => value === "1").optional() })
   .strict()
 
+const nameInput = z
+  .string()
+  .trim()
+  .min(1, "Escribe el nombre del medio de pago")
+  .max(120, "El nombre admite hasta 120 caracteres")
+
+const typeCodeInput = z.enum(["10", "48", "30", "68", "20", "1"], "Elige el tipo del medio de pago de la lista")
+
 const createInput = z
   .object({
-    name: z.string().trim().min(1).max(120),
-    typeCode: z.enum(["10", "48", "30", "68", "20", "1"]).nullish(),
+    name: nameInput,
+    typeCode: typeCodeInput.nullish(),
     sortOrder: z.number().int().min(0).max(9999).nullish(),
   })
   .strict()
 
 const patchInput = z
   .object({
-    name: z.string().trim().min(1).max(120).optional(),
-    typeCode: z.enum(["10", "48", "30", "68", "20", "1"]).optional(),
+    name: nameInput.optional(),
+    typeCode: typeCodeInput.optional(),
     sortOrder: z.number().int().min(0).max(9999).nullish(),
     isActive: z.boolean().optional(),
   })

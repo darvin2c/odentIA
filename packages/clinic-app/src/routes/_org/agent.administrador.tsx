@@ -1,6 +1,6 @@
 import { Badge, Button } from "@odentia/ui"
 import { Switch } from "@odentia/ui/components/switch"
-import { ErrorState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
+import { ErrorState, PageHeader, PageShell, submitErrorMessage, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef } from "react"
@@ -14,7 +14,7 @@ import { ADMIN_NAME, AGENT_NAME_REASONS, useReceptionName } from "../../lib/agen
 import { apiFetch } from "../../lib/api"
 import { ARGOS_ALLOWANCE_KEY } from "../../lib/argos"
 import { usePermission } from "../../lib/crm"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { AdministratorPageSkeleton, AdministratorSkeleton } from "../../components/skeletons/agent"
 
 interface AdminSearch {
@@ -34,6 +34,9 @@ export const Route = createFileRoute("/_org/agent/administrador")({
 })
 
 const LINK = "inline-flex min-h-11 items-center text-sm font-semibold text-primary hover:underline sm:min-h-8"
+
+/** Desde dónde se encendió o apagó a Argos: el error se dice junto a ese control. */
+type PowerFrom = "interruptor" | "tarjeta" | "aviso"
 
 function Card({ id, title, hint, children }: { id: string; title: string; hint: string; children: ReactNode }) {
   return (
@@ -139,12 +142,15 @@ function MissingNotices({
   onOpen,
   canWrite,
   powering,
+  powerError,
   onTurnOn,
 }: {
   page: AdminPage
   onOpen: (key: string) => void
   canWrite: boolean
   powering: boolean
+  /** Por qué no se encendió desde este aviso. */
+  powerError: string | null
   onTurnOn: () => void
 }) {
   const receptionName = useReceptionName()
@@ -176,7 +182,13 @@ function MissingNotices({
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {!page.enabled ? (
-            <Button type="button" className="min-h-11 sm:min-h-8" disabled={powering} onClick={onTurnOn}>
+            <Button
+              type="button"
+              className="min-h-11 sm:min-h-8"
+              disabled={powering}
+              aria-describedby={powerError ? "administrador-aviso-error" : undefined}
+              onClick={onTurnOn}
+            >
               Encender a {ADMIN_NAME}
             </Button>
           ) : null}
@@ -186,6 +198,11 @@ function MissingNotices({
             </Link>
           ) : null}
         </div>
+        {powerError ? (
+          <p id="administrador-aviso-error" role="alert" className="w-full text-sm text-destructive">
+            {powerError}
+          </p>
+        ) : null}
       </div>
     )
   }
@@ -282,7 +299,8 @@ function AdministratorPage() {
   })
   const power = useMutation({
     retry: false,
-    mutationFn: (enabled: boolean) => apiFetch("/api/agent/admin/settings", { method: "PUT", body: JSON.stringify({ enabled }) }),
+    mutationFn: ({ enabled }: { enabled: boolean; from: PowerFrom }) =>
+      apiFetch("/api/agent/admin/settings", { method: "PUT", body: JSON.stringify({ enabled }) }),
     onSettled: () => {
       // El buscador y el panel de Argos leen si está encendido: que no se queden con lo de antes.
       void queryClient.invalidateQueries({ queryKey: ARGOS_ALLOWANCE_KEY })
@@ -302,6 +320,9 @@ function AdministratorPage() {
   const principles = rolesQuery.data?.data.principles ?? []
   // Abrir o cerrar una línea no mueve la página: la línea se queda donde está y se abre debajo de quien la tocó.
   const open = (key: string | undefined) => void navigate({ search: key ? { linea: key } : {}, replace: true, resetScroll: false })
+  const powerError = (from: PowerFrom) => (power.isError && power.variables?.from === from ? submitErrorMessage(power.error) : null)
+  const switchError = powerError("interruptor")
+  const cardError = powerError("tarjeta")
   const on = page?.lines.filter((line) => line.enabled) ?? []
   const off = page?.lines.filter((line) => !line.enabled) ?? []
 
@@ -320,11 +341,17 @@ function AdministratorPage() {
                   checked={page.enabled}
                   disabled={power.isPending}
                   aria-label={page.enabled ? `Apagar a ${ADMIN_NAME}` : `Encender a ${ADMIN_NAME}`}
-                  onCheckedChange={(next: boolean) => power.mutate(next)}
+                  aria-describedby={switchError ? "administrador-encendido-error" : undefined}
+                  onCheckedChange={(next: boolean) => power.mutate({ enabled: next, from: "interruptor" })}
                 />
               </label>
             ) : page ? (
               <Badge variant={page.enabled ? "success" : "secondary"}>{page.enabled ? "Encendido" : "Apagado"}</Badge>
+            ) : null}
+            {switchError ? (
+              <p id="administrador-encendido-error" role="alert" className="text-sm text-destructive">
+                {switchError}
+              </p>
             ) : null}
           </>
         }
@@ -342,12 +369,6 @@ function AdministratorPage() {
         <QueryErrorState error={pageQuery.error ?? rolesQuery.error} onRetry={() => void (pageQuery.isError ? pageQuery : rolesQuery).refetch()} />
       ) : (
         <>
-          {power.isError ? (
-            <p role="alert" className="text-sm text-destructive">
-              {mutationErrorMessage(power.error)}
-            </p>
-          ) : null}
-
           {page.enabled ? (
             <section aria-label="Hoy" className="flex flex-wrap gap-x-6 gap-y-1 rounded-xl bg-muted p-4 text-sm">
               <span className="font-semibold">Hoy</span>
@@ -383,15 +404,33 @@ function AdministratorPage() {
                   )}
                 </p>
                 {canWrite ? (
-                  <Button type="button" className="min-h-11" disabled={power.isPending} onClick={() => power.mutate(true)}>
+                  <Button
+                    type="button"
+                    className="min-h-11"
+                    disabled={power.isPending}
+                    aria-describedby={cardError ? "administrador-apagado-error" : undefined}
+                    onClick={() => power.mutate({ enabled: true, from: "tarjeta" })}
+                  >
                     Encender a {ADMIN_NAME}
                   </Button>
+                ) : null}
+                {cardError ? (
+                  <p id="administrador-apagado-error" role="alert" className="w-full text-sm text-destructive">
+                    {cardError}
+                  </p>
                 ) : null}
               </div>
             </Card>
           )}
 
-          <MissingNotices page={page} onOpen={open} canWrite={canWrite} powering={power.isPending} onTurnOn={() => power.mutate(true)} />
+          <MissingNotices
+            page={page}
+            onOpen={open}
+            canWrite={canWrite}
+            powering={power.isPending}
+            powerError={powerError("aviso")}
+            onTurnOn={() => power.mutate({ enabled: true, from: "aviso" })}
+          />
 
           {page.enabled && canWrite ? <AdminRequest onOpen={open} /> : null}
 
@@ -420,7 +459,7 @@ function AdministratorPage() {
             hint={
               page.enabled
                 ? `Están apagadas: no pasa nada con ellas. Si hoy tienen casos, ${ADMIN_NAME} te las recomienda en Inicio.`
-                : "Lo que podrá hacer cuando lo enciendas. Tócalas para ver su flujo."
+                : "Lo que podrá hacer cuando lo enciendas: hasta entonces no se prenden ni se ajustan. Tócalas para ver su flujo."
             }
             lines={off}
             empty="Todas están prendidas."

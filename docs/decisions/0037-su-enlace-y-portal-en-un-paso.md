@@ -1,6 +1,6 @@
 # 0037 · «Su enlace» para lo del servicio y el portal en un paso
 
-Fecha: 2026-10-16 · Estado: aceptada · Precisa: [0014](0014-reservar-desde-un-enlace-personal.md)
+Fecha: 2026-10-16 · Estado: aceptada · Precisa: [0014](0014-reservar-desde-un-enlace-personal.md) · Precisada por [0109](0109-un-solo-formulario-con-lo-que-ya-sabemos.md) (al reservar, quien ya es paciente ve su nombre, su documento abreviado y su celular)
 
 ## Problema
 

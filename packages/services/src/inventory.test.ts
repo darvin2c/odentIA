@@ -168,7 +168,7 @@ it("recibir en unidades de compra, en varios lotes y con el precio de la factura
   // Recibir de más dice cuánto falta; un producto repetido se rechaza en palabras.
   await expect(c.receive(order.id, [{ productId: item.id, quantity: 12 }])).rejects.toMatchObject({
     code: "CONFLICT",
-    message: "La recepción supera lo pedido: de ese producto faltan 11",
+    fields: { "lines[0].quantity": expect.stringContaining("faltan 11") },
   })
   await expect(
     c.receive(order.id, [

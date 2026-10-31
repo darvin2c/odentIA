@@ -2,21 +2,25 @@ import { diagnosisCodeLabel } from "@odentia/clinical"
 import {
   Badge,
   Button,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
 } from "@odentia/ui"
-import { ConfirmDialog, FormDrawer } from "@odentia/ui-patterns"
+import {
+  ConfirmDialog,
+  FormDrawer,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useState } from "react"
-import { ApiError, apiFetch } from "../../lib/api"
+import { useState } from "react"
+import { z } from "zod"
+import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
 import { voidProcedureApi } from "../../lib/encounters"
 import {
@@ -37,6 +41,13 @@ import { activeOrgLocale } from "../../lib/locale"
 const NO_PLAN = "__sin-plan__"
 const NO_SITE: PlaceWithParts = { toothNumber: null, surfaces: [] }
 const QUADRANTS = ["1", "2", "3", "4", "5", "6", "7", "8"]
+const QUADRANT_OPTIONS = QUADRANTS.map((q) => ({ value: q, label: `Cuadrante ${q}` }))
+const ARCH_OPTIONS = [
+  { value: "upper", label: "Arcada superior" },
+  { value: "lower", label: "Arcada inferior" },
+]
+const MAX_TEXT = 2000
+const QUANTITY_RANGE = "La cantidad va de 1 a 99"
 
 /**
  * «36 · Oclusal», «Cuadrante 2», «Arcada superior» o «General». Un tratamiento
@@ -67,9 +78,64 @@ function formatDateTime(iso: string | null): string {
   return date.toLocaleString(activeOrgLocale(), { dateStyle: "short", timeStyle: "short" })
 }
 
-function mutationMessage(err: unknown): string {
-  if (err instanceof ApiError && err.shape.message) return err.shape.message
-  return err instanceof Error ? err.message : "No se pudo registrar el procedimiento."
+/** Indicado con la pieza o la cara por definir: se elige ahora, al hacerlo. */
+function isPlanPending(plan: PlanItem | null): boolean {
+  return Boolean(
+    plan &&
+      (((plan.scope === "tooth" || plan.scope === "surfaces") && plan.toothNumber == null) ||
+        (plan.scope === "surfaces" && (plan.surfaces ?? []).length === 0)),
+  )
+}
+
+/**
+ * Lo mismo que pide la API (`procedureInput` y `addEncounterProcedure`): qué
+ * registrar, el sitio que pide su ámbito y la cantidad. Cada falta, en su campo.
+ */
+function procedureSchema(planById: Record<string, PlanItem>) {
+  return z
+    .object({
+      freeMode: z.boolean(),
+      description: z.string().max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
+      service: z.custom<ServiceCatalogItem | null>(),
+      planItemId: z.string(),
+      site: z.custom<PlaceWithParts>(),
+      quadrant: z.string(),
+      arch: z.string(),
+      quantity: z.string(),
+      diagnosisCode: z.string(),
+      diagnosisSystem: z.string().nullable(),
+    })
+    .superRefine((value, ctx) => {
+      const plan = value.planItemId ? (planById[value.planItemId] ?? null) : null
+      if (plan) {
+        if (isPlanPending(plan)) {
+          if (value.site.toothNumber === null)
+            ctx.addIssue({ code: "custom", path: ["site"], message: "Elige la pieza en que lo hiciste" })
+          else if (plan.scope === "surfaces" && value.site.surfaces.length === 0)
+            ctx.addIssue({ code: "custom", path: ["site"], message: "Marca al menos una cara" })
+        }
+        return
+      }
+      if (value.freeMode) {
+        if (!value.description.trim())
+          ctx.addIssue({ code: "custom", path: ["description"], message: "Describe el acto libre" })
+      } else if (!value.service) {
+        ctx.addIssue({ code: "custom", path: ["service"], message: "Elige el tratamiento" })
+      } else {
+        const scope = value.service.scope
+        if ((scope === "tooth" || scope === "surfaces") && value.site.toothNumber === null)
+          ctx.addIssue({ code: "custom", path: ["site"], message: "Elige la pieza" })
+        else if (scope === "surfaces" && value.site.surfaces.length === 0)
+          ctx.addIssue({ code: "custom", path: ["site"], message: "Marca al menos una superficie" })
+        if (scope === "quadrant" && !value.quadrant)
+          ctx.addIssue({ code: "custom", path: ["quadrant"], message: "Elige el cuadrante" })
+        if (scope === "arch" && !value.arch)
+          ctx.addIssue({ code: "custom", path: ["arch"], message: "Elige la arcada" })
+      }
+      const quantity = Number(value.quantity)
+      if (!value.quantity.trim() || !Number.isInteger(quantity) || quantity < 1 || quantity > 99)
+        ctx.addIssue({ code: "custom", path: ["quantity"], message: QUANTITY_RANGE })
+    })
 }
 
 function planOptionLabel(item: PlanItem, locale: string | undefined): string {
@@ -119,30 +185,12 @@ export function EncounterProcedures({
   const canRead = usePermission("clinical.read")
   const orgLocale = useOrgProfile().data?.locale
   const queryClient = useQueryClient()
-  const uid = useId()
   const [open, setOpen] = useState(autoOpen && !disabled)
-  const [service, setService] = useState<ServiceCatalogItem | null>(null)
-  const serviceId = service?.id ?? ""
-  const [freeMode, setFreeMode] = useState(false)
-  const [freeDescription, setFreeDescription] = useState("")
-  const [site, setSite] = useState<PlaceWithParts>(NO_SITE)
-  const [quadrant, setQuadrant] = useState("")
-  const [quantity, setQuantity] = useState("1")
-  const [arch, setArch] = useState("")
-  const [cie, setCie] = useState("")
-  const [cieSystem, setCieSystem] = useState<string | null>(null)
-  const [planSel, setPlanSel] = useState<string>("")
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [voidingProc, setVoidingProc] = useState<ProcedureItem | null>(null)
-  const [voidReason, setVoidReason] = useState("")
-  const [voidError, setVoidError] = useState<string | null>(null)
 
   const encounter = detail.encounter
   // Solo el borrador admite registrar o anular actos.
   const finalized = encounter.status !== "borrador"
-  const busy = disabled || saving
-  const canOpen = canWrite && !finalized && !disabled
 
   const planQuery = useQuery({
     queryKey: ["plan-items", patientId],
@@ -157,14 +205,121 @@ export function EncounterProcedures({
     allItems.map((item) => [item.id, item]),
   )
 
-  const tooth = site.toothNumber
+  const form = useAppForm({
+    defaultValues: {
+      freeMode: false,
+      description: "",
+      service: null as ServiceCatalogItem | null,
+      planItemId: "",
+      site: NO_SITE,
+      quadrant: "",
+      arch: "",
+      quantity: "1",
+      diagnosisCode: "",
+      diagnosisSystem: null as string | null,
+    },
+    validators: { onSubmit: procedureSchema(planById) },
+    onSubmit: async ({ value, formApi }) => {
+      const plan = value.planItemId ? (planById[value.planItemId] ?? null) : null
+      const trimmedCie = value.diagnosisCode.trim()
+      const diagnosisCode = trimmedCie === "" ? null : trimmedCie
+      const diagnosisSystem = diagnosisCode ? value.diagnosisSystem : null
+      const quantity = Number(value.quantity)
+      const serviceScope = value.service?.scope ?? null
+      // El tratamiento del plan conserva su sitio: el servidor lo toma de él. Si
+      // quedó por definir, va lo que se eligió ahora y queda también en el tratamiento.
+      const body = plan
+        ? {
+            planItemId: plan.id,
+            diagnosisCode,
+            diagnosisSystem,
+            ...(isPlanPending(plan) ? { toothNumber: value.site.toothNumber, surfaces: value.site.surfaces } : {}),
+          }
+        : value.freeMode
+          ? {
+              description: value.description.trim(),
+              toothNumber: value.site.toothNumber,
+              surfaces: value.site.surfaces,
+              quantity,
+              diagnosisCode,
+              diagnosisSystem,
+            }
+          : {
+              serviceId: value.service?.id,
+              ...(serviceScope === "tooth" || serviceScope === "surfaces" ? { toothNumber: value.site.toothNumber } : {}),
+              ...(serviceScope === "surfaces" ? { surfaces: value.site.surfaces } : {}),
+              ...(serviceScope === "quadrant" ? { quadrant: Number(value.quadrant) } : {}),
+              ...(serviceScope === "arch" ? { arch: value.arch } : {}),
+              quantity,
+              diagnosisCode,
+              diagnosisSystem,
+            }
+      onPendingChange(true)
+      try {
+        await beforeWrite()
+        await apiFetch(`/api/patients/${patientId}/encounters/${encounter.id}/procedures`, {
+          method: "POST",
+          body: JSON.stringify(body),
+        })
+        // El servidor deja el tratamiento en curso (o realizado si es directo).
+        await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+        await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+        await onChanged()
+      } finally {
+        onPendingChange(false)
+      }
+      formApi.reset()
+      setOpen(false)
+    },
+  })
+  const surface = useFormSurface(form, {
+    // La pieza y sus caras son un solo control; el servicio, el del catálogo
+    // (o la descripción en el acto libre); la lista va con el código.
+    fieldMap: (key) => {
+      if (key === "toothNumber" || key === "surfaces") return "site"
+      if (key === "serviceId") return form.state.values.freeMode ? "description" : "service"
+      if (key === "diagnosisSystem") return "diagnosisCode"
+      return undefined
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+
+  const voidForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: {
+      onSubmit: z.object({
+        reason: z.string().trim().min(1, "Escribe el motivo.").max(MAX_TEXT, `Escribe como mucho ${MAX_TEXT} caracteres.`),
+      }),
+    },
+    onSubmit: async ({ value }) => {
+      if (!voidingProc) return
+      onPendingChange(true)
+      try {
+        await beforeWrite()
+        await voidProcedureApi(patientId, encounter.id, voidingProc.id, value.reason.trim())
+        await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
+        await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
+        await onChanged()
+      } finally {
+        onPendingChange(false)
+      }
+      setVoidingProc(null)
+    },
+  })
+  const voidSubmitting = useStore(voidForm.store, (state) => state.isSubmitting)
+  const voidError = useFormSubmitError(voidForm)
+
+  const busy = disabled || surface.isSubmitting || voidSubmitting
+  const canOpen = canWrite && !finalized && !disabled
+
+  const tooth = values.site.toothNumber
   // Al elegir pieza solo caben sus ítems más los generales (sin pieza); el
   // servidor no exige coincidencia, así que los generales siempre aplican.
   const visiblePlans =
     tooth == null
       ? openItems
       : openItems.filter((item) => item.toothNumber == null || item.toothNumber === tooth)
-  const selectedPlan = planSel ? (planById[planSel] ?? null) : null
+  const selectedPlan = values.planItemId ? (planById[values.planItemId] ?? null) : null
   const options =
     selectedPlan && !visiblePlans.some((item) => item.id === selectedPlan.id)
       ? [...visiblePlans, selectedPlan]
@@ -175,160 +330,32 @@ export function EncounterProcedures({
 
   // El ámbito del servicio decide qué sitio pide: pieza, superficies,
   // cuadrante, arcada o nada (general). El acto libre admite pieza opcional.
-  const scope = freeMode ? "tooth-optional" : (service?.scope ?? null)
+  const freeMode = values.freeMode
+  const scope = freeMode ? "tooth-optional" : (values.service?.scope ?? null)
   const needsTooth = scope === "tooth" || scope === "surfaces"
-  // Indicado con la pieza o la cara por definir: se elige ahora, al hacerlo.
-  const planPending = Boolean(
-    selectedPlan &&
-      (((selectedPlan.scope === "tooth" || selectedPlan.scope === "surfaces") && selectedPlan.toothNumber == null) ||
-        (selectedPlan.scope === "surfaces" && (selectedPlan.surfaces ?? []).length === 0)),
-  )
-  const siteComplete = selectedPlan
-    ? !planPending || (site.toothNumber !== null && (selectedPlan.scope !== "surfaces" || site.surfaces.length > 0))
-    : (scope === "general" || scope === "tooth-optional" || scope === null
-      ? true
-      : scope === "tooth"
-        ? site.toothNumber !== null
-        : scope === "surfaces"
-          ? site.toothNumber !== null && site.surfaces.length > 0
-          : scope === "quadrant"
-            ? quadrant !== ""
-            : arch !== "")
+  const planPending = isPlanPending(selectedPlan)
 
   const onPlanChange = (value: string | null) => {
     const next = value ?? NO_PLAN
     if (next === NO_PLAN) {
-      setPlanSel("")
+      form.setFieldValue("planItemId", "")
       return
     }
     const linked = planById[next]
     if (!linked) return
-    setPlanSel(next)
-    setService(null)
-    setCie(linked.diagnosisCode ?? "")
-    setCieSystem(linked.diagnosisSystem ?? null)
-    setSite({ toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
-  }
-
-  const quantityNumber = Number(quantity)
-  const quantityValid =
-    Number.isInteger(quantityNumber) && quantityNumber >= 1 && quantityNumber <= 99
-  const canSubmit =
-    canWrite &&
-    !finalized &&
-    !busy &&
-    siteComplete &&
-    quantityValid &&
-    (Boolean(selectedPlan) || serviceId !== "" || (freeMode && freeDescription.trim() !== ""))
-  const isDirty =
-    serviceId !== "" ||
-    planSel !== "" ||
-    cie.trim() !== "" ||
-    site.toothNumber !== null ||
-    freeDescription.trim() !== ""
-
-  const resetForm = () => {
-    setService(null)
-    setSite(NO_SITE)
-    setQuadrant("")
-    setArch("")
-    setQuantity("1")
-    setCie("")
-    setCieSystem(null)
-    setPlanSel("")
-    setFreeMode(false)
-    setFreeDescription("")
-  }
-
-  const onSubmit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (!canSubmit) return
-    const trimmedCie = cie.trim()
-    const diagnosisCode = trimmedCie === "" ? null : trimmedCie
-    const diagnosisSystem = diagnosisCode ? cieSystem : null
-    // El tratamiento del plan conserva su sitio: el servidor lo toma de él. Si
-    // quedó por definir, va lo que se eligió ahora y queda también en el tratamiento.
-    const body = selectedPlan
-      ? {
-          planItemId: selectedPlan.id,
-          diagnosisCode,
-          diagnosisSystem,
-          ...(planPending ? { toothNumber: tooth, surfaces: site.surfaces } : {}),
-        }
-      : freeMode
-        ? {
-            description: freeDescription.trim(),
-            toothNumber: tooth,
-            surfaces: site.surfaces,
-            quantity: quantityNumber,
-            diagnosisCode,
-            diagnosisSystem,
-          }
-        : {
-            serviceId,
-            ...(needsTooth ? { toothNumber: tooth } : {}),
-            ...(scope === "surfaces" ? { surfaces: site.surfaces } : {}),
-            ...(scope === "quadrant" ? { quadrant: Number(quadrant) } : {}),
-            ...(scope === "arch" ? { arch } : {}),
-            quantity: quantityNumber,
-            diagnosisCode,
-            diagnosisSystem,
-          }
-    onPendingChange(true)
-    setSaving(true)
-    setError(null)
-    try {
-      await beforeWrite()
-      await apiFetch(`/api/patients/${patientId}/encounters/${encounter.id}/procedures`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      })
-      // El servidor deja el tratamiento en curso (o realizado si es directo).
-      await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
-      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
-      await onChanged()
-      resetForm()
-      setOpen(false)
-    } catch (err) {
-      setError(mutationMessage(err))
-    } finally {
-      setSaving(false)
-      onPendingChange(false)
-    }
+    form.setFieldValue("planItemId", next)
+    form.setFieldValue("service", null)
+    form.setFieldValue("diagnosisCode", linked.diagnosisCode ?? "")
+    form.setFieldValue("diagnosisSystem", linked.diagnosisSystem ?? null)
+    form.setFieldValue("site", { toothNumber: linked.toothNumber, surfaces: linked.surfaces ?? [] })
   }
 
   const handleClose = () => {
     // Durante el guardado no se cierra: el error y lo elegido se conservan
     // en el drawer y no se pierde la selección del catálogo/presupuesto.
-    if (saving) return
-    resetForm()
-    setError(null)
+    if (surface.isSubmitting) return
+    form.reset()
     setOpen(false)
-  }
-
-  const confirmVoid = async () => {
-    if (!voidingProc || !voidReason.trim() || saving) return
-    onPendingChange(true)
-    setSaving(true)
-    setVoidError(null)
-    try {
-      await beforeWrite()
-      await voidProcedureApi(patientId, encounter.id, voidingProc.id, voidReason.trim())
-      await queryClient.invalidateQueries({ queryKey: ["plan-items", patientId] })
-      await queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] })
-      await onChanged()
-      setVoidingProc(null)
-    } catch (err) {
-      setVoidError(
-        err instanceof ApiError && err.shape.message
-          ? err.shape.message
-          : "No se pudo anular el procedimiento.",
-      )
-    } finally {
-      setSaving(false)
-      onPendingChange(false)
-    }
   }
 
   return (
@@ -418,8 +445,7 @@ export function EncounterProcedures({
                         variant="outline"
                         disabled={busy}
                         onClick={() => {
-                          setVoidReason("")
-                          setVoidError(null)
+                          voidForm.reset()
                           setVoidingProc(proc)
                         }}
                       >
@@ -448,6 +474,7 @@ export function EncounterProcedures({
 
         {canWrite && !finalized && (
           <FormDrawer
+            {...surface}
             open={open}
             onClose={handleClose}
             title="Registrar procedimiento"
@@ -456,68 +483,88 @@ export function EncounterProcedures({
                 ? "Elige un tratamiento aceptado del presupuesto, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
                 : "Elige un tratamiento indicado, un servicio del catálogo (se registra como tratamiento realizado en el acto), o marca acto libre para algo que no se cobra."
             }
-            onSubmit={(event) => void onSubmit(event)}
-            isDirty={isDirty}
-            isSubmitting={saving}
-            submitDisabled={!canSubmit}
             submitLabel="Registrar procedimiento"
-            error={error}
           >
             <div className="flex flex-col gap-4">
-              <Field orientation="horizontal" className="items-center gap-2">
-                <input
-                  id={`${uid}-free`}
-                  type="checkbox"
-                  checked={freeMode}
-                  disabled={busy}
-                  onChange={(event) => {
-                    setFreeMode(event.target.checked)
-                    setService(null)
-                    setPlanSel("")
-                    setSite(NO_SITE)
-                  }}
-                />
-                <FieldLabel htmlFor={`${uid}-free`} className="font-normal">
-                  Acto libre (sin servicio de la lista; queda registrado pero no se cobra)
-                </FieldLabel>
-              </Field>
-              {freeMode && (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-free-desc`}>Descripción del acto</FieldLabel>
-                  <Textarea
-                    id={`${uid}-free-desc`}
-                    value={freeDescription}
-                    onChange={(event) => setFreeDescription(event.target.value)}
-                    placeholder="Ej.: ajuste oclusal menor de cortesía"
-                    rows={2}
-                    maxLength={2000}
+              <form.AppField
+                name="freeMode"
+                listeners={{
+                  onChange: () => {
+                    form.setFieldValue("service", null)
+                    form.setFieldValue("planItemId", "")
+                    form.setFieldValue("site", NO_SITE)
+                  },
+                }}
+              >
+                {(field) => (
+                  <field.CheckboxField
+                    label="Acto libre (sin servicio de la lista; queda registrado pero no se cobra)"
                     disabled={busy}
-                    required
                   />
-                </Field>
+                )}
+              </form.AppField>
+              {freeMode && (
+                <form.AppField name="description">
+                  {(field) => (
+                    <field.TextareaField
+                      label="Descripción del acto"
+                      placeholder="Ej.: ajuste oclusal menor de cortesía"
+                      rows={2}
+                      maxLength={MAX_TEXT}
+                      disabled={busy}
+                    />
+                  )}
+                </form.AppField>
               )}
               {!selectedPlan && !freeMode && (
-                <ServicePicker
-                  value={serviceId}
-                  onChange={(next) => {
-                    setService(next)
-                    setSite(NO_SITE)
-                    setQuadrant("")
-                    setArch("")
-                  }}
-                  disabled={busy}
-                />
+                <form.AppField name="service">
+                  {(field) => (
+                    <field.Control label="Tratamiento">
+                      {(control) => (
+                        <ServicePicker
+                          id={control.id}
+                          invalid={control.invalid}
+                          aria-describedby={control.describedBy}
+                          onBlur={control.onBlur}
+                          value={field.state.value?.id ?? ""}
+                          onChange={(next) => {
+                            field.handleChange(next)
+                            form.setFieldValue("site", NO_SITE)
+                            form.setFieldValue("quadrant", "")
+                            form.setFieldValue("arch", "")
+                          }}
+                          disabled={busy}
+                        />
+                      )}
+                    </field.Control>
+                  )}
+                </form.AppField>
               )}
 
               {selectedPlan && planPending ? (
-                <SiteField
-                  value={site}
-                  onChange={setSite}
-                  withSurfaces={selectedPlan.scope === "surfaces"}
-                  surfacesRequired={selectedPlan.scope === "surfaces"}
-                  label={selectedPlan.toothNumber == null ? "¿En qué pieza lo hiciste?" : "¿Qué cara trabajaste?"}
-                  disabled={busy}
-                />
+                productUi().site ? (
+                  <form.AppField name="site">
+                    {(field) => (
+                      <field.Group
+                        legend={selectedPlan.toothNumber == null ? "¿En qué pieza lo hiciste?" : "¿Qué cara trabajaste?"}
+                      >
+                        {(control) => (
+                          <SiteField
+                            id={control.id}
+                            invalid={control.invalid}
+                            aria-describedby={control.describedBy}
+                            onBlur={control.onBlur}
+                            value={field.state.value}
+                            onChange={(next) => field.handleChange(next)}
+                            withSurfaces={selectedPlan.scope === "surfaces"}
+                            surfacesRequired={selectedPlan.scope === "surfaces"}
+                            disabled={busy}
+                          />
+                        )}
+                      </field.Group>
+                    )}
+                  </form.AppField>
+                ) : null
               ) : selectedPlan ? (
                 <p className="text-sm text-muted-foreground">
                   Sitio del tratamiento:{" "}
@@ -529,149 +576,165 @@ export function EncounterProcedures({
                   })}
                 </p>
               ) : freeMode || needsTooth ? (
-                <SiteField
-                  value={site}
-                  onChange={setSite}
-                  withSurfaces={freeMode || scope === "surfaces"}
-                  optional={freeMode}
-                  surfacesRequired={scope === "surfaces"}
-                  label={scope === "surfaces" ? "Pieza y superficies" : "Pieza"}
-                  disabled={busy}
-                />
+                productUi().site ? (
+                  <form.AppField name="site">
+                    {(field) => (
+                      <field.Group
+                        legend={
+                          <>
+                            {scope === "surfaces" ? "Pieza y superficies" : "Pieza"}
+                            {freeMode ? <span className="text-muted-foreground"> (opcional)</span> : null}
+                          </>
+                        }
+                      >
+                        {(control) => (
+                          <SiteField
+                            id={control.id}
+                            invalid={control.invalid}
+                            aria-describedby={control.describedBy}
+                            onBlur={control.onBlur}
+                            value={field.state.value}
+                            onChange={(next) => field.handleChange(next)}
+                            withSurfaces={freeMode || scope === "surfaces"}
+                            surfacesRequired={scope === "surfaces"}
+                            disabled={busy}
+                          />
+                        )}
+                      </field.Group>
+                    )}
+                  </form.AppField>
+                ) : null
               ) : scope === "quadrant" ? (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-quadrant`}>Cuadrante</FieldLabel>
-                  <Select
-                    value={quadrant}
-                    items={Object.fromEntries(QUADRANTS.map((q) => [q, `Cuadrante ${q}`]))}
-                    onValueChange={(value) => setQuadrant(value ?? "")}
-                    disabled={busy}
-                  >
-                    <SelectTrigger id={`${uid}-quadrant`}>
-                      <SelectValue placeholder="Elige el cuadrante" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {QUADRANTS.map((q) => (
-                        <SelectItem key={q} value={q}>
-                          Cuadrante {q}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
+                <form.AppField name="quadrant">
+                  {(field) => (
+                    <field.SelectField
+                      label="Cuadrante"
+                      options={QUADRANT_OPTIONS}
+                      placeholder="Elige el cuadrante"
+                      disabled={busy}
+                    />
+                  )}
+                </form.AppField>
               ) : scope === "arch" ? (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-arch`}>Arcada</FieldLabel>
-                  <Select
-                    value={arch}
-                    items={{ upper: "Arcada superior", lower: "Arcada inferior" }}
-                    onValueChange={(value) => setArch(value ?? "")}
-                    disabled={busy}
-                  >
-                    <SelectTrigger id={`${uid}-arch`}>
-                      <SelectValue placeholder="Elige la arcada" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="upper">Arcada superior</SelectItem>
-                      <SelectItem value="lower">Arcada inferior</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
+                <form.AppField name="arch">
+                  {(field) => (
+                    <field.SelectField
+                      label="Arcada"
+                      options={ARCH_OPTIONS}
+                      placeholder="Elige la arcada"
+                      disabled={busy}
+                    />
+                  )}
+                </form.AppField>
               ) : null}
 
               {!selectedPlan ? (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-quantity`}>Cantidad</FieldLabel>
-                  <Input
-                    id={`${uid}-quantity`}
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={99}
-                    className="w-24"
-                    value={quantity}
-                    aria-invalid={!quantityValid}
-                    disabled={busy}
-                    onChange={(event) => setQuantity(event.target.value)}
-                  />
-                  <FieldDescription>
-                    Unidades realizadas (p. ej. 3 sellantes); el cargo es precio × cantidad.
-                  </FieldDescription>
-                </Field>
+                <form.AppField name="quantity">
+                  {(field) => (
+                    <field.TextField
+                      label="Cantidad"
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={99}
+                      inputClassName="w-24"
+                      disabled={busy}
+                      description="Unidades realizadas (p. ej. 3 sellantes); el cargo es precio × cantidad."
+                    />
+                  )}
+                </form.AppField>
               ) : null}
 
-              <DiagnosisSearch
-                value={cie}
-                system={cieSystem}
-                onChange={(code, _description, system) => {
-                  setCie(code)
-                  setCieSystem(system)
-                }}
-                label="Diagnóstico (opcional)"
-                disabled={busy}
-              />
+              <form.AppField name="diagnosisCode">
+                {(field) => (
+                  <field.Control label="Diagnóstico (opcional)">
+                    {(control) => (
+                      <DiagnosisSearch
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        onBlur={control.onBlur}
+                        value={field.state.value}
+                        system={values.diagnosisSystem}
+                        onChange={(code, _description, system) => {
+                          field.handleChange(code)
+                          form.setFieldValue("diagnosisSystem", system)
+                        }}
+                        disabled={busy}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
 
               {!freeMode && (
-                <Field>
-                  <FieldLabel htmlFor={`${uid}-plan`}>
-                    {productUi().plan.budgetRequired ? "Tratamiento aceptado del presupuesto" : "Tratamiento indicado"}
-                  </FieldLabel>
-                  {planQuery.isLoading ? (
-                    <p className="text-sm text-muted-foreground">Cargando plan…</p>
-                  ) : planQuery.isError ? (
-                    <div className="flex flex-col gap-2">
-                      <p role="alert" className="text-sm text-destructive">
-                        No se pudo cargar el plan de tratamiento.
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="self-start"
-                        disabled={busy}
-                        onClick={() => void planQuery.refetch()}
-                      >
-                        Reintentar
-                      </Button>
-                    </div>
-                  ) : (
-                    <Select
-                      value={planSel === "" ? NO_PLAN : planSel}
-                      items={planItems}
-                      onValueChange={onPlanChange}
-                      disabled={busy}
+                <form.AppField name="planItemId">
+                  {(field) => (
+                    <field.Control
+                      label={productUi().plan.budgetRequired ? "Tratamiento aceptado del presupuesto" : "Tratamiento indicado"}
                     >
-                      <SelectTrigger
-                        id={`${uid}-plan`}
-                        aria-label={productUi().plan.budgetRequired ? "Tratamiento del presupuesto" : "Tratamiento indicado"}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NO_PLAN}>
-                          Seleccionar otro servicio del catálogo
-                        </SelectItem>
-                        {options.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {planOptionLabel(item, orgLocale)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      {(control) => (
+                        <>
+                          {planQuery.isLoading ? (
+                            <p className="text-sm text-muted-foreground">Cargando plan…</p>
+                          ) : planQuery.isError ? (
+                            <div className="flex flex-col gap-2">
+                              <p role="alert" className="text-sm text-destructive">
+                                No se pudo cargar el plan de tratamiento.
+                              </p>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="self-start"
+                                disabled={busy}
+                                onClick={() => void planQuery.refetch()}
+                              >
+                                Reintentar
+                              </Button>
+                            </div>
+                          ) : (
+                            <Select
+                              value={field.state.value === "" ? NO_PLAN : field.state.value}
+                              items={planItems}
+                              onValueChange={onPlanChange}
+                              disabled={busy}
+                            >
+                              <SelectTrigger
+                                {...control.props}
+                                aria-label={productUi().plan.budgetRequired ? "Tratamiento del presupuesto" : "Tratamiento indicado"}
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={NO_PLAN}>
+                                  Seleccionar otro servicio del catálogo
+                                </SelectItem>
+                                {options.map((item) => (
+                                  <SelectItem key={item.id} value={item.id}>
+                                    {planOptionLabel(item, orgLocale)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                          {options.length === 0 && !selectedPlan && (
+                            <p className="text-xs text-muted-foreground">
+                              Sin tratamientos aceptados pendientes: registra un servicio directo del
+                              catálogo.
+                            </p>
+                          )}
+                          {selectedPlan && (
+                            <p className="text-xs text-muted-foreground">
+                              Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta atención.
+                              Completarlo es una decisión aparte, en Tratamientos.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </field.Control>
                   )}
-                  {options.length === 0 && !selectedPlan && (
-                    <p className="text-xs text-muted-foreground">
-                      Sin tratamientos aceptados pendientes: registra un servicio directo del
-                      catálogo.
-                    </p>
-                  )}
-                  {selectedPlan && (
-                    <p className="text-xs text-muted-foreground">
-                      Al guardar, «{selectedPlan.title}» queda en curso y vinculado a esta atención.
-                      Completarlo es una decisión aparte, en Tratamientos.
-                    </p>
-                  )}
-                </Field>
+                </form.AppField>
               )}
             </div>
           </FormDrawer>
@@ -682,28 +745,16 @@ export function EncounterProcedures({
         title="Anular procedimiento"
         description={`${voidingProc?.description ?? ""}. Queda en la traza como anulado: no cuenta como sesión ni genera cargo al cerrar.`}
         confirmLabel="Anular procedimiento"
-        pending={saving}
-        confirmDisabled={!voidReason.trim()}
-        onConfirm={() => void confirmVoid()}
+        pending={voidSubmitting}
+        error={voidError}
+        onConfirm={() => void submitForm(voidForm)}
         onClose={() => {
-          if (!saving) setVoidingProc(null)
+          if (!voidSubmitting) setVoidingProc(null)
         }}
       >
-        <Field>
-          <FieldLabel htmlFor={`${uid}-void`}>Motivo</FieldLabel>
-          <Textarea
-            id={`${uid}-void`}
-            rows={2}
-            maxLength={2000}
-            value={voidReason}
-            onChange={(event) => setVoidReason(event.target.value)}
-          />
-        </Field>
-        {voidError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {voidError}
-          </p>
-        ) : null}
+        <voidForm.AppField name="reason">
+          {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_TEXT} aria-required />}
+        </voidForm.AppField>
       </ConfirmDialog>
     </div>
   )

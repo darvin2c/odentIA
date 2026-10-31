@@ -1,9 +1,21 @@
 // «Pide tus USD 100» (Fundadores, issue 165; lienzo, tableros 2 y 3): a la izquierda la marca sobre
 // la noche, con las 32 piezas de la portada y la acción de un agente, como entrar y crear cuenta; a la
 // derecha la solicitud. Al enviarla, la misma pantalla dice qué sigue. La solicitud va a la ruta
-// pública de la API (excepción a ADR 0046, como el Libro de Reclamaciones).
+// pública de la API (excepción a ADR 0046, como el Libro de Reclamaciones). Cada error, también lo que
+// rechaza el servidor, va bajo su campo y el foco al primero.
 import { AGENTS, CalmPulseScene, CalmToothScene, type DayEvent } from "@odentia/brand-scene"
+import { useForm, useStore } from "@tanstack/react-form"
 import { type SyntheticEvent, useEffect, useState } from "react"
+import {
+  applyRejection,
+  clearRejection,
+  EMAIL,
+  fieldError,
+  focusFirstInvalid,
+  PHONE,
+  rejectionOf,
+  SubmitRejected,
+} from "../../lib/form"
 import { businessDays } from "../../lib/pricing"
 import { MEDICAL, WORDS } from "../../lib/product"
 import { waitlistApiUrl } from "../../lib/site"
@@ -67,60 +79,159 @@ function deviceCountry(): string {
 
 type Sent = { firstName: string; clinicName: string; phone: string; email: string; answerDays: number }
 
+/** Los campos se llaman como en el cuerpo de la API: lo que rechaza el servidor cae en su campo. */
+type Values = {
+  firstName: string
+  lastName: string
+  email: string
+  countryCode: string
+  city: string
+  phone: string
+  clinicName: string
+  professionals: string
+  currentTool: string
+}
+type Field = keyof Values
+
+const EMPTY: Values = {
+  firstName: "",
+  lastName: "",
+  email: "",
+  countryCode: "",
+  city: "",
+  phone: "",
+  clinicName: "",
+  professionals: "",
+  currentTool: "",
+}
+
+const SAVE_FAILED = "No pudimos guardar tu solicitud. Intenta nuevamente."
+
+/** El celular como lo recibe el servidor: con el prefijo del país, salvo que ya lo traiga. */
+function fullPhone(phone: string, countryCode: string): string {
+  const raw = phone.trim()
+  const dial = COUNTRIES.find(([code]) => code === countryCode)?.[2]
+  return raw.startsWith("+") || !dial ? raw : `+${dial} ${raw}`
+}
+
+/** Mismas reglas que el servidor (`waitlistInputSchema`, saas-founders.ts); el servidor vuelve a validar. */
+function validate(v: Values): Partial<Record<Field, string>> {
+  const e: Partial<Record<Field, string>> = {}
+  if (!v.firstName.trim()) e.firstName = "Escribe tu nombre"
+  if (!v.lastName.trim()) e.lastName = "Escribe tus apellidos"
+  if (!v.email.trim()) e.email = "Escribe tu correo"
+  else if (!EMAIL.test(v.email.trim())) e.email = "Escribe un correo válido, como nombre@clinica.com"
+  if (!v.countryCode) e.countryCode = "Elige el país"
+  if (!v.city.trim()) e.city = "Escribe la ciudad"
+  const phone = fullPhone(v.phone, v.countryCode)
+  if (!v.phone.trim()) e.phone = "Escribe tu celular"
+  else if (!PHONE.test(phone))
+    e.phone =
+      /^\+?[0-9][0-9 ()-]*$/.test(phone) && phone.length > 21
+        ? "El celular es demasiado largo; escríbelo sin el código del país"
+        : "Escribe un celular válido, solo con números"
+  if (!v.clinicName.trim())
+    e.clinicName = MEDICAL ? "Escribe el nombre del consultorio" : "Escribe el nombre de la clínica"
+  if (!v.professionals) e.professionals = `Elige cuántos ${MEDICAL ? "médicos" : "odontólogos"} atienden`
+  if (!v.currentTool) e.currentTool = "Elige qué usan hoy"
+  return e
+}
+
+/** Atributos de un campo: id, nombre y su error, si lo tiene. */
+function a11y(field: Field, error: string | undefined) {
+  return {
+    id: `wl-${field}`,
+    name: field,
+    "aria-invalid": error ? true : undefined,
+    "aria-describedby": error ? `wl-${field}-error` : undefined,
+  }
+}
+
+function FieldError({ field, message }: { field: Field; message: string | undefined }) {
+  if (!message) return null
+  return (
+    <p className="wl-field-error" id={`wl-${field}-error`}>
+      {message}
+    </p>
+  )
+}
+
 export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answerDays }: Props) {
-  const [country, setCountry] = useState("")
-  // El país del dispositivo se propone al cargar (en el servidor no se sabe); se puede cambiar.
-  useEffect(() => setCountry((current) => current || deviceCountry()), [])
-  const dial = COUNTRIES.find(([code]) => code === country)?.[2]
-  const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState<Sent | null>(null)
   const [work, setWork] = useState<DayEvent | null>(null)
 
-  async function submit(event: SyntheticEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (pending) return
-    const data = new FormData(event.currentTarget)
-    const value = (name: string) => String(data.get(name) ?? "").trim()
-    const rawPhone = value("phone")
-    const phone = rawPhone.startsWith("+") || !dial ? rawPhone : `+${dial} ${rawPhone}`
-    const body = {
-      firstName: value("firstName"),
-      lastName: value("lastName"),
-      email: value("email"),
-      phone,
-      clinicName: value("clinicName"),
-      countryCode: country,
-      city: value("city"),
-      professionals: value("professionals"),
-      currentTool: value("currentTool"),
-    }
-    setPending(true)
-    setError(null)
-    try {
-      const res = await fetch(waitlistApiUrl, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const payload = (await res.json().catch(() => ({}))) as { error?: { message?: string }; data?: { answerDays?: number }; answerDays?: number }
-      if (!res.ok) {
-        setError(payload.error?.message ?? "No pudimos guardar tu solicitud. Intenta nuevamente.")
-        return
+  const form = useForm({
+    defaultValues: EMPTY,
+    validators: {
+      // Al enviar; corregir un campo retira su mensaje al momento. Los campos no llaman a
+      // `handleBlur`: en TanStack Form salir de un campo borra el error del envío aunque siga mal.
+      onSubmit: ({ value }) => {
+        const fields = validate(value)
+        return Object.keys(fields).length > 0 ? { fields } : undefined
+      },
+    },
+    onSubmit: async ({ value }) => {
+      const body = {
+        firstName: value.firstName.trim(),
+        lastName: value.lastName.trim(),
+        email: value.email.trim(),
+        phone: fullPhone(value.phone, value.countryCode),
+        clinicName: value.clinicName.trim(),
+        countryCode: value.countryCode,
+        city: value.city.trim(),
+        professionals: value.professionals,
+        currentTool: value.currentTool,
       }
+      let res: Response
+      try {
+        res = await fetch(waitlistApiUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      } catch {
+        throw new SubmitRejected(
+          "No hay conexión. Revisa tu internet e intenta nuevamente; lo que escribiste sigue aquí.",
+        )
+      }
+      const payload = (await res.json().catch(() => null)) as {
+        data?: { answerDays?: number }
+        answerDays?: number
+      } | null
+      // Un 400 dice en `fields` qué dato rechazó: cada uno va a su campo.
+      if (!res.ok) throw rejectionOf(payload, SAVE_FAILED)
       setSent({
         firstName: body.firstName,
         clinicName: body.clinicName,
         phone: body.phone,
         email: body.email,
-        answerDays: payload.data?.answerDays ?? payload.answerDays ?? answerDays,
+        answerDays: payload?.data?.answerDays ?? payload?.answerDays ?? answerDays,
       })
       window.scrollTo({ top: 0 })
-    } catch {
-      setError("No hay conexión. Revisa tu internet e intenta nuevamente; lo que escribiste sigue aquí.")
-    } finally {
-      setPending(false)
+    },
+  })
+  const country = useStore(form.store, (state) => state.values.countryCode)
+  const pending = useStore(form.store, (state) => state.isSubmitting)
+  const dial = COUNTRIES.find(([code]) => code === country)?.[2]
+  // El país del dispositivo se propone al cargar (en el servidor no se sabe); se puede cambiar.
+  useEffect(() => {
+    if (!form.getFieldValue("countryCode"))
+      form.setFieldValue("countryCode", deviceCountry(), { dontUpdateMeta: true })
+  }, [form])
+
+  async function submit(event: SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (form.state.isSubmitting) return
+    const root = event.currentTarget
+    setError(null)
+    clearRejection(form)
+    try {
+      await form.handleSubmit()
+    } catch (rejection) {
+      setError(applyRejection(form, rejection, SAVE_FAILED))
     }
+    if (!form.state.isSubmitSuccessful) focusFirstInvalid(root)
   }
 
   const agent = work ? AGENTS[work.agent] : null
@@ -193,7 +304,7 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
             </a>
           </div>
         ) : (
-          <form className="wl-card" onSubmit={submit} noValidate={false}>
+          <form className="wl-card" onSubmit={submit} noValidate>
             <h2 className="wl-h">
               {gift ? (
                 <>
@@ -205,72 +316,205 @@ export default function WaitlistSplit({ logo, gift, discountPercent, noFee, answ
             </h2>
             <p className="wl-note">Mientras dure el programa, se entra por invitación. Te respondemos en {businessDays(answerDays)}.</p>
             <div className="wl-grid">
-              <div className="wl-field">
-                <label htmlFor="wl-firstName">Nombre</label>
-                <input id="wl-firstName" name="firstName" autoComplete="given-name" required maxLength={80} />
-              </div>
-              <div className="wl-field">
-                <label htmlFor="wl-lastName">Apellidos</label>
-                <input id="wl-lastName" name="lastName" autoComplete="family-name" required maxLength={80} />
-              </div>
-              <div className="wl-field wl-wide">
-                <label htmlFor="wl-email">Correo</label>
-                <input id="wl-email" name="email" type="email" inputMode="email" autoComplete="email" required maxLength={254} />
-              </div>
-              <div className="wl-field">
-                <label htmlFor="wl-countryCode">País</label>
-                <select id="wl-countryCode" name="countryCode" required value={country} onChange={(event) => setCountry(event.target.value)}>
-                  <option value="" disabled>
-                    Elige el país
-                  </option>
-                  {COUNTRIES.map(([code, name]) => (
-                    <option key={code} value={code}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="wl-field">
-                <label htmlFor="wl-city">Ciudad</label>
-                <input id="wl-city" name="city" autoComplete="address-level2" required maxLength={80} />
-              </div>
-              <div className="wl-field wl-wide-sm">
-                <label htmlFor="wl-phone">Celular (WhatsApp)</label>
-                <span className="wl-phone">
-                  {dial ? <span className="mono wl-dial">+{dial}</span> : null}
-                  <input id="wl-phone" name="phone" type="tel" inputMode="tel" autoComplete="tel-national" required minLength={6} maxLength={20} />
-                </span>
-              </div>
-              <div className="wl-field wl-wide-sm">
-                <label htmlFor="wl-clinicName">{MEDICAL ? "Nombre del consultorio" : "Nombre de la clínica"}</label>
-                <input id="wl-clinicName" name="clinicName" autoComplete="organization" required maxLength={120} />
-              </div>
-              <div className="wl-field">
-                <label htmlFor="wl-professionals">{MEDICAL ? "Médicos que atienden" : "Odontólogos que atienden"}</label>
-                <select id="wl-professionals" name="professionals" required defaultValue="">
-                  <option value="" disabled>
-                    Elige
-                  </option>
-                  {PROFESSIONALS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="wl-field">
-                <label htmlFor="wl-currentTool">Qué usan hoy</label>
-                <select id="wl-currentTool" name="currentTool" required defaultValue="">
-                  <option value="" disabled>
-                    Elige
-                  </option>
-                  {TOOLS.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <form.Field name="firstName">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field">
+                      <label htmlFor="wl-firstName">Nombre</label>
+                      <input
+                        {...a11y("firstName", fieldMessage)}
+                        autoComplete="given-name"
+                        required
+                        maxLength={80}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <FieldError field="firstName" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="lastName">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field">
+                      <label htmlFor="wl-lastName">Apellidos</label>
+                      <input
+                        {...a11y("lastName", fieldMessage)}
+                        autoComplete="family-name"
+                        required
+                        maxLength={80}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <FieldError field="lastName" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="email">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field wl-wide">
+                      <label htmlFor="wl-email">Correo</label>
+                      <input
+                        {...a11y("email", fieldMessage)}
+                        type="email"
+                        inputMode="email"
+                        autoComplete="email"
+                        required
+                        maxLength={254}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <FieldError field="email" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="countryCode">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field">
+                      <label htmlFor="wl-countryCode">País</label>
+                      <select
+                        {...a11y("countryCode", fieldMessage)}
+                        required
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      >
+                        <option value="" disabled>
+                          Elige el país
+                        </option>
+                        {COUNTRIES.map(([code, name]) => (
+                          <option key={code} value={code}>
+                            {name}
+                          </option>
+                        ))}
+                      </select>
+                      <FieldError field="countryCode" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="city">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field">
+                      <label htmlFor="wl-city">Ciudad</label>
+                      <input
+                        {...a11y("city", fieldMessage)}
+                        autoComplete="address-level2"
+                        required
+                        maxLength={80}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <FieldError field="city" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="phone">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field wl-wide-sm">
+                      <label htmlFor="wl-phone">Celular (WhatsApp)</label>
+                      <span className="wl-phone">
+                        {dial ? <span className="mono wl-dial">+{dial}</span> : null}
+                        <input
+                          {...a11y("phone", fieldMessage)}
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel-national"
+                          required
+                          maxLength={20}
+                          value={field.state.value}
+                          onChange={(event) => field.handleChange(event.target.value)}
+                        />
+                      </span>
+                      <FieldError field="phone" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="clinicName">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field wl-wide-sm">
+                      <label htmlFor="wl-clinicName">{MEDICAL ? "Nombre del consultorio" : "Nombre de la clínica"}</label>
+                      <input
+                        {...a11y("clinicName", fieldMessage)}
+                        autoComplete="organization"
+                        required
+                        maxLength={120}
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      />
+                      <FieldError field="clinicName" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="professionals">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field">
+                      <label htmlFor="wl-professionals">{MEDICAL ? "Médicos que atienden" : "Odontólogos que atienden"}</label>
+                      <select
+                        {...a11y("professionals", fieldMessage)}
+                        required
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      >
+                        <option value="" disabled>
+                          Elige
+                        </option>
+                        {PROFESSIONALS.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      <FieldError field="professionals" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
+              <form.Field name="currentTool">
+                {(field) => {
+                  const fieldMessage = fieldError(field.state.meta)
+                  return (
+                    <div className="wl-field">
+                      <label htmlFor="wl-currentTool">Qué usan hoy</label>
+                      <select
+                        {...a11y("currentTool", fieldMessage)}
+                        required
+                        value={field.state.value}
+                        onChange={(event) => field.handleChange(event.target.value)}
+                      >
+                        <option value="" disabled>
+                          Elige
+                        </option>
+                        {TOOLS.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      <FieldError field="currentTool" message={fieldMessage} />
+                    </div>
+                  )
+                }}
+              </form.Field>
             </div>
             <p className="wl-legal">
               Usamos estos datos solo para responder tu solicitud. <a href="/privacidad">Aviso de privacidad</a>.

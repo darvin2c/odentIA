@@ -55,6 +55,8 @@ export interface ConversationAttention {
   teamLive?: boolean
   /** Chat web con un tema y sin dónde avisarle (R4): si cierra la pestaña, no le llega la respuesta. */
   unreachable?: boolean
+  /** El WhatsApp que dejó ya es de otra persona de la clínica: no se usa hasta confirmar quién es. */
+  othersPhone?: string | null
   /** El agente atiende hoy el hilo: abierto, encendido en el hilo y en la organización. */
   agentAttending: boolean
   /** Propuestas pendientes que esperan al interlocutor: las únicas que quedan pendientes. */

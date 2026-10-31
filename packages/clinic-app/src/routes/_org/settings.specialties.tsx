@@ -1,19 +1,19 @@
 import { canAccessAny, platformPathPermission } from "@odentia/auth/permissions"
+import { Badge, Button, Checkbox, toast } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  Checkbox,
-  Field,
-  FieldError,
-  FieldLabel,
-  Input,
-  Textarea,
-  toast,
-} from "@odentia/ui"
-import { ConfirmDialog, EmptyState, FormDrawer, PageHeader, SkeletonRegion } from "@odentia/ui-patterns"
+  ConfirmDialog,
+  EmptyState,
+  FormDrawer,
+  PageHeader,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { type FormEvent, useEffect, useId, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { z } from "zod"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
@@ -22,6 +22,7 @@ import {
   archiveSpecialty,
   createSpecialty,
   fetchSpecialtiesOverview,
+  type Specialty,
   type SpecialtyOverview,
   saveSpecialtyProfessionals,
   updateSpecialty,
@@ -40,9 +41,20 @@ const TITLE = "Especialidades"
 const SUBTITLE = "Las especialidades de tu clínica y quién atiende cada una. La agenda ofrece cada servicio a quien atiende su especialidad."
 const LINK = "font-semibold text-primary underline-offset-4 hover:underline"
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
-}
+const NAME_CHARS = 120
+const DESCRIPTION_CHARS = 2000
+
+/** Los límites de la ruta y la regla de la clave: del nombre deben salir al menos dos letras o números. */
+const specialtySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Escribe el nombre de la especialidad")
+    .max(NAME_CHARS, `El nombre de la especialidad admite hasta ${NAME_CHARS} caracteres`)
+    .refine((name) => (name.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 2, "El nombre necesita al menos dos letras o números"),
+  description: z.string().max(DESCRIPTION_CHARS, `La descripción admite hasta ${DESCRIPTION_CHARS} caracteres`),
+  who: z.array(z.string()).max(100, "Marca como mucho 100 personas"),
+})
 
 /** ¿Puede este rol abrir esa pantalla? Un enlace solo se ofrece a quien puede. */
 function useCanOpen(path: string): boolean {
@@ -184,7 +196,7 @@ function SpecialtiesPage() {
       >
         {archiveMutation.isError ? (
           <p role="alert" className="text-sm text-destructive">
-            {errorText(archiveMutation.error, "No pudimos archivar la especialidad. Vuelve a intentarlo.")}
+            {submitErrorMessage(archiveMutation.error)}
           </p>
         ) : null}
       </ConfirmDialog>
@@ -275,34 +287,56 @@ function SpecialtyForm({
   onArchive: (specialty: SpecialtyOverview) => void
   onSaved: () => void
 }) {
-  const ids = useId()
   const specialty = target?.specialty ?? null
   const members = useOrgMembers()
   const canOpenTeam = useCanOpen("/settings/team")
   const queryClient = useQueryClient()
   const initialWho = (specialty?.professionals ?? []).map((item) => item.userId)
-  const [name, setName] = useState(specialty?.name ?? "")
-  const [description, setDescription] = useState(specialty?.description ?? "")
-  const [who, setWho] = useState<Set<string>>(() => new Set(initialWho))
-  const [nameError, setNameError] = useState<string | null>(null)
-  const whoRef = useRef<HTMLFieldSetElement>(null)
+  const whoRef = useRef<HTMLDivElement>(null)
+  // La especialidad nueva ya creada: si falla «Quién atiende», el reintento no la vuelve a crear.
+  const created = useRef<Specialty | null>(null)
 
   useEffect(() => {
     if (target?.chooseWho) whoRef.current?.querySelector<HTMLElement>("button, input")?.focus()
   }, [target?.chooseWho])
 
-  const save = useMutation({
-    mutationFn: async (values: { name: string; description: string | null }) => {
-      const saved = (specialty ? await updateSpecialty(specialty.id, values) : await createSpecialty(values)).data
-      const changedWho = who.size !== initialWho.length || initialWho.some((userId) => !who.has(userId))
-      if (changedWho) await saveSpecialtyProfessionals(saved.id, [...who])
-      return saved
+  const form = useAppForm({
+    defaultValues: {
+      name: specialty?.name ?? "",
+      description: specialty?.description ?? "",
+      who: initialWho,
     },
-    onSuccess: (saved) => {
+    validators: { onSubmit: specialtySchema },
+    onSubmit: async ({ value }) => {
+      const values = { name: value.name.trim(), description: value.description.trim() || null }
+      const existing = specialty ?? created.current
+      let saved: Specialty
+      if (existing) {
+        const last = created.current
+        const unchanged = last !== null && values.name === last.name && values.description === last.description
+        saved = unchanged ? last : (await updateSpecialty(existing.id, values)).data
+        if (created.current) created.current = saved
+      } else {
+        saved = (await createSpecialty(values)).data
+        created.current = saved
+        void queryClient.invalidateQueries({ queryKey: ["specialties"] })
+      }
+      const changedWho = value.who.length !== initialWho.length || initialWho.some((userId) => !value.who.includes(userId))
+      if (changedWho) {
+        try {
+          await saveSpecialtyProfessionals(saved.id, value.who)
+        } catch (error) {
+          // El primer paso ya quedó guardado: lo que falló es «Quién atiende», y se dice ahí.
+          const message = submitErrorMessage(error)
+          throw new ApiError(400, { code: "PROFESSIONALS", message, fields: { who: message } })
+        }
+      }
       toast.success(`Especialidad «${saved.name}» guardada`)
       onSaved()
     },
   })
+  const surface = useFormSurface(form)
+  useReportDirty(surface.isDirty, onDirtyChange)
 
   const reactivate = useMutation({
     mutationFn: () => updateSpecialty(specialty!.id, { isActive: true }),
@@ -311,102 +345,77 @@ function SpecialtyForm({
       toast.success(`Especialidad «${specialty?.name ?? ""}» reactivada`)
       onClose()
     },
-    onError: (error) => toast.error(errorText(error, "No pudimos reactivar la especialidad. Vuelve a intentarlo.")),
+    onError: (error) => toast.error(submitErrorMessage(error)),
   })
-
-  const isDirty =
-    name !== (specialty?.name ?? "") ||
-    description !== (specialty?.description ?? "") ||
-    who.size !== initialWho.length ||
-    initialWho.some((userId) => !who.has(userId))
-  useReportDirty(isDirty, onDirtyChange)
 
   return (
     <FormDrawer
+      {...surface}
       open
       onClose={onClose}
       title={specialty ? `Editar «${specialty.name}»` : "Nueva especialidad"}
-      isDirty={isDirty}
-      isSubmitting={save.isPending}
-      error={save.isError ? errorText(save.error, "No pudimos guardar la especialidad. Vuelve a intentarlo.") : null}
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault()
-        const trimmed = name.trim()
-        if (trimmed.length < 2) {
-          setNameError("Escribe el nombre de la especialidad")
-          return
-        }
-        setNameError(null)
-        save.mutate({ name: trimmed, description: description.trim() ? description.trim() : null })
-      }}
     >
       <div className="flex flex-col gap-5">
-        <Field>
-          <FieldLabel htmlFor={`${ids}-nombre`}>Nombre</FieldLabel>
-          <Input
-            id={`${ids}-nombre`}
-            value={name}
-            placeholder={appWords().examples.specialty}
-            maxLength={120}
-            aria-invalid={nameError ? true : undefined}
-            onChange={(event) => setName(event.target.value)}
-          />
-          {nameError ? <FieldError>{nameError}</FieldError> : null}
-        </Field>
-        <Field>
-          <FieldLabel htmlFor={`${ids}-descripcion`}>Descripción (opcional)</FieldLabel>
-          <Textarea
-            id={`${ids}-descripcion`}
-            value={description}
-            rows={3}
-            maxLength={2000}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </Field>
-        <fieldset ref={whoRef} className="flex flex-col gap-2">
-          <legend className="text-sm font-medium">Quién atiende</legend>
-          <p className="text-sm text-muted-foreground">
-            La agenda ofrece los servicios de esta especialidad solo a quienes marques, si tienen horario en esa sede. Sin
-            nadie marcado, los ofrece a cualquiera.
-          </p>
-          {members.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Aún no hay nadie en el equipo.{" "}
-              {canOpenTeam ? (
-                <Link to="/settings/team" className={LINK}>
-                  Invitar a alguien en Equipo
-                </Link>
-              ) : null}
-            </p>
-          ) : (
-            <ul className="flex flex-col divide-y">
-              {members.map((member) => {
-                const id = `${ids}-atiende-${member.userId}`
-                const role = appRoleLabel(member.role, "")
-                return (
-                  <li key={member.userId} className="flex min-h-11 items-center gap-3 py-2">
-                    <Checkbox
-                      id={id}
-                      checked={who.has(member.userId)}
-                      onCheckedChange={(checked) =>
-                        setWho((current) => {
-                          const next = new Set(current)
-                          if (checked === true) next.add(member.userId)
-                          else next.delete(member.userId)
-                          return next
-                        })
-                      }
-                    />
-                    <label htmlFor={id} className="min-w-0 flex-1 text-sm">
-                      <span className="font-medium">{member.user.name}</span>
-                      {role ? <span className="text-muted-foreground"> · {role}</span> : null}
-                    </label>
-                  </li>
-                )
-              })}
-            </ul>
+        <form.AppField name="name">
+          {(field) => (
+            <field.TextField label="Nombre" placeholder={appWords().examples.specialty} maxLength={NAME_CHARS} />
           )}
-        </fieldset>
+        </form.AppField>
+        <form.AppField name="description">
+          {(field) => <field.TextareaField label="Descripción (opcional)" rows={3} maxLength={DESCRIPTION_CHARS} />}
+        </form.AppField>
+        <div ref={whoRef}>
+          <form.AppField name="who">
+            {(field) => (
+              <field.Group
+                legend="Quién atiende"
+                description="La agenda ofrece los servicios de esta especialidad solo a quienes marques, si tienen horario en esa sede. Sin nadie marcado, los ofrece a cualquiera."
+              >
+                {(control) =>
+                  members.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Aún no hay nadie en el equipo.{" "}
+                      {canOpenTeam ? (
+                        <Link to="/settings/team" className={LINK}>
+                          Invitar a alguien en Equipo
+                        </Link>
+                      ) : null}
+                    </p>
+                  ) : (
+                    <ul className="flex flex-col divide-y">
+                      {members.map((member) => {
+                        const id = `${control.id}-${member.userId}`
+                        const role = appRoleLabel(member.role, "")
+                        return (
+                          <li key={member.userId} className="flex min-h-11 items-center gap-3 py-2">
+                            <Checkbox
+                              id={id}
+                              checked={field.state.value.includes(member.userId)}
+                              aria-invalid={control.invalid || undefined}
+                              aria-describedby={control.describedBy}
+                              onBlur={control.onBlur}
+                              onCheckedChange={(checked) =>
+                                field.handleChange((current) =>
+                                  checked === true
+                                    ? [...current.filter((userId) => userId !== member.userId), member.userId]
+                                    : current.filter((userId) => userId !== member.userId),
+                                )
+                              }
+                            />
+                            <label htmlFor={id} className="min-w-0 flex-1 text-sm">
+                              <span className="font-medium">{member.user.name}</span>
+                              {role ? <span className="text-muted-foreground"> · {role}</span> : null}
+                            </label>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )
+                }
+              </field.Group>
+            )}
+          </form.AppField>
+        </div>
         {specialty ? (
           <div className="flex flex-col gap-2 border-t pt-4">
             {specialty.isActive ? (

@@ -1,112 +1,111 @@
 import { createHash } from "node:crypto"
 import { tool } from "@langchain/core/tools"
 import { type Db, withOrgContext } from "@odentia/db"
-import { channelConnection, conversation } from "@odentia/db/schema/crm"
-import { and, eq } from "drizzle-orm"
 import type { AnswerBasisItem, AnswerCheck, AnswerTraceOutcome } from "@odentia/db/schema/agent"
+import { channelConnection, conversation } from "@odentia/db/schema/crm"
+import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
 import {
+  type AgentPatientBudgets,
   addAgentCaseNote,
   addPersonFact,
-  type AgentPatientBudgets,
-  CASE_SLOTS,
-  type CaseSlot,
+  agentReplyBlockedReason,
+  agentTextsFor,
+  annotateHandoff,
+  answerGeneralPermission,
+  bookedDataLink,
+  bookingPickAddress,
   budgetAnswerQuestion,
   budgetLineWords,
   budgetNumberText,
   buildAgentProposalKey,
-  getAgentPatientBudgets,
-  planBudgetAnswer,
-  proposalConfirmButtons,
-  resendBudgetByContact,
-  confirmProposalByContact,
-  proposalReplyOf,
-  chosenBeforeProposalOf,
-  bookedDataLink,
-  answerGeneralPermission,
-  chooseMessagesInConversation,
-  confirmAppointmentByContact,
+  CASE_SLOTS,
+  type CaseSlot,
   type ContactAppointmentOption,
-  PERSONAL_LINK_TTL_DAYS,
-  createBookingLink,
-  issueAgendaLink,
-  personalLinkAddress,
-  personalLinkRef,
-  GAPS_PER_PROFESSIONAL_PER_DAY,
-  requestPortalReentry,
-  annotateHandoff,
-  agentReplyBlockedReason,
-  newerInboundThan,
+  chatBookingMissing,
+  chooseMessagesInConversation,
+  chosenBeforeProposalOf,
+  clinicAddressOf,
+  clinicOrigin,
+  clinicSearchFoundNothing,
   closeConversationWith,
   closurePendingReason,
+  confirmAppointmentByContact,
+  confirmProposalByContact,
+  createBookingLink,
   createHandoff,
-  topicKindOf,
-  recordTopicAskedAgain,
-  latestOpenTopic,
-  getProposal,
   createProposal,
   createTask,
-  recordAgentAction,
+  emergencyAdviceFor,
   findFreeGaps,
-  getAgentPatientSummary,
-  getContact,
-  getClinicInfoSnapshot,
-  getOpportunity,
-  getOrgLocale,
-  clinicSearchFoundNothing,
   formatAgentClinicData,
   formatClinicSearch,
-  GENERAL_PERMISSION_NO,
-  GENERAL_PERMISSION_QUESTION,
-  GENERAL_PERMISSION_YES,
-  listPricedSubjects,
-  PRICES_PER_CONVERSATION,
   formatOrgMoney,
   formatZoned,
+  GAPS_PER_PROFESSIONAL_PER_DAY,
+  GENERAL_PERMISSION_QUESTION,
+  generalPermissionWords,
   getAgentClinicData,
   getAgentConfig,
+  getAgentPatientBudgets,
+  getAgentPatientSummary,
+  getClinicInfoSnapshot,
+  getContact,
+  getOpportunity,
+  getOrgLocale,
+  getProposal,
+  issueAgendaLink,
+  latestOpenTopic,
   listAgentContextCandidates,
-  chatPrivacyNotice,
-  chatRegistrationSchema,
-  type ChatRegistrationPerson,
+  reportPatientNameMismatch,
   listContactChannelHistory,
   listContactNotes,
   listOpportunities,
   listPaymentMethods,
+  listPricedSubjects,
   listTasks,
+  newerInboundThan,
   noteLessonUse,
   operationAgentSchema,
+  PERSONAL_LINK_TTL_DAYS,
+  PRICES_PER_CONVERSATION,
+  type ProductAgentTexts,
+  personalLinkAddress,
+  personalLinkRef,
+  planBudgetAnswer,
+  proposalConfirmButtons,
+  proposalReplyOf,
+  rankByMeaning,
+  recordAgentAction,
   recordAnswerTrace,
   recordKnowledgeGap,
+  recordTopicAskedAgain,
+  requestPortalReentry,
   requireContact,
+  resendBudgetByContact,
   resolveAgentPatientContext,
-  resumeConversationBySystem,
-  sendReceiptInConversation,
-  rankByMeaning,
   resolveProfessionalRef,
+  resumeConversationBySystem,
+  ServiceError,
+  saveWebchatContactForConversation,
   searchClinic,
   searchPublishedKnowledge,
-  ServiceError,
+  sendReceiptInConversation,
+  topicKindOf,
   updateContact,
   webchatHandoffWhere,
   webchatReplyRoutes,
-  saveWebchatContactForConversation,
-  agentTextsFor,
-  emergencyAdviceFor,
-  type ProductAgentTexts,
-  clinicAddressOf,
-  clinicOrigin,
 } from "@odentia/services"
-import type { MeaningRank, OpportunityDetail, OrgLocale, ProposalItem, PublicLinkConfig, SearchEmbedder, Storage } from "@odentia/services"
+import { and, eq } from "drizzle-orm"
 import { z } from "zod"
-import type { DecisionModel } from "./decision/port.js"
-import { choseThisSlot, understoodYes } from "./confirm-intent.js"
-import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
+import { formulasIn, nameQuestionsIn } from "./attention.js"
 import { formatForChannel } from "./channel-format.js"
 import { claimsOf } from "./claims.js"
+import { choseThisSlot, understoodYes } from "./confirm-intent.js"
+import type { DecisionModel } from "./decision/port.js"
+import { type AgentRoute, budgetNotice, handoffFallbackNotice, URGENT_SCORE } from "./decision/route.js"
 import { languageOf } from "./language.js"
 import { tutea } from "./treatment.js"
-import { formulasIn, nameQuestionsIn } from "./attention.js"
-import { describeUnsupported, type Evidence, pricedSubjectsOf, refusedPaymentMentions, type ReplyVerdict, timesIn, verifyReply } from "./verify.js"
+import { describeUnsupported, type Evidence, pricedSubjectsOf, type ReplyVerdict, refusedPaymentMentions, timesIn, verifyReply } from "./verify.js"
 
 /** Fuente de un dato del turno, con la clase que verá el equipo en «En qué se basó». */
 export interface AgentEvidence extends Evidence {
@@ -158,14 +157,14 @@ export const TOOL_SOURCES: Record<string, { kind: string; label: string }> = {
 
 /** Lo que hizo el agente en un turno, dicho para quien prueba (no para el modelo). */
 export const TOOL_ACTION_LABEL: Record<string, string> = {
-  reservar_paciente_nuevo: "Propuso la cita de alguien nuevo, que con su sí queda registrado.",
+  reservar_paciente_nuevo: "Le dio a alguien nuevo su enlace con la hora que eligió, para que deje sus datos y reserve ahí.",
   ver_sedes_y_servicios: "Consultó sedes, servicios y precios.",
   buscar_en_la_clinica: "Buscó en los servicios, promociones y profesionales de la clínica.",
   consultar_conocimiento: "Buscó en las respuestas oficiales.",
   buscar_huecos: "Buscó huecos reales en la agenda.",
   ver_contexto_paciente: "Verificó para quién es la atención.",
   ver_resumen_paciente: "Consultó las citas y el estado de cuenta del paciente.",
-  proponer_cita: "Propuso reservar una cita.",
+  proponer_cita: "Propuso reservar una cita o, si a la clínica le faltaban datos del paciente, le dio su enlace con esa hora.",
   reprogramar_cita: "Propuso mover una cita.",
   cancelar_cita: "Propuso cancelar una cita.",
   confirmar_propuesta: "Ejecutó lo que el paciente confirmó.",
@@ -315,8 +314,8 @@ export interface AgentToolCtx {
   nameNudged?: boolean
   /** Cuántas respuestas de esta atención ya usaron «Entiendo…» o «anoté que…» (`formulasIn`). */
   formulas?: { opener: number; noted: number }
-  /** Ya le habló por su nombre en esta atención (`attentionProgress`). */
-  usedName?: boolean
+  /** Las horas de los enlaces con la hora elegida que ya le dio en esta atención (`attentionProgress`). */
+  pickLinks?: string[]
   /** Ya se le pidió una vez en esta corrida que no repita esas fórmulas. */
   formulaNudged?: boolean
   /** Lo que consta del caso al empezar la corrida: temas con el equipo y notas (`claimsOf`). */
@@ -912,7 +911,8 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     const sought = ctx.gapsSought
     const publicUrl = ctx.publicUrl
     if (!sought || !publicUrl || ctx.dryRun || ctx.casePending || ctx.route?.path === "cambio_cita") return text
-    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?token=") || timesIn(text) < 2) return text
+    // Ya lleva su enlace (el de reserva, o el que trae la hora elegida: `/reserva?sede=…&token=…`): no va otro.
+    if (APPOINTMENT_ACTS.some((name) => ctx.toolsUsed.includes(name)) || text.includes("/reserva?") || timesIn(text) < 2) return text
     try {
       const line = await inOrg(async (tx) => {
         const origin = await clinicLinkOrigin(tx, publicUrl)
@@ -984,7 +984,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     if ((await conversationChannel(ctx)) !== "webchat") return null
     const routes = await inOrg((tx) => webchatReplyRoutes(tx, ctx.orgId, ctx.contactId)).catch(() => null)
     if (!routes) return null
-    if (routes.whatsapp || routes.correo) {
+    // Un número de otra persona (`othersPhone`) cuenta como dejado: lo decide el equipo, y
+    // decirle al visitante que no sirve le revelaría quién es de la clínica.
+    if (routes.whatsapp || routes.correo || routes.othersPhone) {
       ctx.contactOnFile = true
       return null
     }
@@ -1163,8 +1165,15 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
       const naming = Boolean(displayName || givenNames || familyName)
       // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
-      if (naming && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, contactId))).some((item) => item.relationship === "self")) {
-        return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
+      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
+      if (naming) {
+        const said = [givenNames?.trim(), familyName?.trim()].filter(Boolean).join(" ") || displayName || ""
+        const outcome = await inOrg((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said }))
+        if (outcome === "avisado") {
+          await noteAction("datos", "avisó a recepción que su nombre no es el de su ficha")
+          return "Es paciente y su ficha dice otro nombre: por aquí no se cambia y quedó una tarea para que recepción la revise. Háblale por el nombre que te dijo, sin decirle cómo figura en su ficha. Si le das su enlace para reservar, dile que ahí puede corregir su nombre."
+        }
+        if (outcome !== "no_es_paciente") return "Es paciente: su nombre no se cambia por aquí. Úsalo tal como figura."
       }
       // Solo sus nombres también se guardan: «Soy Carla» ya es saber con quién habla.
       const names = givenNames?.trim() && familyName?.trim()
@@ -1590,6 +1599,64 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     (await conversationChannel(ctx)) === "webchat" &&
     (await inOrg((tx) => webchatHandoffWhere(tx, ctx.orgId, ctx.conversationId)).catch(() => "aqui" as const)) === "preguntar"
 
+  /**
+   * «Su enlace» con la hora que eligió en el chat (ADR 0109): para quien aún no es paciente, o para
+   * el paciente al que la clínica le falta algo, la hora se reserva ahí, al confirmar sus datos. Es el
+   * mismo enlace que acompaña a los horarios (`issueAgendaLink`): nulo si el paciente ya tiene una
+   * cita por venir, porque la página le mostraría esa cita en vez de la reserva. El mensaje guarda la
+   * referencia del enlace y el worker pone el token al entregarlo (`personalLinkRef`).
+   */
+  const pickLink = async (
+    origin: string,
+    slot: { patientId?: string; branchId: string; serviceId?: string; professionalUserId: string; startsAt: string; newPerson?: boolean },
+  ) =>
+    inOrg(async (tx) => {
+      const { patientId, serviceId, professionalUserId, startsAt, branchId, newPerson } = slot
+      const link = await issueAgendaLink(
+        tx,
+        ctx.orgId,
+        {
+          conversationId: ctx.conversationId,
+          branchId,
+          ...(patientId ? { patientId } : {}),
+          ...(serviceId ? { serviceId } : {}),
+          ...(newPerson ? { newPerson: true } : {}),
+        },
+        { secretsKey: ctx.secretsKey },
+      )
+      return link ? { link, url: bookingPickAddress(origin, personalLinkRef(link.linkId), { branchId, professionalUserId, startsAt }) } : null
+    })
+
+  /** Ya le dio en esta atención el enlace con esa misma hora: no se le manda otra vez. */
+  const PICK_LINK_GIVEN =
+    "Ya le diste su enlace con esa hora en esta atención: no se lo vuelvas a mandar ni le repitas la cita. Respóndele en una frase a lo que dice; si no quiere o no puede usar el enlace, pasa el caso a recepción con request_human_handoff, con esa hora, y no le digas que se reserva por aquí."
+  const pickGiven = (startsAt: string): boolean => {
+    const at = Date.parse(startsAt)
+    return !Number.isNaN(at) && (ctx.pickLinks ?? []).some((given) => Date.parse(given) === at)
+  }
+
+  /** Lo que se le dice al modelo para enviar ese enlace: con sus palabras, como lo pidió la clínica (ADR 0109). */
+  const pickLinkReply = (url: string, why: string, forName: string | null): string =>
+    `Todavía no se reservó nada: ${why}. Esa hora se reserva en su enlace, que ya la trae elegida: ahí confirma sus datos y queda reservada (es personal y vale ${PERSONAL_LINK_TTL_DAYS} días): ${url}\n` +
+    `Envíaselo con send_reply en un solo mensaje, con tus palabras, en su idioma y con el trato de la clínica, por ejemplo «¡Perfecto, Rosa! Para reservarte el martes 3 de noviembre a las 9:00 a. m. con el Dr. Luis Prado, confirma tus datos aquí (1 minuto): ${url}»: ` +
+    `si sabes cómo se llama, empieza por su nombre; di el día, la hora y con quién del hueco que eligió${forName ? ` y que la cita es para ${forName}` : ""}, y escribe el enlace tal cual, sin cambiarlo. ` +
+    "No le pidas por aquí su sí ni sus datos, no le digas que se reserva por aquí y no digas que ya quedó reservada: queda reservada cuando confirme en la página, y el sistema se lo dice en esta conversación."
+
+  /**
+   * La sede del hueco que se ofreció con ese inicio, ese profesional y esa sala: la que lleva el
+   * enlace con la hora cuando el modelo no la indicó. Nula sin evidencia o sin ese hueco.
+   */
+  const offeredBranch = (input: { startsAt: string; professionalUserId: string; roomId: string }): string | null => {
+    const wanted = Date.parse(input.startsAt)
+    const professional = input.professionalUserId.trim().toLowerCase()
+    for (const item of ctx.evidence ?? []) {
+      for (const [, startsAt = "", branch = "", rest = "", ref = ""] of item.text.matchAll(/\[startsAt (\S+) · sede (\S+) · (.+?) · profesional ([^\]\s]+)\]/g)) {
+        if (Date.parse(startsAt) === wanted && ref.toLowerCase() === professional && rest.includes(input.roomId)) return branch
+      }
+    }
+    return null
+  }
+
   const proposeBooking = tool(
     async (input: {
       patientId: string
@@ -1609,6 +1676,39 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       // El agente solo conoce al profesional por su referencia («pro-…»): el usuario lo pone el servidor.
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
+      // Si a la clínica le falta algo del paciente (un dato obligatorio o el aviso de privacidad), esa
+      // hora se reserva en su enlace al confirmarlo, no con su sí en el chat (ADR 0109). Sin dirección
+      // pública, con una cita por venir (su enlace le mostraría esa cita) o si el enlace no se puede
+      // emitir, se propone aquí como siempre y la confirmación lleva el enlace para completar sus datos.
+      const viaLink = await (async () => {
+        const publicUrl = ctx.publicUrl
+        const branchId = input.branchId ?? offeredBranch(input)
+        if (!publicUrl || !branchId) return null
+        if (pickGiven(input.startsAt)) return PICK_LINK_GIVEN
+        try {
+          const found = await inOrg(async (tx) => {
+            const origin = await clinicLinkOrigin(tx, publicUrl)
+            const missing = origin ? await chatBookingMissing(tx, ctx.orgId, { contactId: ctx.contactId, patientId: input.patientId }) : []
+            return origin && missing.length ? { origin, missing } : null
+          })
+          if (!found) return null
+          const issued = await pickLink(found.origin, {
+            patientId: input.patientId,
+            branchId,
+            ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+            professionalUserId,
+            startsAt: input.startsAt,
+          })
+          if (!issued) return null
+          await noteAction("enlace", "le dio su enlace con la hora que eligió")
+          const whose = issued.link.forName ?? "la persona"
+          return pickLinkReply(issued.url, `a la clínica le falta algo de ${whose} (${found.missing.join(", ")}) y no se reserva por aquí`, issued.link.forName)
+        } catch (error) {
+          if (error instanceof ServiceError) return null
+          throw error
+        }
+      })()
+      if (viaLink) return viaLink
       const { reason, ...payload } = { ...input, professionalUserId }
       let created: ProposalItem | undefined
       const proposed = await propose("reservar_cita", payload, "proponer_cita", reason, (p) => {
@@ -1636,16 +1736,18 @@ export function makeAgentTools(ctx: AgentToolCtx) {
     {
       name: "proponer_cita",
       description:
-        `Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, ${room}, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta).`,
+        `Propone reservar una cita con los IDs exactos de un hueco de buscar_huecos (sede, ${room}, profesional, inicio). Verifica vínculo del paciente al ejecutar; queda esperando la confirmación del interlocutor (confirmar_propuesta). Si a la clínica le falta un dato del paciente o que acepte el aviso de privacidad, no la propone: te da su enlace con esa hora para que confirme sus datos y reserve ahí.`,
       schema: operationAgentSchema("cita.reservar", { room }),
     },
   )
 
   /**
-   * Quien aún no es paciente reserva en el chat (ADR 0101): la cita lleva sus
-   * datos en vez del paciente y, con su sí a la pregunta que dice «Al confirmar,
-   * aceptas nuestro aviso de privacidad», queda registrado y reservado en un
-   * solo paso. Sin aviso publicado (o sin registro encendido), su enlace.
+   * Quien aún no es paciente reserva en su enlace (ADR 0109, que precisa la 0101): con el hueco
+   * que eligió, su enlace ya trae esa hora y ahí deja sus datos (o los de su hijo, con «Para otra
+   * persona») y acepta el aviso; por el chat no se registra a nadie. Si quien escribe ya tiene
+   * pacientes (una madre con el suyo que pide cita para su hijo nuevo), el enlace es para alguien
+   * nuevo (`newPerson`): no es el de ellos. Sin registro en línea o sin dirección pública, lo
+   * registra recepción.
    */
   const bookNewPatient = tool(
     async (input: {
@@ -1656,74 +1758,65 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       serviceId?: string
       durationMin?: number
       reason?: string
-      givenNames: string
-      familyName: string
-      docType?: ChatRegistrationPerson["docType"]
-      docNumber?: string
       forOther?: boolean
-      minor?: boolean
-      writerName?: string
     }) => {
       if (!slotWasOffered(ctx.evidence, input)) return SLOT_NOT_OFFERED
-      if (ctx.dryRun) return `[SIMULACIÓN] Se propondría reservar y registrar a ${input.givenNames} ${input.familyName} el ${input.startsAt}.`
-      const forOther = input.forOther === true
-      if (!forOther && (await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))).some((item) => item.relationship === "self")) {
-        return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente)."
+      if (ctx.dryRun) return `[SIMULACIÓN] Se le daría su enlace con la hora ${input.startsAt}, para que deje sus datos y reserve ahí.`
+      // Quien ya tiene pacientes vinculados recibe el enlace para alguien nuevo: su enlace de siempre abriría lo de ellos.
+      const linked = await inOrg((tx) => listAgentContextCandidates(tx, ctx.orgId, ctx.contactId))
+      const ownRecord = linked.some((item) => item.relationship === "self")
+      if (ownRecord && input.forOther !== true) {
+        return "Ya es paciente: no se registra de nuevo. Usa proponer_cita con su patientId (de ver_contexto_paciente). Si la cita es para otra persona que aún no es paciente (su hijo, por ejemplo), vuelve a llamar a reservar_paciente_nuevo con forOther."
       }
-      const { notice, origin } = await inOrg(async (tx) => ({
-        notice: await chatPrivacyNotice(tx, ctx.orgId),
-        origin: ctx.publicUrl ? await clinicLinkOrigin(tx, ctx.publicUrl) : null,
-      }))
-      if (!notice || !origin) {
+      const publicUrl = ctx.publicUrl
+      const origin = publicUrl ? await inOrg((tx) => clinicLinkOrigin(tx, publicUrl)) : null
+      if (!origin) {
         return "La clínica no registra pacientes por el chat. Envíale su enlace con enviar_enlace_cita para que reserve ese horario y deje sus datos."
       }
       const professionalUserId = await inOrg((tx) => resolveProfessionalRef(tx, ctx.orgId, input.professionalUserId))
       if (!professionalUserId) return UNKNOWN_PROFESSIONAL
-      const { givenNames, familyName, docType, docNumber, forOther: _forOther, minor, writerName, reason, ...slot } = input
-      const newPatient = {
-        givenNames,
-        familyName,
-        ...(docType && docNumber ? { docType, docNumber } : {}),
-        ...(forOther ? { forOther: true, minor: minor === true, ...(writerName ? { writerName } : {}) } : {}),
-      }
-      let created: ProposalItem | undefined
-      let proposed: string
+      const branchId = input.branchId ?? offeredBranch(input)
+      if (!branchId) return "Falta la sede del hueco que eligió: vuelve a llamar con su branchId exacto (el dato «sede» del hueco de buscar_huecos)."
+      if (pickGiven(input.startsAt)) return PICK_LINK_GIVEN
+      const toTeam = "pasa el caso a recepción con request_human_handoff, con su nombre y la hora que eligió, para que lo registre y le confirme; no le digas que quedó reservada."
+      let issued: Awaited<ReturnType<typeof pickLink>>
       try {
-        proposed = await propose("reservar_cita", { ...slot, professionalUserId, newPatient }, "reservar_paciente_nuevo", reason, (p) => {
-          created = p
+        issued = await pickLink(origin, {
+          branchId,
+          ...(input.serviceId ? { serviceId: input.serviceId } : {}),
+          professionalUserId,
+          startsAt: input.startsAt,
+          ...(linked.length > 0 ? { newPerson: true } : {}),
         })
       } catch (error) {
-        // Un documento mal escrito se le pide de nuevo antes de pedirle el sí.
-        if (error instanceof ServiceError && error.code === "VALIDATION") return `${error.message}. Pídele que lo revise; si no lo tiene a la mano, sigue sin documento.`
+        if (error instanceof ServiceError && error.code === "TEST_CONVERSATION") {
+          return "Es una prueba con una persona real: no se envía su enlace ni se reserva nada de verdad. Dile que en la prueba no se reserva."
+        }
+        if (error instanceof ServiceError && error.code === "BOOKING_NEEDS_PATIENT") {
+          return `La clínica no tiene activo el registro de pacientes en línea: a quien aún no es paciente no se le reserva por aquí ni por un enlace. Por eso ${toTeam}`
+        }
+        if (error instanceof ServiceError) return `No se pudo preparar su enlace: ${error.message}. Por eso ${toTeam}`
         throw error
       }
-      if (created?.status !== "propuesta") return proposed
-      const noticeUrl = new URL("/aviso", origin).toString()
-      // El registro va en la frase final, con el aviso y bajo «al confirmar»: dicho aparte sonaba
-      // hecho («te registro como paciente») o repetía «Al confirmar» (auditoría del ADR 0104).
-      const registers = !forOther
-        ? "te registro como paciente"
-        : minor
-          ? `registro a ${givenNames} ${familyName} como paciente, contigo como su madre, padre o tutor,`
-          : `registro a ${givenNames} ${familyName} como paciente`
-      const where = (await webchatNeedsContact())
-        ? " En el chat web, si aún no te dio su WhatsApp ni se lo pediste, pídeselo en ese mismo mensaje para avisarle de la cita."
-        : ""
-      // Sin la palabra «propuesta»: lo que lee aquí lo repite a la persona. Su sí tiene que
-      // llegar después del aviso (ADR 0101); si ya pidió esta hora, lo único que falta es ese
-      // sí, y «¿Te la reservo?» le volvía a preguntar lo que ya pidió (auditoría del ADR 0104).
-      const accepts = `${registers} y aceptas nuestro aviso de privacidad: ${noticeUrl}.`
-      // Quien acaba de dar su nombre para registrarse no lo oía en esta pregunta, la primera
-      // después de darlo: el juez lo contaba como no saber con quién habla (auditoría del ADR 0104).
-      const writer = (forOther ? writerName : givenNames)?.trim().split(/\s+/)[0]
-      const byName = writer && ctx.usedName !== true ? `empieza por su nombre («${writer}, …»), ` : ""
-      return `Falta su sí (id ${created.id}): todavía no se reservó ni registró nada. En tu mensaje, en su idioma y sin darla por hecha, ${byName}di el día, la hora, la sede y con quién${forOther ? `, para ${givenNames} ${familyName}` : ""}, y termina con una frase que diga, en su idioma y con su trato: «Al confirmar, ${accepts} ¿Te la reservo?». Si en esta atención ya te pidió esta misma hora, no le vuelvas a preguntar si la quiere ni le expliques por qué le pides el sí: termina en cambio con «Al confirmar, ${accepts} ¿Me confirmas?». Escribe el enlace tal cual: sin él, su sí no la registra. El registro y «al confirmar» van una sola vez, en esa frase final.${where} Con su sí, usa confirmar_propuesta con ese id: eso la registra y reserva. Si no dice que sí, no insistas.`
+      if (!issued) return `No se pudo preparar su enlace. Por eso ${toTeam}`
+      await noteAction("enlace", "le dio su enlace con la hora que eligió")
+      return pickLinkReply(
+        issued.url,
+        ownRecord
+          ? "la cita es para alguien que aún no es paciente y por aquí no se registra a nadie: en la página deja los datos de esa persona"
+          : "aún no es paciente y por aquí no se registra a nadie; si la cita es para otra persona (su hijo o hija, por ejemplo), en la página elige «Para otra persona» y deja sus datos",
+        null,
+      )
     },
     {
       name: "reservar_paciente_nuevo",
       description:
-        "Para quien aún no es paciente: propone la cita del hueco elegido y, con su sí, la registra como paciente con lo mínimo y la reserva en un solo paso. Pide antes sus nombres y apellidos (y su documento solo si la clínica lo pide). Si la cita es para otra persona, van los datos de esa persona con forOther; si es su hijo o hija menor, también minor. Nunca preguntes nada de salud para esto.",
-      schema: operationAgentSchema("cita.reservar", { room }).omit({ patientId: true }).extend(chatRegistrationSchema.shape),
+        "Para quien aún no es paciente, cuando ya eligió un hueco de buscar_huecos: te da su enlace con esa hora ya elegida, para que deje sus datos (o los de la persona para quien es la cita) y quede reservada ahí. Si quien escribe ya es paciente y la cita es para otra persona que aún no lo es (su hijo, por ejemplo), con forOther. Por aquí no se registra a nadie: no le pidas apellidos, documento ni nada de salud para esto.",
+      schema: operationAgentSchema("cita.reservar", { room })
+        .omit({ patientId: true })
+        .extend({
+          forOther: z.boolean().optional().describe("true si quien escribe ya es paciente y la cita es para otra persona que aún no lo es."),
+        }),
     },
   )
 
@@ -1838,8 +1931,13 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (outcome === "no_preguntado") return "No se le hizo esa pregunta: no hay nada que anotar. Sigue la conversación."
       if (outcome === "ya_respondio") return "Ya había respondido antes; no cambia nada. Sigue la conversación."
       await noteAction("mensajes", granted ? "anotó que acepta novedades y promociones" : "anotó que no quiere novedades ni promociones")
-      // La misma frase que el botón: lo que deja de recibir son las novedades y promociones, nada más (ADR 0030).
-      return `Anotado. Díselo con send_reply, con estas palabras: «${granted ? GENERAL_PERMISSION_YES : GENERAL_PERMISSION_NO}» No le digas que dejará de recibir otros mensajes: sus citas, controles y presupuestos le siguen llegando.`
+      // La misma frase que el botón, con el nombre y el trato de la clínica (de usted solo si la clínica
+      // trata de usted, como la pregunta): lo que deja de recibir son las novedades y promociones (ADR 0030).
+      const words = await inOrg(async (tx) => {
+        const treatment = ctx.treatment !== undefined ? ctx.treatment : (await getAgentConfig(tx, ctx.orgId)).treatment
+        return generalPermissionWords((await getClinicInfoSnapshot(tx, ctx.orgId)).clinicName, treatment === "usted" ? "usted" : "tu")
+      })
+      return `Anotado. Díselo con send_reply, con estas palabras: «${granted ? words.yes : words.no}» No le digas que dejará de recibir otros mensajes: sus citas, controles y presupuestos le siguen llegando.`
     },
     {
       name: "responder_permiso_mensajes",
@@ -2085,8 +2183,9 @@ export function makeAgentTools(ctx: AgentToolCtx) {
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_CONFIRMED") {
           return "Su último mensaje no es un sí a esa cita. Pregúntale con naturalidad si se la reservas, sin hablar de confirmaciones, propuestas ni sistemas."
         }
+        // Solo una cita de alguien nuevo propuesta antes del ADR 0109 (que se registraba con su sí) llega aquí.
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOTICE_NOT_SENT") {
-          return "Todavía no le llegó la pregunta con el aviso de privacidad: envíala con el enlace del aviso tal cual (la frase que te dio reservar_paciente_nuevo) y espera su sí. No la des por reservada."
+          return "Todavía no le llegó la pregunta con el aviso de privacidad: envíala con el enlace del aviso tal cual y espera su sí. No la des por reservada."
         }
         if (e instanceof ServiceError && e.code === "PROPOSAL_NOT_PENDING") {
           return "Esa cita ya no espera su sí: si ya quedó reservada, díselo con el día y la hora; si no, ofrécele horarios de nuevo. No hables de propuestas ni de sistemas."
@@ -2111,7 +2210,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
           ).catch(() => null)
           if (data) {
             const why = data.missing.length ? `Al paciente le faltan datos para atenderlo (${data.missing.join(", ")})` : "Se acaba de registrar"
-            return `Confirmado y ejecutado (id ${proposal.id}). ${why}: al confirmar la cita, añade en el mismo mensaje «Antes de venir, completa tus datos y tu salud aquí (toma 2 minutos) y llegas con todo listo: ${data.url}». Escribe el enlace tal cual, sin cambiarlo.`
+            return `Confirmado y ejecutado (id ${proposal.id}). ${why}: al confirmar la cita, añade en el mismo mensaje «Antes de venir, completa tus datos aquí (toma 2 minutos): ${data.url}». Escribe el enlace tal cual, sin cambiarlo.`
           }
         }
         return `Confirmado y ejecutado (id ${proposal.id}).`

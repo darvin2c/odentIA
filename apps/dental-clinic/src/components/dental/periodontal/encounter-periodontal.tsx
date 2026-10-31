@@ -16,10 +16,12 @@ import {
   PERIODONTAL_SITES,
   type PeriImplantCondition,
   type PeriodontalClassification,
+  periodontalClassificationIssues,
   type PeriodontalClassificationInputs,
   type PeriodontalDiagnosis,
   type PeriodontalExtent,
   type PeriodontalMissingInput,
+  type PeriodontalProposal,
   periodontalClassificationShort,
   PERIODONTITIS_GRADES,
   PERIODONTITIS_STAGES,
@@ -30,11 +32,18 @@ import {
   type PeriodontitisStatus,
   proposePeriodontalClassification,
 } from "@odentia/dental"
-import { Badge, Button, cn, Field, FieldLabel, Input, toast } from "@odentia/ui"
-import { LoadingState, SubmitButton } from "@odentia/ui-patterns"
+import { Badge, Button, FieldLegend, FieldSet, toast } from "@odentia/ui"
+import {
+  LoadingState,
+  SubmitButton,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useId, useMemo, useState } from "react"
-import { ApiError } from "@odentia/clinic-app/lib/api"
+import { useId, useMemo, useRef, useState } from "react"
 import {
   classifyPeriodontalChart,
   fetchPeriodontalChart,
@@ -88,35 +97,19 @@ export function periodontalBlockSummary(item: PeriodontalChartListItem | null): 
   return parts.filter(Boolean).join(" · ")
 }
 
-/** Un selector de la ficha con sus opciones en una lista. */
-function Choice({
-  options,
-  onValueChange,
-  ...props
-}: {
-  id?: string
-  "aria-label"?: string
-  value: string
-  disabled?: boolean
-  placeholder?: string
-  options: Array<{ value: string; label: string }>
-  onValueChange: (value: string) => void
-}) {
-  return (
-    <ChoiceSelect {...props} onChange={(event) => onValueChange(event.target.value)}>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </ChoiceSelect>
-  )
-}
-
 function numberOrNull(value: string): number | null {
   if (value.trim() === "") return null
   const n = Number(value.replace(",", "."))
   return Number.isFinite(n) ? n : null
+}
+
+/** Lo escrito en un dato numérico: vacío vale (no se preguntó); si no es un número, la causa. */
+function numberError(text: string, integer: boolean): string | undefined {
+  if (!text.trim()) return undefined
+  const value = numberOrNull(text)
+  if (value === null) return "Escribe un número."
+  if (integer && !Number.isInteger(value)) return "Escribe un número entero, sin decimales."
+  return undefined
 }
 
 /**
@@ -175,7 +168,6 @@ export function EncounterPeriodontalBlock({
       await queryClient.invalidateQueries({ queryKey: periodontalKeys.list(patientId) })
       onCapture(result.data.id)
     },
-    onError: (err) => toast.error(err instanceof ApiError && err.shape.message ? err.shape.message : "No se pudo empezar el periodontograma"),
   })
 
   if (list.isPending) return <LoadingState message="Cargando el periodontograma…" />
@@ -189,9 +181,16 @@ export function EncounterPeriodontalBlock({
         {disabled ? (
           <p className="text-sm text-muted-foreground">Esta atención no tiene periodontograma.</p>
         ) : (
-          <SubmitButton className="self-start" pending={start.isPending} onClick={() => start.mutate()}>
-            Empezar
-          </SubmitButton>
+          <>
+            <SubmitButton className="self-start" pending={start.isPending} onClick={() => start.mutate()}>
+              Empezar
+            </SubmitButton>
+            {start.isError ? (
+              <p role="alert" className="text-sm text-destructive">
+                {submitErrorMessage(start.error)}
+              </p>
+            ) : null}
+          </>
         )}
       </div>
     )
@@ -244,15 +243,25 @@ export function EncounterPeriodontalBlock({
   )
 }
 
-interface Draft {
+interface ClassifyDraft {
   boneLossPercent: string
   teethLostToPeriodontitis: string
   cigarettesPerDay: string
-  diabetes: "" | "yes" | "no"
+  /** "" (sin preguntar), "yes" o "no". */
+  diabetes: string
   hba1c: string
+  /** Estado de cada implante que el odontólogo eligió; los demás, el que propone odentIA. */
+  implants: Partial<Record<string, PeriImplantCondition>>
+  /** «Cambiar»: se confirma lo elegido abajo en vez de la propuesta. */
+  changing: boolean
+  diagnosis: string
+  stage: string
+  grade: string
+  extent: string
+  status: string
 }
 
-function draftFrom(chart: ChartData): Draft {
+function draftFrom(chart: ChartData): ClassifyDraft {
   const c = chart.classification
   return {
     boneLossPercent: c?.boneLossPercent?.toString() ?? "",
@@ -260,10 +269,17 @@ function draftFrom(chart: ChartData): Draft {
     cigarettesPerDay: c?.cigarettesPerDay?.toString() ?? "",
     diabetes: c?.diabetes === true ? "yes" : c?.diabetes === false ? "no" : "",
     hba1c: c?.hba1c?.toString() ?? "",
+    implants: Object.fromEntries(chart.teeth.filter((t) => t.periImplant).map((t) => [String(t.toothNumber), t.periImplant!])),
+    changing: false,
+    diagnosis: "",
+    stage: "",
+    grade: "",
+    extent: "",
+    status: "",
   }
 }
 
-function inputsOf(draft: Draft): PeriodontalClassificationInputs {
+function inputsOf(draft: ClassifyDraft): PeriodontalClassificationInputs {
   return {
     boneLossPercent: numberOrNull(draft.boneLossPercent),
     teethLostToPeriodontitis: numberOrNull(draft.teethLostToPeriodontitis),
@@ -280,6 +296,40 @@ interface Chosen {
   extent: PeriodontalExtent | null
   status: PeriodontitisStatus | null
 }
+
+/** Lo que se confirma: lo elegido con «Cambiar» o, si no, la propuesta. */
+function chosenOf(draft: ClassifyDraft, proposal: PeriodontalProposal): Chosen {
+  if (!draft.changing) {
+    return {
+      diagnosis: proposal.diagnosis,
+      stage: proposal.stage,
+      grade: proposal.grade,
+      extent: proposal.extent,
+      status: proposal.status,
+    }
+  }
+  return {
+    diagnosis: draft.diagnosis as PeriodontalDiagnosis,
+    stage: draft.stage ? (Number(draft.stage) as PeriodontitisStage) : null,
+    grade: (draft.grade || null) as PeriodontitisGrade | null,
+    extent: (draft.extent || null) as PeriodontalExtent | null,
+    status: (draft.status || null) as PeriodontitisStatus | null,
+  }
+}
+
+/** Lo que viaja: estadio, grado y estado solo en la periodontitis; la salud sin extensión. */
+function classificationOf(choice: Chosen): Omit<PeriodontalClassification, keyof PeriodontalClassificationInputs> {
+  const periodontitis = choice.diagnosis === "periodontitis"
+  return {
+    diagnosis: choice.diagnosis,
+    stage: periodontitis ? choice.stage : null,
+    grade: periodontitis ? choice.grade : null,
+    extent: choice.diagnosis === "health" ? null : choice.extent,
+    status: periodontitis ? choice.status : null,
+  }
+}
+
+const CHOICE_FIELDS: readonly string[] = ["diagnosis", "stage", "grade", "extent", "status"]
 
 /**
  * Resumen y clasificación (tablero 9): lo que se midió, lo que agrega el
@@ -300,11 +350,61 @@ function PeriodontalClassify({
   onChanged: () => Promise<void>
 }) {
   const ids = useId()
+  const sectionRef = useRef<HTMLElement>(null)
   const queryClient = useQueryClient()
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(chart))
-  const [override, setOverride] = useState<Chosen | null>(null)
-  const inputs = inputsOf(draft)
+  // Los valores iniciales, una vez: lo que llega después no borra lo escrito.
+  const [initial] = useState(() => draftFrom(chart))
   // La misma regla que el servidor, recalculada con lo que se escribe.
+  const proposeFor = (value: ClassifyDraft) =>
+    proposePeriodontalClassification(
+      chart.teeth,
+      chart.implantTeeth,
+      inputsOf(value),
+      chart.proposalBasis.ageYears,
+      chart.proposalBasis.remainingTeeth,
+      chart.proposalBasis.previous,
+    )
+  /**
+   * Lo mismo que valida el servidor, antes de enviar. Si se confirma la
+   * propuesta, lo que le falta se dice junto al botón (no hay selector a la
+   * vista): se completa con lo que falta o con «Cambiar».
+   */
+  const validateClassify = (value: ClassifyDraft) => {
+    const choice = chosenOf(value, proposeFor(value))
+    const fields: Partial<Record<keyof ClassifyDraft, string>> = {}
+    const general: string[] = []
+    for (const issue of periodontalClassificationIssues({ ...classificationOf(choice), ...inputsOf(value) })) {
+      if (CHOICE_FIELDS.includes(issue.field) && !value.changing)
+        general.push(`${issue.message}: completa lo que falta o elígelo con «Cambiar».`)
+      else fields[issue.field] ??= issue.message
+    }
+    if (general.length === 0 && Object.keys(fields).length === 0) return undefined
+    return { form: general.length > 0 ? general.join(" ") : undefined, fields }
+  }
+  const form = useAppForm({
+    defaultValues: initial,
+    validators: { onSubmit: ({ value }) => validateClassify(value) },
+    onSubmit: async ({ value }) => {
+      const proposal = proposeFor(value)
+      await beforeWrite()
+      const result = await classifyPeriodontalChart(patientId, chart.id, {
+        ...classificationOf(chosenOf(value, proposal)),
+        ...inputsOf(value),
+        implants: proposal.implants.map((implant) => ({
+          toothNumber: implant.toothNumber,
+          condition: value.implants[String(implant.toothNumber)] ?? implant.condition,
+        })),
+      })
+      queryClient.setQueryData(periodontalKeys.chart(patientId, chart.id), result)
+      await queryClient.invalidateQueries({ queryKey: periodontalKeys.list(patientId) })
+      form.reset({ ...value, changing: false }, { keepDefaultValues: true })
+      toast.success("Diagnóstico confirmado; quedó también en el diagnóstico de la atención")
+      await onChanged()
+    },
+  })
+  const draft = useStore(form.store, (state) => state.values)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const submitError = useFormSubmitError(form)
   const proposal = useMemo(
     () =>
       proposePeriodontalClassification(
@@ -317,48 +417,35 @@ function PeriodontalClassify({
       ),
     [chart.teeth, chart.implantTeeth, chart.proposalBasis, draft],
   )
-  const [implants, setImplants] = useState<Record<number, PeriImplantCondition>>(() =>
-    Object.fromEntries(chart.teeth.filter((t) => t.periImplant).map((t) => [t.toothNumber, t.periImplant!])),
-  )
-  const choice: Chosen = override ?? {
-    diagnosis: proposal.diagnosis,
-    stage: proposal.stage,
-    grade: proposal.grade,
-    extent: proposal.extent,
-    status: proposal.status,
+  // El servidor nombra cada implante por su lugar en la lista que se envía.
+  const serverField = (key: string) => {
+    const match = /^implants\[(\d+)\]/.exec(key)
+    const implant = match ? proposal.implants[Number(match[1])] : undefined
+    return implant ? `implants.${implant.toothNumber}` : undefined
   }
-  const confirm = useMutation({
-    mutationFn: async () => {
-      await beforeWrite()
-      const periodontitis = choice.diagnosis === "periodontitis"
-      return classifyPeriodontalChart(patientId, chart.id, {
-        diagnosis: choice.diagnosis,
-        stage: periodontitis ? choice.stage : null,
-        grade: periodontitis ? choice.grade : null,
-        extent: choice.diagnosis === "health" ? null : choice.extent,
-        status: periodontitis ? choice.status : null,
-        ...inputs,
-        implants: proposal.implants.map((implant) => ({ toothNumber: implant.toothNumber, condition: implants[implant.toothNumber] ?? implant.condition })),
-      })
-    },
-    onSuccess: async (result) => {
-      queryClient.setQueryData(periodontalKeys.chart(patientId, chart.id), result)
-      await queryClient.invalidateQueries({ queryKey: periodontalKeys.list(patientId) })
-      setOverride(null)
-      toast.success("Diagnóstico confirmado; quedó también en el diagnóstico de la atención")
-      await onChanged()
-    },
-    onError: (err) => toast.error(err instanceof ApiError && err.shape.message ? err.shape.message : "No se pudo confirmar el diagnóstico"),
-  })
-  const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((current) => ({ ...current, [key]: value }))
+  const confirm = () => void submitForm(form, { root: sectionRef.current, fieldMap: serverField })
+  const startChanging = () => {
+    form.setFieldValue("diagnosis", proposal.diagnosis)
+    form.setFieldValue("stage", proposal.stage?.toString() ?? "")
+    form.setFieldValue("grade", proposal.grade ?? "")
+    form.setFieldValue("extent", proposal.extent ?? "")
+    form.setFieldValue("status", proposal.status ?? "")
+    form.setFieldValue("changing", true)
+  }
+  // Lo que se escribió y no es un número se dice en su campo, no como «Falta…».
+  const written: Record<PeriodontalMissingInput, string> = {
+    boneLossPercent: draft.boneLossPercent,
+    teethLostToPeriodontitis: draft.teethLostToPeriodontitis,
+    smoking: draft.cigarettesPerDay,
+    diabetes: draft.diabetes,
+  }
+  const missing = proposal.missing.filter((key) => !written[key].trim())
   const summary = chart.summary
   const confirmed = chart.classification
-  const periodontitis = choice.diagnosis === "periodontitis"
-  const valid = !periodontitis || (choice.stage !== null && choice.grade !== null && choice.extent !== null)
 
   return (
     // Mide por su contenedor: en la superficie lateral va en una columna; en ancho, en tres.
-    <section aria-labelledby={`${ids}-title`} className="@container flex flex-col gap-4">
+    <section ref={sectionRef} aria-labelledby={`${ids}-title`} className="@container flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 id={`${ids}-title`} className="font-heading text-base font-medium">
           Resumen y clasificación
@@ -397,65 +484,65 @@ function PeriodontalClassify({
 
         <div className="flex flex-col gap-3 rounded-xl border p-3">
           <span className="text-xs font-bold tracking-wider text-muted-foreground uppercase">2 · Lo que agregas</span>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-bone`}>Pérdida de hueso en la radiografía, en la pieza más afectada (%)</FieldLabel>
-            <Input
-              id={`${ids}-bone`}
-              inputMode="numeric"
-              value={draft.boneLossPercent}
-              disabled={disabled}
-              placeholder="Ej.: 40"
-              onChange={(event) => set("boneLossPercent", event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-lost`}>Piezas perdidas por la enfermedad</FieldLabel>
-            <Input
-              id={`${ids}-lost`}
-              inputMode="numeric"
-              value={draft.teethLostToPeriodontitis}
-              disabled={disabled}
-              placeholder="0 si ninguna"
-              onChange={(event) => set("teethLostToPeriodontitis", event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-smoke`}>Cigarrillos al día</FieldLabel>
-            <Input
-              id={`${ids}-smoke`}
-              inputMode="numeric"
-              value={draft.cigarettesPerDay}
-              disabled={disabled}
-              placeholder="0 si no fuma"
-              onChange={(event) => set("cigarettesPerDay", event.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${ids}-diabetes`}>¿Diabetes?</FieldLabel>
-            <Choice
-              id={`${ids}-diabetes`}
-              value={draft.diabetes}
-              disabled={disabled}
-              placeholder="Sin preguntar"
-              options={[
-                { value: "no", label: "No" },
-                { value: "yes", label: "Sí" },
-              ]}
-              onValueChange={(value) => set("diabetes", value === "yes" ? "yes" : value === "no" ? "no" : "")}
-            />
-          </Field>
-          {draft.diabetes === "yes" ? (
-            <Field>
-              <FieldLabel htmlFor={`${ids}-hba1c`}>Última hemoglobina glicada (%)</FieldLabel>
-              <Input
-                id={`${ids}-hba1c`}
-                inputMode="decimal"
-                value={draft.hba1c}
+          <form.AppField name="boneLossPercent" validators={{ onChange: ({ value }) => numberError(value, true) }}>
+            {(field) => (
+              <field.TextField
+                id={`${ids}-bone`}
+                label="Pérdida de hueso en la radiografía, en la pieza más afectada (%)"
+                inputMode="numeric"
                 disabled={disabled}
-                placeholder="Ej.: 6,8"
-                onChange={(event) => set("hba1c", event.target.value)}
+                placeholder="Ej.: 40"
               />
-            </Field>
+            )}
+          </form.AppField>
+          <form.AppField name="teethLostToPeriodontitis" validators={{ onChange: ({ value }) => numberError(value, true) }}>
+            {(field) => (
+              <field.TextField
+                id={`${ids}-lost`}
+                label="Piezas perdidas por la enfermedad"
+                inputMode="numeric"
+                disabled={disabled}
+                placeholder="0 si ninguna"
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="cigarettesPerDay" validators={{ onChange: ({ value }) => numberError(value, true) }}>
+            {(field) => (
+              <field.TextField
+                id={`${ids}-smoke`}
+                label="Cigarrillos al día"
+                inputMode="numeric"
+                disabled={disabled}
+                placeholder="0 si no fuma"
+              />
+            )}
+          </form.AppField>
+          <form.AppField name="diabetes">
+            {(field) => (
+              <field.SelectField
+                id={`${ids}-diabetes`}
+                label="¿Diabetes?"
+                placeholder="Sin preguntar"
+                disabled={disabled}
+                options={[
+                  { value: "no", label: "No" },
+                  { value: "yes", label: "Sí" },
+                ]}
+              />
+            )}
+          </form.AppField>
+          {draft.diabetes === "yes" ? (
+            <form.AppField name="hba1c" validators={{ onChange: ({ value }) => numberError(value, false) }}>
+              {(field) => (
+                <field.TextField
+                  id={`${ids}-hba1c`}
+                  label="Última hemoglobina glicada (%)"
+                  inputMode="decimal"
+                  disabled={disabled}
+                  placeholder="Ej.: 6,8"
+                />
+              )}
+            </form.AppField>
           ) : null}
         </div>
 
@@ -476,9 +563,9 @@ function PeriodontalClassify({
                 <li key={reason}>{reason}</li>
               ))}
             </ul>
-            {proposal.missing.length ? (
+            {missing.length ? (
               <p className="text-sm text-muted-foreground">
-                {missingSentence(proposal.missing)}: la propuesta parte de lo que hay.
+                {missingSentence(missing)}: la propuesta parte de lo que hay.
               </p>
             ) : null}
             {proposal.warnings.map((warning) => (
@@ -488,88 +575,138 @@ function PeriodontalClassify({
             ))}
           </div>
           {proposal.implants.map((implant) => (
-            <Field key={implant.toothNumber}>
-              <FieldLabel htmlFor={`${ids}-imp-${implant.toothNumber}`}>Implante {implant.toothNumber}</FieldLabel>
-              <Choice
-                id={`${ids}-imp-${implant.toothNumber}`}
-                value={implants[implant.toothNumber] ?? implant.condition}
-                disabled={disabled}
-                options={PERI_IMPLANT_CONDITIONS.map((value) => ({ value, label: PERI_IMPLANT_WORDS[value] }))}
-                onValueChange={(value) => setImplants((current) => ({ ...current, [implant.toothNumber]: value as PeriImplantCondition }))}
-              />
-              <p className="text-xs text-muted-foreground">La periimplantitis pide ver pérdida de hueso en la radiografía.</p>
-            </Field>
+            <form.AppField key={implant.toothNumber} name={`implants.${implant.toothNumber}`}>
+              {(field) => (
+                <field.Control
+                  id={`${ids}-imp-${implant.toothNumber}`}
+                  label={`Implante ${implant.toothNumber}`}
+                  description="La periimplantitis pide ver pérdida de hueso en la radiografía."
+                >
+                  {(control) => (
+                    <ChoiceSelect
+                      id={control.id}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      value={field.state.value ?? implant.condition}
+                      disabled={disabled}
+                      onChange={(event) => field.handleChange(event.target.value as PeriImplantCondition)}
+                    >
+                      {PERI_IMPLANT_CONDITIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {PERI_IMPLANT_WORDS[value]}
+                        </option>
+                      ))}
+                    </ChoiceSelect>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           ))}
-          {override ? (
-            <div className="flex flex-col gap-2 rounded-xl border p-3">
-              <span className="text-sm font-medium">Lo que confirmas</span>
-              <Choice
-                aria-label="Diagnóstico"
-                value={override.diagnosis}
-                options={PERIODONTAL_DIAGNOSES.map((value) => ({ value, label: PERIODONTAL_DIAGNOSIS_WORDS[value] }))}
-                onValueChange={(value) => setOverride({ ...override, diagnosis: value as PeriodontalDiagnosis })}
-              />
-              {override.diagnosis === "periodontitis" ? (
+          {draft.changing ? (
+            <FieldSet className="flex flex-col gap-2 rounded-xl border p-3">
+              <FieldLegend variant="label">Lo que confirmas</FieldLegend>
+              <form.AppField
+                name="diagnosis"
+                listeners={{
+                  // La gingivitis es localizada o generalizada: nunca queda otra extensión elegida.
+                  onChange: ({ value }) => {
+                    if (value === "gingivitis" && form.getFieldValue("extent") !== "generalized")
+                      form.setFieldValue("extent", "localized")
+                  },
+                }}
+              >
+                {(field) => (
+                  <field.SelectField
+                    id={`${ids}-diagnosis`}
+                    label="Diagnóstico"
+                    options={PERIODONTAL_DIAGNOSES.map((value) => ({ value, label: PERIODONTAL_DIAGNOSIS_WORDS[value] }))}
+                  />
+                )}
+              </form.AppField>
+              {draft.diagnosis === "periodontitis" ? (
                 <div className="grid grid-cols-2 gap-2">
-                  <Choice
-                    aria-label="Estadio"
-                    value={override.stage?.toString() ?? ""}
-                    placeholder="Estadio"
-                    options={PERIODONTITIS_STAGES.map((value) => ({ value: String(value), label: `Estadio ${STAGE_WORDS[value]}` }))}
-                    onValueChange={(value) => setOverride({ ...override, stage: Number(value) as PeriodontitisStage })}
-                  />
-                  <Choice
-                    aria-label="Grado"
-                    value={override.grade ?? ""}
-                    placeholder="Grado"
-                    options={PERIODONTITIS_GRADES.map((value) => ({ value, label: `Grado ${value}` }))}
-                    onValueChange={(value) => setOverride({ ...override, grade: value as PeriodontitisGrade })}
-                  />
-                  <Choice
-                    aria-label="Extensión"
-                    value={override.extent ?? ""}
-                    placeholder="Extensión"
-                    options={PERIODONTAL_EXTENTS.map((value) => ({ value, label: PERIODONTAL_EXTENT_WORDS[value] }))}
-                    onValueChange={(value) => setOverride({ ...override, extent: value as PeriodontalExtent })}
-                  />
+                  <form.AppField name="stage">
+                    {(field) => (
+                      <field.SelectField
+                        id={`${ids}-stage`}
+                        label="Estadio"
+                        placeholder="Estadio"
+                        options={PERIODONTITIS_STAGES.map((value) => ({ value: String(value), label: `Estadio ${STAGE_WORDS[value]}` }))}
+                      />
+                    )}
+                  </form.AppField>
+                  <form.AppField name="grade">
+                    {(field) => (
+                      <field.SelectField
+                        id={`${ids}-grade`}
+                        label="Grado"
+                        placeholder="Grado"
+                        options={PERIODONTITIS_GRADES.map((value) => ({ value, label: `Grado ${value}` }))}
+                      />
+                    )}
+                  </form.AppField>
+                  <form.AppField name="extent">
+                    {(field) => (
+                      <field.SelectField
+                        id={`${ids}-extent`}
+                        label="Extensión"
+                        placeholder="Extensión"
+                        options={PERIODONTAL_EXTENTS.map((value) => ({ value, label: PERIODONTAL_EXTENT_WORDS[value] }))}
+                      />
+                    )}
+                  </form.AppField>
                   {chart.proposalBasis.previous ? (
-                    <Choice
-                      aria-label="Cómo está hoy"
-                      value={override.status ?? ""}
-                      placeholder="Cómo está hoy"
-                      options={PERIODONTITIS_STATUSES.map((value) => ({ value, label: PERIODONTITIS_STATUS_WORDS[value] }))}
-                      onValueChange={(value) => setOverride({ ...override, status: value as PeriodontitisStatus })}
-                    />
+                    <form.AppField name="status">
+                      {(field) => (
+                        <field.SelectField
+                          id={`${ids}-status`}
+                          label="Cómo está hoy"
+                          placeholder="Cómo está hoy"
+                          options={PERIODONTITIS_STATUSES.map((value) => ({ value, label: PERIODONTITIS_STATUS_WORDS[value] }))}
+                        />
+                      )}
+                    </form.AppField>
                   ) : null}
                 </div>
-              ) : override.diagnosis === "gingivitis" ? (
-                <Choice
-                  aria-label="Extensión"
-                  value={override.extent === "generalized" ? "generalized" : "localized"}
-                  options={[
-                    { value: "localized", label: "Localizada" },
-                    { value: "generalized", label: "Generalizada" },
-                  ]}
-                  onValueChange={(value) => setOverride({ ...override, extent: value as PeriodontalExtent })}
-                />
+              ) : draft.diagnosis === "gingivitis" ? (
+                <form.AppField name="extent">
+                  {(field) => (
+                    <field.SelectField
+                      id={`${ids}-extent`}
+                      label="Extensión"
+                      options={[
+                        { value: "localized", label: "Localizada" },
+                        { value: "generalized", label: "Generalizada" },
+                      ]}
+                    />
+                  )}
+                </form.AppField>
+              ) : null}
+            </FieldSet>
+          ) : null}
+          {!disabled ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2">
+                <SubmitButton pending={isSubmitting} onClick={confirm}>
+                  {draft.changing ? "Confirmar lo elegido" : "Confirmar diagnóstico"}
+                </SubmitButton>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={draft.changing ? () => form.setFieldValue("changing", false) : startChanging}
+                >
+                  {draft.changing ? "Volver a la propuesta" : "Cambiar"}
+                </Button>
+              </div>
+              {submitError ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {submitError}
+                </p>
               ) : null}
             </div>
           ) : null}
-          {!disabled ? (
-            <div className="flex flex-wrap gap-2">
-              <SubmitButton pending={confirm.isPending} disabled={!valid} onClick={() => confirm.mutate()}>
-                {override ? "Confirmar lo elegido" : "Confirmar diagnóstico"}
-              </SubmitButton>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setOverride(override ? null : { ...choice })}
-              >
-                {override ? "Volver a la propuesta" : "Cambiar"}
-              </Button>
-            </div>
-          ) : null}
-          <p className={cn("text-xs text-muted-foreground")}>
+          <p className="text-xs text-muted-foreground">
             Al confirmar, la atención recibe también su diagnóstico con el código de la lista de la clínica y la clasificación como nota. No hay que buscarlo aparte.
           </p>
         </div>

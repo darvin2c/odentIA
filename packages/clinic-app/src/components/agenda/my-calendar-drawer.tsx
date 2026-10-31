@@ -1,5 +1,5 @@
 import { Badge, Button, Input, toast } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, PageNotice, SubmitButton } from "@odentia/ui-patterns"
+import { ConfirmDialog, DetailDrawer, PageNotice, SubmitButton, submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check } from "lucide-react"
 import * as React from "react"
@@ -68,7 +68,13 @@ export function MyCalendarDrawer({ open, onClose }: { open: boolean; onClose: ()
   })
   const data = query.data?.data
   const feed = data?.feed ?? null
-  const failure = create.error ?? rotate.error ?? revoke.error ?? known.error
+  // Cambiar o apagar el enlace fallan dentro de su diálogo, que tapa el cajón: se dicen allí.
+  const failure = create.error ?? known.error
+  const closeAsking = () => {
+    setAsking(null)
+    rotate.reset()
+    revoke.reset()
+  }
 
   const copy = async () => {
     if (!feed?.url) return
@@ -100,7 +106,7 @@ export function MyCalendarDrawer({ open, onClose }: { open: boolean; onClose: ()
         title="Mi calendario"
         description="Tus citas de esta clínica en Google Calendar, Apple u Outlook, junto a lo demás de tu día."
         isLoading={query.isPending}
-        error={query.isError ? errorText(query.error) : failure ? errorText(failure) : null}
+        error={query.isError ? errorText(query.error) : failure ? submitErrorMessage(failure) : null}
         actions={actions}
       >
         {data && !data.allowed ? (
@@ -255,7 +261,8 @@ export function MyCalendarDrawer({ open, onClose }: { open: boolean; onClose: ()
         confirmLabel="Sí, cambiarlo"
         cancelLabel="No, dejarlo así"
         pending={rotate.isPending}
-        onClose={() => setAsking(null)}
+        error={rotate.error ? submitErrorMessage(rotate.error) : null}
+        onClose={closeAsking}
         onConfirm={() => rotate.mutate()}
       />
       <ConfirmDialog
@@ -266,7 +273,8 @@ export function MyCalendarDrawer({ open, onClose }: { open: boolean; onClose: ()
         cancelLabel="No, seguir compartiendo"
         variant="destructive"
         pending={revoke.isPending}
-        onClose={() => setAsking(null)}
+        error={revoke.error ? submitErrorMessage(revoke.error) : null}
+        onClose={closeAsking}
         onConfirm={() => revoke.mutate()}
       />
     </>

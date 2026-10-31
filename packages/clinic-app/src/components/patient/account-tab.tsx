@@ -11,22 +11,23 @@
  * la clínica.
  */
 import { documentText, formatMoney, formatMoneyInput } from "@odentia/clinical"
+import { Badge, Button, cn, Field, FieldDescription, FieldLabel } from "@odentia/ui"
 import {
-  Badge,
-  Button,
-  cn,
-  Field,
-  FieldDescription,
-  FieldLabel,
-  Input,
-  Textarea,
-} from "@odentia/ui"
-import { DetailDrawer, EmptyState, ErrorState, FormDrawer, SkeletonRegion, SubmitButton } from "@odentia/ui-patterns"
-import { AccountSkeleton } from "../skeletons/person-sections"
+  DetailDrawer,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  SubmitButton,
+  useAppForm,
+  useFormSurface,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { z } from "zod"
 import {
   CollectDrawer,
   MoneyInput,
@@ -38,7 +39,7 @@ import { ChoiceSelect } from "../ui/choice-select"
 import { apiFetch } from "../../lib/api"
 import { useActiveBranch } from "../../lib/active-branch"
 import { usePermission } from "../../lib/crm"
-import { financeErrorMessage } from "../../lib/finance"
+import { financeErrorMessage, financeFormMessage } from "../../lib/finance"
 import {
   CASH_TYPE_CODE,
   collectApi,
@@ -57,8 +58,38 @@ import {
 } from "../../lib/finance-collect"
 import { useOrgEvents } from "../../lib/org-events"
 import type { PatientFull } from "../../lib/patients"
+import { AccountSkeleton } from "../skeletons/person-sections"
 
 const MAX_REASON = 2000
+
+type ParseCents = (text: string) => number | null
+
+/** «Agregar un concepto»: qué se cobra y cuánto, dicho en cada campo. */
+function chargeSchema(cents: ParseCents) {
+  return z.object({
+    description: z.string().trim().min(1, "Escribe qué es lo que se cobra.").max(MAX_REASON),
+    amountText: z.string().refine((text) => (cents(text) ?? 0) > 0, "Escribe el importe."),
+  })
+}
+
+/** «Devolver dinero»: lo que exige `refundCredit`, dicho en cada campo antes de enviar. */
+function refundSchema(input: { cents: ParseCents; favor: number; favorText: string; hasMethod: boolean }) {
+  return z
+    .object({
+      amountText: z.string(),
+      paymentMethodId: z.string(),
+      reason: z.string().trim().min(1, "Escribe el motivo de la devolución.").max(MAX_REASON),
+    })
+    .superRefine((value, ctx) => {
+      const amount = input.cents(value.amountText)
+      if (amount === null || amount <= 0)
+        ctx.addIssue({ code: "custom", path: ["amountText"], message: "Escribe cuánto devuelves." })
+      else if (amount > input.favor)
+        ctx.addIssue({ code: "custom", path: ["amountText"], message: `Solo tiene ${input.favorText} a favor.` })
+      if (!input.hasMethod)
+        ctx.addIssue({ code: "custom", path: ["paymentMethodId"], message: "Elige cómo se lo devuelves." })
+    })
+}
 
 const FINANCE_EVENT_KINDS = [
   "payment.created",
@@ -112,13 +143,10 @@ export function AccountTab({
   const [cobrarOpen, setCobrarOpen] = useState(false)
   const [collect, setCollect] = useState<CollectResultBody | null>(null)
   const [viewTicket, setViewTicket] = useState<AccountCobro | null>(null)
-  const [reason, setReason] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [refundOpen, setRefundOpen] = useState(false)
-  const [refundAmount, setRefundAmount] = useState("")
-  const [refundMethod, setRefundMethod] = useState("")
   const [receipt, setReceipt] = useState<RefundResult | null>(null)
-  const [adding, setAdding] = useState<{ description: string; amountText: string } | null>(null)
+  const [adding, setAdding] = useState(false)
   const [pdfBusy, setPdfBusy] = useState<string | null>(null)
   const [pdfError, setPdfError] = useState<string | null>(null)
 
@@ -170,23 +198,43 @@ export function AccountTab({
   const activeBranch = sede.effectiveId ?? pickedBranch
   const branchName = sede.branches.find((item) => item.id === activeBranch)?.name ?? ""
 
+  const cents = (text: string) => parseMoneyOrNull(text, orgUnit ?? "", locale ?? "")
+  const favor = account.data?.data.byCurrency.find((row) => row.currency === orgUnit)?.aFavor ?? 0
+  const methodList = methods.data?.data ?? []
+
   const refundMutation = useMutation({
-    mutationFn: (input: { amountCents: number; paymentMethodId: string }) =>
-      refundApi(patientId, {
-        branchId: activeBranch,
-        amountCents: input.amountCents,
-        paymentMethodId: input.paymentMethodId,
-        reason: reason.trim(),
+    mutationFn: (input: { amountCents: number; paymentMethodId: string; reason: string }) =>
+      refundApi(patientId, { branchId: activeBranch, ...input }),
+  })
+  const refundForm = useAppForm({
+    defaultValues: { amountText: "", paymentMethodId: "", reason: "" },
+    validators: {
+      onSubmit: refundSchema({
+        cents,
+        favor,
+        favorText: orgUnit && locale ? formatMoney(favor, orgUnit, locale) : "",
+        hasMethod: methodList.length > 0,
       }),
-    onSuccess: (result) => {
+    },
+    onSubmit: async ({ value }) => {
+      const result = await refundMutation.mutateAsync({
+        amountCents: cents(value.amountText) ?? 0,
+        // Sin elegir, el primero de la lista: el que se ve marcado.
+        paymentMethodId: value.paymentMethodId || (methodList[0]?.id ?? ""),
+        reason: value.reason.trim(),
+      })
       setReceipt(result.data)
       setRefundOpen(false)
-      setReason("")
-      setError(null)
       invalidate()
     },
-    onError: (err) => setError(financeErrorMessage(err)),
   })
+  // El importe se escribe como texto: lo que el servidor dice de `amountCents` va en él.
+  const refundSurface = useFormSurface(refundForm, {
+    fieldMap: { amountCents: "amountText" },
+    formMessage: financeFormMessage,
+  })
+  const refundAmount = useStore(refundForm.store, (state) => state.values.amountText)
+  const refundMethod = useStore(refundForm.store, (state) => state.values.paymentMethodId)
 
   // «Aplicar lo que tiene a favor»: el mismo cobro de caja, sin dinero nuevo.
   // Queda como un ticket con el saldo a favor usado (el movimiento registrado).
@@ -203,12 +251,19 @@ export function AccountTab({
   const addMutation = useMutation({
     mutationFn: (input: { description: string; amountCents: number }) =>
       createManualChargeApi(patientId, { branchId: activeBranch, ...input }),
-    onSuccess: () => {
-      setAdding(null)
-      setError(null)
+  })
+  const addForm = useAppForm({
+    defaultValues: { description: "", amountText: "" },
+    validators: { onSubmit: chargeSchema(cents) },
+    onSubmit: async ({ value }) => {
+      await addMutation.mutateAsync({ description: value.description.trim(), amountCents: cents(value.amountText) ?? 0 })
+      setAdding(false)
       invalidate()
     },
-    onError: (err) => setError(financeErrorMessage(err)),
+  })
+  const addSurface = useFormSurface(addForm, {
+    fieldMap: { amountCents: "amountText" },
+    formMessage: financeFormMessage,
   })
 
   // «Cobrar» de Pendientes: la acción del botón de cobro corre una vez, cuando la
@@ -294,9 +349,22 @@ export function AccountTab({
   const patientName = person?.displayName ?? ""
   const patientDocument = person?.docNumber ? documentText(person.docType, person.docNumber) : null
   const cobros = [...data.cobros].reverse()
-  const methodList = methods.data?.data ?? []
   const refundChoice = methodList.find((item) => item.id === refundMethod) ?? methodList[0] ?? null
-  const refundCents = parseMoneyOrNull(refundAmount, orgUnit, locale)
+  const refundCents = cents(refundAmount)
+
+  /** Abre lo pedido, ya con la sede decidida; cada formulario empieza limpio. */
+  const start = (action: "cobrar" | "devolver" | "agregar" | "aplicar") => {
+    if (action === "aplicar") applyMutation.mutate()
+    if (action === "cobrar") setCobrarOpen(true)
+    if (action === "agregar") {
+      addForm.reset()
+      setAdding(true)
+    }
+    if (action === "devolver") {
+      refundForm.reset({ amountText: formatMoneyInput(orgFavor, orgUnit, locale), paymentMethodId: "", reason: "" })
+      setRefundOpen(true)
+    }
+  }
 
   /** Ejecuta la acción si ya hay sede; si no, la pide una sola vez. */
   const withBranch = (action: "cobrar" | "devolver" | "agregar" | "aplicar") => {
@@ -306,15 +374,7 @@ export function AccountTab({
       return
     }
     setAskBranch(null)
-    if (action === "aplicar") applyMutation.mutate()
-    if (action === "cobrar") setCobrarOpen(true)
-    if (action === "agregar") setAdding({ description: "", amountText: "" })
-    if (action === "devolver") {
-      setRefundAmount(formatMoneyInput(orgFavor, orgUnit, locale))
-      setRefundMethod("")
-      setReason("")
-      setRefundOpen(true)
-    }
+    start(action)
   }
 
   // Lo que tiene a favor cubre lo que debe: la acción es aplicarlo, no cobrar.
@@ -359,7 +419,7 @@ export function AccountTab({
             </div>
           ))}
         </div>
-        {error && !cobrarOpen && !refundOpen && !adding ? (
+        {error ? (
           <p role="alert" className="mt-3 text-sm text-destructive">
             {error}
           </p>
@@ -379,15 +439,7 @@ export function AccountTab({
                 sede.choose(id)
                 const action = askBranch
                 setAskBranch(null)
-                if (action === "aplicar") applyMutation.mutate()
-                if (action === "cobrar") setCobrarOpen(true)
-                if (action === "agregar") setAdding({ description: "", amountText: "" })
-                if (action === "devolver") {
-                  setRefundAmount(formatMoneyInput(orgFavor, orgUnit, locale))
-                  setRefundMethod("")
-                  setReason("")
-                  setRefundOpen(true)
-                }
+                start(action)
               }}
             >
               {sede.branches.map((item) => (
@@ -634,60 +686,41 @@ export function AccountTab({
       </DetailDrawer>
 
       <FormDrawer
-        open={adding !== null}
+        {...addSurface}
+        open={adding}
         title="Agregar un concepto por cobrar"
         description="Algo que se cobra fuera de una atención. Queda pendiente en la cuenta."
-        error={adding ? error : null}
-        isSubmitting={addMutation.isPending}
         submitLabel="Agregar concepto"
         onClose={() => {
-          if (!addMutation.isPending) {
-            setAdding(null)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (!adding) return
-          const description = adding.description.trim()
-          const cents = parseMoneyOrNull(adding.amountText, orgUnit, locale)
-          if (!description) {
-            setError("Escribe qué es lo que se cobra.")
-            return
-          }
-          if (cents === null || cents <= 0) {
-            setError("Escribe el importe.")
-            return
-          }
-          addMutation.mutate({ description, amountCents: cents })
+          if (!addSurface.isSubmitting) setAdding(false)
         }}
       >
         <div className="flex flex-col gap-4">
-          <Field>
-            <FieldLabel htmlFor={`${uid}-concepto`}>Concepto</FieldLabel>
-            <Input
-              id={`${uid}-concepto`}
-              maxLength={MAX_REASON}
-              value={adding?.description ?? ""}
-              onChange={(event) =>
-                adding && setAdding({ ...adding, description: event.target.value })
-              }
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-concepto-importe`}>Importe</FieldLabel>
-            <MoneyInput
-              id={`${uid}-concepto-importe`}
-              currency={orgUnit}
-              locale={locale}
-              value={adding?.amountText ?? ""}
-              onChange={(value) => adding && setAdding({ ...adding, amountText: value })}
-            />
-          </Field>
+          <addForm.AppField name="description">
+            {(field) => <field.TextField label="Concepto" maxLength={MAX_REASON} />}
+          </addForm.AppField>
+          <addForm.AppField name="amountText">
+            {(field) => (
+              <field.Control label="Importe">
+                {(control) => (
+                  <MoneyInput
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    currency={orgUnit}
+                    locale={locale}
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                  />
+                )}
+              </field.Control>
+            )}
+          </addForm.AppField>
         </div>
       </FormDrawer>
 
       <FormDrawer
+        {...refundSurface}
         open={refundOpen}
         title="Devolver dinero"
         headerContent={
@@ -700,88 +733,69 @@ export function AccountTab({
             </p>
           </div>
         }
-        error={refundOpen ? error : null}
-        isSubmitting={refundMutation.isPending}
         isLoading={methods.isPending}
+        // Sin medios de pago activos no hay cómo devolver: el motivo se lee en el campo.
         submitDisabled={!refundChoice}
         submitLabel={
           refundCents !== null && refundCents > 0 ? `Devolver ${money(refundCents)}` : "Devolver"
         }
         onClose={() => {
-          if (!refundMutation.isPending) {
-            setRefundOpen(false)
-            setError(null)
-          }
-        }}
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (refundCents === null || refundCents <= 0) {
-            setError("Escribe cuánto devuelves.")
-            return
-          }
-          if (refundCents > orgFavor) {
-            setError(`Solo tiene ${money(orgFavor)} a favor.`)
-            return
-          }
-          if (!refundChoice) {
-            setError("Elige cómo se lo devuelves.")
-            return
-          }
-          if (!reason.trim()) {
-            setError("Escribe el motivo de la devolución.")
-            return
-          }
-          refundMutation.mutate({ amountCents: refundCents, paymentMethodId: refundChoice.id })
+          if (!refundSurface.isSubmitting) setRefundOpen(false)
         }}
       >
         <div className="flex flex-col gap-5">
-          <Field>
-            <FieldLabel htmlFor={`${uid}-devolver`}>Cuánto devuelves</FieldLabel>
-            <MoneyInput
-              id={`${uid}-devolver`}
-              currency={orgUnit}
-              locale={locale}
-              value={refundAmount}
-              onChange={setRefundAmount}
-            />
-            <FieldDescription>
-              Solo se devuelve lo que está a favor. Para devolver algo ya cobrado, ábrelo desde su
-              ticket: «Devolver».
-            </FieldDescription>
-          </Field>
-          <div className="flex flex-col gap-2">
-            <span id={`${uid}-devolver-medio`} className="text-sm font-medium">
-              Cómo se lo devuelves
-            </span>
-            {methods.isError ? (
-              <ErrorState
-                title="No se pudieron consultar los medios de pago"
-                message={financeErrorMessage(methods.error)}
-                onRetry={() => void methods.refetch()}
-              />
-            ) : methodList.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No hay medios de pago activos. Pídele a quien administra la clínica que active uno.
-              </p>
-            ) : (
-              <PaymentMethodButtons
-                labelId={`${uid}-devolver-medio`}
-                methods={methodList}
-                value={refundChoice?.id ?? ""}
-                onChange={setRefundMethod}
-              />
+          <refundForm.AppField name="amountText">
+            {(field) => (
+              <field.Control
+                label="Cuánto devuelves"
+                description="Solo se devuelve lo que está a favor. Para devolver algo ya cobrado, ábrelo desde su ticket: «Devolver»."
+              >
+                {(control) => (
+                  <MoneyInput
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    currency={orgUnit}
+                    locale={locale}
+                    value={field.state.value}
+                    onChange={field.handleChange}
+                  />
+                )}
+              </field.Control>
             )}
-          </div>
-          <Field>
-            <FieldLabel htmlFor={`${uid}-devolver-motivo`}>Motivo</FieldLabel>
-            <Textarea
-              id={`${uid}-devolver-motivo`}
-              rows={2}
-              maxLength={MAX_REASON}
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-            />
-          </Field>
+          </refundForm.AppField>
+          <refundForm.AppField name="paymentMethodId">
+            {(field) => (
+              <field.Group legend={<span id={`${uid}-devolver-medio`}>Cómo se lo devuelves</span>}>
+                {() =>
+                  methods.isError ? (
+                    <ErrorState
+                      title="No se pudieron consultar los medios de pago"
+                      message={financeErrorMessage(methods.error)}
+                      onRetry={() => void methods.refetch()}
+                    />
+                  ) : methodList.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      No hay medios de pago activos. Pídele a quien administra la clínica que active uno.
+                    </p>
+                  ) : (
+                    <PaymentMethodButtons
+                      labelId={`${uid}-devolver-medio`}
+                      methods={methodList}
+                      value={refundChoice?.id ?? ""}
+                      onChange={(id) => {
+                        field.handleChange(id)
+                        field.handleBlur()
+                      }}
+                    />
+                  )
+                }
+              </field.Group>
+            )}
+          </refundForm.AppField>
+          <refundForm.AppField name="reason">
+            {(field) => <field.TextareaField label="Motivo" rows={2} maxLength={MAX_REASON} />}
+          </refundForm.AppField>
           {refundChoice?.typeCode === CASH_TYPE_CODE && refundCents !== null && refundCents > 0 ? (
             <p className="flex items-center justify-between gap-3 rounded-xl bg-muted/60 px-3 py-2 text-sm">
               <span>Salen del efectivo de la caja{branchName ? ` de ${branchName}` : ""}</span>

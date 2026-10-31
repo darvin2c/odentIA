@@ -1,13 +1,19 @@
 import { cn, FieldLabel, RadioGroup, RadioGroupItem } from "@odentia/ui"
 
 export interface RadioChipsProps<T extends string> {
+  /** Va en la raíz del grupo. */
+  id?: string
   value: T
   options: ReadonlyArray<{ value: T; label: string }>
   onChange: (value: T) => void
   /** Id del texto visible que nombra al grupo. */
-  labelledBy?: string
+  "aria-labelledby"?: string
   /** Nombre accesible cuando no hay un texto visible que lo nombre. */
   "aria-label"?: string
+  "aria-describedby"?: string
+  invalid?: boolean
+  /** Al salir del grupo. */
+  onBlur?: () => void
   disabled?: boolean
   className?: string
 }
@@ -15,21 +21,34 @@ export interface RadioChipsProps<T extends string> {
 /**
  * Opciones excluyentes como pastillas: el grupo de radio del sistema
  * (`RadioGroup` de `@odentia/ui`) con teclado y foco, para elegir entre pocas
- * alternativas que conviene ver todas a la vez.
+ * alternativas que conviene ver todas a la vez. No pinta etiqueta: el grupo se
+ * nombra desde fuera (`aria-labelledby` o `aria-label`).
  */
 export function RadioChips<T extends string>({
+  id,
   value,
   options,
   onChange,
-  labelledBy,
+  invalid = false,
+  onBlur,
   disabled,
   className,
   ...aria
 }: RadioChipsProps<T>): React.JSX.Element {
   return (
     <RadioGroup
-      aria-labelledby={labelledBy}
+      id={id}
+      aria-labelledby={aria["aria-labelledby"]}
       aria-label={aria["aria-label"]}
+      aria-describedby={aria["aria-describedby"]}
+      aria-invalid={invalid || undefined}
+      onBlur={
+        onBlur
+          ? (event: React.FocusEvent<HTMLDivElement>) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
       className={cn("flex flex-wrap gap-2", className)}
       disabled={disabled}
       value={value}
@@ -43,7 +62,7 @@ export function RadioChips<T extends string>({
             value === option.value && "border-primary bg-primary-soft",
           )}
         >
-          <RadioGroupItem value={option.value} />
+          <RadioGroupItem value={option.value} aria-invalid={invalid || undefined} />
           {option.label}
         </FieldLabel>
       ))}

@@ -2,23 +2,32 @@ import {
   Badge,
   Button,
   buttonVariants,
-  Field,
-  FieldDescription,
-  FieldLabel,
   FieldLegend,
   FieldSet,
-  Input,
   RadioGroup,
   RadioGroupItem,
-  Textarea,
   toast,
 } from "@odentia/ui"
 import { formatMoney } from "@odentia/clinical"
-import { ConfirmDialog, EmptyState, ErrorState, FormDrawer, LoadingState, PastDateInput, SkeletonRegion } from "@odentia/ui-patterns"
-import { DataRequestsSkeleton } from "../skeletons/person-sections"
+import {
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  LoadingState,
+  PastDateInput,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  useFormSurface,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FileText, MessageSquareOff, PencilLine, Trash2 } from "lucide-react"
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
 import { ChoiceButtons } from "../choice-buttons"
 import { ApiError } from "../../lib/api"
 import { formatDateTime } from "../../lib/clinical-journey"
@@ -54,13 +63,39 @@ import {
 } from "../../lib/data-requests"
 import { useOrgLocale } from "../../lib/locale"
 import { appWords } from "../../lib/product-words"
+import { DataRequestsSkeleton } from "../skeletons/person-sections"
 
+/** Por qué no se pudo cargar algo (la lista, el resumen de lo que se borra). */
 function problemOf(error: unknown): string | null {
   if (!error) return null
   return error instanceof ApiError
     ? (error.shape.message ?? "No pudimos completar la acción.")
     : "No pudimos completar la acción. Revisa tu conexión."
 }
+
+/** Los mismos límites que la API (`patient-data-requests.ts`). */
+const MAX_TEXT = 1000
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/
+
+const resolutionSchema = z.object({
+  resolution: z
+    .string()
+    .trim()
+    .min(1, "Escribe qué se entregó o qué se hizo")
+    .max(MAX_TEXT, `La respuesta admite hasta ${MAX_TEXT} caracteres`),
+})
+
+const denySchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe por qué se deniega")
+    .max(MAX_TEXT, `El motivo admite hasta ${MAX_TEXT} caracteres`),
+})
+
+const eraseSchema = z.object({
+  typed: z.string().refine((text) => text.trim() === "BORRAR", "Escribe BORRAR, en mayúsculas, para confirmar"),
+})
 
 const KIND_ICON = { copia: FileText, corregir: PencilLine, mensajes: MessageSquareOff, borrar: Trash2 } as const
 
@@ -249,22 +284,39 @@ function RegisterDrawer({
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
-  const [kind, setKind] = useState<DataRequestKind | null>(null)
-  const [requester, setRequester] = useState(view.requesters.find((r) => r.relation === "paciente")?.contactId ?? view.requesters[0]?.contactId ?? "")
-  const [channel, setChannel] = useState<DataRequestChannel | null>(null)
-  const [requestedOn, setRequestedOn] = useState(view.today)
-  const [said, setSaid] = useState("")
-  const validDay = /^\d{4}-\d{2}-\d{2}$/.test(requestedOn) && requestedOn <= view.today
-  const create = useMutation({
-    mutationFn: () =>
-      createDataRequestApi(patientId, {
-        kind: kind as DataRequestKind,
-        requesterContactId: requester,
-        channel: channel as DataRequestChannel,
-        requestedOn,
-        said: said.trim() || undefined,
+  const create = useMutation({ mutationFn: (body: Parameters<typeof createDataRequestApi>[1]) => createDataRequestApi(patientId, body) })
+  const schema = useMemo(
+    () =>
+      z.object({
+        kind: z.custom<DataRequestKind | "">().refine((kind) => kind !== "", "Elige qué pide"),
+        requesterContactId: z.string().min(1, "Elige quién lo pide"),
+        channel: z.custom<DataRequestChannel | "">().refine((channel) => channel !== "", "Elige por dónde llegó"),
+        requestedOn: z
+          .string()
+          .refine((day) => ISO_DAY.test(day), "Cuándo lo pidió: escribe una fecha completa")
+          .refine((day) => !ISO_DAY.test(day) || day <= view.today, "Cuándo lo pidió: no puede ser una fecha futura"),
+        said: z.string().max(MAX_TEXT, `Lo que dijo admite hasta ${MAX_TEXT} caracteres`),
       }),
-    onSuccess: async (created) => {
+    [view.today],
+  )
+  const form = useAppForm({
+    defaultValues: {
+      kind: "" as DataRequestKind | "",
+      requesterContactId:
+        view.requesters.find((r) => r.relation === "paciente")?.contactId ?? view.requesters[0]?.contactId ?? "",
+      channel: "" as DataRequestChannel | "",
+      requestedOn: view.today,
+      said: "",
+    },
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const created = await create.mutateAsync({
+        kind: value.kind as DataRequestKind,
+        requesterContactId: value.requesterContactId,
+        channel: value.channel as DataRequestChannel,
+        requestedOn: value.requestedOn,
+        said: value.said.trim() || undefined,
+      })
       await queryClient.invalidateQueries({ queryKey: dataRequestsKey(patientId) })
       toast.success(
         created.kind === "mensajes"
@@ -274,88 +326,133 @@ function RegisterDrawer({
       onClose()
     },
   })
-  const ready = kind !== null && channel !== null && requester !== "" && validDay
+  const surface = useFormSurface(form)
+  const requestedOn = useStore(form.store, (state) => state.values.requestedOn)
+  const validDay = ISO_DAY.test(requestedOn) && requestedOn <= view.today
   return (
     <FormDrawer
+      {...surface}
       open
       onClose={onClose}
       title="Registrar un pedido"
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (ready) create.mutate()
-      }}
-      isDirty={kind !== null || channel !== null || said.trim() !== ""}
-      isSubmitting={create.isPending}
-      submitDisabled={!ready}
-      error={problemOf(create.error)}
       submitLabel="Registrar"
     >
       <div className="flex flex-col gap-5">
-        <FieldSet>
-          <FieldLegend variant="label">¿Qué pide?</FieldLegend>
-          <RadioGroup value={kind ?? ""} onValueChange={(value) => setKind(value as DataRequestKind)}>
-            {KIND_ORDER.map((item) => (
-              <label
-                key={item}
-                htmlFor={`data-request-kind-${item}`}
-                className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary/5"
-              >
-                <RadioGroupItem id={`data-request-kind-${item}`} value={item} className="mt-0.5" />
-                <span>
-                  <span className="font-medium">{DATA_REQUEST_KIND_TEXT[item].title}</span>
-                  <span className="block text-muted-foreground">{DATA_REQUEST_KIND_TEXT[item].detail}</span>
-                </span>
-              </label>
-            ))}
-          </RadioGroup>
-        </FieldSet>
+        <form.AppField name="kind">
+          {(field) => (
+            <field.Group legend="¿Qué pide?">
+              {(control) => (
+                <RadioGroup
+                  id={control.id}
+                  name={control.name}
+                  value={field.state.value}
+                  aria-invalid={control.invalid || undefined}
+                  aria-describedby={control.describedBy}
+                  onValueChange={(value) => {
+                    field.handleChange(value as DataRequestKind)
+                    field.handleBlur()
+                  }}
+                >
+                  {KIND_ORDER.map((item) => (
+                    <label
+                      key={item}
+                      htmlFor={`data-request-kind-${item}`}
+                      className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm has-[[data-checked]]:border-primary has-[[data-checked]]:bg-primary/5"
+                    >
+                      <RadioGroupItem
+                        id={`data-request-kind-${item}`}
+                        value={item}
+                        className="mt-0.5"
+                        aria-invalid={control.invalid || undefined}
+                      />
+                      <span>
+                        <span className="font-medium">{DATA_REQUEST_KIND_TEXT[item].title}</span>
+                        <span className="block text-muted-foreground">{DATA_REQUEST_KIND_TEXT[item].detail}</span>
+                      </span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        {/* Con una sola persona no hay nada que elegir: su rechazo se dice junto a los botones. */}
         {view.requesters.length > 1 ? (
-          <Field>
-            <FieldLabel>Quién lo pide</FieldLabel>
-            <ChoiceButtons
-              label="Quién lo pide"
-              value={requester}
-              onChange={setRequester}
-              options={view.requesters.map((r) => ({
-                value: r.contactId,
-                label: `${r.displayName} · ${r.relation === "paciente" ? "ella misma" : "representante legal"}`,
-              }))}
-            />
-          </Field>
+          <form.AppField name="requesterContactId">
+            {(field) => (
+              <field.Group legend="Quién lo pide">
+                {(control) => (
+                  <ChoiceButtons
+                    id={control.id}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value || null}
+                    onChange={(next) => field.handleChange(next)}
+                    options={view.requesters.map((r) => ({
+                      value: r.contactId,
+                      label: `${r.displayName} · ${r.relation === "paciente" ? "ella misma" : "representante legal"}`,
+                    }))}
+                  />
+                )}
+              </field.Group>
+            )}
+          </form.AppField>
         ) : (
           <p className="text-sm">
             Lo pide <strong>{view.requesters[0]?.displayName}</strong>
             {view.requesters[0]?.relation === "representante_legal" ? " (representante legal)" : ""}.
           </p>
         )}
-        <Field>
-          <FieldLabel>Por dónde llegó</FieldLabel>
-          <ChoiceButtons
-            label="Por dónde llegó"
-            value={channel}
-            onChange={setChannel}
-            columns={2}
-            options={CHANNEL_ORDER.map((value) => ({ value, label: DATA_REQUEST_CHANNEL_TEXT[value] }))}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="data-request-day">Cuándo lo pidió</FieldLabel>
-          <PastDateInput id="data-request-day" value={requestedOn} today={view.today} onChange={(next) => setRequestedOn(next)} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="data-request-said">Lo que dijo (opcional)</FieldLabel>
-          <Textarea id="data-request-said" rows={2} maxLength={1000} value={said} onChange={(event) => setSaid(event.target.value)} />
-        </Field>
+        <form.AppField name="channel">
+          {(field) => (
+            <field.Group legend="Por dónde llegó">
+              {(control) => (
+                <ChoiceButtons
+                  id={control.id}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value || null}
+                  onChange={(next) => field.handleChange(next)}
+                  columns={2}
+                  options={CHANNEL_ORDER.map((value) => ({ value, label: DATA_REQUEST_CHANNEL_TEXT[value] }))}
+                />
+              )}
+            </field.Group>
+          )}
+        </form.AppField>
+        <form.AppField name="requestedOn">
+          {(field) => (
+            <field.Control label="Cuándo lo pidió">
+              {(control) => (
+                <PastDateInput
+                  id={control.id}
+                  name={control.name}
+                  invalid={control.invalid}
+                  aria-describedby={control.describedBy}
+                  onBlur={control.onBlur}
+                  value={field.state.value}
+                  today={view.today}
+                  onChange={(next) => field.handleChange(next)}
+                />
+              )}
+            </field.Control>
+          )}
+        </form.AppField>
+        <form.AppField name="said">
+          {(field) => <field.TextareaField label="Lo que dijo (opcional)" rows={2} maxLength={MAX_TEXT} />}
+        </form.AppField>
         {validDay ? (
           <div className="rounded-lg border bg-muted/40 p-3 text-sm">
             <p className="font-medium">Responder hasta el {dayWords(addDays(requestedOn, DATA_REQUEST_DAYS), locale)}</p>
-            <FieldDescription>
+            <p className="text-sm text-muted-foreground">
               {DATA_REQUEST_DAYS} días, para cualquier pedido y en cualquier país. Es más corto que lo que piden las leyes de la
               región: respondiendo a tiempo, cumples en todas.
-            </FieldDescription>
+            </p>
           </div>
         ) : null}
-        <FieldDescription>Solo la propia persona, si es mayor de edad, o su representante legal vigente.</FieldDescription>
+        <p className="text-sm text-muted-foreground">Solo la propia persona, si es mayor de edad, o su representante legal vigente.</p>
       </div>
     </FormDrawer>
   )
@@ -389,26 +486,40 @@ function AttendDrawer({
   const [how, setHow] = useState<DataRequestVerification>(
     request.requesterRelation === "representante_legal" ? "representante" : request.channel === "portal" ? "portal" : "documento",
   )
-  const [resolution, setResolution] = useState("")
   const [denying, setDenying] = useState(false)
-  const [reason, setReason] = useState("")
   const verify = useMutation({ mutationFn: () => verifyDataRequestApi(patientId, request.id, how), onSuccess: refresh })
-  const respond = useMutation({
-    mutationFn: () => respondDataRequestApi(patientId, request.id, resolution.trim()),
-    onSuccess: async () => {
+  const respond = useMutation({ mutationFn: (resolution: string) => respondDataRequestApi(patientId, request.id, resolution) })
+  const deny = useMutation({ mutationFn: (reason: string) => denyDataRequestApi(patientId, request.id, reason) })
+  const respondForm = useAppForm({
+    defaultValues: { resolution: "" },
+    validators: {
+      // Sin el paso 1 no hay respuesta que valga: se dice junto a «Marcar respondida».
+      onSubmit: ({ value }) => {
+        if (!verified) return { form: "Primero comprueba que es ella (paso 1)." }
+        const parsed = resolutionSchema.safeParse(value)
+        return parsed.success ? undefined : { fields: { resolution: parsed.error.issues[0]?.message ?? "" } }
+      },
+    },
+    onSubmit: async ({ value }) => {
+      await respond.mutateAsync(value.resolution.trim())
       await refresh()
       toast.success("Pedido respondido")
       onClose()
     },
   })
-  const deny = useMutation({
-    mutationFn: () => denyDataRequestApi(patientId, request.id, reason.trim()),
-    onSuccess: async () => {
+  const denyForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: denySchema },
+    onSubmit: async ({ value }) => {
+      await deny.mutateAsync(value.reason.trim())
       await refresh()
       toast.success("Pedido denegado")
       onClose()
     },
   })
+  const respondSurface = useFormSurface(respondForm)
+  const denySurface = useFormSurface(denyForm)
+  const surface = denying ? denySurface : respondSurface
   const sendOptions = useQuery({
     queryKey: ["data-request-send-options", request.id],
     queryFn: () => fetchRecordSendOptions(patientId, request.id),
@@ -423,12 +534,12 @@ function AttendDrawer({
     },
   })
   const [erasing, setErasing] = useState(false)
-  const error = problemOf(verify.error ?? respond.error ?? deny.error ?? send.error)
   // Borrar se responde al borrar: no hay «Marcar respondida» (ADR 0080).
   const erase = request.kind === "borrar"
 
   return (
     <FormDrawer
+      {...surface}
       open
       onClose={onClose}
       title={DATA_REQUEST_ROW_TITLE[request.kind]}
@@ -437,17 +548,9 @@ function AttendDrawer({
           ? `Responder hasta el ${dayWords(request.dueOn, locale)} · ${dueWords(today, request.dueOn)}`
           : `${DATA_REQUEST_STATUS_TEXT[request.status]}${request.resolvedByName ? ` por ${request.resolvedByName}` : ""}`
       }
-      onSubmit={(event) => {
-        event.preventDefault()
-        if (denying && reason.trim()) deny.mutate()
-        else if (verified && resolution.trim()) respond.mutate()
-      }}
-      isSubmitting={respond.isPending || deny.isPending}
-      submitDisabled={denying ? !reason.trim() : !(verified && resolution.trim())}
       hideSubmit={!pending || (erase && !denying)}
       submitLabel={denying ? "Denegar" : "Marcar respondida"}
       cancelLabel={pending ? "Cerrar" : "Listo"}
-      error={error}
       dock={false}
     >
       <div className="flex flex-col gap-4 text-sm">
@@ -468,14 +571,21 @@ function AttendDrawer({
             ) : null}
           </div>
         ) : denying ? (
-          <Field>
-            <FieldLabel htmlFor="data-request-deny">¿Por qué se deniega?</FieldLabel>
-            <Textarea id="data-request-deny" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} />
-            <FieldDescription>Se le dice a la persona. Por ejemplo: «No pudimos comprobar que la pide ella».</FieldDescription>
+          <div className="flex flex-col gap-2">
+            <denyForm.AppField name="reason">
+              {(field) => (
+                <field.TextareaField
+                  label="¿Por qué se deniega?"
+                  rows={3}
+                  maxLength={MAX_TEXT}
+                  description="Se le dice a la persona. Por ejemplo: «No pudimos comprobar que la pide ella»."
+                />
+              )}
+            </denyForm.AppField>
             <Button type="button" variant="ghost" size="sm" className="self-start" onClick={() => setDenying(false)}>
               Volver
             </Button>
-          </Field>
+          </div>
         ) : (
           <>
             <Step number={1} done={verified} title={verified ? "Comprobaste que es ella" : "Comprueba que es ella"}>
@@ -486,20 +596,33 @@ function AttendDrawer({
                 </p>
               ) : (
                 <>
-                  <RadioGroup value={how} onValueChange={(value) => setHow(value as DataRequestVerification)}>
-                    {VERIFY_ORDER.filter((item) =>
-                      request.requesterRelation === "representante_legal" ? item !== "documento" : item !== "representante",
-                    ).map((item) => (
-                      <label key={item} htmlFor={`data-request-how-${item}`} className="flex min-h-11 cursor-pointer items-center gap-3">
-                        <RadioGroupItem id={`data-request-how-${item}`} value={item} />
-                        {DATA_REQUEST_VERIFICATION_TEXT[item]}
-                      </label>
-                    ))}
-                  </RadioGroup>
+                  <FieldSet>
+                    <FieldLegend className="sr-only">Cómo comprobaste que es ella</FieldLegend>
+                    <RadioGroup
+                      value={how}
+                      aria-invalid={verify.error ? true : undefined}
+                      aria-describedby={verify.error ? "data-request-verify-error" : undefined}
+                      onValueChange={(value) => setHow(value as DataRequestVerification)}
+                    >
+                      {VERIFY_ORDER.filter((item) =>
+                        request.requesterRelation === "representante_legal" ? item !== "documento" : item !== "representante",
+                      ).map((item) => (
+                        <label key={item} htmlFor={`data-request-how-${item}`} className="flex min-h-11 cursor-pointer items-center gap-3">
+                          <RadioGroupItem id={`data-request-how-${item}`} value={item} />
+                          {DATA_REQUEST_VERIFICATION_TEXT[item]}
+                        </label>
+                      ))}
+                    </RadioGroup>
+                  </FieldSet>
                   <p className="text-muted-foreground">Nunca porque escribió desde su número.</p>
                   <Button type="button" size="sm" className="self-start" disabled={verify.isPending} onClick={() => verify.mutate()}>
                     Comprobé que es ella
                   </Button>
+                  {verify.error ? (
+                    <p id="data-request-verify-error" role="alert" className="text-destructive">
+                      {submitErrorMessage(verify.error)}
+                    </p>
+                  ) : null}
                 </>
               )}
             </Step>
@@ -563,6 +686,11 @@ function AttendDrawer({
                       representante legal.
                       {canReadClinical ? " «Descargar» trae además el archivo FHIR y sus imágenes, para entregarlo en mano." : ""}
                     </p>
+                    {send.error ? (
+                      <p role="alert" className="text-destructive">
+                        {submitErrorMessage(send.error)}
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p className="text-muted-foreground">Primero comprueba que es ella.</p>
@@ -576,17 +704,17 @@ function AttendDrawer({
             </Step>
             {erase ? null : (
             <Step number={3} done={false} disabled={!verified} title="Responde">
-              <Field>
-                <FieldLabel htmlFor="data-request-resolution">Qué se entregó o qué se hizo</FieldLabel>
-                <Textarea
-                  id="data-request-resolution"
-                  rows={2}
-                  disabled={!verified}
-                  value={resolution}
-                  placeholder={request.kind === "copia" ? "Se le entregó en mano el 23 oct" : "Se cambió su dirección"}
-                  onChange={(event) => setResolution(event.target.value)}
-                />
-              </Field>
+              <respondForm.AppField name="resolution">
+                {(field) => (
+                  <field.TextareaField
+                    label="Qué se entregó o qué se hizo"
+                    rows={2}
+                    maxLength={MAX_TEXT}
+                    disabled={!verified}
+                    placeholder={request.kind === "copia" ? "Se le entregó en mano el 23 oct" : "Se cambió su dirección"}
+                  />
+                )}
+              </respondForm.AppField>
             </Step>
             )}
             <Button type="button" variant="ghost" size="sm" className="self-start text-destructive" onClick={() => setDenying(true)}>
@@ -642,20 +770,24 @@ function EraseDialog({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  const [typed, setTyped] = useState("")
   const preview = useQuery({
     queryKey: ["data-request-erase-preview", request.id],
     queryFn: () => fetchErasurePreview(patientId, request.id),
   })
-  const erase = useMutation({
-    mutationFn: () => eraseDataApi(patientId, request.id),
-    onSuccess: async () => {
+  const erase = useMutation({ mutationFn: () => eraseDataApi(patientId, request.id) })
+  const form = useAppForm({
+    defaultValues: { typed: "" },
+    validators: { onSubmit: eraseSchema },
+    onSubmit: async () => {
+      await erase.mutateAsync()
       toast.success("Se borraron sus datos y su historia quedó bloqueada")
       onDone()
       // La ficha ya no existe para el equipo: la página pasa a la historia bloqueada.
       await queryClient.invalidateQueries()
     },
   })
+  const submitting = useStore(form.store, (state) => state.isSubmitting)
+  const submitError = useFormSubmitError(form)
   const verifiedText = request.verifiedHow ? ` · ${ERASE_VERIFIED_TEXT[request.verifiedHow]}` : ""
   return (
     <ConfirmDialog
@@ -663,28 +795,30 @@ function EraseDialog({
       title={`¿Borrar los datos de ${patientName ?? "esta persona"}?`}
       description={`Lo pidió ${request.requesterName} ${DATA_REQUEST_CHANNEL_PHRASE[request.channel]} el ${dayWords(request.requestedOn, locale)}${verifiedText}.`}
       confirmLabel="Borrar y bloquear"
-      pending={erase.isPending}
-      confirmDisabled={typed.trim() !== "BORRAR" || !preview.data}
-      onConfirm={() => erase.mutate()}
+      pending={submitting}
+      // Sin el resumen a la vista no se confirma: lo dice «Revisando…» o su error.
+      confirmDisabled={!preview.data}
+      error={submitError}
+      onConfirm={() => void submitForm(form)}
       onClose={onClose}
     >
       {preview.isPending ? <LoadingState message="Revisando lo que se borra…" /> : null}
-      {preview.isError ? <p className="text-sm text-destructive">{problemOf(preview.error)}</p> : null}
+      {preview.isError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {problemOf(preview.error)}
+        </p>
+      ) : null}
       {preview.data ? <ErasureSummary preview={preview.data} locale={locale} /> : null}
-      <Field>
-        <FieldLabel htmlFor="erase-confirm">Escribe BORRAR para confirmar</FieldLabel>
-        <Input
-          id="erase-confirm"
-          autoComplete="off"
-          value={typed}
-          placeholder="BORRAR"
-          onChange={(event) => setTyped(event.target.value)}
-        />
-        <FieldDescription>
-          Lo que se borra no se puede recuperar. Queda en la Actividad del equipo y el pedido pasa a «Respondida» con el detalle.
-        </FieldDescription>
-      </Field>
-      {erase.error ? <p className="text-sm text-destructive">{problemOf(erase.error)}</p> : null}
+      <form.AppField name="typed">
+        {(field) => (
+          <field.TextField
+            label="Escribe BORRAR para confirmar"
+            autoComplete="off"
+            placeholder="BORRAR"
+            description="Lo que se borra no se puede recuperar. Queda en la Actividad del equipo y el pedido pasa a «Respondida» con el detalle."
+          />
+        )}
+      </form.AppField>
     </ConfirmDialog>
   )
 }

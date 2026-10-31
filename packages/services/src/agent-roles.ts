@@ -102,7 +102,7 @@ export const AGENT_ROLES: Record<AgentRoleId, AgentRole> = {
         id: "agendar",
         label: "Agendar, mover y cancelar citas",
         description:
-          "Busca horarios reales y reserva, mueve o cancela por el chat. Antes de hacerlo le pide el «sí» al paciente, salvo que ya haya pedido esa misma hora. A quien aún no es paciente lo registra con ese mismo sí, si la clínica tiene su aviso de privacidad publicado. También puede mandar el enlace de reserva cuando a la persona le sirve ver todos los horarios, sedes y profesionales a la vez.",
+          "Busca horarios reales y reserva, mueve o cancela por el chat. Antes de hacerlo le pide el «sí» al paciente, salvo que ya haya pedido esa misma hora. A quien aún no es paciente, o le falta un dato que la clínica pide, le da su enlace con la hora que eligió para que deje sus datos y quede reservada. También puede mandar el enlace de reserva cuando a la persona le sirve ver todos los horarios, sedes y profesionales a la vez.",
         fixed: false,
         tools: ["ver_sedes_y_servicios", "buscar_huecos", "proponer_cita", "reservar_paciente_nuevo", "reprogramar_cita", "cancelar_cita", "guardar_contacto"],
         steps: [

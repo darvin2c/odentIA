@@ -1,5 +1,5 @@
 {
-  "id": "884cc301-d89d-4440-966f-07de9859ddcb",
+  "id": "7d0f4994-761b-4792-bf15-aeb7197854d4",
   "prevId": "8770cd47-144c-445d-9e2f-9e530b8e3da9",
   "version": "7",
   "dialect": "postgresql",
@@ -3218,6 +3218,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "new_person": {
+          "name": "new_person",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -15573,28 +15580,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "patient_charge_encounter_procedure_idx": {
-          "name": "patient_charge_encounter_procedure_idx",
-          "columns": [
-            {
-              "expression": "organization_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "encounter_procedure_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"encounter_procedure_id\" IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

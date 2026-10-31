@@ -18,7 +18,7 @@ import { setAppointmentStatus } from "./appointments.js"
 import { setMessageChoice } from "./automation.js"
 import { recordClinicalAccess } from "./clinical-access.js"
 import { type DataRequestItem, listDataRequests, lockPendingDataRequest } from "./data-requests.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { joinPatientPerson } from "./patient-identity.js"
 import { getAccountSummary } from "./payments.js"
 import { setPersonArchived } from "./people.js"
@@ -306,11 +306,11 @@ export async function openLockedRecord(
   patientId: string,
   input: { reason: string; note?: string | null },
 ): Promise<RecordLockState> {
-  if (!(RECORD_OPENING_REASONS as readonly string[]).includes(input.reason)) throw validation("Elige el motivo")
+  if (!(RECORD_OPENING_REASONS as readonly string[]).includes(input.reason)) throw invalidField("reason", "Elige el motivo")
   const reason = input.reason as RecordOpeningReason
   const note = (input.note ?? "").trim() || null
-  if (note && note.length > 500) throw validation("El motivo admite hasta 500 caracteres")
-  if (reason === "otro" && !note) throw validation("Escribe el motivo")
+  if (note && note.length > 500) throw invalidField("note", "El motivo admite hasta 500 caracteres")
+  if (reason === "otro" && !note) throw invalidField("note", "Escribe el motivo")
   const person = await personOf(tx, orgId, patientId)
   if (!person.lockedAt) throw new ServiceError("RECORD_NOT_LOCKED", 409, "Esta historia no está bloqueada")
   if (reason === "vuelve") {

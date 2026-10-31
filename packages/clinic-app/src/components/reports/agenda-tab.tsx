@@ -508,7 +508,7 @@ function FreeHours({ data }: { data: AgendaReport }) {
               ))}
             </ChoiceSelect>
           ) : null}
-          <ChoiceButtons label="Vista del mapa" value={view} options={views} onChange={setView} />
+          <ChoiceButtons aria-label="Vista del mapa" value={view} options={views} onChange={setView} />
 
         </div>
       </div>

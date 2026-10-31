@@ -21,22 +21,35 @@ import { runService, serviceErrorResponse, validationError } from "./helpers.js"
  * empezar y borrarlas. Las arma el worker. Crear, volver a empezar y borrar
  * son de la administración (el servicio lo exige); soporte las lee.
  */
+const DEMO_NAME_WORDS = "El nombre va de 3 a 80 letras"
+
 const demoInput = z
   .object({
-    product: z.enum(CLINICAL_PRODUCTS),
-    kind: z.string().trim().min(1).max(60),
-    size: z.enum(DEMO_SIZES),
+    product: z.enum(CLINICAL_PRODUCTS, "Elige el producto"),
+    kind: z.string().trim().min(1, "Elige el tipo de demo").max(60, "Elige el tipo de demo"),
+    size: z.enum(DEMO_SIZES, "Elige el tamaño"),
     months: z.coerce
       .number()
-      .int()
-      .refine((value) => (DEMO_MONTHS as readonly number[]).includes(value), "6, 12 o 24 meses"),
-    countryCode: z.enum(["PE", "CO", "MX"]),
-    name: z.string().trim().min(3).max(80),
-    presenterUserId: z.string().trim().min(1).max(200),
+      .int("La historia es de 6, 12 o 24 meses")
+      .refine(
+        (value) => (DEMO_MONTHS as readonly number[]).includes(value),
+        "La historia es de 6, 12 o 24 meses",
+      ),
+    countryCode: z.enum(["PE", "CO", "MX"], "Las demos son de Perú, Colombia o México"),
+    name: z.string().trim().min(3, DEMO_NAME_WORDS).max(80, DEMO_NAME_WORDS),
+    presenterUserId: z
+      .string()
+      .trim()
+      .min(1, "Elige quién la presenta")
+      .max(200, "Quien presenta es alguien del equipo de la administración"),
   })
   .strict()
 
-const deleteInput = z.object({ confirmName: z.string().max(120) }).strict()
+const deleteInput = z
+  .object({
+    confirmName: z.string("Escribe el nombre de la demo para borrarla").max(120, "Escribe el nombre de la demo para borrarla"),
+  })
+  .strict()
 
 export function createAdminDemosRoute(deps: Pick<AppDeps, "ownerDb" | "storage">) {
   const app = new Hono()

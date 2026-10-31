@@ -7,11 +7,12 @@
  * tratamiento aún en curso para continuar en una sesión posterior.
  */
 import { Badge, Button } from "@odentia/ui"
+import { submitErrorMessage } from "@odentia/ui-patterns"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { planDecisionLabel } from "../../lib/budgets"
-import { completeTreatmentApi, formatDate, mutationMessage } from "../../lib/clinical-journey"
+import { completeTreatmentApi, formatDate } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { type PlanItem, planStatusLabel } from "../../lib/patients"
 
@@ -55,7 +56,7 @@ export function EncounterTreatments({
     },
     onError: (mutationError) => {
       setCompletingId(null)
-      setError(mutationMessage(mutationError))
+      setError(submitErrorMessage(mutationError))
     },
   })
 
@@ -67,7 +68,7 @@ export function EncounterTreatments({
       completeMutation.mutate(itemId)
     } catch (caught) {
       setCompletingId(null)
-      setError(mutationMessage(caught))
+      setError(submitErrorMessage(caught))
     }
   }
 

@@ -116,6 +116,7 @@ export function visibleDocumentFilters(
 const NOUNS: Record<string, readonly [string, string]> = {
   todo: ["papel", "papeles"],
   requieren: ["papel que requiere acción", "papeles que requieren acción"],
+  presupuestos: ["presupuesto", "presupuestos"],
   recetas: ["receta", "recetas"],
   descansos: ["descanso médico", "descansos médicos"],
   ordenes: ["orden", "órdenes"],

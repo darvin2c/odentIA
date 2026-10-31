@@ -32,7 +32,15 @@ function forbid(c: Context, message = "No tienes acceso a comisiones") {
 const currency = z.string().regex(/^[A-Z]{3}$/)
 const year = z.coerce.number().int().min(2000).max(2100)
 const month = z.coerce.number().int().min(1).max(12)
-const reasonInput = z.object({ reason: z.string().trim().min(1).max(2000) }).strict()
+const reasonInput = z
+  .object({
+    reason: z
+      .string()
+      .trim()
+      .min(1, "Indica el motivo de la anulación.")
+      .max(2000, "Escribe el motivo en 2000 caracteres como máximo."),
+  })
+  .strict()
 const period = z.object({ year, month, currency: currency.optional() })
 
 /**
@@ -78,8 +86,12 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
     if (!canAccess(memberRole, "commissions.write")) return forbid(c)
     const parsed = z
       .object({
-        professionalUserId: z.string().min(1),
-        rateBps: z.number().int().min(0).max(10000),
+        professionalUserId: z.string().min(1, "Elige a la persona."),
+        rateBps: z
+          .number()
+          .int("Escribe un porcentaje con dos decimales como máximo.")
+          .min(0, "Escribe un porcentaje entre 0 y 100.")
+          .max(10000, "Escribe un porcentaje entre 0 y 100."),
       })
       .strict()
       .safeParse(await c.req.json().catch(() => null))
@@ -142,7 +154,7 @@ export function createCommissionsRoute(deps: Pick<CrmDeps, "db">) {
         year: z.number().int().min(2000).max(2100),
         month: z.number().int().min(1).max(12),
         currency: currency.optional(),
-        branchId: z.uuid(),
+        branchId: z.uuid("Elige la sede del gasto."),
         notes: z.string().max(2000).nullish(),
         expectedCents: z.number().int().positive().optional(),
       })

@@ -3,7 +3,9 @@ import type {
   RegistrationFieldKey,
   RegistrationFieldMode,
 } from "@odentia/clinical"
+import { FieldError } from "@odentia/ui"
 import { Lock } from "lucide-react"
+import { useId } from "react"
 import { ChoiceButtons } from "../choice-buttons"
 import { productUi } from "../../product/product-ui"
 
@@ -90,6 +92,8 @@ const THREE: ReadonlyArray<{ value: RegistrationFieldMode; label: string }> = [
 const TWO = THREE.slice(0, 2)
 
 type Fields = RegistrationConfig["fields"]
+/** Lo que hay que corregir de cada dato, junto a su fila. */
+export type RegistrationFieldErrors = Partial<Record<RegistrationFieldKey, string>>
 
 function Row({
   item,
@@ -97,29 +101,39 @@ function Row({
   options,
   onMode,
   disabled,
+  errors,
 }: {
   item: PickerItem
   fields: Fields
   options: ReadonlyArray<{ value: RegistrationFieldMode; label: string }>
   onMode: (keys: RegistrationFieldKey[], mode: RegistrationFieldMode) => void
   disabled: boolean
+  errors: RegistrationFieldErrors
 }) {
   const current = fields[item.keys[0] as RegistrationFieldKey]
+  const labelId = useId()
+  const errorId = useId()
+  const error = item.keys.map((key) => errors[key]).find(Boolean)
   return (
-    <div className="@container flex min-w-0 flex-col gap-2 border-b py-3 last:border-b-0 @md:flex-row @md:items-center @md:justify-between">
-      <div className="flex min-w-0 flex-col">
-        <span className="text-sm font-medium">{item.label}</span>
-        {item.hint ? <span className="text-xs text-muted-foreground">{item.hint}</span> : null}
+    <div className="flex flex-col gap-1 border-b py-3 last:border-b-0">
+      <div className="@container flex min-w-0 flex-col gap-2 @md:flex-row @md:items-center @md:justify-between">
+        <div className="flex min-w-0 flex-col">
+          <span id={labelId} className="text-sm font-medium">{item.label}</span>
+          {item.hint ? <span className="text-xs text-muted-foreground">{item.hint}</span> : null}
+        </div>
+        <ChoiceButtons
+          aria-labelledby={labelId}
+          aria-describedby={error ? errorId : undefined}
+          invalid={Boolean(error)}
+          value={options.some((option) => option.value === current) ? current : "optional"}
+          options={options}
+          onChange={(mode) => onMode(item.keys, mode)}
+          disabled={disabled}
+          columns={options.length === 3 ? 3 : 2}
+          className="@md:w-auto @md:min-w-80"
+        />
       </div>
-      <ChoiceButtons
-        label={item.label}
-        value={options.some((option) => option.value === current) ? current : "optional"}
-        options={options}
-        onChange={(mode) => onMode(item.keys, mode)}
-        disabled={disabled}
-        columns={options.length === 3 ? 3 : 2}
-        className="@md:w-auto @md:min-w-80"
-      />
+      {error ? <FieldError id={errorId}>{`${item.label}: ${error}`}</FieldError> : null}
     </div>
   )
 }
@@ -132,6 +146,7 @@ function Group({
   options,
   onMode,
   disabled,
+  errors,
 }: {
   title: string
   help: string
@@ -140,6 +155,7 @@ function Group({
   options: ReadonlyArray<{ value: RegistrationFieldMode; label: string }>
   onMode: (keys: RegistrationFieldKey[], mode: RegistrationFieldMode) => void
   disabled: boolean
+  errors: RegistrationFieldErrors
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -156,6 +172,7 @@ function Group({
             options={options}
             onMode={onMode}
             disabled={disabled}
+            errors={errors}
           />
         ))}
       </div>
@@ -168,12 +185,15 @@ export function RegistrationFieldsPicker({
   onMode,
   disabled,
   showOrigin,
+  errors = {},
 }: {
   fields: Fields
   onMode: (keys: RegistrationFieldKey[], mode: RegistrationFieldMode) => void
   disabled: boolean
   /** «Procedencia» solo en clínicas de Perú. */
   showOrigin: boolean
+  /** El motivo de cada dato que no se puede guardar así (del esquema o del servidor). */
+  errors?: RegistrationFieldErrors
 }) {
   // Lo de cada producto: «Su historia dental» en odentIA; la lactancia y los hábitos en latidIA.
   const product = productUi().product
@@ -230,6 +250,7 @@ export function RegistrationFieldsPicker({
         options={THREE}
         onMode={onMode}
         disabled={disabled}
+        errors={errors}
       />
       <Group
         title="Su salud"
@@ -239,6 +260,7 @@ export function RegistrationFieldsPicker({
         options={THREE}
         onMode={onMode}
         disabled={disabled}
+        errors={errors}
       />
       <Group
         title="Otros antecedentes"
@@ -248,6 +270,7 @@ export function RegistrationFieldsPicker({
         options={TWO}
         onMode={onMode}
         disabled={disabled}
+        errors={errors}
       />
       {product === "dental" ? (
         <Group
@@ -258,6 +281,7 @@ export function RegistrationFieldsPicker({
           options={TWO}
           onMode={onMode}
           disabled={disabled}
+          errors={errors}
         />
       ) : (
         <Group
@@ -268,6 +292,7 @@ export function RegistrationFieldsPicker({
           options={TWO}
           onMode={onMode}
           disabled={disabled}
+          errors={errors}
         />
       )}
       <Group
@@ -278,6 +303,7 @@ export function RegistrationFieldsPicker({
         options={TWO}
         onMode={onMode}
         disabled={disabled}
+        errors={errors}
       />
     </div>
   )

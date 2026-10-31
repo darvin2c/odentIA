@@ -54,7 +54,7 @@ export {
   scheduleRangeState,
 } from "./range-picker.js"
 export { ScheduleResourceChips, type ScheduleResourceChipsProps } from "./resource-chips.js"
-export { ResourceSelect, type ResourceSelectOption } from "./resource-select.js"
+export { ResourceSelect, type ResourceSelectOption, type ResourceSelectProps } from "./resource-select.js"
 export {
   entryState,
   entryStateLabel,

@@ -3,90 +3,90 @@ process.env.DOCKER_HOST ??= "unix:///mnt/wsl/podman-sockets/odentia.sock"
 import { randomUUID } from "node:crypto"
 import { once } from "node:events"
 import { createServer } from "node:http"
+import { BaseChatModel } from "@langchain/core/language_models/chat_models"
+import { AIMessage, type BaseMessage, SystemMessage, type ToolMessage } from "@langchain/core/messages"
+import type { ChatResult } from "@langchain/core/outputs"
 import { buildWebchatInbound, telegramBotApiAdapter, webChatAdapter } from "@odentia/channels"
 import { createAppDb, createOwnerDb, type Db, sendAgentRun, withOrgContext } from "@odentia/db"
-import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
+import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
 import { agentDecisionLog, agentHandoff, agentProposal, agentRunLedger } from "@odentia/db/schema/agent"
+import { user } from "@odentia/db/schema/auth"
 import { automationJob } from "@odentia/db/schema/automation"
+import { contact, contactIdentity, conversation, crmTask, message } from "@odentia/db/schema/crm"
+import { auditEvent, branch } from "@odentia/db/schema/org"
+import { workspaceNotification } from "@odentia/db/schema/workspace"
 import {
-  sendOutbound,
+  AGENT_ROLES,
+  addAgentGuidance,
   addContactIdentity,
-  createRoom,
-  createConnection,
-  createContact,
-  createAppointment,
-  deleteProbar,
-  findFreeGaps,
-  getProbar,
-  listAgentContextCandidates,
-  listAvailableSlots,
-  openProbar,
-  moveAppointment,
   approveLesson,
   claimHandoff,
+  closeConversationWith,
+  configurePublicLinks,
   correctAnswer,
-  discardLesson,
-  getLesson,
-  withdrawLesson,
+  createAppointment,
+  createConnection,
+  createContact,
   createHandoff,
   createKnowledgeEntry,
-  setKnowledgeStatus,
-  updateTask,
+  createRoom,
+  createTask,
+  deleteProbar,
+  discardLesson,
+  findFreeGaps,
   getAgentCaseState,
   getAgentConfig,
-  listAnswerTraces,
-  listKnowledgeGaps,
-  listPersonFacts,
-  removePersonFact,
-  operationAgentFields,
-  AGENT_ROLES,
-  READ_TOOLS,
-  TOOL_OPERATION,
-  TOOLS_WITHOUT_OPERATION,
+  getLesson,
+  getPatientRegistrationConfig,
+  getProbar,
   ingestInbound,
+  listAgentContextCandidates,
+  listAnswerTraces,
+  listAvailableSlots,
   listHandoffs,
-  createTask,
-  listProposals,
+  listKnowledgeGaps,
   listOpportunities,
+  listPersonFacts,
+  listProposals,
+  moveAppointment,
+  pendingSpokenName,
   moveContactIdentity,
   nextPatientNumber,
   noteSandboxTurn,
-  secretsKeyFromEnv,
-  setPatientContact,
-  setProfessionalSchedule,
-  upsertAgentConfig,
-  addAgentGuidance,
-  removeAgentGuidance,
-} from "@odentia/services"
-import {
-  closeConversationWith,
-  configurePublicLinks,
-  getPatientRegistrationConfig,
+  openProbar,
+  operationAgentFields,
   professionalRef,
+  READ_TOOLS,
+  removeAgentGuidance,
+  removePersonFact,
   reserveBookingLink,
+  resolvePersonalLink,
   resolvePersonalLinkRefs,
   savePatientRegistrationConfig,
+  secretsKeyFromEnv,
+  sendOutbound,
+  setKnowledgeStatus,
+  setPatientContact,
+  setProfessionalSchedule,
+  TOOL_OPERATION,
+  TOOLS_WITHOUT_OPERATION,
+  updateTask,
+  upsertAgentConfig,
+  withdrawLesson,
 } from "@odentia/services"
+import { insertTestPatients } from "@odentia/services/test-patient"
 import { and, desc, eq, sql } from "drizzle-orm"
 import { migrate } from "drizzle-orm/postgres-js/migrator"
 import { GenericContainer, type StartedTestContainer, Wait } from "testcontainers"
 import { afterAll, beforeAll, expect, it, onTestFinished } from "vitest"
 import { createFakeDecisionModel, DecisionError, type DecisionModel } from "./decision/index.js"
 import { offTopicReply } from "./decision/route.js"
-import { supportCase, supportMessage } from "@odentia/db/schema/admin-support"
-import { FAKE_REPLY_TEXT } from "./fake-model.js"
-import { type AgentRuntime, previewLesson, processAgentRun } from "./run.js"
-import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
 import { extractDictation } from "./extract-dictation.js"
-import { makeAgentTools, TOOL_SOURCES, type AgentToolCtx } from "./tools.js"
-import { BaseChatModel } from "@langchain/core/language_models/chat_models"
-import { AIMessage, SystemMessage, type BaseMessage, type ToolMessage } from "@langchain/core/messages"
-import type { ChatResult } from "@langchain/core/outputs"
-import { user } from "@odentia/db/schema/auth"
-import { branch, auditEvent } from "@odentia/db/schema/org"
-import { appointment, appointmentBookingLink } from "@odentia/db/schema/agenda"
-import { workspaceNotification } from "@odentia/db/schema/workspace"
-import { insertTestPatients } from "@odentia/services/test-patient"
+import { FAKE_REPLY_TEXT } from "./fake-model.js"
+import { compileAgentGraph, UNSENT_TEXT } from "./graph.js"
+import { type AgentRuntime, previewLesson, processAgentRun } from "./run.js"
+import { type AgentToolCtx, makeAgentTools, TOOL_SOURCES } from "./tools.js"
 
 const IMAGE = "dentalagent-postgres:18.6"
 const KEY = secretsKeyFromEnv("aa".repeat(31) + "ab")
@@ -1184,103 +1184,202 @@ it("buscar_huecos entrega una opción completa que proponer_cita ejecuta como ci
   expect(booked.durationMin).toBe(45)
   expect(booked.startsAt.toISOString()).toBe(optionStart)
   expect(booked.endsAt.toISOString()).toBe(new Date(Date.parse(optionStart) + durationMin * 60_000).toISOString())
-  expect(booked.status).toBe("programada")
+  // La eligió la persona con su sí: nace confirmada (ADR 0109).
+  expect(booked.status).toBe("confirmada")
 })
 
-it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el aviso a la vista (ADR 0101)", async () => {
-  const [createdBranch] = await ownerDb
-    .insert(branch)
-    .values({ organizationId: "org_a", name: "Sede Registro Chat", timezone: "America/Lima" })
-    .returning({ id: branch.id })
-  const branchId = createdBranch!.id
-  const stamp = Date.now()
-  const actorId = `agent-actor-reg-${stamp}`
-  const professionalId = `agent-professional-reg-${stamp}`
-  await ownerDb.insert(user).values([
-    { id: actorId, name: "Actor Registro", email: `actor-reg-${stamp}@example.test` },
-    { id: professionalId, name: "Dentista Registro", email: `dentista-reg-${stamp}@example.test` },
-  ])
-  await ownerDb.execute(sql`
-    insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values
-      (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now()),
-      (${`m-${professionalId}`}, 'org_a', ${professionalId}, 'member', now())`)
-  const createdRoom = await withOrgContext(appDb, "org_a", (tx) => createRoom(tx, "org_a", { branchId, name: "Unidad dental Registro" }))
-  await withOrgContext(appDb, "org_a", (tx) =>
-    setProfessionalSchedule(tx, "org_a", actorId, {
+/** Lo que el grafo guarda como lo consultado del turno cuando una herramienta entrega un enlace (`recordLookups`). */
+const linksOf = (text: string) => ({
+  kind: "sistema",
+  source: "Enlace que entregó el sistema",
+  text: (text.match(/\bhttps?:\/\/[^\s"<>\\^`{|}«»]+/gi) ?? []).join("\n"),
+})
+
+/** «Su enlace» con la hora elegida, tal como queda en el mensaje: con la referencia del token al final (ADR 0109). */
+const PICK_LINK = /https:\/\/norte\.odentia\.test\/reserva\?sede=\S+?&token=\{\{su-enlace:[0-9a-f-]{36}\}\}/
+
+const publicCtx = (conversationId: string, contactId: string): AgentToolCtx => ({
+  db: appDb, orgId: "org_a", conversationId, contactId,
+  triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+  toolsUsed: [], usage: emptyUsage(),
+  publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" },
+})
+
+/** Los huecos del próximo lunes, como los propone el agente; la búsqueda queda como lo consultado del turno. */
+async function offeredSlots(ctx: AgentToolCtx, branchId: string) {
+  const day = upcomingMonday()
+  const found = String(await makeAgentTools(ctx).find((t) => t.name === "buscar_huecos")!.invoke({
+    branchId, from: day.toISOString(), to: new Date(day.getTime() + 86_400_000).toISOString(), durationMin: 45,
+  }))
+  ctx.evidence = [...(ctx.evidence ?? []), { kind: "agenda", source: "Agenda: horarios disponibles", text: found }]
+  ctx.toolsUsed.push("buscar_huecos")
+  return found.split("\n").filter((line) => line.startsWith("- ")).map((line) => ({
+    clock: line.match(/, (\d{2}:\d{2})–/)![1]!,
+    slot: {
       branchId,
-      professionalUserId: professionalId,
-      rules: [1, 2, 3, 4, 5].map((weekday) => ({ weekday, startMin: 9 * 60, endMin: 13 * 60 })),
-    }))
+      roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
+      professionalUserId: line.match(/profesional ([^\]\s]+)/)![1]!,
+      startsAt: line.match(ISO_INSTANT)![0],
+      durationMin: 45,
+    },
+  }))
+}
+
+/** La dirección del enlace con la hora, con el token ya puesto como lo entrega el worker. */
+function pickOf(sent: string): URL {
+  const ref = PICK_LINK.exec(sent)?.[0]
+  expect(ref, sent).toBeDefined()
+  return new URL(resolvePersonalLinkRefs(ref!, KEY))
+}
+
+it("a quien aún no es paciente le da su enlace con la hora que eligió para dejar sus datos y reservar ahí; por el chat no registra a nadie (ADR 0109)", async () => {
+  const seed = await ingestText("tg:nuevo-enlace-sede", "evt-nuevo-enlace-sede", "Hola")
+  // La sede y el profesional del fixture; su paciente es de otra persona.
+  const fx = await bookingFixture(seed.conversationId, "nuevo-enlace")
   const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
-  // Las demás pruebas cuentan con el registro como estaba, pase lo que pase con esta.
-  onTestFinished(async () => {
+  const saveRegistration = async (enabled: boolean, privacyNotice: string) => {
     const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
     await withOrgContext(appDb, "org_a", (tx) =>
-      savePatientRegistrationConfig(tx, "org_a", actorId, {
-        expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice,
-      }))
-  })
-  if (!current.enabled || !current.privacyNotice.trim()) {
-    await withOrgContext(appDb, "org_a", (tx) =>
-      savePatientRegistrationConfig(tx, "org_a", actorId, {
-        expectedVersion: current.version, enabled: true, fields: current.fields, privacyNotice: "Usamos tus datos solo para atenderte.",
-      }))
+      savePatientRegistrationConfig(tx, "org_a", fx.actorId, { expectedVersion: latest.version, enabled, fields: latest.fields, privacyNotice }))
   }
-  const { conversationId } = await ingestText("tg:registro-chat", "evt-registro-chat", "Hola, quiero una cita")
+  // Las demás pruebas cuentan con el registro como estaba, pase lo que pase con esta.
+  onTestFinished(() => saveRegistration(current.enabled, current.privacyNotice))
+  const { conversationId } = await ingestText("tg:nuevo-enlace", "evt-nuevo-enlace", "Hola, quiero una cita")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
-  const ctx: AgentToolCtx = {
-    db: appDb, orgId: "org_a", conversationId, contactId,
-    triggerId: null, secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
-    toolsUsed: [], usage: emptyUsage(),
-    publicUrl: { webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" },
-  }
-  const tools = makeAgentTools(ctx)
-  const monday = new Date(Date.now() + 7 * 86_400_000)
-  monday.setUTCDate(monday.getUTCDate() + ((8 - monday.getUTCDay()) % 7))
-  const from = `${monday.toISOString().slice(0, 10)}T05:00:00Z`
-  const out = String(await tools.find((t) => t.name === "buscar_huecos")!.invoke({
-    branchId, from, to: new Date(Date.parse(from) + 86_400_000).toISOString(), durationMin: 30,
+  const ctx = publicCtx(conversationId, contactId)
+  const [first] = await offeredSlots(ctx, fx.branchId)
+  const book = () => makeAgentTools(ctx).find((t) => t.name === "reservar_paciente_nuevo")!.invoke(first!.slot).then(String)
+
+  // Sin registro en línea, ni el chat ni un enlace lo registran: lo hace recepción.
+  await saveRegistration(false, current.privacyNotice)
+  expect(await book()).toContain("pasa el caso a recepción con request_human_handoff")
+
+  // Con el registro encendido, su enlace con esa hora (el aviso se acepta en la página).
+  await saveRegistration(true, "Usamos tus datos solo para atenderte.")
+  const sent = await book()
+  expect(sent).toContain("Todavía no se reservó nada")
+  expect(sent).toContain("confirma tus datos aquí (1 minuto)")
+  const url = pickOf(sent)
+  expect(url.origin).toBe("https://norte.odentia.test")
+  expect(url.pathname).toBe("/reserva")
+  // Lo que lee la página para abrir la reserva ya elegida: la sede, el usuario del profesional y el inicio.
+  expect(url.searchParams.get("sede")).toBe(fx.branchId)
+  expect(url.searchParams.get("con")).toBe(fx.professionalId)
+  expect(url.searchParams.get("hora")).toBe(new Date(first!.slot.startsAt).toISOString())
+  expect(url.searchParams.get("token")).toMatch(/^[0-9a-f]{64}$/)
+  // El enlace abre la reserva para alguien que aún no es paciente, en esa sede; nada quedó propuesto ni registrado.
+  const links = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, contactId)))
+  expect(links).toMatchObject([{ booking: true, branchId: fx.branchId, patientId: null, conversationId }])
+  expect(await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId }))).toEqual([])
+  const patients = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
+  expect(patients[0]?.n).toBe(0)
+
+  // Con ese enlace ya dado en la atención, otra llamada con la misma hora no lo vuelve a armar (ronda del ADR 0109).
+  ctx.pickLinks = [new Date(first!.slot.startsAt).toISOString()]
+  expect(await book()).toContain("Ya le diste su enlace con esa hora en esta atención")
+  ctx.pickLinks = []
+
+  // Sale tal como lo escribe Sofi: un solo enlace (la agenda no se suma), con la referencia del token.
+  ctx.evidence = [...(ctx.evidence ?? []), linksOf(sent)]
+  ctx.toolsUsed.push("reservar_paciente_nuevo")
+  const ref = PICK_LINK.exec(sent)![0]
+  const outcome = String(await makeAgentTools(ctx).find((t) => t.name === "send_reply")!.invoke({
+    text: `¡Perfecto! Para reservarte el lunes a las ${first!.clock} con Dentista nuevo-enlace, confirma tus datos aquí (1 minuto): ${ref}`,
   }))
-  const line = out.split("\n")[1] ?? ""
-  const slot = {
-    branchId: line.match(/sede ([0-9a-f-]{36})/i)![1]!,
-    roomId: line.match(/unidad dental ([0-9a-f-]{36})/i)![1]!,
-    professionalUserId: line.match(/profesional ([^\]\s]+)/)![1]!,
-    startsAt: line.match(/startsAt (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/)![1]!,
-    durationMin: 30,
-  }
-  expect(slot.roomId).toBe(createdRoom!.id)
-  // Un documento mal escrito se pide de nuevo antes de pedir el sí: no queda propuesta.
-  const badDocument = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({
-    ...slot, givenNames: "Valeria", familyName: "Rojas Salazar", docType: "DNI", docNumber: "123",
-  }))
-  expect(badDocument).toContain("Pídele que lo revise")
-  const asked = String(await tools.find((t) => t.name === "reservar_paciente_nuevo")!.invoke({ ...slot, givenNames: "Valeria", familyName: "Rojas Salazar" }))
-  // La pregunta lleva la frase del aviso y su enlace, con el registro en la misma frase; todavía no hay nadie registrado.
-  expect(asked).toContain("Al confirmar, te registro como paciente y aceptas nuestro aviso de privacidad: https://")
-  // Acaba de dar su nombre y aún no se le habló por él: la pregunta empieza por su nombre.
-  expect(asked).toContain("empieza por su nombre («Valeria, …»)")
-  // En la corrida, el grafo guarda lo que devolvió la herramienta como lo consultado del turno.
-  ctx.evidence = [...(ctx.evidence ?? []), { kind: "sistema", source: "reservar_paciente_nuevo", text: asked }]
-  const noticeUrl = asked.match(/https:\/\/\S+\/aviso/)?.[0]
-  expect(noticeUrl).toBeDefined()
-  const before = await ownerDb.execute<{ n: number }>(sql`select count(*)::int as n from patient where person_id = ${contactId}`)
-  expect(before[0]?.n).toBe(0)
-  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId, status: "propuesta" }))
-  // El aviso quedó congelado en la propuesta: es el que se guarda con su sí.
-  expect(pending!.payload.privacyNotice).toMatchObject({ text: expect.any(String) })
-  // Un «sí» antes de que le llegue la pregunta con el aviso no la registra.
-  await ingestText("tg:registro-chat", "evt-registro-chat-temprano", "sí")
-  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("Todavía no le llegó la pregunta con el aviso")
-  await tools.find((t) => t.name === "send_reply")!.invoke({
-    text: `Te reservo el lunes con el dentista y te registro como paciente. Al confirmar, aceptas nuestro aviso de privacidad: ${noticeUrl}. ¿Te la reservo?`,
+  expect(outcome).not.toContain("No enviado")
+  const [message] = await agentMessages(conversationId)
+  expect(message).toContain(ref)
+  expect(message!.match(/\/reserva\?/g)).toHaveLength(1)
+  expect(message).not.toContain("La agenda completa")
+
+  // Quien ya es paciente no se registra de nuevo: para ella, proponer_cita.
+  const known = await ingestText("tg:nuevo-enlace-ya", "evt-nuevo-enlace-ya", "Quiero una cita")
+  const fxKnown = await bookingFixture(known.conversationId, "nuevo-enlace-ya")
+  const bookFor = (input: NonNullable<typeof first>["slot"] & { forOther?: boolean }) =>
+    makeAgentTools(publicCtx(known.conversationId, fxKnown.contactId)).find((t) => t.name === "reservar_paciente_nuevo")!.invoke(input).then(String)
+  const again = await bookFor(first!.slot)
+  expect(again).toContain("Ya es paciente")
+  expect(again).toContain("forOther")
+  // Para su hijo, que aún no es paciente: el enlace para alguien nuevo, que no es el de ella.
+  const forChild = await bookFor({ ...first!.slot, forOther: true })
+  expect(forChild).toContain("confirma tus datos aquí (1 minuto)")
+  const childToken = pickOf(forChild).searchParams.get("token")!
+  const childLinks = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(and(eq(appointmentBookingLink.contactId, fxKnown.contactId), eq(appointmentBookingLink.newPerson, true))))
+  expect(childLinks).toMatchObject([{ booking: true, patientId: null, newPerson: true }])
+  // Abrirlo no lo une a su ficha: la página registra ahí a quien se atiende.
+  const opened = await withOrgContext(appDb, "org_a", (tx) => resolvePersonalLink(tx, "org_a", childToken))
+  expect(opened.patientId).toBeNull()
+  expect(opened.canBook).toBe(true)
+})
+
+it("proponer_cita: si a la clínica le falta algo del paciente, su enlace con esa hora; si no, su sí en el chat; con una cita por venir, el sí y sus datos al confirmar (ADR 0109)", async () => {
+  // Le faltan datos: la hora se reserva en su enlace, donde los confirma.
+  const lacking = await ingestText("tg:faltan-datos", "evt-faltan-datos", "Quiero una cita")
+  const fx = await bookingFixture(lacking.conversationId, "faltan", { complete: false })
+  const ctx = publicCtx(lacking.conversationId, fx.contactId)
+  const [first] = await offeredSlots(ctx, fx.branchId)
+  // Sin la sede, la toma del hueco que se ofreció.
+  const { branchId: _branch, ...withoutBranch } = first!.slot
+  const sent = String(await makeAgentTools(ctx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fx.patientId, ...withoutBranch }))
+  expect(sent).toContain("fecha de nacimiento")
+  expect(sent).toContain("confirma tus datos aquí (1 minuto)")
+  const url = pickOf(sent)
+  expect(url.searchParams.get("sede")).toBe(fx.branchId)
+  expect(url.searchParams.get("con")).toBe(fx.professionalId)
+  expect(url.searchParams.get("hora")).toBe(new Date(first!.slot.startsAt).toISOString())
+  expect(await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: lacking.conversationId }))).toEqual([])
+  const [link] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(appointmentBookingLink).where(eq(appointmentBookingLink.contactId, fx.contactId)))
+  expect(link).toMatchObject({ booking: true, patientId: fx.patientId, branchId: fx.branchId })
+
+  // No le falta nada: se le reserva con su sí, como siempre.
+  const complete = await ingestText("tg:datos-completos", "evt-datos-completos", "Quiero una cita")
+  const fxComplete = await bookingFixture(complete.conversationId, "completos")
+  const completeCtx = publicCtx(complete.conversationId, fxComplete.contactId)
+  const [slotComplete] = await offeredSlots(completeCtx, fxComplete.branchId)
+  const asked = String(await makeAgentTools(completeCtx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxComplete.patientId, ...slotComplete!.slot }))
+  expect(asked).toContain("Falta su sí")
+  expect(asked).not.toContain("/reserva?")
+  const proposals = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: complete.conversationId, status: "propuesta" }))
+  expect(proposals.map((item) => item.action)).toEqual(["reservar_cita"])
+
+  // Tiene sus datos, pero la clínica escribió su aviso y aún no lo aceptó: también su enlace.
+  const current = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+  onTestFinished(async () => {
+    const latest = await withOrgContext(appDb, "org_a", (tx) => getPatientRegistrationConfig(tx, "org_a"))
+    await withOrgContext(appDb, "org_a", (tx) =>
+      savePatientRegistrationConfig(tx, "org_a", fx.actorId, { expectedVersion: latest.version, enabled: current.enabled, fields: current.fields, privacyNotice: current.privacyNotice }))
   })
-  ctx.replySettled = false
-  // Ese «sí» de antes no vale: hace falta uno después de la pregunta.
-  expect(String(await tools.find((t) => t.name === "confirmar_propuesta")!.invoke({ proposalId: pending!.id }))).toContain("no es un sí")
-  await ingestText("tg:registro-chat", "evt-registro-chat-si", "sí porfa")
+  await withOrgContext(appDb, "org_a", (tx) =>
+    savePatientRegistrationConfig(tx, "org_a", fx.actorId, { expectedVersion: current.version, enabled: current.enabled, fields: current.fields, privacyNotice: "Usamos tus datos solo para atenderte." }))
+  const notice = await ingestText("tg:sin-aviso", "evt-sin-aviso", "Quiero una cita")
+  const fxNotice = await bookingFixture(notice.conversationId, "sin-aviso")
+  const noticeCtx = publicCtx(notice.conversationId, fxNotice.contactId)
+  const [slotNotice] = await offeredSlots(noticeCtx, fxNotice.branchId)
+  const viaNotice = String(await makeAgentTools(noticeCtx).find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxNotice.patientId, ...slotNotice!.slot }))
+  expect(viaNotice).toContain("aceptar el aviso de privacidad")
+  expect(viaNotice).toMatch(PICK_LINK)
+
+  // Con una cita por venir su enlace le mostraría esa cita, no la reserva: la nueva va con su sí en el chat
+  // y la confirmación lleva su enlace para completar lo que falta, sin «y tu salud».
+  const booked = await ingestText("tg:con-cita", "evt-con-cita", "Quiero otra cita")
+  const fxBooked = await bookingFixture(booked.conversationId, "con-cita", { complete: false })
+  const bookedCtx = publicCtx(booked.conversationId, fxBooked.contactId)
+  const slots = await offeredSlots(bookedCtx, fxBooked.branchId)
+  const taken = slots[0]!.slot
+  await withOrgContext(appDb, "org_a", (tx) =>
+    createAppointment(tx, "org_a", fxBooked.actorId, {
+      branchId: taken.branchId, patientId: fxBooked.patientId, professionalUserId: fxBooked.professionalId, roomId: taken.roomId, startsAt: taken.startsAt, durationMin: 45,
+    }))
+  const tools = makeAgentTools(bookedCtx)
+  const proposed = String(await tools.find((t) => t.name === "proponer_cita")!.invoke({ patientId: fxBooked.patientId, ...slots.at(-1)!.slot }))
+  expect(proposed).toContain("Falta su sí")
+  const [pending] = await withOrgContext(appDb, "org_a", (tx) => listProposals(tx, "org_a", { conversationId: booked.conversationId, status: "propuesta" }))
+  await ingestText("tg:con-cita", "evt-con-cita-si", "Sí, confirmo")
   // La dirección pública la configuran la API y el worker al arrancar.
   configurePublicLinks({ webURL: "https://app.odentia.test", cookieDomain: ".odentia.test" })
   const confirmed = await (async () => {
@@ -1291,20 +1390,8 @@ it("a quien aún no es paciente lo registra y le reserva con un solo sí, con el
     }
   })()
   expect(confirmed).toContain("Confirmado y ejecutado")
-  const [patientRow] = await ownerDb.execute<{ id: string; display_name: string }>(
-    sql`select p.id, pp.display_name from patient p join contact pp on pp.organization_id = p.organization_id and pp.id = p.person_id where p.person_id = ${contactId}`,
-  )
-  expect(patientRow?.display_name).toBe("Valeria Rojas Salazar")
-  const booked = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(appointment).where(eq(appointment.patientId, patientRow!.id)))
-  expect(booked).toHaveLength(1)
-  expect(booked[0]!.startsAt.toISOString()).toBe(slot.startsAt)
-  const [consent] = await ownerDb.execute<{ channel: string; source_message_id: string | null }>(
-    sql`select channel, source_message_id from patient_data_consent where patient_id = ${patientRow!.id}`,
-  )
-  expect(consent?.channel).toBe("chat")
-  expect(consent?.source_message_id).not.toBeNull()
-  // Con la cita, el enlace para llegar con todo completo.
-  expect(confirmed).toContain("llegas con todo listo")
+  expect(confirmed).toMatch(/«Antes de venir, completa tus datos aquí \(toma 2 minutos\): https:\/\/norte\.odentia\.test\/reserva\?token=[0-9a-f]{64}»/)
+  expect(confirmed).not.toContain("tu salud")
 })
 
 it("reprogramar_cita y cancelar_cita actúan sobre la cita real sin duplicar reserva ni pisar cambios ajenos", async () => {
@@ -1531,6 +1618,49 @@ it("con una cita esperando el sí, otro acto guía a confirmar en vez de romper 
   expect(after.items.map((row) => row.id)).toEqual(before.items.map((row) => row.id))
 })
 
+it("si un paciente dice que se llama distinto, su ficha no cambia y recepción recibe una tarea para revisarla", async () => {
+  const { conversationId } = await ingestText("tg:otro-nombre", "evt-otro-nombre", "Hola, te saluda Darvin")
+  const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
+    tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
+  const contactId = conv!.contactId
+  const actorId = `agent-actor-nombre-${Date.now()}`
+  await ownerDb.insert(user).values({ id: actorId, name: "Recepción Nombre", email: `${actorId}@example.test` })
+  await ownerDb.execute(sql`insert into "member" ("id", "organization_id", "user_id", "role", "created_at") values (${`m-${actorId}`}, 'org_a', ${actorId}, 'owner', now())`)
+  const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
+  const [created] = await insertTestPatients(ownerDb, {
+    organizationId: "org_a", displayName: "Paciente Prueba WhatsApp", givenNames: "Paciente", familyName: "Prueba WhatsApp", patientNumber,
+  })
+  await withOrgContext(appDb, "org_a", (tx) =>
+    setPatientContact(tx, "org_a", actorId, created!.id, { contactId, relationship: "self", isPreferred: true }))
+  const ctx: AgentToolCtx = {
+    db: appDb, orgId: "org_a", conversationId, contactId,
+    triggerId: "trig-otro-nombre", secretsKey: KEY, dryRun: false, handedOff: false, replySettled: false,
+    toolsUsed: [], usage: emptyUsage(),
+  }
+  const updateContactTool = makeAgentTools(ctx).find((t) => t.name === "update_contact")!
+  const tasksOf = () => withOrgContext(appDb, "org_a", (tx) =>
+    tx.select().from(crmTask).where(and(eq(crmTask.organizationId, "org_a"), eq(crmTask.contactId, contactId))))
+
+  // Lo que ya está en su ficha no avisa a nadie, aunque lo escriba sin tildes ni mayúsculas.
+  expect(String(await updateContactTool.invoke({ givenNames: "paciente" }))).toContain("Úsalo tal como figura")
+  expect(await tasksOf()).toEqual([])
+
+  // Otro nombre: la ficha sigue igual y recepción recibe una sola tarea, aunque lo repita.
+  const told = String(await updateContactTool.invoke({ givenNames: "Darvin" }))
+  expect(told).toContain("quedó una tarea para que recepción la revise")
+  expect(told).toContain("Háblale por el nombre que te dijo")
+  await updateContactTool.invoke({ givenNames: "Darvin" })
+  const tasks = await tasksOf()
+  expect(tasks.map((task) => [task.title, task.area, task.patientId])).toEqual([["Revisar su nombre: Paciente Prueba WhatsApp", "recepcion", created!.id]])
+  expect(tasks[0]!.reason).toContain("dijo llamarse «Darvin»")
+  const [person] = await withOrgContext(appDb, "org_a", (tx) => tx.select().from(contact).where(eq(contact.id, contactId)))
+  expect(person).toMatchObject({ displayName: "Paciente Prueba WhatsApp", givenNames: "Paciente" })
+  // En los turnos siguientes se le sigue llamando como dijo, mientras recepción no revise su ficha.
+  expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBe("Darvin")
+  await ownerDb.update(crmTask).set({ status: "done" }).where(eq(crmTask.id, tasks[0]!.id))
+  expect(await withOrgContext(appDb, "org_a", (tx) => pendingSpokenName(tx, "org_a", contactId))).toBeNull()
+})
+
 it("create_task no duplica en reentrega y las escrituras directas auditan su origen agente", async () => {
   const { conversationId } = await ingestText("tg:direct-writes", "evt-dw-1", "Recuérdame llamar")
   const [conv] = await withOrgContext(appDb, "org_a", (tx) =>
@@ -1637,7 +1767,12 @@ it("la derivación tiene plazo, toma atómica de la cola y, al vencer, no llena 
 })
 
 /** Sede con unidad dental, horario y un paciente vinculado al interlocutor del hilo: lo mínimo para reservar. */
-async function bookingFixture(conversationId: string, label: string) {
+/**
+ * Sede, profesional con horario y un paciente vinculado como «self» a la persona de la conversación.
+ * Con `complete` (lo de siempre) el paciente tiene todo lo que la clínica pide: con su sí se le
+ * reserva en el chat. Sin él le faltan sus nombres, su fecha y cómo contactarlo (ADR 0109).
+ */
+async function bookingFixture(conversationId: string, label: string, options: { complete?: boolean } = {}) {
   const [createdBranch] = await ownerDb
     .insert(branch)
     .values({ organizationId: "org_a", name: `Sede ${label}`, timezone: "America/Lima" })
@@ -1665,7 +1800,13 @@ async function bookingFixture(conversationId: string, label: string) {
     tx.select({ contactId: conversation.contactId }).from(conversation).where(eq(conversation.id, conversationId)))
   const contactId = conv!.contactId
   const patientNumber = await withOrgContext(appDb, "org_a", (tx) => nextPatientNumber(tx, "org_a"))
-  const [createdPatient] = await insertTestPatients(ownerDb, { organizationId: "org_a", displayName: `Paciente ${label}`, patientNumber })
+  const complete = options.complete !== false
+  const [createdPatient] = await insertTestPatients(ownerDb, {
+    organizationId: "org_a",
+    displayName: `Paciente ${label}`,
+    patientNumber,
+    ...(complete ? { givenNames: "Paciente", familyName: label, birthDate: "1990-04-12", email: `paciente-${label}-${stamp}@example.test` } : {}),
+  })
   const patientId = createdPatient!.id
   await withOrgContext(appDb, "org_a", (tx) =>
     setPatientContact(tx, "org_a", actorId, patientId, { contactId, relationship: "self", isPreferred: true }))
@@ -1776,7 +1917,7 @@ it("el sí del interlocutor en el turno siguiente ejecuta la reserva propuesta, 
   expect(seen[seen.length - 1]?.getType()).toBe("system")
   const booked = await withOrgContext(appDb, "org_a", (tx) =>
     tx.select({ status: appointment.status }).from(appointment).where(eq(appointment.patientId, fx.patientId)))
-  expect(booked).toEqual([{ status: "programada" }])
+  expect(booked).toEqual([{ status: "confirmada" }])
   const runs = await ledgerRows(conversationId)
   expect(runs[runs.length - 1]?.toolsUsed).toEqual(["confirmar_propuesta", "send_reply"])
   expect(await agentMessages(conversationId)).toContain("Listo, tu cita quedó reservada.")
@@ -2367,7 +2508,7 @@ it("probar: la conversación de prueba reserva de verdad, marcada «Prueba», si
 
   // La cita existe de verdad, de la persona de prueba, y la base la marca «Prueba».
   const [booked] = await ownerDb.select().from(appointment).where(eq(appointment.conversationId, opened.conversationId))
-  expect(booked).toMatchObject({ patientId: testPatient!.patientId, isTest: true, status: "programada" })
+  expect(booked).toMatchObject({ patientId: testPatient!.patientId, isTest: true, status: "confirmada" })
   const state = await inOrg((tx) => getProbar(tx, "org_a", fx.actorId))
   expect(state.created).toMatchObject([{ appointmentId: booked!.id }])
   expect(state.turns.map((turn) => turn.toolsUsed)).toEqual([
@@ -2450,17 +2591,15 @@ it("en el chat web no dice que guardó su WhatsApp sin guardarlo, ni cuando guar
   expect(lastToolText(saves, 2)).toContain("Guardado: le avisaremos por WhatsApp")
   expect(await agentMessages(first.conversationId)).toEqual([SAVED])
 
-  // Ese número ya es de otra persona: guardar_contacto lo rechaza y decir que lo guardó no sale.
+  // Ese número ya es de otra persona: guardar_contacto lo acepta igual y el visitante oye lo mismo
+  // (decirle que no sirve le revelaría quién es de la clínica); el equipo lo ve en la Bandeja.
   const second = await writeAs(actors[1]!, "mi WhatsApp es 987 654 321")
-  const refused = new ScriptedModel((_messages, call) =>
-    call === 1
-      ? toolCall("guardar_contacto", { whatsapp: "987 654 321" }, "r-guarda")
-      : toolCall("send_reply", { text: call === 2 ? "Listo, ya guardé tu WhatsApp." : "No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?" }, `r-envio-${call}`),
+  const held = new ScriptedModel((_messages, call) =>
+    call === 1 ? toolCall("guardar_contacto", { whatsapp: "987 654 321" }, "r-guarda") : toolCall("send_reply", { text: SAVED }, `r-envio-${call}`),
   )
-  expect(await runScripted(refused, second.conversationId, second.messageId)).toBe("done")
-  expect(lastToolText(refused, 1)).toContain("No se guardó: No podemos avisarte por ese WhatsApp")
-  expect(lastToolText(refused, 2)).toContain("No enviado: dices que guardaste su WhatsApp o su correo")
-  expect(await agentMessages(second.conversationId)).toEqual(["No podemos avisarte por ese WhatsApp. ¿Me dejas otro número o tu correo?"])
+  expect(await runScripted(held, second.conversationId, second.messageId)).toBe("done")
+  expect(lastToolText(held, 1)).toContain("Guardado: le avisaremos por WhatsApp")
+  expect(await agentMessages(second.conversationId)).toEqual([SAVED])
 
   // Con el caso ya en el equipo (una señal de alarma lo pasa): no se le nombra guardar_contacto,
   // que ese camino no trae, y el turno vuelve al modelo en vez de cerrar con el aviso fijo.

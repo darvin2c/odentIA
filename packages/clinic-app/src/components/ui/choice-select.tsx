@@ -1,5 +1,5 @@
 import { cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@odentia/ui"
-import { Children, isValidElement, type ReactNode } from "react"
+import { Children, isValidElement, type ReactNode, useRef } from "react"
 
 interface OptionProps {
   value?: string | number
@@ -49,6 +49,11 @@ export interface ChoiceSelectProps {
   "aria-required"?: boolean | "true" | "false"
   required?: boolean
   name?: string
+  /**
+   * Salir del campo: al cerrar la lista o al pasar de largo con el teclado,
+   * no al abrirla (la lista toma el foco y el error aparecería antes de elegir).
+   */
+  onBlur?: () => void
 }
 
 /**
@@ -65,9 +70,11 @@ export function ChoiceSelect({
   className,
   placeholder = "Elige una opción",
   required,
+  onBlur,
   ...aria
 }: ChoiceSelectProps): React.JSX.Element {
   const options = collectOptions(children)
+  const open = useRef(false)
   // La opción vacía («Sin turno», «No registrado») es el texto sin elección.
   const emptyLabel = options.find((o) => o.value === "")?.label
   return (
@@ -75,6 +82,10 @@ export function ChoiceSelect({
       items={Object.fromEntries(options.map((o) => [o.value, o.label]))}
       value={value}
       disabled={disabled}
+      onOpenChange={(next) => {
+        open.current = next
+        if (!next) onBlur?.()
+      }}
       onValueChange={(next) => {
         const v = next == null ? "" : String(next)
         onChange({ target: { value: v }, currentTarget: { value: v } })
@@ -87,6 +98,9 @@ export function ChoiceSelect({
         aria-describedby={aria["aria-describedby"]}
         aria-invalid={aria["aria-invalid"]}
         aria-required={aria["aria-required"] ?? (required ? true : undefined)}
+        onBlur={() => {
+          if (!open.current) onBlur?.()
+        }}
       >
         <SelectValue placeholder={emptyLabel || placeholder} />
       </SelectTrigger>

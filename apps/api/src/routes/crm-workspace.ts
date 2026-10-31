@@ -34,7 +34,7 @@ const activityQuery = z.object({
 })
 
 const noteInput = z.object({
-  body: z.string().min(1).max(2000),
+  body: z.string().trim().min(1, "Escribe la nota.").max(2000, "La nota admite hasta 2000 caracteres."),
   conversationId: uuid.nullable().optional(),
   opportunityId: uuid.nullable().optional(),
 })

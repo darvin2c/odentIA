@@ -11,7 +11,7 @@ import { and, asc, eq } from "drizzle-orm"
 import { describe, expect, it } from "vitest"
 import { confirmAppointmentByContact, confirmProposalByPhone, createProposal } from "./agent-operations.js"
 import { createAppointment, getAppointmentContext, moveAppointment, setAppointmentStatus } from "./appointments.js"
-import { AUTOMATION_MESSAGES, type AutomationMessageKey, GENERAL_PERMISSION_QUESTION, GENERAL_PERMISSION_YES, replyId } from "./automation-messages.js"
+import { AUTOMATION_MESSAGES, type AutomationMessageKey, GENERAL_PERMISSION_YES, replyId } from "./automation-messages.js"
 import {
   answerGeneralPermission,
   appointmentConfirmationPlan,
@@ -548,7 +548,10 @@ describe("solo novedades y promociones pide permiso (ADR 0030)", () => {
     )
     expect(await ask(rosa.conversationId!)).toBe(true)
     const thread = await ownerDb.select().from(message).where(eq(message.conversationId, rosa.conversationId!)).orderBy(asc(message.createdAt))
-    expect(thread.at(-1)).toMatchObject({ direction: "out", senderKind: "agent", body: GENERAL_PERMISSION_QUESTION })
+    // Con el nombre de la clínica; de tú, porque la clínica trata como la persona la trate.
+    expect(thread.at(-1)).toMatchObject({
+      direction: "out", senderKind: "agent", body: "¿Te podemos escribir para enviarte novedades y promociones de Clínica Sonríe?",
+    })
     expect(thread.at(-1)?.replyButtons?.map((button) => button.title)).toEqual(["Sí", "No, gracias"])
     // Una sola vez por persona, aunque no responda.
     expect(await ask(rosa.conversationId!)).toBe(false)
@@ -570,6 +573,23 @@ describe("solo novedades y promociones pide permiso (ADR 0030)", () => {
       }),
     )
     expect(await ask(ana.conversationId!)).toBe(false)
+  })
+
+  it("si la clínica trata de usted, la pregunta y sus respuestas van de usted", async () => {
+    const c = await clinic()
+    await ownerDb.update(agentConfig).set({ treatment: "usted" }).where(eq(agentConfig.organizationId, c.orgId))
+    const rosa = await person(c, "Rosa Quispe", { openWindow: true })
+    await run(c, (tx) =>
+      createAppointment(tx, c.orgId, c.ownerId, {
+        branchId: c.branchId, patientId: rosa.patientId, professionalUserId: c.professionalId, roomId: c.roomId,
+        startsAt: later(3 * DAY).toISOString(), outsideSchedule: true, source: "conversacion", conversationId: rosa.conversationId!, notice: false,
+      }),
+    )
+    expect(await run(c, (tx) => askGeneralPermissionAfterBooking(tx, c.orgId, { conversationId: rosa.conversationId!, since: new Date(Date.now() - 60_000) }))).toBe(true)
+    const said = () => ownerDb.select().from(message).where(eq(message.conversationId, rosa.conversationId!)).orderBy(asc(message.createdAt))
+    expect((await said()).at(-1)?.body).toBe("¿Le podemos escribir para enviarle novedades y promociones de Clínica Sonríe?")
+    expect(await run(c, (tx) => handleAutomationReply(tx, c.orgId, { conversationId: rosa.conversationId!, replyId: replyId("permiso_no", rosa.contactId) }))).toBe(true)
+    expect((await said()).at(-1)?.body).toBe("Entendido: no le enviaremos novedades ni promociones.")
   })
 })
 

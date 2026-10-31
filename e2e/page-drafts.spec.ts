@@ -104,7 +104,8 @@ test("Datos de la clínica protege navegación, historial y recarga; guardar y r
   await page.route("**/api/org-profile", (route) => failSave(page, route))
   await page.getByLabel("Dirección fiscal", { exact: true }).fill("Dirección conservada")
   await page.getByRole("button", { name: "Guardar", exact: true }).click()
-  await expect(page.getByText("No pudimos guardar los datos", { exact: true })).toBeVisible()
+  // El rechazo se dice junto a «Guardar» (no en un toast) y conserva el borrador.
+  await expect(page.getByRole("alert").filter({ hasText: "No pudimos confirmar el resultado." })).toBeVisible()
   await expect(name).toHaveValue("Borrador para adelante")
   await expect(page.getByLabel("Dirección fiscal", { exact: true })).toHaveValue("Dirección conservada")
   await page.getByRole("link", { name: "Pacientes", exact: true }).click()

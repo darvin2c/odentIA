@@ -9,16 +9,13 @@ import {
   ComboboxItem,
   ComboboxList,
   Field,
-  FieldError,
   FieldGroup,
   FieldLabel,
-  Input,
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
   InputGroupText,
   Skeleton,
-  Textarea,
   toast,
 } from "@odentia/ui"
 import {
@@ -33,15 +30,19 @@ import {
   FormDrawer,
   SkeletonRegion,
   PageHeader,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
   zonedDateOf,
   zonedDayStart,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { BadgePercent } from "lucide-react"
-import { type FormEvent, useId, useMemo, useRef, useState } from "react"
-import { PromotionsListSkeleton, PromotionsPageSkeleton } from "../../components/skeletons/services"
+import { useId, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { ChoiceSelect } from "../../components/ui/choice-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
@@ -68,6 +69,7 @@ import {
   type PriceDisclosure,
   type ServiceCatalogItem,
 } from "../../lib/services"
+import { PromotionsListSkeleton, PromotionsPageSkeleton } from "../../components/skeletons/services"
 
 export const Route = createFileRoute("/_org/services/promotions")({
   pendingComponent: PromotionsPageSkeleton,
@@ -78,14 +80,6 @@ export const Route = createFileRoute("/_org/services/promotions")({
 interface Regional {
   locale: string
   timeZone: string
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.shape.message) return error.shape.message
-    if (error.shape.code) return `No se pudo guardar (${error.shape.code}). Inténtalo de nuevo.`
-  }
-  return error instanceof Error ? error.message : "No se pudo guardar. Inténtalo de nuevo."
 }
 
 /* ------------------------------ Fechas y textos ---------------------------- */
@@ -501,13 +495,72 @@ const MODE_OPTIONS: ReadonlyArray<{ value: PromotionMode; label: string }> = [
   { value: "from", label: "Desde" },
 ]
 
-function parsePrice(row: PriceRow, locale: string): number | null {
-  if (row.priceText.trim() === "") return null
+/** Lo que se dice si el precio escrito no sirve: el motivo de `parseMoney`. */
+function priceProblem(row: PriceRow, locale: string): string | null {
+  if (row.priceText.trim() === "") return "Falta el precio (usa 0 si es sin costo)"
   try {
-    return parseMoney(row.priceText, row.currency, locale)
-  } catch {
+    parseMoney(row.priceText, row.currency, locale)
     return null
+  } catch (failure) {
+    return failure instanceof Error ? failure.message : "Revisa el precio"
   }
+}
+
+function parsePrice(row: PriceRow, locale: string): number | null {
+  return priceProblem(row, locale) === null ? parseMoney(row.priceText, row.currency, locale) : null
+}
+
+/** Lo mismo que acepta `POST/PATCH /api/promotions`. */
+const MAX_SERVICES = 100
+
+interface PromotionValues {
+  name: string
+  startsOn: string
+  endsOn: string
+  conditions: string
+  items: PriceRow[]
+}
+
+function promotionSchema(locale: string, checkDates: boolean) {
+  const row = z
+    .object({
+      serviceId: z.string(),
+      serviceName: z.string(),
+      currency: z.string(),
+      tariffCents: z.number(),
+      mode: z.enum(["fixed", "from"]),
+      disclosure: z.enum(["exacto", "desde", "evaluacion"]),
+      priceText: z.string(),
+    })
+    .superRefine((value, ctx) => {
+      const problem = priceProblem(value, locale)
+      if (problem) ctx.addIssue({ code: "custom", path: ["priceText"], message: problem })
+    })
+  return z
+    .object({
+      name: z.string().trim().min(1, "Ponle un nombre").max(120, "Escribe como mucho 120 caracteres."),
+      startsOn: z.string(),
+      endsOn: z.string(),
+      conditions: z.string().trim().max(500, "Escribe como mucho 500 caracteres."),
+      items: z
+        .array(row)
+        .min(1, "Agrega al menos un servicio con su precio")
+        .max(MAX_SERVICES, `Una promoción lleva como mucho ${MAX_SERVICES} servicios`),
+    })
+    .superRefine((value, ctx) => {
+      if (checkDates && value.endsOn && value.endsOn < value.startsOn) {
+        ctx.addIssue({ code: "custom", path: ["endsOn"], message: "No puede terminar antes de empezar" })
+      }
+    })
+}
+
+/** El servidor nombra los datos del cuerpo; aquí algunos se llaman distinto. */
+function promotionFieldMap(serverField: string): string | undefined {
+  if (serverField === "startsAt") return "startsOn"
+  if (serverField === "endsAt") return "endsOn"
+  return serverField
+    .replace(/^(items\[\d+\])\.priceCents$/, "$1.priceText")
+    .replace(/^(items\[\d+\])\.priceDisclosure$/, "$1.disclosure")
 }
 
 /**
@@ -531,32 +584,25 @@ function PromotionForm({
   const queryClient = useQueryClient()
   const { locale, timeZone } = regional
   const today = zonedDateOf(new Date().toISOString(), timeZone)
-  const initialStart = initial ? zonedDateOf(initial.startsAt, timeZone) : today
-  const initialEnd = initial?.endsAt ? zonedDateOf(initial.endsAt, timeZone) : ""
-  const initialRows = useMemo<PriceRow[]>(
-    () =>
-      (initial?.items ?? []).map((item) => ({
-        serviceId: item.serviceId,
-        serviceName: item.serviceName,
-        currency: item.currency,
-        tariffCents: item.tariffCents,
-        mode: item.mode,
-        disclosure: item.priceDisclosure ?? disclosureFor(item.mode),
-        priceText: formatMoneyInput(item.priceCents, item.currency, locale),
-      })),
-    [initial, locale],
-  )
   const ended = initial?.state === "terminada"
   /** Lo que ya empezó conserva su inicio: el histórico se cuenta desde ahí. */
   const started = initial !== null && initial.state !== "programada"
-
-  const [name, setName] = useState(initial?.name ?? "")
-  const [startsOn, setStartsOn] = useState(initialStart)
-  const [endsOn, setEndsOn] = useState(initialEnd)
-  const [conditions, setConditions] = useState(initial?.conditions ?? "")
-  const [rows, setRows] = useState<PriceRow[]>(initialRows)
-  const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  // Valores iniciales una sola vez, al abrir: `key` remonta el formulario en cada apertura.
+  const [defaults] = useState<PromotionValues>(() => ({
+    name: initial?.name ?? "",
+    startsOn: initial ? zonedDateOf(initial.startsAt, timeZone) : today,
+    endsOn: initial?.endsAt ? zonedDateOf(initial.endsAt, timeZone) : "",
+    conditions: initial?.conditions ?? "",
+    items: (initial?.items ?? []).map((item) => ({
+      serviceId: item.serviceId,
+      serviceName: item.serviceName,
+      currency: item.currency,
+      tariffCents: item.tariffCents,
+      mode: item.mode,
+      disclosure: item.priceDisclosure ?? disclosureFor(item.mode),
+      priceText: formatMoneyInput(item.priceCents, item.currency, locale),
+    })),
+  }))
   const [confirmEnd, setConfirmEnd] = useState(false)
 
   const invalidate = async () => {
@@ -564,71 +610,9 @@ function PromotionForm({
     await queryClient.invalidateQueries({ queryKey: ["promotion"] })
   }
 
-  const itemsChanged =
-    rows.length !== initialRows.length ||
-    rows.some((row, index) => {
-      const before = initialRows[index]
-      return (
-        !before ||
-        before.serviceId !== row.serviceId ||
-        before.mode !== row.mode ||
-        before.disclosure !== row.disclosure ||
-        before.priceText !== row.priceText
-      )
-    })
-  const isDirty =
-    name !== (initial?.name ?? "") ||
-    startsOn !== initialStart ||
-    endsOn !== initialEnd ||
-    conditions !== (initial?.conditions ?? "") ||
-    itemsChanged
-
-  const nameIssue = name.trim() ? null : "Ponle un nombre"
-  const rowsIssue = rows.length === 0 ? "Agrega al menos un servicio con su precio" : null
-  const datesIssue = endsOn && endsOn < startsOn ? "No puede terminar antes de empezar" : null
-  const priceIssues = rows.map((row) => {
-    if (row.priceText.trim() === "") return "Falta el precio (usa 0 si es sin costo)"
-    return parsePrice(row, locale) === null ? "Precio inválido" : null
-  })
-
   const saveMutation = useMutation({
-    mutationFn: async () => {
-      const items: PromotionItemBody[] = rows.map((row) => ({
-        serviceId: row.serviceId,
-        mode: row.mode,
-        priceDisclosure: row.disclosure,
-        priceCents: parsePrice(row, locale) ?? 0,
-      }))
-      if (!initial) {
-        return createPromotionApi({
-          name: name.trim(),
-          startsAt: startOfClinicDay(startsOn, timeZone),
-          endsAt: endsOn ? endOfClinicDay(endsOn, timeZone) : null,
-          conditions: conditions.trim() || null,
-          items,
-        })
-      }
-      const patch: UpdatePromotionBody = {}
-      if (name.trim() !== initial.name) patch.name = name.trim()
-      if ((conditions.trim() || null) !== (initial.conditions ?? null)) {
-        patch.conditions = conditions.trim() || null
-      }
-      if (itemsChanged) patch.items = items
-      // Las fechas de lo terminado no viajan: editarla no la revive.
-      if (!ended) {
-        if (!started && startsOn !== initialStart) patch.startsAt = startOfClinicDay(startsOn, timeZone)
-        if (endsOn !== initialEnd) patch.endsAt = endsOn ? endOfClinicDay(endsOn, timeZone) : null
-      }
-      if (Object.keys(patch).length === 0) return null
-      return updatePromotionApi(initial.id, patch)
-    },
-    onSuccess: async () => {
-      setError(null)
-      await invalidate()
-      toast.success(initial ? "Promoción actualizada" : "Promoción guardada")
-      onClose()
-    },
-    onError: (failure) => setError(errorMessage(failure)),
+    mutationFn: (body: { create: Parameters<typeof createPromotionApi>[0] } | { id: string; patch: UpdatePromotionBody }) =>
+      "create" in body ? createPromotionApi(body.create) : updatePromotionApi(body.id, body.patch),
   })
 
   const endMutation = useMutation({
@@ -641,19 +625,64 @@ function PromotionForm({
     },
   })
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    setSubmitted(true)
-    if (nameIssue || rowsIssue || datesIssue || priceIssues.some(Boolean)) {
-      setError("Revisa lo marcado antes de guardar.")
-      return
-    }
-    setError(null)
-    saveMutation.mutate()
-  }
-
-  const setRow = (serviceId: string, patch: Partial<PriceRow>) =>
-    setRows((list) => list.map((row) => (row.serviceId === serviceId ? { ...row, ...patch } : row)))
+  const schema = useMemo(() => promotionSchema(locale, !ended), [locale, ended])
+  const form = useAppForm({
+    defaultValues: defaults,
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const name = value.name.trim()
+      const conditions = value.conditions.trim() || null
+      const items: PromotionItemBody[] = value.items.map((row) => ({
+        serviceId: row.serviceId,
+        mode: row.mode,
+        priceDisclosure: row.disclosure,
+        priceCents: parsePrice(row, locale) ?? 0,
+      }))
+      if (!initial) {
+        await saveMutation.mutateAsync({
+          create: {
+            name,
+            startsAt: startOfClinicDay(value.startsOn, timeZone),
+            endsAt: value.endsOn ? endOfClinicDay(value.endsOn, timeZone) : null,
+            conditions,
+            items,
+          },
+        })
+      } else {
+        const itemsChanged =
+          value.items.length !== defaults.items.length ||
+          value.items.some((row, index) => {
+            const before = defaults.items[index]
+            return (
+              !before ||
+              before.serviceId !== row.serviceId ||
+              before.mode !== row.mode ||
+              before.disclosure !== row.disclosure ||
+              before.priceText !== row.priceText
+            )
+          })
+        const patch: UpdatePromotionBody = {}
+        if (name !== initial.name) patch.name = name
+        if (conditions !== (initial.conditions ?? null)) patch.conditions = conditions
+        if (itemsChanged) patch.items = items
+        // Las fechas de lo terminado no viajan: editarla no la revive.
+        if (!ended) {
+          if (!started && value.startsOn !== defaults.startsOn) {
+            patch.startsAt = startOfClinicDay(value.startsOn, timeZone)
+          }
+          if (value.endsOn !== defaults.endsOn) {
+            patch.endsAt = value.endsOn ? endOfClinicDay(value.endsOn, timeZone) : null
+          }
+        }
+        if (Object.keys(patch).length > 0) await saveMutation.mutateAsync({ id: initial.id, patch })
+      }
+      await invalidate()
+      toast.success(initial ? "Promoción actualizada" : "Promoción guardada")
+      onClose()
+    },
+  })
+  const surface = useFormSurface(form, { fieldMap: promotionFieldMap })
+  const startsOn = useStore(form.store, (state) => state.values.startsOn)
 
   const uses = initial?.metrics?.uses ?? null
   const usedNote =
@@ -666,80 +695,87 @@ function PromotionForm({
   return (
     <>
       <FormDrawer
+        {...surface}
         open={open}
         title={initial ? initial.name : "Nueva promoción"}
         headerContent={initial ? <PromotionStatus promotion={initial} locale={locale} /> : undefined}
-        error={error}
-        isDirty={isDirty}
-        isSubmitting={saveMutation.isPending}
         submitLabel={initial ? "Guardar cambios" : "Guardar promoción"}
         onClose={onClose}
-        onSubmit={submit}
       >
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor={`${id}-nombre`}>
-              {initial ? "Nombre" : "Nombre, como sale en la publicación"}
-            </FieldLabel>
-            <Input
-              id={`${id}-nombre`}
-              value={name}
-              maxLength={120}
-              aria-invalid={(submitted && nameIssue !== null) || undefined}
-              onChange={(event) => setName(event.target.value)}
-            />
-            {submitted && nameIssue ? <FieldError>{nameIssue}</FieldError> : null}
-          </Field>
+          <form.AppField name="name">
+            {(field) => (
+              <field.TextField
+                label={initial ? "Nombre" : "Nombre, como sale en la publicación"}
+                maxLength={120}
+              />
+            )}
+          </form.AppField>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field>
-              <span id={`${id}-empieza`} className="text-sm font-medium">
-                {started ? "Empezó" : "Empieza"}
-              </span>
-              {started ? (
+            {started ? (
+              <Field>
+                <span id={`${id}-empieza`} className="text-sm font-medium">
+                  Empezó
+                </span>
                 <p className="text-sm" aria-labelledby={`${id}-empieza`}>
                   {dayShort(startsOn, regional)}
                 </p>
-              ) : (
-                <DatePickerButton
-                  aria-labelledby={`${id}-empieza`}
-                  className="w-full justify-start"
-                  value={startsOn}
-                  min={today}
-                  onChange={setStartsOn}
-                >
-                  {dayShort(startsOn, regional)}
-                </DatePickerButton>
-              )}
-            </Field>
-            <Field>
-              <span id={`${id}-termina`} className="text-sm font-medium">
-                {ended ? "Terminó" : "Termina"}
-              </span>
-              {ended ? (
+              </Field>
+            ) : (
+              <form.AppField name="startsOn">
+                {(field) => (
+                  <field.Control label="Empieza">
+                    {(control) => (
+                      <DatePickerButton
+                        {...control.props}
+                        className="w-full justify-start"
+                        value={field.state.value}
+                        min={today}
+                        onChange={(next) => field.handleChange(next)}
+                      >
+                        {dayShort(field.state.value, regional)}
+                      </DatePickerButton>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            )}
+            {ended ? (
+              <Field>
+                <span id={`${id}-termina`} className="text-sm font-medium">
+                  Terminó
+                </span>
                 <p className="text-sm" aria-labelledby={`${id}-termina`}>
-                  {endsOn ? dayShort(endsOn, regional) : "Se desactivó"}
+                  {defaults.endsOn ? dayShort(defaults.endsOn, regional) : "Se desactivó"}
                 </p>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <DatePickerButton
-                    aria-labelledby={`${id}-termina`}
-                    className="min-w-0 flex-1 justify-start"
-                    value={endsOn || startsOn}
-                    min={startsOn > today ? startsOn : today}
-                    onChange={setEndsOn}
-                  >
-                    {endsOn ? dayShort(endsOn, regional) : "Sin fecha de fin"}
-                  </DatePickerButton>
-                  {endsOn ? (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setEndsOn("")}>
-                      Quitar fin
-                    </Button>
-                  ) : null}
-                </div>
-              )}
-              {datesIssue ? <FieldError>{datesIssue}</FieldError> : null}
-            </Field>
+              </Field>
+            ) : (
+              <form.AppField name="endsOn">
+                {(field) => (
+                  <field.Control label="Termina">
+                    {(control) => (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <DatePickerButton
+                          {...control.props}
+                          className="min-w-0 flex-1 justify-start"
+                          value={field.state.value || startsOn}
+                          min={startsOn > today ? startsOn : today}
+                          onChange={(next) => field.handleChange(next)}
+                        >
+                          {field.state.value ? dayShort(field.state.value, regional) : "Sin fecha de fin"}
+                        </DatePickerButton>
+                        {field.state.value ? (
+                          <Button type="button" variant="ghost" size="sm" onClick={() => field.handleChange("")}>
+                            Quitar fin
+                          </Button>
+                        ) : null}
+                      </div>
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+            )}
           </div>
           {ended ? (
             <p className="text-xs text-muted-foreground">
@@ -747,132 +783,172 @@ function PromotionForm({
             </p>
           ) : null}
 
-          <div className="flex flex-col gap-3">
-            <span className="text-sm font-medium">
-              {initial ? "Servicios y su precio" : "Servicios y su precio en la promoción"}
-            </span>
-            {rows.map((row, index) => {
-              const price = parsePrice(row, locale)
-              const issue = submitted ? priceIssues[index] : null
-              const above = price !== null && price > row.tariffCents
-              return (
-                <div key={row.serviceId} className="flex flex-col gap-2 rounded-lg border p-3">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium break-words">{row.serviceName}</span>
-                      <span className="text-xs text-muted-foreground">
-                        Normal {formatAmount(row.tariffCents, row.currency, locale)}
-                      </span>
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`Quitar ${row.serviceName} de la promoción`}
-                      onClick={() =>
-                        setRows((list) => list.filter((item) => item.serviceId !== row.serviceId))
-                      }
-                    >
-                      Quitar
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <RadioChips
-                      aria-label={`Tipo de precio de ${row.serviceName}`}
-                      className="w-auto"
-                      value={row.mode}
-                      options={MODE_OPTIONS}
-                      onChange={(mode) =>
-                        // Si la clínica no había elegido otra cosa, lo que dice el agente sigue al tipo de precio.
-                        setRow(row.serviceId, {
-                          mode,
-                          ...(row.disclosure === disclosureFor(row.mode) ? { disclosure: disclosureFor(mode) } : {}),
+          <form.AppField name="items" mode="array">
+            {(itemsField) => (
+              <itemsField.Group legend={initial ? "Servicios y su precio" : "Servicios y su precio en la promoción"}>
+                {(group) => (
+                  <div className="flex flex-col gap-3">
+                    {itemsField.state.value.map((row, index) => {
+                      const price = parsePrice(row, locale)
+                      const above = price !== null && price > row.tariffCents
+                      return (
+                        <div key={row.serviceId} className="flex flex-col gap-2 rounded-lg border p-3">
+                          <form.AppField name={`items[${index}].serviceId`}>
+                            {(field) => (
+                              <field.Control label={row.serviceName} hideLabel>
+                                {(control) => (
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <span className="flex min-w-0 flex-col">
+                                      <span className="text-sm font-medium break-words">{row.serviceName}</span>
+                                      <span className="text-xs text-muted-foreground">
+                                        Normal {formatAmount(row.tariffCents, row.currency, locale)}
+                                      </span>
+                                    </span>
+                                    <Button
+                                      {...control.props}
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      aria-label={`Quitar ${row.serviceName} de la promoción`}
+                                      onClick={() => itemsField.removeValue(index)}
+                                    >
+                                      Quitar
+                                    </Button>
+                                  </div>
+                                )}
+                              </field.Control>
+                            )}
+                          </form.AppField>
+                          <div className="flex flex-wrap items-start gap-2">
+                            <form.AppField name={`items[${index}].mode`}>
+                              {(field) => (
+                                <field.Control label={`Tipo de precio de ${row.serviceName}`} hideLabel className="w-auto">
+                                  {(control) => (
+                                    <RadioChips
+                                      id={control.id}
+                                      invalid={control.invalid}
+                                      aria-describedby={control.describedBy}
+                                      onBlur={control.onBlur}
+                                      aria-label={`Tipo de precio de ${row.serviceName}`}
+                                      className="w-auto"
+                                      value={field.state.value}
+                                      options={MODE_OPTIONS}
+                                      onChange={(mode) => {
+                                        // Si la clínica no había elegido otra cosa, lo que dice el agente sigue al tipo de precio.
+                                        if (row.disclosure === disclosureFor(row.mode)) {
+                                          form.setFieldValue(`items[${index}].disclosure`, disclosureFor(mode))
+                                        }
+                                        field.handleChange(mode)
+                                      }}
+                                    />
+                                  )}
+                                </field.Control>
+                              )}
+                            </form.AppField>
+                            <form.AppField name={`items[${index}].priceText`}>
+                              {(field) => (
+                                <field.Control
+                                  label={
+                                    row.mode === "from"
+                                      ? `Precio desde de ${row.serviceName} en la promoción`
+                                      : `Precio de ${row.serviceName} en la promoción`
+                                  }
+                                  hideLabel
+                                  className="w-auto"
+                                >
+                                  {(control) => (
+                                    <InputGroup className="w-40">
+                                      <InputGroupAddon align="inline-start">
+                                        <InputGroupText>{currencySymbol(row.currency, locale)}</InputGroupText>
+                                      </InputGroupAddon>
+                                      <InputGroupInput
+                                        {...control.props}
+                                        inputMode="decimal"
+                                        placeholder={formatMoneyInput(0, row.currency, locale)}
+                                        value={field.state.value}
+                                        onChange={(event) => field.handleChange(event.target.value)}
+                                      />
+                                    </InputGroup>
+                                  )}
+                                </field.Control>
+                              )}
+                            </form.AppField>
+                          </div>
+                          <form.AppField name={`items[${index}].disclosure`}>
+                            {(field) => (
+                              <field.Control
+                                label={`Cómo dice ${receptionName} el precio de ${row.serviceName}`}
+                                hideLabel
+                              >
+                                {(control) => (
+                                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                                    <span aria-hidden className="text-muted-foreground">{receptionName} lo dice</span>
+                                    <ChoiceSelect
+                                      {...control.props}
+                                      className="w-auto min-w-48"
+                                      value={field.state.value}
+                                      onChange={(event) => field.handleChange(event.target.value as PriceDisclosure)}
+                                    >
+                                      {PRICE_DISCLOSURE_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </ChoiceSelect>
+                                  </div>
+                                )}
+                              </field.Control>
+                            )}
+                          </form.AppField>
+                          {above ? (
+                            <p className="text-xs text-warning" role="status">
+                              Es más que el precio normal ({formatMoney(row.tariffCents, row.currency, locale)}
+                              ). Revisa que sea lo que quieres.
+                            </p>
+                          ) : null}
+                        </div>
+                      )
+                    })}
+                    {itemsField.state.value.some((row) => row.mode === "from") ? (
+                      <p className="text-xs text-muted-foreground">
+                        «Desde» anuncia un mínimo. El precio final lo pone quien hace el presupuesto.
+                      </p>
+                    ) : null}
+                    <ServiceAdder
+                      id={group.id}
+                      invalid={group.invalid}
+                      describedBy={group.describedBy}
+                      onBlur={group.onBlur}
+                      label={itemsField.state.value.length === 0 ? "Agregar un servicio" : "Agregar otro servicio"}
+                      locale={locale}
+                      taken={itemsField.state.value.map((row) => row.serviceId)}
+                      onAdd={(service) =>
+                        itemsField.pushValue({
+                          serviceId: service.id,
+                          serviceName: service.name,
+                          currency: service.currency,
+                          tariffCents: service.priceCents,
+                          mode: "fixed",
+                          disclosure: "exacto",
+                          priceText: "",
                         })
                       }
                     />
-                    <InputGroup className="w-40">
-                      <InputGroupAddon align="inline-start">
-                        <InputGroupText>{currencySymbol(row.currency, locale)}</InputGroupText>
-                      </InputGroupAddon>
-                      <InputGroupInput
-                        inputMode="decimal"
-                        placeholder={formatMoneyInput(0, row.currency, locale)}
-                        aria-label={
-                          row.mode === "from"
-                            ? `Precio desde de ${row.serviceName} en la promoción`
-                            : `Precio de ${row.serviceName} en la promoción`
-                        }
-                        aria-invalid={Boolean(issue) || undefined}
-                        value={row.priceText}
-                        onChange={(event) => setRow(row.serviceId, { priceText: event.target.value })}
-                      />
-                    </InputGroup>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span aria-hidden className="text-muted-foreground">{receptionName} lo dice</span>
-                    <ChoiceSelect
-                      className="w-auto min-w-48"
-                      aria-label={`Cómo dice ${receptionName} el precio de ${row.serviceName}`}
-                      value={row.disclosure}
-                      onChange={(event) => setRow(row.serviceId, { disclosure: event.target.value as PriceDisclosure })}
-                    >
-                      {PRICE_DISCLOSURE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </ChoiceSelect>
-                  </div>
-                  {issue ? <FieldError>{issue}</FieldError> : null}
-                  {above ? (
-                    <p className="text-xs text-warning" role="status">
-                      Es más que el precio normal ({formatMoney(row.tariffCents, row.currency, locale)}
-                      ). Revisa que sea lo que quieres.
-                    </p>
-                  ) : null}
-                </div>
-              )
-            })}
-            {rows.some((row) => row.mode === "from") ? (
-              <p className="text-xs text-muted-foreground">
-                «Desde» anuncia un mínimo. El precio final lo pone quien hace el presupuesto.
-              </p>
-            ) : null}
-            <ServiceAdder
-              id={`${id}-servicio`}
-              label={rows.length === 0 ? "Agregar un servicio" : "Agregar otro servicio"}
-              locale={locale}
-              taken={rows.map((row) => row.serviceId)}
-              onAdd={(service) =>
-                setRows((list) => [
-                  ...list,
-                  {
-                    serviceId: service.id,
-                    serviceName: service.name,
-                    currency: service.currency,
-                    tariffCents: service.priceCents,
-                    mode: "fixed",
-                    disclosure: "exacto",
-                    priceText: "",
-                  },
-                ])
-              }
-            />
-            {submitted && rowsIssue ? <FieldError>{rowsIssue}</FieldError> : null}
-          </div>
+                )}
+              </itemsField.Group>
+            )}
+          </form.AppField>
 
-          <Field>
-            <FieldLabel htmlFor={`${id}-condiciones`}>
-              {initial ? "Condiciones" : "Condiciones, en una frase"}
-            </FieldLabel>
-            <Textarea
-              id={`${id}-condiciones`}
-              value={conditions}
-              rows={2}
-              maxLength={500}
-              onChange={(event) => setConditions(event.target.value)}
-            />
-          </Field>
+          <form.AppField name="conditions">
+            {(field) => (
+              <field.TextareaField
+                label={initial ? "Condiciones" : "Condiciones, en una frase"}
+                rows={2}
+                maxLength={500}
+              />
+            )}
+          </form.AppField>
 
           <p className="text-xs text-muted-foreground" role="status">
             {initial
@@ -884,7 +960,7 @@ function PromotionForm({
               type="button"
               variant="outline"
               className="min-h-11 self-start"
-              disabled={saveMutation.isPending}
+              disabled={surface.isSubmitting}
               onClick={() => {
                 endMutation.reset()
                 setConfirmEnd(true)
@@ -902,7 +978,7 @@ function PromotionForm({
           open={confirmEnd}
           title="Terminar la promoción hoy"
           description={`«${initial.name}» deja de ofrecerse desde ahora. Lo ya presupuestado o cobrado con ella no cambia, y no se puede volver a activar.`}
-          error={endMutation.isError ? errorMessage(endMutation.error) : null}
+          error={endMutation.isError ? submitErrorMessage(endMutation.error) : null}
           isSubmitting={endMutation.isPending}
           submitLabel="Terminar hoy"
           cancelLabel="Dejarla vigente"
@@ -922,12 +998,19 @@ function PromotionForm({
 /** Buscador del tarifario para sumar un servicio a la promoción. */
 function ServiceAdder({
   id,
+  invalid,
+  describedBy,
+  onBlur,
   label,
   locale,
   taken,
   onAdd,
 }: {
   id: string
+  /** Error del grupo de servicios (falta uno, más de 100…): se dice debajo del grupo. */
+  invalid: boolean
+  describedBy: string | undefined
+  onBlur: () => void
   label: string
   locale: string
   /** Servicios ya en la promoción: cada uno aparece una sola vez. */
@@ -971,7 +1054,14 @@ function ServiceAdder({
           setOpen(false)
         }}
       >
-        <ComboboxInput id={id} placeholder="Buscar un servicio" showTrigger={false} />
+        <ComboboxInput
+          id={id}
+          placeholder="Buscar un servicio"
+          showTrigger={false}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
+          onBlur={onBlur}
+        />
         <ComboboxContent>
           {servicesQuery.isPending ? (
             <div className="flex flex-col gap-2 p-3">

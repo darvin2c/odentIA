@@ -87,24 +87,27 @@ export interface DiagnosisCodeInput {
  * El código pedido, comprobado en su lista. `newDiagnosis`: es un diagnóstico
  * nuevo de la atención y solo vale la lista de la clínica. `codable`: no se
  * acepta una categoría con subcódigos (regla de codificación de la CIE).
+ * `field`: el nombre del dato en el cuerpo; si viene, el rechazo lo nombra
+ * (`fields`) para decirse junto a ese campo.
  */
 export async function resolveDiagnosisCode(
   tx: Db,
   orgId: string,
   input: DiagnosisCodeInput,
-  options: { newDiagnosis?: boolean; codable?: boolean } = {},
+  options: { newDiagnosis?: boolean; codable?: boolean; field?: string } = {},
 ): Promise<DiagnosisCodeOption> {
+  const fail = (message: string) => validation(message, options.field ? { [options.field]: message } : undefined)
   const raw = input.code?.trim()
-  if (!raw) throw validation("Elige el diagnóstico")
+  if (!raw) throw fail("Elige el diagnóstico")
   const orgSystem = await orgDiagnosisSystem(tx, orgId)
   const requested = input.system?.trim() || orgSystem
-  if (!isDiagnosisSystem(requested)) throw validation("Esa lista de diagnósticos no existe")
+  if (!isDiagnosisSystem(requested)) throw fail("Esa lista de diagnósticos no existe")
   if (options.newDiagnosis && requested !== orgSystem)
-    throw validation(
+    throw fail(
       `Los diagnósticos nuevos se eligen en ${listName(orgSystem)}, la de la clínica`,
     )
   const found = await findDiagnosisCode(tx, requested, raw)
-  if (!found) throw validation(`El código ${raw.toUpperCase()} no está en ${listName(requested)}`)
+  if (!found) throw fail(`El código ${raw.toUpperCase()} no está en ${listName(requested)}`)
   if (options.codable && found.isCategory) {
     // La CIE-10 del MINSA escribe con X la categoría sin subdivisiones («I10X»):
     // si es su único subcódigo, «I10» es ese mismo diagnóstico y se registra así.
@@ -138,24 +141,28 @@ export async function resolveDiagnosisCode(
       )
       .orderBy(asc(diagnosisCatalog.code))
       .limit(1)
-    throw validation(
+    throw fail(
       `${found.code} es una categoría: registra el subcódigo más específico${sub ? ` (p. ej. ${sub.code})` : ""}`,
     )
   }
   return found
 }
 
-/** Un código opcional (antecedentes, plan, receta, orden): null si no viene. */
+/**
+ * Un código opcional (antecedentes, plan, receta, orden): null si no viene.
+ * `field`: el nombre del dato en el cuerpo, para decir el rechazo junto a él.
+ */
 export async function resolveOptionalDiagnosisCode(
   tx: Db,
   orgId: string,
   input: { code?: string | null; system?: string | null },
+  field?: string,
 ): Promise<
   | { diagnosisSystem: DiagnosisSystemKey; diagnosisCode: string }
   | { diagnosisSystem: null; diagnosisCode: null }
 > {
   if (!input.code?.trim()) return { diagnosisSystem: null, diagnosisCode: null }
-  const found = await resolveDiagnosisCode(tx, orgId, { code: input.code, system: input.system })
+  const found = await resolveDiagnosisCode(tx, orgId, { code: input.code, system: input.system }, { field })
   return { diagnosisSystem: found.system, diagnosisCode: found.code }
 }
 

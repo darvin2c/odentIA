@@ -1,7 +1,7 @@
 import type { Db } from "@odentia/db"
 import { customFieldDef } from "@odentia/db/schema/crm"
 import { and, asc, eq } from "drizzle-orm"
-import { isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError } from "./errors.js"
 
 const TYPES = ["text", "number", "date", "select"]
 const KEY_RE = /^[a-z0-9_]{1,40}$/
@@ -36,24 +36,24 @@ function toDef(row: typeof customFieldDef.$inferSelect): FieldDef {
 
 /** Opciones de una lista: sin vacías ni repetidas, en el orden en que se escribieron. */
 function checkType(type: string, options: unknown): string[] | null {
-  if (!TYPES.includes(type)) throw validation("Elige el tipo del campo: texto, número, fecha o lista de opciones")
+  if (!TYPES.includes(type)) throw invalidField("type", "Elige el tipo del campo: texto, número, fecha o lista de opciones")
   if (type !== "select") return null
   if (!Array.isArray(options) || !options.every((o) => typeof o === "string")) {
-    throw validation("Una lista de opciones necesita al menos una opción")
+    throw invalidField("options", "Una lista de opciones necesita al menos una opción")
   }
   const clean = [...new Set(options.map((option: string) => option.trim()).filter(Boolean))]
-  if (clean.length === 0) throw validation("Una lista de opciones necesita al menos una opción")
-  if (clean.length > OPTIONS_MAX) throw validation(`Una lista admite hasta ${OPTIONS_MAX} opciones`)
+  if (clean.length === 0) throw invalidField("options", "Una lista de opciones necesita al menos una opción")
+  if (clean.length > OPTIONS_MAX) throw invalidField("options", `Una lista admite hasta ${OPTIONS_MAX} opciones`)
   if (clean.some((option) => option.length > OPTION_CHARS)) {
-    throw validation(`Cada opción admite hasta ${OPTION_CHARS} caracteres`)
+    throw invalidField("options", `Cada opción admite hasta ${OPTION_CHARS} caracteres`)
   }
   return clean
 }
 
 function checkLabel(raw: string): string {
   const label = raw.trim()
-  if (!label) throw validation("Escribe el nombre del campo")
-  if (label.length > LABEL_CHARS) throw validation(`El nombre del campo admite hasta ${LABEL_CHARS} caracteres`)
+  if (!label) throw invalidField("label", "Escribe el nombre del campo")
+  if (label.length > LABEL_CHARS) throw invalidField("label", `El nombre del campo admite hasta ${LABEL_CHARS} caracteres`)
   return label
 }
 
@@ -89,10 +89,15 @@ function freeKey(base: string, taken: Set<string>): string {
     const candidate = `${base.slice(0, KEY_CHARS - suffix.length)}${suffix}`
     if (!taken.has(candidate)) return candidate
   }
-  throw validation("Ya hay demasiados campos con un nombre parecido: usa otro nombre")
+  throw nameTaken("Ya hay demasiados campos con un nombre parecido: usa otro nombre")
 }
 
 const DUPLICATE_NAME = "Ya hay un campo con ese nombre"
+
+/** El nombre choca con otro campo: es un 409 y se dice junto a «Nombre». */
+function nameTaken(message = DUPLICATE_NAME): ServiceError {
+  return new ServiceError("FIELD_NAME_TAKEN", 409, message, { label: message })
+}
 
 export async function listFieldDefs(tx: Db, orgId: string): Promise<FieldDef[]> {
   const rows = await tx
@@ -121,14 +126,14 @@ export async function createFieldDef(
     .from(customFieldDef)
     .where(eq(customFieldDef.organizationId, orgId))
   if (existing.some((row) => plain(row.label) === plain(label))) {
-    throw new ServiceError("FIELD_NAME_TAKEN", 409, DUPLICATE_NAME)
+    throw nameTaken()
   }
   const taken = new Set(existing.map((row) => row.key))
   let key: string
   if (input.key?.trim()) {
     key = input.key.trim().toLowerCase()
-    if (!KEY_RE.test(key)) throw validation("La clave solo admite minúsculas, números y guion bajo (hasta 40)")
-    if (taken.has(key)) throw new ServiceError("FIELD_NAME_TAKEN", 409, DUPLICATE_NAME)
+    if (!KEY_RE.test(key)) throw invalidField("key", "La clave solo admite minúsculas, números y guion bajo (hasta 40)")
+    if (taken.has(key)) throw new ServiceError("FIELD_NAME_TAKEN", 409, DUPLICATE_NAME, { key: DUPLICATE_NAME })
   } else {
     key = freeKey(fieldKeyFromLabel(label), taken)
   }
@@ -148,7 +153,7 @@ export async function createFieldDef(
     return toDef(created)
   } catch (error) {
     // Dos altas a la vez con el mismo nombre: la segunda lo dice en vez de fallar sin motivo.
-    if (isUniqueViolation(error)) throw new ServiceError("FIELD_NAME_TAKEN", 409, DUPLICATE_NAME)
+    if (isUniqueViolation(error)) throw nameTaken()
     throw error
   }
 }
@@ -180,7 +185,7 @@ export async function updateFieldDef(
         .from(customFieldDef)
         .where(eq(customFieldDef.organizationId, orgId))
       if (others.some((other) => other.id !== id && plain(other.label) === plain(label))) {
-        throw new ServiceError("FIELD_NAME_TAKEN", 409, DUPLICATE_NAME)
+        throw nameTaken()
       }
     }
     patch.label = label

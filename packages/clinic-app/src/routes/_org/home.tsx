@@ -1,8 +1,22 @@
-import { FieldLabel, Textarea, toast } from "@odentia/ui"
-import { ConfirmDialog, DetailDrawer, EmptyState, ErrorState, PageHeader, PageShell, SkeletonRegion } from "@odentia/ui-patterns"
+import { toast } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  DetailDrawer,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  PageShell,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmitError,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
+import { z } from "zod"
 import { AdminRecommendationDrawer, AdminUnreachedDrawer } from "../../components/agent/admin-recommendation"
 import { CaseBriefDrawer } from "../../components/agent/case-brief"
 import { invalidateAgentPanelQueries, takeCase } from "../../components/agent-panel"
@@ -26,7 +40,6 @@ import { usePermission } from "../../lib/crm"
 import { type DebtRow, invalidateFinance } from "../../lib/finance-cash"
 import { type CollectResultBody, useOrgFinanceProfile } from "../../lib/finance-collect"
 import { daysAgo, longDay, waitingKey } from "../../lib/home"
-import { mutationErrorMessage } from "../../lib/query-error"
 import { isReceiptOnly, useOrgEvents } from "../../lib/org-events"
 import type { WaitingRow, WorkspaceCash, WorkspaceHome } from "../../lib/workspace"
 
@@ -63,6 +76,16 @@ type StaleEncounterRow = Extract<WaitingRow, { kind: "staleEncounter" }>
 type DuplicateRow = Extract<WaitingRow, { kind: "possibleDuplicate" }>
 type InventoryRow = Extract<WaitingRow, { kind: "inventory" }>
 type UnclosedRow = Extract<WaitingRow, { kind: "unclosed" }>
+
+/** El motivo de anular una atención, con el mismo tope que `POST /api/patients/:id/encounters/:encounterId/void`. */
+const VOID_REASON_MAX = 2000
+const voidReasonSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe por qué se anula la atención.")
+    .max(VOID_REASON_MAX, `Escribe como mucho ${VOID_REASON_MAX} caracteres.`),
+})
 
 /** Tiene al menos un dominio de trabajo; sin ninguno no hay nada que mostrarle. */
 function hasWork(access: WorkspaceHome["access"]): boolean {
@@ -165,11 +188,11 @@ function HomePage() {
           : null
   const busyAction = discardRegistration.isPending ? "descartar" : null
   const actionError =
-    (take.error ? mutationErrorMessage(take.error) ?? "No se pudo tomar el caso." : null) ??
-    (confirmRepresentative.error ? mutationErrorMessage(confirmRepresentative.error) ?? "No se pudo confirmar el representante." : null) ??
-    (discardRegistration.error ? mutationErrorMessage(discardRegistration.error) ?? "No se pudo descartar." : null) ??
-    (reorder.error ? mutationErrorMessage(reorder.error) ?? "No se armaron los borradores de compra." : null) ??
-    (noShow.error ? mutationErrorMessage(noShow.error) ?? "No se pudo marcar que no vino." : null) ??
+    (take.error ? submitErrorMessage(take.error) : null) ??
+    (confirmRepresentative.error ? submitErrorMessage(confirmRepresentative.error) : null) ??
+    (discardRegistration.error ? submitErrorMessage(discardRegistration.error) : null) ??
+    (reorder.error ? submitErrorMessage(reorder.error) : null) ??
+    (noShow.error ? submitErrorMessage(noShow.error) : null) ??
     completion.error
 
   const [briefFor, setBriefFor] = useState<{ conversationId: string; name: string } | null>(null)
@@ -180,7 +203,6 @@ function HomePage() {
   const [budgets, setBudgets] = useState<BudgetsRow | null>(null)
   // «Anular con motivo» una atención de otro día sin cerrar: la misma anulación de la atención.
   const [discarding, setDiscarding] = useState<StaleEncounterRow | null>(null)
-  const [discardReason, setDiscardReason] = useState("")
   const discard = useMutation({
     mutationFn: (input: { row: StaleEncounterRow; reason: string }) =>
       apiFetch(`/api/patients/${input.row.patientId}/encounters/${input.row.id}/void`, {
@@ -190,12 +212,21 @@ function HomePage() {
     onSuccess: async (_result, input) => {
       toast.success(`Se anuló la atención de ${input.row.patientName}`)
       setDiscarding(null)
-      setDiscardReason("")
       await queryClient.invalidateQueries({ queryKey: ["open-encounter", input.row.patientId] })
       refresh()
     },
-    onError: (cause) => toast.error(mutationErrorMessage(cause) ?? "No se pudo anular la atención."),
   })
+  // El motivo es un campo con su error; lo que el servidor rechaza sin campo (ya anulada, no es quien la atiende,
+  // indicaciones ya presupuestadas) se dice en el diálogo, junto a sus botones.
+  const discardForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: voidReasonSchema },
+    onSubmit: async ({ value }) => {
+      if (discarding) await discard.mutateAsync({ row: discarding, reason: value.reason.trim() })
+    },
+  })
+  const discardError = useFormSubmitError(discardForm)
+  const discardPending = useStore(discardForm.store, (state) => state.isSubmitting)
 
   const receptionName = useReceptionName()
   const data = query.data?.data
@@ -232,19 +263,15 @@ function HomePage() {
               noCaseBrief: !data.access.conversations && !data.access.agent,
               // Responder sin entrar a la Bandeja: el odontólogo su duda clínica, caja un pago (R3 y decisión 3).
               onReply: async (row, text) => {
-                try {
-                  const sent = await apiFetch<{ data: { held?: boolean } }>(`/api/workspace/topics/${row.id}/reply`, {
-                    method: "POST",
-                    body: JSON.stringify({ text }),
-                  })
-                  const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
-                  toast.success(sent.data.held ? `Quedó por entregar: a ${first} le llega con «Ver respuesta».` : `Le respondiste a ${first}. Tema resuelto.`)
-                  invalidateAgentPanelQueries(queryClient)
-                  refresh()
-                  return null
-                } catch (cause) {
-                  return mutationErrorMessage(cause) ?? "No se pudo enviar la respuesta."
-                }
+                // Si el servidor lo rechaza, lanza: la respuesta lo dice junto a su campo o a sus botones.
+                const sent = await apiFetch<{ data: { held?: boolean } }>(`/api/workspace/topics/${row.id}/reply`, {
+                  method: "POST",
+                  body: JSON.stringify({ text }),
+                })
+                const first = row.contactName?.trim().split(/\s+/)[0] || "la persona"
+                toast.success(sent.data.held ? `Quedó por entregar: a ${first} le llega con «Ver respuesta».` : `Le respondiste a ${first}. Tema resuelto.`)
+                invalidateAgentPanelQueries(queryClient)
+                refresh()
               },
               onDone: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
               onReviewed: canDoTasks ? (row) => void completion.complete(row.id) : undefined,
@@ -258,7 +285,7 @@ function HomePage() {
               onNoShow: canWriteAppointments ? (row) => noShow.mutate(row) : undefined,
               onAcceptedList: () => setAcceptedList(true),
               onVoidEncounter: (row) => {
-                setDiscardReason("")
+                discardForm.reset({ reason: "" })
                 setDiscarding(row)
               },
               busyKey,
@@ -292,22 +319,24 @@ function HomePage() {
       description={discarding ? `La atención de ${discarding.patientName} queda anulada en su historia, con tu motivo. No genera cargos y su ficha queda libre para otra atención.` : ""}
       confirmLabel="Anular la atención"
       cancelLabel="Volver"
-      pending={discard.isPending}
-      confirmDisabled={discardReason.trim().length === 0}
+      pending={discardPending}
+      error={discardError}
       onClose={() => setDiscarding(null)}
-      onConfirm={() => discarding && discard.mutate({ row: discarding, reason: discardReason.trim() })}
+      onConfirm={() => void submitForm(discardForm)}
     >
-      <div className="grid gap-2 text-left">
-        <FieldLabel htmlFor="anular-atencion-motivo">Motivo</FieldLabel>
-        <Textarea
-          id="anular-atencion-motivo"
-          value={discardReason}
-          maxLength={2000}
-          rows={3}
-          placeholder="Ej.: se abrió por error"
-          onChange={(event) => setDiscardReason(event.target.value)}
-        />
-      </div>
+      <discardForm.AppField name="reason">
+        {(field) => (
+          <field.TextareaField
+            id="anular-atencion-motivo"
+            label="Motivo"
+            className="text-left"
+            maxLength={VOID_REASON_MAX}
+            rows={3}
+            placeholder="Ej.: se abrió por error"
+            aria-required
+          />
+        )}
+      </discardForm.AppField>
     </ConfirmDialog>
     <RegistrationHoldDrawer taskId={holdTask} onClose={() => setHoldTask(null)} />
     <CaseBriefDrawer conversationId={briefFor?.conversationId ?? null} name={briefFor?.name ?? "Interlocutor"} canTake={canTake} onClose={() => setBriefFor(null)} onClaimed={refresh} />

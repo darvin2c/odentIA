@@ -49,7 +49,10 @@ export function SuppliersTab() {
       toast.success(input.isActive ? `${input.item.name} está activo otra vez.` : `${input.item.name} quedó desactivado.`)
       void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
     },
-    onError: (error) => toast.error(inventoryErrorMessage(error)),
+    // Desactivar se confirma en un diálogo: el motivo se dice ahí, no detrás de él.
+    onError: (error, input) => {
+      if (input.isActive) toast.error(inventoryErrorMessage(error))
+    },
   })
 
   const columns = React.useMemo<ColumnDef<SupplierItem>[]>(() => {
@@ -184,7 +187,11 @@ export function SuppliersTab() {
         confirmLabel="Desactivar"
         cancelLabel="Volver"
         pending={activation.isPending}
-        onClose={() => setConfirming(null)}
+        error={activation.error && activation.variables?.isActive === false ? inventoryErrorMessage(activation.error) : null}
+        onClose={() => {
+          setConfirming(null)
+          activation.reset()
+        }}
         onConfirm={() => {
           if (confirming) activation.mutate({ item: confirming, isActive: false })
         }}

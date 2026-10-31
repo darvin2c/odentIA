@@ -1,18 +1,4 @@
-import {
-  Badge,
-  Button,
-  Field,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  toast,
-} from "@odentia/ui"
+import { Badge, Button, FieldGroup, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   EmptyState,
@@ -20,15 +6,23 @@ import {
   FormDrawer,
   PageHeader,
   PageShell,
+  submitErrorMessage,
+  submitForm,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Plus } from "lucide-react"
 import { useState } from "react"
-import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
+import { z } from "zod"
 import { ApiError, api } from "../../lib/api"
 import { useAdminUserId, useIsAdmin } from "../../lib/session"
+import { TeamPageSkeleton, TeamSkeleton } from "../../components/skeletons/team"
 
 export const Route = createFileRoute("/_app/team")({
   pendingComponent: TeamPageSkeleton,
@@ -70,10 +64,10 @@ function inviteLinkOf(token: string): string {
   return `${window.location.origin}/security?invitation=${encodeURIComponent(token)}`
 }
 
-function apiMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.shape.message ?? `Error ${error.status}`
-  return "No pudimos conectar con el servidor"
-}
+/** El motivo que queda auditado: los mismos límites que la ruta. */
+const reasonSchema = z.object({
+  reason: z.string().trim().min(8, "Escribe al menos 8 caracteres").max(280, "Escribe como mucho 280 caracteres"),
+})
 
 function TeamPage() {
   const queryClient = useQueryClient()
@@ -84,16 +78,14 @@ function TeamPage() {
   const isManager = useIsAdmin()
   const myUserId = useAdminUserId()
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [inviteEmail, setInviteEmail] = useState("")
-  const [inviteRole, setInviteRole] = useState<"admin" | "support">("support")
   const [inviteLink, setInviteLink] = useState<string | null>(null)
-  const [reactivate, setReactivate] = useState<{ row: StaffRow; reason: string } | null>(null)
+  const [reactivate, setReactivate] = useState<StaffRow | null>(null)
   const [confirm, setConfirm] = useState<
     | { kind: "role"; row: StaffRow; role: "admin" | "support" }
-    | { kind: "deactivate"; row: StaffRow; reason: string }
-    | { kind: "reset"; row: StaffRow; reason: string }
+    | { kind: "deactivate"; row: StaffRow }
+    | { kind: "reset"; row: StaffRow }
     | { kind: "revoke-invitation"; invitation: InvitationRow }
-    | { kind: "resend"; invitation: InvitationRow; reason: string }
+    | { kind: "resend"; invitation: InvitationRow }
     | null
   >(null)
 
@@ -104,24 +96,37 @@ function TeamPage() {
   }
 
   const invite = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: { email: string; role: "admin" | "support" }) =>
       api<InviteResult>(`/api/admin/access/team/invite`, {
         method: "POST",
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify(input),
       }),
     onSuccess: (data) => {
-      setInviteEmail("")
       setInviteLink(inviteLinkOf(data.token))
       if (data.delivery === "sent")
         toast.success("Invitación enviada por correo; aquí tienes el enlace también")
       else toast.success("No pudimos confirmar el envío: comparte el enlace manualmente")
       refresh()
     },
-    onError: (error) => toast.error(apiMessage(error)),
   })
+  const inviteForm = useAppForm({
+    defaultValues: { email: "", role: "support" as "admin" | "support" },
+    validators: {
+      onSubmit: z.object({
+        email: z.string().trim().email("Correo inválido").max(160, "Escribe como mucho 160 caracteres"),
+        role: z.enum(["admin", "support"]),
+      }),
+    },
+    onSubmit: async ({ value, formApi }) => {
+      await invite.mutateAsync({ email: value.email.trim(), role: value.role })
+      // El cajón sigue abierto para invitar a otro con el mismo rol.
+      formApi.reset({ email: "", role: value.role })
+    },
+  })
+  const inviteSurface = useFormSurface(inviteForm)
 
   const apply = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (reason: string) => {
       if (!confirm) return { ok: true as const }
       if (confirm.kind === "role") {
         return api<{ ok: true }>(`/api/admin/access/team/${confirm.row.userId}/role`, {
@@ -132,13 +137,13 @@ function TeamPage() {
       if (confirm.kind === "deactivate") {
         return api<{ ok: true }>(`/api/admin/access/team/${confirm.row.userId}/active`, {
           method: "POST",
-          body: JSON.stringify({ active: false, reason: confirm.reason }),
+          body: JSON.stringify({ active: false, reason }),
         })
       }
       if (confirm.kind === "reset") {
         return api<{ ok: true }>(`/api/admin/access/team/${confirm.row.userId}/factor-reset`, {
           method: "POST",
-          body: JSON.stringify({ reason: confirm.reason }),
+          body: JSON.stringify({ reason }),
         })
       }
       if (confirm.kind === "resend") {
@@ -146,7 +151,7 @@ function TeamPage() {
           `/api/admin/access/team/invitations/${confirm.invitation.id}/resend`,
           {
             method: "POST",
-            body: JSON.stringify({ reason: confirm.reason }),
+            body: JSON.stringify({ reason }),
           },
         )
       }
@@ -178,8 +183,25 @@ function TeamPage() {
       } else toast.success("Listo")
       refresh()
     },
-    onError: (error) => toast.error(apiMessage(error)),
   })
+
+  // Desactivar, resetear y reenviar piden motivo; cambiar rol y revocar solo confirman.
+  const needsReason = confirm?.kind === "deactivate" || confirm?.kind === "reset" || confirm?.kind === "resend"
+  const reasonForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value, formApi }) => {
+      await apply.mutateAsync(value.reason.trim())
+      formApi.reset()
+    },
+  })
+  const reasonError = useFormSubmitError(reasonForm)
+  const reasonPending = useStore(reasonForm.store, (state) => state.isSubmitting)
+  const closeConfirm = () => {
+    reasonForm.reset()
+    apply.reset()
+    setConfirm(null)
+  }
 
   const setActive = useMutation({
     mutationFn: (input: { userId: string; active: boolean; reason: string }) =>
@@ -191,17 +213,20 @@ function TeamPage() {
       toast.success("Integrante reactivado")
       refresh()
     },
-    onError: (error) => toast.error(apiMessage(error)),
   })
+  const reactivateForm = useAppForm({
+    defaultValues: { reason: "" },
+    validators: { onSubmit: reasonSchema },
+    onSubmit: async ({ value, formApi }) => {
+      if (!reactivate) return
+      await setActive.mutateAsync({ userId: reactivate.userId, active: true, reason: value.reason.trim() })
+      formApi.reset()
+    },
+  })
+  const onReactivateSubmit = useFormSubmit(reactivateForm)
+  const reactivateError = useFormSubmitError(reactivateForm)
+  const reactivatePending = useStore(reactivateForm.store, (state) => state.isSubmitting)
 
-  const confirmReason =
-    confirm?.kind === "deactivate" || confirm?.kind === "reset" || confirm?.kind === "resend"
-      ? confirm.reason
-      : "ok"
-  const confirmReady =
-    confirm?.kind === "role" ||
-    confirm?.kind === "revoke-invitation" ||
-    (confirmReason.trim().length >= 8 && !apply.isPending)
 
   return (
     <PageShell className="flex flex-col gap-6">
@@ -218,7 +243,7 @@ function TeamPage() {
         </SkeletonRegion>
       ) : team.isError ? (
         <ErrorState
-          message={apiMessage(team.error)}
+          message={submitErrorMessage(team.error)}
           onRetry={() => void team.refetch()}
           {...(team.error instanceof ApiError &&
           team.error.status === 403 &&
@@ -267,33 +292,42 @@ function TeamPage() {
                     <Badge>{row.role === "admin" ? "Administración" : "Soporte"}</Badge>
                     {row.active ? null : <Badge>Desactivado</Badge>}
                     {isManager && row.userId !== myUserId ? (
-                      reactivate?.row.userId === row.userId ? (
+                      reactivate?.userId === row.userId ? (
                         <form
-                          className="flex w-full flex-wrap items-center gap-2"
-                          onSubmit={(event) => {
-                            event.preventDefault()
-                            setActive.mutate({
-                              userId: row.userId,
-                              active: true,
-                              reason: reactivate.reason,
-                            })
-                          }}
+                          noValidate
+                          className="flex w-full flex-wrap items-end gap-2"
+                          onSubmit={onReactivateSubmit}
                         >
-                          <Input
-                            aria-label="Motivo de reactivación"
-                            placeholder="Motivo (queda auditado)"
-                            value={reactivate.reason}
-                            onChange={(event) => setReactivate({ row, reason: event.target.value })}
-                          />
-                          <Button
-                            type="submit"
-                            disabled={setActive.isPending || reactivate.reason.trim().length < 8}
-                          >
-                            {setActive.isPending ? "Reactivando…" : "Confirmar"}
+                          <reactivateForm.AppField name="reason">
+                            {(field) => (
+                              <field.TextField
+                                id="reactivate-reason"
+                                label="Motivo de reactivación"
+                                description="Mínimo 8 caracteres"
+                                placeholder="Motivo (queda auditado)"
+                                maxLength={280}
+                                className="min-w-48 flex-1"
+                              />
+                            )}
+                          </reactivateForm.AppField>
+                          <Button type="submit" disabled={reactivatePending}>
+                            {reactivatePending ? "Reactivando…" : "Confirmar"}
                           </Button>
-                          <Button type="button" variant="ghost" onClick={() => setReactivate(null)}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => {
+                              reactivateForm.reset()
+                              setReactivate(null)
+                            }}
+                          >
                             Cancelar
                           </Button>
+                          {reactivateError ? (
+                            <p role="alert" className="w-full text-sm text-destructive">
+                              {reactivateError}
+                            </p>
+                          ) : null}
                         </form>
                       ) : (
                         <div className="flex flex-wrap gap-1">
@@ -312,21 +346,24 @@ function TeamPage() {
                           {row.active ? (
                             <Button
                               variant="ghost"
-                              onClick={() => setConfirm({ kind: "deactivate", row, reason: "" })}
+                              onClick={() => setConfirm({ kind: "deactivate", row })}
                             >
                               Desactivar
                             </Button>
                           ) : (
                             <Button
                               variant="ghost"
-                              onClick={() => setReactivate({ row, reason: "" })}
+                              onClick={() => {
+                                reactivateForm.reset()
+                                setReactivate(row)
+                              }}
                             >
                               Reactivar
                             </Button>
                           )}
                           <Button
                             variant="ghost"
-                            onClick={() => setConfirm({ kind: "reset", row, reason: "" })}
+                            onClick={() => setConfirm({ kind: "reset", row })}
                           >
                             Resetear factor
                           </Button>
@@ -363,7 +400,7 @@ function TeamPage() {
                       <div className="flex flex-wrap gap-1">
                         <Button
                           variant="ghost"
-                          onClick={() => setConfirm({ kind: "resend", invitation, reason: "" })}
+                          onClick={() => setConfirm({ kind: "resend", invitation })}
                         >
                           Reenviar
                         </Button>
@@ -383,44 +420,35 @@ function TeamPage() {
         </div>
       )}
       <FormDrawer
+        {...inviteSurface}
         open={inviteOpen}
         title="Invitar personal"
         onClose={() => setInviteOpen(false)}
-        onSubmit={(event) => {
-          event.preventDefault()
-          invite.mutate()
-        }}
-        isDirty={inviteEmail.trim().length > 0}
-        isSubmitting={invite.isPending}
-        error={invite.isError ? apiMessage(invite.error) : null}
       >
         <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="invite-email">Correo del integrante</FieldLabel>
-            <Input
-              id="invite-email"
-              type="email"
-              autoComplete="email"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-            />
-            <FieldError>{null}</FieldError>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="invite-role">Rol</FieldLabel>
-            <Select
-              value={inviteRole}
-              onValueChange={(value) => setInviteRole(value === "admin" ? "admin" : "support")}
-            >
-              <SelectTrigger id="invite-role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="support">Soporte</SelectItem>
-                <SelectItem value="admin">Administración</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+          <inviteForm.AppField name="email">
+            {(field) => (
+              <field.TextField
+                id="invite-email"
+                label="Correo del integrante"
+                type="email"
+                autoComplete="email"
+                maxLength={160}
+              />
+            )}
+          </inviteForm.AppField>
+          <inviteForm.AppField name="role">
+            {(field) => (
+              <field.SelectField
+                id="invite-role"
+                label="Rol"
+                options={[
+                  { value: "support", label: "Soporte" },
+                  { value: "admin", label: "Administración" },
+                ]}
+              />
+            )}
+          </inviteForm.AppField>
         </FieldGroup>
       </FormDrawer>
       <ConfirmDialog
@@ -453,22 +481,25 @@ function TeamPage() {
             ? "destructive"
             : "default"
         }
-        pending={apply.isPending}
-        confirmDisabled={!confirmReady}
-        onConfirm={() => apply.mutate()}
-        onClose={() => setConfirm(null)}
+        pending={needsReason ? reasonPending : apply.isPending}
+        error={needsReason ? reasonError : apply.error ? submitErrorMessage(apply.error) : null}
+        onConfirm={() => {
+          if (needsReason) void submitForm(reasonForm)
+          else apply.mutate("")
+        }}
+        onClose={closeConfirm}
       >
-        {confirm?.kind === "deactivate" ||
-        confirm?.kind === "reset" ||
-        confirm?.kind === "resend" ? (
-          <Field>
-            <FieldLabel htmlFor="confirm-reason">Motivo (obligatorio, queda auditado)</FieldLabel>
-            <Input
-              id="confirm-reason"
-              value={confirm.reason}
-              onChange={(event) => setConfirm({ ...confirm, reason: event.target.value })}
-            />
-          </Field>
+        {needsReason ? (
+          <reasonForm.AppField name="reason">
+            {(field) => (
+              <field.TextField
+                id="confirm-reason"
+                label="Motivo (obligatorio, queda auditado)"
+                description="Mínimo 8 caracteres"
+                maxLength={280}
+              />
+            )}
+          </reasonForm.AppField>
         ) : null}
       </ConfirmDialog>
     </PageShell>

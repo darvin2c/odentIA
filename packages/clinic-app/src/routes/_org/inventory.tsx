@@ -132,7 +132,13 @@ function InventoryWorkspace() {
   // Lo que se abre al lado queda en la sede donde se abrió: cambiar de sede en la página no lo mueve.
   type SedeAtOpen = { id: string; name: string }
   const [action, setAction] = React.useState<{ kind: StockActionKind; preset: { productId?: string; lotId?: string }; seq: number; sede: SedeAtOpen } | null>(null)
-  const [purchase, setPurchase] = React.useState<{ preset?: PurchasePreset; order?: PurchaseOrderView; seq: number; sede: SedeAtOpen } | null>(null)
+  const [purchase, setPurchase] = React.useState<{
+    preset?: PurchasePreset
+    order?: PurchaseOrderView
+    missingPrices?: boolean
+    seq: number
+    sede: SedeAtOpen
+  } | null>(null)
   const [receiving, setReceiving] = React.useState<string | null>(null)
   const [pasting, setPasting] = React.useState<SedeAtOpen | null>(null)
   const [supplierForm, setSupplierForm] = React.useState<{ supplier: SupplierItem | null; onSaved?: (saved: SupplierItem) => void; seq: number } | null>(null)
@@ -151,7 +157,7 @@ function InventoryWorkspace() {
       productForm: (product) => setProductForm({ product: product ?? null, seq: nextSeq() }),
       action: (kind, preset) => setAction({ kind, preset: preset ?? {}, seq: nextSeq(), sede: sedeNow.current }),
       purchase: (preset) => setPurchase({ preset, seq: nextSeq(), sede: sedeNow.current }),
-      editPurchase: (order) => setPurchase({ order, seq: nextSeq(), sede: sedeNow.current }),
+      editPurchase: (order, options) => setPurchase({ order, missingPrices: options?.missingPrices, seq: nextSeq(), sede: sedeNow.current }),
       receive: (orderId) => setReceiving(orderId),
       paste: () => setPasting(sedeNow.current),
       supplier: (supplier, onSaved) => setSupplierForm({ supplier: supplier ?? null, onSaved, seq: nextSeq() }),
@@ -313,6 +319,7 @@ function InventoryWorkspace() {
               key={purchase.seq}
               preset={purchase.preset}
               order={purchase.order}
+              missingPrices={purchase.missingPrices}
               onClose={() => setPurchase(null)}
               onSaved={(order, pay) => {
                 setPurchase(null)

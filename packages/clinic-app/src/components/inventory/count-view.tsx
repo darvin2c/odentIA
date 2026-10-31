@@ -5,34 +5,56 @@
  * conteo» (se puede contar por partes) y lo que no se cuenta no cambia.
  */
 import { unitFor } from "@odentia/clinical"
-import { Button, Checkbox, Field, FieldLabel, toast } from "@odentia/ui"
-import { ConfirmDialog, DataTable, EmptyState, PageHeader, SearchInput, SkeletonRegion, SubmitButton, ViewTabs, normalizeSearchText, useListSearch } from "@odentia/ui-patterns"
+import { Checkbox, Field, FieldLabel, toast } from "@odentia/ui"
+import {
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  normalizeSearchText,
+  PageHeader,
+  SearchInput,
+  SubmitButton,
+  useAppForm,
+  useFormSubmit,
+  useFormSubmitError,
+  useListSearch,
+  ViewTabs,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ClipboardList } from "lucide-react"
 import * as React from "react"
+import { z } from "zod"
 import {
   countStock,
   fetchProducts,
   formatWhole,
-  inventoryErrorMessage,
   inventoryKeys,
+  inventoryUnconfirmedMessage,
   newKey,
   type ProductListItem,
   parseWhole,
   stockText,
 } from "../../lib/inventory"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
+import { appWords } from "../../lib/product-words"
 import { QueryErrorState } from "../../lib/query-error"
 import { inventoryCountPrimary } from "../../lib/screen-rules"
 import { CountRowsSkeleton } from "../skeletons/inventory"
 import { QuantityInput } from "./fields"
 import { useInventory } from "./inventory-scope"
-import { appWords } from "../../lib/product-words"
 
 type CountFilter = "sin_contar" | "diferencia" | "todos"
 
-function readDraft(key: string): Record<string, string> {
+/** Lo que se escribió de cada producto, por su id. */
+type Counts = Record<string, string>
+
+/** El mismo tope que el servidor (`counted`). */
+const MAX_COUNT = 1_000_000_000
+
+function readDraft(key: string): Counts {
   try {
     const raw = localStorage.getItem(key)
     const parsed = raw ? (JSON.parse(raw) as unknown) : null
@@ -46,7 +68,7 @@ function readDraft(key: string): Record<string, string> {
 }
 
 /** Guarda lo escrito; `false` si el navegador no deja (entonces se avisa al salir). */
-function writeDraft(key: string, draft: Record<string, string>): boolean {
+function writeDraft(key: string, draft: Counts): boolean {
   try {
     const filled = Object.fromEntries(Object.entries(draft).filter(([, value]) => value.trim() !== ""))
     if (Object.keys(filled).length === 0) localStorage.removeItem(key)
@@ -60,7 +82,7 @@ function writeDraft(key: string, draft: Record<string, string>): boolean {
 function countedOf(text: string | undefined): number | null {
   if (text === undefined) return null
   const parsed = parseWhole(text)
-  return parsed === null || Number.isNaN(parsed) ? null : parsed
+  return parsed === null || Number.isNaN(parsed) || parsed > MAX_COUNT ? null : parsed
 }
 
 export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onExit: () => void }) {
@@ -71,7 +93,69 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
   const storageKey = `odentia:inventario:conteo:${branchId}`
   const products = useQuery({ queryKey: inventoryKeys.products(branchId, "", ""), queryFn: () => fetchProducts(branchId) })
   const items = products.data?.items ?? []
-  const [draft, setDraft] = React.useState<Record<string, string>>(() => readDraft(storageKey))
+
+  const [key, setKey] = React.useState(newKey)
+  // El orden en que viajaron: `items[i]` del servidor es el producto `sent[i]`.
+  const sent = React.useRef<string[]>([])
+  const save = useMutation({
+    mutationFn: (rows: Array<{ productId: string; counted: number }>) => countStock(branchId, rows, key),
+  })
+
+  const schema = React.useMemo(() => {
+    const known = new Set(items.map((item) => item.id))
+    return z.object({ counts: z.record(z.string(), z.string()) }).superRefine((value, ctx) => {
+      for (const [id, text] of Object.entries(value.counts)) {
+        if (!known.has(id) || text.trim() === "") continue
+        // Lo escrito que no es un número no se descarta en silencio: se corrige antes de guardar.
+        if (countedOf(text) === null)
+          ctx.addIssue({ code: "custom", path: ["counts", id], message: `Escribe un número entero de 0 a ${formatWhole(MAX_COUNT)}.` })
+      }
+    })
+  }, [items])
+
+  // Lo escrito antes se lee una vez, al abrir.
+  const [initialDraft] = React.useState(() => readDraft(storageKey))
+  const form = useAppForm({
+    defaultValues: { counts: initialDraft },
+    validators: { onSubmit: schema },
+    onSubmit: async ({ value }) => {
+      const rows = Object.entries(value.counts)
+        .filter(([id, text]) => text.trim() !== "" && items.some((item) => item.id === id))
+        .map(([productId, text]) => ({ productId, counted: countedOf(text) as number }))
+      // No es de ninguna fila: se dice junto al botón.
+      if (rows.length === 0) throw new Error("Escribe lo que hay de al menos un producto.")
+      sent.current = rows.map((row) => row.productId)
+      const result = await save.mutateAsync(rows)
+      setKey(newKey())
+      form.reset({ counts: {} })
+      writeDraft(storageKey, {})
+      const changed = result.changed.length
+      toast.success(
+        changed === 0
+          ? "Conteo guardado: todo estaba igual."
+          : `Conteo guardado: ${changed === 1 ? "1 producto cambió" : `${formatWhole(changed)} productos cambiaron`} con el motivo «Conteo».`,
+      )
+      void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
+      onExit()
+    },
+    // Lo que hay que corregir puede estar fuera del filtro: se muestran todos.
+    onSubmitInvalid: ({ formApi }) => {
+      const wrong = Object.keys(formApi.state.values.counts).find((id) => formApi.getFieldMeta(`counts.${id}`)?.errors.length)
+      if (wrong && !container.current?.querySelector(`[data-count-input="${wrong}"]`)) pick("todos")
+    },
+  })
+  const submit = useFormSubmit(form, {
+    // Cada fila se dice en su campo «Contaste».
+    fieldMap: (serverField) => {
+      const index = /^items\[(\d+)\]/.exec(serverField)?.[1]
+      const id = index === undefined ? undefined : sent.current[Number(index)]
+      return id ? `counts.${id}` : undefined
+    },
+    formMessage: (error) => inventoryUnconfirmedMessage(error),
+  })
+  const submitError = useFormSubmitError(form)
+
+  const draft = useStore(form.store, (state) => state.values.counts)
   const [persisted, setPersisted] = React.useState(true)
   React.useEffect(() => setPersisted(writeDraft(storageKey, draft)), [storageKey, draft])
   const written = Object.entries(draft).filter(([id, value]) => value.trim() !== "" && items.some((item) => item.id === id))
@@ -111,29 +195,6 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
     (item) => (shown === null || shown.has(item.id)) && (!q || normalizeSearchText(`${item.name} ${item.sku}`).includes(q)),
   )
 
-  const [key, setKey] = React.useState(newKey)
-  const save = useMutation({
-    mutationFn: () =>
-      countStock(
-        branchId,
-        counted.map(([productId, value]) => ({ productId, counted: countedOf(value) as number })),
-        key,
-      ),
-    onSuccess: (result) => {
-      setKey(newKey())
-      setDraft({})
-      writeDraft(storageKey, {})
-      const changed = result.changed.length
-      toast.success(
-        changed === 0
-          ? "Conteo guardado: todo estaba igual."
-          : `Conteo guardado: ${changed === 1 ? "1 producto cambió" : `${formatWhole(changed)} productos cambiaron`} con el motivo «Conteo».`,
-      )
-      void queryClient.invalidateQueries({ queryKey: inventoryKeys.all })
-      onExit()
-    },
-  })
-
   const container = React.useRef<HTMLFormElement>(null)
   const next = React.useCallback((from: HTMLInputElement) => {
     const inputs = [...(container.current?.querySelectorAll<HTMLInputElement>("[data-count-input]") ?? [])]
@@ -164,22 +225,30 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
         header: () => <span className="block text-right">Contaste</span>,
         meta: { view: { primary: true, label: "Contaste" } },
         cell: ({ row }) => (
-          <QuantityInput
-            className="ml-auto w-32"
-            data-count-input={row.original.id}
-            aria-label={`Contaste de ${row.original.name}, en ${unitFor(2, row.original.unit)}`}
-            placeholder="—"
-            // Se cuenta en la unidad de uso, aunque se compre por cajas: así lo dice el campo.
-            suffix={unitFor(countedOf(draft[row.original.id]) === 1 ? 1 : 2, row.original.unit)}
-            value={draft[row.original.id] ?? ""}
-            invalid={(draft[row.original.id] ?? "").trim() !== "" && countedOf(draft[row.original.id]) === null}
-            onChange={(value) => setDraft((current) => ({ ...current, [row.original.id]: value }))}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter") return
-              event.preventDefault()
-              next(event.currentTarget)
-            }}
-          />
+          <form.AppField name={`counts.${row.original.id}`}>
+            {(field) => (
+              <field.Control hideLabel className="ml-auto w-32 gap-1" label={`Contaste de ${row.original.name}, en ${unitFor(2, row.original.unit)}`}>
+                {(control) => (
+                  <QuantityInput
+                    id={control.id}
+                    data-count-input={row.original.id}
+                    placeholder="—"
+                    // Se cuenta en la unidad de uso, aunque se compre por cajas: así lo dice el campo.
+                    suffix={unitFor(countedOf(field.state.value) === 1 ? 1 : 2, row.original.unit)}
+                    value={field.state.value ?? ""}
+                    invalid={control.invalid}
+                    aria-describedby={control.describedBy}
+                    onChange={(value) => field.handleChange(value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") return
+                      event.preventDefault()
+                      next(event.currentTarget)
+                    }}
+                  />
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ),
       },
       {
@@ -200,12 +269,12 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
         },
       },
     ],
-    [draft, next],
+    [draft, next, form],
   )
   // Sin paginación: reiniciar la página con cada lista nueva re-renderiza sin fin (las filas son otro arreglo en cada render).
   const table = useReactTable({ data: rows, columns, autoResetPageIndex: false, getCoreRowModel: getCoreRowModel(), getRowId: (row) => row.id })
 
-  const [invalidNotice, setInvalidNotice] = React.useState(false)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
   const [leaving, setLeaving] = React.useState(false)
   const [discard, setDiscard] = React.useState(false)
   const filters: Array<{ value: CountFilter; label: string; count: number }> = [
@@ -230,27 +299,18 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
       />
       <form
         ref={container}
+        noValidate
         className="flex flex-col gap-3"
         onKeyDown={(event) => {
           // Enter en el buscador no guarda el conteo: solo los campos de «Contaste» pasan al siguiente.
           if (event.key === "Enter" && event.target instanceof HTMLInputElement && !event.target.dataset.countInput) event.preventDefault()
         }}
         onSubmit={(event) => {
-          event.preventDefault()
-          if (save.isPending || counted.length === 0) return
-          // Lo escrito que no es un número no se descarta en silencio: se corrige antes de guardar.
-          const wrong = written.find(([, value]) => countedOf(value) === null)
-          if (wrong) {
-            setInvalidNotice(true)
-            const input = container.current?.querySelector<HTMLInputElement>(`[data-count-input="${wrong[0]}"]`)
-            if (input) {
-              input.focus()
-              input.select()
-            } else pick("todos")
+          if (isSubmitting) {
+            event.preventDefault()
             return
           }
-          setInvalidNotice(false)
-          save.mutate()
+          submit(event)
         }}
       >
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-card p-3">
@@ -278,27 +338,24 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
           <DataTable table={table} isFetching={products.isFetching} />
         )}
 
-        {invalidNotice && written.length !== counted.length ? (
-          <p role="alert" className="text-sm text-destructive">
-            Corrige lo que está en rojo: cada producto se cuenta con un número entero.
-          </p>
-        ) : null}
-        {save.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {inventoryErrorMessage(save.error)}
-          </p>
-        ) : null}
         {!persisted && written.length > 0 ? (
           <p className="text-sm text-warning">Este navegador no deja guardar lo escrito: guarda el conteo antes de salir.</p>
         ) : null}
 
-        <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-canvas/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:mx-0 sm:rounded-md sm:border sm:bg-card sm:px-4">
-          <p className="text-sm" role="status">
-            {formatWhole(counted.length)} {counted.length === 1 ? "contado" : "contados"} · {formatWhole(differing.length)} con diferencia. Lo que no cuentes no cambia.
-          </p>
-          <SubmitButton type="submit" pending={save.isPending} disabled={counted.length === 0} className="min-h-11 sm:min-h-9">
-            Guardar el conteo
-          </SubmitButton>
+        <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-2 border-t bg-canvas/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:mx-0 sm:rounded-md sm:border sm:bg-card sm:px-4">
+          {submitError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {submitError}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm" role="status">
+              {formatWhole(counted.length)} {counted.length === 1 ? "contado" : "contados"} · {formatWhole(differing.length)} con diferencia. Lo que no cuentes no cambia.
+            </p>
+            <SubmitButton type="submit" pending={isSubmitting} className="min-h-11 sm:min-h-9">
+              Guardar el conteo
+            </SubmitButton>
+          </div>
         </div>
       </form>
 
@@ -312,7 +369,7 @@ export function CountView({ subtitle, onExit }: { subtitle: React.ReactNode; onE
         onClose={() => setLeaving(false)}
         onConfirm={() => {
           if (discard) {
-            setDraft({})
+            form.reset({ counts: {} })
             writeDraft(storageKey, {})
           }
           setLeaving(false)

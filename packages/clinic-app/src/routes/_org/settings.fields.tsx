@@ -1,19 +1,4 @@
-import {
-  Button,
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-  FieldTitle,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Textarea,
-  toast,
-} from "@odentia/ui"
+import { Field, FieldDescription, FieldTitle, toast } from "@odentia/ui"
 import {
   ConfirmDialog,
   DataTable,
@@ -22,17 +7,22 @@ import {
   FormDrawer,
   PageHeader,
   RowActions,
+  submitErrorMessage,
+  useAppForm,
+  useFormSurface,
   useListSearch,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
-import { type FormEvent, useId, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { z } from "zod"
 import { SettingsLoadError } from "../../components/settings/load-error"
 import { SettingsNoAccess } from "../../components/settings/no-access"
 import { DiscardDraftDialog, useReportDirty, useSideForm } from "../../components/settings/side-form"
-import { ApiError, apiFetch } from "../../lib/api"
-import { type FieldDef, useCan, usePermission } from "../../lib/crm"
+import { apiFetch } from "../../lib/api"
+import { type FieldDef, usePermission, useCan } from "../../lib/crm"
 import { settingsPrimary } from "../../lib/screen-rules"
 import { ContactFieldsPageSkeleton, ContactFieldsSkeleton } from "../../components/skeletons/settings"
 
@@ -64,9 +54,43 @@ function toOptions(text: string): string[] {
   return [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))]
 }
 
-function errorText(error: unknown, fallback: string): string {
-  return error instanceof ApiError ? (error.shape.message ?? fallback) : fallback
-}
+const LABEL_CHARS = 120
+const OPTION_CHARS = 80
+const OPTIONS_MAX = 50
+
+/** Los mismos límites que la ruta: el nombre, y en una lista sus opciones (diciendo qué línea falla). */
+const fieldSchema = z
+  .object({
+    label: z
+      .string()
+      .trim()
+      .min(1, "Escribe el nombre del campo")
+      .max(LABEL_CHARS, `El nombre del campo admite hasta ${LABEL_CHARS} caracteres`),
+    type: z.string(),
+    options: z.string(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.type !== "select") return
+    const list = toOptions(value.options)
+    if (list.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["options"], message: "Escribe al menos una opción" })
+      return
+    }
+    const long = value.options.split("\n").findIndex((line) => line.trim().length > OPTION_CHARS)
+    if (long >= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["options"],
+        message: `La línea ${long + 1} pasa de ${OPTION_CHARS} caracteres: acórtala`,
+      })
+    } else if (list.length > OPTIONS_MAX) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["options"],
+        message: `Una lista admite hasta ${OPTIONS_MAX} opciones; ahora hay ${list.length}`,
+      })
+    }
+  })
 
 /**
  * Campos de contacto: lo que la clínica quiere guardar de cada contacto además
@@ -105,7 +129,7 @@ function ContactFieldsPage() {
     },
     onError: (error) => {
       setDeleting(null)
-      toast.error(errorText(error, "No pudimos eliminar el campo. Vuelve a intentarlo."))
+      toast.error(submitErrorMessage(error))
     },
   })
 
@@ -290,15 +314,8 @@ function FieldForm({
   onClose: () => void
   onSaved: () => void
 }) {
-  const ids = useId()
-  const initialOptions = (field?.options ?? []).join("\n")
-  const [label, setLabel] = useState(field?.label ?? "")
-  const [type, setType] = useState<FieldType>((field?.type as FieldType | undefined) ?? "text")
-  const [options, setOptions] = useState(initialOptions)
-  const [errors, setErrors] = useState<{ label?: string; options?: string }>({})
-
   const save = useMutation({
-    mutationFn: (values: { label: string; type: FieldType; options: string[] }) => {
+    mutationFn: (values: { label: string; type: string; options: string[] }) => {
       const withOptions = values.type === "select" ? { options: values.options } : {}
       return field
         ? apiFetch(`/api/fields/${field.id}`, {
@@ -310,49 +327,39 @@ function FieldForm({
             body: JSON.stringify({ label: values.label, type: values.type, ...withOptions }),
           })
     },
-    onSuccess: (_result, values) => {
-      toast.success(`Campo «${values.label}» guardado`)
+  })
+
+  const form = useAppForm({
+    defaultValues: {
+      label: field?.label ?? "",
+      type: field?.type ?? "text",
+      options: (field?.options ?? []).join("\n"),
+    },
+    validators: { onSubmit: fieldSchema },
+    onSubmit: async ({ value }) => {
+      const label = value.label.trim()
+      await save.mutateAsync({ label, type: value.type, options: toOptions(value.options) })
+      toast.success(`Campo «${label}» guardado`)
       onSaved()
     },
   })
-
-  const isDirty = label !== (field?.label ?? "") || options !== initialOptions || (!field && type !== "text")
-  useReportDirty(isDirty, onDirtyChange)
+  const surface = useFormSurface(form)
+  const type = useStore(form.store, (state) => state.values.type)
+  useReportDirty(surface.isDirty, onDirtyChange)
 
   return (
-    <FormDrawer
-      open
-      onClose={onClose}
-      title={field ? "Editar campo" : "Nuevo campo"}
-      isDirty={isDirty}
-      isSubmitting={save.isPending}
-      error={save.isError ? errorText(save.error, "No pudimos guardar el campo. Vuelve a intentarlo.") : null}
-      onSubmit={(event: FormEvent) => {
-        event.preventDefault()
-        const name = label.trim()
-        const list = toOptions(options)
-        const next: { label?: string; options?: string } = {}
-        if (!name) next.label = "Escribe el nombre del campo"
-        if (type === "select" && list.length === 0) next.options = "Escribe al menos una opción"
-        setErrors(next)
-        if (next.label || next.options) return
-        save.mutate({ label: name, type, options: list })
-      }}
-    >
+    <FormDrawer {...surface} open onClose={onClose} title={field ? "Editar campo" : "Nuevo campo"}>
       <div className="flex flex-col gap-4">
-        <Field>
-          <FieldLabel htmlFor={`${ids}-nombre`}>Nombre</FieldLabel>
-          <Input
-            id={`${ids}-nombre`}
-            value={label}
-            maxLength={120}
-            placeholder="Cómo nos conoció"
-            aria-invalid={errors.label ? true : undefined}
-            onChange={(event) => setLabel(event.target.value)}
-          />
-          <FieldDescription>Así se lee en la ficha de cada contacto.</FieldDescription>
-          {errors.label ? <FieldError>{errors.label}</FieldError> : null}
-        </Field>
+        <form.AppField name="label">
+          {(control) => (
+            <control.TextField
+              label="Nombre"
+              maxLength={LABEL_CHARS}
+              placeholder="Cómo nos conoció"
+              description="Así se lee en la ficha de cada contacto."
+            />
+          )}
+        </form.AppField>
         {field ? (
           <Field>
             <FieldTitle>Tipo</FieldTitle>
@@ -362,44 +369,31 @@ function FieldForm({
             </FieldDescription>
           </Field>
         ) : (
-          <Field>
-            <FieldLabel htmlFor={`${ids}-tipo`}>Tipo</FieldLabel>
-            <Select value={type} items={TYPE_ITEMS} onValueChange={(value) => setType((value as FieldType | null) ?? "text")}>
-              <SelectTrigger id={`${ids}-tipo`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FIELD_TYPES.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldDescription>
-              {FIELD_TYPES.find((item) => item.value === type)?.hint} Después no se puede cambiar.
-            </FieldDescription>
-          </Field>
+          <form.AppField name="type">
+            {(control) => (
+              <control.SelectField
+                label="Tipo"
+                options={FIELD_TYPES.map(({ value, label }) => ({ value, label }))}
+                description={`${FIELD_TYPES.find((item) => item.value === type)?.hint ?? ""} Después no se puede cambiar.`}
+              />
+            )}
+          </form.AppField>
         )}
         {type === "select" ? (
-          <Field>
-            <FieldLabel htmlFor={`${ids}-opciones`}>Opciones</FieldLabel>
-            <Textarea
-              id={`${ids}-opciones`}
-              value={options}
-              rows={5}
-              placeholder={"Redes sociales\nRecomendación\nPasó por la clínica"}
-              aria-invalid={errors.options ? true : undefined}
-              onChange={(event) => setOptions(event.target.value)}
-            />
-            <FieldDescription>
-              Una por línea.
-              {field
-                ? " Si quitas una, los contactos que la tenían la conservan; al editar sus campos habrá que elegir otra."
-                : ""}
-            </FieldDescription>
-            {errors.options ? <FieldError>{errors.options}</FieldError> : null}
-          </Field>
+          <form.AppField name="options">
+            {(control) => (
+              <control.TextareaField
+                label="Opciones"
+                rows={5}
+                placeholder={"Redes sociales\nRecomendación\nPasó por la clínica"}
+                description={`Una por línea.${
+                  field
+                    ? " Si quitas una, los contactos que la tenían la conservan; al editar sus campos habrá que elegir otra."
+                    : ""
+                }`}
+              />
+            )}
+          </form.AppField>
         ) : null}
       </div>
     </FormDrawer>

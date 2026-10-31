@@ -1,9 +1,7 @@
 import {
   buttonVariants,
-  Checkbox,
   cn,
   FieldLabel,
-  Input,
   RadioGroup,
   RadioGroupItem,
   toast,
@@ -14,18 +12,21 @@ import {
   DatePickerButton,
   FormDrawer,
   formatDateLong,
+  hourLabel,
   minutesToInstant,
   TimeSelect,
+  useAppForm,
+  useFormSurface,
   zonedDateOf,
 } from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { TriangleAlert } from "lucide-react"
-import * as React from "react"
+import { z } from "zod"
 import type { AgendaAppointment } from "../../lib/agenda"
 import { apiFetch } from "../../lib/api"
 import { ChoiceSelect } from "../ui/choice-select"
-import { errorMessage } from "./shared"
 
 type ReasonId = "vacaciones" | "permiso" | "feriado" | "cierre" | "otro"
 type Reason = { id: ReasonId; label: string; kind: "ausencia" | "bloqueo" }
@@ -53,9 +54,12 @@ function toMinutes(label: string): number {
   return hours * 60 + minutes
 }
 
+/** La última hora de la lista: un inicio a esa hora no deja fin ese día. */
+const LAST_START = 23 * 60 + 45
+
 /** «12:00» + 60 → «13:00», sin pasar de las 23:45 (la última hora de la lista). */
 function addMinutes(label: string, add: number): string {
-  return clockValue(Math.min(toMinutes(label) + add, 23 * 60 + 45))
+  return clockValue(Math.min(toMinutes(label) + add, LAST_START))
 }
 
 /** «Ana, Luis y Marta» o «Ana, Luis, Marta y 2 más». */
@@ -65,6 +69,45 @@ function namesSaid(names: string[]): string {
   if (rest > 0) return `${shown.join(", ")} y ${rest} más`
   if (shown.length <= 1) return shown.join("")
   return `${shown.slice(0, -1).join(", ")} y ${shown[shown.length - 1]}`
+}
+
+const absenceSchema = z
+  .object({
+    reason: z.enum(["vacaciones", "permiso", "feriado", "cierre", "otro"]),
+    other: z.string().max(500, "Escribe el motivo en 500 caracteres como mucho."),
+    from: z.string(),
+    to: z.string(),
+    allDay: z.boolean(),
+    fromTime: z.string(),
+    toTime: z.string(),
+    roomId: z.string(),
+  })
+  .superRefine((value, ctx) => {
+    // Con horas, el fin es del mismo día: tiene que ser después del inicio.
+    if (!value.allDay && toMinutes(value.toTime) <= toMinutes(value.fromTime)) {
+      const start = hourLabel(toMinutes(value.fromTime))
+      ctx.addIssue({
+        code: "custom",
+        path: ["toTime"],
+        // Desde las 23:45 la lista ya no tiene una hora después.
+        message:
+          toMinutes(value.fromTime) >= LAST_START
+            ? `Después de las ${start} no queda hora ese día: adelanta «Desde las» o marca «Todo el día».`
+            : `Elige una hora después de las ${start}.`,
+      })
+    }
+  })
+
+type AbsenceValues = z.input<typeof absenceSchema>
+
+/** El tramo que se cierra: de todo el día o de una hora a otra el mismo día. */
+function rangeOf(value: AbsenceValues, timeZone: string) {
+  const lastDay = value.allDay && value.to >= value.from ? value.to : value.from
+  const startsAt = minutesToInstant(value.from, value.allDay ? 0 : toMinutes(value.fromTime), timeZone)
+  const endsAt = value.allDay
+    ? minutesToInstant(addDays(lastDay, 1), 0, timeZone)
+    : minutesToInstant(value.from, toMinutes(value.toTime), timeZone)
+  return { lastDay, startsAt, endsAt }
 }
 
 /**
@@ -93,28 +136,57 @@ export function AbsenceForm({
   const person = scope.kind === "person"
   const who = person ? scope.professionalUserId : null
   const reasons = person ? PERSON_REASONS : BRANCH_REASONS
-  const [reason, setReason] = React.useState<ReasonId>(reasons[0]?.id ?? "otro")
-  const [other, setOther] = React.useState("")
-  const [from, setFrom] = React.useState(today)
-  const [to, setTo] = React.useState(today)
-  const [allDay, setAllDay] = React.useState(true)
-  const [fromTime, setFromTime] = React.useState("12:00")
-  const [toTime, setToTime] = React.useState("14:00")
-  const [roomId, setRoomId] = React.useState("")
-  const [error, setError] = React.useState("")
-  const reasonId = React.useId()
-  const allDayId = React.useId()
 
-  const lastDay = allDay && to >= from ? to : from
-  const startsAt = minutesToInstant(from, allDay ? 0 : toMinutes(fromTime), timeZone)
-  const endsAt = allDay
-    ? minutesToInstant(addDays(lastDay, 1), 0, timeZone)
-    : minutesToInstant(from, toMinutes(toTime), timeZone)
+  const save = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch("/api/agenda/blocks", { method: "POST", body: JSON.stringify(body) }),
+  })
+  const form = useAppForm({
+    defaultValues: {
+      reason: reasons[0]?.id ?? "otro",
+      other: "",
+      from: today,
+      to: today,
+      allDay: true,
+      fromTime: "12:00",
+      toTime: "14:00",
+      roomId: "",
+    } as AbsenceValues,
+    validators: { onSubmit: absenceSchema },
+    onSubmit: async ({ value }) => {
+      const chosen = reasons.find((item) => item.id === value.reason) ?? reasons[0]
+      const text = value.reason === "otro" ? value.other.trim() : chosen?.label
+      const { startsAt, endsAt } = rangeOf(value, timeZone)
+      await save.mutateAsync({
+        branchId,
+        professionalUserId: who,
+        roomId: value.roomId || null,
+        kind: chosen?.kind ?? "bloqueo",
+        reason: text || undefined,
+        startsAt,
+        endsAt,
+      })
+      toast.success(person ? "Ausencia guardada" : "Feriado o cierre guardado")
+      await onSaved()
+    },
+  })
+  const surface = useFormSurface(form, {
+    // El inicio y el fin van en el cuerpo como instantes: se dicen en el campo que los fija.
+    fieldMap: (field) => {
+      const allDay = form.state.values.allDay
+      if (field === "startsAt") return allDay ? "from" : "fromTime"
+      if (field === "endsAt") return allDay ? "to" : "toTime"
+      if (field === "reason") return "other"
+      return undefined
+    },
+  })
+  const values = useStore(form.store, (state) => state.values)
+  const { lastDay, startsAt, endsAt } = rangeOf(values, timeZone)
   const valid = Date.parse(endsAt) > Date.parse(startsAt)
 
   // Citas en pie que quedan dentro: se avisa antes de guardar.
   const affectedQuery = useQuery({
-    queryKey: ["agenda", "ausencia", branchId, who, roomId, startsAt, endsAt],
+    queryKey: ["agenda", "ausencia", branchId, who, values.roomId, startsAt, endsAt],
     enabled: valid,
     queryFn: () => {
       const params = new URLSearchParams({
@@ -124,7 +196,7 @@ export function AbsenceForm({
         status: "programada,confirmada",
       })
       if (who) params.set("professionals", who)
-      if (roomId) params.set("rooms", roomId)
+      if (values.roomId) params.set("rooms", values.roomId)
       return apiFetch<{ data: AgendaAppointment[] }>(`/api/appointments?${params}`)
     },
   })
@@ -135,33 +207,9 @@ export function AbsenceForm({
   )
   const firstAffected = affected[0]
 
-  const chosen = reasons.find((item) => item.id === reason) ?? reasons[0]
-  const save = useMutation({
-    mutationFn: () => {
-      if (!valid) throw new Error("El fin debe ser posterior al inicio.")
-      const text = reason === "otro" ? other.trim() : chosen?.label
-      return apiFetch("/api/agenda/blocks", {
-        method: "POST",
-        body: JSON.stringify({
-          branchId,
-          professionalUserId: who,
-          roomId: roomId || null,
-          kind: chosen?.kind ?? "bloqueo",
-          reason: text || undefined,
-          startsAt,
-          endsAt,
-        }),
-      })
-    },
-    onSuccess: async () => {
-      toast.success(person ? "Ausencia guardada" : "Feriado o cierre guardado")
-      await onSaved()
-    },
-    onError: (cause) => setError(errorMessage(cause)),
-  })
-
   return (
     <FormDrawer
+      {...surface}
       open
       title={person ? "Nueva ausencia" : "Nuevo feriado o cierre"}
       description={
@@ -170,134 +218,197 @@ export function AbsenceForm({
           : `Días u horas en que ${scope.name} no atiende. Vale para todos los profesionales.`
       }
       onClose={onClose}
-      onSubmit={(event) => {
-        event.preventDefault()
-        setError("")
-        save.mutate()
-      }}
-      isSubmitting={save.isPending}
-      isDirty
-      error={error || null}
-      submitDisabled={!valid}
       submitLabel={person ? "Guardar ausencia" : "Guardar"}
     >
       <div className="grid gap-4">
         <div className="grid gap-2">
-          <span id={reasonId} className="text-sm font-medium">
-            Motivo
-          </span>
-          <RadioGroup
-            aria-labelledby={reasonId}
-            className="flex flex-wrap gap-2"
-            value={reason}
-            onValueChange={(next) => setReason(next as ReasonId)}
-          >
-            {reasons.map((option) => (
-              <FieldLabel
-                key={option.id}
-                className={cn(
-                  "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
-                  reason === option.id && "border-primary bg-primary-soft",
+          <form.AppField name="reason">
+            {(field) => (
+              <field.Group legend="Motivo">
+                {(control) => (
+                  <RadioGroup
+                    name={control.name}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    className="flex flex-wrap gap-2"
+                    value={field.state.value}
+                    onValueChange={(next) => {
+                      field.handleChange(next as ReasonId)
+                      field.handleBlur()
+                    }}
+                  >
+                    {reasons.map((option) => (
+                      <FieldLabel
+                        key={option.id}
+                        className={cn(
+                          "flex h-10 w-auto cursor-pointer items-center gap-2 rounded-xl border px-3 text-sm font-normal",
+                          field.state.value === option.id && "border-primary bg-primary-soft",
+                        )}
+                      >
+                        <RadioGroupItem value={option.id} />
+                        {option.label}
+                      </FieldLabel>
+                    ))}
+                  </RadioGroup>
                 )}
-              >
-                <RadioGroupItem value={option.id} />
-                {option.label}
-              </FieldLabel>
-            ))}
-          </RadioGroup>
-          {reason === "otro" ? (
-            <Input
-              aria-label="Motivo"
-              placeholder={person ? "Capacitación, congreso…" : "Mantenimiento, inventario…"}
-              maxLength={500}
-              value={other}
-              onChange={(event) => setOther(event.target.value)}
-            />
+              </field.Group>
+            )}
+          </form.AppField>
+          {values.reason === "otro" ? (
+            <form.AppField name="other">
+              {(field) => (
+                <field.TextField
+                  label="Motivo"
+                  hideLabel
+                  placeholder={person ? "Capacitación, congreso…" : "Mantenimiento, inventario…"}
+                  maxLength={500}
+                />
+              )}
+            </form.AppField>
           ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className={cn("grid gap-2", !allDay && "col-span-2")}>
-            <FieldLabel htmlFor="ausencia-desde">{allDay ? "Desde" : "Día"}</FieldLabel>
-            <DatePickerButton
-              id="ausencia-desde"
-              className="justify-start font-normal"
-              value={from}
-              onChange={(next) => {
-                setFrom(next)
-                if (to < next) setTo(next)
-              }}
-            >
-              {formatDateLong(from)}
-            </DatePickerButton>
-          </div>
-          {allDay ? (
-            <div className="grid gap-2">
-              <FieldLabel htmlFor="ausencia-hasta">Hasta</FieldLabel>
-              <DatePickerButton
-                id="ausencia-hasta"
-                className="justify-start font-normal"
-                min={from}
-                align="end"
-                value={lastDay}
-                onChange={setTo}
+          <form.AppField
+            name="from"
+            listeners={{
+              onChange: ({ value }) => {
+                if (form.getFieldValue("to") < value) form.setFieldValue("to", value)
+              },
+            }}
+          >
+            {(field) => (
+              <field.Control
+                label={values.allDay ? "Desde" : "Día"}
+                id="ausencia-desde"
+                className={cn(!values.allDay && "col-span-2")}
               >
-                {formatDateLong(lastDay)}
-              </DatePickerButton>
-            </div>
+                {(control) => (
+                  <DatePickerButton
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    className="justify-start font-normal"
+                    value={field.state.value}
+                    onChange={(next) => {
+                      field.handleChange(next)
+                      field.handleBlur()
+                    }}
+                  >
+                    {formatDateLong(field.state.value)}
+                  </DatePickerButton>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
+          {values.allDay ? (
+            <form.AppField name="to">
+              {(field) => (
+                <field.Control label="Hasta" id="ausencia-hasta">
+                  {(control) => (
+                    <DatePickerButton
+                      id={control.id}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      className="justify-start font-normal"
+                      min={values.from}
+                      align="end"
+                      value={lastDay}
+                      onChange={(next) => {
+                        field.handleChange(next)
+                        field.handleBlur()
+                      }}
+                    >
+                      {formatDateLong(lastDay)}
+                    </DatePickerButton>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           ) : (
             <>
-              <div className="grid gap-2">
-                <FieldLabel htmlFor="ausencia-inicio">Desde las</FieldLabel>
-                <TimeSelect
-                  id="ausencia-inicio"
-                  className="w-full"
-                  value={fromTime}
-                  onChange={(next) => {
-                    setFromTime(next)
-                    if (toMinutes(toTime) <= toMinutes(next)) setToTime(addMinutes(next, 60))
-                  }}
-                />
-              </div>
-              <div className="grid gap-2">
-                <FieldLabel htmlFor="ausencia-fin">Hasta las</FieldLabel>
-                <TimeSelect
-                  id="ausencia-fin"
-                  className="w-full"
-                  min={addMinutes(fromTime, 15)}
-                  value={toTime}
-                  onChange={setToTime}
-                />
-              </div>
+              <form.AppField
+                name="fromTime"
+                listeners={{
+                  onChange: ({ value }) => {
+                    // El fin acompaña al inicio; a las 23:45 no queda hueco y lo dice «Hasta las».
+                    if (toMinutes(form.getFieldValue("toTime")) <= toMinutes(value)) {
+                      form.setFieldValue("toTime", addMinutes(value, 60))
+                    }
+                  },
+                }}
+              >
+                {(field) => (
+                  <field.Control label="Desde las" id="ausencia-inicio">
+                    {(control) => (
+                      <TimeSelect
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        className="w-full"
+                        value={field.state.value}
+                        onChange={(next) => {
+                          field.handleChange(next)
+                          field.handleBlur()
+                        }}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
+              <form.AppField name="toTime">
+                {(field) => (
+                  <field.Control label="Hasta las" id="ausencia-fin">
+                    {(control) => (
+                      <TimeSelect
+                        id={control.id}
+                        invalid={control.invalid}
+                        aria-describedby={control.describedBy}
+                        className="w-full"
+                        min={addMinutes(values.fromTime, 15)}
+                        value={field.state.value}
+                        onChange={(next) => {
+                          field.handleChange(next)
+                          field.handleBlur()
+                        }}
+                      />
+                    )}
+                  </field.Control>
+                )}
+              </form.AppField>
             </>
           )}
         </div>
 
-        <FieldLabel htmlFor={allDayId} className="flex cursor-pointer items-center gap-2.5 font-normal">
-          <Checkbox
-            id={allDayId}
-            checked={allDay}
-            onCheckedChange={(checked) => setAllDay(checked === true)}
-          />
-          Todo el día
-        </FieldLabel>
+        <form.AppField name="allDay">{(field) => <field.CheckboxField label="Todo el día" />}</form.AppField>
 
         {!person && rooms.length > 0 ? (
-          <div className="grid gap-2">
-            <FieldLabel htmlFor="ausencia-sillon">Qué se cierra</FieldLabel>
-            <ChoiceSelect
-              id="ausencia-sillon"
-              value={roomId}
-              onChange={(event) => setRoomId(event.target.value)}
-            >
-              <option value="">Toda la sede</option>
-              {rooms.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </ChoiceSelect>
-          </div>
+          <form.AppField name="roomId">
+            {(field) => (
+              <field.Control label="Qué se cierra" id="ausencia-sillon">
+                {(control) => (
+                  <ChoiceSelect
+                    id={control.id}
+                    aria-invalid={control.invalid || undefined}
+                    aria-describedby={control.describedBy}
+                    onBlur={control.onBlur}
+                    value={field.state.value}
+                    onChange={(event) => {
+                      field.handleChange(event.target.value)
+                      field.handleBlur()
+                    }}
+                  >
+                    <option value="">Toda la sede</option>
+                    {rooms.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </ChoiceSelect>
+                )}
+              </field.Control>
+            )}
+          </form.AppField>
         ) : null}
 
         {firstAffected ? (

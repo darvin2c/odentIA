@@ -5,7 +5,8 @@ export interface ApiErrorShape {
   code?: string
   message?: string
   request_id?: string
-  details?: unknown
+  /** Campo del cuerpo (`items[0].price`) → lo que se dice junto a él. */
+  fields?: Record<string, string>
 }
 
 export interface ErrorStateProps {
@@ -13,7 +14,6 @@ export interface ErrorStateProps {
   message?: string
   code?: string
   requestId?: string
-  details?: unknown
   error?: ApiErrorShape | Error | string | null
   onRetry?: () => void
   retryLabel?: string

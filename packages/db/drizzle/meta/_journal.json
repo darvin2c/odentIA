@@ -173,8 +173,22 @@
     {
       "idx": 24,
       "version": "7",
-      "when": 1793395606272,
-      "tag": "0024_adorable_slapstick",
+      "when": 1793390257419,
+      "tag": "0024_enlace_para_alguien_nuevo",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793399859386,
+      "tag": "0025_documentos_formales",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793456547916,
+      "tag": "0026_indice_cobro_por_procedimiento",
       "breakpoints": true
     }
   ]

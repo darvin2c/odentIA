@@ -36,16 +36,17 @@ test("condiciones comerciales: se leen en frases, se cambian por grupo y quedan 
     await section.scrollIntoViewIfNeeded()
     await shot("seccion")
 
-    // Un valor fuera de lo que admite se dice junto al campo y no se guarda.
+    // Un valor fuera de lo que admite se dice junto al campo al guardar y no se guarda.
     await section.getByRole("button", { name: "Cambiar: Prueba y avisos del presupuesto" }).click()
     const warn = page.getByRole("textbox", { name: "Avisar al usar" })
     await warn.fill(String(before!.alarmPercent + 2))
+    await page.getByRole("button", { name: "Guardar" }).click()
+    // Sigue abierto, con el error en el campo y el foco en él.
+    await expect(warn).toBeVisible()
+    await expect(warn).toHaveAttribute("aria-invalid", "true")
+    await expect(warn).toBeFocused()
     await expect(page.getByText(`El aviso va antes que la alarma: escribe menos de ${before!.alarmPercent} %.`)).toBeVisible()
     await shot("error-junto-al-campo")
-    await page.getByRole("button", { name: "Guardar" }).click()
-    // Sigue abierto, con el error a la vista.
-    await expect(warn).toBeVisible()
-    await expect(page.getByText(`El aviso va antes que la alarma: escribe menos de ${before!.alarmPercent} %.`)).toBeVisible()
     await warn.fill(String(before!.warnPercent))
     await page.getByRole("button", { name: "Cancelar" }).click()
 

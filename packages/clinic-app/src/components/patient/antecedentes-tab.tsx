@@ -18,29 +18,35 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-  Textarea,
 } from "@odentia/ui"
-import { EmptyState, ErrorState, FormDrawer, SkeletonRegion } from "@odentia/ui-patterns"
-import { AntecedentesSkeleton } from "../skeletons/person-sections"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  EmptyState,
+  ErrorState,
+  FormDrawer,
+  useAppForm,
+  useFormSurface,
+  SkeletonRegion,
+} from "@odentia/ui-patterns"
+import { useStore } from "@tanstack/react-form"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, HeartPulse } from "lucide-react"
 import type { ReactNode } from "react"
 import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { z } from "zod"
 import { ApiError, apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
+import { clinicToday } from "../../lib/inventory"
 import {
   type AnamnesisAnswers,
-  type BloodGroup,
-  type Condition,
   fetchAnamnesisHistory,
   fetchPatientHealth,
   HEALTH_REVIEW_LABELS,
   type HealthReviewState,
   hasHealthInfo,
   isHealthReviewPending,
-  type Medication,
   type PatientFull,
   type PatientHealth,
+  type SaveHealthInput,
   savePatientHealthApi,
 } from "../../lib/patients"
 import { ChoiceSelect } from "../ui/choice-select"
@@ -48,45 +54,32 @@ import { AllergiesCard } from "./allergies-card"
 import { AnamnesisVersionDialog } from "./anamnesis-history"
 import {
   BLOOD_GROUP_LABELS,
-  BloodGroupSelect,
+  BloodGroupField,
   ConditionRows,
-  type ConditionRowValue,
   DECLARATION_STATE_LABELS,
+  HEALTH_NAME_MAX,
+  HEALTH_NOTES_MAX,
+  type HealthFormValues,
+  healthFormOptions,
   MedicationRows,
-  type MedicationRowValue,
-  ReviewStateSelect,
+  ReviewStateField,
 } from "./patient-health-fields"
 import { activeOrgLocale } from "../../lib/locale"
-import { productUi } from "../../product/product-ui"
+import { productUi, type SubFieldErrors } from "../../product/product-ui"
+import { AntecedentesSkeleton } from "../skeletons/person-sections"
 
 type Rec = Record<string, unknown>
-
-interface ConditionDraft extends ConditionRowValue {
-  id?: string
-}
-
-interface MedicationDraft extends MedicationRowValue {
-  id?: string
-}
-
-interface ReviewDraft {
-  allergies: HealthReviewState
-  conditions: HealthReviewState
-  medications: HealthReviewState
-}
-
-type DraftId = { key: string; id?: string }
 
 function strOf(v: unknown): string {
   return typeof v === "string" || typeof v === "number" ? String(v) : ""
 }
 
-function groupOf(value: AnamnesisAnswers, group: string): Rec {
-  const g = (value as Rec)[group]
+function groupOf(value: Rec, group: string): Rec {
+  const g = value[group]
   return typeof g === "object" && g !== null ? { ...(g as Rec) } : {}
 }
 
-function sanitizeInterview(value: AnamnesisAnswers): AnamnesisAnswers {
+function sanitizeInterview(value: Rec): AnamnesisAnswers {
   const walk = (node: unknown): unknown => {
     if (typeof node === "string") {
       const t = node.trim()
@@ -109,6 +102,16 @@ function sanitizeInterview(value: AnamnesisAnswers): AnamnesisAnswers {
   return (walk(value) ?? {}) as AnamnesisAnswers
 }
 
+/** La entrevista como texto estable (claves ordenadas): para saber si cambió. */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? ""
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`
+  return `{${Object.entries(value as Rec)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`)
+    .join(",")}}`
+}
+
 function isValidDateStr(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const [y, m, d] = value.split("-").map(Number)
@@ -119,7 +122,6 @@ function isValidDateStr(value: string): boolean {
     date.getUTCDate() === d
   )
 }
-const STATUS_OPTIONS: readonly string[] = CONDITION_STATUSES
 
 const LEGACY_TOP_KEYS = [
   "motivoConsulta",
@@ -142,21 +144,13 @@ function legacyTexts(
       out.push({ label: key, text: JSON.stringify(value) })
     }
   }
-  const personales = groupOf(answers, "antecedentesPersonales")
+  const personales = groupOf(rec, "antecedentesPersonales")
   for (const key of ["enfermedades", "medicacionHabitual"] as const) {
     if (typeof personales[key] === "string" && (personales[key] as string).trim() !== "") {
       out.push({ label: `antecedentesPersonales.${key}`, text: personales[key] as string })
     }
   }
   return out
-}
-
-interface FamilyDraft {
-  key: string
-  relationship: string
-  condition: string
-  diagnosisCode: string
-  diagnosisSystem: string | null
 }
 
 /** Parentesco con HL7 v3 RoleCode, con las palabras de siempre (decisión 28). */
@@ -172,15 +166,10 @@ const ASA_OPTIONS: Array<[string, string]> = [
   ["VI", "ASA VI · muerte cerebral (donante)"],
 ]
 
-function buildDrafts(health: PatientHealth): {
-  conditions: ConditionDraft[]
-  medications: MedicationDraft[]
-  review: ReviewDraft
-  bloodGroup: BloodGroup | null
-  asaClass: string
-  familyHistory: FamilyDraft[]
-  interview: AnamnesisAnswers
-} {
+/** Lo guardado, como lo edita el formulario. */
+function buildDrafts(health: PatientHealth): HealthFormValues {
+  const interview = (health.latestAnamnesis?.answers ?? {}) as Rec
+  const weeks = groupOf(interview, "antecedentesPersonales")["semanasEmbarazo"]
   return {
     asaClass: health.asaClass ?? "",
     familyHistory: (health.familyHistory ?? []).map((row) => ({
@@ -190,7 +179,7 @@ function buildDrafts(health: PatientHealth): {
       diagnosisCode: row.diagnosisCode ?? "",
       diagnosisSystem: row.diagnosisSystem ?? null,
     })),
-    conditions: health.conditions.map((c: Condition) => ({
+    conditions: health.conditions.map((c) => ({
       key: c.id,
       id: c.id,
       name: c.name,
@@ -202,7 +191,7 @@ function buildDrafts(health: PatientHealth): {
       notes: c.notes ?? "",
       persisted: true,
     })),
-    medications: health.medications.map((m: Medication) => ({
+    medications: health.medications.map((m) => ({
       key: m.id,
       id: m.id,
       name: m.name,
@@ -211,16 +200,239 @@ function buildDrafts(health: PatientHealth): {
       dose: m.doseValue ? "" : (m.dose ?? ""),
       doseValue: m.doseValue ? String(Number(m.doseValue)) : "",
       doseUnit: m.doseUnit ?? "",
+      // Lo escrito sin frecuencia de la lista es «Otra».
       frequency: m.frequencyCode ? "" : (m.frequency ?? ""),
-      frequencyCode: m.frequencyCode ?? "",
+      frequencyCode: m.frequencyCode ?? (m.frequency?.trim() ? "otra" : ""),
       startDate: m.startDate ?? "",
       endDate: m.endDate ?? "",
       notes: m.notes ?? "",
       persisted: true,
     })),
-    review: { ...health.reviewStatus },
-    bloodGroup: health.bloodGroup ?? null,
-    interview: (health.latestAnamnesis?.answers ?? {}) as AnamnesisAnswers,
+    reviewStatus: {
+      conditions: health.reviewStatus.conditions,
+      medications: health.reviewStatus.medications,
+    },
+    bloodGroup: health.bloodGroup ?? "",
+    interview,
+    pregnancyWeeks: typeof weeks === "number" ? String(weeks) : "",
+  }
+}
+
+/** Desde dónde se editó: revisión del agregado, versión de la entrevista y cómo era. */
+interface HealthBase {
+  revision: number
+  version: number
+  interview: string
+}
+
+/** La entrevista con las semanas de embarazo (odentIA las pregunta en «Personales»). */
+function interviewOf(value: HealthFormValues, asksPregnancy: boolean): Rec {
+  if (!asksPregnancy) return value.interview
+  const personales = groupOf(value.interview, "antecedentesPersonales")
+  const weeks = value.pregnancyWeeks.trim()
+  if (personales["embarazo"] === true && weeks !== "") personales["semanasEmbarazo"] = Number(weeks)
+  else delete personales["semanasEmbarazo"]
+  const out = { ...value.interview }
+  if (Object.keys(personales).length > 0) out["antecedentesPersonales"] = personales
+  else delete out["antecedentesPersonales"]
+  return out
+}
+
+const INTERVIEW_PREFIX = "anamnesis.answers."
+
+/** Lo que el servidor dijo de la entrevista, con las claves de `InterviewSections` («habitos.tabaco»). */
+function interviewErrorsOf(fields: Record<string, string> | undefined): SubFieldErrors {
+  const out: SubFieldErrors = {}
+  for (const [key, message] of Object.entries(fields ?? {})) {
+    if (!key.startsWith(INTERVIEW_PREFIX)) continue
+    out[key.slice(INTERVIEW_PREFIX.length).replace(/\[(\d+)\]/g, ".$1")] = message
+  }
+  return out
+}
+
+const tooLong = (max: number) => `Escribe como mucho ${max} caracteres.`
+const dateText = z.string().refine((v) => v === "" || isValidDateStr(v), "Escribe la fecha completa.")
+const endAfterStart = (row: { startDate: string; endDate: string }, ctx: z.core.$RefinementCtx) => {
+  if (row.startDate !== "" && row.endDate !== "" && row.startDate > row.endDate)
+    ctx.addIssue({ code: "custom", path: ["endDate"], message: "El fin no puede ser anterior al inicio." })
+}
+const nameText = z
+  .string()
+  .trim()
+  .min(1, "Escribe el nombre.")
+  .max(HEALTH_NAME_MAX, tooLong(HEALTH_NAME_MAX))
+const notesText = z.string().max(HEALTH_NOTES_MAX, tooLong(HEALTH_NOTES_MAX))
+
+/** Los mismos límites y reglas que `PUT /api/patients/:id/health` y su servicio. */
+function healthSchema(
+  asksPregnancy: boolean,
+  validateInterview: (interview: Rec) => SubFieldErrors,
+) {
+  const reviewState = z.enum(["unknown", "none", "recorded"])
+  return z
+    .object({
+      bloodGroup: z.string(),
+      asaClass: z.string(),
+      conditions: z.array(
+        z
+          .object({
+            key: z.string(),
+            id: z.string().optional(),
+            name: nameText,
+            diagnosisCode: z.string(),
+            diagnosisSystem: z.string().nullable(),
+            persisted: z.boolean(),
+            status: z
+              .string()
+              .refine((v) => (CONDITION_STATUSES as readonly string[]).includes(v), "Elige el estado."),
+            startDate: dateText,
+            endDate: dateText,
+            notes: notesText,
+          })
+          .superRefine(endAfterStart),
+      ),
+      medications: z.array(
+        z
+          .object({
+            key: z.string(),
+            id: z.string().optional(),
+            name: nameText,
+            genericName: z.string(),
+            dose: z.string(),
+            frequencyCode: z.string(),
+            persisted: z.boolean(),
+            doseValue: z.string(),
+            doseUnit: z.string(),
+            frequency: z.string().max(HEALTH_NAME_MAX, tooLong(HEALTH_NAME_MAX)),
+            startDate: dateText,
+            endDate: dateText,
+            notes: notesText,
+          })
+          .superRefine((row, ctx) => {
+            if (row.doseValue) {
+              const value = Number(row.doseValue.replace(",", "."))
+              if (!Number.isFinite(value) || value <= 0)
+                ctx.addIssue({
+                  code: "custom",
+                  path: ["doseValue"],
+                  message: "Escribe la dosis con un número mayor que cero.",
+                })
+              else if (!row.doseUnit)
+                ctx.addIssue({ code: "custom", path: ["doseUnit"], message: "Elige la unidad." })
+            }
+            endAfterStart(row, ctx)
+          }),
+      ),
+      familyHistory: z.array(
+        z.object({
+          key: z.string(),
+          relationship: z.string(),
+          condition: z.string().max(HEALTH_NAME_MAX, tooLong(HEALTH_NAME_MAX)),
+          diagnosisCode: z.string(),
+          diagnosisSystem: z.string().nullable(),
+        }),
+      ),
+      reviewStatus: z.object({ conditions: reviewState, medications: reviewState }),
+      pregnancyWeeks: z.string(),
+      interview: z.record(z.string(), z.unknown()),
+    })
+    .superRefine((value, ctx) => {
+      const activeCon = value.conditions.filter((r) => r.status === "activa").length
+      const activeMed = value.medications.filter((r) => r.endDate === "").length
+      const review = (group: "conditions" | "medications", message: string) =>
+        ctx.addIssue({ code: "custom", path: ["reviewStatus", group], message })
+      if (value.reviewStatus.conditions === "none" && activeCon > 0)
+        review("conditions", "Hay condiciones activas: no puede marcarse ausencia.")
+      else if (activeCon > 0 && value.reviewStatus.conditions !== "recorded")
+        review("conditions", "Con condiciones activas la revisión debe quedar registrada.")
+      if (value.reviewStatus.medications === "none" && activeMed > 0)
+        review("medications", "Hay medicamentos vigentes: no puede marcarse ausencia.")
+      else if (activeMed > 0 && value.reviewStatus.medications !== "recorded")
+        review("medications", "Con medicamentos vigentes la revisión debe quedar registrada.")
+      const weeks = value.pregnancyWeeks.trim()
+      if (
+        asksPregnancy &&
+        groupOf(value.interview, "antecedentesPersonales")["embarazo"] === true &&
+        weeks !== "" &&
+        !(/^\d{1,2}$/.test(weeks) && Number(weeks) <= 42)
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["pregnancyWeeks"],
+          message: "Escribe las semanas con un número entero de 0 a 42.",
+        })
+      }
+      // Lo del producto: cada error se dice bajo su dato (`InterviewSections`).
+      if (Object.keys(validateInterview(value.interview)).length > 0)
+        ctx.addIssue({ code: "custom", path: ["interview"], message: "Revisa los datos marcados de la entrevista." })
+    })
+}
+
+/** El cuerpo de `PUT /health` y, de cada antecedente familiar enviado, su fila en pantalla. */
+function healthBody(
+  value: HealthFormValues,
+  base: HealthBase,
+  asksPregnancy: boolean,
+  allergiesReview: HealthReviewState,
+): { body: SaveHealthInput; familyRows: number[] } {
+  const familyRows = value.familyHistory.flatMap((row, index) => (row.condition.trim() !== "" ? [index] : []))
+  const answers = sanitizeInterview(interviewOf(value, asksPregnancy))
+  return {
+    familyRows,
+    body: {
+      expectedRevision: base.revision,
+      // Las alergias no viajan: se agregan y quitan una por una en su tarjeta (tablero 7).
+      reviewStatus: { ...value.reviewStatus, allergies: allergiesReview },
+      bloodGroup: (value.bloodGroup || null) as SaveHealthInput["bloodGroup"],
+      // Las mismas filas de `familyRows`, en el mismo orden: las que tienen condición escrita.
+      familyHistory: value.familyHistory.filter((row) => row.condition.trim() !== "").map((row) => {
+        return {
+          relationship: row.relationship,
+          condition: row.condition.trim(),
+          diagnosisCode: row.diagnosisCode || null,
+          diagnosisSystem: row.diagnosisCode ? row.diagnosisSystem : null,
+        }
+      }),
+      asaClass: value.asaClass || null,
+      conditions: value.conditions.map((c) => ({
+        ...(c.id ? { id: c.id } : {}),
+        name: c.name.trim(),
+        diagnosisCode: c.diagnosisCode ? c.diagnosisCode : null,
+        diagnosisSystem: c.diagnosisCode ? c.diagnosisSystem : null,
+        status: c.status,
+        startDate: c.startDate === "" ? null : c.startDate,
+        endDate: c.endDate === "" ? null : c.endDate,
+        notes: c.notes.trim() === "" ? null : c.notes.trim(),
+      })),
+      medications: value.medications.map((m) => {
+        const other = m.frequencyCode === "otra"
+        return {
+          ...(m.id ? { id: m.id } : {}),
+          name: m.name.trim(),
+          genericName: m.genericName.trim() ? m.genericName.trim() : null,
+          dose: m.dose.trim() === "" ? null : m.dose.trim(),
+          // Con número y unidad, el servidor escribe la dosis («500 mg»); igual la frecuencia de la lista.
+          doseValue: m.doseValue ? Number(m.doseValue.replace(",", ".")) : null,
+          doseUnit: m.doseValue ? m.doseUnit || null : null,
+          frequency: other && m.frequency.trim() !== "" ? m.frequency.trim() : null,
+          frequencyCode: m.frequencyCode && !other ? m.frequencyCode : null,
+          startDate: m.startDate === "" ? null : m.startDate,
+          endDate: m.endDate === "" ? null : m.endDate,
+          notes: m.notes.trim() === "" ? null : m.notes.trim(),
+        }
+      }),
+      ...(canonicalJson(answers) !== base.interview
+        ? { anamnesis: { expectedVersion: base.version, answers } }
+        : {}),
+    },
+  }
+}
+
+function baseOf(health: PatientHealth): HealthBase {
+  return {
+    revision: health.revision,
+    version: health.latestAnamnesis?.version ?? 0,
+    interview: canonicalJson(sanitizeInterview((health.latestAnamnesis?.answers ?? {}) as Rec)),
   }
 }
 
@@ -247,106 +459,55 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
     enabled: canRead,
   })
 
-  const [conditions, setConditions] = useState<ConditionDraft[]>([])
-  const [medications, setMedications] = useState<MedicationDraft[]>([])
-  const [review, setReview] = useState<ReviewDraft>({
-    allergies: "unknown",
-    conditions: "unknown",
-    medications: "unknown",
-  })
-  const [bloodGroup, setBloodGroup] = useState<BloodGroup | null>(null)
-  const [asaClass, setAsaClass] = useState("")
-  const [familyHistory, setFamilyHistory] = useState<FamilyDraft[]>([])
-  const [interview, setInterview] = useState<AnamnesisAnswers>({})
-  const [interviewDirty, setInterviewDirty] = useState(false)
-  const [dirty, setDirty] = useState(false)
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  const [formError, setFormError] = useState<string | null>(null)
   const [stale, setStale] = useState(false)
+  const [serverInterviewErrors, setServerInterviewErrors] = useState<SubFieldErrors>({})
   const [versionId, setVersionId] = useState<string | null>(null)
   const [snapshotOpen, setSnapshotOpen] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [openPersonales, setOpenPersonales] = useState(true)
   const [openFamiliares, setOpenFamiliares] = useState(true)
-  const dirtyRef = useRef(false)
-  dirtyRef.current = dirty || interviewDirty
+  const base = useRef<HealthBase>({ revision: 0, version: 0, interview: "{}" })
+  // De cada antecedente familiar enviado, su fila en pantalla (las vacías no viajan).
+  const sentFamilyRows = useRef<number[]>([])
 
   const health = healthQuery.data?.data ?? null
   // Lo del producto en la entrevista (issue 229).
   const productHealth = productUi().health
   const versions = useMemo(() => historyQuery.data?.data ?? [], [historyQuery.data])
-  const latestVersion = health?.latestAnamnesis?.version ?? 0
+  const saved = useMemo(() => (health ? buildDrafts(health) : null), [health])
+  const today = clinicToday()
 
-  useEffect(() => {
-    if (health && !dirtyRef.current) {
-      const drafts = buildDrafts(health)
-      setConditions(drafts.conditions)
-      setMedications(drafts.medications)
-      setReview(drafts.review)
-      setBloodGroup(drafts.bloodGroup)
-      setAsaClass(drafts.asaClass)
-      setFamilyHistory(drafts.familyHistory)
-      setInterview(drafts.interview)
-      setInterviewDirty(false)
-      setFieldErrors({})
-      setFormError(null)
-      setStale(false)
-    }
-  }, [health])
-
-  const markDirty = (): void => setDirty(true)
-
-  const saveMutation = useMutation({
-    mutationFn: () => {
-      if (!health) throw new Error("Sin datos de salud para guardar")
-      return savePatientHealthApi(patientId, {
-        expectedRevision: health.revision,
-        // Las alergias no viajan: se agregan y quitan una por una en su tarjeta (tablero 7).
-        reviewStatus: { ...review, allergies: health.reviewStatus.allergies },
-        bloodGroup,
-        familyHistory: familyHistory
-          .filter((row) => row.condition.trim() !== "")
-          .map((row) => ({
-            relationship: row.relationship,
-            condition: row.condition.trim(),
-            diagnosisCode: row.diagnosisCode || null,
-            diagnosisSystem: row.diagnosisCode ? row.diagnosisSystem : null,
-          })),
-        asaClass: asaClass || null,
-        conditions: conditions.map((c) => ({
-          ...(c.id ? { id: c.id } : {}),
-          name: c.name.trim(),
-          diagnosisCode: c.diagnosisCode ? c.diagnosisCode : null,
-          diagnosisSystem: c.diagnosisCode ? (c.diagnosisSystem ?? null) : null,
-          status: c.status,
-          startDate: c.startDate === "" ? null : c.startDate,
-          endDate: c.endDate === "" ? null : c.endDate,
-          notes: c.notes.trim() === "" ? null : c.notes.trim(),
-        })),
-        medications: medications.map((m) => ({
-          ...(m.id ? { id: m.id } : {}),
-          name: m.name.trim(),
-          genericName: m.genericName?.trim() ? m.genericName.trim() : null,
-          dose: m.dose.trim() === "" ? null : m.dose.trim(),
-          // Con número y unidad, el servidor escribe la dosis («500 mg»); igual la frecuencia de la lista.
-          doseValue: m.doseValue ? Number(m.doseValue.replace(",", ".")) : null,
-          doseUnit: m.doseValue ? m.doseUnit || null : null,
-          frequency: m.frequency.trim() === "" ? null : m.frequency.trim(),
-          frequencyCode: m.frequencyCode || null,
-          startDate: m.startDate === "" ? null : m.startDate,
-          endDate: m.endDate === "" ? null : m.endDate,
-          notes: m.notes.trim() === "" ? null : m.notes.trim(),
-        })),
-        ...(interviewDirty
-          ? { anamnesis: { expectedVersion: latestVersion, answers: sanitizeInterview(interview) } }
-          : {}),
-      })
+  const form = useAppForm({
+    ...healthFormOptions,
+    validators: {
+      onSubmit: healthSchema(productHealth.asksPregnancy, (interview) =>
+        productHealth.validate(interview, today),
+      ),
     },
-    onSuccess: async () => {
-      setDirty(false)
-      setInterviewDirty(false)
-      setFieldErrors({})
-      setFormError(null)
+    onSubmitInvalid: () => {
+      setOpenPersonales(true)
+      setOpenFamiliares(true)
+    },
+    onSubmit: async ({ value }) => {
+      if (!health) return
+      const { body, familyRows } = healthBody(
+        value,
+        base.current,
+        productHealth.asksPregnancy,
+        health.reviewStatus.allergies,
+      )
+      sentFamilyRows.current = familyRows
+      try {
+        await savePatientHealthApi(patientId, body)
+      } catch (error) {
+        if (error instanceof ApiError) {
+          if (error.shape.code === "STALE_HEALTH_REVISION") setStale(true)
+          setServerInterviewErrors(interviewErrorsOf(error.shape.fields))
+        }
+        setOpenPersonales(true)
+        setOpenFamiliares(true)
+        throw error
+      }
       setStale(false)
       setDrawerOpen(false)
       await Promise.all([
@@ -356,112 +517,77 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         queryClient.invalidateQueries({ queryKey: ["patient-summary", patientId] }),
       ])
     },
-    onError: (error) => {
-      if (error instanceof ApiError && error.shape.code === "STALE_HEALTH_REVISION") {
-        setStale(true)
-        setFormError(null)
-        return
-      }
-      setFormError(
-        error instanceof ApiError ? (error.shape.message ?? error.message) : error.message,
-      )
-    },
   })
+  const surface = useFormSurface(form, {
+    fieldMap: (key) => {
+      if (key === `${INTERVIEW_PREFIX}antecedentesPersonales.semanasEmbarazo`) return "pregnancyWeeks"
+      // Lo de la entrevista lo dice cada sección bajo su dato (`serverInterviewErrors`).
+      if (key.startsWith(INTERVIEW_PREFIX)) return "interview"
+      const family = /^familyHistory\[(\d+)\](.*)$/.exec(key)
+      if (!family) return undefined
+      const row = sentFamilyRows.current[Number(family[1])]
+      return row === undefined ? undefined : `familyHistory[${row}]${family[2]}`
+    },
+    // El aviso de otra sesión va arriba del cajón, con «Recargar»: no se repite junto a los botones.
+    formMessage: (error) =>
+      error instanceof ApiError && error.shape.code === "STALE_HEALTH_REVISION" ? "" : null,
+  })
+  const interview = useStore(form.store, (state) => state.values.interview)
+  const reviewStatus = useStore(form.store, (state) => state.values.reviewStatus)
+  const submitted = useStore(form.store, (state) => state.submissionAttempts > 0)
+  const isDirty = useStore(form.store, (state) => state.isDirty)
+  const isSubmitting = useStore(form.store, (state) => state.isSubmitting)
+  const interviewErrors = useMemo<SubFieldErrors>(
+    () => ({ ...(submitted ? productHealth.validate(interview, today) : {}), ...serverInterviewErrors }),
+    [submitted, productHealth, interview, today, serverInterviewErrors],
+  )
 
-  function validateLocal(): { errors: Record<string, string>; firstId: string | null } {
-    const errors: Record<string, string> = {}
-    let firstId: string | null = null
-    const take = (id: string, message: string): void => {
-      errors[id] = message
-      firstId ??= id
-    }
-    const fid = (name: string): string => `${uid}-${name}`
-    for (const row of conditions) {
-      if (row.name.trim() === "") take(fid(`con-nom-${row.key}`), "El nombre es obligatorio.")
-      if (!STATUS_OPTIONS.includes(row.status)) take(fid(`con-est-${row.key}`), "Elige el estado.")
-      if (row.startDate !== "" && !isValidDateStr(row.startDate))
-        take(fid(`con-ini-${row.key}`), "Fecha YYYY-MM-DD válida.")
-      if (row.endDate !== "" && !isValidDateStr(row.endDate))
-        take(fid(`con-fin-${row.key}`), "Fecha YYYY-MM-DD válida.")
-      if (row.startDate !== "" && row.endDate !== "" && row.startDate > row.endDate) {
-        take(fid(`con-fin-${row.key}`), "El fin no puede ser anterior al inicio.")
-      }
-    }
-    for (const row of medications) {
-      if (row.name.trim() === "") take(fid(`med-nom-${row.key}`), "El nombre es obligatorio.")
-      if (row.doseValue) {
-        const value = Number(row.doseValue.replace(",", "."))
-        if (!Number.isFinite(value) || value <= 0) take(fid(`med-dos-${row.key}`), "Escribe la dosis con un número mayor que cero.")
-        else if (!row.doseUnit) take(fid(`med-uni-${row.key}`), "Elige la unidad.")
-      }
-      if (row.startDate !== "" && !isValidDateStr(row.startDate))
-        take(fid(`med-ini-${row.key}`), "Fecha YYYY-MM-DD válida.")
-      if (row.endDate !== "" && !isValidDateStr(row.endDate))
-        take(fid(`med-fin-${row.key}`), "Fecha YYYY-MM-DD válida.")
-      if (row.startDate !== "" && row.endDate !== "" && row.startDate > row.endDate) {
-        take(fid(`med-fin-${row.key}`), "El fin no puede ser anterior al inicio.")
-      }
-    }
-    const activeCon = conditions.filter((r) => r.status === "activa").length
-    const activeMed = medications.filter((r) => r.endDate === "").length
-    if (review.conditions === "none" && activeCon > 0)
-      take(fid("rev-con"), "Hay condiciones activas: no puede marcarse ausencia.")
-    if (activeCon > 0 && review.conditions !== "recorded")
-      take(fid("rev-con"), "Con condiciones activas la revisión debe quedar registrada.")
-    if (review.medications === "none" && activeMed > 0)
-      take(fid("rev-med"), "Hay medicamentos vigentes: no puede marcarse ausencia.")
-    if (activeMed > 0 && review.medications !== "recorded")
-      take(fid("rev-med"), "Con medicamentos vigentes la revisión debe quedar registrada.")
-    const personales = groupOf(interview, "antecedentesPersonales")
-    if (personales["embarazo"] === true) {
-      const sem = personales["semanasEmbarazo"]
-      if (
-        sem !== undefined &&
-        (!Number.isInteger(sem) || (sem as number) < 0 || (sem as number) > 42)
-      ) {
-        take(fid("emb-sem"), "Semanas de 0 a 42.")
-      }
-    }
-    return { errors, firstId }
+  /** El borrador vuelve a lo guardado: al abrir, al recargar y si llega otra revisión sin cambios escritos. */
+  function resetTo(next: PatientHealth): void {
+    base.current = baseOf(next)
+    form.reset(buildDrafts(next))
+    setServerInterviewErrors({})
   }
 
-  function handleSubmit(event: React.FormEvent): void {
-    event.preventDefault()
-    if (!canWrite || saveMutation.isPending) return
-    const { errors, firstId } = validateLocal()
-    setFieldErrors(errors)
-    if (firstId) {
-      if (firstId.endsWith("emb-sem")) setOpenPersonales(true)
-      document.getElementById(firstId)?.focus()
-      return
-    }
-    setFormError(null)
-    saveMutation.mutate()
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega otra revisión; abrir ya reinicia el borrador.
+  useEffect(() => {
+    if (health && drawerOpen && !form.state.isDirty && !form.state.isSubmitting) resetTo(health)
+  }, [health])
+
+  function openDrawer(): void {
+    if (!health) return
+    resetTo(health)
+    setStale(false)
+    setDrawerOpen(true)
+  }
+
+  async function reload(): Promise<void> {
+    const fresh = await healthQuery.refetch()
+    if (fresh.data) resetTo(fresh.data.data)
+    setStale(false)
   }
 
   function updateInterview(group: string, key: string, next: unknown): void {
-    setInterview((prev) => {
+    form.setFieldValue("interview", (prev) => {
       const g = groupOf(prev, group)
       if (next === undefined) delete g[key]
       else g[key] = next
-      const out = { ...(prev as Rec) }
+      const out = { ...prev }
       if (Object.keys(g).length > 0) out[group] = g
       else delete out[group]
-      return out as AnamnesisAnswers
+      return out
     })
-    setInterviewDirty(true)
-    markDirty()
+    if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
   }
 
   function setTopInterview(key: string, next: unknown): void {
-    setInterview((prev) => {
-      const out = { ...(prev as Rec) }
+    form.setFieldValue("interview", (prev) => {
+      const out = { ...prev }
       if (next === undefined) delete out[key]
       else out[key] = next
-      return out as AnamnesisAnswers
+      return out
     })
-    setInterviewDirty(true)
-    markDirty()
+    if (Object.keys(serverInterviewErrors).length > 0) setServerInterviewErrors({})
   }
 
   if (healthQuery.isPending)
@@ -470,7 +596,7 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
         <AntecedentesSkeleton canWrite={canWrite} />
       </SkeletonRegion>
     )
-  if (healthQuery.isError || !health) {
+  if (healthQuery.isError || !health || !saved) {
     return (
       <ErrorState
         error={healthQuery.error instanceof ApiError ? healthQuery.error.shape : null}
@@ -484,12 +610,10 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
   const fid = (name: string): string => `${uid}-${name}`
   const registration = patientQuery.data?.data.registration ?? null
   const pendingReview = isHealthReviewPending(health)
-  const canSubmit = dirty || interviewDirty || pendingReview
-  const submitLabel =
-    pendingReview && !dirty && !interviewDirty ? "Revisar y guardar" : "Guardar antecedentes"
-  const saving = !canWrite || saveMutation.isPending
+  const submitLabel = pendingReview && !isDirty ? "Revisar y guardar" : "Guardar antecedentes"
+  const readOnly = !canWrite || isSubmitting
   // Nunca se preguntó: el vacío lo dice y lleva a registrarlo (ADR 0035).
-  const unasked = !hasHealthInfo(health) && !dirty && !interviewDirty
+  const unasked = !hasHealthInfo(health)
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -525,47 +649,16 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
             </Button>
           ) : null}
           {canWrite && !unasked ? (
-            <Button type="button" onClick={() => setDrawerOpen(true)}>
-              {submitLabel === "Revisar y guardar"
+            <Button type="button" onClick={openDrawer}>
+              {pendingReview
                 ? "Revisar antecedentes"
-                : conditions.length + medications.length > 0
+                : saved.conditions.length + saved.medications.length > 0
                   ? "Editar antecedentes"
                   : "Registrar antecedentes"}
             </Button>
           ) : null}
         </div>
       </div>
-
-      {stale ? (
-        <div
-          role="alert"
-          className="flex flex-col gap-2 rounded-xl border border-destructive/50 p-3"
-        >
-          <p className="text-sm">
-            Otra sesión guardó antecedentes mientras editabas (revisión {health.revision}). Tus
-            valores se conservan: recarga para ver lo nuevo y vuelve a guardar.
-          </p>
-          <div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setDirty(false)
-                setInterviewDirty(false)
-                void healthQuery.refetch()
-              }}
-            >
-              Recargar
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {formError && !drawerOpen ? (
-        <p role="alert" className="text-sm text-destructive">
-          {formError}
-        </p>
-      ) : null}
 
       <AllergiesCard
         patientId={patientId}
@@ -579,40 +672,48 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
           title="Aún no se le preguntó por sus enfermedades ni su medicación"
           description="Enfermedades, medicación y la entrevista se registran juntas; «no preguntado» no es lo mismo que «niega»."
           actionLabel={canWrite ? "Registrar antecedentes" : undefined}
-          onAction={canWrite ? () => setDrawerOpen(true) : undefined}
+          onAction={canWrite ? openDrawer : undefined}
         />
       ) : (
-        <AntecedentesSummary
-          conditions={conditions}
-          medications={medications}
-          review={review}
-          bloodGroup={bloodGroup}
-          pendingReview={pendingReview}
-        />
+        <AntecedentesSummary saved={saved} pendingReview={pendingReview} />
       )}
       <productHealth.Summary answers={(health.latestAnamnesis?.answers ?? {}) as Rec} />
 
       <FormDrawer
+        {...surface}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         title="Registrar antecedentes"
         description="Completa por secciones. En móvil avanza en una columna; en tablet y web el formulario usa dos columnas."
         headerContent={
-          <p className="text-xs text-muted-foreground">
-            Revisión {health.revision} ·{" "}
-            {health.latestAnamnesis
-              ? `entrevista v${health.latestAnamnesis.version}`
-              : "sin entrevista registrada"}
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-muted-foreground">
+              Revisión {base.current.revision} ·{" "}
+              {base.current.version > 0
+                ? `entrevista v${base.current.version}`
+                : "sin entrevista registrada"}
+            </p>
+            {stale ? (
+              <div
+                role="alert"
+                className="flex flex-col gap-2 rounded-xl border border-destructive/50 p-3"
+              >
+                <p className="text-sm">
+                  Otra sesión guardó antecedentes mientras editabas (revisión {health.revision}). Tus
+                  valores se conservan: recarga para ver lo nuevo y vuelve a guardar.
+                </p>
+                <div>
+                  <Button type="button" size="sm" variant="outline" onClick={() => void reload()}>
+                    Recargar
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         }
-        onSubmit={handleSubmit}
-        isDirty={dirty || interviewDirty}
-        isSubmitting={saveMutation.isPending}
         isLoading={healthQuery.isPending}
-        error={formError}
-        fieldErrors={fieldErrors}
         submitLabel={submitLabel}
-        submitDisabled={!canWrite || !canSubmit}
+        submitDisabled={!canWrite}
         className="data-[swipe-axis=x]:sm:[--drawer-content-width:min(48rem,calc(100vw-2rem))]"
       >
         <div className="flex flex-col gap-4">
@@ -623,110 +724,83 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
             <div className="flex flex-col gap-1.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="font-heading text-base font-medium">Grupo sanguíneo</div>
-                {bloodGroup != null && pendingReview ? (
+                {saved.bloodGroup !== "" && pendingReview ? (
                   <Badge variant="outline">Declarado · pendiente de revisión</Badge>
                 ) : null}
               </div>
             </div>
             <div>
-              <BloodGroupSelect
+              <BloodGroupField
+                form={form}
                 id={fid("blood")}
-                value={bloodGroup}
-                onChange={(next) => {
-                  setBloodGroup(next)
-                  markDirty()
-                }}
-                readOnly={saving}
-                declared={bloodGroup != null}
+                readOnly={readOnly}
+                declared={saved.bloodGroup !== "" && pendingReview}
               />
             </div>
-            <Field>
-              <FieldLabel htmlFor={fid("asa")}>Clasificación ASA</FieldLabel>
-              <ChoiceSelect
-                id={fid("asa")}
-                className="max-w-md"
-                value={asaClass}
-                disabled={saving}
-                onChange={(e) => {
-                  setAsaClass(e.target.value)
-                  markDirty()
-                }}
-              >
-                <option value="">Sin clasificar</option>
-                {ASA_OPTIONS.map(([value, optionLabel]) => (
-                  <option key={value} value={value}>
-                    {optionLabel}
-                  </option>
-                ))}
-              </ChoiceSelect>
-            </Field>
+            <form.AppField name="asaClass">
+              {(field) => (
+                <field.Control id={fid("asa")} label="Clasificación ASA">
+                  {(control) => (
+                    <ChoiceSelect
+                      id={control.id}
+                      aria-invalid={control.invalid || undefined}
+                      aria-describedby={control.describedBy}
+                      onBlur={control.onBlur}
+                      className="max-w-md"
+                      value={field.state.value}
+                      disabled={readOnly}
+                      onChange={(e) => field.handleChange(e.target.value)}
+                    >
+                      <option value="">Sin clasificar</option>
+                      {ASA_OPTIONS.map(([value, optionLabel]) => (
+                        <option key={value} value={value}>
+                          {optionLabel}
+                        </option>
+                      ))}
+                    </ChoiceSelect>
+                  )}
+                </field.Control>
+              )}
+            </form.AppField>
           </section>
 
           {/* Las alergias se agregan y quitan una por una en su tarjeta, fuera de este formulario (tablero 7). */}
           <ClinicalGroupCard
             title="Condiciones"
-            review={review.conditions}
-            reviewId={fid("rev-con")}
-            reviewError={fieldErrors[fid("rev-con")]}
-            readOnly={saving}
-            onReview={(next) => {
-              setReview((r) => ({ ...r, conditions: next }))
-              markDirty()
-            }}
-            empty={
-              conditions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {review.conditions === "none"
-                    ? "Ausencia confirmada en este grupo."
-                    : "Sin registros. Agrega filas o confirma la ausencia."}
-                </p>
-              ) : null
-            }
+            review={reviewStatus.conditions}
+            reviewField={<ReviewStateField form={form} id={fid("rev-con")} group="conditions" readOnly={readOnly} />}
           >
-            <ConditionRows
-              mode="clinical"
-              rows={conditions}
-              onChange={(next) => {
-                setConditions(restoreIds(conditions, next))
-                markDirty()
-              }}
-              readOnly={saving}
-              errors={fieldErrors}
-              idPrefix={uid}
-            />
+            <ConditionRows form={form} idPrefix={uid} readOnly={readOnly} />
+            <form.Subscribe selector={(state) => state.values.conditions.length === 0}>
+              {(empty) =>
+                empty ? (
+                  <p className="text-sm text-muted-foreground">
+                    {reviewStatus.conditions === "none"
+                      ? "Ausencia confirmada en este grupo."
+                      : "Sin registros. Agrega filas o confirma la ausencia."}
+                  </p>
+                ) : null
+              }
+            </form.Subscribe>
           </ClinicalGroupCard>
 
           <ClinicalGroupCard
             title="Medicación vigente"
-            review={review.medications}
-            reviewId={fid("rev-med")}
-            reviewError={fieldErrors[fid("rev-med")]}
-            readOnly={saving}
-            onReview={(next) => {
-              setReview((r) => ({ ...r, medications: next }))
-              markDirty()
-            }}
-            empty={
-              medications.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  {review.medications === "none"
-                    ? "Ausencia confirmada en este grupo."
-                    : "Sin registros. Agrega filas o confirma la ausencia."}
-                </p>
-              ) : null
-            }
+            review={reviewStatus.medications}
+            reviewField={<ReviewStateField form={form} id={fid("rev-med")} group="medications" readOnly={readOnly} />}
           >
-            <MedicationRows
-              mode="clinical"
-              rows={medications}
-              onChange={(next) => {
-                setMedications(restoreIds(medications, next))
-                markDirty()
-              }}
-              readOnly={saving}
-              errors={fieldErrors}
-              idPrefix={uid}
-            />
+            <MedicationRows form={form} idPrefix={uid} readOnly={readOnly} />
+            <form.Subscribe selector={(state) => state.values.medications.length === 0}>
+              {(empty) =>
+                empty ? (
+                  <p className="text-sm text-muted-foreground">
+                    {reviewStatus.medications === "none"
+                      ? "Ausencia confirmada en este grupo."
+                      : "Sin registros. Agrega filas o confirma la ausencia."}
+                  </p>
+                ) : null
+              }
+            </form.Subscribe>
           </ClinicalGroupCard>
 
           <section
@@ -748,105 +822,72 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="grid gap-4 pt-2 sm:grid-cols-2">
-                    <Field>
-                      <FieldLabel htmlFor={fid("ap-hosp")}>Hospitalizaciones</FieldLabel>
-                      <Input
-                        id={fid("ap-hosp")}
-                        value={strOf(personales["hospitalizaciones"])}
-                        disabled={!canWrite}
-                        onChange={(e) =>
-                          updateInterview(
-                            "antecedentesPersonales",
-                            "hospitalizaciones",
-                            e.target.value === "" ? undefined : e.target.value,
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={fid("ap-cir")}>Cirugías</FieldLabel>
-                      <Input
-                        id={fid("ap-cir")}
-                        value={strOf(personales["cirugias"])}
-                        disabled={!canWrite}
-                        onChange={(e) =>
-                          updateInterview(
-                            "antecedentesPersonales",
-                            "cirugias",
-                            e.target.value === "" ? undefined : e.target.value,
-                          )
-                        }
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor={fid("ap-tra")}>Transfusiones</FieldLabel>
-                      <Input
-                        id={fid("ap-tra")}
-                        value={strOf(personales["transfusiones"])}
-                        disabled={!canWrite}
-                        onChange={(e) =>
-                          updateInterview(
-                            "antecedentesPersonales",
-                            "transfusiones",
-                            e.target.value === "" ? undefined : e.target.value,
-                          )
-                        }
-                      />
-                    </Field>
-                    {productHealth.asksPregnancy ? (
-                    <Field>
-                      <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
-                      <Select
-                        value={
-                          personales["embarazo"] === true
-                            ? "si"
-                            : personales["embarazo"] === false
-                              ? "no"
-                              : "sin-responder"
-                        }
-                        onValueChange={(v) =>
-                          updateInterview(
-                            "antecedentesPersonales",
-                            "embarazo",
-                            v === "si" ? true : v === "no" ? false : undefined,
-                          )
-                        }
-                        disabled={!canWrite}
-                      >
-                        <SelectTrigger id={fid("emb-estado")}>
-                          <SelectValue placeholder="Sin responder" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="sin-responder">Sin responder</SelectItem>
-                          <SelectItem value="si">Sí</SelectItem>
-                          <SelectItem value="no">No</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    ) : null}
-                    {productHealth.asksPregnancy && personales["embarazo"] === true ? (
-                      <Field>
-                        <FieldLabel htmlFor={fid("emb-sem")}>Semanas de embarazo (0–42)</FieldLabel>
+                    {(
+                      [
+                        ["hospitalizaciones", "ap-hosp", "Hospitalizaciones"],
+                        ["cirugias", "ap-cir", "Cirugías"],
+                        ["transfusiones", "ap-tra", "Transfusiones"],
+                      ] as const
+                    ).map(([key, id, label]) => (
+                      <Field key={key}>
+                        <FieldLabel htmlFor={fid(id)}>{label}</FieldLabel>
                         <Input
-                          id={fid("emb-sem")}
-                          type="number"
-                          min={0}
-                          max={42}
-                          value={strOf(personales["semanasEmbarazo"])}
-                          disabled={!canWrite}
-                          onChange={(e) => {
-                            const t = e.target.value.trim()
+                          id={fid(id)}
+                          value={strOf(personales[key])}
+                          disabled={readOnly}
+                          onChange={(e) =>
                             updateInterview(
                               "antecedentesPersonales",
-                              "semanasEmbarazo",
-                              t === "" ? undefined : Number(t),
+                              key,
+                              e.target.value === "" ? undefined : e.target.value,
                             )
-                          }}
+                          }
                         />
-                        {fieldErrors[fid("emb-sem")] ? (
-                          <p className="text-sm text-destructive">{fieldErrors[fid("emb-sem")]}</p>
-                        ) : null}
                       </Field>
+                    ))}
+                    {productHealth.asksPregnancy ? (
+                      <Field>
+                        <FieldLabel htmlFor={fid("emb-estado")}>Embarazo</FieldLabel>
+                        <Select
+                          value={
+                            personales["embarazo"] === true
+                              ? "si"
+                              : personales["embarazo"] === false
+                                ? "no"
+                                : "sin-responder"
+                          }
+                          onValueChange={(v) =>
+                            updateInterview(
+                              "antecedentesPersonales",
+                              "embarazo",
+                              v === "si" ? true : v === "no" ? false : undefined,
+                            )
+                          }
+                          disabled={readOnly}
+                        >
+                          <SelectTrigger id={fid("emb-estado")}>
+                            <SelectValue placeholder="Sin responder" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="sin-responder">Sin responder</SelectItem>
+                            <SelectItem value="si">Sí</SelectItem>
+                            <SelectItem value="no">No</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    ) : null}
+                    {productHealth.asksPregnancy && personales["embarazo"] === true ? (
+                      <form.AppField name="pregnancyWeeks">
+                        {(field) => (
+                          <field.TextField
+                            id={fid("emb-sem")}
+                            label="Semanas de embarazo (0–42)"
+                            inputMode="numeric"
+                            maxLength={2}
+                            disabled={readOnly}
+                          />
+                        )}
+                      </form.AppField>
                     ) : null}
                   </div>
                 </CollapsibleContent>
@@ -859,113 +900,109 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
                   </span>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <div className="flex flex-col gap-3 pt-2">
-                    {familyHistory.map((row, index) => (
-                      <div
-                        key={row.key}
-                        className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[10rem_1fr_auto]"
-                      >
-                        <Field>
-                          <FieldLabel htmlFor={fid(`fam-rel-${row.key}`)}>Parentesco</FieldLabel>
-                          <ChoiceSelect
-                            id={fid(`fam-rel-${row.key}`)}
-                            
-                            value={row.relationship}
-                            disabled={!canWrite}
-                            onChange={(e) => {
-                              setFamilyHistory((prev) =>
-                                prev.map((r, i) =>
-                                  i === index ? { ...r, relationship: e.target.value } : r,
-                                ),
-                              )
-                              markDirty()
-                            }}
+                  <form.AppField name="familyHistory" mode="array">
+                    {(rowsField) => (
+                      <div className="flex flex-col gap-3 pt-2">
+                        {rowsField.state.value.map((row, index) => (
+                          <div
+                            key={row.key}
+                            className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[10rem_1fr_auto]"
                           >
-                            {FAMILY_RELATIONSHIP_OPTIONS.map(([value, optionLabel]) => (
-                              <option key={value} value={value}>
-                                {optionLabel}
-                              </option>
-                            ))}
-                          </ChoiceSelect>
-                        </Field>
-                        <Field>
-                          <FieldLabel htmlFor={fid(`fam-con-${row.key}`)}>Condición</FieldLabel>
-                          <Input
-                            id={fid(`fam-con-${row.key}`)}
-                            value={row.condition}
-                            maxLength={200}
-                            disabled={!canWrite}
-                            placeholder="Ej.: diabetes, hipertensión, cardiopatía"
-                            onChange={(e) => {
-                              setFamilyHistory((prev) =>
-                                prev.map((r, i) =>
-                                  i === index ? { ...r, condition: e.target.value } : r,
-                                ),
-                              )
-                              markDirty()
-                            }}
-                          />
-                        </Field>
+                            <form.AppField name={`familyHistory[${index}].relationship`}>
+                              {(field) => (
+                                <field.Control id={fid(`fam-rel-${row.key}`)} label="Parentesco">
+                                  {(control) => (
+                                    <ChoiceSelect
+                                      id={control.id}
+                                      aria-invalid={control.invalid || undefined}
+                                      aria-describedby={control.describedBy}
+                                      onBlur={control.onBlur}
+                                      value={field.state.value}
+                                      disabled={readOnly}
+                                      onChange={(e) => field.handleChange(e.target.value)}
+                                    >
+                                      {FAMILY_RELATIONSHIP_OPTIONS.map(([value, optionLabel]) => (
+                                        <option key={value} value={value}>
+                                          {optionLabel}
+                                        </option>
+                                      ))}
+                                    </ChoiceSelect>
+                                  )}
+                                </field.Control>
+                              )}
+                            </form.AppField>
+                            <form.AppField name={`familyHistory[${index}].condition`}>
+                              {(field) => (
+                                <field.TextField
+                                  id={fid(`fam-con-${row.key}`)}
+                                  label="Condición"
+                                  maxLength={HEALTH_NAME_MAX}
+                                  disabled={readOnly}
+                                  placeholder="Ej.: diabetes, hipertensión, cardiopatía"
+                                />
+                              )}
+                            </form.AppField>
+                            {canWrite ? (
+                              <div className="flex items-end">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={readOnly}
+                                  onClick={() => rowsField.removeValue(index)}
+                                >
+                                  Quitar
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
                         {canWrite ? (
-                          <div className="flex items-end">
+                          <div>
                             <Button
                               type="button"
                               size="sm"
                               variant="outline"
-                              onClick={() => {
-                                setFamilyHistory((prev) => prev.filter((_, i) => i !== index))
-                                markDirty()
-                              }}
+                              disabled={readOnly}
+                              onClick={() =>
+                                rowsField.pushValue({
+                                  key: `fam-${Date.now()}`,
+                                  relationship: "MTH",
+                                  condition: "",
+                                  diagnosisCode: "",
+                                  diagnosisSystem: null,
+                                })
+                              }
                             >
-                              Quitar
+                              Agregar antecedente familiar
                             </Button>
                           </div>
                         ) : null}
+                        {strOf(interview["antecedentesFamiliares"]) ? (
+                          <p className="text-xs text-muted-foreground">
+                            Registro anterior en texto: {strOf(interview["antecedentesFamiliares"])}
+                          </p>
+                        ) : null}
                       </div>
-                    ))}
-                    {canWrite ? (
-                      <div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setFamilyHistory((prev) => [
-                              ...prev,
-                              {
-                                key: `fam-${Date.now()}`,
-                                relationship: "MTH",
-                                condition: "",
-                                diagnosisCode: "",
-                                diagnosisSystem: null,
-                              },
-                            ])
-                            markDirty()
-                          }}
-                        >
-                          Agregar antecedente familiar
-                        </Button>
-                      </div>
-                    ) : null}
-                    {strOf((interview as Rec)["antecedentesFamiliares"]) ? (
-                      <p className="text-xs text-muted-foreground">
-                        Registro anterior en texto:{" "}
-                        {strOf((interview as Rec)["antecedentesFamiliares"])}
-                      </p>
-                    ) : null}
-                  </div>
+                    )}
+                  </form.AppField>
                 </CollapsibleContent>
               </Collapsible>
 
               {/* Lo del producto (odentIA: «Odontológicos y hábitos»; latidIA: embarazo, hábitos y vacunas). */}
-              <productHealth.InterviewSections
-                answers={interview as Rec}
-                update={updateInterview}
-                setGroup={setTopInterview}
-                disabled={!canWrite}
-                idPrefix={uid}
-                sex={patientQuery.data?.data.patient.sex ?? null}
-              />
+              <form.Field name="interview">
+                {() => (
+                  <productHealth.InterviewSections
+                    answers={interview}
+                    update={updateInterview}
+                    setGroup={setTopInterview}
+                    disabled={readOnly}
+                    idPrefix={uid}
+                    sex={patientQuery.data?.data.patient.sex ?? null}
+                    errors={interviewErrors}
+                  />
+                )}
+              </form.Field>
 
               {legacy.length > 0 ? (
                 <div
@@ -1011,22 +1048,17 @@ export function AntecedentesTab({ patientId }: { patientId: string }): React.JSX
 }
 
 /**
- * Resumen de lectura: conteos por grupo + estado de revisión. Sin formularios.
- * Las alergias tienen su propia tarjeta arriba (`AllergiesCard`).
+ * Resumen de lectura de lo guardado: conteos por grupo + estado de revisión.
+ * Sin formularios. Las alergias tienen su propia tarjeta arriba (`AllergiesCard`).
  */
 function AntecedentesSummary({
-  conditions,
-  medications,
-  review,
-  bloodGroup,
+  saved,
   pendingReview,
 }: {
-  conditions: ConditionDraft[]
-  medications: MedicationDraft[]
-  review: ReviewDraft
-  bloodGroup: BloodGroup | null
+  saved: HealthFormValues
   pendingReview: boolean
 }): React.JSX.Element {
+  const { conditions, medications, reviewStatus: review, bloodGroup } = saved
   const activeCon = conditions.filter((r) => r.status === "activa").length
   const activeMed = medications.filter((r) => r.endDate === "").length
   const rows: Array<{ title: string; state: HealthReviewState; detail: string }> = [
@@ -1052,11 +1084,11 @@ function AntecedentesSummary({
       <div className="flex flex-col gap-1 elevated rounded-xl border bg-card p-4">
         <span className="font-heading text-sm font-medium">Grupo sanguíneo</span>
         <span className="text-sm text-muted-foreground">
-          {bloodGroup != null && bloodGroup in BLOOD_GROUP_LABELS
+          {bloodGroup in BLOOD_GROUP_LABELS
             ? BLOOD_GROUP_LABELS[bloodGroup as keyof typeof BLOOD_GROUP_LABELS]
             : "Sin registrar"}
         </span>
-        {pendingReview && bloodGroup != null ? (
+        {pendingReview && bloodGroup !== "" ? (
           <Badge variant="outline" className="mt-1 w-fit">
             Declarado · pendiente
           </Badge>
@@ -1080,33 +1112,15 @@ function AntecedentesSummary({
   )
 }
 
-/** Conserva el id persistido al editar filas compartidas (clave estable por fila). */
-function restoreIds<T extends DraftId>(prev: Array<T & DraftId>, next: T[]): Array<T & DraftId> {
-  const ids: Record<string, string | undefined> = {}
-  for (const row of prev) ids[row.key] = row.id
-  return next.map((row) => {
-    const id = ids[row.key]
-    return id ? { ...row, id } : row
-  })
-}
-
 function ClinicalGroupCard({
   title,
   review,
-  reviewId,
-  reviewError,
-  readOnly,
-  onReview,
-  empty,
+  reviewField,
   children,
 }: {
   title: string
   review: HealthReviewState
-  reviewId: string
-  reviewError?: string
-  readOnly: boolean
-  onReview: (next: HealthReviewState) => void
-  empty: ReactNode
+  reviewField: ReactNode
   children: ReactNode
 }): React.JSX.Element {
   return (
@@ -1127,15 +1141,8 @@ function ClinicalGroupCard({
         </div>
       </div>
       <div className="flex flex-col gap-3">
-        <ReviewStateSelect
-          id={reviewId}
-          value={review}
-          onChange={onReview}
-          readOnly={readOnly}
-          error={reviewError}
-        />
+        {reviewField}
         {children}
-        {empty}
       </div>
     </section>
   )

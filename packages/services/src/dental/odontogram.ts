@@ -1,3 +1,13 @@
+import type { Db } from "@odentia/db"
+import { organization } from "@odentia/db/schema/auth"
+import {
+  encounterPlanItem,
+  encounterSite,
+  patient,
+  treatmentPlanItem,
+} from "@odentia/db/schema/clinical"
+import { odontogramAssessment, odontogramEntry, planItemFinding } from "@odentia/db/schema/dental"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import {
   activeFindingsAsOf,
   type ClosingOdontogramPurpose,
@@ -6,23 +16,21 @@ import {
   type FindingDetails,
   type FindingInput,
   type FindingRecord,
+  findingIssues,
   ISO_3950,
   MANUAL_SIGNED_ODONTOGRAM_PURPOSES,
   type SignedOdontogramPurpose,
   toothSiteCode,
-  validateFinding,
 } from "@odentia/dental"
-import type { Db } from "@odentia/db"
-import { encounterPlanItem, encounterSite, patient, treatmentPlanItem } from "@odentia/db/schema/clinical"
-import { odontogramAssessment, odontogramEntry, planItemFinding } from "@odentia/db/schema/dental"
-import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { branchAddressColumns, branchAddressWriter } from "../branches.js"
 import { requireDraftLink } from "../clinical.js"
 import { resolveOptionalDiagnosisCode } from "../diagnosis-codes.js"
-import { notFound, ServiceError, validation } from "../errors.js"
-import { orgDentalProfile } from "./profile.js"
+import { documentCheckUrl } from "../document-check.js"
+import { invalidField, notFound, ServiceError, validation } from "../errors.js"
 import { requirePatient } from "../patients.js"
 import { requireProfessionalSignature } from "../professional-profiles.js"
+import { orgDentalProfile } from "./profile.js"
 
 function conflict(code: string, message: string): ServiceError {
   return new ServiceError(code, 409, message)
@@ -37,7 +45,16 @@ async function audit(
   entityId: string,
   metadata?: Record<string, unknown>,
 ): Promise<void> {
-  await tx.insert(auditEvent).values({ organizationId: orgId, actorUserId, action, entity, entityId, metadata: metadata ?? null })
+  await tx
+    .insert(auditEvent)
+    .values({
+      organizationId: orgId,
+      actorUserId,
+      action,
+      entity,
+      entityId,
+      metadata: metadata ?? null,
+    })
 }
 
 // El odontograma (ADR 0036 y 0079): lo dental de la historia, fuera de lo
@@ -114,7 +131,9 @@ export async function orgStrictVariants(tx: Db, orgId: string): Promise<boolean>
  * o una sola para un hallazgo de grupo), suma la pieza a la atención y lo
  * audita. `leftByPlanItemId` es el tratamiento completado que lo dejó (se
  * escribe al insertar: la aplicación no reescribe un hallazgo). Solo para
- * servicios: el equipo registra con `addOdontogramEntries`.
+ * servicios: el equipo registra con `addOdontogramEntries`. `bodyFields`: el
+ * hallazgo viene del cuerpo de la petición y cada error lleva su dato
+ * (`details.grade`; el código del diagnóstico, con el nombre que se pasa).
  */
 export async function insertOdontogramFinding(
   tx: Db,
@@ -123,7 +142,11 @@ export async function insertOdontogramFinding(
   patientId: string,
   encounterId: string,
   input: Omit<FindingInput, "encounterId"> & { diagnosisSystem?: string | null },
-  options: { strictVariants: boolean; leftByPlanItemId?: string | null },
+  options: {
+    strictVariants: boolean
+    leftByPlanItemId?: string | null
+    bodyFields?: { diagnosisCode: string }
+  },
 ): Promise<OdontogramRow[]> {
   const finding: FindingInput = {
     toothNumber: input.toothNumber,
@@ -134,9 +157,24 @@ export async function insertOdontogramFinding(
     diagnosisCode: input.diagnosisCode ?? null,
     encounterId,
   }
-  const errors = validateFinding(finding, { strictVariants: options.strictVariants })
-  if (errors.length) throw validation(errors.join("; "))
-  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
+  // Cada error nombra su pieza (con varias piezas, quien lee sabe cuál es) y,
+  // si el hallazgo viene del cuerpo, su dato: la pantalla lo dice junto al campo.
+  const issues = findingIssues(finding, { strictVariants: options.strictVariants })
+  if (issues.length) {
+    const said = (message: string) => `Pieza ${input.toothNumber}: ${message}`
+    const fields: Record<string, string> = {}
+    for (const issue of issues) fields[issue.field] ??= said(issue.message)
+    throw validation(
+      issues.map((issue) => said(issue.message)).join(" "),
+      options.bodyFields ? fields : undefined,
+    )
+  }
+  const diagnosis = await resolveOptionalDiagnosisCode(
+    tx,
+    orgId,
+    { code: input.diagnosisCode, system: input.diagnosisSystem },
+    options.bodyFields?.diagnosisCode,
+  )
   // Hallazgo de grupo/tramo (puente, dentadura, supernumerario): UNA sola fila
   // con relatedTeeth incluyendo la principal; se proyecta a cada participante.
   const related = normalizeRelatedTeeth(
@@ -166,7 +204,12 @@ export async function insertOdontogramFinding(
   for (const tooth of teethTouched) {
     await tx
       .insert(encounterSite)
-      .values({ organizationId: orgId, encounterId, siteSystem: ISO_3950, siteCode: toothSiteCode(tooth) })
+      .values({
+        organizationId: orgId,
+        encounterId,
+        siteSystem: ISO_3950,
+        siteCode: toothSiteCode(tooth),
+      })
       .onConflictDoNothing()
   }
   await audit(
@@ -191,7 +234,9 @@ export async function insertOdontogramFinding(
 /**
  * Registra un hallazgo observado en la atención en borrador de quien la lleva.
  * Sin atención no se registra: desde la ficha el odontograma se consulta y
- * «Atender» está a un clic.
+ * «Atender» está a un clic. Cada error lleva su dato como en el cuerpo de
+ * `/odontogram/entries`; el panel de la pieza nombra distinto el diagnóstico
+ * (`diagnosisField`).
  */
 export async function addOdontogramEntries(
   tx: Db,
@@ -199,6 +244,7 @@ export async function addOdontogramEntries(
   actorUserId: string,
   patientId: string,
   input: AddOdontogramInput,
+  options: { diagnosisField?: string } = {},
 ) {
   await requirePatient(tx, orgId, patientId)
   const encounterId = typeof input.encounterId === "string" ? input.encounterId.trim() : ""
@@ -218,6 +264,7 @@ export async function addOdontogramEntries(
   }
   return insertOdontogramFinding(tx, orgId, actorUserId, patientId, encounterId, input, {
     strictVariants: await orgStrictVariants(tx, orgId),
+    bodyFields: { diagnosisCode: options.diagnosisField ?? "diagnosisCode" },
   })
 }
 
@@ -232,7 +279,7 @@ export async function voidOdontogramEntry(
   const trimmed = reason?.trim() ?? ""
   if (!patientId) throw validation("patientId es obligatorio")
   if (!trimmed || trimmed.length > 2000)
-    throw validation("El motivo de anulación es obligatorio (1–2000 caracteres)")
+    throw invalidField("reason", "Escribe el motivo de la anulación (hasta 2000 caracteres).")
   const [current] = await tx
     .select()
     .from(odontogramEntry)
@@ -375,7 +422,8 @@ async function signOdontogram(
   const patientRow = await requirePatient(tx, orgId, patientId)
   // Identidad firmada desde el servidor (nunca del body del cliente).
   const patientName = patientRow.displayName.trim()
-  if (!patientName) throw validation("La persona no tiene nombre registrado para firmar el odontograma")
+  if (!patientName)
+    throw validation("La persona no tiene nombre registrado para firmar el odontograma")
   // Snapshot calculado en el servidor; nunca se acepta del cliente.
   const { history } = await getOdontogram(tx, orgId, patientId)
   const candidates = history.filter((row) => !row.needsReview && !isVoidedRow(row))
@@ -417,9 +465,12 @@ async function signOdontogram(
   return row
 }
 
-function cleanAssessmentText(value: string | null | undefined, field: string): string {
+function cleanAssessmentText(
+  value: string | null | undefined,
+  field: "specifications" | "observations",
+): string {
   const text = value?.trim() ?? ""
-  if (text.length > 4000) throw validation(`${field} admite hasta 4000 caracteres`)
+  if (text.length > 4000) throw invalidField(field, "Escribe como mucho 4000 caracteres.")
   return text
 }
 
@@ -446,12 +497,13 @@ export async function createOdontogramAssessment(
     )
   }
   if (!(MANUAL_SIGNED_ODONTOGRAM_PURPOSES as readonly string[]).includes(input.purpose)) {
-    throw validation(
+    throw invalidField(
+      "purpose",
       "Con «Firmar odontograma» se firma a pedido judicial, a pedido de la persona o al reingresar; el inicio, los nuevos hallazgos y la culminación los firma el cierre de la atención",
     )
   }
-  const specifications = cleanAssessmentText(input.specifications, "Las especificaciones")
-  const observations = cleanAssessmentText(input.observations, "Las observaciones")
+  const specifications = cleanAssessmentText(input.specifications, "specifications")
+  const observations = cleanAssessmentText(input.observations, "observations")
   // Firma con su perfil: sin colegiatura no se firma (nadie firma con otro nombre).
   const signer = await requireProfessionalSignature(tx, orgId, actorUserId)
   // Sin firma sobre revisión pendiente: primero se revisan los legados.
@@ -674,10 +726,25 @@ async function establishmentOf(tx: Db, orgId: string) {
       fiscalDocType: orgProfile.fiscalDocType,
       fiscalDocNumber: orgProfile.fiscalDocNumber,
       address: orgProfile.fiscalAddress,
+      logo: organization.logo,
     })
     .from(orgProfile)
+    .leftJoin(organization, eq(organization.id, orgProfile.organizationId))
     .where(eq(orgProfile.organizationId, orgId))
-  return org ?? null
+  if (!org) return null
+  // Como los demás papeles: con una sola sede, su nombre, dirección y teléfono.
+  const branches = await tx
+    .select({ name: branch.name, address: branchAddressColumns, phone: branch.phone })
+    .from(branch)
+    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .limit(2)
+  const only = branches.length === 1 ? branches[0]! : null
+  return {
+    ...org,
+    address: (only ? (await branchAddressWriter(tx, orgId))(only.address) : null) ?? org.address,
+    branchName: only?.name ?? null,
+    phone: only?.phone ?? null,
+  }
 }
 
 async function printPatientOf(tx: Db, orgId: string, patientId: string) {
@@ -717,6 +784,8 @@ export async function getSignedOdontogramPrint(
     assessment,
     patient: await printPatientOf(tx, orgId, patientId),
     establishment: await establishmentOf(tx, orgId),
+    // La dirección del QR de la hoja: quien la tiene en la mano comprueba que sigue vigente.
+    checkUrl: await documentCheckUrl(tx, orgId, "signed_odontogram", assessment.id),
   }
 }
 
@@ -727,7 +796,11 @@ export async function getSignedOdontogramPrint(
 export async function odontogramLines(tx: Db, orgId: string, patientId: string) {
   const { teeth } = await getOdontogram(tx, orgId, patientId)
   return Object.entries(teeth)
-    .map(([tooth, state]) => ({ tooth: Number(tooth), label: conditionLabel(state.condition), surfaces: state.surfaces }))
+    .map(([tooth, state]) => ({
+      tooth: Number(tooth),
+      label: conditionLabel(state.condition),
+      surfaces: state.surfaces,
+    }))
     .sort((a, b) => a.tooth - b.tooth)
 }
 
@@ -747,4 +820,3 @@ export async function getOdontogramPrint(tx: Db, orgId: string, patientId: strin
     printedAt: new Date(),
   }
 }
-

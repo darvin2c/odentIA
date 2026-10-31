@@ -154,9 +154,30 @@ export const APPOINTMENT_DATA_NOTICE_KEY = "aviso_cita_reservada_datos"
  */
 export const REMINDER_DATA_KEY = "recordatorio_cita_datos"
 
+/**
+ * El recordatorio de una cita que ya está confirmada (ADR 0109): la que eligió
+ * la persona, en su enlace o con su sí en el chat, o la que ya confirmó. No le
+ * pide «Confirmar»: «Cambiar mi cita» abre su enlace, donde la cambia o la
+ * cancela. Sale en lugar del recordatorio; por WhatsApp, a quien no escribió en
+ * las últimas 24 horas, solo cuando lo aprobó: mientras tanto sale el de siempre.
+ * No tiene par con «Completar mis datos»: su botón es el mismo enlace, que abre
+ * primero lo que le falte.
+ */
+export const REMINDER_CONFIRMED_KEY = "recordatorio_cita_confirmada"
+
+/**
+ * «¿Vienes en camino?» (ADR 0113): de «Recordar la cita», a los minutos de la
+ * hora si la persona no llegó y en su sede ya marcaron llegadas ese día. Es su
+ * propio trabajo, uno por cita, y cuenta como recordatorio: lo apaga «No más
+ * recordatorios».
+ */
+export const APPOINTMENT_ARRIVAL_KEY = "cita_sin_llegar"
+
 export const AUTOMATION_MESSAGE_KEYS = [
   "recordatorio_cita",
   REMINDER_DATA_KEY,
+  REMINDER_CONFIRMED_KEY,
+  APPOINTMENT_ARRIVAL_KEY,
   // Los avisos de la cita van junto a su línea, «Recordar la cita»; el de
   // reserva con «Su enlace», junto al de reserva.
   "aviso_cita_reservada",
@@ -202,6 +223,34 @@ export const AUTOMATION_MESSAGES: Record<AutomationMessageKey, AutomationMessage
       NO_REMINDERS,
     ],
     subject: "Recordatorio de cita: completa tus datos",
+  },
+  // Lo aprobado en el lienzo «Recordatorio, un día antes», con una frase al
+  // final: WhatsApp rechaza el texto que termina en un dato (`checkBody`).
+  recordatorio_cita_confirmada: {
+    key: "recordatorio_cita_confirmada",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_recordatorio_cita_confirmada_v1",
+    body: "Hola, {{1}}. Te esperamos {{2}} en {{3}}. Si necesitas cambiar la cita, responde a este mensaje.",
+    variables: ["persona", "citas", "lugar"],
+    link: { title: "Cambiar mi cita" },
+    buttons: [{ action: "responder", title: "No podré ir", asks: "cambiar" }, NO_REMINDERS],
+    subject: "Recordatorio de cita",
+  },
+  // Sale mientras la cita todavía puede darse: no dice «no viniste», pregunta.
+  cita_sin_llegar: {
+    key: "cita_sin_llegar",
+    purpose: "recordatorio",
+    category: "utility",
+    template: "odentia_cita_sin_llegar_v1",
+    body: "Hola, {{1}}. Te esperamos en {{2}}: tu cita es {{3}}. ¿Vienes en camino? Si no puedes llegar, responde y te ayudamos a cambiarla.",
+    variables: ["persona", "lugar", "citas"],
+    buttons: [
+      { action: "responder", title: "Voy en camino" },
+      { action: "responder", title: "No podré ir", asks: "cambiar" },
+      NO_REMINDERS,
+    ],
+    subject: "Te esperamos en tu cita",
   },
   // «Controles y seguimiento»: se apaga aparte de los recordatorios de la cita.
   recordatorio_control: {
@@ -573,11 +622,42 @@ export function replyId(action: ReplyAction, jobId: string): string {
 /**
  * La pregunta del permiso de novedades y promociones, una sola vez por
  * persona, tras reservar (ADR 0030). Texto y botones fijos; la respuesta la
- * resuelve el sistema sin modelo.
+ * resuelve el sistema sin modelo. Lleva el nombre de la clínica y su trato
+ * (`generalPermissionWords`); estas tres son las de tú sin nombre, las que
+ * citan el prompt y la herramienta del agente.
  */
 export const GENERAL_PERMISSION_QUESTION = "¿Te podemos escribir para enviarte novedades y promociones de la clínica?"
 export const GENERAL_PERMISSION_YES = "¡Listo! Te enviaremos novedades y promociones. Puedes darte de baja cuando quieras."
 export const GENERAL_PERMISSION_NO = "Entendido: no te enviaremos novedades ni promociones."
+
+/**
+ * La pregunta y sus dos respuestas con el nombre de la clínica, de usted si la
+ * clínica trata de usted; si trata de tú o como la persona la trate, de tú: la
+ * pregunta sale antes de saber cómo escribe. Sin nombre, «la clínica».
+ */
+export function generalPermissionWords(
+  clinic: string | null,
+  treatment: "tu" | "usted" | null,
+): { question: string; yes: string; no: string } {
+  const name = clinic?.replace(/\s+/g, " ").trim() || "la clínica"
+  if (treatment === "usted") {
+    return {
+      question: `¿Le podemos escribir para enviarle novedades y promociones de ${name}?`,
+      yes: "¡Listo! Le enviaremos novedades y promociones. Puede darse de baja cuando quiera.",
+      no: "Entendido: no le enviaremos novedades ni promociones.",
+    }
+  }
+  return {
+    question: `¿Te podemos escribir para enviarte novedades y promociones de ${name}?`,
+    yes: GENERAL_PERMISSION_YES,
+    no: GENERAL_PERMISSION_NO,
+  }
+}
+
+/** Si un texto es la pregunta de novedades, con cualquier nombre de clínica y trato. */
+export function isGeneralPermissionQuestion(text: string | null | undefined): boolean {
+  return /^¿(Te|Le) podemos escribir para enviar(te|le) novedades y promociones de .+\?$/.test((text ?? "").trim())
+}
 
 // ---------------------------------------------------------- «Tus mensajes» ---
 

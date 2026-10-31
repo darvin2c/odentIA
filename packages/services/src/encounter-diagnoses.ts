@@ -15,7 +15,7 @@ import { and, asc, desc, eq, isNull } from "drizzle-orm"
 import { DIAGNOSIS_TYPES } from "./clinical.js"
 import { resolveDiagnosisCode, wasDiagnosedBefore } from "./diagnosis-codes.js"
 import { assertOpenDraft, type EncounterDiagnosisRow, lockEncounter } from "./encounters.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { withSite } from "./product-hooks.js"
 import { productHooks } from "./products.js"
@@ -76,16 +76,16 @@ export async function addEncounterDiagnosis(
     tx,
     orgId,
     { code: input.diagnosisCode, system: input.diagnosisSystem },
-    { newDiagnosis: true, codable: true },
+    { newDiagnosis: true, codable: true, field: "diagnosisCode" },
   )
   if (!(DIAGNOSIS_TYPES as readonly string[]).includes(input.diagnosisType))
-    throw validation("Elige si el diagnóstico es presuntivo o definitivo")
+    throw invalidField("diagnosisType", "Elige si el diagnóstico es presuntivo o definitivo")
   const previouslyDiagnosed = await wasDiagnosedBefore(tx, orgId, patientId, found, encounterId)
   // Dónde, como lo valida el producto (odentIA: una pieza FDI y sus caras).
   const site = await siteOf(tx, orgId)
   const columns = site.columns({ toothNumber: input.toothNumber ?? null, surfaces: input.surfaces ?? [] })
   const note = input.note?.trim() || null
-  if (note && note.length > 2000) throw validation("La nota admite hasta 2000 caracteres")
+  if (note && note.length > 2000) throw invalidField("note", "La nota admite hasta 2000 caracteres")
   const [row] = await tx
     .insert(encounterDiagnosis)
     .values({
@@ -125,7 +125,7 @@ export async function voidEncounterDiagnosis(
   assertOpenDraft(locked, actorUserId)
   const reason = input.reason?.trim() ?? ""
   if (reason.length < 1 || reason.length > 2000)
-    throw validation("El motivo debe tener 1–2000 caracteres")
+    throw invalidField("reason", "El motivo debe tener 1–2000 caracteres")
   const [current] = await tx
     .select()
     .from(encounterDiagnosis)

@@ -21,27 +21,45 @@ type Dentition = "adulta" | "temporal"
  * Selector de sitio dental: UNA pieza sobre el arco anatómico del odontograma
  * y, si se piden, sus superficies válidas. El número FDI también se escribe,
  * para teclado y lector de pantalla. Es la misma composición para
- * diagnósticos, procedimientos y documentos: un solo selector de pieza.
+ * diagnósticos, procedimientos y documentos: un solo selector de pieza. No
+ * pinta su etiqueta: la pantalla lo nombra (`FieldSet` + `FieldLegend` o
+ * `field.Group`).
  */
 export function ToothSiteSelector({
   value,
   onChange,
   withSurfaces = false,
   disabled = false,
-  label = "Pieza",
-  optional = true,
   surfacesRequired = false,
+  id,
+  invalid = false,
+  "aria-describedby": describedBy,
+  "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
+  onBlur,
 }: {
   value: ToothSite
   onChange: (value: ToothSite) => void
   withSurfaces?: boolean
   disabled?: boolean
-  label?: string
-  optional?: boolean
   surfacesRequired?: boolean
+  /** Va al campo «Número FDI» (para `FieldLabel htmlFor`); los ids internos salen de él. */
+  id?: string
+  /** `aria-invalid` en el grupo, en el número FDI y en cada superficie que se muestra. */
+  invalid?: boolean
+  /** La ayuda y el error de la pantalla; se une a las pistas internas. */
+  "aria-describedby"?: string
+  /** Nombre del grupo si la pantalla no lo envuelve en un `FieldSet` con leyenda. */
+  "aria-label"?: string
+  "aria-labelledby"?: string
+  /** Al salir del grupo. */
+  onBlur?: () => void
 }): React.JSX.Element {
-  const groupId = useId()
-  const inputId = useId()
+  const generatedId = useId()
+  const inputId = id ?? generatedId
+  const statusId = `${inputId}-estado`
+  const typedErrorId = `${inputId}-error`
+  const surfacesLabelId = `${inputId}-superficies`
   const [dentition, setDentition] = useState<Dentition>(() =>
     value.toothNumber !== null && value.toothNumber >= 50 ? "temporal" : "adulta",
   )
@@ -49,6 +67,8 @@ export function ToothSiteSelector({
   const rows = dentition === "adulta" ? FDI_ADULT_ROWS : FDI_CHILD_ROWS
   const tooth = value.toothNumber
   const available = tooth !== null && isValidTooth(tooth) ? surfacesForTooth(tooth) : []
+  // Dos dígitos que no son una pieza: el error manda sobre la pieza anterior, que ya se quitó.
+  const typedInvalid = typed.length === 2 && !isValidTooth(Number(typed))
 
   const pick = (next: number | null) => {
     setTyped(next === null ? "" : String(next))
@@ -57,12 +77,21 @@ export function ToothSiteSelector({
   }
 
   return (
-    <fieldset aria-labelledby={groupId} className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
+    <fieldset
+      aria-label={ariaLabel}
+      aria-labelledby={labelledBy}
+      aria-invalid={invalid || undefined}
+      aria-describedby={describedBy}
+      onBlur={
+        onBlur
+          ? (event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) onBlur()
+            }
+          : undefined
+      }
+      className="flex min-w-0 flex-col gap-3"
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span id={groupId} className="text-sm font-medium">
-          {label}
-          {optional ? <span className="text-muted-foreground"> (opcional)</span> : null}
-        </span>
         <fieldset className="m-0 flex gap-1 border-0 p-0" aria-label="Dentición">
           {(["adulta", "temporal"] as const).map((d) => (
             <Button
@@ -102,23 +131,27 @@ export function ToothSiteSelector({
             placeholder="Ej.: 36"
             value={typed}
             disabled={disabled}
-            aria-invalid={typed !== "" && !isValidTooth(Number(typed))}
+            aria-invalid={typedInvalid || invalid ? true : undefined}
+            aria-describedby={[describedBy, typedInvalid ? typedErrorId : statusId].filter(Boolean).join(" ")}
             onChange={(event) => {
               const digits = event.target.value.replace(/\D/g, "").slice(0, 2)
               setTyped(digits)
-              if (digits === "") onChange({ toothNumber: null, surfaces: [] })
-              else if (digits.length === 2 && isValidTooth(Number(digits)))
-                onChange({ toothNumber: Number(digits), surfaces: [] })
+              const next = Number(digits)
+              // Lo escrito manda: si ya no es la pieza elegida, se quita (no queda la anterior a la vista).
+              if (digits.length === 2 && isValidTooth(next)) onChange({ toothNumber: next, surfaces: [] })
+              else if (tooth !== null) onChange({ toothNumber: null, surfaces: [] })
             }}
           />
         </div>
-        <p aria-live="polite" className="pb-2 text-xs text-muted-foreground">
-          {tooth !== null && isValidTooth(tooth)
-            ? `${tooth} · ${toothNameOf(tooth)}`
-            : typed !== "" && typed.length === 2
-              ? "Número FDI no válido (11–48 o 51–85)."
-              : "Toca una pieza o escribe su número."}
-        </p>
+        {typedInvalid ? (
+          <p id={typedErrorId} role="alert" className="pb-2 text-xs text-destructive">
+            Número FDI no válido: escribe de 11 a 48 o de 51 a 85.
+          </p>
+        ) : (
+          <p id={statusId} aria-live="polite" className="pb-2 text-xs text-muted-foreground">
+            {tooth !== null && isValidTooth(tooth) ? `${tooth} · ${toothNameOf(tooth)}` : "Toca una pieza o escribe su número."}
+          </p>
+        )}
         {tooth !== null ? (
           <Button
             type="button"
@@ -133,12 +166,13 @@ export function ToothSiteSelector({
       </div>
       {withSurfaces && available.length > 0 ? (
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs text-muted-foreground">
+          <span id={surfacesLabelId} className="text-xs text-muted-foreground">
             {surfacesRequired ? "Superficies (al menos una)" : "Superficies (opcional)"}
           </span>
           <fieldset
             className="m-0 flex flex-wrap gap-1.5 border-0 p-0"
             aria-label={`Superficies de la pieza ${tooth}`}
+            aria-describedby={surfacesLabelId}
           >
             {available.map((surface) => {
               const pressed = value.surfaces.includes(surface)
@@ -149,6 +183,7 @@ export function ToothSiteSelector({
                   size="sm"
                   variant={pressed ? "default" : "outline"}
                   aria-pressed={pressed}
+                  aria-invalid={invalid || undefined}
                   disabled={disabled}
                   onClick={() =>
                     onChange({

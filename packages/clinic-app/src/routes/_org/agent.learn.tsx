@@ -1,5 +1,5 @@
 import { Badge, Button, Collapsible, CollapsibleContent, CollapsibleTrigger, cn, useIsMobile } from "@odentia/ui"
-import { AgentSurface, EmptyState, ErrorState, PageHeader, PageShell, RowActions, ViewTabs, SkeletonRegion } from "@odentia/ui-patterns"
+import { AgentSurface, EmptyState, ErrorState, PageHeader, PageShell, RowActions, submitErrorMessage, ViewTabs, SkeletonRegion } from "@odentia/ui-patterns"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
@@ -29,7 +29,7 @@ import { channelLabel } from "../../lib/channels"
 import { type AgentConfig, useCan, usePermission } from "../../lib/crm"
 import { canCorrectAgent } from "../../lib/screen-rules"
 import { useOrgEvents } from "../../lib/org-events"
-import { mutationErrorMessage, QueryErrorState } from "../../lib/query-error"
+import { QueryErrorState } from "../../lib/query-error"
 import { LearnPageSkeleton, LearnSkeleton } from "../../components/skeletons/agent"
 
 export const Route = createFileRoute("/_org/agent/learn")({
@@ -415,7 +415,7 @@ function AgentLearnPage() {
             )}
             {markOk.isError ? (
               <p role="alert" className="text-sm text-destructive">
-                {mutationErrorMessage(markOk.error)}
+                {submitErrorMessage(markOk.error)}
               </p>
             ) : null}
             {!allReview && review.length > PREVIEW ? (

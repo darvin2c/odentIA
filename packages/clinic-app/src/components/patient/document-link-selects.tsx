@@ -4,6 +4,10 @@
  * La atención y el tratamiento tienen sus propios selectores en cada superficie;
  * estos cuatro completan la cadena clínico-económica para que un archivo se lea
  * desde el hecho que lo originó. Sin vínculo, el documento sigue siendo válido.
+ *
+ * Es un grupo: cada selector lleva su nombre, pero el nombre, la ayuda y el
+ * error del conjunto los pinta la pantalla (`FieldSet` + `FieldLegend` o
+ * `aria-label`). `id` va al primer selector; los demás derivan de él.
  */
 import {
   Field,
@@ -15,6 +19,7 @@ import {
   SelectValue,
 } from "@odentia/ui"
 import { useQuery } from "@tanstack/react-query"
+import { useId } from "react"
 import { fetchBudgets } from "../../lib/budgets"
 import {
   fetchFollowUps,
@@ -34,21 +39,36 @@ export interface DocumentLinkValue {
   encounterProcedureId: string
 }
 
-
 export function DocumentLinkSelects({
+  id: idProp,
   patientId,
   value,
   onChange,
-  idPrefix,
   procedures,
+  invalid = false,
+  onBlur,
+  "aria-describedby": describedBy,
+  "aria-label": ariaLabel,
+  "aria-labelledby": labelledBy,
 }: {
+  /** El del primer selector (Procedimiento); los demás son `${id}-budget`, `${id}-follow-up`… */
+  id?: string
   patientId: string
   value: DocumentLinkValue
   onChange: (patch: Partial<DocumentLinkValue>) => void
-  idPrefix: string
   /** Procedimientos de la atención elegida: sin atención no hay ninguno que vincular. */
   procedures?: Array<{ id: string; description: string }>
+  /** El error lo dice la pantalla: el grupo solo se marca. */
+  invalid?: boolean
+  /** Al salir del grupo. */
+  onBlur?: () => void
+  "aria-describedby"?: string
+  "aria-label"?: string
+  "aria-labelledby"?: string
 }): React.JSX.Element {
+  const fallbackId = useId()
+  const id = idProp ?? fallbackId
+  const marked = invalid || undefined
   // Formato de la clínica para los importes históricos (moneda congelada del pago).
   const profile = useOrgProfile()
   const orgLocale = profile.data?.locale
@@ -96,14 +116,23 @@ export function DocumentLinkSelects({
   ]
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <fieldset
+      aria-label={ariaLabel}
+      aria-labelledby={labelledBy}
+      aria-invalid={marked}
+      aria-describedby={describedBy}
+      className="grid min-w-0 gap-3 sm:grid-cols-2"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onBlur?.()
+      }}
+    >
       <Field>
-        <FieldLabel htmlFor={`${idPrefix}-procedure`}>Procedimiento</FieldLabel>
+        <FieldLabel htmlFor={id}>Procedimiento</FieldLabel>
         <Select
           value={value.encounterProcedureId || undefined}
           onValueChange={(next) => onChange({ encounterProcedureId: next ?? "" })}
         >
-          <SelectTrigger id={`${idPrefix}-procedure`} aria-label="Procedimiento vinculado">
+          <SelectTrigger id={id} aria-label="Procedimiento vinculado" aria-invalid={marked}>
             <SelectValue
               placeholder={
                 (procedures?.length ?? 0) === 0
@@ -123,12 +152,12 @@ export function DocumentLinkSelects({
       </Field>
 
       <Field>
-        <FieldLabel htmlFor={`${idPrefix}-budget`}>Presupuesto</FieldLabel>
+        <FieldLabel htmlFor={`${id}-budget`}>Presupuesto</FieldLabel>
         <Select
           value={value.budgetId || undefined}
           onValueChange={(next) => onChange({ budgetId: next ?? "" })}
         >
-          <SelectTrigger id={`${idPrefix}-budget`} aria-label="Presupuesto vinculado">
+          <SelectTrigger id={`${id}-budget`} aria-label="Presupuesto vinculado" aria-invalid={marked}>
             <SelectValue placeholder="Sin presupuesto" />
           </SelectTrigger>
           <SelectContent>
@@ -142,12 +171,12 @@ export function DocumentLinkSelects({
       </Field>
 
       <Field>
-        <FieldLabel htmlFor={`${idPrefix}-follow-up`}>Control</FieldLabel>
+        <FieldLabel htmlFor={`${id}-follow-up`}>Control</FieldLabel>
         <Select
           value={value.followUpId || undefined}
           onValueChange={(next) => onChange({ followUpId: next ?? "" })}
         >
-          <SelectTrigger id={`${idPrefix}-follow-up`} aria-label="Control vinculado">
+          <SelectTrigger id={`${id}-follow-up`} aria-label="Control vinculado" aria-invalid={marked}>
             <SelectValue placeholder="Sin control" />
           </SelectTrigger>
           <SelectContent>
@@ -161,12 +190,12 @@ export function DocumentLinkSelects({
       </Field>
 
       <Field>
-        <FieldLabel htmlFor={`${idPrefix}-prescription`}>Receta</FieldLabel>
+        <FieldLabel htmlFor={`${id}-prescription`}>Receta</FieldLabel>
         <Select
           value={value.prescriptionId || undefined}
           onValueChange={(next) => onChange({ prescriptionId: next ?? "" })}
         >
-          <SelectTrigger id={`${idPrefix}-prescription`} aria-label="Receta vinculada">
+          <SelectTrigger id={`${id}-prescription`} aria-label="Receta vinculada" aria-invalid={marked}>
             <SelectValue placeholder="Sin receta" />
           </SelectTrigger>
           <SelectContent>
@@ -180,12 +209,12 @@ export function DocumentLinkSelects({
       </Field>
 
       <Field>
-        <FieldLabel htmlFor={`${idPrefix}-payment`}>Pago</FieldLabel>
+        <FieldLabel htmlFor={`${id}-payment`}>Pago</FieldLabel>
         <Select
           value={value.paymentId || undefined}
           onValueChange={(next) => onChange({ paymentId: next ?? "" })}
         >
-          <SelectTrigger id={`${idPrefix}-payment`} aria-label="Pago vinculado">
+          <SelectTrigger id={`${id}-payment`} aria-label="Pago vinculado" aria-invalid={marked}>
             <SelectValue placeholder="Sin pago" />
           </SelectTrigger>
           <SelectContent>
@@ -198,6 +227,6 @@ export function DocumentLinkSelects({
           </SelectContent>
         </Select>
       </Field>
-    </div>
+    </fieldset>
   )
 }

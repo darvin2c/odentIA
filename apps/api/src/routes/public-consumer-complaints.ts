@@ -11,6 +11,7 @@ import {
 import { type Context, Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { errorBody } from "../lib/error.js"
+import { validationError } from "./helpers.js"
 import type { RegistrationRemoteAddress } from "./public-patient-registration.js"
 
 const WINDOW_MS = 10 * 60 * 1000
@@ -112,18 +113,14 @@ export function createPublicConsumerComplaintsRoute(deps: {
 
     const body = await c.req.json().catch(() => null)
     const parsed = consumerComplaintInputSchema.safeParse(body)
-    if (!parsed.success) {
-      const message =
-        parsed.error.issues[0]?.message ?? "Revisa los datos de la hoja de reclamación"
-      return c.json(errorBody(c, "VALIDATION", message), 400)
-    }
+    if (!parsed.success) return validationError(c, parsed.error.issues)
 
     let result: Awaited<ReturnType<typeof submitConsumerComplaint>>
     try {
       result = await deps.ownerDb.transaction((tx) => submitConsumerComplaint(tx, parsed.data))
     } catch (error) {
       if (error instanceof ServiceError)
-        return c.json(errorBody(c, error.code, error.message), error.status)
+        return c.json(errorBody(c, error.code, error.message, error.fields), error.status)
       throw error
     }
     const { sheet, created } = result

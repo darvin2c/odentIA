@@ -18,7 +18,7 @@ import { z } from "zod"
 import { planPrices } from "./saas-actions.js"
 import { type AdminActor, writeAdminAudit } from "./admin-core.js"
 import { addBusinessDays, currentSaasTerms, loadSaasTermsTimeline, type SaasTermsTimeline, saasTermsAt } from "./saas-commercial-terms.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { orgProduct } from "./locale.js"
 import { defaultPlanOf } from "./saas-plan-product.js"
 
@@ -336,7 +336,7 @@ async function lockRequest(tx: Db, id: string) {
 
 export async function setWaitlistNote(tx: Db, actor: AdminActor, id: string, note: string | null): Promise<void> {
   const value = note?.trim() ? note.trim() : null
-  if (value && value.length > 2000) throw validation("La nota puede tener como máximo 2000 caracteres")
+  if (value && value.length > 2000) throw invalidField("note", "La nota puede tener como máximo 2000 caracteres")
   await lockRequest(tx, id)
   await tx.update(saasWaitlistRequest).set({ note: value, updatedAt: new Date() }).where(eq(saasWaitlistRequest.id, id))
   await writeAdminAudit(tx, actor, { action: "saas.waitlist_note", entityId: id })
@@ -345,8 +345,8 @@ export async function setWaitlistNote(tx: Db, actor: AdminActor, id: string, not
 /** Descartar pide un motivo y no se le avisa a quien pidió (tablero 6). */
 export async function discardWaitlistRequest(tx: Db, actor: AdminActor, id: string, reason: string): Promise<void> {
   const value = reason.trim()
-  if (!value) throw validation("Escribe por qué se descarta")
-  if (value.length > 500) throw validation("Usa como máximo 500 caracteres")
+  if (!value) throw invalidField("reason", "Escribe por qué se descarta")
+  if (value.length > 500) throw invalidField("reason", "Usa como máximo 500 caracteres")
   const row = await lockRequest(tx, id)
   if (row.status === "entro") throw new ServiceError("WAITLIST_ENTERED", 409, "Esa clínica ya entró: no se puede descartar")
   if (row.claimedAt) throw new ServiceError("WAITLIST_IN_USE", 409, "La invitación se está usando en este momento: intenta en un minuto")

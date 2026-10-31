@@ -14,7 +14,7 @@ import {
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { requirePatient } from "./patients.js"
 import { assertExecutableCodings, resolveServiceCodings } from "./procedure-codings.js"
 import { requireServiceForIndication, type ServiceRow } from "./service-catalog.js"
@@ -421,14 +421,14 @@ async function nextSortOrder(tx: Db, orgId: string, planId: string): Promise<num
 
 function assertPhase(hooks: ProductHooks, value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null
-  if (!hooks.planPhases.includes(value)) throw validation(`Fase inválida: ${hooks.planPhases.join(", ")}`)
+  if (!hooks.planPhases.includes(value)) throw invalidField("phase", `Fase inválida: ${hooks.planPhases.join(", ")}`)
   return value
 }
 
 function assertPlannedSessions(value: number | null | undefined): number | null {
   if (value === undefined || value === null) return null
   if (!Number.isInteger(value) || value < 1 || value > 60)
-    throw validation("Las sesiones previstas van de 1 a 60")
+    throw invalidField("plannedSessions", "Las sesiones previstas van de 1 a 60")
   return value
 }
 
@@ -680,7 +680,7 @@ export async function addPlanItem(
   await requirePatient(tx, orgId, patientId)
   if (!input.sourceEncounterId?.trim()) throw validation("sourceEncounterId es obligatorio")
   if (!input.serviceId?.trim())
-    throw validation("serviceId es obligatorio: selecciona una prestación de la lista de servicios")
+    throw invalidField("serviceId", "Elige la prestación de la lista de servicios.")
   const encounterId = input.sourceEncounterId.trim()
   await lockDraftEncounter(tx, orgId, patientId, encounterId)
   // No se elige plan al indicar: va al abierto, que nace solo si no hay.
@@ -690,7 +690,7 @@ export async function addPlanItem(
   const scope = assertScopeValue(hooks.site, service.scope)
   const itemSite = hooks.site.columns(siteInputOf(hooks.site, input), { scope, surfaces: await surfaceLimits(tx, orgId, service), pending: true })
   const detail = assertDetail(input.detail)
-  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem })
+  const diagnosis = await resolveOptionalDiagnosisCode(tx, orgId, { code: input.diagnosisCode, system: input.diagnosisSystem }, "diagnosisCode")
   const codings = await resolveServiceCodings(tx, (await orgClinicalProfile(tx, orgId)).services, service)
   // La fase la propone la especialidad de la clínica por su clave de la biblioteca.
   const phase =
@@ -1033,7 +1033,7 @@ export async function setPlanItemStatus(
   let reason: string | null = null
   if (input.status === "suspendido" || input.status === "cancelado") {
     reason = input.statusReason?.trim() ?? ""
-    if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+    if (!reason || reason.length > 2000) throw invalidField("statusReason", "El motivo debe tener 1–2000 caracteres.")
   }
   if (["programado", "en_curso", "realizado"].includes(input.status)) {
     if (current.decisionStatus !== "aceptado")
@@ -1126,7 +1126,7 @@ export async function revisePlanItem(
   },
 ): Promise<PlanItemWithDecision> {
   const reason = input.reason?.trim()
-  if (!reason || reason.length > 2000) throw validation("El motivo debe tener 1–2000 caracteres")
+  if (!reason || reason.length > 2000) throw invalidField("reason", "El motivo debe tener 1–2000 caracteres.")
   await requirePatient(tx, orgId, patientId)
   await lockDraftEncounter(tx, orgId, patientId, input.encounterId)
   const { item } = await lockPlanItemForExecution(tx, orgId, patientId, itemId)
@@ -1205,7 +1205,7 @@ export async function updatePlanItemPlanning(
   if (plannedSessions !== null) {
     const [done] = await withDecisions(tx, orgId, [item])
     if (done && plannedSessions < done.sessionsDone)
-      throw validation(`Ya se hicieron ${done.sessionsDone} sesiones: no pueden preverse menos`)
+      throw invalidField("plannedSessions", `Ya se hicieron ${done.sessionsDone} sesiones: no pueden preverse menos`)
   }
   const changes: Partial<PlanItemRow> = {}
   if (phase !== null && phase !== item.phase) {

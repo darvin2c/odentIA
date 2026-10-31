@@ -8,7 +8,7 @@ import { agentConfig, channelConnection } from "@odentia/db/schema/crm"
 import { helpAsk } from "@odentia/db/schema/workspace"
 import { and, count, eq, gte } from "drizzle-orm"
 import { openSupportCaseFromHelp, type SupportCaseListItem } from "./admin-support.js"
-import { notFound, ServiceError, validation } from "./errors.js"
+import { invalidField, notFound, ServiceError } from "./errors.js"
 import {
   type HelpTopic,
   helpSuggestions,
@@ -148,7 +148,7 @@ async function requireDailyRoom(tx: Db, orgId: string, userId: string): Promise<
  * nunca del texto de la pregunta.
  */
 export async function askHelp(tx: Db, orgId: string, asker: HelpAsker, input: { question: unknown; screen: unknown }): Promise<HelpReply> {
-  if (typeof input.question !== "string" || input.question.trim().length < 3) throw validation("Escribe tu pregunta")
+  if (typeof input.question !== "string" || input.question.trim().length < 3) throw invalidField("question", "Escribe tu pregunta: al menos 3 caracteres.")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   const screen = typeof input.screen === "string" ? input.screen.slice(0, 200) : "/"
   await requireDailyRoom(tx, orgId, asker.userId)
@@ -264,7 +264,7 @@ export async function sendHelpRequest(
   asker: Pick<HelpAsker, "userId" | "roleLabel">,
   input: { question: unknown; screen: unknown; kind?: unknown; detail?: unknown; appVersion?: string | null },
 ): Promise<SupportCaseListItem & { reused: boolean }> {
-  if (typeof input.question !== "string" || input.question.trim().length < 3) throw validation("Escribe lo que quieres preguntar")
+  if (typeof input.question !== "string" || input.question.trim().length < 3) throw invalidField("question", "Escribe lo que quieres enviar: al menos 3 caracteres.")
   const question = input.question.trim().slice(0, QUESTION_CHARS)
   return openSupportCaseFromHelp(tx, orgId, {
     userId: asker.userId,
