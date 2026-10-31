@@ -368,7 +368,7 @@ function FinanceWorkspace() {
   // En el escritorio, la cabecera trae la acción principal de la sección y lo demás en ⋯; en el teléfono, las acciones van en la barra de abajo.
   const headerOn = !isMobile && ws !== null
   // Mientras llegan la sede y el perfil, la acción sigue a la vista, deshabilitada: no aparece, se va y vuelve.
-  const headerWaiting = !isMobile && ws === null && (profile.isPending || sede.branches.length === 0)
+  const headerWaiting = !isMobile && ws === null && (profile.isPending || branchZone.isPending)
   const { primary: headerPrimary, menu: headerMenu } = headerOn
     ? financeHeader(view, access, runAction)
     : headerWaiting

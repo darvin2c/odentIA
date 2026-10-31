@@ -4,7 +4,7 @@
  * `components/person/locked-record.tsx`.
  */
 import { ParamTabs } from "./param-tabs"
-import { Button, Skeleton, Tabs, TabsTrigger } from "@odentia/ui"
+import { Button, Skeleton, TabsTrigger } from "@odentia/ui"
 import { FilterBar, type PageHeaderProps, PageShell, ScrollingTabsList, SkeletonRegion } from "@odentia/ui-patterns"
 import { Lock } from "lucide-react"
 import { PageLoading } from "./page-loading"

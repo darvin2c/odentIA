@@ -9,10 +9,11 @@ import {
   useAppForm,
   useFormSubmit,
   useFormSubmitError,
+  useDraftBlocker,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link, useBlocker } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, X } from "lucide-react"
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { z } from "zod"
@@ -140,10 +141,9 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
   // Borrador local sin storage: cambiar de hilo, cerrar el contexto móvil o
   // salir de la bandeja con borrador bloquea la navegación del router y pide
   // confirmación real. Drawers y secciones son estado local y nunca navegan.
-  const draftBlocker = useBlocker({
+  const draftBlocker = useDraftBlocker({
     disabled: !noteDirty,
     enableBeforeUnload: false,
-    withResolver: true,
     shouldBlockFn: ({ current, next }) => {
       if (!noteDirtyRef.current) return false
       if (next.routeId !== "/_org/inbox") return true

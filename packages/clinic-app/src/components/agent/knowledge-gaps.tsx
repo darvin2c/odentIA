@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
+import { SkeletonRegion } from "@odentia/ui-patterns"
 import { useState } from "react"
 import { QueryErrorState } from "../../lib/query-error"
 import { gapFrequency, type KnowledgeGap, TOUCH } from "./knowledge-model"

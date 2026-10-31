@@ -10,12 +10,18 @@ import type { ComponentProps } from "react"
 export function ParamTabs({
   param,
   fallback,
+  clear = [],
+  to = ".",
   ...props
 }: ComponentProps<typeof Tabs> & {
   /** El parámetro de la dirección que elige la pestaña. */
   param: string
   /** La pestaña que abre sin parámetro: elegirla lo quita. */
   fallback?: string
+  /** Lo que la pantalla limpia al cambiar de pestaña: los filtros son de cada una. */
+  clear?: readonly string[]
+  /** Cuando la dirección de ahora no es la de estas pestañas (Comisiones dentro de Finanzas). */
+  to?: string
 }) {
   const navigate = useNavigate()
   return (
@@ -23,7 +29,8 @@ export function ParamTabs({
       {...props}
       onValueChange={(value) => {
         const next = String(value)
-        void navigate({ to: ".", search: (prev: Record<string, unknown>) => ({ ...prev, [param]: next === fallback ? undefined : next }) } as never)
+        const cleared = Object.fromEntries(clear.map((key) => [key, undefined]))
+        void navigate({ to, search: (prev: Record<string, unknown>) => ({ ...prev, ...cleared, [param]: next === fallback ? undefined : next }) } as never)
       }}
     />
   )

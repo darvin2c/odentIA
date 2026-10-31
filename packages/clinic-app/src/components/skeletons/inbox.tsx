@@ -5,7 +5,7 @@
  * por vez: el hilo si el enlace ya trae una conversación y, si no, la lista.
  */
 import { ParamTabs } from "./param-tabs"
-import { Button, cn, InputGroup, InputGroupAddon, InputGroupTextarea, Skeleton, Tabs, TabsTrigger } from "@odentia/ui"
+import { Button, cn, InputGroup, InputGroupAddon, InputGroupTextarea, Skeleton, TabsTrigger } from "@odentia/ui"
 import { EmptyState, FilterBar, PageHeader, PageShell, ScrollingTabsList, SkeletonRegion, useListSearch } from "@odentia/ui-patterns"
 import { Ban, ChevronLeft } from "lucide-react"
 import { useCan } from "../../lib/crm"
@@ -179,7 +179,7 @@ export function InboxPageSkeleton() {
         <PageHeader title="Bandeja" primary={inboxPrimary(can)} />
       </div>
       <div className={cn("flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:gap-3", listOnly)}>
-        <ParamTabs param="view" fallback="attend" value={get("view") ?? "attend"} className="min-w-0 shrink-0 max-md:w-full md:max-w-[70%]">
+        <ParamTabs param="view" fallback="attend" value={CHIPS.some((chip) => chip.value === get("view")) ? get("view") : "attend"} className="min-w-0 shrink-0 max-md:w-full md:max-w-[70%]">
           <ScrollingTabsList aria-label="Vista de la bandeja">
             {CHIPS.map((chip) => (
               <TabsTrigger key={chip.value} value={chip.value} className="shrink-0 min-h-11 px-3 sm:min-h-9">
@@ -206,7 +206,7 @@ export function InboxPageSkeleton() {
             searchLabel="Buscar en la Bandeja"
             resetKeys={["channel", "q"]}
           />
-          <Button type="button" variant="outline" className="min-h-11 shrink-0 sm:min-h-9">
+          <Button type="button" variant="outline" disabled className="min-h-11 shrink-0 sm:min-h-9">
             Solo las mías
           </Button>
         </div>

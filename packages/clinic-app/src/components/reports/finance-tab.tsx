@@ -581,7 +581,6 @@ function CommissionsSection({ query, data }: { query: ReportQuery; data: ReportF
   const report = useQuery({
     queryKey: reportKey("finance/commissions", query),
     queryFn: () => fetchReport<ReportCommissions>("finance/commissions", query),
-    placeholderData: keepPreviousData,
     retry: false,
   })
   const canPay = usePermission("commissions.write")
@@ -921,7 +920,7 @@ function PayablesCard({ data }: { data: ReportFinance }) {
 // --- Lo que viene y de dónde vino lo cobrado ---------------------------------------------
 
 function OutlookCard({ query, onOpenList }: { query: ReportQuery; onOpenList: (list: ReportListKey) => void }) {
-  const report = useQuery({ queryKey: reportKey("finance/outlook", query), queryFn: () => fetchReport<ReportOutlook>("finance/outlook", query), placeholderData: keepPreviousData, retry: false })
+  const report = useQuery({ queryKey: reportKey("finance/outlook", query), queryFn: () => fetchReport<ReportOutlook>("finance/outlook", query), retry: false })
   if (report.isPending)
     return (
       <ReportCard title="Lo que viene">

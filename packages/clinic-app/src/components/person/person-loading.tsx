@@ -1,5 +1,5 @@
 import { useLocation, useNavigate, useSearch, Link } from "@tanstack/react-router"
-import { LoadingState, PageShell } from "@odentia/ui-patterns"
+import { LoadingState, PagePending, PageShell } from "@odentia/ui-patterns"
 import { useCan, usePermission } from "../../lib/crm"
 import {
   areaNav,
@@ -103,7 +103,10 @@ export function PersonLoading() {
 
 /** La atención: quien escribe en la historia suele abrir un borrador; los demás, una ya cerrada. */
 export function EncounterLoading() {
-  return <EncounterPageSkeleton draft={usePermission("clinical.write")} />
+  const canRead = usePermission("clinical.read")
+  const canWrite = usePermission("clinical.write")
+  if (!canRead && !canWrite) return <PagePending />
+  return <EncounterPageSkeleton draft={canWrite} />
 }
 
 /**

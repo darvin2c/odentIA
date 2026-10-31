@@ -167,15 +167,15 @@ export const Route = createFileRoute("/_org")({
     const elsewhere =
       region.product && region.product !== productUi().product ? tenantUrl(data.slug, location.href, region.product) : null
     if (elsewhere && new URL(elsewhere).hostname !== requestHostname()) throw redirect({ href: elsewhere })
-    return { session, org: data, region }
+    return { session, org: data, region, checkedAt: Date.now() }
   },
   component: OrgGate,
 })
 
 /** Sin la verificación que pide la clínica, su pantalla en vez de la aplicación. */
 function OrgGate() {
-  const { org, region, session } = orgRouteApi.useRouteContext()
-  rememberServerChecks({ org, region, session })
+  const { org, region, session, checkedAt } = orgRouteApi.useRouteContext()
+  rememberServerChecks({ org, region, session, checkedAt })
   if (region.twoFactorRequired) return <TwoFactorRequiredPage org={org} need={region.twoFactorRequired} />
   return <OrgLayout />
 }

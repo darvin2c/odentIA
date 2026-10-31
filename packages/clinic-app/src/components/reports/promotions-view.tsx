@@ -9,7 +9,7 @@ import { formatMoney } from "@odentia/clinical"
 import { Button, cn } from "@odentia/ui"
 import { ToggleGroup, ToggleGroupItem } from "@odentia/ui/components/toggle-group"
 import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { AlertTriangle, ArrowLeft, Check } from "lucide-react"
 import { useState } from "react"
 import { usePermission } from "../../lib/crm"
@@ -22,7 +22,7 @@ import { Link } from "@tanstack/react-router"
 type Promotion = ReportPromotions["promotions"][number]
 
 function usePromotions(query: ReportQuery) {
-  return useQuery({ queryKey: reportKey("finance/promotions", query), queryFn: () => fetchReport<ReportPromotions>("finance/promotions", query), placeholderData: keepPreviousData, retry: false })
+  return useQuery({ queryKey: reportKey("finance/promotions", query), queryFn: () => fetchReport<ReportPromotions>("finance/promotions", query), retry: false })
 }
 
 function plural(count: number, one: string, many: string): string {

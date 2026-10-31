@@ -301,9 +301,7 @@ function PipelinePage() {
 
   if (pipelinesQuery.isLoading) {
     return (
-      <PipelinePageSkeleton
-        primary={pipelinePrimary(can, () => setCreateOpen(true))}
-      />
+      <PipelinePageSkeleton primary={pipelinePrimary(can)} />
     )
   }
   if (!pipeline) {

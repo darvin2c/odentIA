@@ -40,8 +40,8 @@ export const orgChecks: { access: OrgAccess | null; region: OrgRegion | null } =
  * Lo comprobado en el servidor al armar la página vale también en el navegador:
  * sin esto, el primer clic tras cargar repetía sesión, términos, clínica y perfil.
  */
-export function rememberServerChecks(checked: { session: SessionInfo; org: FullOrganization; region: OrgRegion }): void {
+export function rememberServerChecks(checked: { session: SessionInfo; org: FullOrganization; region: OrgRegion; checkedAt: number }): void {
   if (typeof window === "undefined" || checked.region.twoFactorRequired) return
-  orgChecks.access ??= { slug: checked.org.slug, at: Date.now(), session: checked.session, org: checked.org }
+  orgChecks.access ??= { slug: checked.org.slug, at: Math.min(checked.checkedAt, Date.now()), session: checked.session, org: checked.org }
   if (checked.region.timeZone) orgChecks.region ??= checked.region
 }

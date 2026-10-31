@@ -6,7 +6,7 @@
  */
 import { Button } from "@odentia/ui"
 import { AgentMark, AgentSurface, submitErrorMessage } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { refreshAdmin } from "../../lib/admin"
 import { apiFetch } from "../../lib/api"
 import { usePermission } from "../../lib/crm"
@@ -15,7 +15,7 @@ import { ADMIN_NAME } from "../../lib/agent-names"
 
 /** Los avisos del periodo; sin el administrador encendido no hay ninguno. */
 export function useReportAdvice(query: ReportQuery, enabled: boolean) {
-  return useQuery({ queryKey: reportKey("advice", query), queryFn: () => fetchReportAdvice(query), enabled, placeholderData: keepPreviousData, retry: false })
+  return useQuery({ queryKey: reportKey("advice", query), queryFn: () => fetchReportAdvice(query), enabled, retry: false })
 }
 
 export function adviceFor(notices: ReportAdvice[] | undefined, tab: ReportAdviceTab): ReportAdvice | null {

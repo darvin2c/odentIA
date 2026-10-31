@@ -83,7 +83,8 @@ export function SummaryTab({
     return <QueryErrorState error={report.error} onRetry={() => void report.refetch()} notFound="La sede elegida ya no está disponible. Elige otra sede." />
 
   const data = report.data?.data
-  if (data && hasNoMovement(data)) {
+  // «Sin movimiento» se dice de lo pedido, no de lo que aún muestra la sede o el periodo anterior.
+  if (data && !report.isPlaceholderData && hasNoMovement(data)) {
     return (
       <EmptyState
         title="Todavía no hay movimiento que mostrar"

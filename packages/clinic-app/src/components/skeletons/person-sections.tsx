@@ -819,11 +819,11 @@ export function PersonSectionSkeleton({
     case "cuenta":
       return <AccountSkeleton canWrite={can("finance.write")} />
     case "filiacion":
-      return <FiliacionSkeleton canEdit={canWritePatient} />
+      return <FiliacionSkeleton canEdit={canWritePatient || can("crm.write")} />
     case "contactos":
       return <PersonLinksSkeleton canWrite={canWritePatient} />
     case "canales":
-      return <PersonChannelsSkeleton canChange={can("crm.write")} />
+      return <PersonChannelsSkeleton canChange={can("conversations.write")} />
     case "responsables":
       return <ResponsablesSkeleton canWrite={canWritePatient} />
     case "portal":

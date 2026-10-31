@@ -8,7 +8,7 @@
  * - Lista: las fichas por estado y una fila por cita.
  */
 import { ParamTabs } from "./param-tabs"
-import { buttonVariants, cn, ScrollArea, Skeleton, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { buttonVariants, cn, ScrollArea, Skeleton, TabsList, TabsTrigger } from "@odentia/ui"
 import { PageHeader, PageShell, ScheduleOccupancyLegend, SkeletonRegion, useListSearch } from "@odentia/ui-patterns"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import type { CSSProperties } from "react"
@@ -243,7 +243,7 @@ export function AgendaPageSkeleton() {
             </span>
             {week ? null : <Skeleton className="h-3.5 w-14" />}
           </div>
-          <ParamTabs param="view" fallback="dia" value={view} className="max-sm:w-full sm:ml-auto">
+          <ParamTabs param="view" fallback="dia" clear={["status"]} value={view} className="max-sm:w-full sm:ml-auto">
             <TabsList aria-label="Vista de la agenda" className="max-sm:w-full">
               {VIEWS.map((option) => (
                 <TabsTrigger key={option.id} value={option.id} className="max-sm:h-10">

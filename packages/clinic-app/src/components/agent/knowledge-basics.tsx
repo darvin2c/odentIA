@@ -1,5 +1,5 @@
 import { Button } from "@odentia/ui"
-import { LoadingState, SkeletonRegion } from "@odentia/ui-patterns"
+import { SkeletonRegion } from "@odentia/ui-patterns"
 import { QueryErrorState } from "../../lib/query-error"
 import type { KnowledgeBasics as Basics } from "./knowledge-model"
 import { KnowledgeBasicsSkeleton } from "../skeletons/agent"

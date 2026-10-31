@@ -369,6 +369,14 @@ function ReceptionPage() {
 
   if (pending || failed || !roles || !overview || !config || !role) {
     return (
+      <>
+      {/* «Probar» no depende de estos datos: su columna ya ocupa su sitio y la página no salta al llegar.
+          Va primero en las dos ramas, en el mismo lugar: al llegar los datos conserva lo que ya se escribió. */}
+      {pending && canWrite && docked ? (
+        <SideDockPortal fallback={null}>
+          <TestColumn />
+        </SideDockPortal>
+      ) : null}
       <PageShell className="flex flex-col gap-6">
         <PageHeader title={title} />
         {pending ? (
@@ -378,13 +386,8 @@ function ReceptionPage() {
         ) : (
           <QueryErrorState error={failed?.error} onRetry={() => void (failed ?? rolesQuery).refetch()} />
         )}
-        {/* «Probar» no depende de estos datos: su columna ya ocupa su sitio y la página no salta al llegar. */}
-        {pending && canWrite && docked ? (
-          <SideDockPortal fallback={null}>
-            <TestColumn />
-          </SideDockPortal>
-        ) : null}
       </PageShell>
+      </>
     )
   }
 
@@ -426,6 +429,14 @@ function ReceptionPage() {
     ) : null
 
   return (
+    <>
+    {canWrite && docked ? (
+      <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />}>
+        <TestColumn />
+      </SideDockPortal>
+    ) : canWrite ? (
+      <TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />
+    ) : null}
     <PageShell className={`flex flex-col gap-6 ${canWrite && !testing ? "max-sm:pb-24" : ""}`}>
       <PageHeader
         title={title}
@@ -697,14 +708,6 @@ function ReceptionPage() {
         </div>
       ) : null}
 
-      {canWrite && docked ? (
-        <SideDockPortal fallback={<TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />}>
-          <TestColumn />
-        </SideDockPortal>
-      ) : canWrite ? (
-        <TestDrawer open={testing} onClose={() => setTesting(false)} returnFocus={openerOfTest} />
-      ) : null}
-
       <FunctionNoteDrawer fn={noteFor} config={config} onClose={() => setNoteFor(null)} />
       <LimitsDrawer section={limits} onClose={() => setLimits(null)} config={config} />
       <AgentBaseDrawer
@@ -745,6 +748,7 @@ function ReceptionPage() {
         ) : null}
       </ConfirmDialog>
     </PageShell>
+    </>
   )
 }
 

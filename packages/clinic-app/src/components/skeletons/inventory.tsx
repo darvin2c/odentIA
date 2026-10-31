@@ -4,7 +4,7 @@
  * pantalla real mientras espera; la pestaña entera, la ruta.
  */
 import { ParamTabs } from "./param-tabs"
-import { ScrollArea, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
+import { ScrollArea, Skeleton, TabsContent, TabsList, TabsTrigger } from "@odentia/ui"
 import { ViewTabs } from "@odentia/ui-patterns"
 import { useCan } from "../../lib/crm"
 import { appWords } from "../../lib/product-words"
@@ -233,7 +233,7 @@ function SuppliersSkeleton() {
 /** Pestañas fijas y la pestaña elegida. La pantalla lo usa también mientras llega la sede. */
 export function InventoryBodySkeleton({ tab }: { tab: InventoryTab }) {
   return (
-    <ParamTabs param="tab" fallback="productos" className="gap-4" value={tab}>
+    <ParamTabs param="tab" fallback="productos" clear={["q", "ver", "pago", "tipo", "periodo", "productoId", "proveedor"]} className="gap-4" value={tab}>
       <ScrollArea horizontal className="min-w-0 max-w-full">
         <TabsList aria-label="Secciones de Inventario">
           <TabsTrigger value="productos">Productos</TabsTrigger>

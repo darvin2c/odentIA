@@ -33,10 +33,11 @@ import {
   useFormSubmitError,
   useFormSurface,
   useListSearch,
+  useDraftBlocker,
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, useBlocker, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { Library } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
@@ -1271,10 +1272,9 @@ function OwnServiceDrawer({
  * filtrar o paginar cambian la URL de esta misma pantalla y no cuentan como salir.
  */
 function LeaveGuard({ dirty }: { dirty: boolean }) {
-  const blocker = useBlocker({
+  const blocker = useDraftBlocker({
     disabled: !dirty,
     enableBeforeUnload: () => dirty,
-    withResolver: true,
     shouldBlockFn: ({ current, next }) => current.pathname !== next.pathname,
   })
   return (

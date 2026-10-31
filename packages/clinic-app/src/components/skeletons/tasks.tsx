@@ -3,7 +3,7 @@
  * filas de la vista lista. Las pestañas y la búsqueda se pintan reales.
  */
 import { ParamTabs } from "./param-tabs"
-import { Skeleton, Tabs, TabsList, TabsTrigger } from "@odentia/ui"
+import { Skeleton, TabsList, TabsTrigger } from "@odentia/ui"
 import { FilterBar, useListSearch } from "@odentia/ui-patterns"
 import { useCan, usePermission } from "../../lib/crm"
 import { tasksFilters, tasksPrimary } from "../../lib/screen-rules"
@@ -75,7 +75,7 @@ export function TasksPageSkeleton() {
           <Skeleton className="h-3.5 w-2/3 sm:hidden" />
         </div>
         <div className="flex flex-col gap-2">
-          <ParamTabs param="vista" fallback="abiertas" value={TABS.some((tab) => tab.value === vista) ? vista : "abiertas"}>
+          <ParamTabs param="vista" fallback="abiertas" clear={["sort"]} value={TABS.some((tab) => tab.value === vista) ? vista : "abiertas"}>
             <TabsList
               aria-label="Qué tareas ver"
               className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"

@@ -16,7 +16,7 @@ import {
   useFormSurface,
   SkeletonRegion,
 } from "@odentia/ui-patterns"
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useId } from "react"
 import { z } from "zod"
 import { ADMIN_NAME } from "../../lib/agent-names"
@@ -265,7 +265,7 @@ export function GoalDrawer({
 export function PinnedAnswers({ query, argosEnabled }: { query: ReportQuery; argosEnabled: boolean | undefined }) {
   const queryClient = useQueryClient()
   const locale = useOrgLocale() ?? "es"
-  const pins = useQuery({ queryKey: [...PINS_KEY, query.period, query.branchId ?? null], queryFn: () => fetchPins(query), placeholderData: keepPreviousData, retry: false })
+  const pins = useQuery({ queryKey: [...PINS_KEY, query.period, query.branchId ?? null], queryFn: () => fetchPins(query), retry: false })
   const remove = useMutation({
     retry: false,
     mutationFn: (id: string) => unpinAnswer(id),

@@ -108,6 +108,7 @@ export {
   PagePending,
   SkeletonRegion,
 } from "./loading-state.js"
+export { useDraftBlocker } from "./draft-blocker.js"
 export {
   type DetailMode,
   type DetailPanelSize,

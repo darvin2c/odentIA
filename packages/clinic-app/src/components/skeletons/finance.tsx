@@ -4,7 +4,7 @@
  * usa la pantalla real mientras espera; las de sección entera, la ruta.
  */
 import { ParamTabs } from "./param-tabs"
-import { Button, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger, useIsMobile } from "@odentia/ui"
+import { Button, Skeleton, TabsContent, TabsList, TabsTrigger, useIsMobile } from "@odentia/ui"
 import { ArrowLeft } from "lucide-react"
 import { useCan, useMyUserId, useOrgMembers } from "../../lib/crm"
 import { commissionsHeading, COMMISSIONS_ADMIN_SUBTITLE, financeAccess, financeHeader, financePhoneActions } from "../../lib/screen-rules"
@@ -343,12 +343,15 @@ function isByMonth(view: FinanceStrip, commissions: boolean): boolean {
 
 const MONTH_PICKER = "h-9 w-40 rounded-full"
 
+/** Lo que la pantalla limpia al cambiar de sección. */
+const FINANCE_LIST_PARAMS = ["q", "sort", "fecha_from", "fecha_to", "medio", "cobro", "estado", "antiguedad", "tipo", "resultado", "ticket"]
+
 /** Las pestañas del rol y la sección elegida. La pantalla lo usa también mientras llega el perfil de la clínica. */
 export function FinanceBodySkeleton({ view }: { view: FinanceStrip }) {
   const access = financeAccess(useCan())
   const strip = view === "cierres" ? "caja" : view
   return (
-    <ParamTabs param="tab" fallback="caja" className="gap-4" value={strip}>
+    <ParamTabs param="tab" fallback="caja" clear={FINANCE_LIST_PARAMS} to="/finance" className="gap-4" value={strip}>
       <div className="flex flex-wrap items-center gap-2">
         <TabsList aria-label="Secciones de Finanzas" className="max-w-full justify-start overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsTrigger value="caja" className="shrink-0">

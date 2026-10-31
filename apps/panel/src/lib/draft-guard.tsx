@@ -8,7 +8,7 @@ import {
   AlertDialogTitle,
   Button,
 } from "@odentia/ui"
-import { useBlocker } from "@tanstack/react-router"
+import { useDraftBlocker } from "@odentia/ui-patterns"
 import { useEffect, useRef } from "react"
 
 /**
@@ -19,10 +19,9 @@ import { useEffect, useRef } from "react"
 export function DraftGuard({ dirty }: { dirty: boolean }) {
   const dirtyRef = useRef(dirty)
   dirtyRef.current = dirty
-  const blocker = useBlocker({
+  const blocker = useDraftBlocker({
     disabled: !dirty,
     enableBeforeUnload: false,
-    withResolver: true,
     shouldBlockFn: () => dirtyRef.current,
   })
 
