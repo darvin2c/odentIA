@@ -32,6 +32,7 @@ import { z } from "zod"
 import { ApiError, api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { panelUrl } from "../lib/host"
+import { rememberSeenSession } from "../lib/session"
 import {
   AUTHENTICATOR_STORES,
   backupCodesText,
@@ -125,6 +126,7 @@ function useTouchDevice(): boolean {
 
 async function signOut() {
   await authClient.signOut()
+  rememberSeenSession(null)
   window.location.assign(panelUrl("/login"))
 }
 

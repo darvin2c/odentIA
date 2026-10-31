@@ -13,10 +13,11 @@ import { ButtonBar, Line, RowsShape, SummaryCardShape, TableShape, WaitingButton
 /** Lo que el rol de quien mira decide en las secciones. */
 export type SkeletonCan = (permission: string) => boolean
 
-function Fact({ label, width = "w-32" }: { label: string; width?: string }) {
+/** Sin `label`: un dato que quizá no tenga, hasta saberlo. */
+function Fact({ label, width = "w-32" }: { label?: string; width?: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dt className="text-xs font-medium text-muted-foreground">{label ?? <Line size="xs" className="w-16" />}</dt>
       <dd>
         <Line className={width} />
       </dd>
@@ -63,15 +64,39 @@ export function NotesListSkeleton() {
   )
 }
 
-/** `PersonSummary`: las cuatro tarjetas de quien lee la clínica, los datos, pendientes, notas y lo que recuerda. */
-export function PersonSummarySkeleton({ clinical, can }: { clinical: boolean; can: SkeletonCan }) {
+/**
+ * `PersonSummary`: las cuatro tarjetas de quien lee la clínica, los datos, pendientes, notas y lo que recuerda.
+ * `unknown`: quien lee la clínica abre a alguien que quizá aún no es paciente; arriba, sin títulos que luego se vayan.
+ */
+export function PersonSummarySkeleton({
+  clinical,
+  can,
+  patient = true,
+  archived = false,
+}: {
+  clinical: boolean | "unknown"
+  can: SkeletonCan
+  /** Si es paciente; `null` si aún no se sabe. Alergias y saldo son de quien lo es. */
+  patient?: boolean | null
+  /** Si está archivada; `null` si aún no se sabe. */
+  archived?: boolean | null
+}) {
   const chats = can("conversations.read")
   const crm = can("crm.read")
   const finance = can("finance.read")
-  const showFacts = !clinical || finance || chats || crm
+  const showFacts = clinical !== "unknown" && (!clinical || finance || chats || crm)
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      {clinical ? (
+      {clinical === "unknown" ? (
+        <section className="elevated grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 rounded-xl border bg-card p-6 sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map((slot) => (
+            <div key={slot} className="flex flex-col gap-1">
+              <Line size="xs" className="w-20" />
+              <Line className="w-40" />
+            </div>
+          ))}
+        </section>
+      ) : clinical ? (
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
           <SummaryCardShape title="Alergias y alertas" action={<WaitingButton>Antecedentes</WaitingButton>}>
             <ul className="flex flex-col gap-2">
@@ -93,9 +118,9 @@ export function PersonSummarySkeleton({ clinical, can }: { clinical: boolean; ca
         <section className="elevated rounded-xl border bg-card p-6">
           <dl className="grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
             {clinical ? null : <Fact label="Teléfono" />}
-            {!clinical && (can("clinical.alerts") || can("clinical.read")) ? <Fact label="Alergias" /> : null}
+            {!clinical && patient !== false && (can("clinical.alerts") || can("clinical.read")) ? <Fact label={patient ? "Alergias" : undefined} /> : null}
             {!clinical && can("appointments.read") ? <Fact label="Próxima cita" width="w-48" /> : null}
-            {finance ? <Fact label="Saldo" /> : null}
+            {finance && patient !== false ? <Fact label={patient ? "Saldo" : undefined} /> : null}
             {chats ? <Fact label="Conversación" width="w-44" /> : null}
             {crm ? <Fact label="Oportunidad" /> : null}
           </dl>
@@ -103,7 +128,7 @@ export function PersonSummarySkeleton({ clinical, can }: { clinical: boolean; ca
       ) : null}
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
-          <SummaryCardShape title="Pendientes" action={can("tasks.write") ? <WaitingButton>Nueva tarea</WaitingButton> : undefined}>
+          <SummaryCardShape title="Pendientes" action={!can("tasks.write") || archived === true ? undefined : archived === null ? <ButtonBar /> : <WaitingButton>Nueva tarea</WaitingButton>}>
             <RowsShape rows={2} />
           </SummaryCardShape>
           {crm ? (
@@ -519,7 +544,7 @@ function AccountRows({ rows, ticket }: { rows: number; ticket?: boolean }) {
             <Line className="w-56" />
           </div>
           <Line size="base" className="w-20" />
-          {ticket ? <WaitingButton>Ver ticket</WaitingButton> : null}
+          {ticket ? <ButtonBar /> : null}
         </li>
       ))}
     </ul>
@@ -788,25 +813,38 @@ export function PersonSectionSkeleton({
   placeLabel,
   budgetOptional = false,
   own,
+  patient = true,
+  archived = false,
 }: {
   section: string
   can: SkeletonCan
-  /** El Resumen es el clínico: quien lo ve lee la historia y la persona ya es paciente. */
-  clinicalSummary: boolean
+  /** El Resumen es el clínico: quien lo ve lee la historia y la persona ya es paciente. `unknown`: aún no se sabe si lo es. */
+  clinicalSummary: boolean | "unknown"
   /** Cómo se llama un lugar en el producto («Pieza»), si registra dónde. */
   placeLabel?: string
   /** En este producto el presupuesto es opcional (latidIA). */
   budgetOptional?: boolean
   /** El esqueleto propio de una sección del producto (odentIA: el odontograma). */
   own?: ReactNode
+  /** Si es paciente; `null` si aún no se sabe. */
+  patient?: boolean | null
+  /** Si está archivada; `null` si aún no se sabe. */
+  archived?: boolean | null
 }) {
   const canWritePatient = can("patients.write")
   switch (section) {
     case "resumen":
-      return <PersonSummarySkeleton clinical={clinicalSummary} can={can} />
+      return <PersonSummarySkeleton clinical={clinicalSummary} can={can} patient={patient} archived={archived} />
     case "conversaciones":
       return <PersonConversationsSkeleton can={can} />
     case "citas":
+      // Sin ficha (o sin saberlo) no hay listas de citas ni un botón seguro: la forma general.
+      if (patient !== true)
+        return (
+          <section className="elevated rounded-xl border bg-card p-6">
+            <RowsShape rows={2} action={false} />
+          </section>
+        )
       return <CitasSkeleton action={can("appointments.write") ? <WaitingButton>Reservar cita</WaitingButton> : undefined} />
     case "antecedentes":
       return <AntecedentesSkeleton canWrite={can("clinical.write")} />

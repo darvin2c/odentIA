@@ -1,4 +1,5 @@
-import { useLocation, useNavigate, useSearch, Link } from "@tanstack/react-router"
+import { useQueryClient } from "@tanstack/react-query"
+import { useLocation, useNavigate, useParams, useSearch, Link } from "@tanstack/react-router"
 import { LoadingState, PagePending, PageShell } from "@odentia/ui-patterns"
 import { useCan, usePermission } from "../../lib/crm"
 import {
@@ -14,7 +15,7 @@ import {
   subsectionNav,
   visibleAreas,
 } from "../../lib/patient-areas"
-import { PEOPLE_VIEWS } from "../../lib/people"
+import { PEOPLE_VIEWS, type PersonPage, type PersonShape, personQueryKey, personShapeKey, personShapeOf } from "../../lib/people"
 import { peopleHeader, peopleSubtitle, personHeaderRules } from "../../lib/screen-rules"
 import { productUi } from "../../product/product-ui"
 import { EncounterPageSkeleton } from "../skeletons/encounter"
@@ -24,10 +25,28 @@ import { PersonSectionSkeleton, SubsectionTabs } from "../skeletons/person-secti
 
 /**
  * Lo que los esqueletos necesitan saber y no piden por su cuenta: el rol de quien
- * mira y la sección de la dirección. Sin ningún dato de la persona: mientras
- * llega se la supone paciente, que es lo que casi siempre abre esta página, y si
- * no lo es sus pestañas se ajustan al llegar.
+ * mira, la sección de la dirección y lo que ya se sepa de la persona. Lo que aún
+ * no se sabe no se anticipa: su pestaña o su botón es un hueco sin nombre, que
+ * toma su nombre al llegar o se va sin haber ofrecido nada.
  */
+
+const PERSON_SHAPE_FRESH_MS = 60_000
+
+/** Lo ya sabido de quien se abre; `null` lo que falta. */
+function useKnownPerson(seesAll: boolean): { pageOf: PersonShape["pageOf"] | null; archived: boolean | null } {
+  const queryClient = useQueryClient()
+  const { personId, patientId } = useParams({ strict: false }) as { personId?: string; patientId?: string }
+  if (personId) {
+    const page = queryClient.getQueryData<{ data: PersonPage }>(personQueryKey(personId))?.data
+    // Lo que dijo la lista vale un momento: otra persona del equipo pudo registrarla o archivarla.
+    const listedAt = queryClient.getQueryState(personShapeKey(personId))?.dataUpdatedAt ?? 0
+    const listed = Date.now() - listedAt < PERSON_SHAPE_FRESH_MS ? queryClient.getQueryData<PersonShape>(personShapeKey(personId)) : undefined
+    const shape = page ? personShapeOf(page) : listed
+    if (shape) return shape
+  }
+  // La dirección de una ficha es de un paciente, y quien no lee el CRM solo llega a pacientes.
+  return { pageOf: patientId || !seesAll ? true : null, archived: null }
+}
 
 /** Las pestañas de la lista de Pacientes que el rol ve. */
 export function visiblePeopleViews(seesAll: boolean) {
@@ -44,17 +63,30 @@ export function PeopleLoading() {
 }
 
 /** La sección abierta de la persona, con lo que el rol ve en ella. */
-export function PersonSectionLoading({ section, pageOf = true }: { section: PatientSectionId; pageOf?: PageOf }) {
+export function PersonSectionLoading({
+  section,
+  pageOf = true,
+  unknownKind = false,
+  archived = false,
+}: {
+  section: PatientSectionId
+  pageOf?: PageOf
+  unknownKind?: boolean
+  archived?: boolean | null
+}) {
   const can = useCan()
   const product = productUi()
+  const clinicalSummary = clinicalSummaryFor(can, pageOf)
   return (
     <PersonSectionSkeleton
       section={section}
       can={can}
-      clinicalSummary={clinicalSummaryFor(can, pageOf)}
+      clinicalSummary={clinicalSummary && unknownKind ? "unknown" : clinicalSummary}
       placeLabel={product.site?.placeLabel}
       budgetOptional={!product.plan.budgetRequired}
       own={product.record.sections.find((item) => item.id === section)?.skeleton}
+      patient={unknownKind ? null : pageOf === true}
+      archived={archived}
     />
   )
 }
@@ -64,7 +96,11 @@ export function PersonLoading() {
   const can = useCan()
   const navigate = useNavigate()
   const { tab } = useSearch({ strict: false }) as { tab?: unknown }
-  const section = resolveSection(sectionFromSearch(tab), can, true)
+  const known = useKnownPerson(can("crm.read"))
+  const unknownKind = known.pageOf === null
+  // Casi siempre es paciente: su forma es la que se dibuja, y lo que solo tiene un paciente va como hueco.
+  const pageOf = known.pageOf ?? true
+  const section = resolveSection(sectionFromSearch(tab), can, pageOf)
   if (!section)
     return (
       <PageShell>
@@ -72,18 +108,23 @@ export function PersonLoading() {
       </PageShell>
     )
   const current = sectionOf(section)
-  const entries = areaNav(current.area, can, true)
   const areaLabel = PATIENT_AREAS.find((area) => area.id === current.area)?.label ?? current.area
-  const subsections = subsectionNav(section, can, true)
+  const subsections = subsectionNav(section, can, pageOf)
+  const rules = personHeaderRules(can, pageOf === true)
+  // «Responsable» es lo que menos tiene: lo que también ve es de cualquier persona. Lo que pide la dirección
+  // conserva su nombre: casi siempre es de un paciente, y sin él ninguna pestaña se vería marcada.
+  const anyPersonAreas = new Set<string>(visibleAreas(can, "responsable").map((area) => area.id))
+  const anyPersonEntries = new Set<string>(areaNav(current.area, can, "responsable").map((entry) => entry.value))
   return (
     <PersonPageSkeleton
       crumb={<Link to="/people" />}
-      actions={personHeaderRules(can, true)}
+      actions={known.archived ? { ...rules, message: false, book: false, encounter: false } : rules}
+      actionsUnsure={unknownKind || known.archived === null}
       onOpen={(next) => void navigate({ to: ".", search: { tab: next } } as never)}
       nav={{
-        areas: visibleAreas(can, true),
+        areas: visibleAreas(can, pageOf).map((area) => ({ ...area, unsure: unknownKind && area.id !== current.area && !anyPersonAreas.has(area.id) })),
         area: current.area,
-        entries,
+        entries: areaNav(current.area, can, pageOf).map((entry) => ({ ...entry, unsure: unknownKind && entry.value !== (current.parent ?? current.id) && !anyPersonEntries.has(entry.value) })),
         current: current.parent ?? current.id,
         sideNav: SIDE_NAV_AREAS.has(current.area),
         mobileLabel: areaLabel === current.label ? current.label : `${areaLabel} · ${current.label}`,
@@ -92,10 +133,10 @@ export function PersonLoading() {
       {subsections.length > 1 ? (
         <div className="flex min-w-0 flex-col gap-4">
           <SubsectionTabs label={`Dentro de ${areaLabel}`} value={section} items={subsections} />
-          <PersonSectionLoading section={section} />
+          <PersonSectionLoading section={section} pageOf={pageOf} unknownKind={unknownKind} archived={known.archived} />
         </div>
       ) : (
-        <PersonSectionLoading section={section} />
+        <PersonSectionLoading section={section} pageOf={pageOf} unknownKind={unknownKind} archived={known.archived} />
       )}
     </PersonPageSkeleton>
   )

@@ -111,7 +111,7 @@ export function inventoryHeader(
   options?: {
     /** «Trasladar» pide más de una sede. Mientras no se sabe, no se ofrece. */
     manyBranches: boolean
-    run: {
+    run?: {
       product: () => void
       purchase: () => void
       supplier: () => void
@@ -338,7 +338,8 @@ export const RECEPTION_TEST_COLUMN = { initial: 416, min: 352, max: 560 }
 // --- Inicio ---------------------------------------------------------------------------------
 
 export interface HomeToday {
-  card: "patients" | "agenda" | "cash" | null
+  /** `undecided`: dirige y atiende; qué tarjeta tiene depende de sus citas de hoy, y no se anticipa su título. */
+  card: "patients" | "agenda" | "undecided" | "cash" | null
   /** Quien ve la agenda y además la caja la tiene en una línea, debajo. */
   cashLine: boolean
 }
@@ -346,12 +347,11 @@ export interface HomeToday {
 /**
  * La tarjeta de hoy, con la misma regla que `getWorkspaceHome` y `accessFor` en el
  * servidor: el odontólogo tiene «Mis pacientes de hoy», quien ve la agenda, la de
- * la sede, y quien solo cobra, la caja. La dueña que atiende también puede tener
- * «Mis pacientes», pero eso depende de si hoy tiene citas propias: un dato que se
- * sabe al llegar.
+ * la sede, y quien solo cobra, la caja. Quien dirige y además atiende tiene «Mis
+ * pacientes» si hoy tiene citas propias: un dato que se sabe al llegar.
  */
 export function homeToday(role: string, can: Can): HomeToday {
   const finance = can("finance.read")
   if (!can("appointments.read")) return { card: finance ? "cash" : null, cashLine: false }
-  return { card: role === "clinician" ? "patients" : "agenda", cashLine: finance }
+  return { card: role === "clinician" ? "patients" : can("clinical.write") ? "undecided" : "agenda", cashLine: finance }
 }

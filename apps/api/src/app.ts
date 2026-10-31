@@ -384,7 +384,10 @@ export function createApp(deps: AppDeps) {
   app.notFound((c) => c.json(errorBody(c, "NOT_FOUND", "Recurso no encontrado"), 404))
 
   app.get("/health", async (c) => {
+    const start = performance.now()
     await db.execute(sql`select 1`)
+    // Lo que tarda la base, aparte del viaje: separa el servidor de la distancia hasta él.
+    c.header("Server-Timing", `db;dur=${(performance.now() - start).toFixed(1)}`)
     return c.json({ ok: true })
   })
 

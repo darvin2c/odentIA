@@ -45,7 +45,8 @@ export function MyCommissionsSkeleton() {
       </section>
 
       <section className="flex min-w-0 flex-col gap-2">
-        <h2 className="text-base font-semibold">Meses anteriores</h2>
+        {/* Solo existe si ya hubo meses: su título no se anticipa. */}
+        <Skeleton className="h-6 w-40" />
         <ul className="elevated flex min-w-0 flex-col divide-y rounded-xl border bg-card">
           {["w-24", "w-20"].map((width) => (
             <li key={width} className="flex min-w-0 items-center gap-3 px-4 py-3">
