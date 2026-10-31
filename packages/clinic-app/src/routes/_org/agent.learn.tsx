@@ -152,7 +152,12 @@ function AgentLearnPage() {
 
   const query = useQuery({
     queryKey: ["agent-learning"],
-    queryFn: () => apiFetch<{ data: LearningOverview }>("/api/agent/learning"),
+    queryFn: async () => {
+      const result = await apiFetch<{ data: LearningOverview }>("/api/agent/learning")
+      // Leer la lista la concilia en el servidor: el número del menú se pone al día con ella.
+      void queryClient.invalidateQueries({ queryKey: ["agent-panel"] })
+      return result
+    },
     enabled: canRead,
     retry: false,
   })
@@ -194,7 +199,7 @@ function AgentLearnPage() {
         body: JSON.stringify(input.asExample ? { asExample: true } : {}),
       }),
     onSettled: () => {
-      for (const key of ["agent-learning", "agent-overview"]) void queryClient.invalidateQueries({ queryKey: [key] })
+      for (const key of ["agent-learning", "agent-overview", "agent-panel"]) void queryClient.invalidateQueries({ queryKey: [key] })
     },
   })
 

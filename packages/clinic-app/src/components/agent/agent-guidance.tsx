@@ -12,10 +12,11 @@ import { activeOrgLocale } from "../../lib/locale"
 import { QueryErrorState } from "../../lib/query-error"
 import { appWords } from "../../lib/product-words"
 
-/** Lo que se escribe aquí: una idea corta. */
-const GUIDANCE_CHARS = 600
-/** Lo que admite la API: una regla aprendida puede ser más larga y se edita aquí sin recortarla. */
-const GUIDANCE_MAX_CHARS = 2000
+/**
+ * Lo que mide una regla (`RULE_BODY_CHARS` de los servicios, ADR 0118): va
+ * entera en cada mensaje. Una anterior más larga se edita aquí hasta acortarla.
+ */
+const GUIDANCE_CHARS = 300
 
 /** Lo que admite `POST|PATCH /api/agent/learning/guidance`, con sus mismas palabras. */
 const guidanceSchema = z.object({
@@ -23,7 +24,7 @@ const guidanceSchema = z.object({
     .string()
     .trim()
     .min(1, "Escribe qué debe saber el agente")
-    .max(GUIDANCE_MAX_CHARS, `Como mucho ${GUIDANCE_MAX_CHARS} caracteres`),
+    .max(GUIDANCE_CHARS, `Como mucho ${GUIDANCE_CHARS} caracteres`),
 })
 
 type Filter = "todas" | "escrita" | "aprendida"
@@ -76,6 +77,8 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
     },
   })
   const data = query.data?.data
+  // Todas llegan en cada mensaje: hay un tope (ADR 0118) y se dice cuánto falta.
+  const full = data ? data.counts.all >= data.limits.rules : false
   const options: Array<{ value: Filter; label: string; count: number | undefined }> = [
     { value: "todas", label: "Todas", count: data?.counts.all },
     { value: "escrita", label: "Escritas por la clínica", count: data?.counts.escrita },
@@ -90,9 +93,15 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
             Lo que {receptionName} debe saber
           </h2>
           <p className="text-sm text-muted-foreground">
-            Lo que le pide la clínica y lo que aprendió de sus correcciones, en una sola lista. Los datos concretos (precios, horarios) van en
-            Conocimiento.
+            Lo que le pide la clínica y lo que aprendió de sus correcciones, en una sola lista. Le llega todo en cada mensaje. Los datos
+            concretos (precios, horarios) van en Conocimiento.
           </p>
+          {data ? (
+            <p className={`text-sm ${full ? "font-semibold text-warning" : "text-muted-foreground"}`}>
+              {data.counts.all} de {data.limits.rules} reglas
+              {full ? ": para agregar otra, quita o une una." : "."}
+            </p>
+          ) : null}
         </div>
         {canWrite ? (
           <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" onClick={() => setEditing("nueva")}>
@@ -132,6 +141,11 @@ export function AgentGuidance({ canWrite }: { canWrite: boolean }) {
             <li key={item.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-3">
               <div className="min-w-0 flex-1 basis-56">
                 <p className="break-words">{item.body}</p>
+                {data.limits.chars < item.body.length ? (
+                  <p className="text-sm font-semibold text-warning">
+                    Le llega cortada: pasa de {data.limits.chars} caracteres. Edítala más corta o llévala a Conocimiento.
+                  </p>
+                ) : null}
                 <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <Badge variant={item.source === "escrita" ? "secondary" : "outline"}>
                     {item.source === "escrita" ? "Escrita por la clínica" : "Aprendida"}
@@ -250,7 +264,12 @@ function GuidanceDrawer({
             rows={4}
             maxLength={GUIDANCE_CHARS}
             placeholder="Si alguien llega con dolor, ofrece la primera cita disponible del día."
-            description={<>Una idea por línea. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la base.</>}
+            description={
+              <>
+                Una idea corta, hasta {GUIDANCE_CHARS} caracteres. No puede contradecir lo que fija {appWords().name}: ante un choque, gana la
+                base.
+              </>
+            }
           />
         )}
       </form.AppField>

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react"
 import { apiFetch } from "../../lib/api"
 import { authClient } from "../../lib/auth-client"
 import { awayText, greetingAt, type HomeAway } from "../../lib/home-away"
+import { useAgentPanel } from "../agent-panel"
 
 /** Tras este rato sin tocar nada, el siguiente toque cuenta como volver a Inicio. */
 const IDLE_MS = 10 * 60_000
@@ -29,6 +30,8 @@ export function AwayLine({
   const lastSent = useRef(0)
   const firstName = authClient.useSession().data?.user.name.split(" ")[0]
   const queryClient = useQueryClient()
+  // Los casos se toman en el panel del agente, el mismo del botón de la cabecera.
+  const agentPanel = useAgentPanel()
 
   useEffect(() => {
     const visit = () => {
@@ -69,12 +72,7 @@ export function AwayLine({
   if (!away || closed) return null
   const action =
     away.cases && canSeeCases ? (
-      <Button
-        size="sm"
-        variant="outline"
-        className="bg-card"
-        render={<Link to="/agent/pendientes" />}
-      >
+      <Button size="sm" variant="outline" className="bg-card" onClick={() => agentPanel.setOpen(true)}>
         {away.cases === 1 ? "Ver el caso" : "Ver los casos"}
       </Button>
     ) : away.appointments && canSeeAgenda ? (

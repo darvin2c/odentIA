@@ -1,5 +1,5 @@
 import { withOrgContext } from "@odentia/db"
-import { agentSearchItem } from "@odentia/db/schema/agent"
+import { agentLesson, agentSearchItem } from "@odentia/db/schema/agent"
 import { member, user } from "@odentia/db/schema/auth"
 import { professionalSchedule, scheduleBlock } from "@odentia/db/schema/availability"
 import { orgSpecialty, professionalSpecialty } from "@odentia/db/schema/clinical-forms"
@@ -23,6 +23,7 @@ import {
   SERVICES_IN_PROMPT,
   searchClinic,
 } from "./agent-clinic-info.js"
+import { lessonsForTurn } from "./agent-learning.js"
 import { rankByMeaning, refreshAgentSearch, type SearchEmbedder, syncSearchItems } from "./agent-search-index.js"
 import { createPromotion } from "./promotions.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
@@ -298,6 +299,34 @@ describe("búsqueda por significado", () => {
     await ownerDb.update(serviceCatalog).set({ priceCents: 55000 }).where(eq(serviceCatalog.id, ids["Blanqueamiento dental"]!))
     const again = await run((tx) => searchClinic(tx, ORG, "x", { rankedServiceIds: ranked.services }))
     expect(formatAgentPrice(again.services[0]!.price, ZONE)).toMatch(/550\.00/)
+  })
+
+  it("un ejemplo aprobado se encuentra por significado aunque haya cientos más nuevos (ADR 0118)", async () => {
+    const example = (question: string, minutesAgo: number) => ({
+      organizationId: ORG,
+      kind: "ejemplo" as const,
+      scope: "recepcion",
+      title: `Cuando preguntan: ${question}`,
+      question,
+      body: "Te recomiendo una evaluación de blanqueamiento.",
+      status: "activa" as const,
+      proposedBy: "agent",
+      approvedAt: new Date(Date.now() - minutesAgo * 60_000),
+    })
+    const [old] = await ownerDb.insert(agentLesson).values(example("Se me pusieron amarillos, ¿qué me recomiendan?", 100_000)).returning({ id: agentLesson.id })
+    // Más nuevos que los que se comparan por palabras: el antiguo queda fuera de ellos.
+    await ownerDb.insert(agentLesson).values(Array.from({ length: 200 }, (_, index) => example(`Hola, buenas tardes ${index}`, index)))
+    await refreshAgentSearch(ownerDb, appDb, toy, { maxBatchesPerOrg: 10 })
+    const asked = "tengo los dientes amarillos"
+    expect((await run((tx) => lessonsForTurn(tx, ORG, "recepcion", asked))).examples.map((item) => item.id)).not.toContain(old!.id)
+    const [query] = await toy.embed([asked])
+    const ranked = await run((tx) => rankByMeaning(tx, ORG, { model: toy.model, embedding: query! }))
+    expect(ranked.examples[0]).toBe(old!.id)
+    const turn = await run((tx) => lessonsForTurn(tx, ORG, "recepcion", asked, { rankedExampleIds: ranked.examples }))
+    expect(turn.examples[0]?.id).toBe(old!.id)
+    expect(turn.examples.length).toBeLessThanOrEqual(2)
+    await ownerDb.delete(agentLesson).where(eq(agentLesson.organizationId, ORG))
+    await run((tx) => syncSearchItems(tx, ORG))
   })
 
   it("un vector de otro modelo no se compara; el proveedor que falla deja buscar por palabras", async () => {

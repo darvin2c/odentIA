@@ -116,7 +116,7 @@ export function CorrectDrawer({
   const text = useStore(form.store, (state) => state.values.correctedReply)
 
   const refresh = () => {
-    for (const key of ["agent-learning", "agent-overview"]) void queryClient.invalidateQueries({ queryKey: [key] })
+    for (const key of ["agent-learning", "agent-overview", "agent-panel"]) void queryClient.invalidateQueries({ queryKey: [key] })
   }
   const markOk = useMutation({
     retry: false,

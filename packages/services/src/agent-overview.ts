@@ -10,6 +10,17 @@ import { getOrgLocale } from "./locale.js"
 
 /* ---------- Resumen del agente: cómo va y qué necesita de la clínica ---------- */
 
+/**
+ * Lo que se resuelve dentro de Agente: respuestas por revisar, lecciones por
+ * aprobar y lo que no supo responder. Es el número del menú «Agente» y la
+ * suma de los números de sus pestañas; los casos que el agente pasó al equipo
+ * se cuentan donde se toman (el botón «Agente» de la cabecera).
+ */
+export async function countAgentWork(tx: Db, orgId: string): Promise<number> {
+  const learning = await countLearningPending(tx, orgId)
+  return learning.review + learning.lessons + (await countOpenKnowledgeGaps(tx, orgId))
+}
+
 export interface AgentOutcomes {
   /** Conversaciones en las que el agente respondió o derivó en el periodo. */
   attended: number

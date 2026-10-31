@@ -145,7 +145,7 @@ function AgentSummaryPage() {
 
   if (!canRead) {
     // No es un error: la sección existe y esta persona no la administra. Quien
-    // decide por el agente conserva sus pendientes, y aquí tiene cómo llegar.
+    // decide por el agente atiende lo suyo en la Bandeja, y aquí tiene cómo llegar.
     return (
       <PageShell className="flex flex-col gap-6">
         <PageHeader title="Agente" />
@@ -153,8 +153,8 @@ function AgentSummaryPage() {
         <EmptyState
           icon={Lock}
           title="No tienes acceso a esta sección"
-          description={`Pídelo a quien administra la clínica.${canDecide ? " Las citas que esperan su sí siguen en «Esperan su sí»." : ""}`}
-          {...(canDecide ? { actionLabel: "Ir a Esperan su sí", onAction: () => void navigate({ to: "/agent/pendientes" }) } : {})}
+          description={`Pídelo a quien administra la clínica.${canDecide ? " Lo que el agente propuso y lo que te pasa está en la Bandeja." : ""}`}
+          {...(canDecide ? { actionLabel: "Ir a la Bandeja", onAction: () => void navigate({ to: "/inbox", search: { conversation: undefined } }) } : {})}
         />
       </PageShell>
     )

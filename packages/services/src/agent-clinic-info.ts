@@ -116,12 +116,28 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
   return out
 }
 
-/** Horario de atención de cada sede activa, derivado de los horarios del equipo, y sus próximos cierres. */
-export async function getBranchHours(tx: Db, orgId: string, now = new Date()): Promise<AgentBranchHours[]> {
+/**
+ * Horario de atención de cada sede activa, derivado de los horarios del equipo,
+ * y sus próximos cierres. Es el mismo que dice el agente y el que muestra
+ * «Horarios y ausencias» (`branchId`: solo esa sede): no hay otro horario de
+ * la sede que se escriba aparte (ADR 0117).
+ */
+export async function getBranchHours(
+  tx: Db,
+  orgId: string,
+  now = new Date(),
+  opts: { branchId?: string } = {},
+): Promise<AgentBranchHours[]> {
   const branches = await tx
     .select({ id: branch.id, name: branch.name })
     .from(branch)
-    .where(and(eq(branch.organizationId, orgId), eq(branch.isActive, true)))
+    .where(
+      and(
+        eq(branch.organizationId, orgId),
+        eq(branch.isActive, true),
+        opts.branchId ? eq(branch.id, opts.branchId) : undefined,
+      ),
+    )
     .orderBy(asc(branch.name), asc(branch.id))
   if (!branches.length) return []
   const ids = branches.map((row) => row.id)

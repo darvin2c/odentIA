@@ -1160,7 +1160,7 @@ it("bandeja: vistas nuevas, «Tomar», «Devolver», «Resolver» y cerrar sin r
   expect(config.data.closeAfterHours).toBe(12)
 })
 
-it("«Horario de recontacto», «Esperan su sí» y «Lo que el agente debe saber»: los lee quien supervisa y los cambia quien administra", async () => {
+it("«Horario de recontacto», el número del menú y «Lo que el agente debe saber»: los lee quien supervisa y los cambia quien administra", async () => {
   const json = { "content-type": "application/json" }
   const owner = buildApp("owner")
   const reception = buildApp("reception")
@@ -1174,9 +1174,13 @@ it("«Horario de recontacto», «Esperan su sí» y «Lo que el agente debe sabe
   const saved = await owner.request("/agent/writing-hours", { method: "PUT", headers: json, body: JSON.stringify({ week }) })
   expect(saved.status).toBe(200)
   expect(((await saved.json()) as { data: { week: unknown } }).data.week).toEqual(week)
-  // Recepción decide por el agente: ve las citas que esperan su sí, como antes veía Pendientes.
-  expect((await reception.request("/agent/awaiting")).status).toBe(200)
-  expect((await member.request("/agent/awaiting")).status).toBe(403)
+  // Recepción decide por el agente: ve el panel con sus casos, pero el número del menú
+  // (lo que se resuelve dentro de Agente) es solo de quien lo supervisa (ADR 0117).
+  const panelOf = async (app: typeof owner) =>
+    ((await (await app.request("/agent/panel")).json()) as { data: { toResolve: number } }).data
+  expect(await panelOf(reception)).toMatchObject({ toResolve: 0 })
+  expect(typeof (await panelOf(owner)).toResolve).toBe("number")
+  expect((await member.request("/agent/panel")).status).toBe(403)
   // Lo que debe saber: lo escribe quien administra el agente.
   expect((await reception.request("/agent/learning/guidance", { method: "POST", headers: json, body: JSON.stringify({ body: "No ofrezcas descuentos." }) })).status).toBe(403)
   const added = await owner.request("/agent/learning/guidance", { method: "POST", headers: json, body: JSON.stringify({ body: "No ofrezcas descuentos." }) })

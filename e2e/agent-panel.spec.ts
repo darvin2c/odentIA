@@ -4,7 +4,7 @@ import { member } from "@odentia/db/schema/auth"
 import type { Page } from "@playwright/test"
 import { and, eq } from "drizzle-orm"
 import { simulateTelegramInbound } from "./channels"
-import { API, tenant } from "./env"
+import { API, tenant, tenantPattern } from "./env"
 import { api, call, expect, test } from "./fixtures"
 import { gotoHydrated } from "./hydration"
 
@@ -102,13 +102,13 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
     201,
   )
 
-  // Desde Inicio: el único número es el del menú (cuenta el caso, no la cita); el botón y las pestañas no lo repiten.
+  // Desde Inicio: el número del caso va en el botón que abre el panel donde se toma (ADR 0117), no
+  // en el menú, que cuenta lo que se resuelve dentro de Agente.
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/home"))
   const button = agentButton(page)
-  await expect(button).toHaveAccessibleName("Agente")
-  const sidebarAgent = page.getByRole("navigation").getByRole("link", { name: "Agente", exact: true })
-  await expect(sidebarAgent.locator("..")).toContainText("1")
+  await expect(button).toHaveAccessibleName("Agente: 1 caso por tomar")
+  await expect(button).toContainText("1")
   await button.click()
   const panel = page.getByRole("dialog", { name: "Agente" })
   await expect(panel).toBeVisible()
@@ -208,7 +208,7 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await page.keyboard.press("Control+b")
   await expect(collapse).toBeVisible()
   // Tomado no es resuelto: el caso sigue contando para quien lo tomó hasta que lo resuelve.
-  await expect(sidebarAgent.locator("..")).toContainText("1")
+  await expect(agentButton(page)).toHaveAccessibleName("Agente: 1 caso por tomar")
   // «Te espera» trae el caso una sola vez (ni su tarea ni su conversación son otra fila);
   // no hay nada del agente que aprobar ni la cita del paciente.
   const home = page.getByRole("region", { name: /^Te espera/ })
@@ -237,18 +237,10 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await gotoHydrated(page, tenant(org.slug, `/patients/${patient.id}`))
   await expect(agentButton(page)).toBeVisible()
 
-  // «Esperan su sí» (decisión 21): solo la cita propuesta; los casos están en «Te espera» y en el panel.
-  // La unidad dental de la propuesta no existe: el horario ya no está libre y no se ofrece confirmarla.
+  // «Esperan su sí» se retiró (ADR 0117): la cita propuesta se ve en su conversación y en
+  // este panel, y la dirección vieja lleva a la Bandeja.
   await gotoHydrated(page, tenant(org.slug, "/agent/pendientes"))
-  await expect(page.getByRole("heading", { name: "Esperan su sí" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Casos del agente" })).toHaveCount(0)
-  await expect(page.getByRole("link", { name: /^Esperan su sí/ })).toContainText("1")
-  const approvalCard = page.getByRole("listitem").filter({ hasText: "Le propuse el" })
-  await expect(approvalCard).toContainText("Ese horario se ocupó")
-  await expect(approvalCard.getByRole("link", { name: "Ver conversación" })).toBeVisible()
-  await expect(approvalCard.getByRole("button", { name: "Confirmó por teléfono" })).toHaveCount(0)
-  await expect(page.getByText(/Aprobada|Ejecutada|interlocutor|Ejecutar cambio aprobado/)).toHaveCount(0)
-  await expect(page.getByRole("button", { name: /Revisar y aprobar|Rechazar/ })).toHaveCount(0)
+  await expect(page).toHaveURL(tenantPattern(org.slug, "/inbox"))
   // Nadie decide por el paciente: no hay ruta para aprobar o rechazar.
   const decision = await api(page, "POST", `/api/agent/proposals/${randomUUID()}/decision`, org.slug, { decision: "aprobada" })
   expect(decision.status).toBe(404)
@@ -260,7 +252,8 @@ test("panel del agente: casos que esperan a una persona, citas que esperan al pa
   await expect(agentButton(page)).toBeHidden()
   const moreButton = page.locator("header").getByRole("button", { name: "Más opciones", exact: true })
   await moreButton.click()
-  await page.getByRole("menuitem", { name: "Agente", exact: true }).click()
+  // En el teléfono el número de casos va junto a la opción.
+  await page.getByRole("menuitem", { name: "Agente 1 caso por tomar", exact: true }).click()
   const mobilePanel = page.getByRole("dialog", { name: "Agente" })
   await expect(mobilePanel).toBeVisible()
   const box = await mobilePanel.boundingBox()

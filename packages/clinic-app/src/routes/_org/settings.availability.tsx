@@ -47,6 +47,7 @@ import { ApiError, apiFetch } from "../../lib/api"
 import { useMyRole, usePermission } from "../../lib/crm"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { appWords, upperFirst } from "../../lib/product-words"
+import { useReceptionName } from "../../lib/agent-names"
 
 export const Route = createFileRoute("/_org/settings/availability")({
   validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
@@ -66,6 +67,92 @@ const CARD = "grid content-start gap-3 rounded-xl border bg-background p-3 sm:p-
 
 /** Sin sede elegida todavía: lo que hacen la página y sus formularios. */
 const SUBTITLE = "El horario y las ausencias de cada profesional, y lo que vale para toda la sede."
+
+/** El horario de atención de una sede: lo que entrega `/api/agenda/hours`. */
+interface BranchHours {
+  /** Por día de la semana (0 = domingo), los tramos en que atiende alguien, en minutos locales. */
+  week: Array<{ weekday: number; ranges: Array<[number, number]> }>
+}
+
+/** La semana empieza en lunes, como en la Agenda. */
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
+const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+
+/**
+ * «Lunes a viernes: 09:00 – 13:00 y 15:00 – 19:00»: los días seguidos con los
+ * mismos tramos van en una línea; un día sin nadie del equipo, «Cerrado».
+ */
+function weekLines(hours: BranchHours): Array<{ days: string; text: string }> {
+  const byDay = new Map(hours.week.map((day) => [day.weekday, day.ranges]))
+  const textOf = (weekday: number) => {
+    const ranges = byDay.get(weekday) ?? []
+    return ranges.length
+      ? ranges.map(([start, end]) => `${hourLabel(start)} – ${hourLabel(end)}`).join(" y ")
+      : "Cerrado"
+  }
+  const lines: Array<{ first: number; last: number; text: string }> = []
+  for (const weekday of WEEK_ORDER) {
+    const text = textOf(weekday)
+    const previous = lines[lines.length - 1]
+    if (previous && previous.text === text) previous.last = weekday
+    else lines.push({ first: weekday, last: weekday, text })
+  }
+  return lines.map((line) => ({
+    days:
+      line.first === line.last
+        ? upperFirst(DAY_NAMES[line.first]!)
+        : `${upperFirst(DAY_NAMES[line.first]!)} a ${DAY_NAMES[line.last]}`,
+    text: line.text,
+  }))
+}
+
+/**
+ * Horario de atención de la sede: no se escribe, sale de los horarios del
+ * equipo (ADR 0117). Es el mismo que el agente le dice a quien pregunta; los
+ * feriados y cierres de abajo lo interrumpen.
+ */
+function BranchHoursCard({
+  hours,
+  failed,
+  onRetry,
+}: {
+  hours: BranchHours | null | undefined
+  failed: boolean
+  onRetry: () => void
+}) {
+  const receptionName = useReceptionName()
+  return (
+    <section className={CARD} aria-labelledby="horario-de-atencion">
+      <div className="grid gap-0.5">
+        <h3 id="horario-de-atencion" className="font-heading text-base font-semibold">
+          Horario de atención
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          La suma de los horarios del equipo. Es lo que {receptionName} dice cuando le preguntan; cambia al cambiar el
+          horario de alguien.
+        </p>
+      </div>
+      {failed ? (
+        <CardError what="el horario de atención" onRetry={onRetry} />
+      ) : hours === undefined ? (
+        <Skeleton className="h-9 w-full" />
+      ) : hours === null || hours.week.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Nadie del equipo tiene horario en esta sede: {receptionName} no dice días ni horas hasta que haya uno.
+        </p>
+      ) : (
+        <dl className="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
+          {weekLines(hours).map((line) => (
+            <div key={line.days} className="contents">
+              <dt className="font-semibold">{line.days}</dt>
+              <dd className={line.text === "Cerrado" ? "text-muted-foreground" : "tabular-nums"}>{line.text}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  )
+}
 
 function GroupTitle({ title, hint }: { title: string; hint: string }) {
   return (
@@ -150,6 +237,13 @@ function AvailabilityPage() {
   const schedule = useWeeklySchedule({
     branchId: resources?.branchId,
     professionalUserId: professionalId,
+    // El horario de la sede es la suma de los del equipo: cambia con cada uno.
+    onSaved: () => queryClient.invalidateQueries({ queryKey: ["branch-hours"] }),
+  })
+  const hoursQuery = useQuery({
+    queryKey: ["branch-hours", resources?.branchId],
+    enabled: Boolean(resources?.branchId),
+    queryFn: () => apiFetch<{ data: BranchHours | null }>(`/api/agenda/hours?branchId=${resources?.branchId}`),
   })
   const draftGuard = usePageDraftGuard(schedule.dirty)
 
@@ -461,6 +555,11 @@ function AvailabilityPage() {
           <GroupTitle
             title="De la sede"
             hint={`Vale para todos los profesionales de ${resources.branchName}.`}
+          />
+          <BranchHoursCard
+            hours={hoursQuery.data?.data}
+            failed={hoursQuery.isError && hoursQuery.data === undefined}
+            onRetry={() => void hoursQuery.refetch()}
           />
           <div className="grid gap-4 lg:grid-cols-2">
             <section className={CARD}>

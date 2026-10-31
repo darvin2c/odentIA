@@ -30,7 +30,6 @@ import {
   listAgentDecisions,
   listAgentRuns,
   listAnswerTraces,
-  listAwaitingAnswer,
   listHandoffs,
   claimHandoff,
   getCaseBrief,
@@ -201,20 +200,6 @@ const simulateInput = z.object({
     )
   })
 
-  /**
-   * Agente › «Esperan su sí»: las citas que el agente propuso y esperan la
-   * respuesta de la persona. Lo ven los mismos roles que antes veían Pendientes.
-   */
-  app.get("/awaiting", async (c) => {
-    const { orgId, memberRole } = orgContextOf(c)
-    if (!canAccessAny(memberRole, ["agent.read", "agent.decide"])) return forbidden(c, "agent.decide")
-    return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) =>
-        listAwaitingAnswer(tx, orgId, { limit: c.req.query("limit") ? Number(c.req.query("limit")) : undefined }),
-      ),
-    )
-  })
-
   /** «Confirmó por teléfono»: el mismo permiso que registrar una confirmación, en el dominio del acto. */
   app.post("/proposals/:id/phone-confirm", async (c) => {
     const { orgId, memberRole, userId } = orgContextOf(c)
@@ -285,9 +270,12 @@ const simulateInput = z.object({
     const { orgId, memberRole, userId } = orgContextOf(c)
     if (!canAccessAny(memberRole, ["agent.read", "agent.decide"]))
       return forbidden(c, "agent.decide")
-    // El contador es de quien mira: lo que nadie tomó más lo suyo.
+    // Los casos son de quien mira (lo que nadie tomó más lo suyo); lo que se
+    // resuelve dentro de Agente, solo para quien lo supervisa.
     return runService(c, 200, () =>
-      withOrgContext(deps.db, orgId, (tx) => getAgentPanelSummary(tx, orgId, userId)),
+      withOrgContext(deps.db, orgId, (tx) =>
+        getAgentPanelSummary(tx, orgId, userId, { supervises: canAccess(memberRole, "agent.read") }),
+      ),
     )
   })
 

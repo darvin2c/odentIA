@@ -183,6 +183,13 @@
       "when": 1793399859386,
       "tag": "0025_documentos_formales",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793462363484,
+      "tag": "0026_ejemplos_en_el_indice",
+      "breakpoints": true
     }
   ]
 }

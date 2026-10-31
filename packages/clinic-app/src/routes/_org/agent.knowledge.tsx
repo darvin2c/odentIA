@@ -204,6 +204,8 @@ function AgentKnowledgePage() {
     void queryClient.invalidateQueries({ queryKey: ["agent-knowledge"] })
     void queryClient.invalidateQueries({ queryKey: ["agent-knowledge-basics"] })
     void queryClient.invalidateQueries({ queryKey: ["agent-knowledge-gaps"] })
+    // El número del menú «Agente» cuenta lo que no supo responder.
+    void queryClient.invalidateQueries({ queryKey: ["agent-panel"] })
   }
 
   /** Alta cuya publicación falló: reintentar la corrige y la publica, no crea otra. */

@@ -1,4 +1,17 @@
-import { Badge, Button, Checkbox, cn, Field, FieldContent, FieldDescription, FieldLabel, ScrollArea, useIsMobile } from "@odentia/ui"
+import {
+  Badge,
+  Button,
+  Checkbox,
+  cn,
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+  RadioGroup,
+  RadioGroupItem,
+  ScrollArea,
+  useIsMobile,
+} from "@odentia/ui"
 import { AgentMark, ConfirmDialog, FormDrawer, SubmitButton, submitErrorMessage, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -39,14 +52,29 @@ const WITHOUT_LABEL: Record<LessonKind, string> = {
   ejemplo: "Sin el ejemplo",
 }
 const SECTION_TITLE = "text-xs font-bold tracking-wider text-muted-foreground uppercase"
-const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-knowledge", "agent-knowledge-basics"]
+const LESSON_QUERIES = ["agent-learning", "agent-lesson", "agent-overview", "agent-panel", "agent-knowledge", "agent-knowledge-basics"]
 
 /** Lo que admite `PATCH /api/agent/learning/lessons/:id`, con sus mismas palabras. */
-const lessonSchema = z.object({
-  title: z.string().trim().min(1, "El título es obligatorio").max(200, "El título admite hasta 200 caracteres"),
-  body: z.string().trim().min(1, "El texto es obligatorio").max(2000, "El texto admite hasta 2000 caracteres"),
-  kind: z.enum(["respuesta_oficial", "regla", "ejemplo"], { error: "Elige qué clase de lección es" }),
-})
+/** Lo que mide una regla (`RULE_BODY_CHARS`, ADR 0118): va entera en cada mensaje. */
+const RULE_CHARS = 300
+
+const lessonSchema = z
+  .object({
+    title: z.string().trim().min(1, "El título es obligatorio").max(200, "El título admite hasta 200 caracteres"),
+    body: z.string().trim().min(1, "El texto es obligatorio").max(2000, "El texto admite hasta 2000 caracteres"),
+    kind: z.enum(["respuesta_oficial", "regla", "ejemplo"], { error: "Elige qué clase de lección es" }),
+  })
+  .refine((value) => value.kind !== "regla" || value.body.trim().length <= RULE_CHARS, {
+    path: ["body"],
+    message: `Una regla admite hasta ${RULE_CHARS} caracteres: lo más largo va mejor como ejemplo o respuesta oficial`,
+  })
+
+/** Lo que dice `GET …/conflict` antes de aprobar una regla. */
+interface RuleCheck {
+  conflictWith: { id: string; body: string } | null
+  /** Con el tope lleno, las reglas activas para elegir cuál reemplaza la nueva. */
+  full: { limit: number; rules: Array<{ id: string; body: string }> } | null
+}
 type LessonDraft = { title: string; body: string; kind: LessonKind }
 
 /** «hoy», «ayer», «el martes» (esta semana) o «el 3 de octubre». */
@@ -408,6 +436,9 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   }
   /** La regla activa con la que choca la que se va a aprobar (decisión 24). */
   const [conflict, setConflict] = useState<{ id: string; body: string } | null>(null)
+  /** Con el tope de reglas lleno (ADR 0118): las activas, y cuál reemplaza la nueva. */
+  const [full, setFull] = useState<RuleCheck["full"]>(null)
+  const [replacing, setReplacing] = useState("")
   const act = useMutation({
     retry: false,
     mutationFn: (input: { action: "approve" | "discard" | "restore"; replaceId?: string }) =>
@@ -417,6 +448,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
       }),
     onSuccess: () => {
       setConflict(null)
+      setFull(null)
       refresh()
       close()
     },
@@ -424,12 +456,14 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
   // Antes de aprobar una regla se mira si contradice otra: se avisa antes, nunca después.
   const check = useMutation({
     retry: false,
-    mutationFn: () =>
-      apiFetch<{ data: { conflictWith: { id: string; body: string } | null } }>(`/api/agent/learning/lessons/${lessonId}/conflict`),
+    mutationFn: () => apiFetch<{ data: RuleCheck }>(`/api/agent/learning/lessons/${lessonId}/conflict`),
     onSuccess: (response) => {
-      const found = response.data.conflictWith
-      if (found) setConflict(found)
-      else act.mutate({ action: "approve" })
+      const { conflictWith, full: rules } = response.data
+      // Con el tope lleno, la que contradice es la primera candidata a reemplazar.
+      setFull(rules)
+      setReplacing(conflictWith?.id ?? "")
+      if (conflictWith) setConflict(conflictWith)
+      else if (!rules) act.mutate({ action: "approve" })
     },
   })
   const save = useMutation({
@@ -462,6 +496,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
     detach.reset()
     check.reset()
     setConflict(null)
+    setFull(null)
     setWithdrawing(false)
     onClose()
   }
@@ -478,7 +513,8 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
     else if (withdrawn) act.mutate({ action: "restore" })
   }
   // Lo que falló al aprobar o descartar se dice junto a esas acciones; con el diálogo de la regla contraria abierto, dentro de él.
-  const actionError = conflict === null && (act.isError || check.isError) ? submitErrorMessage(act.error ?? check.error) : null
+  const actionError =
+    conflict === null && full === null && (act.isError || check.isError) ? submitErrorMessage(act.error ?? check.error) : null
 
   const title = !lesson
     ? "Lección"
@@ -547,7 +583,7 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
                     id="leccion-texto"
                     label={draftKind === "regla" ? "La regla" : draftKind === "ejemplo" ? "La respuesta de ejemplo" : "La respuesta oficial"}
                     rows={6}
-                    maxLength={2000}
+                    maxLength={draftKind === "regla" ? RULE_CHARS : 2000}
                   />
                 )}
               </form.AppField>
@@ -699,6 +735,42 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
       </FormDrawer>
       <WithdrawLessonDialog lessonId={withdrawing ? lessonId : null} onClose={() => setWithdrawing(false)} onWithdrawn={close} />
       <ConfirmDialog
+        open={full !== null && conflict === null}
+        title={`Ya hay ${full?.limit ?? 40} reglas`}
+        description="Le llegan todas en cada mensaje, así que no se suma otra: elige cuál reemplaza esta."
+        confirmLabel="Reemplazar"
+        variant="default"
+        pending={act.isPending}
+        error={act.isError ? submitErrorMessage(act.error) : null}
+        onClose={() => {
+          if (!act.isPending) {
+            act.reset()
+            setFull(null)
+          }
+        }}
+        onConfirm={() => {
+          if (replacing) act.mutate({ action: "approve", replaceId: replacing })
+        }}
+      >
+        <ScrollArea className="max-h-72">
+          <RadioGroup aria-label="Regla que reemplaza" className="flex flex-col gap-1.5 pr-3" value={replacing} onValueChange={setReplacing}>
+            {(full?.rules ?? []).map((rule) => (
+              <FieldLabel
+                key={rule.id}
+                className={cn(
+                  "flex min-h-11 w-full cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm font-normal",
+                  replacing === rule.id && "border-primary bg-primary-soft",
+                )}
+              >
+                <RadioGroupItem value={rule.id} className="mt-0.5" />
+                <span className="min-w-0 break-words">{rule.body}</span>
+              </FieldLabel>
+            ))}
+          </RadioGroup>
+        </ScrollArea>
+        {!replacing && act.isIdle ? <p className="text-sm text-muted-foreground">Elige una para reemplazarla.</p> : null}
+      </ConfirmDialog>
+      <ConfirmDialog
         open={conflict !== null}
         title="Contradice otra regla"
         description={conflict ? `Esto contradice «${conflict.body}». ¿Cuál vale?` : ""}
@@ -710,14 +782,26 @@ export function LessonDrawer({ lessonId, canWrite, onClose }: { lessonId: string
           if (!act.isPending) {
             act.reset()
             setConflict(null)
+            // Cerrar no abre después la lista del tope: se cancela todo.
+            setFull(null)
           }
         }}
         onConfirm={() => conflict && act.mutate({ action: "approve", replaceId: conflict.id })}
       >
-        <p className="text-sm text-muted-foreground">«Reemplazar» deja solo la nueva. También puedes mantener las dos o descartar la nueva.</p>
+        <p className="text-sm text-muted-foreground">
+          {full
+            ? `«Reemplazar» deja solo la nueva. Ya hay ${full.limit} reglas: para mantener las dos, elige otra que reemplazar.`
+            : "«Reemplazar» deja solo la nueva. También puedes mantener las dos o descartar la nueva."}
+        </p>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="min-h-11 sm:min-h-9" disabled={act.isPending} onClick={() => act.mutate({ action: "approve" })}>
-            Mantener las dos
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11 sm:min-h-9"
+            disabled={act.isPending}
+            onClick={() => (full ? setConflict(null) : act.mutate({ action: "approve" }))}
+          >
+            {full ? "Elegir otra" : "Mantener las dos"}
           </Button>
           <Button
             type="button"

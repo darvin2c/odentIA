@@ -816,7 +816,8 @@ export const pgVector = customType<{ data: number[]; driverData: string }>({
 })
 
 /** Qué se puede encontrar por significado. */
-export const SEARCH_ITEM_KINDS = ["servicio", "promocion", "profesional", "respuesta"] as const
+// `ejemplo`: la pregunta de un ejemplo aprobado de un agente (ADR 0118).
+export const SEARCH_ITEM_KINDS = ["servicio", "promocion", "profesional", "respuesta", "ejemplo"] as const
 export type SearchItemKind = (typeof SEARCH_ITEM_KINDS)[number]
 
 /**
@@ -842,6 +843,6 @@ export const agentSearchItem = pgTable(
   (table) => [
     uniqueIndex("agent_search_item_ref_uidx").on(table.organizationId, table.kind, table.refId),
     index("agent_search_item_pending_idx").on(table.organizationId).where(sql`${table.embedding} is null`),
-    check("agent_search_item_kind_check", sql`${table.kind} in ('servicio','promocion','profesional','respuesta')`),
+    check("agent_search_item_kind_check", sql`${table.kind} in ('servicio','promocion','profesional','respuesta','ejemplo')`),
   ],
 )

@@ -9,6 +9,7 @@ import {
   getAgendaAvailability,
   getAppointment,
   getAppointmentContext,
+  getBranchHours,
   getPatientMissingData,
   getProfessionalSchedule,
   listAppointments,
@@ -146,6 +147,23 @@ export function createAgendaRoute(deps: CrmDeps) {
     return runService(c, 200, () =>
       withOrgContext(deps.db, orgId, (tx) => listScheduleResources(tx, orgId, { branchId })),
     )
+  })
+
+  // El horario de atención de la sede: la suma de los horarios del equipo y sus
+  // próximos cierres, el mismo que dice el agente.
+  app.get("/hours", async (c) => {
+    const { orgId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "appointments.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes permiso para ver la agenda"), 403)
+    }
+    const branchId = c.req.query("branchId")
+    if (!branchId || !z.uuid().safeParse(branchId).success) {
+      return c.json(errorBody(c, "VALIDATION", "branchId inválido"), 400)
+    }
+    return runService(c, 200, async () => {
+      const [hours] = await withOrgContext(deps.db, orgId, (tx) => getBranchHours(tx, orgId, new Date(), { branchId }))
+      return hours ?? null
+    })
   })
 
   // Lo que dura una cita regular en la sede (la que se reserva sin servicio).

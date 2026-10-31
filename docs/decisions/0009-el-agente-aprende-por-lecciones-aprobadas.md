@@ -29,7 +29,7 @@ Cuando el agente respondía mal, la única salida era reescribir a mano las indi
 - Beneficio: una corrección aprobada llega a la siguiente respuesta a esa pregunta; cada respuesta dice qué lección usó; todo se puede retirar.
 - Sacrificio: «toca el tema» es una comparación de palabras: puede dejar fuera un caso que sí cambiaría o incluir uno que no. La comparación «responde igual» es de texto, y un modelo real puede variar la redacción sin cambiar el contenido.
 - El contador de usos es aproximado: una regla cuenta cuando la pregunta toca su tema, y una respuesta oficial solo cuando el agente la buscó expresamente.
-- Revisar si la cola de revisión crece más de lo que el equipo puede mirar (ajustar la muestra) o si las reglas activas pasan de unas veinte (el prompt lleva las más recientes).
+- Revisar si la cola de revisión crece más de lo que el equipo puede mirar (ajustar la muestra). ~~O si las reglas activas pasan de unas veinte (el prompt lleva las más recientes).~~ Resuelto en [0118](0118-reglas-con-tope-y-ejemplos-por-significado.md): tope de 40 reglas de 300 caracteres y ejemplos buscados por significado.
 
 ## Referencias
 

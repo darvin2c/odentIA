@@ -71,7 +71,8 @@ test("aprender: revisar, corregir, aprobar la lección, retirarla y corregir des
   // Las pestañas dicen cuánto espera: una respuesta por revisar.
   const tabs = page.getByRole("navigation", { name: "Secciones del agente" })
   await expect(tabs.getByRole("link", { name: /^Aprender/ })).toHaveText(/Aprender · 1 pendiente/)
-  await expect(tabs.getByRole("link", { name: /^Esperan su sí/ })).toHaveText("Esperan su sí")
+  // Lo que espera el sí de la persona está en la Bandeja, no aquí (ADR 0117).
+  await expect(tabs.getByRole("link", { name: /Esperan su sí/ })).toHaveCount(0)
   // De qué agente: Recepción con lo que espera; los que están apagados lo dicen y no se eligen.
   const agents = page.getByRole("tablist", { name: "De qué agente" })
   await expect(agents.getByRole("tab", { name: "Todos los agentes" })).toHaveAttribute("aria-selected", "true")
