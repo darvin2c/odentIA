@@ -1,4 +1,5 @@
 import {
+  Badge,
   Button,
   FieldDescription,
   FieldGroup,
@@ -346,7 +347,7 @@ function AgentKnowledgePage() {
     open(EMPTY_DRAFT, {})
   }
 
-  /** Responder lo básico: empieza por la primera que falta y sigue con las demás. */
+  /** «Lo que solo tú sabes»: empieza por la primera que falta y sigue con las demás. */
   function startBasics() {
     const first = missing[0]
     if (first) open(basicDraft(first), { basicsRun: true })
@@ -414,8 +415,16 @@ function AgentKnowledgePage() {
   return (
     <PageShell className={`flex flex-col gap-6 ${canWrite ? "max-sm:pb-24" : ""}`}>
       <PageDraftGuard dirty={formDirty || saveMutation.isPending} />
-      <PageHeader title="Agente" subtitle="Solo responde con lo que está aquí. Si un dato falta, lo dice y pasa a una persona." />
+      <PageHeader
+        title="Agente"
+        subtitle={`Lo que ${receptionName} sabe para atender. Lo de tus datos lo lee en el momento; aquí agregas lo que solo tú sabes.`}
+      />
       <AgentTabs />
+      {/* Conocimiento es de recepción (ADR 0119): Clío y Argos no lo usan. */}
+      <p className="-mt-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <Badge variant="soft">Solo {receptionName}</Badge>
+        Es lo que usa para responder a pacientes. Clío y Argos no lo usan.
+      </p>
 
       <div className="grid min-w-0 items-stretch gap-4 xl:grid-cols-2">
         <KnowledgeGaps
@@ -501,7 +510,7 @@ function AgentKnowledgePage() {
               : editing
                 ? "Editar respuesta"
                 : basicsRun
-                  ? "Responder lo básico"
+                  ? "Responder lo que solo tú sabes"
                   : "Nueva respuesta"
           }
           description={
@@ -509,7 +518,7 @@ function AgentKnowledgePage() {
               ? `La próxima vez que lo pregunten, ${receptionName} responderá con esto.`
               : basicsRun
                 ? runNext
-                  ? `Faltan ${missing.length}. Al guardar pasas a la siguiente.`
+                  ? `Faltan ${missing.length}. Al guardar pasas a la siguiente; puedes dejar cualquiera sin responder.`
                   : "Es la última que falta."
                 : `${receptionName} la cita tal cual. Escríbela como se la dirías a un paciente.`
           }
@@ -574,7 +583,7 @@ function AgentKnowledgePage() {
             {basicsRun && missing.length > 1 ? (
               <form.AppField name="basicKey">
                 {(field) => (
-                  <field.Control id="nc-falta" label="Pregunta básica" description="Puedes responderlas en el orden que quieras.">
+                  <field.Control id="nc-falta" label="Pregunta" description="Puedes responderlas en el orden que quieras.">
                     {(control) => (
                       <Select
                         value={field.state.value}
@@ -707,15 +716,28 @@ function AgentKnowledgePage() {
                     </form.AppField>
                   </div>
                 </FieldSet>
-                {basicsRun ? null : (
+                {basicsRun ? (
+                  // Lo que ya está en los datos no se escribe otra vez (ADR 0119).
+                  <div className="flex flex-col gap-1 rounded-xl border border-agent-border bg-agent-soft px-3.5 py-3 text-sm text-primary-soft-foreground">
+                    <span className="font-semibold">Esto ya lo sabe por tus datos</span>
+                    <span>
+                      Horario, sedes, equipo, servicios con su precio y duración, promociones, medios de pago y urgencias. Si algo está mal, se
+                      corrige donde vive.
+                    </span>
+                  </div>
+                ) : (
                   <form.AppField name="basicKey">
                     {(field) => (
                       <field.SelectField
                         id="nc-basica"
-                        label="Pregunta básica que cubre"
+                        label="Responde a «Lo que solo tú sabes»"
                         options={[
                           { value: "", label: "Ninguna" },
                           ...(basics?.items ?? []).map((item) => ({ value: item.key, label: item.question })),
+                          // Una respuesta de antes puede tener una pregunta que ya no está en la lista: se conserva.
+                          ...(values.basicKey && !(basics?.items ?? []).some((item) => item.key === values.basicKey)
+                            ? [{ value: values.basicKey, label: "Una pregunta de la lista anterior" }]
+                            : []),
                         ]}
                       />
                     )}

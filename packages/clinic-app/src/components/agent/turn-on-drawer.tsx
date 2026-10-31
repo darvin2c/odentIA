@@ -165,16 +165,27 @@ export function TurnOnDrawer({
           }
         />
         <Check ok={modelOk} checking={checking} title="El modelo responde" detail={modelDetail} action={modelAction} />
+        {/* Lo que dice sale de los datos (ADR 0119): sin horario del equipo ni servicios no sabe cuándo atiende ni qué hace. */}
         <Check
-          ok={knows.basicsCovered === knows.basicsTotal}
-          title={`Lo básico de tu clínica: ${knows.basicsCovered} de ${knows.basicsTotal}`}
-          detail="Puedes encender así. Lo que no sepa, lo dice y lo pasa a una persona."
+          ok={knows.branchesWithHours > 0 && knows.services > 0}
+          title="Sabe tu horario y tus servicios"
+          detail={
+            knows.branchesWithHours === 0
+              ? "Nadie del equipo tiene horario: no puede decir cuándo atiende. Puedes encender así."
+              : knows.services === 0
+                ? "No hay servicios activos: no puede decir qué hace la clínica. Puedes encender así."
+                : "Los lee de tus datos en el momento. Lo que no sepa, lo dice y lo pasa a una persona."
+          }
           action={
-            knows.basicsCovered === knows.basicsTotal ? undefined : (
-              <Link to="/agent/knowledge" className={LINK}>
-                Completar
+            knows.branchesWithHours === 0 ? (
+              <Link to="/settings/availability" className={LINK}>
+                Cargar horarios
               </Link>
-            )
+            ) : knows.services === 0 ? (
+              <Link to="/services" className={LINK}>
+                Agregar servicios
+              </Link>
+            ) : undefined
           }
         />
         <Check

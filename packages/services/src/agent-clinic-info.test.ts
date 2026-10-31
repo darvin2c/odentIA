@@ -15,6 +15,7 @@ import {
   formatAgentPrice,
   formatClinicSearch,
   getAgentClinicData,
+  getAgentDataSources,
   identifyAskedService,
   getBranchHours,
   listAgentProfessionals,
@@ -122,6 +123,22 @@ describe("lo que sabe Informar", () => {
     ])
     expect(centro?.closures).toHaveLength(1)
     expect(centro?.closures[0]?.reason).toBe("Feriado")
+  })
+
+  it("lo que toma de tus datos cuenta lo mismo que recibe el agente (ADR 0119)", async () => {
+    const sources = await run((tx) => getAgentDataSources(tx, ORG))
+    const data = await run((tx) => getAgentClinicData(tx, ORG, true))
+    expect(sources.hours).toEqual(data.hours)
+    expect(sources.team).toEqual({
+      professionals: data.professionals.length,
+      specialties: new Set(data.professionals.flatMap((item) => item.specialties)).size,
+    })
+    expect(sources.services.total).toBe(data.services.length)
+    // Los de «solo con evaluación» no cuentan como precio que dice.
+    expect(sources.services.priced).toBe(data.services.filter((item) => item.price.disclosure !== "evaluacion" && item.price.priceCents > 0).length)
+    expect(sources.promotions.map((item) => item.name)).toEqual(data.promotions.map((item) => item.name))
+    expect(sources.informs).toBe(true)
+    expect(sources.branches.total).toBeGreaterThan(0)
   })
 
   it("los profesionales con su especialidad y sus días; sin más datos de la persona", async () => {

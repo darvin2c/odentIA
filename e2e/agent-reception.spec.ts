@@ -51,8 +51,8 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const name of ["Clío", "Argos"]) {
     await expect(agents.getByRole("listitem").filter({ hasText: name })).toContainText("Apagado")
   }
-  // Lo básico que falta se dice en la ficha de las preguntas sin respuesta: se responde en el mismo sitio.
-  await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("preguntas básicas")
+  // Lo que solo sabe la clínica es opcional (ADR 0119): la ficha cuenta solo lo que no supo responder.
+  await expect(page.getByRole("region", { name: "Necesita de ti" }).getByRole("link", { name: /Preguntas sin respuesta/ })).toContainText("Encontró respuesta a todo lo que buscó.")
   await expect(page.getByRole("region", { name: "Cómo le fue esta semana" })).toContainText("Está apagado")
   // Un solo horario, el de recontacto (ADR 0084): para escribir primero; cuando la persona escribe, responde siempre.
   const recontact = page.getByRole("region", { name: "Horario de recontacto" })
@@ -71,6 +71,10 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   await expect(turnOn).toContainText("Sin un canal conectado no le llega ningún mensaje.")
   await expect(turnOn.getByRole("link", { name: "Conectar un canal" })).toBeVisible()
   await expect(turnOn.getByRole("button", { name: "Encender a Sofi" })).toBeDisabled()
+  // Lo que dice sale de los datos: sin horario del equipo lo avisa y lleva a cargarlo, sin impedir encender.
+  await expect(turnOn).toContainText("Sabe tu horario y tus servicios")
+  await expect(turnOn).toContainText("Nadie del equipo tiene horario")
+  await expect(turnOn.getByRole("link", { name: "Cargar horarios" })).toHaveAttribute("href", /\/settings\/availability$/)
   await info.attach("encender-sin-canal", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await turnOn.getByRole("button", { name: "Ahora no" }).click()
   await expect(turnOn).toBeHidden()
@@ -157,7 +161,7 @@ test("agente: resumen, página de Recepción, probar y encender", async ({ owner
   for (const [name, href] of [
     ["Respuestas oficiales", "/agent/knowledge"],
     ["Servicios y precios", "/services"],
-    ["Sedes y horarios", "/settings/branches"],
+    ["Horario y sedes", "/settings/availability"],
     ["Lo que aprendió de tus correcciones", "/agent/learn"],
   ] as const) {
     await expect(knows.getByRole("link", { name: new RegExp(`^${name}`) })).toHaveAttribute("href", new RegExp(`${href}$`))

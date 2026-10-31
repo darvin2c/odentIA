@@ -48,6 +48,7 @@ import { useMyRole, usePermission } from "../../lib/crm"
 import { usePageDraftGuard } from "../../lib/page-draft-guard"
 import { appWords, upperFirst } from "../../lib/product-words"
 import { useReceptionName } from "../../lib/agent-names"
+import { type BranchHours, weekLines } from "../../lib/branch-hours"
 
 export const Route = createFileRoute("/_org/settings/availability")({
   validateSearch: (search: Record<string, unknown>): { branch?: string } => ({
@@ -67,44 +68,6 @@ const CARD = "grid content-start gap-3 rounded-xl border bg-background p-3 sm:p-
 
 /** Sin sede elegida todavía: lo que hacen la página y sus formularios. */
 const SUBTITLE = "El horario y las ausencias de cada profesional, y lo que vale para toda la sede."
-
-/** El horario de atención de una sede: lo que entrega `/api/agenda/hours`. */
-interface BranchHours {
-  /** Por día de la semana (0 = domingo), los tramos en que atiende alguien, en minutos locales. */
-  week: Array<{ weekday: number; ranges: Array<[number, number]> }>
-}
-
-/** La semana empieza en lunes, como en la Agenda. */
-const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
-const DAY_NAMES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
-
-/**
- * «Lunes a viernes: 09:00 – 13:00 y 15:00 – 19:00»: los días seguidos con los
- * mismos tramos van en una línea; un día sin nadie del equipo, «Cerrado».
- */
-function weekLines(hours: BranchHours): Array<{ days: string; text: string }> {
-  const byDay = new Map(hours.week.map((day) => [day.weekday, day.ranges]))
-  const textOf = (weekday: number) => {
-    const ranges = byDay.get(weekday) ?? []
-    return ranges.length
-      ? ranges.map(([start, end]) => `${hourLabel(start)} – ${hourLabel(end)}`).join(" y ")
-      : "Cerrado"
-  }
-  const lines: Array<{ first: number; last: number; text: string }> = []
-  for (const weekday of WEEK_ORDER) {
-    const text = textOf(weekday)
-    const previous = lines[lines.length - 1]
-    if (previous && previous.text === text) previous.last = weekday
-    else lines.push({ first: weekday, last: weekday, text })
-  }
-  return lines.map((line) => ({
-    days:
-      line.first === line.last
-        ? upperFirst(DAY_NAMES[line.first]!)
-        : `${upperFirst(DAY_NAMES[line.first]!)} a ${DAY_NAMES[line.last]}`,
-    text: line.text,
-  }))
-}
 
 /**
  * Horario de atención de la sede: no se escribe, sale de los horarios del
@@ -142,10 +105,10 @@ function BranchHoursCard({
         </p>
       ) : (
         <dl className="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
-          {weekLines(hours).map((line) => (
+          {weekLines(hours.week).map((line) => (
             <div key={line.days} className="contents">
               <dt className="font-semibold">{line.days}</dt>
-              <dd className={line.text === "Cerrado" ? "text-muted-foreground" : "tabular-nums"}>{line.text}</dd>
+              <dd className={line.closed ? "text-muted-foreground" : "tabular-nums"}>{line.text}</dd>
             </div>
           ))}
         </dl>

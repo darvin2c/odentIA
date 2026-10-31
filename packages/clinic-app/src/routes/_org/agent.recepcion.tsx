@@ -140,7 +140,7 @@ function Card({
 }
 
 /** Fila con su entrada: lo que hay y, si se puede cambiar, a dónde lleva. */
-function EntryRow({ label, value, onClick, to }: { label: string; value: string | null; onClick?: () => void; to?: "/agent/knowledge" | "/services" | "/settings/branches" | "/agent/learn" }) {
+function EntryRow({ label, value, onClick, to }: { label: string; value: string | null; onClick?: () => void; to?: "/agent/knowledge" | "/services" | "/settings/availability" | "/agent/learn" }) {
   const content = (
     <>
       <span className="min-w-0 flex-[1_1_9rem] font-semibold">{label}</span>
@@ -619,9 +619,15 @@ function ReceptionPage() {
               </li>
               <li>
                 <EntryRow
-                  label="Sedes y horarios"
-                  value={knows.branches === 0 ? "Ninguna sede activa" : count(knows.branches, "sede", "sedes")}
-                  to="/settings/branches"
+                  label="Horario y sedes"
+                  value={
+                    knows.branches === 0
+                      ? "Ninguna sede activa"
+                      : knows.branchesWithHours === 0
+                        ? "Nadie del equipo tiene horario"
+                        : count(knows.branches, "sede", "sedes")
+                  }
+                  to="/settings/availability"
                 />
               </li>
               <li>

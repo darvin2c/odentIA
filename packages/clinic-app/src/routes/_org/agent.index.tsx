@@ -210,16 +210,12 @@ function AgentSummaryPage() {
                 done="Ninguna lección espera tu aprobación."
                 to="/agent/learn"
               />
-              {/* Las preguntas básicas que faltan se responden en el mismo sitio: van en esta ficha, sin una quinta. */}
+              {/* «Lo que solo tú sabes» es opcional (ADR 0119): no se cuenta como algo que necesita de ti. */}
               <NeedTile
                 count={overview.needsYou.gaps}
                 title="Preguntas sin respuesta"
-                pending={`Lo que le preguntaron y no sabía.${overview.needsYou.basicsMissing > 0 ? ` Además faltan ${overview.needsYou.basicsMissing} de las ${overview.knows.basicsTotal} básicas.` : ""}`}
-                done={
-                  overview.needsYou.basicsMissing > 0
-                    ? `Faltan ${overview.needsYou.basicsMissing} de las ${overview.knows.basicsTotal} preguntas básicas.`
-                    : "Encontró respuesta a todo lo que buscó."
-                }
+                pending="Lo que le preguntaron y no sabía."
+                done="Encontró respuesta a todo lo que buscó."
                 to="/agent/knowledge"
               />
             </div>

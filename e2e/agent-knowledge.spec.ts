@@ -27,7 +27,7 @@ const day = (offset: number) =>
 const QUESTION = "¿Tienen estacionamiento para bicicletas?"
 const TEAM_ANSWER = "Sí, hay un bicicletero en la entrada."
 
-test("conocimiento: lo que no supo responder, lo básico, respuestas en filas con su detalle y lo que toma de los datos", async ({
+test("conocimiento: lo que no supo responder, lo que solo tú sabes, respuestas en filas con su detalle y lo que toma de los datos", async ({
   owner,
   fixtureDb,
   nextEventId,
@@ -63,7 +63,7 @@ test("conocimiento: lo que no supo responder, lo básico, respuestas en filas co
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoHydrated(page, tenant(org.slug, "/agent/knowledge"))
   const gaps = page.getByRole("region", { name: /^No supo responder/ })
-  const basics = page.getByRole("region", { name: "Lo básico de una clínica" })
+  const basics = page.getByRole("region", { name: "Lo que solo tú sabes" })
   const answers = page.getByRole("region", { name: /^Respuestas oficiales/ })
   const sources = page.getByRole("region", { name: "Lo que toma de tus datos" })
   const rows = answers.getByRole("listitem")
@@ -82,45 +82,59 @@ test("conocimiento: lo que no supo responder, lo básico, respuestas en filas co
   await gaps.getByRole("button", { name: "Ver las 4" }).click()
   await expect(gaps.getByRole("button", { name: "Responder", exact: true })).toHaveCount(3)
 
-  // Lo básico: cifra grande, barra, las que faltan como etiquetas y una sola acción.
-  // La sede recién creada no tiene dirección ni hay servicios: de lo básico solo
-  // se cubren solos los medios de pago, que la clínica ya tiene activos en caja.
-  await expect(basics).toContainText("1 de 25")
+  // Conocimiento es de Sofi (ADR 0119).
+  await expect(page.getByText("Es lo que usa para responder a pacientes. Clío y Argos no lo usan.")).toBeVisible()
+
+  // Lo que solo tú sabes: ocho preguntas opcionales, cada una dice si tiene respuesta, y una sola acción.
+  // Lo que está en los datos (horario, medios de pago…) no está aquí: se muestra abajo.
+  await expect(basics).toContainText("0 de 8")
   await expect(basics).toContainText("ya tienen respuesta")
-  await expect(basics.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "1")
-  await expect(basics.getByRole("heading", { name: "Las que faltan" })).toBeVisible()
-  await expect(basics.getByRole("listitem")).toHaveCount(5)
-  await expect(basics).toContainText("y 20 más")
+  await expect(basics.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0")
+  await expect(basics.getByRole("list", { name: "Preguntas" }).getByRole("listitem")).toHaveCount(8)
+  await expect(basics.getByRole("listitem").filter({ hasText: "Pago en cuotas" })).toContainText("sin respuesta")
+  await expect(basics).not.toContainText("horario")
   await expect(basics.getByRole("button")).toHaveCount(1)
+  await expect(basics.getByRole("button", { name: "Responder las 8 que faltan" })).toBeVisible()
 
-  // Lo que toma de tus datos: cifras del sistema y dónde se editan.
-  await expect(sources.getByRole("link", { name: /Servicios y precios.*Ningún precio que Sofi pueda decir todavía.*Se editan en Servicios/ })).toBeVisible()
-  await expect(sources.getByRole("link", { name: /Sedes y horarios.*2 sedes.*Se editan en Sedes/ })).toBeVisible()
+  // Lo que toma de tus datos: lo mismo que recibe Sofi, dónde se edita y, en ámbar y con su texto, lo que falta.
+  // La sede recién creada no tiene dirección y no hay servicios ni horarios del equipo.
+  await expect(sources.getByRole("link", { name: /^Horario de atención.*Nadie del equipo tiene horario/ })).toHaveAttribute("href", /\/settings\/availability$/)
+  await expect(sources.getByRole("link", { name: /^Servicios y precios.*Ningún servicio activo/ })).toHaveAttribute("href", /\/services$/)
+  await expect(sources.getByRole("link", { name: /^Sedes.*2 sedes.*sin dirección/ })).toHaveAttribute("href", /\/settings\/branches$/)
+  await expect(sources.getByRole("link", { name: /^Medios de pago/ })).toHaveAttribute("href", /\/settings\/payment-methods$/)
+  await expect(sources.getByRole("link", { name: /^Teléfono de urgencias.*Falta/ })).toBeVisible()
+  await expect(sources.getByRole("link")).toHaveCount(8)
+  await expect(sources).toContainText("Nada de su historia clínica.")
 
-  // La primera vez: el vacío lleva a lo básico.
+  // La primera vez: el vacío lleva a lo que solo tú sabes.
   await expect(answers).toContainText("Todavía no le has enseñado nada")
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("conocimiento-inicial", { body: await page.screenshot({ fullPage: true, path: info.outputPath("conocimiento-inicial.png") }), contentType: "image/png" })
-  await answers.getByRole("button", { name: "Empezar con lo básico" }).click()
-  const basicForm = sideSurface(page, { name: "Responder lo básico", exact: true })
-  await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿Cuál es el horario de atención?")
+  await answers.getByRole("button", { name: "Responder lo que solo tú sabes" }).click()
+  const basicForm = sideSurface(page, { name: "Responder lo que solo tú sabes", exact: true })
+  await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿Tienen estacionamiento?")
+  // Recuerda lo que ya sabe por los datos, para no escribirlo dos veces.
+  await expect(basicForm).toContainText("Esto ya lo sabe por tus datos")
   // Se responden en el orden que se quiera, sin perder lo escrito.
   await basicForm.getByLabel("La respuesta", { exact: true }).fill("Sí, cuatro plazas para pacientes.")
-  await basicForm.getByRole("combobox", { name: "Pregunta básica" }).click()
-  await page.getByRole("option", { name: "¿Tienen estacionamiento?", exact: true }).click()
-  await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿Tienen estacionamiento?")
+  await basicForm.getByRole("combobox", { name: "Pregunta" }).click()
+  await page.getByRole("option", { name: "¿Se puede pagar en cuotas?", exact: true }).click()
+  await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿Se puede pagar en cuotas?")
   await expect(basicForm.getByLabel("La respuesta", { exact: true })).toHaveValue("Sí, cuatro plazas para pacientes.")
+  await basicForm.getByRole("combobox", { name: "Pregunta" }).click()
+  await page.getByRole("option", { name: "¿Tienen estacionamiento?", exact: true }).click()
   await basicForm.getByRole("button", { name: "Guardar y seguir" }).click()
   // Al guardar pasa a la siguiente que falta, con la respuesta en blanco.
   await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿El local es accesible para silla de ruedas?")
   await expect(basicForm.getByLabel("La respuesta", { exact: true })).toHaveValue("")
+  await info.attach("lo-que-solo-tu-sabes", { body: await page.screenshot({ fullPage: false, path: info.outputPath("lo-que-solo-tu-sabes.png") }), contentType: "image/png" })
   await basicForm.getByRole("button", { name: "Cancelar" }).click()
   await expect(basicForm).toBeHidden()
-  await expect(basics).toContainText("2 de 25")
-  await expect(basics).toContainText("y 19 más")
+  await expect(basics).toContainText("1 de 8")
+  await expect(basics.getByRole("listitem").filter({ hasText: "Estacionamiento" })).toContainText("con respuesta")
   await expect(row("¿Tienen estacionamiento?")).toContainText("Publicada")
-  await basics.getByRole("button", { name: "Responder las que faltan" }).click()
-  await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿Cuál es el horario de atención?")
+  await basics.getByRole("button", { name: "Responder las 7 que faltan" }).click()
+  await expect(basicForm.getByLabel("La pregunta", { exact: true })).toHaveValue("¿El local es accesible para silla de ruedas?")
   await basicForm.getByRole("button", { name: "Cancelar" }).click()
   await expect(basicForm).toBeHidden()
 
@@ -260,26 +274,26 @@ test("conocimiento: lo que no supo responder, lo básico, respuestas en filas co
   expect(listed.find((entry) => entry.title === "¿Tienen estacionamiento?")?.basicKey).toBe("estacionamiento")
   expect(listed.find((entry) => entry.title === "Venta de cepillos")?.askForms).toEqual(["¿Venden cepillos?"])
 
-  // Teléfono: «Nueva respuesta» fija al pie, lo básico en una tarjeta que se toca y filas de dos líneas, sin desbordes.
+  // Teléfono: «Nueva respuesta» fija al pie, lo que solo tú sabes con su acción a todo el ancho y filas de dos líneas, sin desbordes.
   await page.setViewportSize({ width: 390, height: 844 })
   await gotoHydrated(page, tenant(org.slug, "/agent/knowledge"))
-  await expect(basics).toContainText("2 de 25")
+  await expect(basics).toContainText("1 de 8")
   const create390 = page.getByRole("button", { name: "Nueva respuesta", exact: true })
   await expect(create390).toHaveCount(1)
   await expect(create390).toBeInViewport({ ratio: 1 })
   expect((await create390.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
-  await expect(basics.getByRole("heading", { name: "Las que faltan" })).toBeHidden()
-  const basicsCard = basics.getByRole("button", { name: "Faltan 23. Toca para responderlas." })
-  await expect(basicsCard).toBeVisible()
+  const basicsButton = basics.getByRole("button", { name: "Responder las 7 que faltan" })
+  await expect(basicsButton).toBeVisible()
+  expect((await basicsButton.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   await expect(rows.first()).toContainText(/Publicada · todas las sedes|Vence el|Cambio por aprobar · todas las sedes/)
   expect((await rows.first().getByRole("button").boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   expect((await gaps.getByRole("button", { name: "Responder", exact: true }).boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
   expect(await overflow(page)).toBeLessThanOrEqual(0)
   await info.attach("conocimiento-movil", { body: await page.screenshot({ fullPage: true, path: info.outputPath("conocimiento-movil.png") }), contentType: "image/png" })
-  // La tarjeta entera responde al toque, no solo su texto.
-  const card = (await basics.boundingBox())!
-  await page.mouse.click(card.x + card.width - 24, card.y + 16)
-  const mobileBasics = page.getByRole("dialog", { name: "Responder lo básico" })
+  // Cada fila de datos se toca entera.
+  expect((await sources.getByRole("link").first().boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44)
+  await basicsButton.click()
+  const mobileBasics = page.getByRole("dialog", { name: "Responder lo que solo tú sabes" })
   await expect(mobileBasics.getByLabel("La respuesta", { exact: true })).toBeVisible()
   await mobileBasics.getByRole("button", { name: "Cancelar" }).click()
   await expect(mobileBasics).toBeHidden()

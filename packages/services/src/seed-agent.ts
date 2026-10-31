@@ -38,23 +38,25 @@ export async function seedAgent(
     {
       id: "00000000-0000-4000-8000-00000000a602",
       kind: "faq",
-      title: "¿Qué medios de pago aceptan?",
-      body: "Aceptamos efectivo, tarjeta, transferencia, Yape y Plin. El detalle de tu tratamiento y su tarifa se confirman en la clínica antes de atenderte.",
+      // Los medios de pago salen de caja (ADR 0119): aquí va lo que no está en ningún dato.
+      title: "¿Se puede pagar en cuotas?",
+      body: "Los tratamientos de varias sesiones se pagan por partes, según el avance. Lo dejamos acordado en tu presupuesto antes de empezar.",
       branchId: null,
       status: "publicada",
-      askForms: ["¿Puedo pagar con Yape?", "¿Aceptan tarjeta?"],
-      basicKey: "medios_pago",
+      askForms: ["¿Puedo pagar en partes?"],
+      basicKey: "cuotas",
       validUntil: null,
     },
     {
       id: "00000000-0000-4000-8000-00000000a603",
+      // El horario sale de los turnos del equipo (ADR 0119): el borrador es de lo que solo sabe la sede.
       kind: "info_sede",
-      title: "Horario de atención",
-      body: "Coordinar el horario exacto con la sede antes de publicarlo.",
+      title: "¿Tienen estacionamiento?",
+      body: "Confirmar con la sede cuántas plazas hay antes de publicarlo.",
       branchId,
       status: "borrador",
       askForms: [],
-      basicKey: "horario",
+      basicKey: "estacionamiento",
       validUntil: null,
     },
     {

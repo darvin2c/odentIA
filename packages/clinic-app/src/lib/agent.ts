@@ -297,13 +297,14 @@ export const MODEL_CHECK_TEXT = {
 
 export interface AgentOverview {
   enabled: boolean
-  needsYou: { gaps: number; basicsMissing: number; review: number; lessons: number }
+  needsYou: { gaps: number; review: number; lessons: number }
   today: AgentOutcomes
   week: AgentOutcomes
   learned: AgentLearned
   /** El último intento de usar el modelo falló por el proveedor (`at`: cuándo); `null` si responde. */
   provider: { problem: AgentProviderProblem | null; at: string | null }
-  knows: { answers: number; servicesWithPrice: number; branches: number; basicsCovered: number; basicsTotal: number }
+  /** `branchesWithHours` y `services`: sin ellos no puede decir cuándo atiende ni qué hace la clínica. */
+  knows: { answers: number; servicesWithPrice: number; services: number; branches: number; branchesWithHours: number }
   readiness: { channels: string[]; receivers: string[]; sandboxTurns: number }
 }
 

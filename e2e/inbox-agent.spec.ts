@@ -137,6 +137,8 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   const card = page.getByRole("article", { name: "Sofi propuso una cita" })
   await expect(card).toContainText("Espera su sí")
   await expect(card).toContainText(/Espera el sí de \S+ en esta conversación\./)
+  // Si dijo que sí por otra vía, se anota aquí (antes, en «Esperan su sí»; ADR 0117).
+  await expect(card.getByRole("button", { name: "Confirmó por teléfono" })).toBeVisible()
   await info.attach("hilo-con-tarjeta", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await proposeAppointment(derived, "Cita el miércoles 4 de noviembre a las 11:00")
   await page.locator("header").getByRole("button", { name: /^Agente/ }).click()
@@ -310,6 +312,7 @@ test("bandeja: quien no decide por el agente ve el estado del hilo, no la propue
   await expect(page.getByText(/Sofi propuso una cita ·/)).toBeVisible()
   await expect(page.getByRole("article", { name: "Sofi propuso una cita" })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Registrar confirmación" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Confirmó por teléfono" })).toHaveCount(0)
   await expect(page.locator("header").getByRole("button", { name: /^Agente/ })).toHaveCount(0)
   expect((await api(page, "GET", "/api/agent/proposals?status=propuesta", org.slug)).status).toBe(403)
 })

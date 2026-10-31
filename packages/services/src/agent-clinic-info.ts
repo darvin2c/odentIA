@@ -7,7 +7,8 @@ import { branch } from "@odentia/db/schema/org"
 import { and, asc, eq, gt, inArray, isNull, lt } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core"
 import { createHash } from "node:crypto"
-import { normalizeForSearch } from "./knowledge.js"
+import { getAgentConfig } from "./agentConfig.js"
+import { getClinicInfoSnapshot, normalizeForSearch } from "./knowledge.js"
 import { findOrgCountry, formatOrgMoney, type OrgLocale } from "./locale.js"
 import { kindOfSpecialty } from "./product-catalog.js"
 import { productHooks } from "./products.js"
@@ -671,6 +672,62 @@ export async function getAgentClinicData(tx: Db, orgId: string, informs: boolean
     services: await listAgentServices(tx, orgId),
     promotions: await listAgentPromotions(tx, orgId),
     informs,
+  }
+}
+
+/* ---------- Lo que toma de tus datos ---------- */
+
+/**
+ * Lo que el agente de recepción lee de los datos de la clínica, contado para
+ * mostrarlo en Conocimiento (ADR 0119): las mismas fuentes que su prompt
+ * (`getAgentClinicData`, `getClinicInfoSnapshot`), así la pantalla dice lo
+ * que de verdad recibe. Nada se escribe dos veces: cada fila se edita donde
+ * vive.
+ */
+export interface AgentDataSources {
+  /** Horario de atención de cada sede (la suma de los horarios del equipo) y sus cierres de los próximos días. */
+  hours: AgentBranchHours[]
+  branches: { total: number; withAddress: number; withPhone: number }
+  team: { professionals: number; specialties: number }
+  /** `priced`: los que dicen su precio («exacto» o «desde»); `withDuration`: los que dicen cuánto duran. */
+  services: { total: number; priced: number; withDuration: number }
+  promotions: Array<{ name: string; endsAt: string | null }>
+  paymentMethods: string[]
+  /** La clínica registró su teléfono para urgencias (ADR 0084). */
+  emergencyPhone: boolean
+  /**
+   * «Informar» encendido. Apagado, no le llegan precios, promociones,
+   * profesionales ni medios de pago (ADR 0021): la pantalla lo dice en esas filas.
+   */
+  informs: boolean
+}
+
+export async function getAgentDataSources(tx: Db, orgId: string): Promise<AgentDataSources> {
+  const cfg = await getAgentConfig(tx, orgId)
+  const snapshot = await getClinicInfoSnapshot(tx, orgId)
+  const professionals = await listAgentProfessionals(tx, orgId)
+  const services = await listAgentServices(tx, orgId)
+  const promotions = await listAgentPromotions(tx, orgId)
+  return {
+    hours: await getBranchHours(tx, orgId),
+    branches: {
+      total: snapshot.branches.length,
+      withAddress: snapshot.branches.filter((branch) => Boolean(branch.address?.trim())).length,
+      withPhone: snapshot.branches.filter((branch) => Boolean(branch.phone?.trim())).length,
+    },
+    team: {
+      professionals: professionals.length,
+      specialties: new Set(professionals.flatMap((item) => item.specialties)).size,
+    },
+    services: {
+      total: services.length,
+      priced: services.filter((item) => item.price.disclosure !== "evaluacion" && item.price.priceCents > 0).length,
+      withDuration: services.filter((item) => item.durationMin !== null).length,
+    },
+    promotions: promotions.map((item) => ({ name: item.name, endsAt: item.endsAt })),
+    paymentMethods: snapshot.paymentMethods.map((method) => method.name),
+    emergencyPhone: Boolean(snapshot.emergencyPhone),
+    informs: !cfg.disabledFunctions.includes("informar"),
   }
 }
 

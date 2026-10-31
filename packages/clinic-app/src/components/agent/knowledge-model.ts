@@ -1,5 +1,7 @@
 /** Tipos y textos de «Conocimiento»: lo que entrega `/api/agent/knowledge` y cómo se dice en pantalla. */
 
+import type { BranchHours } from "../../lib/branch-hours"
+
 export type KnowledgeState = "borrador" | "programada" | "vigente" | "vencida"
 
 export interface KnowledgeEntry {
@@ -30,13 +32,14 @@ export interface KnowledgeRevision {
   createdAt: string
 }
 
+/** Una de «Lo que solo tú sabes» (ADR 0119): lo que no está en ningún dato. */
 export interface KnowledgeBasicItem {
   key: string
   question: string
+  /** Cómo se nombra en una etiqueta: «Pago en cuotas». */
+  label: string
   covered: boolean
-  coveredBy: "respuesta" | "datos" | null
   entryId: string | null
-  dataSource: string | null
 }
 
 export interface KnowledgeBasics {
@@ -55,10 +58,17 @@ export interface KnowledgeGap {
   teamAnswer: string | null
 }
 
+/** «Lo que toma de tus datos»: lo que entrega `/api/agent/knowledge/sources` (`getAgentDataSources`). */
 export interface KnowledgeSources {
-  pricedServices: number
-  services: number
-  branches: number
+  hours: BranchHours[]
+  branches: { total: number; withAddress: number; withPhone: number }
+  team: { professionals: number; specialties: number }
+  services: { total: number; priced: number; withDuration: number }
+  promotions: Array<{ name: string; endsAt: string | null }>
+  paymentMethods: string[]
+  emergencyPhone: boolean
+  /** «Informar» encendido: apagado, no le llegan precios, promociones, equipo ni medios de pago. */
+  informs: boolean
 }
 
 export const KNOWLEDGE_STATES: KnowledgeState[] = ["vigente", "borrador", "programada", "vencida"]

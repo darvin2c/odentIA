@@ -263,14 +263,12 @@ const MEDICAL_INVENTORY: DemoKindRecipe["inventory"] = {
   ],
 }
 
-/** Lo que Sofi ya tiene respondido en un consultorio, con el horario del equipo de la demo. */
+/**
+ * Lo que Sofi ya tiene respondido en un consultorio: solo lo que no está en los
+ * datos (ADR 0119). El horario sale del equipo de la demo y una urgencia la
+ * atiende la red de señales de alarma (ADR 0084): no se escriben aquí.
+ */
 const MEDICAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
-  {
-    title: "Horario de atención",
-    body: "Atendemos de lunes a viernes de 9:00 a. m. a 1:00 p. m. y de 2:00 p. m. a 6:00 p. m., y los sábados de 9:00 a. m. a 1:00 p. m. Domingos y feriados no atendemos.",
-    basicKey: "horario",
-    askForms: ["¿A qué hora abren?", "¿Atienden los sábados?"],
-  },
   {
     title: "¿Atienden sin cita?",
     body: "Atendemos con cita. Si no puede esperar a mañana, escríbenos y te damos el primer espacio libre del día.",
@@ -278,14 +276,9 @@ const MEDICAL_KNOWLEDGE: DemoKindRecipe["knowledge"] = [
     askForms: ["¿Puedo ir sin reservar?"],
   },
   {
-    title: "¿Atienden urgencias?",
-    body: "No somos un servicio de emergencias. Ante dolor de pecho, falta de aire, un desmayo o un accidente, acude a la emergencia más cercana.",
-    basicKey: "urgencias",
-  },
-  {
-    title: "¿Cómo cambio o cancelo mi cita?",
-    body: "Escríbenos por este chat y la cambiamos al día que te acomode. Si no puedes venir, avísanos con unas horas de anticipación para darle el espacio a otro paciente.",
-    basicKey: "cambiar_cita",
+    title: "¿Qué pasa si llego tarde o no puedo ir?",
+    body: "Si no puedes venir, avísanos por este chat con unas horas de anticipación y la cambiamos al día que te acomode. Si llegas más de 15 minutos tarde, te damos el siguiente espacio libre del día.",
+    basicKey: "tardanza",
   },
   {
     title: "¿Qué necesito llevar a mi primera cita?",
@@ -626,7 +619,6 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       {
         title: "¿Atienden a niños? ¿Desde qué edad?",
         body: "Sí, atendemos desde recién nacidos hasta los 17 años, siempre con un adulto responsable.",
-        basicKey: "ninos",
       },
     ],
   },
@@ -738,7 +730,6 @@ export const MEDICAL_DEMO_KINDS: readonly DemoKindRecipe[] = [
       {
         title: "¿Atienden a embarazadas?",
         body: "Sí, hacemos el control prenatal completo, con sus ecografías, desde el primer mes.",
-        basicKey: "embarazo",
       },
     ],
   },
