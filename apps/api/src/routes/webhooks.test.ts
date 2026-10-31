@@ -208,6 +208,18 @@ it("conexión inexistente o proveedor distinto responde 200 sin encolar", async 
   expect(await queueDepth()).toBe(1)
 })
 
+it("un id mal formado responde como una conexión que no existe, no con un error", async () => {
+  const app = route()
+  const post = await app.request("/channels/telegram_bot_api/undefined", {
+    method: "POST",
+    headers: { "x-telegram-bot-api-secret-token": "x" },
+    body: TG_UPDATE,
+  })
+  expect(post.status).toBe(200)
+  const challenge = await app.request("/channels/whatsapp_cloud_api/undefined?hub.mode=subscribe&hub.verify_token=x&hub.challenge=1")
+  expect(challenge.status).toBe(403)
+})
+
 it("reto GET de WhatsApp valida verify_token", async () => {
   const app = route()
   const ok = await app.request(

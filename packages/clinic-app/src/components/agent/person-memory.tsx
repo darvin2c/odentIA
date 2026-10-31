@@ -13,6 +13,7 @@ import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Lock, Plus, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { z } from "zod"
 import { apiFetch } from "../../lib/api"
 import { useReceptionName } from "../../lib/agent-names"
@@ -119,21 +120,10 @@ export function PersonMemoryDrawer({
   const baseId = useId()
   const [editing, setEditing] = useState<Editing | null>(null)
   const addButton = useRef<HTMLButtonElement>(null)
-  /** Al cerrar el campo de un dato nuevo, el foco vuelve al botón que lo abrió. */
-  const refocusAdd = useRef(false)
   // biome-ignore lint/correctness/useExhaustiveDependencies: el borrador se vacía al cambiar de persona.
   useEffect(() => {
     setEditing(null)
   }, [contactId])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: se ejecuta cuando el campo se cierra.
-  useEffect(() => {
-    if (editing === null && refocusAdd.current) {
-      refocusAdd.current = false
-      // Tras el repintado: el cajón modal, al ver desaparecer el botón que tenía
-      // el foco, se lo lleva a sí mismo en el cuadro siguiente; esto va después.
-      requestAnimationFrame(() => addButton.current?.focus())
-    }
-  }, [editing])
 
   const query = useQuery({
     queryKey: ["agent-person-memory", contactId],
@@ -144,8 +134,11 @@ export function PersonMemoryDrawer({
   const refresh = () => void queryClient.invalidateQueries({ queryKey: ["agent-person-memory", contactId] })
   const fixing = editing?.mode === "fix" ? editing.fact : null
   function closeEditor() {
-    refocusAdd.current = editing?.mode === "add"
-    setEditing(null)
+    const wasAdding = editing?.mode === "add"
+    // Al cerrar el campo de un dato nuevo, el foco vuelve al botón que lo abrió, en
+    // el mismo paso: si el foco queda un instante sin dueño, el cajón modal se lo lleva.
+    flushSync(() => setEditing(null))
+    if (wasAdding) addButton.current?.focus()
   }
   const save = useMutation({
     retry: false,
