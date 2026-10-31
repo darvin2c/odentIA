@@ -17,7 +17,7 @@ import {
   PREFERRED_CHANNELS,
 } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, or, sql } from "drizzle-orm"
+import { type AnyColumn, and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm"
 import { opportunity } from "@odentia/db/schema/opportunities"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import { personSearchCondition } from "./person-search.js"
@@ -1129,6 +1129,46 @@ export async function phoneWhatsAppState(tx: Db, orgId: string, contactId: strin
     .limit(1)
   const state: PhoneWhatsAppState = !identity ? "aun_no" : identity.noWhatsappAt ? "no_tiene" : "es_su_whatsapp"
   return { state, phone, canUse: !!connected }
+}
+
+/**
+ * Las identidades de WhatsApp que dicen un número: `wa:<dígitos>`
+ * (`normalizeChannelIdentity`). Quedan fuera el BSUID de quien oculta el suyo
+ * (`wa:PE.…`, ADR 0110) y el número que WhatsApp rechazó (`noWhatsappAt`).
+ */
+function whatsappNumberIdentities(orgId: string): SQL {
+  return and(
+    eq(contactIdentity.organizationId, orgId),
+    eq(contactIdentity.channel, "whatsapp"),
+    sql`${contactIdentity.externalUserId} ~ '^wa:[0-9]+$'`,
+    isNull(contactIdentity.noWhatsappAt),
+  )!
+}
+
+/**
+ * El número de WhatsApp de cada persona, como `+<dígitos>`; el principal primero.
+ * Se deriva al leer y nunca se copia a `contact.phone`: ese es el dato declarado,
+ * el canal no lo es (ADR 0027), y `adoptIdentity` conserva el que ya hay, así que
+ * copiarlo descartaría el celular que la persona escriba después. Sirve para
+ * mostrarlo y para saber que hay cómo ubicarla; no identifica ni une a nadie.
+ */
+export async function whatsappNumbersOf(tx: Db, orgId: string, contactIds: string[]): Promise<Map<string, string>> {
+  if (contactIds.length === 0) return new Map()
+  const rows = await tx
+    .selectDistinctOn([contactIdentity.contactId], { contactId: contactIdentity.contactId, address: contactIdentity.externalUserId })
+    .from(contactIdentity)
+    .where(and(whatsappNumberIdentities(orgId), inArray(contactIdentity.contactId, contactIds)))
+    .orderBy(contactIdentity.contactId, desc(contactIdentity.isPrimary), asc(contactIdentity.createdAt), asc(contactIdentity.id))
+  return new Map(rows.map((row) => [row.contactId, `+${row.address.slice("wa:".length)}`]))
+}
+
+export async function whatsappNumberOf(tx: Db, orgId: string, contactId: string): Promise<string | null> {
+  return (await whatsappNumbersOf(tx, orgId, [contactId])).get(contactId) ?? null
+}
+
+/** La misma regla dentro de una consulta: una sola lectura de las identidades, no una por fila. */
+export function hasWhatsappNumber(orgId: string, contactId: AnyColumn): SQL {
+  return sql`${contactId} in (select ${contactIdentity.contactId} from ${contactIdentity} where ${whatsappNumberIdentities(orgId)})`
 }
 
 /**
