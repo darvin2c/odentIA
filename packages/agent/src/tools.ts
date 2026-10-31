@@ -1163,7 +1163,7 @@ export function makeAgentTools(ctx: AgentToolCtx) {
       if (ctx.dryRun) return "[SIMULACIÓN] Se actualizaría el contacto."
       const naming = Boolean(displayName || givenNames || familyName)
       // El nombre de un paciente lo cambia el equipo en su ficha; aquí, solo el de quien aún no lo es.
-      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0113).
+      // Si dijo otro, su ficha no cambia y recepción la revisa (ADR 0116).
       if (naming) {
         const said = [givenNames?.trim(), familyName?.trim()].filter(Boolean).join(" ") || displayName || ""
         const outcome = await inOrg((tx) => reportPatientNameMismatch(tx, ctx.orgId, { contactId, conversationId: ctx.conversationId, said }))

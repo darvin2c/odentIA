@@ -1,4 +1,4 @@
-# 0113. Un solo nombre: corregirlo desde su enlace y avisar si dice otro
+# 0116. Un solo nombre: corregirlo desde su enlace y avisar si dice otro
 
 - **Fecha:** 2026-10-30
 - **Estado:** aceptada. Precisa la 0109: deja de descartar del todo «editar desde el enlace los datos ya guardados» (solo el nombre) y que la pregunta de novedades se responda una sola vez.

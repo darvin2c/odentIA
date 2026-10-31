@@ -793,7 +793,7 @@ export function compileAgentGraph(model: Runnable<BaseMessage[], AIMessage>, too
     // Con solo sus nombres ya se sabe con quién habla: los apellidos se piden cuando hacen falta.
     const onlyGivenNames = !nameKnown && Boolean(person?.givenNames?.trim()) && !person?.isTest
     // Si dice que se llama de otra forma, se guarda lo que dijo: siendo paciente, su ficha
-    // no cambia y recepción la revisa (ADR 0113). Antes la llamaba por el nombre del chat
+    // no cambia y recepción la revisa (ADR 0116). Antes la llamaba por el nombre del chat
     // y los mensajes automáticos por el de su ficha, sin que nadie lo notara.
     const otherName = available.has("update_contact")
       ? " Si te dice que se llama de otra forma (no un apodo ni un diminutivo de ese nombre), háblale por el que te dijo y guárdalo con update_contact en ese mismo paso."

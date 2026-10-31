@@ -290,7 +290,7 @@ const nameWords = (value: string): string[] =>
 
 /**
  * Quien ya es paciente dice en el chat que se llama distinto de como figura
- * en su ficha (ADR 0113). El chat no prueba un nombre (un apodo, un familiar
+ * en su ficha (ADR 0116). El chat no prueba un nombre (un apodo, un familiar
  * que escribe desde su celular), así que su ficha no cambia: queda una tarea
  * para que recepción la revise, una por nombre dicho. Ella misma puede
  * corregirlo al reservar desde su enlace, con su documento entero.

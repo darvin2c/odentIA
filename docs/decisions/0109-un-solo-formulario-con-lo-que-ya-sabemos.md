@@ -1,7 +1,7 @@
 # 0109. Un solo formulario para reservar, con lo que ya sabemos y sus permisos
 
 - **Fecha:** 2026-10-30
-- **Estado:** aceptada. Precisa la 0014 (qué se pide al reservar), la 0037 (qué muestra «Su enlace»), la 0030 (dónde se pregunta por novedades) y la 0101 (lo que falta después de reservar por el chat). La 0113 la precisa: el nombre se corrige desde el enlace y a quien dijo que no a novedades se le ofrece una casilla.
+- **Estado:** aceptada. Precisa la 0014 (qué se pide al reservar), la 0037 (qué muestra «Su enlace»), la 0030 (dónde se pregunta por novedades) y la 0101 (lo que falta después de reservar por el chat). La 0116 la precisa: el nombre se corrige desde el enlace y a quien dijo que no a novedades se le ofrece una casilla.
 
 ## Problema
 
