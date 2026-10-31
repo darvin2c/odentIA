@@ -29,7 +29,7 @@ import { upsertAgentConfig } from "./agentConfig.js"
 import { createRoom } from "./appointments.js"
 import { setProfessionalSchedule } from "./availability.js"
 import { chargeTaxOf, orgTaxes } from "./clinic-taxes.js"
-import { setProfessionalSpecialties } from "./clinical-forms.js"
+import { ensureClinicConsents, setProfessionalSpecialties } from "./clinical-forms.js"
 import { createConnection } from "./connections.js"
 import {
   DEMO_COUNTRIES,
@@ -386,6 +386,8 @@ export async function buildDemo(
     },
     { actorUserId: demo.presenterUserId },
   )
+  // Con sus consentimientos activos, como toda clínica nueva.
+  await ensureClinicConsents(tx, orgId, demo.presenterUserId)
   // Registro en línea activo, como lo tendría una clínica que presenta: sin él, a quien
   // escribe por primera vez Sofi no puede mandarle su enlace para reservar (ADR 0097).
   await savePatientRegistrationConfig(tx, orgId, demo.presenterUserId, {
