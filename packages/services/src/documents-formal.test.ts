@@ -250,6 +250,14 @@ describe("lo que dice el PDF", () => {
     expect(text).toContain("Cómo se hace: ver Opción A.")
   })
 
+  it("no remite a una explicación que la hoja no imprimió", async () => {
+    const { f, budget, serviceId } = await budgetWithGuide()
+    await f.run((tx) => updateService(tx, "org_a", f.args[1], serviceId, { patientGuide: { visits: "2" } }))
+    await f.run((tx) => duplicateBudgetOption(tx, ...f.args, budget.id, budget.options[0]!.id))
+    const snap = await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))
+    expect(await printedText(snap)).not.toContain("Cómo se hace: ver")
+  })
+
   it("si una línea no dice sus visitas, el total lo dice como un mínimo", async () => {
     const { f, budget } = await budgetWithGuide()
     const snap = await f.run((tx) => buildBudgetSnapshot(tx, "org_a", f.patient.id, budget.id))

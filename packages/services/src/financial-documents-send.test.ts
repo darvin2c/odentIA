@@ -7,7 +7,7 @@
 import { randomUUID } from "node:crypto"
 import type { Db } from "@odentia/db"
 import { channelConnection, contact, contactIdentity, conversation, message } from "@odentia/db/schema/crm"
-import { patientContact } from "@odentia/db/schema/clinical"
+import { patientContact, treatmentBudget } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
@@ -132,6 +132,11 @@ it("el presupuesto entregado sale con su enlace para responder; a una dirección
   await send({ otherEmail: "otra@example.com", confirmOtherEmail: true })
   expect(await link()).toBeNull()
 
+  await run((tx) => tx.update(treatmentBudget).set({ status: "aceptado" }).where(eq(treatmentBudget.id, budget.id)))
+  await send({})
+  expect(await link()).toBeNull()
+
+  await run((tx) => tx.update(treatmentBudget).set({ status: "presentado" }).where(eq(treatmentBudget.id, budget.id)))
   await send({})
   expect(await link()).toBeTruthy()
 })

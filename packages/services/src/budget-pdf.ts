@@ -775,7 +775,9 @@ function manyOptions(
   // Lo mismo en dos opciones se explica una vez: la hoja compara, no repite.
   const explainedIn = new Map<string, string>()
   const explanationOf = (line: BudgetPrintLine, optionLabel: string): Block[] => {
-    if (!line.guide) return []
+    const blocks = guideBlocks(line.guide)
+    // Sin explicación que imprimir, no hay a dónde remitir después.
+    if (!blocks.length) return []
     const key = JSON.stringify(line.guide)
     const earlier = explainedIn.get(key)
     if (earlier && earlier !== optionLabel)
@@ -789,7 +791,7 @@ function manyOptions(
         },
       ]
     explainedIn.set(key, optionLabel)
-    return guideBlocks(line.guide)
+    return blocks
   }
   for (const option of options) {
     const title =

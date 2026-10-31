@@ -47,9 +47,6 @@ import { getPaymentReturn } from "./payments.js"
 import { listDecisionRecipients } from "./responsibilities.js"
 import type { Storage } from "./storage.js"
 
-/** Un presupuesto entregado que la persona todavía puede responder desde su enlace. */
-const BUDGET_ANSWERABLE = ["presentado", "pospuesto", "parcial", "aceptado"]
-
 export const FINANCIAL_DOCUMENT_TYPES = ["ticket", "budget", "return"] as const
 export type FinancialDocumentType = (typeof FINANCIAL_DOCUMENT_TYPES)[number]
 
@@ -1216,7 +1213,8 @@ export async function sendFinancialDocument(
       input.documentId,
     )
     // Igual que «Revisar y enviar»: su enlace va antes de armar la hoja, para que el primer
-    // envío a quien decide ya lleve su QR. A una dirección escrita a mano, nunca.
+    // envío a quien decide ya lleve su QR. Solo si la hoja lo imprime: «presentado» y no
+    // una dirección escrita a mano.
     if (deps.secretsKey && !otherEmail) {
       const [head] = await tx
         .select({ status: treatmentBudget.status })
@@ -1228,7 +1226,7 @@ export async function sendFinancialDocument(
           ),
         )
         .limit(1)
-      if (head && BUDGET_ANSWERABLE.includes(head.status))
+      if (head?.status === "presentado")
         await issuePersonalLink(
           tx,
           orgId,

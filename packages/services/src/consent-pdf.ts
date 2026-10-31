@@ -236,7 +236,8 @@ export async function renderConsentPdf(
   const words = CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica
   const note = consentSignatureNote(clinicalProfileFor(data.establishment?.country).signatureLaw)
   const qrSize = 54
-  const needed = 44 + (checkUrl ? 10 : 0)
+  // Con QR, el código y sus tres textos no se separan de página.
+  const needed = 44 + (checkUrl ? 26 : 0)
   kit.ensure(needed)
   const top = kit.y
   const textWidth = checkUrl ? kit.width - qrSize - 15 : kit.width
