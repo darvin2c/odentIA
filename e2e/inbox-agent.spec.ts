@@ -196,7 +196,7 @@ test("bandeja: el estado del agente por conversación, las vistas con su total y
   await derivedRow.click()
   await expect(page.getByRole("region", { name: "Lo que te toca contestar" })).toBeVisible()
   await expect(chip("Por atender 1")).toBeHidden()
-  await expect(page.getByPlaceholder("Buscar por nombre o teléfono")).toHaveCount(0)
+  await expect(page.getByRole("searchbox", { name: /Nombre, teléfono/ })).toHaveCount(0)
   await info.attach("hilo-movil", { body: await page.screenshot({ fullPage: false }), contentType: "image/png" })
   await page.getByRole("button", { name: "Volver" }).click()
   await expect(chip("Por atender 1")).toBeVisible()

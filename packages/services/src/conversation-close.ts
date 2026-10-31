@@ -46,6 +46,12 @@ export const NUDGE_AFTER_HOURS = 3
 /** Límites de `close_after_hours`: la ventana de WhatsApp es de 24 horas. */
 export const CLOSE_AFTER_HOURS_MIN = 6
 export const CLOSE_AFTER_HOURS_MAX = 23
+/**
+ * Una atención que terminó con una cita reservada (por Sofi o desde su enlace) no
+ * espera nada de la persona: pasado este rato sin mensajes se cierra como
+ * resuelta, sin despedida (ADR 0113). Lo que sigue lo dicen sus recordatorios.
+ */
+export const BOOKED_CLOSE_AFTER_MS = 60 * 60_000
 /** Tras insistir, el agente espera al menos esto antes de despedirse. */
 const AFTER_NUDGE_MS = 60 * 60_000
 const HOUR_MS = 60 * 60_000
@@ -216,7 +222,7 @@ export async function closeConversationWith(
   tx: Db,
   orgId: string,
   id: string,
-  input: { reason: ConversationCloseReason; byUserId: string | null; now?: Date; unlessInboundAfter?: string },
+  input: { reason: ConversationCloseReason; byUserId: string | null; now?: Date; unlessInboundAfter?: string; ended?: string },
 ): Promise<boolean> {
   if (!(CONVERSATION_CLOSE_REASONS as readonly string[]).includes(input.reason)) {
     throw validation(`Motivo de cierre inválido (${CONVERSATION_CLOSE_REASONS.join("|")})`)
@@ -273,7 +279,7 @@ export async function closeConversationWith(
   const zone = await findOrgLocale(tx, orgId)
   const previous: AgentCaseNote = {
     kind: "atencion_anterior",
-    text: `Atención anterior: cerrada el ${formatZoned(now, zone)}; ${ENDED_WORDS[input.reason]}.`,
+    text: `Atención anterior: cerrada el ${formatZoned(now, zone)}; ${input.ended ?? ENDED_WORDS[input.reason]}.`,
     at: now.toISOString(),
   }
   await tx
@@ -621,8 +627,9 @@ export async function tickConversationCare(
   const cfg = await getAgentConfig(tx, orgId)
   if (!cfg.enabled) return summary
   const conv = sql.raw('"conversation"')
-  // Antes de 3 horas sin mensajes no hay nada que hacer: ni insistir ni cerrar.
-  const quietSince = new Date(now.getTime() - NUDGE_AFTER_HOURS * HOUR_MS)
+  // Antes de una hora sin mensajes no hay nada que hacer: ni insistir, ni cerrar, ni
+  // dar por terminada la atención que dejó una cita.
+  const quietSince = new Date(now.getTime() - BOOKED_CLOSE_AFTER_MS)
   const rows: CareRow[] = await tx
     .select({
       id: conversation.id,
@@ -679,6 +686,20 @@ export async function tickConversationCare(
     // Con una persona a cargo no se cierra sola: la muestra «Te espera».
     if (row.assignedUserId !== null || row.agentStatus === "off") return null
     if (row.unanswered || !row.hasAcceptedOut) return null
+    // Terminó con su cita y no queda nada por responder: se da por resuelta sin escribirle.
+    if (!row.handoffOpen && !row.proposalPending && (await bookedInAttention(inner, orgId, row))) {
+      const lastAt = row.lastMessageAt ?? row.attentionStartedAt
+      if (now.getTime() - lastAt.getTime() < BOOKED_CLOSE_AFTER_MS) return null
+      if (!(await stillQuiet(inner, row))) return null
+      await closeConversationWith(inner, orgId, row.id, {
+        reason: "resuelta",
+        byUserId: null,
+        now,
+        ended: "terminó con su cita reservada y no quedaba nada pendiente",
+      })
+      return "closed"
+    }
+    if (now.getTime() - (row.lastMessageAt ?? row.attentionStartedAt).getTime() < NUDGE_AFTER_HOURS * HOUR_MS) return null
     const silenceFrom = new Date(Math.max(row.lastInboundAt?.getTime() ?? 0, row.attentionStartedAt.getTime()))
     const closeAt = silenceCloseAt({ silenceFrom, nudgedAt: row.nudgedAt, closeAfterHours: cfg.closeAfterHours, schedule })
     const writable = canWriteNow(row, now)
@@ -690,9 +711,7 @@ export async function tickConversationCare(
       const late = now.getTime() - closeAt.getTime() > CARE_LATE_MS
       if (writable && late && !isWritingTime(now, schedule)) return null
       if (!(await stillQuiet(inner, row))) return null
-      // Si en esta atención quedó una cita, no hay nada que retomar: «Recordar la
-      // cita» le escribe cerca de la fecha. Se cierra sin despedida (ADR 0113).
-      if (writable && !(await bookedInAttention(inner, orgId, row))) {
+      if (writable) {
         // Antes de cerrar, porque al cerrar vence la propuesta.
         const proposedWhen = await proposedAppointmentWhen(inner, orgId, row.id)
         await sendFixed(inner, orgId, row.id, format(farewellText(voice, greetingName(row.contactName), proposedWhen), row.channel), {

@@ -105,6 +105,12 @@ const SIDE_VIEWS = ["spam", "blocked"] as const
 const isSideView = (value: string | null | undefined): value is SideView =>
   value === "spam" || value === "blocked"
 const DEFAULT_VIEW = "attend"
+/**
+ * Al buscar, la lista recorre toda la Bandeja (abiertas y cerradas): quien busca a
+ * una persona no sabe en qué pestaña está. «Todas» solo existe mientras se busca;
+ * elegir una pestaña acota la búsqueda a ella.
+ */
+const SEARCH_ALL = "todas"
 
 /** «Contexto» queda como lo dejaste: se recuerda en este navegador y empieza cerrado. */
 const CONTEXT_OPEN_KEY = "inbox.context.open"
@@ -201,10 +207,27 @@ function InboxPage() {
     if (search.trim()) params.set("q", search.trim())
     return params.toString()
   }, [channel, mine, search])
-  const activeView = view && (CHIP_VIEWS.includes(view) || isSideView(view)) ? view : DEFAULT_VIEW
+  const searching = search.trim() !== ""
+  const activeView =
+    searching && (!view || view === SEARCH_ALL)
+      ? SEARCH_ALL
+      : view && (CHIP_VIEWS.includes(view) || isSideView(view))
+        ? view
+        : DEFAULT_VIEW
   const sideView = isSideView(activeView) ? activeView : null
+  // Empezar a buscar abre «Todas», aunque se estuviera en otra pestaña; Spam y Bloqueados
+  // buscan en su lista. Elegir después una pestaña acota la búsqueda.
+  const wasSearching = useRef(searching)
+  useEffect(() => {
+    if (searching && !wasSearching.current && view && view !== SEARCH_ALL && !isSideView(view)) {
+      listSearch.setParam("view", undefined, { replace: true })
+    }
+    wasSearching.current = searching
+  }, [searching, view, listSearch])
   const listParams = useMemo(() => {
     const params = new URLSearchParams(filterParams)
+    // Buscando en toda la Bandeja, cada fila dice en qué está: sin vista ni estado.
+    if (activeView === SEARCH_ALL) return params.toString()
     // Cada pestaña es abierta o cerrada: «Cerradas» pide las cerradas; las demás, las abiertas.
     // Spam y Bloqueados muestran todo lo de esas personas, abierto o cerrado.
     if (!isSideView(activeView)) params.set("status", activeView === "closed" ? "closed" : "open")
@@ -465,10 +488,23 @@ function InboxPage() {
           {/* Cambiar de vista es siempre pestaña: cambia la lista entera. Spam y Bloqueados son vistas, al final y aparte. */}
           <Tabs
             value={activeView}
-            onValueChange={(next) => listSearch.setParam("view", String(next) === DEFAULT_VIEW ? undefined : String(next), { replace: true })}
+            onValueChange={(next) =>
+              listSearch.setParam("view", String(next) === DEFAULT_VIEW && !searching ? undefined : String(next), { replace: true })
+            }
             className="min-w-0 shrink-0 max-md:w-full md:max-w-[70%]"
           >
             <ScrollingTabsList aria-label="Vista de la bandeja">
+              {searching ? (
+                <TabsTrigger value={SEARCH_ALL} className="shrink-0 min-h-11 px-3 sm:min-h-9">
+                  Todas
+                  {summary ? (
+                    <span className="tabular-nums opacity-80">
+                      {" "}
+                      {summary.attend + summary.agent + summary.awaitingPatient + summary.closed + (summary.spam ?? 0)}
+                    </span>
+                  ) : null}
+                </TabsTrigger>
+              ) : null}
               {VIEW_CHIPS.map((chip) => (
                 <TabsTrigger key={chip.value} value={chip.value} className="shrink-0 min-h-11 px-3 sm:min-h-9">
                   {chipLabel(chip, receptionName)}
@@ -508,9 +544,9 @@ function InboxPage() {
                   })),
                 },
               ]}
-              className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end min-[1536px]:[&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:w-10 [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-56"
+              className="min-w-0 flex-1 bg-transparent p-0 [&>[data-filter-row=desktop]]:justify-end [&_[data-filter-row=desktop]>div:first-child]:w-52 [&_[data-filter-row=desktop]>div:first-child]:focus-within:w-72"
               sortOptions={[]}
-              searchPlaceholder="Buscar por nombre o teléfono" searchLabel="Buscar en la Bandeja"
+              searchPlaceholder="Nombre, teléfono, documento o lo que escribió" searchLabel="Buscar en la Bandeja"
               searchPending={listQuery.isFetching && !listQuery.isFetchingNextPage}
               resetKeys={["channel", "q"]}
             />
@@ -557,7 +593,7 @@ function InboxPage() {
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
               onNew={canWrite && canReadCrm ? () => setNewConversation(true) : undefined}
-              searching={search.trim() !== ""}
+              searching={searching}
               sideView={sideView}
               onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
               onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}
@@ -604,7 +640,7 @@ function InboxPage() {
               onFetchNextPage={() => void listQuery.fetchNextPage()}
               onRetry={() => void listQuery.refetch()}
               onNew={canWrite && canReadCrm ? () => setNewConversation(true) : undefined}
-              searching={search.trim() !== ""}
+              searching={searching}
               sideView={sideView}
               onRowAction={sideView === "spam" ? (canWrite ? rowScreenAction : undefined) : canRegister ? rowScreenAction : undefined}
               onBackToTabs={() => listSearch.setParam("view", undefined, { replace: true })}

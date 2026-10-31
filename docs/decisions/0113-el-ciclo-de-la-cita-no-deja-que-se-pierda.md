@@ -29,7 +29,8 @@ Todo sigue en «Recordar la cita», la línea que ya viene prendida: no hay que 
    - **Una vez por cita.** No espera al día siguiente por el tope diario: mañana ya no serviría.
    - **Si no se le puede escribir, queda la llamada para recepción:** «Llamar a … no ha llegado a su cita».
    - **Es un recordatorio:** lo apaga «No más recordatorios».
-4. **La despedida no sale si la atención dejó una cita** (reservada por Sofi o desde el enlace de esa conversación). La conversación se cierra sin mensaje: lo que sigue lo dicen sus recordatorios.
+4. **Una atención que dejó una cita** (reservada por Sofi o desde el enlace de esa conversación) **no espera al paciente**. Si no queda nada por responder, a la hora sin mensajes se cierra como resuelta y sin despedida: lo que sigue lo dicen sus recordatorios. Antes se quedaba en «Esperan al paciente» hasta cerrarse por silencio, unas 22 horas después.
+   - Lo que la persona hace en el enlace que le dio Sofi (reservar, mover o cancelar) queda en el hilo y en la fila de la Bandeja como lo que hizo Sofi. Así también se cobra (ADR 0085).
 5. **Media hora de margen al reservar sola.** Lo que la persona reserva por su cuenta (su enlace o Sofi) empieza al menos 30 minutos después. Recepción sigue viendo el primer hueco libre.
 6. **La demo no cierra una cita que salió de una conversación.** Su llegada o su falta las dice la clínica.
 7. **El saludo no toma por nombre** «Paciente», «Cliente», «Prueba» ni palabras parecidas.

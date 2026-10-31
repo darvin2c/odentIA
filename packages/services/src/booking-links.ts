@@ -12,6 +12,7 @@ import { patient, serviceCatalog, treatmentPlanItem } from "@odentia/db/schema/c
 import { channelConnection, contact, contactIdentity, conversation } from "@odentia/db/schema/crm"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm"
+import { recordAgentAction } from "./agent-actions.js"
 import { addAgentCaseNote } from "./agent-case.js"
 import { createProposal, expireBookingProposals } from "./agent-operations.js"
 import { appointmentCalendarDownload } from "./appointment-calendar.js"
@@ -19,7 +20,7 @@ import { createAppointment } from "./appointments.js"
 import { listAvailableSlots, selfBookingNotBefore } from "./availability.js"
 import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
 import { branchNotFound, invalidField, notFound, ServiceError, validation } from "./errors.js"
-import { findOrgCountry, findOrgLocale, NEUTRAL_TIMEZONE } from "./locale.js"
+import { findOrgCountry, findOrgLocale, formatZonedShort, NEUTRAL_TIMEZONE } from "./locale.js"
 import { consentStatusOf } from "./message-permission.js"
 import {
   assertOwnAppointmentChangeable,
@@ -1357,11 +1358,20 @@ async function tellConversation(
   tx: Db,
   orgId: string,
   link: LinkRow,
-  input: { note: string; message: string; key: string; reason: string },
+  input: { note: string; message: string; key: string; reason: string; done: { title: string; at: string; timeZone: string } },
   deps: { secretsKey?: Buffer },
 ): Promise<void> {
   if (!link.conversationId) return
   await addAgentCaseNote(tx, orgId, link.conversationId, input.note)
+  // Lo que la persona hizo en el enlace que le dio Sofi es parte de su atención: el hilo y
+  // la fila de la Bandeja lo dicen como lo que hizo Sofi, y así se cobra (ADR 0085).
+  const { locale } = await findOrgLocale(tx, orgId)
+  await recordAgentAction(tx, orgId, {
+    conversationId: link.conversationId,
+    kind: "cita",
+    title: input.done.title,
+    detail: `${formatZonedShort(new Date(input.done.at), { timezone: input.done.timeZone, locale })} · desde su enlace`,
+  })
   await createProposal(tx, orgId, {
     conversationId: link.conversationId,
     action: "enviar_mensaje",
@@ -1471,6 +1481,7 @@ export async function reserveBookingLink(
       message: `Listo: ${what} quedó para el ${when} en ${view.branchName}, con ${view.professionalName}.`,
       key: `enlace-reserva:${link.row.id}:${created.id}`,
       reason: "La persona reservó desde su enlace",
+      done: { title: "reservó una cita", at: view.startsAt, timeZone: view.timeZone },
     },
     deps,
   )
@@ -1537,6 +1548,7 @@ export async function changeBookingLinkAppointment(
       message: `Listo: tu cita quedó cambiada para el ${when} en ${view.branchName}, con ${view.professionalName}.`,
       key: `enlace-cambio:${link.row.id}:${view.startsAt}`,
       reason: "La persona cambió su cita desde su enlace",
+      done: { title: "movió una cita", at: view.startsAt, timeZone: view.timeZone },
     },
     deps,
   )
@@ -1581,6 +1593,7 @@ export async function cancelBookingLinkAppointment(
       message: `Tu cita del ${when} quedó cancelada. Si quieres otra, escríbeme y la vemos.`,
       key: `enlace-cancela:${link.row.id}:${current.id}`,
       reason: "La persona canceló su cita desde su enlace",
+      done: { title: "canceló una cita", at: before.startsAt, timeZone: before.timeZone },
     },
     deps,
   )

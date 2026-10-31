@@ -22,6 +22,7 @@ import { automationJob } from "@odentia/db/schema/automation"
 import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent } from "@odentia/db/schema/org"
 import { and, asc, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from "drizzle-orm"
+import { personSearchCondition } from "./person-search.js"
 import { foldedWordsMatch } from "./search-text.js"
 import { lineOfJobKind } from "./admin-lines.js"
 import { assertTemplateSendable } from "./channel-templates.js"
@@ -1106,6 +1107,9 @@ export interface ConversationFilters {
   q?: string
 }
 
+/** En los mensajes solo cuentan palabras de 3 letras o más, como en el buscador general: «de» no encuentra a todos. */
+const MESSAGE_SEARCH_WORD = 3
+
 /** Filtros de la bandeja sobre `conversation` + `contact` + `channel_connection`. */
 export function conversationFilterConditions(orgId: string, input: ConversationFilters): SQL[] {
   // «Probar» se sigue en su panel, no en la Bandeja (ADR 0094); la prueba del chat web sí sale.
@@ -1125,23 +1129,30 @@ export function conversationFilterConditions(orgId: string, input: ConversationF
   if (input.mineOf) conditions.push(mineOrUnclaimedSql(sql.raw('"conversation"'), input.mineOf))
   const q = input.q?.trim()
   if (q) {
-    const byName = foldedWordsMatch([contact.displayName], q)
+    // La misma regla que el buscador general (`personSearchCondition`): nombre por palabras y
+    // sin tildes, documento, correo y teléfono o WhatsApp por sus dígitos. Además, lo que se
+    // escribió en la conversación: «la corona» encuentra a quien preguntó por su corona.
     const digits = phoneDigitsOf(q)
-    // Por teléfono: los dígitos del número que la persona dio o del hilo de
-    // WhatsApp. Buscar solo filtra la lista; nunca identifica a nadie.
     conditions.push(
-      digits
-        ? or(
-            byName,
-            sql`regexp_replace(coalesce(${contact.phone}, ''), '[^0-9]', '', 'g') like ${`%${digits}%`}`,
-            and(
+      or(
+        personSearchCondition(q, {
+          displayName: contact.displayName,
+          phone: contact.phone,
+          email: contact.email,
+          docNumber: contact.docNumber,
+          contactId: contact.id,
+        }),
+        digits
+          ? and(
               eq(channelConnection.channel, "whatsapp"),
               // Solo un hilo con número: los dígitos de un BSUID no son un teléfono (ADR 0110).
               sql`${conversation.externalThreadId} ~ '^wa:[0-9]+$'`,
               sql`regexp_replace(${conversation.externalThreadId}, '[^0-9]', '', 'g') like ${`%${digits}%`}`,
-            ),
-          )!
-        : byName,
+            )
+          : sql`exists (select 1 from message m_q
+              where m_q.organization_id = ${conversation.organizationId} and m_q.conversation_id = ${conversation.id}
+                and m_q.redacted_at is null and ${foldedWordsMatch([sql`m_q.body`], q, { minWord: MESSAGE_SEARCH_WORD })})`,
+      )!,
     )
   }
   return conditions

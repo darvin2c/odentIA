@@ -40,13 +40,18 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
   )
 }
 
-/** Citas del paciente: lo reservado y lo ocurrido, con salida a la agenda para gestionarlas. */
-export function CitasPanel({ patientId, patientName }: { patientId: string; patientName: string }) {
+/**
+ * Citas del paciente: lo reservado y lo ocurrido. Reservar y abrir una cita se
+ * hace al lado, sin salir de donde se está. Desde una conversación
+ * (`conversationId`), la cita queda unida a ella.
+ */
+export function CitasPanel({ patientId, patientName, conversationId }: { patientId: string; patientName: string; conversationId?: string }) {
   const canRead = usePermission("appointments.read")
   const canWrite = usePermission("appointments.write")
   const query = usePatientAppointments(patientId, canRead)
   // «Nueva cita» al lado: la pestaña Citas sigue a la vista.
-  const book = () => openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true })
+  const book = () =>
+    openBookingAnywhere({ patient: { id: patientId, name: patientName }, lockedPatient: true, ...(conversationId ? { conversationId } : {}) })
 
   if (query.isPending) return <LoadingState message="Cargando citas…" />
   if (query.isError)

@@ -244,7 +244,7 @@ export function ConversationList({
             title={searching ? "Nadie coincide con la búsqueda" : "Sin conversaciones"}
             description={
               searching
-                ? "Busca por nombre o por teléfono. Si aún no le escribiste, empieza una conversación."
+                ? "Busca por nombre, teléfono, documento o algo que haya escrito. Si aún no le escribiste, empieza una conversación."
                 : "Los mensajes entrantes aparecen aquí."
             }
             actionLabel={onNew ? "Nueva conversación" : undefined}
