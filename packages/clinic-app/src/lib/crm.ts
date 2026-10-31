@@ -291,6 +291,8 @@ export interface PersonChannel {
   status: string
   /** WhatsApp, Instagram y Messenger: si escribió en las últimas 24 horas. Nulo en los demás. */
   replyWindow: "open" | "closed" | null
+  /** Si su conexión está activa: por una apagada en Configuración no sale nada. */
+  connectionActive: boolean
   /** Temas sin resolver en ese canal. */
   topics: number
   lastMessageAt: string | null

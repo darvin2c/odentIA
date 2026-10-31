@@ -221,6 +221,13 @@ it("una fila por persona: sus canales juntos, en su estado más urgente, y un gr
     [tg.id, "telegram", null, 0],
   ])
   expect(detail.person.unreadCount).toBe(3)
+  expect(detail.person.channels.map((item) => item.connectionActive)).toEqual([true, true])
+  // Apagado en Configuración: su historial sigue en el hilo, pero por ahí ya no se le responde.
+  await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, telegram.id))
+  const off = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, wa.id))
+  expect(off.person.channels.map((item) => [item.channel, item.connectionActive])).toEqual([["whatsapp", true], ["telegram", false]])
+  expect(off.messages).toHaveLength(3)
+  await ownerDb.update(channelConnection).set({ status: "active" }).where(eq(channelConnection.id, telegram.id))
   // Un enlace viejo al canal de Telegram abre a la misma persona.
   const fromTelegram = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, tg.id))
   expect(fromTelegram.conversation.id).toBe(tg.id)
