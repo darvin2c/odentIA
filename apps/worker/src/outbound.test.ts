@@ -327,6 +327,8 @@ it("lo que Meta rechaza con su error queda como no entregado, con su motivo y si
 function metaRejecting(code: number) {
   return {
     ...deps,
+    // `ownerDb` existe recién al empezar las pruebas: `deps` se arma antes.
+    ownerDb,
     senderMode: "live" as const,
     fetch: (async () => new Response(JSON.stringify({ error: { message: "Rechazado", code } }), { status: code === 190 ? 401 : 400 })) as typeof fetch,
   }

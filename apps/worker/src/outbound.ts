@@ -296,7 +296,9 @@ export async function processOutbound(
         }
       }).catch(() => {})
       if (signupToken && error instanceof ProviderRejectedError && error.code === WHATSAPP_TOKEN_REJECTED_CODE) {
-        await noteRejectedSignupToken(db, deps, orgId, signupToken).catch(() => {})
+        await noteRejectedSignupToken(db, deps, orgId, signupToken).catch((failure: unknown) => {
+          console.error(`worker: no se pudo anotar la clave rechazada (${signupToken?.connectionId})`, failure)
+        })
       }
       return "done"
     }
