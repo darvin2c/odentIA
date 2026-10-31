@@ -172,6 +172,8 @@ export interface PersonChannel {
    * horas, «closed» si no. Nulo en los canales sin ventana.
    */
   replyWindow: "open" | "closed" | null
+  /** Si su conexión está activa: por una apagada en Configuración no sale nada. */
+  connectionActive: boolean
   /** Temas sin resolver en ese canal. */
   topics: number
   lastMessageAt: string | null
@@ -196,12 +198,13 @@ export async function personChannels(
     provider: string
     display_name: string
     status: string
+    connection_status: string
     last_inbound_at: Date | string | null
     last_message_at: Date | string | null
     unread_count: number
     topics: number
   }>(sql`
-    select c2.id, cn.channel, cn.provider, cn.display_name, c2.status, c2.last_inbound_at, c2.last_message_at,
+    select c2.id, cn.channel, cn.provider, cn.display_name, c2.status, cn.status as connection_status, c2.last_inbound_at, c2.last_message_at,
       c2.unread_count,
       (select count(*)::int from agent_handoff h
         where h.organization_id = c2.organization_id and h.conversation_id = c2.id and ${handoffOpenSql(sql.raw("h"))}) as topics
@@ -224,6 +227,7 @@ export async function personChannels(
           ? "open"
           : "closed"
         : null,
+      connectionActive: row.connection_status === "active",
       topics: Number(row.topics),
       lastMessageAt: iso(row.last_message_at),
     })),

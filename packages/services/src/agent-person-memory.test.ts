@@ -20,6 +20,7 @@ import {
   PERSON_FACT_LIMIT,
   removePersonFact,
 } from "./agent-person-memory.js"
+import { lastAgentActions } from "./agent-actions.js"
 import { addAgentCaseNote } from "./agent-case.js"
 import { setMessageChoice } from "./automation.js"
 import { getCaseBrief, parseHandoffSaid } from "./agent-case-brief.js"
@@ -397,6 +398,10 @@ describe("reservar desde un enlace", () => {
     // El agente y quien tome el caso lo ven: queda anotado en el caso.
     const brief = await run((tx) => getCaseBrief(tx, ORG, eva.conversationId))
     expect(brief.known.map((item) => item.text).join(" ")).toContain("Reservó desde su enlace")
+    // Lo hizo con el enlace que le dio Sofi: el hilo y la fila de la Bandeja lo dicen como lo que hizo Sofi.
+    const done = (await run((tx) => lastAgentActions(tx, ORG, [eva.conversationId]))).get(eva.conversationId)
+    expect(done).toMatchObject({ title: "reservó una cita", state: "hecho" })
+    expect(done?.what).toMatch(/· desde su enlace$/)
 
     // Con la cita reservada, el mismo enlace la cambia de horario: es la misma cita, movida, con las reglas de la Agenda.
     const other = after.slots[0]!

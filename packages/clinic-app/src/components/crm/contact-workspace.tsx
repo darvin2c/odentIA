@@ -40,6 +40,7 @@ import { usePerson } from "../../lib/people"
 import { amountFromCents } from "../../lib/workspace"
 import { productUi } from "../../product/product-ui"
 import { PersonMemoryDrawer } from "../agent/person-memory"
+import { openBookingAnywhere } from "../agenda/schedule-host"
 import { CitasPanel } from "../patient/citas-panel"
 import { PersonData } from "../person/person-data"
 import { dueWords, isOverdue } from "./crm-helpers"
@@ -341,7 +342,7 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
 /** Sus citas y «Reservar cita»: quien aún no es paciente se reserva con su ficha mínima (la crea la Agenda). */
 function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
   const can = useCan()
-  const { patientId, contactId, name, nextAppointment } = context
+  const { patientId, contactId, name, phone, nextAppointment } = context
   // La próxima cita puede ser de a quien lleva: la que anuncia la fila también se ve al entrar.
   const carried = nextAppointment && nextAppointment.patientId !== patientId ? nextAppointment : null
   // Quien ya es paciente reserva desde su panel, sin salir de la Bandeja.
@@ -350,13 +351,14 @@ function CitasSection({ context, conversationId }: { context: ConversationContex
   ) : (
     <>
       {can("appointments.write") ? (
-        <Link
-          to="/agenda"
-          search={{ contactId, conversationId }}
-          className="w-fit rounded-full bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+        <Button
+          type="button"
+          size="sm"
+          className="w-fit"
+          onClick={() => openBookingAnywhere({ person: { contactId, name, phone }, lockedPatient: true, conversationId })}
         >
           Reservar cita
-        </Link>
+        </Button>
       ) : null}
       <p className="text-xs text-muted-foreground">
         {name.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y teléfono, y lo que falte queda pendiente en su página.

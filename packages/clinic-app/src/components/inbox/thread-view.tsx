@@ -218,6 +218,18 @@ export function ThreadView({
   // Los canales de la persona (fase 4 del pulido); sin el dato, solo este.
   const personChannels: PersonChannel[] = detail?.person?.channels ?? []
   const personIds = personChannels.length > 0 ? personChannels.map((item) => item.conversationId) : [id]
+  // Por una conexión apagada en Configuración no sale nada: «Responder por» no la ofrece.
+  const replyable = personChannels.filter((item) => item.connectionActive)
+  // Abierta por un canal apagado: se pasa a uno activo de la persona, si tiene, antes de escribir.
+  const landing =
+    !detailQuery.isPlaceholderData && personChannels.find((item) => item.conversationId === id)?.connectionActive === false
+      ? replyable[0]?.conversationId
+      : undefined
+  useEffect(() => {
+    if (!landing) return
+    switchingRef.current = true
+    setId(landing)
+  }, [landing])
 
   // En qué se basó cada respuesta del agente, en todos sus canales: solo se ofrece en los mensajes que la tienen.
   const tracesQuery = useQuery({
@@ -646,7 +658,7 @@ export function ThreadView({
   const switching = detailQuery.isPlaceholderData
   // Dos conversaciones del mismo canal (dos hilos de correo) se distinguen por su cuenta o su hora.
   const channelName = (item: PersonChannel) => {
-    const twins = personChannels.filter((other) => other.channel === item.channel)
+    const twins = replyable.filter((other) => other.channel === item.channel)
     if (twins.length < 2) return channelLabel(item.channel)
     const sameAccount = twins.some((other) => other !== item && other.connectionName === item.connectionName)
     return `${channelLabel(item.channel)} · ${sameAccount ? listTimeWords(item.lastMessageAt) : item.connectionName}`
@@ -897,17 +909,20 @@ export function ThreadView({
         >
           <span className="min-w-0 flex-1">
             {item.topics === 1 ? "Tiene un tema por responder" : `Tiene ${item.topics} temas por responder`} en{" "}
-            {channelLabel(item.channel)}: se responde por ahí.
+            {channelLabel(item.channel)}
+            {item.connectionActive ? ": se responde por ahí." : `, pero ${item.connectionName} está apagado en Configuración.`}
           </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0"
-            onClick={() => switchTo(item.conversationId)}
-          >
-            Responder por {channelLabel(item.channel)}
-          </Button>
+          {item.connectionActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-auto min-h-11 px-2 py-1 text-xs font-semibold text-primary sm:min-h-0"
+              onClick={() => switchTo(item.conversationId)}
+            >
+              Responder por {channelLabel(item.channel)}
+            </Button>
+          ) : null}
         </div>
       ))}
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
@@ -1168,7 +1183,7 @@ export function ThreadView({
                 className="h-auto min-h-10 items-end bg-background"
                 onSubmit={handleComposerSubmit}
               >
-                {multiChannel && !blocked ? (
+                {replyable.length > 1 && !blocked ? (
                   <PromptInputHeader className="w-full flex-nowrap pb-0 text-xs">
                     <span className="shrink-0">Responder por:</span>
                     <DropdownMenu>
@@ -1182,7 +1197,7 @@ export function ThreadView({
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start" className="w-auto">
                         {/* Base UI: el elemento del menú responde a `onClick`. */}
-                        {personChannels.map((item) => (
+                        {replyable.map((item) => (
                           <DropdownMenuItem key={item.conversationId} onClick={() => switchTo(item.conversationId)}>
                             <span className="whitespace-nowrap">
                               <span className="font-medium">{channelName(item)}</span>

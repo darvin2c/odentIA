@@ -221,6 +221,13 @@ it("una fila por persona: sus canales juntos, en su estado más urgente, y un gr
     [tg.id, "telegram", null, 0],
   ])
   expect(detail.person.unreadCount).toBe(3)
+  expect(detail.person.channels.map((item) => item.connectionActive)).toEqual([true, true])
+  // Apagado en Configuración: su historial sigue en el hilo, pero por ahí ya no se le responde.
+  await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, telegram.id))
+  const off = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, wa.id))
+  expect(off.person.channels.map((item) => [item.channel, item.connectionActive])).toEqual([["whatsapp", true], ["telegram", false]])
+  expect(off.messages).toHaveLength(3)
+  await ownerDb.update(channelConnection).set({ status: "active" }).where(eq(channelConnection.id, telegram.id))
   // Un enlace viejo al canal de Telegram abre a la misma persona.
   const fromTelegram = await withOrgContext(appDb, orgId, (tx) => getInboxConversationDetail(tx, orgId, tg.id))
   expect(fromTelegram.conversation.id).toBe(tg.id)
@@ -264,4 +271,24 @@ it("en «Por atender» la fila de la persona muestra la conversación del tema, 
   const row = items.find((item) => item.contact.id === rosa.id)
   expect(row?.id).toBe(withTopic.id)
   expect(row?.attention.topics).toHaveLength(1)
+})
+
+it("buscar encuentra a la persona como el buscador general, y por lo que escribió, en cualquier pestaña", async () => {
+  const { orgId, thread } = await seedInbox()
+  const corona = await thread("Lucía Quispe Huamán")
+  await ownerDb.update(contact).set({ docNumber: "45678912", email: "lucia.q@example.com" }).where(eq(contact.id, corona.contactId))
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: corona.id, direction: "in", senderKind: "contact", body: "Se me cayó la corona que me pusieron", status: "received" })
+  const closed = await thread("Jorge Ramos", { status: "closed", closeReason: "manual", closedAt: new Date() })
+  await ownerDb.insert(message).values({ organizationId: orgId, conversationId: closed.id, direction: "in", senderKind: "contact", body: "¿Atienden emergencias el domingo?", status: "received" })
+  const found = async (q: string) =>
+    (await withOrgContext(appDb, orgId, (tx) => listInboxConversations(tx, orgId, { q }))).items.map((item) => item.id).sort()
+  // Sin tildes y por palabras, por documento y por correo: la misma regla que el buscador general.
+  expect(await found("lucia huaman")).toEqual([corona.id])
+  expect(await found("45678912")).toEqual([corona.id])
+  expect(await found("lucia.q@")).toEqual([corona.id])
+  // Por lo que escribió, aunque su conversación esté cerrada: sin vista se busca en toda la Bandeja.
+  expect(await found("corona")).toEqual([corona.id])
+  expect(await found("emergencias domingo")).toEqual([closed.id])
+  // Palabras cortas no traen a todos.
+  expect(await found("se")).toEqual([])
 })

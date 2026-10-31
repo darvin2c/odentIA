@@ -90,7 +90,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Bandeja",
     parent: null,
     purpose:
-      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó y lo que espera a una persona del equipo), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre o por teléfono. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Ninguna queda abierta: Sofi la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
+      "Todas las conversaciones con pacientes y contactos, de todos los canales, en un solo lugar, en cuatro pestañas que no se pisan: «Por atender» (lo que Sofi te pasó y lo que espera a una persona del equipo), «Las atiende Sofi», «Esperan al paciente» y «Cerradas». Cada persona sale una vez, aunque escriba por WhatsApp y por Telegram, y al abrirla ves lo que dijo por todos sus canales. Se buscan por nombre, teléfono, documento o algo que hayan escrito, en todas las pestañas a la vez. Lo que Sofi no puede responder queda como un tema: lo respondes con «Responder» y ella sigue con lo demás; «Contexto» muestra a la persona, su próxima cita y te deja reservarle una. Ninguna queda abierta: Sofi la cierra con una despedida cuando termina o cuando la persona deja de responder, y cualquier mensaje suyo la vuelve a abrir.",
     terms: [
       "mensajes",
       "chats",
@@ -127,7 +127,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué canal le llega mi respuesta?",
-        a: "Por donde preguntó: si respondes un tema, por el canal de ese tema; si no, por el de la conversación que la lista te muestra, la que más pide o la de su último mensaje. Arriba de donde escribes, «Responder por» dice cada canal y si está abierto, y te deja cambiarlo sin perder lo que escribiste. Si tiene un tema en otro canal, arriba lo dice con «Responder por» ese canal.",
+        a: "Por donde preguntó: si respondes un tema, por el canal de ese tema; si no, por el de la conversación que la lista te muestra, la que más pide o la de su último mensaje. Arriba de donde escribes, «Responder por» dice cada canal por el que se le puede escribir y si está abierto, y te deja cambiarlo sin perder lo que escribiste. Un canal apagado en Configuración no aparece: su historial sigue en el hilo. Si tiene un tema en otro canal, arriba lo dice con «Responder por» ese canal.",
       },
       {
         q: "¿Qué pasa si nadie responde un tema?",

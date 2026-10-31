@@ -294,7 +294,7 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Hugo, cuando quieras retomar, escríbenos por aquí: estamos atentos para ayudarte.")
   })
 
-  it("si en la atención quedó una cita, cierra sin «cuando quieras retomar»: le escribe su recordatorio (ADR 0113)", async () => {
+  it("si en la atención quedó una cita, a la hora sin mensajes la da por resuelta, sin despedida: le escribe su recordatorio (ADR 0113)", async () => {
     const c = await clinic()
     const conv = await c.thread("Carlos Ramos", { lastInboundAt: IN, lastMessageAt: OUT, attentionStartedAt: IN })
     await c.say(conv.id, "in", "Sí, el jueves a las 5", IN)
@@ -308,9 +308,14 @@ describe("el ciclo: insistir una vez y cerrar por silencio", () => {
       startsAt, endsAt: new Date(startsAt.getTime() + 30 * 60_000), durationMin: 30, status: "confirmada", source: "enlace",
       conversationId: conv.id, createdAt: new Date("2026-10-12T14:00:30Z"),
     })
-    expect(await tick(c, new Date("2026-10-13T01:00:00Z"))).toMatchObject({ closed: 1 })
-    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "sin_respuesta" })
+    // A los 50 minutos todavía no: puede que quiera decir algo más.
+    expect(await tick(c, new Date("2026-10-12T14:51:00Z"))).toEqual({ nudged: 0, closed: 0 })
+    expect(await tick(c, new Date("2026-10-12T15:02:00Z"))).toMatchObject({ closed: 1 })
+    expect(await c.row(conv.id)).toMatchObject({ status: "closed", closeReason: "resuelta" })
     expect((await c.messages(conv.id)).at(-1)?.body).toBe("Listo: tu cita quedó para el jueves a las 5:00 p. m.")
+    // La atención siguiente sabe cómo terminó esta.
+    const [memory] = await ownerDb.select().from(agentCaseMemory).where(eq(agentCaseMemory.conversationId, conv.id))
+    expect(memory?.notes[0]?.text).toContain("terminó con su cita reservada")
   })
 
   it("sin algo por responder no insiste, fuera de horario tampoco, y cierra a la hora configurada", async () => {

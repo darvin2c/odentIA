@@ -71,7 +71,9 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await context.getByRole("button", { name: "Volver al contexto" }).click()
   await expect(context.getByRole("button", { name: /^Datos/ })).toBeFocused()
   await context.getByRole("button", { name: /^Citas/ }).click()
-  await expect(context.getByRole("link", { name: "Reservar cita", exact: true })).toHaveAttribute("href", new RegExp(`contactId=${detail.contact.id}`))
+  // Un solo «Reservar cita», que reserva al lado sin salir del hilo.
+  await expect(context.getByRole("button", { name: "Reservar cita", exact: true })).toHaveCount(1)
+  await expect(context.getByRole("link", { name: "Reservar cita" })).toHaveCount(0)
   await expect(context).toContainText("todavía no es paciente")
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   expect(await overflow(page)).toBeLessThanOrEqual(0)
@@ -79,7 +81,10 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
 
   // --- La Bandeja la encuentra por su teléfono ---
   await gotoHydrated(page, tenant(org.slug, "/inbox?q=987654321"))
+  // Buscando, la lista recorre toda la Bandeja: no hay que adivinar en qué pestaña está.
+  await expect(page.getByRole("tab", { name: /^Todas/ })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByRole("button", { name: /Rosa Quispe/ }).first()).toBeVisible()
+  await expect(page.getByRole("searchbox", { name: /Nombre, teléfono/ })).toHaveValue("987654321")
 
   // --- Escribirle otra vez abre la misma conversación ---
   const again = await api<{ data: { conversationId: string; identityCreated: boolean } }>(page, "POST", `/api/contacts/${detail.contact.id}/write`, org.slug, {})
@@ -102,15 +107,20 @@ test("«Nueva conversación»: crea a la persona con su número, abre su WhatsAp
   await gotoHydrated(page, tenant(org.slug, `/inbox?conversation=${conversationId}`))
   const reception = page.getByRole("region", { name: "Contexto del contacto" })
   await reception.getByRole("button", { name: /^Citas/ }).click()
-  await reception.getByRole("link", { name: "Reservar cita", exact: true }).click()
+  await reception.getByRole("button", { name: "Reservar cita", exact: true }).click()
+  // «Nueva cita» se abre al lado: la Bandeja sigue detrás, con el mismo hilo.
+  await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   await expect(page.getByText("Rosa Quispe todavía no es paciente")).toBeVisible()
   await page.getByRole("button", { name: "Semana siguiente" }).click()
   // La pregunta de novedades y promociones no se salta: recepción anota lo que respondió.
   await page.getByRole("group", { name: /^¿Acepta recibir novedades y promociones( de .+)? por WhatsApp\?$/ }).getByRole("button", { name: "No aceptó" }).click()
   await page.getByRole("button", { name: /^Registrar y reservar / }).click()
-  // Al guardar vuelve al hilo; no hace falta registrarla antes en Pacientes.
+  // Al guardar sigue en el hilo; no hace falta registrarla antes en Pacientes.
   await expect(page).toHaveURL(new RegExp(`/inbox\\?conversation=${conversationId}`))
   await expect(page.getByText(/No se pudo registrar/)).toHaveCount(0)
+  // Reservar no navega: se espera a que quede guardada (la cita aparece en su Contexto, ya como paciente).
+  await expect(reception.getByRole("button", { name: "Ver cita" })).toBeVisible()
+  await expect(reception.getByRole("button", { name: "Reservar cita", exact: true })).toHaveCount(1)
   const [registered] = await call<{ id: string; displayName: string }[]>(page, "GET", "/api/patients?q=Rosa&limit=5", org.slug)
   expect(registered?.displayName).toBe("Rosa Quispe")
   const ficha = await call<{ patient: { birthDate: string | null; identityNeedsReview: boolean } }>(page, "GET", `/api/patients/${registered!.id}`, org.slug)
