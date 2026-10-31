@@ -366,7 +366,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       },
       {
         q: "¿Por qué la atención me dice «Necesita consentimiento»?",
-        a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Formularios y consentimientos › «Se pide para»). «Preparar» lo genera lleno. Si la clínica aún no lo publicó, fírmalo en papel; quien configura lo verá en «Te espera».",
+        a: "Porque registraste o indicaste un servicio para el que tu clínica pide un consentimiento (Configuración › Consentimientos › «Se pide para»). «Preparar» lo genera lleno. Si la clínica aún no lo activó, fírmalo en papel; quien configura lo verá en «Te espera».",
       },
       {
         q: "¿Puedo cerrar sin el consentimiento firmado?",
@@ -950,10 +950,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "formularios",
     path: "/settings/forms",
-    title: "Formularios y consentimientos",
+    title: "Consentimientos",
     parent: SETTINGS,
     purpose:
-      "Las plantillas de consentimientos informados y de cuestionarios que usa tu clínica, con sus versiones, y para qué servicios se pide cada consentimiento.",
+      "Los consentimientos informados de tu clínica: vienen activos con un texto sugerido, y aquí se leen, se cambian sobre la misma hoja, se ve cómo quedan y se elige para qué servicios se pide cada uno. También se crean formularios propios, para preguntas que solo tu clínica hace.",
     terms: [
       "consentimiento informado",
       "anamnesis",
@@ -965,8 +965,16 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     writePermission: "settings.write",
     faqs: [
       {
+        q: "¿Puedo usar un consentimiento sin revisarlo?",
+        a: "Sí: los sugeridos vienen activos para que no empieces en papel. Son textos de partida, así que pide a un profesional de tu clínica que los lea, porque es lo que firma el paciente. Cada uno dice «Sin revisar» hasta que alguien lo marca o guarda un cambio.",
+      },
+      {
+        q: "Si cambio el texto, ¿qué pasa con lo ya firmado?",
+        a: "No cambia: cada consentimiento firmado conserva el texto que se firmó. Los nuevos usan el que guardaste. Apagar uno tampoco toca lo firmado: solo deja de ofrecerse.",
+      },
+      {
         q: "¿Para qué sirve «Se pide para»?",
-        a: "Para que la atención proponga sola el consentimiento: al registrar o indicar uno de esos servicios aparece «Necesita consentimiento · Preparar», lleno con lo de la atención. Vale para la plantilla y todas sus versiones. Si un servicio lo pide y la plantilla aún no está publicada, la atención se firma en papel y te lo recordamos en «Te espera».",
+        a: "Para que la atención proponga sola el consentimiento: al registrar o indicar uno de esos servicios aparece «Necesita consentimiento · Preparar», lleno con lo de la atención. Los sugeridos ya vienen unidos a los servicios de la biblioteca que les corresponden. Los servicios propios se eligen a mano.",
       },
       {
         q: "¿Las alergias que el paciente escribe en el cuestionario llegan a su ficha?",

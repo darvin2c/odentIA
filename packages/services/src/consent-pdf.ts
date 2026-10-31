@@ -295,6 +295,33 @@ export async function renderConsentPaperPdf(
 }
 
 /**
+ * Cómo queda un consentimiento de la clínica antes de usarlo: la misma hoja que se
+ * firma, con una persona de ejemplo. No toca ninguna ficha ni se guarda.
+ */
+export async function renderConsentPreviewPdf(
+  clinic: DocumentClinic,
+  draft: { title: string; sections: ConsentSections; body: string; version: number },
+): Promise<Uint8Array> {
+  const sample = {
+    document: {
+      titleSnapshot: draft.title,
+      templateVersion: draft.version,
+      procedureRef: null,
+      sectionsSnapshot: draft.sections,
+      bodySnapshot: draft.body,
+      diagnosisCode: null,
+      declarationSnapshot: null,
+      informerName: null,
+      informerTitle: null,
+      informerRegistration: null,
+      signedAt: null,
+    },
+    patient: { displayName: "Paciente de ejemplo", docType: null, docNumber: null, patientNumber: 1 },
+  } as unknown as ConsentPrint
+  return renderConsentPaperPdf(sample, clinic)
+}
+
+/**
  * Guarda los PDF que le faltan a un consentimiento, cada uno una sola vez
  * como documento clínico del paciente y con su huella SHA-256: el firmado y,
  * si se revocó, el de la revocación. `run` ejecuta cada paso en el contexto

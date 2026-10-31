@@ -11,7 +11,7 @@ import {
   createConsentTemplate,
   createFormResponse,
   createFormTemplate,
-  createSuggestedConsentTemplates,
+  ensureClinicConsents,
   discardFormResponse,
   finalizeFormResponse,
   listFormTemplates,
@@ -344,11 +344,11 @@ it("consentimiento: firma verificada del paciente o de su representante legal vi
     listConsentTemplates(tx, "org_a", { status: "publicado" }),
   )
   expect(published.filter((t) => t.key === template.key).map((t) => t.version)).toEqual([2])
-  // Sugeridas: se crean como borrador, sin duplicar claves existentes.
-  const suggested = await run((tx) => createSuggestedConsentTemplates(tx, "org_a", ACTOR))
+  // Sugeridas: nacen activas y sin revisar, sin duplicar claves existentes.
+  const suggested = await run((tx) => ensureClinicConsents(tx, "org_a", ACTOR))
   expect(suggested.length).toBeGreaterThan(5)
-  expect(suggested.every((t) => t.status === "borrador" && t.sections)).toBe(true)
-  expect(await run((tx) => createSuggestedConsentTemplates(tx, "org_a", ACTOR))).toEqual([])
+  expect(suggested.every((t) => t.status === "publicado" && t.sections && !t.reviewedAt)).toBe(true)
+  expect(await run((tx) => ensureClinicConsents(tx, "org_a", ACTOR))).toEqual([])
 })
 
 it("bitácora: registra quién consultó qué parte de la ficha, una fila por hora", async () => {

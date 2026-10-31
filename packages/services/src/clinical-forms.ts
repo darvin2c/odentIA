@@ -16,6 +16,7 @@ import {
   patientDocument,
   serviceCatalog,
   treatmentPlanItem,
+  treatmentTemplate,
 } from "@odentia/db/schema/clinical"
 import {
   clinicalFormAddendum,
@@ -32,7 +33,7 @@ import {
 import { canAccess } from "@odentia/auth/permissions"
 import { member, user } from "@odentia/db/schema/auth"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, or, sql } from "drizzle-orm"
 import { foldedWordsMatch } from "./search-text.js"
 import { resolveOptionalDiagnosisCode } from "./diagnosis-codes.js"
 import { fieldsError, invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
@@ -1534,7 +1535,7 @@ export async function listConsentTemplates(
   tx: Db,
   orgId: string,
   query: { specialtyId?: string; status?: string; q?: string } = {},
-): Promise<ConsentTemplateRow[]> {
+): Promise<Array<ConsentTemplateRow & { reviewerName: string | null }>> {
   const conditions = [eq(consentTemplate.organizationId, orgId)]
   if (query.specialtyId) conditions.push(eq(consentTemplate.specialtyId, query.specialtyId))
   if (query.status) {
@@ -1546,8 +1547,9 @@ export async function listConsentTemplates(
   const q = (query.q ?? "").trim()
   if (q) conditions.push(foldedWordsMatch([consentTemplate.title], q))
   return tx
-    .select()
+    .select({ ...getTableColumns(consentTemplate), reviewerName: user.name })
     .from(consentTemplate)
+    .leftJoin(user, eq(user.id, consentTemplate.reviewedBy))
     .where(and(...conditions))
     .orderBy(desc(consentTemplate.updatedAt))
 }
@@ -1601,7 +1603,7 @@ function consentContent(input: { sections?: unknown; body?: string | null }): {
 export async function createConsentTemplate(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   input: CreateConsentTemplateInput,
 ): Promise<ConsentTemplateRow> {
   const title = assertName(input.title, "Título del consentimiento", 200)
@@ -1691,7 +1693,7 @@ export async function updateConsentTemplate(
 export async function publishConsentTemplate(
   tx: Db,
   orgId: string,
-  actorUserId: string,
+  actorUserId: string | null,
   templateId: string,
 ): Promise<ConsentTemplateRow> {
   const [current] = await tx
@@ -1754,13 +1756,189 @@ export async function archiveConsentTemplate(
 }
 
 /**
- * Crea como borrador las plantillas sugeridas por procedimiento que la
- * organización aún no tiene (por clave). Nunca publica: el texto se revisa.
+ * Lo que la clínica edita en la hoja: el título y las secciones, ya validados.
+ * Un problema se dice en su campo, igual al guardar que al ver la vista previa.
  */
-export async function createSuggestedConsentTemplates(
+export function parseConsentDraft(input: { title: unknown; sections: unknown }): {
+  title: string
+  sections: ConsentSections
+  body: string
+} {
+  const title = assertName(typeof input.title === "string" ? input.title : "", "Título del consentimiento", 200)
+  const { sections, body } = consentContent({ sections: input.sections ?? {} })
+  return { title, sections: sections as ConsentSections, body }
+}
+
+async function consentVersions(tx: Db, orgId: string, key: string): Promise<ConsentTemplateRow[]> {
+  return tx
+    .select()
+    .from(consentTemplate)
+    .where(and(eq(consentTemplate.organizationId, orgId), eq(consentTemplate.key, key)))
+    .orderBy(desc(consentTemplate.version))
+    .for("update")
+}
+
+/**
+ * «Guardar cambios» de la hoja: una sola acción, sin borrador ni publicar aparte.
+ * El texto nuevo es otra versión y queda en uso; lo ya firmado conserva el suyo.
+ * Quien lo guarda ya lo leyó, y uno apagado sigue apagado.
+ */
+export async function saveConsentTemplate(
   tx: Db,
   orgId: string,
   actorUserId: string,
+  input: { key?: string | null; title: unknown; sections: unknown },
+): Promise<ConsentTemplateRow> {
+  const { title, sections, body } = parseConsentDraft(input)
+  const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title, "title")
+  // «nuevo» es la hoja en blanco: uno con esa clave no se podría volver a abrir.
+  if (!input.key && key === "nuevo") throw invalidField("title", "Elige un título más descriptivo")
+  const versions = await consentVersions(tx, orgId, key)
+  if (input.key && versions.length === 0) throw notFound("Plantilla de consentimiento")
+  if (!input.key && versions.length > 0) throw invalidField("title", "Ya hay un consentimiento con ese título")
+  const latest = versions[0]
+  if (latest && latest.status !== "borrador" && latest.title === title && latest.body === body) return latest
+  const stayOff = !versions.some((row) => row.status === "publicado") && versions.some((row) => row.status === "archivado")
+  const draft = versions.find((row) => row.status === "borrador")
+  const specialty = latest?.specialtyId ? await requireSpecialty(tx, orgId, latest.specialtyId) : null
+  const saved = draft
+    ? await updateConsentTemplate(tx, orgId, actorUserId, draft.id, { title, sections })
+    : await createConsentTemplate(tx, orgId, actorUserId, {
+        key,
+        title,
+        sections,
+        specialtyId: specialty?.isActive ? specialty.id : null,
+      })
+  await publishConsentTemplate(tx, orgId, actorUserId, saved.id)
+  const [row] = await tx
+    .update(consentTemplate)
+    .set({
+      reviewedAt: new Date(),
+      reviewedBy: actorUserId,
+      updatedAt: new Date(),
+      ...(stayOff ? { status: "archivado" } : {}),
+    })
+    .where(and(eq(consentTemplate.id, saved.id), eq(consentTemplate.organizationId, orgId)))
+    .returning()
+  return row!
+}
+
+/**
+ * El interruptor de la lista: apagado no se ofrece ni se propone en la atención.
+ * Encender vuelve a la última versión, y lo ya firmado no cambia en ningún caso.
+ */
+export async function setConsentTemplateActive(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  templateId: string,
+  active: boolean,
+): Promise<ConsentTemplateRow> {
+  const [current] = await tx
+    .select({ key: consentTemplate.key })
+    .from(consentTemplate)
+    .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
+    .limit(1)
+  if (!current) throw notFound("Plantilla de consentimiento")
+  const versions = await consentVersions(tx, orgId, current.key)
+  const published = versions.find((row) => row.status === "publicado")
+  if (active === Boolean(published)) return published ?? versions[0]!
+  // Vuelve la última que estuvo en uso; un borrador a medias no entra por aquí.
+  const lastUsed = versions.find((row) => row.status === "archivado")
+  if (active && !lastUsed) return publishConsentTemplate(tx, orgId, actorUserId, versions[0]!.id)
+  const [row] = await tx
+    .update(consentTemplate)
+    .set(
+      active
+        ? { status: "publicado", publishedAt: new Date(), updatedAt: new Date() }
+        : { status: "archivado", updatedAt: new Date() },
+    )
+    .where(and(eq(consentTemplate.id, (active ? lastUsed! : published!).id), eq(consentTemplate.organizationId, orgId)))
+    .returning()
+  await audit(tx, orgId, actorUserId, active ? "consent_template.publish" : "consent_template.archive", "consent_template", row!.id, {
+    key: current.key,
+    version: row!.version,
+  })
+  return row!
+}
+
+/** Alguien de la clínica leyó este texto sin cambiarlo: deja de decir «sin revisar». */
+export async function markConsentTemplateReviewed(
+  tx: Db,
+  orgId: string,
+  actorUserId: string,
+  templateId: string,
+): Promise<ConsentTemplateRow> {
+  const [row] = await tx
+    .update(consentTemplate)
+    .set({ reviewedAt: new Date(), reviewedBy: actorUserId, updatedAt: new Date() })
+    .where(and(eq(consentTemplate.id, templateId), eq(consentTemplate.organizationId, orgId)))
+    .returning()
+  if (!row) throw notFound("Plantilla de consentimiento")
+  await audit(tx, orgId, actorUserId, "consent_template.review", "consent_template", row.id, {
+    key: row.key,
+    version: row.version,
+  })
+  return row
+}
+
+/**
+ * Une servicios de la biblioteca a los consentimientos sugeridos que los piden
+ * (`servicePrefixes`). Solo agrega: nunca quita lo que la clínica decidió, y un
+ * servicio propio se elige a mano porque no hay de dónde saber qué es.
+ */
+export async function linkServicesToSuggestedConsents(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
+  only: { serviceIds?: string[]; templateKeys?: string[] } = {},
+): Promise<void> {
+  if (only.serviceIds?.length === 0 || only.templateKeys?.length === 0) return
+  const suggestions = (await productHooks(tx, orgId)).consentSuggestions.filter(
+    (suggestion) => suggestion.servicePrefixes?.length && (!only.templateKeys || only.templateKeys.includes(suggestion.key)),
+  )
+  if (suggestions.length === 0) return
+  const services = await tx
+    .select({ id: serviceCatalog.id, libraryKey: treatmentTemplate.key })
+    .from(serviceCatalog)
+    .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+    .where(
+      and(
+        eq(serviceCatalog.organizationId, orgId),
+        eq(serviceCatalog.isActive, true),
+        ...(only.serviceIds ? [inArray(serviceCatalog.id, only.serviceIds)] : []),
+      ),
+    )
+  if (services.length === 0) return
+  const owned = await tx
+    .select({ key: consentTemplate.key })
+    .from(consentTemplate)
+    .where(eq(consentTemplate.organizationId, orgId))
+  const keys = new Set(owned.map((row) => row.key))
+  const links = suggestions
+    .filter((suggestion) => keys.has(suggestion.key))
+    .flatMap((suggestion) =>
+      services
+        .filter((service) => suggestion.servicePrefixes?.some((prefix) => service.libraryKey.startsWith(prefix)))
+        .map((service) => ({
+          organizationId: orgId,
+          templateKey: suggestion.key,
+          serviceId: service.id,
+          createdBy: actorUserId,
+        })),
+    )
+  if (links.length > 0) await tx.insert(consentTemplateService).values(links).onConflictDoNothing()
+}
+
+/**
+ * Los consentimientos sugeridos que le faltan a la clínica, ya activos y unidos a
+ * sus servicios: nace lista para firmar por la web, sin armar nada. Por clave:
+ * uno que ella cambió o apagó no se vuelve a crear.
+ */
+export async function ensureClinicConsents(
+  tx: Db,
+  orgId: string,
+  actorUserId: string | null,
 ): Promise<ConsentTemplateRow[]> {
   const existing = await tx
     .select({ key: consentTemplate.key })
@@ -1771,14 +1949,14 @@ export async function createSuggestedConsentTemplates(
   // Las del producto de la clínica (issue 229: latidIA sugiere los de un consultorio).
   for (const suggestion of (await productHooks(tx, orgId)).consentSuggestions) {
     if (known.has(suggestion.key)) continue
-    created.push(
-      await createConsentTemplate(tx, orgId, actorUserId, {
-        key: suggestion.key,
-        title: suggestion.title,
-        sections: suggestion.sections,
-      }),
-    )
+    const draft = await createConsentTemplate(tx, orgId, actorUserId, {
+      key: suggestion.key,
+      title: suggestion.title,
+      sections: suggestion.sections,
+    })
+    created.push(await publishConsentTemplate(tx, orgId, actorUserId, draft.id))
   }
+  await linkServicesToSuggestedConsents(tx, orgId, actorUserId, { templateKeys: created.map((row) => row.key) })
   return created
 }
 
@@ -2950,6 +3128,8 @@ export async function getEncounterConsentNeeds(
     const pending = ownDocs.find((doc) => doc.status === "pendiente")
     const doc = signed ?? pending ?? null
     if (doc) covered.add(doc.id)
+    // La clínica lo apagó: la atención ya no lo pide.
+    if (!doc && latest && !published && !templates.some((t) => t.key === key && t.status === "borrador")) continue
     const status: ConsentNeedStatus = signed
       ? "firmado"
       : pending
@@ -3101,6 +3281,11 @@ export async function listConsentsToPublish(tx: Db, orgId: string): Promise<Cons
       where not exists (
         select 1 from "consent_template" ct
         where ct."organization_id" = ${orgId} and ct."key" = n."template_key" and ct."status" = 'publicado'
+      )
+      -- Uno apagado lo decidió la clínica: no se le vuelve a pedir.
+      and exists (
+        select 1 from "consent_template" ct
+        where ct."organization_id" = ${orgId} and ct."key" = n."template_key" and ct."status" = 'borrador'
       )
       order by n."template_key", n."created_at" desc
     )

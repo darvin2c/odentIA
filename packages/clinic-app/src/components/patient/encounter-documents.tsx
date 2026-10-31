@@ -342,16 +342,16 @@ export function EncounterDocumentsBlock({
       {docs.unpublished.map((need) => (
         <section
           key={need.templateKey}
-          aria-label="Consentimiento sin publicar"
+          aria-label="Consentimiento sin activar"
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
         >
           <div className="flex min-w-0 flex-col">
             <span className="text-sm font-medium">
-              Esta clínica aún no publicó el consentimiento de «{need.title}»
+              Esta clínica aún no activó el consentimiento de «{need.title}»
             </span>
             <span className="text-xs text-muted-foreground">
               Fírmalo en papel y sube la foto; quien configura lo verá en «Te espera» para
-              publicarlo.
+              activarlo.
             </span>
           </div>
           {canWrite ? (

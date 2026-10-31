@@ -14,6 +14,7 @@ import {
   configureDocumentLogos,
   configurePublicLinks,
   createBranch,
+  ensureClinicConsents,
   ensureClinicSpecialties,
   getAgentConfig,
   getBackofficeOverview,
@@ -800,6 +801,8 @@ export function createApp(deps: AppDeps) {
         if (!current) await turnOnNewClinicLines(tx, orgId, userId)
         // Y nace con las especialidades de su país, que puede renombrar (ADR 0039 y 0069).
         if (!current) await ensureClinicSpecialties(tx, orgId)
+        // Y con sus consentimientos activos, para firmar por la web desde el primer día.
+        if (!current) await ensureClinicConsents(tx, orgId, userId)
         await tx.insert(auditEvent).values({
           organizationId: orgId,
           actorUserId: userId,

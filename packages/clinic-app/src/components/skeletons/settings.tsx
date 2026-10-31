@@ -8,7 +8,7 @@
  * `PageHeader`: por eso aquí el marco es `SettingsPage` y no `PageLoading`, que
  * dentro de un shell omite el título.
  */
-import { cn, Skeleton, tabsListVariants, tabsTriggerClassName } from "@odentia/ui"
+import { cn, Skeleton } from "@odentia/ui"
 import { DataTableSkeleton, PageHeader, type PageHeaderProps, SkeletonRegion } from "@odentia/ui-patterns"
 import { Link } from "@tanstack/react-router"
 import { ArrowLeft } from "lucide-react"
@@ -446,7 +446,7 @@ export function SpecialtiesPageSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Formularios y consentimientos
+// Consentimientos
 // ---------------------------------------------------------------------------
 
 /** Las plantillas: su nombre, su estado y sus versiones, luego sus acciones. */
@@ -483,17 +483,10 @@ export function TemplatesSkeleton() {
 export function FormTemplatesPageSkeleton() {
   return (
     <SettingsPage
-      title="Formularios y consentimientos"
-      subtitle="Las plantillas que usa tu clínica. Se preparan en borrador y se publican; lo ya respondido o firmado no cambia."
-      message="Cargando las plantillas de formularios…"
+      title="Consentimientos"
+      subtitle="Lo que firma el paciente antes de un tratamiento. La atención lo prepara solo cuando registras uno de estos servicios."
+      message="Cargando los consentimientos…"
     >
-      {/* Las dos pestañas fijas, inertes hasta que llega la pantalla. */}
-      <div aria-hidden className={cn(tabsListVariants(), "w-fit max-w-full")}>
-        <span data-active="" className={tabsTriggerClassName}>
-          Formularios clínicos
-        </span>
-        <span className={tabsTriggerClassName}>Consentimientos</span>
-      </div>
       <TemplatesSkeleton />
     </SettingsPage>
   )

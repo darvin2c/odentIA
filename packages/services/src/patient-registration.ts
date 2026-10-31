@@ -32,7 +32,8 @@ import {
 import { contact, conversation, contactIdentity, channelConnection, crmTask, registrationHold } from "@odentia/db/schema/crm"
 import { auditEvent, patientRegistrationConfig } from "@odentia/db/schema/org"
 import { createHash, randomBytes, randomUUID } from "node:crypto"
-import { and, eq, inArray, sql, type SQL } from "drizzle-orm"
+import { appointmentBookingLink } from "@odentia/db/schema/agenda"
+import { and, eq, inArray, isNotNull, sql, type SQL } from "drizzle-orm"
 import { z } from "zod"
 import { addAgentCaseNote, CASE_NOTE_CHARS } from "./agent-case.js"
 import { fieldsError, invalidField, issueFields, notFound, ServiceError, validation } from "./errors.js"
@@ -206,6 +207,33 @@ function spokespersonReachable(orgId: string) {
  * escribe desde un número no se le pide un teléfono: el de su WhatsApp cuenta,
  * sin pasar a ser el «Teléfono» de su ficha (`whatsappNumbersOf`).
  */
+export async function clinicAsksHealth(tx: Db, orgId: string): Promise<boolean> {
+  const config = await getPatientRegistrationConfig(tx, orgId)
+  return (["allergies", "conditions", "medications"] as const).some((key) => config.fields[key] !== "hidden")
+}
+
+/**
+ * Hay algo que preguntarle a la persona antes de su cita aunque no le falte
+ * ningún dato: su salud, si la clínica la pregunta, nadie la registró y aún no
+ * envió «Tus datos» (lo dejó en blanco porque es opcional: no se le insiste).
+ */
+export async function patientHealthToAsk(tx: Db, orgId: string, patientId: string): Promise<boolean> {
+  if (!(await clinicAsksHealth(tx, orgId))) return false
+  if ((await getPatientHealth(tx, orgId, patientId)).revision > 0) return false
+  const [sent] = await tx
+    .select({ id: appointmentBookingLink.id })
+    .from(appointmentBookingLink)
+    .where(
+      and(
+        eq(appointmentBookingLink.organizationId, orgId),
+        eq(appointmentBookingLink.patientId, patientId),
+        isNotNull(appointmentBookingLink.dataSubmittedAt),
+      ),
+    )
+    .limit(1)
+  return !sent
+}
+
 export async function getPatientMissingData(
   tx: Db,
   orgId: string,
