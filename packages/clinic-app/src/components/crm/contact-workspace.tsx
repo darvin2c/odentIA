@@ -341,10 +341,13 @@ export function ContactWorkspace({ conversationId, section, onSectionChange, onR
 /** Sus citas y «Reservar cita»: quien aún no es paciente se reserva con su ficha mínima (la crea la Agenda). */
 function CitasSection({ context, conversationId }: { context: ConversationContext; conversationId: string }) {
   const can = useCan()
-  const { patientId, contactId, name } = context
+  const { patientId, contactId, name, nextAppointment } = context
+  // La próxima cita puede ser de a quien lleva: la que anuncia la fila también se ve al entrar.
+  const carried = nextAppointment && nextAppointment.patientId !== patientId ? nextAppointment : null
   // Quien ya es paciente reserva desde su panel, sin salir de la Bandeja.
-  if (patientId) return <CitasPanel patientId={patientId} patientName={name} conversationId={conversationId} />
-  return (
+  const own = patientId ? (
+    <CitasPanel patientId={patientId} patientName={name} conversationId={conversationId} />
+  ) : (
     <>
       {can("appointments.write") ? (
         <Link
@@ -358,6 +361,15 @@ function CitasSection({ context, conversationId }: { context: ConversationContex
       <p className="text-xs text-muted-foreground">
         {name.split(/\s+/)[0]} todavía no es paciente: al reservar se crea su ficha con nombre y teléfono, y lo que falte queda pendiente en su página.
       </p>
+    </>
+  )
+  if (!carried) return own
+  return (
+    <>
+      <h3 className="text-sm font-medium">{carried.patientName}</h3>
+      <CitasPanel patientId={carried.patientId} patientName={carried.patientName} conversationId={conversationId} />
+      <h3 className="text-sm font-medium">{name}</h3>
+      {own}
     </>
   )
 }

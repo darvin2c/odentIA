@@ -1,6 +1,7 @@
 import { Badge, Button } from "@odentia/ui"
 import { EmptyState, SkeletonRegion } from "@odentia/ui-patterns"
 import { CalendarDays } from "lucide-react"
+import { useId } from "react"
 import { type AgendaAppointment, visitName } from "../../lib/agenda"
 import { usePermission } from "../../lib/crm"
 import {
@@ -43,6 +44,8 @@ function AppointmentRow({ appointment }: { appointment: AgendaAppointment }) {
 
 /** Citas del paciente: lo reservado y lo ocurrido, con salida a la agenda para gestionarlas. */
 export function CitasPanel({ patientId, patientName, conversationId }: { patientId: string; patientName: string; conversationId?: string }) {
+  // En «Contexto» pueden ir dos paneles juntos: el de la persona y el de a quien lleva.
+  const titleId = useId()
   const canRead = usePermission("appointments.read")
   const canWrite = usePermission("appointments.write")
   const query = usePatientAppointments(patientId, canRead)
@@ -87,9 +90,9 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="elevated rounded-xl border bg-card p-6" aria-labelledby="citas-proximas">
+      <section className="elevated rounded-xl border bg-card p-6" aria-labelledby={`${titleId}-proximas`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="citas-proximas" className="font-heading text-base font-medium">
+          <h2 id={`${titleId}-proximas`} className="font-heading text-base font-medium">
             Próximas citas
           </h2>
           {canWrite ? (
@@ -111,9 +114,9 @@ export function CitasPanel({ patientId, patientName, conversationId }: { patient
       {past.length > 0 ? (
         <section
           className="elevated rounded-xl border bg-card p-6"
-          aria-labelledby="citas-anteriores"
+          aria-labelledby={`${titleId}-anteriores`}
         >
-          <h2 id="citas-anteriores" className="font-heading text-base font-medium">
+          <h2 id={`${titleId}-anteriores`} className="font-heading text-base font-medium">
             Citas anteriores
           </h2>
           <ul className="mt-2 flex flex-col divide-y">
