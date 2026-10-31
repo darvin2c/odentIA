@@ -2803,9 +2803,18 @@ export async function reviseBudget(
   if (!option) throw new Error("No se pudo crear la opción de la revisión")
   const previousOptions = await listOptions(tx, orgId, [current.id])
   const valued = valueOptionOf(previousOptions)
-  const oldLines = (await listBudgetLines(tx, orgId, patientId, current.id)).filter(
-    (line) => !valued || line.optionId === valued.id,
-  )
+  const previousLines = await listBudgetLines(tx, orgId, patientId, current.id)
+  const oldLines = previousLines.filter((line) => !valued || line.optionId === valued.id)
+  // La revisión es de una sola opción: las alternativas no se suman como si se hicieran todas.
+  for (const [index, itemId] of input.itemIds.entries()) {
+    const alternative = previousLines.find((line) => line.planItemId === itemId)
+    if (alternative && !oldLines.some((line) => line.planItemId === itemId)) {
+      const message = `«${alternative.title}» es de otra opción: la revisión sigue con la que vale`
+      throw new ServiceError("BUDGET_REVISION_ALTERNATIVE", 409, message, {
+        [`itemIds[${index}]`]: message,
+      })
+    }
+  }
   // Un tratamiento que entra nuevo a la revisión toma el modo de cobro de su servicio.
   const billingModes = await readBillingModes(
     tx,

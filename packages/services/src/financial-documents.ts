@@ -28,6 +28,7 @@ import { channelConnection, contact, contactIdentity, conversation } from "@oden
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { NOTICE_PURPOSE } from "./automation-messages.js"
+import { issuePersonalLink } from "./booking-links.js"
 import { buildBudgetSnapshot, renderBudgetPdf } from "./budget-pdf.js"
 import { deliverBudget, requireOwnBudget } from "./budgets.js"
 import {
@@ -740,6 +741,8 @@ export interface SendFinancialDocumentResult {
 
 export interface SendDeps {
   storage: Storage
+  /** Con ella, el presupuesto a quien decide lleva su enlace y su QR. */
+  secretsKey?: Buffer
 }
 
 function cleanMessage(value: string | undefined): string | null {
@@ -1209,6 +1212,28 @@ export async function sendFinancialDocument(
       input.patientId,
       input.documentId,
     )
+    // Igual que «Revisar y enviar»: su enlace va antes de armar la hoja, para que el primer
+    // envío a quien decide ya lleve su QR. Solo si la hoja lo imprime: «presentado» y no
+    // una dirección escrita a mano.
+    if (deps.secretsKey && !otherEmail) {
+      const [head] = await tx
+        .select({ status: treatmentBudget.status })
+        .from(treatmentBudget)
+        .where(
+          and(
+            eq(treatmentBudget.id, input.documentId),
+            eq(treatmentBudget.organizationId, orgId),
+          ),
+        )
+        .limit(1)
+      if (head?.status === "presentado")
+        await issuePersonalLink(
+          tx,
+          orgId,
+          { contactId: recipient.contactId, patientId: input.patientId, createdBy: actorUserId },
+          { secretsKey: deps.secretsKey },
+        )
+    }
     const snap = await buildBudgetSnapshot(tx, orgId, input.patientId, input.documentId, {
       actorUserId,
       memberRole,

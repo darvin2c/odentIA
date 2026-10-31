@@ -474,7 +474,6 @@ export function createApp(deps: AppDeps) {
       ownerDb: deps.ownerDb,
       storage: deps.storage,
       webURL: deps.webURL,
-      cookieDomain: deps.cookieDomain,
     }),
   )
   // Oferta de prueba y versión de los documentos, para la pantalla de crear cuenta.
@@ -1041,7 +1040,7 @@ export function createApp(deps: AppDeps) {
   guarded.route("/clinical-forms", createClinicalFormsRoute(crmDeps))
   guarded.route(
     "/portal",
-    createPortalRoute({ db, webURL: deps.webURL, cookieDomain: deps.cookieDomain }),
+    createPortalRoute({ db, webURL: deps.webURL }),
   )
   guarded.route("/channels/webchat", createWebchatAdminRoute(crmDeps))
   app.route("/api", guarded)

@@ -486,11 +486,24 @@ export async function renderReturnPdf(
     : null
   if (kit.thermal) {
     kit.gap(8)
-    kit.spread(
-      { text: "Devolución", face: "serif", size: SIZE.h2small },
-      { text: `N.º ${numberLabel}`, face: "sansBold", size: SIZE.table },
-      { size: SIZE.table, leading: 1.3 },
-    )
+    const title = "Devolución"
+    const number = `N.º ${numberLabel}`
+    // En el rollo angosto no caben juntos: el número va debajo, sin partir la palabra.
+    if (
+      kit.textWidth(title, "serif", SIZE.h2small) +
+        kit.textWidth(number, "sansBold", SIZE.table) +
+        12 >
+      kit.width
+    ) {
+      kit.text(title, { face: "serif", size: SIZE.h2small, leading: 1.3 })
+      kit.text(number, { face: "sansBold", size: SIZE.table, leading: 1.3 })
+    } else {
+      kit.spread(
+        { text: title, face: "serif", size: SIZE.h2small },
+        { text: number, face: "sansBold", size: SIZE.table },
+        { size: SIZE.table, leading: 1.3 },
+      )
+    }
     kit.text(shortDayTime(row.createdAt, org), { size: SIZE.label, leading: 1.4 })
     kit.text(`Del ticket N.º ${ticketLabel} del ${dayWords(frozen.ticket.createdAt, org)}`, {
       size: SIZE.label,

@@ -236,13 +236,20 @@ export async function renderConsentPdf(
   const words = CONSENT_SIGNATURE_WORDS[method] ?? CONSENT_SIGNATURE_WORDS.clinica
   const note = consentSignatureNote(clinicalProfileFor(data.establishment?.country).signatureLaw)
   const qrSize = 54
-  const needed = 44 + (checkUrl ? 10 : 0)
+  // Con QR, el código y sus tres textos no se separan de página.
+  const needed = 44 + (checkUrl ? 26 : 0)
   kit.ensure(needed)
   const top = kit.y
   const textWidth = checkUrl ? kit.width - qrSize - 15 : kit.width
   kit.text(words, { size: SIZE.second, face: "sansSemi", width: textWidth })
   kit.text(note, { size: SIZE.label, tone: "gray", width: textWidth, leading: 1.4 })
   if (checkUrl) {
+    kit.text("Escanee el código para comprobar que sigue vigente.", {
+      size: SIZE.label,
+      tone: "gray",
+      width: textWidth,
+      leading: 1.4,
+    })
     kit.qr(checkUrl, kit.right - qrSize, top, qrSize)
     kit.y = Math.min(kit.y, top - qrSize)
   }

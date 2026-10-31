@@ -598,7 +598,7 @@ function ReviewForm({
               <h3 className="font-medium">Antes de enviar</h3>
               <ul className="flex flex-col gap-1.5">
                 {dated ? null : (
-                  <li>No tiene fecha de vigencia: el papel no dirá hasta cuándo vale.</li>
+                  <li>Sin fecha de vigencia: al entregarlo se pondrá la de la clínica.</li>
                 )}
                 {missing.map((line) => (
                   <li key={line.id}>
