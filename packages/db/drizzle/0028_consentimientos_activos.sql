@@ -17,7 +17,7 @@ BEGIN
 END;
 $$;--> statement-breakpoint
 -- Lo que una clínica ya publicó, alguien de ella lo revisó.
-UPDATE "consent_template" SET "reviewed_at" = "published_at", "reviewed_by" = "created_by" WHERE "status" = 'publicado';--> statement-breakpoint
+UPDATE "consent_template" SET "reviewed_at" = COALESCE("published_at", "updated_at"), "reviewed_by" = "created_by" WHERE "status" IN ('publicado','archivado');--> statement-breakpoint
 -- Las clínicas de hoy quedan como las nuevas: con lo sugerido activo y sin revisar.
 -- Es la foto de los textos de este momento: una clínica nueva los toma del código.
 CREATE TEMPORARY TABLE consent_suggestion (product text, key text, title text, sections jsonb, body text, prefixes text[]) ON COMMIT DROP;--> statement-breakpoint
@@ -278,7 +278,8 @@ FROM "org_profile" p, consent_suggestion s
 WHERE p."organization_id" = c."organization_id" AND s.product = p."product" AND s.key = c."key"
   AND c."status" = 'borrador' AND c."body" = s.body
   AND NOT EXISTS (SELECT 1 FROM "consent_template" o WHERE o."organization_id" = c."organization_id" AND o."key" = c."key" AND o."status" = 'publicado');--> statement-breakpoint
--- Se unen a los servicios de la biblioteca que ya tiene la clínica; lo que ella ya unió no se toca.
+-- Se unen a los servicios de la biblioteca que ya tiene la clínica. Lo que ella ya unió no se toca:
+-- ni un consentimiento que ya tiene sus servicios, ni un servicio que ya pide otro consentimiento.
 INSERT INTO "consent_template_service" ("organization_id", "template_key", "service_id")
 SELECT DISTINCT c."organization_id", c."key", sc."id"
 FROM "consent_template" c
@@ -289,4 +290,5 @@ JOIN "catalog"."treatment_template" t ON t."id" = sc."template_id"
 JOIN LATERAL unnest(s.prefixes) AS prefix ON t."key" LIKE prefix || '%'
 WHERE c."status" = 'publicado' AND c."reviewed_at" IS NULL
   AND NOT EXISTS (SELECT 1 FROM "consent_template_service" l WHERE l."organization_id" = c."organization_id" AND l."template_key" = c."key")
+  AND NOT EXISTS (SELECT 1 FROM "consent_template_service" l WHERE l."organization_id" = sc."organization_id" AND l."service_id" = sc."id")
 ON CONFLICT DO NOTHING;

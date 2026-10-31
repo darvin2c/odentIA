@@ -1791,12 +1791,14 @@ export async function saveConsentTemplate(
 ): Promise<ConsentTemplateRow> {
   const { title, sections, body } = parseConsentDraft(input)
   const key = input.key ? assertKey(input.key, "Clave") : keyFromName(title, "title")
+  // «nuevo» es la hoja en blanco: uno con esa clave no se podría volver a abrir.
+  if (!input.key && key === "nuevo") throw invalidField("title", "Elige un título más descriptivo")
   const versions = await consentVersions(tx, orgId, key)
   if (input.key && versions.length === 0) throw notFound("Plantilla de consentimiento")
   if (!input.key && versions.length > 0) throw invalidField("title", "Ya hay un consentimiento con ese título")
   const latest = versions[0]
   if (latest && latest.status !== "borrador" && latest.title === title && latest.body === body) return latest
-  const stayOff = latest?.status === "archivado" && !versions.some((row) => row.status === "publicado")
+  const stayOff = !versions.some((row) => row.status === "publicado") && versions.some((row) => row.status === "archivado")
   const draft = versions.find((row) => row.status === "borrador")
   const specialty = latest?.specialtyId ? await requireSpecialty(tx, orgId, latest.specialtyId) : null
   const saved = draft
@@ -1840,8 +1842,10 @@ export async function setConsentTemplateActive(
   if (!current) throw notFound("Plantilla de consentimiento")
   const versions = await consentVersions(tx, orgId, current.key)
   const published = versions.find((row) => row.status === "publicado")
-  const latest = versions[0]!
-  if (active === Boolean(published)) return published ?? latest
+  if (active === Boolean(published)) return published ?? versions[0]!
+  // Vuelve la última que estuvo en uso; un borrador a medias no entra por aquí.
+  const lastUsed = versions.find((row) => row.status === "archivado")
+  if (active && !lastUsed) return publishConsentTemplate(tx, orgId, actorUserId, versions[0]!.id)
   const [row] = await tx
     .update(consentTemplate)
     .set(
@@ -1849,7 +1853,7 @@ export async function setConsentTemplateActive(
         ? { status: "publicado", publishedAt: new Date(), updatedAt: new Date() }
         : { status: "archivado", updatedAt: new Date() },
     )
-    .where(and(eq(consentTemplate.id, (published ?? latest).id), eq(consentTemplate.organizationId, orgId)))
+    .where(and(eq(consentTemplate.id, (active ? lastUsed! : published!).id), eq(consentTemplate.organizationId, orgId)))
     .returning()
   await audit(tx, orgId, actorUserId, active ? "consent_template.publish" : "consent_template.archive", "consent_template", row!.id, {
     key: current.key,

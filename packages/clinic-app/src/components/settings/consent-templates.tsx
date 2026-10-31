@@ -63,6 +63,8 @@ interface ConsentGroup {
   versions: ConsentTemplate[]
   /** La que se usa hoy o, si no hay, la última. */
   shown: ConsentTemplate
+  /** Un borrador de antes de esta pantalla, si quedó uno. */
+  draft: ConsentTemplate | null
   active: boolean
 }
 
@@ -73,7 +75,8 @@ function groupConsents(templates: ConsentTemplate[]): ConsentGroup[] {
     .map(([key, list]) => {
       const versions = list.toSorted((a, b) => b.version - a.version)
       const published = versions.find((row) => row.status === "publicado")
-      return { key, versions, shown: published ?? versions[0]!, active: Boolean(published) }
+      const draft = versions.find((row) => row.status === "borrador") ?? null
+      return { key, versions, shown: published ?? versions[0]!, draft, active: Boolean(published) }
     })
     .sort((a, b) => a.shown.title.localeCompare(b.shown.title, "es"))
 }
@@ -108,6 +111,10 @@ function useConsentServices() {
   const nameOf = useMemo(() => new Map((names.data ?? []).map((service) => [service.id, service.name])), [names.data])
   return {
     nameOf,
+    /** Sin la lista no se sabe qué está unido: elegir ahí borraría lo que no se ve. */
+    linksLoaded: links.isSuccess,
+    linksFailed: links.isError,
+    retryLinks: () => void links.refetch(),
     linkedOf: (key: string) => links.data?.data.find((link) => link.templateKey === key)?.serviceIds ?? [],
   }
 }
@@ -129,7 +136,7 @@ export function ConsentTemplatesList() {
   const navigate = useNavigate()
   const listQuery = useConsentTemplates()
   const groups = useMemo(() => groupConsents(listQuery.data?.data ?? []), [listQuery.data])
-  const { nameOf, linkedOf } = useConsentServices()
+  const { nameOf, linkedOf, linksLoaded } = useConsentServices()
   const refresh = useConsentRefresh()
   const [filter, setFilter] = useState<ConsentFilter>("todos")
   const [turningOff, setTurningOff] = useState<ConsentTemplate | null>(null)
@@ -188,10 +195,10 @@ export function ConsentTemplatesList() {
           ) : null}
           {unreviewed.length > 0 ? (
             <PageNotice tone="aviso" label="Textos por revisar">
-              {`${groups.length - unreviewed.length} de ${groups.length} revisados. Son textos sugeridos y ya se pueden usar: pide a un profesional de tu clínica que los lea, porque es lo que firma el paciente.`}
+              {`${groups.length - unreviewed.length} de ${groups.length} revisados. Los demás ya se pueden usar: pide a un profesional de tu clínica que los lea, porque es lo que firma el paciente.`}
             </PageNotice>
           ) : null}
-          {unreviewed.length > 0 || off.length > 0 ? (
+          {unreviewed.length > 0 || off.length > 0 || filter !== "todos" ? (
             <div role="group" aria-label="Filtrar" className="flex flex-wrap gap-2">
               {filters.map((item) => (
                 <Button
@@ -219,7 +226,7 @@ export function ConsentTemplatesList() {
                     <div className="min-w-0 flex-[999_1_18rem]">
                       <p className={active ? "font-medium" : "font-medium text-muted-foreground"}>{template.title}</p>
                       <p className="text-sm text-muted-foreground">
-                        {servicesLine(linkedOf(group.key), nameOf)}
+                        {linksLoaded ? servicesLine(linkedOf(group.key), nameOf) : "Servicios por cargar"}
                       </p>
                       <p className="mt-0.5 flex items-center gap-1 text-sm">
                         {template.reviewedAt ? (
@@ -306,7 +313,7 @@ export function ConsentTemplatesList() {
         open={turningOff !== null}
         variant="default"
         title={turningOff ? `Apagar «${turningOff.title}»` : "Apagar"}
-        description="La atención deja de ofrecerlo y de pedirlo. Lo ya firmado no cambia, y puedes volver a encenderlo cuando quieras."
+        description="La atención deja de ofrecerlo y de pedirlo. Lo ya preparado o firmado no cambia, y puedes volver a encenderlo cuando quieras."
         confirmLabel="Apagar"
         pending={activeMutation.isPending}
         onClose={() => setTurningOff(null)}
@@ -627,8 +634,9 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
   const navigate = useNavigate()
   const refresh = useConsentRefresh()
   const canAdmin = usePermission("settings.write")
-  const template = group?.shown ?? null
-  const { nameOf, linkedOf } = useConsentServices()
+  // Si quedó un borrador se sigue desde él: guardar lo deja en uso, y no se pierde lo escrito.
+  const template = group?.draft ?? group?.shown ?? null
+  const { nameOf, linkedOf, linksLoaded, linksFailed, retryLinks } = useConsentServices()
   const queryClient = useQueryClient()
   const [preview, setPreview] = useState<ConsentPreviewDraft | null>(null)
   const [choosingServices, setChoosingServices] = useState(false)
@@ -743,6 +751,11 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
             <strong className="font-semibold">Toca un recuadro punteado y escribe.</strong> Enter agrega otra línea. Lo
             gris se completa solo con cada paciente.
           </p>
+          {group?.draft ? (
+            <p className="text-sm text-muted-foreground">
+              Sigues un borrador que quedó sin publicar. Al guardar, este texto queda en uso.
+            </p>
+          ) : null}
           {template && !template.sections ? (
             <Collapsible className="rounded-xl border p-3 text-sm">
               <CollapsibleTrigger
@@ -880,7 +893,11 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
             <section className="elevated flex flex-col gap-2 rounded-xl border bg-card p-4">
               <h2 className="font-semibold">Se pide para</h2>
               <p className="text-sm text-muted-foreground">Al registrar estos servicios, la atención lo prepara sola.</p>
-              {linked.length > 0 ? (
+              {linksFailed ? (
+                <SettingsLoadError what="los servicios" onRetry={retryLinks} />
+              ) : !linksLoaded ? (
+                <p className="text-sm text-muted-foreground">Cargando los servicios…</p>
+              ) : linked.length > 0 ? (
                 <ul className="flex flex-wrap gap-1.5">
                   {linked.map((id) => (
                     <li key={id}>
@@ -891,7 +908,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
               ) : (
                 <p className="text-sm">Ningún servicio todavía: se prepara a mano desde la atención.</p>
               )}
-              {canAdmin ? (
+              {canAdmin && linksLoaded ? (
                 <Button type="button" variant="outline" className="min-h-11" onClick={() => setChoosingServices(true)}>
                   Elegir servicios
                 </Button>
@@ -908,7 +925,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
                 </p>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground">Texto sugerido. Se puede usar mientras tanto.</p>
+                  <p className="text-sm text-muted-foreground">Nadie de la clínica lo ha revisado. Se puede usar mientras tanto.</p>
                   {canAdmin ? (
                     <Button
                       type="button"
@@ -947,7 +964,7 @@ function ConsentSheet({ group }: { group: ConsentGroup | null }) {
         open={turningOff}
         variant="default"
         title={template ? `Apagar «${template.title}»` : "Apagar"}
-        description="La atención deja de ofrecerlo y de pedirlo. Lo ya firmado no cambia, y puedes volver a encenderlo cuando quieras."
+        description="La atención deja de ofrecerlo y de pedirlo. Lo ya preparado o firmado no cambia, y puedes volver a encenderlo cuando quieras."
         confirmLabel="Apagar"
         pending={activeMutation.isPending}
         onClose={() => setTurningOff(false)}
@@ -1033,6 +1050,8 @@ function ConsentServicesDrawer({
               {(control) =>
                 searchQuery.isPending ? (
                   <p className="text-sm text-muted-foreground">Cargando servicios…</p>
+                ) : searchQuery.isError && found.length === 0 ? (
+                  <SettingsLoadError what="los servicios" onRetry={() => void searchQuery.refetch()} />
                 ) : shown.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     {q ? "Ningún servicio coincide." : "Aún no hay servicios en la lista de la clínica."}

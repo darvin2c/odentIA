@@ -64,9 +64,9 @@ test("consentimientos: nacen activos; se leen, se cambian sobre la hoja, se ve e
   const implant = page.getByRole("listitem").filter({ hasText: "Implante dental" })
   await implant.getByRole("switch").click()
   await page.getByRole("alertdialog").getByRole("button", { name: "Apagar" }).click()
-  await expect(implant.getByText("Apagado")).toBeVisible()
+  await expect(implant.getByText("Apagado", { exact: true })).toBeVisible()
   await implant.getByRole("switch").click()
-  await expect(implant.getByText("Activo")).toBeVisible()
+  await expect(implant.getByText("Activo", { exact: true })).toBeVisible()
 
   // Los formularios propios quedan a un enlace, no como pestaña.
   await expect(page.getByRole("tab", { name: "Formularios clínicos" })).toHaveCount(0)

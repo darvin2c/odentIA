@@ -832,7 +832,8 @@ export async function submitPersonalLinkData(
     throw new ServiceError("DATA_ALREADY_SENT", 409, "Tus datos ya están en la clínica.")
   }
   await saveLinkData(tx, orgId, link, patientId, missing ?? [], input, {
-    requireSomething: true,
+    // Si solo quedaba su salud, que es opcional, enviarla en blanco también es responder.
+    requireSomething: Boolean(missing),
     toldWhatsApp: input.acceptsReminders === true && !!input.data.phone?.trim(),
   })
   // «Tus datos» se envían una sola vez: después dice «Recibido».

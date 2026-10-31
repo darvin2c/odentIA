@@ -64,7 +64,14 @@ export function ConsentReading({
           <p>{sections.consequences}</p>
         </div>
       ) : null}
-      {body ? <p className="whitespace-pre-wrap">{body}</p> : null}
+      {sections?.notes ? (
+        <div>
+          <p className="font-semibold">Información adicional</p>
+          <p className="whitespace-pre-wrap">{sections.notes}</p>
+        </div>
+      ) : null}
+      {/* El texto completo solo si no hay secciones: con ellas repetiría todo. */}
+      {!sections && body ? <p className="whitespace-pre-wrap">{body}</p> : null}
     </div>
   )
 }

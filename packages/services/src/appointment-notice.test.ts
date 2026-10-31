@@ -37,8 +37,8 @@ import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { getPortalAppointmentCalendar, reschedulePortalAppointment } from "./portal.js"
 import { configurePublicLinks } from "./public-links.js"
 import { secretsKeyFromEnv } from "./secrets.js"
-import { getPatientMissingData } from "./patient-registration.js"
-import { getPersonalLinkView } from "./su-enlace.js"
+import { getPatientMissingData, patientHealthToAsk } from "./patient-registration.js"
+import { getPersonalLinkView, submitPersonalLinkData } from "./su-enlace.js"
 import { appDb, insertOrg, ownerDb, setupTestDb } from "./test-setup.js"
 import { insertTestPatients } from "./test-patient.js"
 
@@ -257,6 +257,9 @@ describe("al cambiar la cita, el agente le avisa", () => {
       const token = /token=([0-9a-f]{64})/.exec(body)![1]!
       const view = await run(c, (tx) => getPersonalLinkView(tx, c.orgId, token))
       expect(view.data).toEqual({ missing: [], health: true })
+      // Si la deja en blanco, que es opcional, ya respondió: no se le vuelve a pedir.
+      await run(c, (tx) => submitPersonalLinkData(tx, c.orgId, token, { data: {} }))
+      expect(await run(c, (tx) => patientHealthToAsk(tx, c.orgId, pedro.patientId))).toBe(false)
     } finally {
       configurePublicLinks(null)
     }

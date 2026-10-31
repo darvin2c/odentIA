@@ -163,6 +163,26 @@ it("uno apagado sigue apagado al guardarlo y vuelve a su última versión al enc
   expect((await run((tx) => setConsentTemplateActive(tx, orgId, ACTOR, first!.id, true))).id).toBe(back.id)
 })
 
+it("encender vuelve a lo que estaba en uso: un borrador a medias no entra por el interruptor", async () => {
+  const { orgId, run } = await newClinic()
+  const [first] = await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
+  await run((tx) => createConsentTemplate(tx, orgId, ACTOR, { key: first!.key, title: "A medias", sections }))
+  await run((tx) => setConsentTemplateActive(tx, orgId, ACTOR, first!.id, false))
+  const back = await run((tx) => setConsentTemplateActive(tx, orgId, ACTOR, first!.id, true))
+  expect(back).toMatchObject({ id: first!.id, version: 1, status: "publicado" })
+  // Con el borrador de por medio, guardar sigue respetando lo apagado.
+  await run((tx) => setConsentTemplateActive(tx, orgId, ACTOR, first!.id, false))
+  const saved = await run((tx) => saveConsentTemplate(tx, orgId, ACTOR, { key: first!.key, title: "Terminado", sections }))
+  expect(saved).toMatchObject({ version: 2, status: "archivado", title: "Terminado" })
+})
+
+it("la clave de la hoja en blanco no se le da a un consentimiento", async () => {
+  const { orgId, run } = await newClinic()
+  await expect(run((tx) => saveConsentTemplate(tx, orgId, ACTOR, { title: "Nuevo", sections }))).rejects.toMatchObject({
+    fields: { title: "Elige un título más descriptivo" },
+  })
+})
+
 it("revisar no crea otra versión, y el texto publicado sigue sin poder cambiarse", async () => {
   const { orgId, run } = await newClinic()
   const [first] = await run((tx) => ensureClinicConsents(tx, orgId, ACTOR))
@@ -212,6 +232,12 @@ it("la vista previa sale del mismo generador y un dato incompleto se dice en su 
 it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidieron", async () => {
   const { orgId, run } = await newClinic()
   const extraction = await service(orgId, "Extracción", "exodoncia-migra-")
+  const surgical = await service(orgId, "Extracción quirúrgica", "exodoncia-migra-q-")
+  // Este servicio ya pide un consentimiento suyo: no se le suma otro.
+  const mine = await run((tx) =>
+    createConsentTemplate(tx, orgId, ACTOR, { key: "mi-extraccion", title: "Mi extracción", sections }),
+  )
+  await run((tx) => setConsentTemplateServices(tx, orgId, ACTOR, mine.id, [surgical.id]))
   // Ya publicó su implante, con su propio texto, y dejó sin tocar el borrador sugerido de exodoncia.
   const own = await run((tx) =>
     createConsentTemplate(tx, orgId, ACTOR, { key: "implante", title: "Mi implante", sections }),
@@ -227,7 +253,8 @@ it("las clínicas de hoy quedan igual que una nueva, sin tocar lo que ya decidie
   })
   const rows = await run((tx) => listConsentTemplates(tx, orgId))
   const byKey = new Map(rows.map((row) => [row.key, row]))
-  expect(byKey.size).toBe(SUGGESTED_CONSENT_TEMPLATES.length)
+  expect(byKey.size).toBe(SUGGESTED_CONSENT_TEMPLATES.length + 1)
+  expect(await linkedKeys(orgId, surgical.id)).toEqual(["mi-extraccion"])
   expect(byKey.get("implante")).toMatchObject({ title: "Mi implante", version: 1, status: "publicado" })
   expect(byKey.get("implante")?.reviewedAt).toBeTruthy()
   expect(byKey.get("exodoncia")).toMatchObject({ status: "publicado", reviewedAt: null })
