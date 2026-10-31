@@ -1,4 +1,5 @@
 import { configureZodMessages } from "@odentia/clinical"
+import { RouteErrorScreen } from "@odentia/ui-patterns"
 import { createRouter } from "@tanstack/react-router"
 import { dentalUi } from "./product/dental"
 import { declareProduct } from "@odentia/clinic-app/product/product-ui"
@@ -12,6 +13,7 @@ configureZodMessages()
 export function getRouter() {
   return createRouter({
     routeTree,
+    defaultErrorComponent: RouteErrorScreen,
     // Al acercar el puntero (o el foco) a un enlace se baja el código de esa
     // pantalla y corre su `beforeLoad`: al hacer clic ya está lista.
     defaultPreload: "intent",
