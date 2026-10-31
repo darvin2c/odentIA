@@ -11,8 +11,11 @@ import { patientContact } from "@odentia/db/schema/clinical"
 import { auditEvent, branch } from "@odentia/db/schema/org"
 import { and, eq } from "drizzle-orm"
 import { expect, it } from "vitest"
+import { livePersonalLinkToken } from "./booking-links.js"
+import { createBudget, deliverBudget } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
 import { createContact, updateContact } from "./contacts.js"
+import { addPlanItem } from "./plan.js"
 import { getRefundReceiptPdf } from "./financial-document-pdf.js"
 import { getDocumentSendOptions, saveRecipientEmail, sendFinancialDocument, sendReceiptInConversation } from "./financial-documents.js"
 import { grantResponsibility } from "./responsibilities.js"
@@ -91,6 +94,47 @@ async function connectEmail(): Promise<string> {
     .returning()
   return conn!.id
 }
+
+it("el presupuesto entregado sale con su enlace para responder; a una dirección escrita a mano, sin él", async () => {
+  const f = await clinicalFixture()
+  const run = f.run as <T>(fn: (tx: Db) => Promise<T>) => Promise<T>
+  const secretsKey = Buffer.alloc(32, 9)
+  await setTestPatientIdentity(ownerDb, f.patient.id, { email: `paciente-${randomUUID()}@example.com` })
+  const item = await run((tx) =>
+    addPlanItem(tx, ...f.args, { serviceId: f.service.id, planId: f.plan.id, sourceEncounterId: f.encounter.id }),
+  )
+  const budget = await run((tx) => createBudget(tx, ...f.args, { planId: f.plan.id, itemIds: [item.id] }))
+  await run((tx) => deliverBudget(tx, ...f.args, budget.id))
+  const connectionId = await connectEmail()
+  const { storage } = capturingStorage()
+  const contactId = f.patient.personId
+  const link = () =>
+    run((tx) => livePersonalLinkToken(tx, "org_a", { contactId, patientId: f.patient.id }, { secretsKey }))
+  const send = (extra: { otherEmail?: string; confirmOtherEmail?: boolean }) =>
+    run((tx) =>
+      sendFinancialDocument(
+        tx,
+        "org_a",
+        f.actor,
+        "admin",
+        {
+          patientId: f.patient.id,
+          documentType: "budget",
+          documentId: budget.id,
+          recipientContactId: contactId,
+          connectionId,
+          ...extra,
+        },
+        { storage, secretsKey },
+      ),
+    )
+
+  await send({ otherEmail: "otra@example.com", confirmOtherEmail: true })
+  expect(await link()).toBeNull()
+
+  await send({})
+  expect(await link()).toBeTruthy()
+})
 
 it("el ticket se envía por correo con su PDF, queda en la conversación de la persona y no se duplica", async () => {
   const { f, run, selfId, ticket } = await paidTicket()

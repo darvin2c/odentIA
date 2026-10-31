@@ -1259,7 +1259,8 @@ export class DocumentKit {
       : this.thermal
         ? this.width
         : this.width * 0.6
-    const draw = (x: number, width: number, value: string) => {
+    // Devuelve dónde termina: en un rollo angosto el texto puede ocupar dos renglones.
+    const draw = (x: number, width: number, value: string): number => {
       this.page.drawLine({
         start: { x, y: top },
         end: { x: x + width, y: top },
@@ -1275,10 +1276,11 @@ export class DocumentKit {
         this.drawLineAt(line, x, cursor, width)
         cursor -= line.height
       }
+      return cursor
     }
-    draw(this.left, mainWidth, caption)
-    if (second) draw(this.left + mainWidth + gapX, secondWidth, second)
-    this.y = top - 3 - SIZE.second * 1.4
+    const mainEnd = draw(this.left, mainWidth, caption)
+    const secondEnd = second ? draw(this.left + mainWidth + gapX, secondWidth, second) : mainEnd
+    this.y = Math.min(mainEnd, secondEnd)
   }
 
   private penColumnHeight(signature: PenSignature, width: number, boxHeight: number): number {
@@ -1318,13 +1320,18 @@ export class DocumentKit {
       cursor -= 4
       const boxTop = cursor
       if (signature.strokes && signature.strokes.length > 0) {
+        // El recuadro donde se firmó mide 22 × 7: en una columna más ancha el trazo no se estira.
+        const penWidth = Math.min(width, (boxHeight * 22) / 7)
         for (const stroke of signature.strokes) {
           for (let point = 1; point < stroke.length; point++) {
             const from = stroke[point - 1] as [number, number]
             const to = stroke[point] as [number, number]
             this.page.drawLine({
-              start: { x: x + (from[0] / 1000) * width, y: boxTop - (from[1] / 1000) * boxHeight },
-              end: { x: x + (to[0] / 1000) * width, y: boxTop - (to[1] / 1000) * boxHeight },
+              start: {
+                x: x + (from[0] / 1000) * penWidth,
+                y: boxTop - (from[1] / 1000) * boxHeight,
+              },
+              end: { x: x + (to[0] / 1000) * penWidth, y: boxTop - (to[1] / 1000) * boxHeight },
               thickness: 1.25,
               color: this.tones.ink,
             })

@@ -243,6 +243,12 @@ export async function renderConsentPdf(
   kit.text(words, { size: SIZE.second, face: "sansSemi", width: textWidth })
   kit.text(note, { size: SIZE.label, tone: "gray", width: textWidth, leading: 1.4 })
   if (checkUrl) {
+    kit.text("Escanee el código para comprobar que sigue vigente.", {
+      size: SIZE.label,
+      tone: "gray",
+      width: textWidth,
+      leading: 1.4,
+    })
     kit.qr(checkUrl, kit.right - qrSize, top, qrSize)
     kit.y = Math.min(kit.y, top - qrSize)
   }

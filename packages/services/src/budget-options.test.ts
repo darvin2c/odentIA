@@ -32,6 +32,7 @@ import {
   listBudgets,
   recommendBudgetOption,
   removeBudgetItems,
+  reviseBudget,
   removeBudgetOption,
 } from "./budgets.js"
 import { clinicalFixture } from "./clinical-test-fixture.js"
@@ -395,4 +396,22 @@ it("enviar a quien pidió no recibir ningún mensaje pasa por la puerta única: 
   } finally {
     await ownerDb.update(channelConnection).set({ status: "disabled" }).where(eq(channelConnection.id, mailbox!.id))
   }
+})
+
+it("la revisión no junta las alternativas: sigue con la opción que vale", async () => {
+  const { f, items } = await withItems(2)
+  const [resina, corona] = items as [(typeof items)[number], (typeof items)[number]]
+  const draft = await f.run((tx) => createBudget(tx, ...f.args, { itemIds: [resina.id] }))
+  const two = await f.run((tx) => duplicateBudgetOption(tx, ...f.args, draft.id, draft.options[0]!.id))
+  const optionB = two.options[1]!
+  await f.run((tx) => removeBudgetItems(tx, ...f.args, draft.id, { itemIds: [resina.id], optionId: optionB.id }))
+  await f.run((tx) => addBudgetItems(tx, ...f.args, draft.id, { itemIds: [corona.id], optionId: optionB.id }))
+  await f.run((tx) => deliverBudget(tx, ...f.args, draft.id))
+
+  await expect(
+    f.run((tx) => reviseBudget(tx, ...f.args, draft.id, { itemIds: [resina.id, corona.id], reason: "Cambio" })),
+  ).rejects.toMatchObject({ code: "BUDGET_REVISION_ALTERNATIVE" })
+
+  const revision = await f.run((tx) => reviseBudget(tx, ...f.args, draft.id, { itemIds: [resina.id], reason: "Cambio" }))
+  expect(revision.items.map((line) => line.planItemId)).toEqual([resina.id])
 })

@@ -119,17 +119,25 @@ function visitRange(line: BudgetPrintLine): { min: number; max: number } | null 
   return planned ? { min: planned, max: planned } : null
 }
 
-function rangeWords(range: { min: number; max: number } | null): string {
+/** `open`: alguna línea no dice sus visitas, así que la suma es solo un mínimo. */
+type VisitTotal = { min: number; max: number; open?: boolean }
+
+function rangeWords(range: VisitTotal | null): string {
   if (!range) return ""
+  if (range.open) return `${range.min} o más`
   return range.min === range.max ? String(range.min) : `${range.min} a ${range.max}`
 }
 
-function addRanges(lines: BudgetPrintLine[]): { min: number; max: number } | null {
+function addRanges(lines: BudgetPrintLine[]): VisitTotal | null {
   const ranges = lines
     .map(visitRange)
     .filter((range): range is { min: number; max: number } => range !== null)
   if (ranges.length === 0) return null
-  return ranges.reduce((sum, range) => ({ min: sum.min + range.min, max: sum.max + range.max }))
+  const sum = ranges.reduce((total, range) => ({
+    min: total.min + range.min,
+    max: total.max + range.max,
+  }))
+  return ranges.length < lines.length ? { ...sum, open: true } : sum
 }
 
 function upperFirstWord(text: string): string {
@@ -419,14 +427,18 @@ function paymentNotes(line: BudgetPrintLine, money: (cents: number | null) => st
 }
 
 /** Una línea con todo lo que explica: nombre e importe, sitio y visitas, cómo se hace. */
-function lineDetailRow(line: BudgetPrintLine, money: (cents: number | null) => string): Cell[] {
+function lineDetailRow(
+  line: BudgetPrintLine,
+  money: (cents: number | null) => string,
+  explanation: Block[] = guideBlocks(line.guide),
+): Cell[] {
   const meta = lineMeta(line)
   return [
     [
       { inlines: line.title, size: SIZE.table, face: "sansSemi" },
       ...(meta ? [{ inlines: meta, size: SIZE.second, tone: "gray" as const, leading: 1.4 }] : []),
       ...paymentNotes(line, money),
-      ...guideBlocks(line.guide),
+      ...explanation,
     ],
     [{ inlines: linePrice(line, money), size: SIZE.dense, face: "sansSemi", align: "right" }],
   ]
@@ -538,7 +550,7 @@ function singleOption(
   proposal()
   const visits = addRanges(lines)
   const visitsWords = visits
-    ? ` · unas ${rangeWords(visits)} ${visits.max === 1 ? "visita" : "visitas"}`
+    ? ` · ${visits.open ? "" : "unas "}${rangeWords(visits)} ${visits.max === 1 && !visits.open ? "visita" : "visitas"}`
     : ""
   const totalLine = () => {
     kit.total([{ text: "Total", face: "sansSemi" }, visitsWords], money(snap.totalCents))
@@ -760,6 +772,25 @@ function manyOptions(
   if (kit.room() < kit.format.height * 0.35) kit.newPage()
   else kit.gap(8)
   kit.heading("Qué incluye cada opción", { size: SIZE.h2, before: 8, after: 4, keep: 60 })
+  // Lo mismo en dos opciones se explica una vez: la hoja compara, no repite.
+  const explainedIn = new Map<string, string>()
+  const explanationOf = (line: BudgetPrintLine, optionLabel: string): Block[] => {
+    if (!line.guide) return []
+    const key = JSON.stringify(line.guide)
+    const earlier = explainedIn.get(key)
+    if (earlier && earlier !== optionLabel)
+      return [
+        {
+          inlines: `Cómo se hace: ver ${earlier}.`,
+          size: SIZE.second,
+          tone: "soft",
+          leading: 1.4,
+          gapBefore: 1.5,
+        },
+      ]
+    explainedIn.set(key, optionLabel)
+    return guideBlocks(line.guide)
+  }
   for (const option of options) {
     const title =
       [option.label, option.name].filter(Boolean).join(" · ") +
@@ -774,14 +805,13 @@ function manyOptions(
     })
     kit.rule({ tone: "ink" })
     kit.table({
-      columns: [{ label: "" }, { label: "", width: 130, align: "right", pad: 0 }],
+      columns: detailColumns(kit, option.lines, money),
       size: SIZE.dense,
-      rowPad: 3.75,
+      rowPad: 5,
       closed: false,
-      rows: option.lines.map((line) => [
-        [{ inlines: lineLabel(line) }, ...paymentNotes(line, money)],
-        [{ inlines: linePrice(line, money), align: "right" as const }],
-      ]),
+      rows: option.lines.map((line) =>
+        lineDetailRow(line, money, explanationOf(line, option.label)),
+      ),
     })
     kit.spread(
       { text: `Total ${option.label.replace(/^Opción/, "opción")}`, face: "sansBold" },

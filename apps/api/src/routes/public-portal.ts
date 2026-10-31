@@ -73,7 +73,6 @@ export function createPublicPortalRoute(deps: {
   ownerDb: Db
   storage: Pick<Storage, "attachmentUrl">
   webURL: string
-  cookieDomain: string
   remoteAddress?: (c: Context) => string | undefined
 }) {
   const app = new Hono()

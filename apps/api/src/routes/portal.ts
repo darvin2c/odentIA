@@ -28,7 +28,7 @@ import { portalAccessInput, portalIdInput, portalPolicyInput, portalScopeInput }
  * - El token crudo solo viaja en el QR (una vez) o en el mensaje a la persona;
  *   el código de 6 dígitos vuelve a quien da el acceso, para decírselo aparte.
  */
-export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string; cookieDomain: string }) {
+export function createPortalRoute(deps: Pick<CrmDeps, "db"> & { webURL: string }) {
   const app = new Hono()
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store")
