@@ -2,6 +2,7 @@ import { organizationClient } from "better-auth/client/plugins"
 import type { AuthFetch } from "@odentia/ui-patterns"
 import { createAuthClient } from "better-auth/react"
 import { adminAc, defaultAc, memberAc, ownerAc } from "better-auth/plugins/organization/access"
+import { apiTransport } from "./ssr-fetch"
 
 export const API_URL = import.meta.env.VITE_API_URL as string
 
@@ -18,7 +19,7 @@ const staffRole = defaultAc.newRole({
 
 export const authClient = createAuthClient({
   baseURL: API_URL,
-  fetchOptions: { credentials: "include" },
+  fetchOptions: { credentials: "include", customFetchImpl: apiTransport },
   plugins: [
     organizationClient({
       roles: {
