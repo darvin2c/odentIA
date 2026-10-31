@@ -3,6 +3,7 @@ import { createIsomorphicFn } from "@tanstack/react-start"
 import { getRequestHeaders } from "@tanstack/react-start/server"
 import { API_URL } from "./auth-client"
 import { orgSlugFromHostname, requestHostname } from "./host"
+import { apiTransport } from "./ssr-fetch"
 
 export class ApiError extends Error {
   shape: ApiErrorShape
@@ -39,7 +40,7 @@ function contextHeaders(): Record<string, string> {
 
 /** Fetch a la API con cookies de sesión y slug de tenant del host; errores en forma ApiErrorShape. */
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await apiTransport(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: {
