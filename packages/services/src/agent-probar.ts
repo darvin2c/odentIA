@@ -18,7 +18,7 @@ import { TEST_KEEP_MS } from "./conversation-state.js"
 import { nextPatientNumber } from "./patients.js"
 import { resolvePersonalLinkRefs } from "./personal-link-token.js"
 import { proposalPendingSql } from "./proposal-state.js"
-import { ensureClinicWebchatConnection } from "./webchat.js"
+import { deleteTestConversation, ensureClinicWebchatConnection } from "./webchat.js"
 
 /**
  * «Probar» (ADR 0094): una conversación real con Sofi, por el mismo recorrido
@@ -126,7 +126,7 @@ async function findProbar(tx: Db, orgId: string, userId: string) {
 export async function deleteProbar(tx: Db, orgId: string, userId: string): Promise<boolean> {
   const found = await findProbar(tx, orgId, userId)
   if (!found) return false
-  await tx.execute(sql`select public.delete_webchat_test(${found.id}::uuid)`)
+  await deleteTestConversation(tx, orgId, found.id)
   return true
 }
 
