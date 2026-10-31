@@ -1,49 +1,50 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto"
+import { type PatientGuide, parsePatientGuide } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { appointment } from "@odentia/db/schema/agenda"
+import { user } from "@odentia/db/schema/auth"
 import {
   patient,
   patientContact,
   patientDocument,
+  treatmentBudget,
 } from "@odentia/db/schema/clinical"
 import { channelConnection, contact, conversation } from "@odentia/db/schema/crm"
-import { user } from "@odentia/db/schema/auth"
-import { auditEvent, branch } from "@odentia/db/schema/org"
+import { auditEvent, branch, orgProfile } from "@odentia/db/schema/org"
 import {
+  type PortalScope,
   portalAccessLog,
   portalLink,
   portalSession,
-  type PortalScope,
 } from "@odentia/db/schema/portal"
 import { portalPasskey } from "@odentia/db/schema/portal-access"
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, max } from "drizzle-orm"
+import { appointmentCalendarDownload } from "./appointment-calendar.js"
+import { type BookingLinkSlot, listWeekSlots } from "./booking-links.js"
+import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
+import { type BudgetWithTotals, decideBudget, getBudgetDetail, listBudgets } from "./budgets.js"
+import { getPatientDocument, listPatientDocuments } from "./clinical.js"
+import { sendOutbound } from "./conversations.js"
+import { invalidField, isUniqueViolation, notFound, ServiceError, validation } from "./errors.js"
+import { findOrgLocale, getOrgLocale } from "./locale.js"
 import {
   assertOwnAppointmentChangeable,
   cancelOwnAppointment,
   confirmOwnAppointment,
   moveOwnAppointment,
 } from "./own-appointment.js"
-import { type BookingLinkSlot, listWeekSlots } from "./booking-links.js"
-import { decideBudget, getBudgetDetail, listBudgets, type BudgetWithTotals } from "./budgets.js"
-import { getPatientDocument, listPatientDocuments } from "./clinical.js"
-import { sendOutbound } from "./conversations.js"
-import {
-  invalidField,
-  isUniqueViolation,
-  notFound,
-  ServiceError,
-  validation,
-} from "./errors.js"
+import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 import { requirePatient } from "./patients.js"
-import { contactDecides } from "./responsibilities.js"
 import { getPatientAccount } from "./payments.js"
-import { branchAddressColumns, branchAddressWriter, branchDirectionsWriter } from "./branches.js"
-import { appointmentCalendarDownload } from "./appointment-calendar.js"
-import { findOrgLocale, getOrgLocale } from "./locale.js"
+import {
+  getPortalPolicy,
+  PORTAL_FIXED,
+  portalDisabled,
+  requireActivePortalGrant,
+} from "./portal-policy.js"
+import { contactDecides } from "./responsibilities.js"
 import type { Storage } from "./storage.js"
 import { createWorkspaceNotification } from "./workspace.js"
-import { getPortalPolicy, PORTAL_FIXED, portalDisabled, requireActivePortalGrant } from "./portal-policy.js"
-import { joinPatientPerson, patientPerson } from "./patient-identity.js"
 
 /**
  * Quién puede compartir qué en el portal: los presupuestos, quien los envía
@@ -58,11 +59,23 @@ export interface PortalShareRights {
 
 export function assertShareRights(scope: PortalScope, rights: PortalShareRights): void {
   if (scope.budgets && !rights.canShareBudgets)
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Dar acceso a los presupuestos requiere poder enviarlos")
+    throw new ServiceError(
+      "PORTAL_FORBIDDEN",
+      404,
+      "Dar acceso a los presupuestos requiere poder enviarlos",
+    )
   if (scope.account && !rights.canShareAccount)
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Dar acceso a la cuenta requiere permiso de caja")
+    throw new ServiceError(
+      "PORTAL_FORBIDDEN",
+      404,
+      "Dar acceso a la cuenta requiere permiso de caja",
+    )
   if (scope.documents.length > 0 && !rights.canShareDocuments)
-    throw new ServiceError("PORTAL_FORBIDDEN", 404, "Dar acceso a los documentos requiere leer la historia")
+    throw new ServiceError(
+      "PORTAL_FORBIDDEN",
+      404,
+      "Dar acceso a los documentos requiere leer la historia",
+    )
 }
 
 /**
@@ -237,7 +250,12 @@ async function requirePatientLink(tx: Db, orgId: string, patientId: string, cont
  * hija que ya cumplió 18 (su madre la representaba de menor), el acceso
  * equivale a revocado.
  */
-export async function requireActiveGrant(tx: Db, orgId: string, patientId: string, contactId: string): Promise<void> {
+export async function requireActiveGrant(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+  contactId: string,
+): Promise<void> {
   if (!(await contactDecides(tx, orgId, patientId, contactId))) {
     throw conflict("PORTAL_REVOKED", "Este acceso fue revocado; pide uno nuevo en recepción")
   }
@@ -256,9 +274,13 @@ export async function assertScope(
   const documentIds = [...new Set(raw.filter((id) => typeof id === "string" && id.length > 0))]
   // Los rechazos son de «Qué verá» (`scope` en el cuerpo de todas las rutas que lo llaman).
   if (documentIds.length > 100)
-    throw validation("Demasiados documentos autorizados (máximo 100)", { scope: "Elige como mucho 100 documentos" })
+    throw validation("Demasiados documentos autorizados (máximo 100)", {
+      scope: "Elige como mucho 100 documentos",
+    })
   if (!appointments && !budgets && !account && documentIds.length === 0) {
-    throw validation("El alcance no puede estar vacío", { scope: "Elige al menos una cosa que verá" })
+    throw validation("El alcance no puede estar vacío", {
+      scope: "Elige al menos una cosa que verá",
+    })
   }
   if (documentIds.length > 0) {
     const found = await tx
@@ -365,7 +387,9 @@ export async function issuePortalLink(
     const [existing] = await tx
       .select()
       .from(portalLink)
-      .where(and(eq(portalLink.organizationId, orgId), eq(portalLink.idempotencyKey, idempotencyKey)))
+      .where(
+        and(eq(portalLink.organizationId, orgId), eq(portalLink.idempotencyKey, idempotencyKey)),
+      )
       .limit(1)
     if (existing && existing.status === "pendiente" && existing.expiresAt.getTime() > Date.now()) {
       const view = await linkView(tx, orgId, existing)
@@ -402,7 +426,11 @@ export async function issuePortalLink(
     .where(eq(channelConnection.id, conv.channelConnectionId))
     .limit(1)
   if (issuanceConnection?.status !== "active") {
-    throw new ServiceError("PORTAL_NO_CHANNEL", 409, "Su conversación ya no tiene un canal activo: dale acceso con el QR en recepción")
+    throw new ServiceError(
+      "PORTAL_NO_CHANNEL",
+      409,
+      "Su conversación ya no tiene un canal activo: dale acceso con el QR en recepción",
+    )
   }
 
   const token = rawToken()
@@ -436,7 +464,11 @@ export async function issuePortalLink(
 
   const url = deliver.linkUrl(token)
   const zone = await getOrgLocale(tx, orgId)
-  const vence = row.expiresAt.toLocaleString(zone.locale, { dateStyle: "medium", timeStyle: "short", timeZone: zone.timezone })
+  const vence = row.expiresAt.toLocaleString(zone.locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: zone.timezone,
+  })
   // Mensaje genérico y discreto: sin nombres, sin datos clínicos ni PIN.
   const text =
     `Tienes un acceso al portal del paciente: ${url}\nVence el ${vence}. Al abrirlo te pedirá un código ` +
@@ -648,12 +680,23 @@ export async function revokePortalSession(
     .update(portalSession)
     .set({ revokedAt: now, revokedBy: actorUserId, updatedAt: now })
     .where(and(eq(portalSession.id, sessionId), eq(portalSession.organizationId, orgId)))
-  await auditPortal(tx, orgId, actorUserId, "portal.session_revoked", "portal_session", sessionId, {})
+  await auditPortal(
+    tx,
+    orgId,
+    actorUserId,
+    "portal.session_revoked",
+    "portal_session",
+    sessionId,
+    {},
+  )
   return { revoked: true }
 }
 
 /** Resuelve el tenant desde el hash (para ownerDb, patrón de enlaces públicos). */
-export async function resolvePortalOrgByLinkToken(db: Db, rawLinkToken: string): Promise<string | null> {
+export async function resolvePortalOrgByLinkToken(
+  db: Db,
+  rawLinkToken: string,
+): Promise<string | null> {
   if (typeof rawLinkToken !== "string" || !LINK_TOKEN_RE.test(rawLinkToken)) return null
   const [link] = await db
     .select({ organizationId: portalLink.organizationId })
@@ -663,7 +706,10 @@ export async function resolvePortalOrgByLinkToken(db: Db, rawLinkToken: string):
   return link?.organizationId ?? null
 }
 
-export async function resolvePortalOrgBySessionToken(db: Db, rawSessionToken: string): Promise<string | null> {
+export async function resolvePortalOrgBySessionToken(
+  db: Db,
+  rawSessionToken: string,
+): Promise<string | null> {
   if (typeof rawSessionToken !== "string" || !LINK_TOKEN_RE.test(rawSessionToken)) return null
   const [session] = await db
     .select({ organizationId: portalSession.organizationId })
@@ -813,14 +859,20 @@ export interface PortalContext {
  * efectivo como intersección (solo reduce: grant y política solo recortan,
  * jamás amplían el alcance congelado de la sesión).
  */
-export async function requirePortalSession(tx: Db, orgId: string, rawSessionToken: string): Promise<PortalContext> {
+export async function requirePortalSession(
+  tx: Db,
+  orgId: string,
+  rawSessionToken: string,
+): Promise<PortalContext> {
   const policy = await getPortalPolicy(tx, orgId)
   if (!policy.enabled) throw portalDisabled()
   const token = assertTokenFormat(rawSessionToken)
   const [session] = await tx
     .select()
     .from(portalSession)
-    .where(and(eq(portalSession.tokenHash, hashToken(token)), eq(portalSession.organizationId, orgId)))
+    .where(
+      and(eq(portalSession.tokenHash, hashToken(token)), eq(portalSession.organizationId, orgId)),
+    )
     .for("update")
     .limit(1)
   if (!session) throw notFound("Sesión del portal")
@@ -851,15 +903,30 @@ export async function requirePortalSession(tx: Db, orgId: string, rawSessionToke
       throw conflict("PORTAL_REVOKED", "Esta sesión fue revocada")
     }
   }
-  const stored = session.scope ?? { appointments: false, budgets: false, account: false, documents: [] }
-  const granted = grant.scope ?? { appointments: false, budgets: false, account: false, documents: [] }
+  const stored = session.scope ?? {
+    appointments: false,
+    budgets: false,
+    account: false,
+    documents: [],
+  }
+  const granted = grant.scope ?? {
+    appointments: false,
+    budgets: false,
+    account: false,
+    documents: [],
+  }
   const storedDocs = Array.isArray(stored.documents) ? stored.documents : []
   const grantedDocs = Array.isArray(granted.documents) ? granted.documents : []
   const effective: PortalScope = {
-    appointments: stored.appointments === true && granted.appointments === true && policy.allowedScope.appointments,
+    appointments:
+      stored.appointments === true &&
+      granted.appointments === true &&
+      policy.allowedScope.appointments,
     budgets: stored.budgets === true && granted.budgets === true && policy.allowedScope.budgets,
     account: stored.account === true && granted.account === true && policy.allowedScope.account,
-    documents: policy.allowedScope.documents ? storedDocs.filter((id) => grantedDocs.includes(id)) : [],
+    documents: policy.allowedScope.documents
+      ? storedDocs.filter((id) => grantedDocs.includes(id))
+      : [],
   }
   let effectiveRow = session
   if (JSON.stringify(effective) !== JSON.stringify(session.scope)) {
@@ -869,9 +936,17 @@ export async function requirePortalSession(tx: Db, orgId: string, rawSessionToke
       .where(and(eq(portalSession.id, session.id), eq(portalSession.organizationId, orgId)))
       .returning()
     if (refreshed) effectiveRow = refreshed
-    await auditPortal(tx, orgId, session.issuedBy, "portal.session_scope_refreshed", "portal_session", session.id, {
-      grantId: grant.id,
-    })
+    await auditPortal(
+      tx,
+      orgId,
+      session.issuedBy,
+      "portal.session_scope_refreshed",
+      "portal_session",
+      session.id,
+      {
+        grantId: grant.id,
+      },
+    )
   } else {
     await tx
       .update(portalSession)
@@ -881,15 +956,24 @@ export async function requirePortalSession(tx: Db, orgId: string, rawSessionToke
   return { orgId, session: effectiveRow, patientName: patientRow.displayName }
 }
 
-export function requireScope(session: PortalSessionRow, key: "appointments" | "budgets" | "account"): void {
+export function requireScope(
+  session: PortalSessionRow,
+  key: "appointments" | "budgets" | "account",
+): void {
   if (session.scope?.[key] !== true) {
     throw new ServiceError("PORTAL_FORBIDDEN", 404, "Esta sección no está autorizada en tu acceso")
   }
 }
 
 function requireDocumentInScope(session: PortalSessionRow, documentId: string): void {
-  const allowed = Array.isArray(session.scope?.documents) && session.scope.documents.includes(documentId)
-  if (!allowed) throw new ServiceError("PORTAL_FORBIDDEN", 404, "Este documento no está autorizado en tu acceso")
+  const allowed =
+    Array.isArray(session.scope?.documents) && session.scope.documents.includes(documentId)
+  if (!allowed)
+    throw new ServiceError(
+      "PORTAL_FORBIDDEN",
+      404,
+      "Este documento no está autorizado en tu acceso",
+    )
 }
 
 /**
@@ -960,7 +1044,10 @@ export async function getPortalSessionInfo(tx: Db, ctx: PortalContext) {
 
 /** La sesión ya se alargó a los 30 días de «recordar en este teléfono». */
 function isRemembered(session: PortalSessionRow): boolean {
-  return session.expiresAt.getTime() - session.createdAt.getTime() > PORTAL_FIXED.sessionTtlHours * 3600_000 + 60_000
+  return (
+    session.expiresAt.getTime() - session.createdAt.getTime() >
+    PORTAL_FIXED.sessionTtlHours * 3600_000 + 60_000
+  )
 }
 
 /**
@@ -969,12 +1056,17 @@ function isRemembered(session: PortalSessionRow): boolean {
  * se abrió, una sola vez. Lo pide la página cuando el teléfono no puede
  * guardar la llave; una sesión que ya entró con su llave no lo necesita.
  */
-export async function rememberPortalSession(tx: Db, ctx: PortalContext): Promise<{ expiresAt: Date }> {
+export async function rememberPortalSession(
+  tx: Db,
+  ctx: PortalContext,
+): Promise<{ expiresAt: Date }> {
   if (ctx.session.authMethod !== "enlace_pin") {
     throw conflict("PORTAL_REMEMBER", "Este acceso ya entra con tu huella o tu cara")
   }
   if (isRemembered(ctx.session)) return { expiresAt: ctx.session.expiresAt }
-  const expiresAt = new Date(ctx.session.createdAt.getTime() + PORTAL_FIXED.rememberDays * 86_400_000)
+  const expiresAt = new Date(
+    ctx.session.createdAt.getTime() + PORTAL_FIXED.rememberDays * 86_400_000,
+  )
   await tx
     .update(portalSession)
     .set({ expiresAt, updatedAt: new Date() })
@@ -984,7 +1076,11 @@ export async function rememberPortalSession(tx: Db, ctx: PortalContext): Promise
 }
 
 /** Nombre y zona de la sede de una cita: sin zona propia, la de la clínica. */
-async function branchPlace(tx: Db, orgId: string, branchId: string): Promise<{ name: string; timeZone: string } | null> {
+async function branchPlace(
+  tx: Db,
+  orgId: string,
+  branchId: string,
+): Promise<{ name: string; timeZone: string } | null> {
   const [row] = await tx
     .select({ name: branch.name, timezone: branch.timezone })
     .from(branch)
@@ -1046,7 +1142,11 @@ export async function getPortalAppointments(
  * «Añadir al calendario» del portal (issue 46): el `.ics` de una cita del
  * paciente, el mismo evento que el de «Su enlace» y el del correo.
  */
-export async function getPortalAppointmentCalendar(tx: Db, ctx: PortalContext, appointmentId: string): Promise<string> {
+export async function getPortalAppointmentCalendar(
+  tx: Db,
+  ctx: PortalContext,
+  appointmentId: string,
+): Promise<string> {
   requireScope(ctx.session, "appointments")
   const [row] = await tx
     .select({ id: appointment.id })
@@ -1065,7 +1165,11 @@ export async function getPortalAppointmentCalendar(tx: Db, ctx: PortalContext, a
 }
 
 /** Una cita del paciente como la ve el portal. */
-async function portalAppointmentView(tx: Db, orgId: string, appointmentId: string): Promise<PortalAppointmentView> {
+async function portalAppointmentView(
+  tx: Db,
+  orgId: string,
+  appointmentId: string,
+): Promise<PortalAppointmentView> {
   const [row] = await tx
     .select({
       id: appointment.id,
@@ -1091,7 +1195,10 @@ async function portalAppointmentView(tx: Db, orgId: string, appointmentId: strin
   return {
     ...rest,
     branchAddress: (await branchAddressWriter(tx, orgId))(branchAddress),
-    branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({ address: branchAddress, placeId: branchPlaceId }),
+    branchDirectionsUrl: (await branchDirectionsWriter(tx, orgId))({
+      address: branchAddress,
+      placeId: branchPlaceId,
+    }),
     startsAt: row.startsAt.toISOString(),
     endsAt: row.endsAt.toISOString(),
     timeZone: branchTimeZone ?? (await findOrgLocale(tx, orgId)).timezone,
@@ -1122,12 +1229,26 @@ export async function confirmPortalAppointment(
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
   // La misma regla que el enlace y el agente: si ya estaba confirmada, queda como está.
-  const { item: updated, already } = await confirmOwnAppointment(tx, ctx.orgId, portalActor(ctx.session), current, "portal")
+  const { item: updated, already } = await confirmOwnAppointment(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    current,
+    "portal",
+  )
   if (already) return portalAppointmentView(tx, ctx.orgId, updated.id)
-  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_confirmed", "appointment", current.id, {
-    sessionId: ctx.session.id,
-    contactId: ctx.session.contactId,
-  })
+  await auditPortal(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    "portal.appointment_confirmed",
+    "appointment",
+    current.id,
+    {
+      sessionId: ctx.session.id,
+      contactId: ctx.session.contactId,
+    },
+  )
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.confirmed", "appointment", current.id)
   await notifyIssuer(tx, ctx.orgId, ctx.session, {
     dedupeKey: `portal-cita-confirmada-${current.id}`,
@@ -1166,12 +1287,27 @@ export async function reschedulePortalAppointment(
   // La misma regla que el enlace y el agente: en pie, hora futura y dentro del horizonte.
   const moved = await moveOwnAppointment(tx, ctx.orgId, portalActor(ctx.session), current, input)
   const startsAt = new Date(moved.startsAt)
-  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_rescheduled", "appointment", current.id, {
-    sessionId: ctx.session.id,
-    contactId: ctx.session.contactId,
-    startsAt: startsAt.toISOString(),
-  })
-  await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.rescheduled", "appointment", current.id)
+  await auditPortal(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    "portal.appointment_rescheduled",
+    "appointment",
+    current.id,
+    {
+      sessionId: ctx.session.id,
+      contactId: ctx.session.contactId,
+      startsAt: startsAt.toISOString(),
+    },
+  )
+  await logAccess(
+    tx,
+    ctx.orgId,
+    ctx.session.id,
+    "appointment.rescheduled",
+    "appointment",
+    current.id,
+  )
   await notifyIssuer(tx, ctx.orgId, ctx.session, {
     dedupeKey: `portal-cita-reprogramada-${current.id}-${startsAt.toISOString()}`,
     title: "Cita reprogramada desde el portal",
@@ -1189,11 +1325,25 @@ export async function cancelPortalAppointment(
 ): Promise<PortalAppointmentView> {
   requireScope(ctx.session, "appointments")
   const current = await requireOwnAppointment(tx, ctx, appointmentId)
-  await cancelOwnAppointment(tx, ctx.orgId, portalActor(ctx.session), current, "La canceló la persona desde el portal")
-  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.appointment_cancelled", "appointment", current.id, {
-    sessionId: ctx.session.id,
-    contactId: ctx.session.contactId,
-  })
+  await cancelOwnAppointment(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    current,
+    "La canceló la persona desde el portal",
+  )
+  await auditPortal(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    "portal.appointment_cancelled",
+    "appointment",
+    current.id,
+    {
+      sessionId: ctx.session.id,
+      contactId: ctx.session.contactId,
+    },
+  )
   await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.cancelled", "appointment", current.id)
   await notifyIssuer(tx, ctx.orgId, ctx.session, {
     dedupeKey: `portal-cita-cancelada-${current.id}`,
@@ -1232,11 +1382,20 @@ export async function getPortalRescheduleSlots(
     to: input.to,
     durationMin: current.durationMin,
   })
-  await logAccess(tx, ctx.orgId, ctx.session.id, "appointment.slots_viewed", "appointment", current.id)
+  await logAccess(
+    tx,
+    ctx.orgId,
+    ctx.session.id,
+    "appointment.slots_viewed",
+    "appointment",
+    current.id,
+  )
   return slots
 }
 
 export interface PortalBudgetLineView {
+  /** Cómo se hace, qué incluye y qué sigue, congelado al entregar. */
+  patientGuide: PatientGuide | null
   planItemId: string
   /** La opción de la línea (con una sola opción, la única). */
   optionId: string
@@ -1285,8 +1444,24 @@ export interface PortalBudgetView {
   decisionNote: string | null
   /** El estado con su nombre de siempre («Enviado · espera respuesta», «Aceptó 2 de 3»). */
   stateText: string
+  /** AAAA-MM-DD; imprimir o mostrarlo vencido no impide aceptar. */
+  validUntil: string | null
+  /** «Lo que encontramos»: solo para la propia persona o su representante. */
+  findings: string | null
+  proposal: string | null
+  /** Las condiciones de la clínica; vacías, esa sección no sale. */
+  terms: { payment: string | null; change: string | null }
   /** Con más de una, la persona elige una (decisión 13); cada una con su total. */
-  options: Array<{ id: string; label: string; isRecommended: boolean; decision: string; totalCents: number | null }>
+  options: Array<{
+    id: string
+    label: string
+    name: string | null
+    pros: string | null
+    cons: string | null
+    isRecommended: boolean
+    decision: string
+    totalCents: number | null
+  }>
   items: PortalBudgetLineView[]
 }
 
@@ -1300,7 +1475,49 @@ export async function portalBudgetLocale(tx: Db, orgId: string): Promise<string 
   }
 }
 
-export function toPortalBudget(budget: BudgetWithTotals, locale: string | null): PortalBudgetView {
+/** Lo que la vista de la persona suma al presupuesto. */
+export interface PortalBudgetContext {
+  locale: string | null
+  terms: PortalBudgetView["terms"]
+  findings: ReadonlyMap<string, string | null>
+}
+
+/**
+ * Formato, condiciones y lo encontrado de estos presupuestos. `findings` es dato clínico
+ * y no viaja en el detalle: se lee aquí, solo para quien decide por el paciente.
+ */
+export async function portalBudgetContext(
+  tx: Db,
+  orgId: string,
+  budgetIds: string[],
+  clinicalAllowed: boolean,
+): Promise<PortalBudgetContext> {
+  const [profile] = await tx
+    .select({ payment: orgProfile.budgetPaymentTerms, change: orgProfile.budgetChangeTerms })
+    .from(orgProfile)
+    .where(eq(orgProfile.organizationId, orgId))
+    .limit(1)
+  const rows =
+    clinicalAllowed && budgetIds.length > 0
+      ? await tx
+          .select({ id: treatmentBudget.id, findings: treatmentBudget.findings })
+          .from(treatmentBudget)
+          .where(
+            and(eq(treatmentBudget.organizationId, orgId), inArray(treatmentBudget.id, budgetIds)),
+          )
+      : []
+  return {
+    locale: await portalBudgetLocale(tx, orgId),
+    terms: { payment: profile?.payment?.trim() || null, change: profile?.change?.trim() || null },
+    findings: new Map(rows.map((row) => [row.id, row.findings])),
+  }
+}
+
+export function toPortalBudget(
+  budget: BudgetWithTotals,
+  context: PortalBudgetContext,
+): PortalBudgetView {
+  const { locale } = context
   return {
     id: budget.id,
     planId: budget.planId,
@@ -1320,9 +1537,17 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
     acceptedByName: budget.acceptedByName,
     decisionNote: budget.decisionNote,
     stateText: budget.stateText,
+    validUntil: budget.validUntil,
+    findings: context.findings.get(budget.id) ?? null,
+    proposal: budget.proposal,
+    // Lo entregado dice lo que se entregó; lo entregado antes de congelarlo, lo vigente.
+    terms: budget.deliveredSnapshot?.terms ?? context.terms,
     options: budget.options.map((option) => ({
       id: option.id,
       label: option.label,
+      name: option.name,
+      pros: option.pros,
+      cons: option.cons,
       isRecommended: option.isRecommended,
       decision: option.decision,
       totalCents: option.totalCents,
@@ -1344,6 +1569,8 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
       currency: line.currency,
       decision: line.decision,
       itemStatus: line.itemStatus,
+      // Lo congelado al entregar: lo que se le explicó a esta persona.
+      patientGuide: parsePatientGuide(line.patientGuide),
     })),
   }
 }
@@ -1351,12 +1578,19 @@ export function toPortalBudget(budget: BudgetWithTotals, locale: string | null):
 /** Presupuestos visibles del paciente: nunca borradores ni internos. */
 export async function listPortalBudgets(tx: Db, ctx: PortalContext): Promise<PortalBudgetView[]> {
   requireScope(ctx.session, "budgets")
-  const budgets = await listBudgets(tx, ctx.orgId, ctx.session.patientId)
-  const locale = await portalBudgetLocale(tx, ctx.orgId)
+  const budgets = (await listBudgets(tx, ctx.orgId, ctx.session.patientId)).filter(
+    (budget) => budget.status !== "borrador",
+  )
+  // Lo encontrado va a quien decide por el paciente, no a cualquiera con acceso al portal.
+  const decides = await contactDecides(tx, ctx.orgId, ctx.session.patientId, ctx.session.contactId)
+  const context = await portalBudgetContext(
+    tx,
+    ctx.orgId,
+    budgets.map((budget) => budget.id),
+    decides,
+  )
   await logAccess(tx, ctx.orgId, ctx.session.id, "budgets.listed")
-  return budgets
-    .filter((budget) => budget.status !== "borrador")
-    .map((budget) => toPortalBudget(budget, locale))
+  return budgets.map((budget) => toPortalBudget(budget, context))
 }
 
 export interface DecidePortalBudgetInput {
@@ -1380,26 +1614,42 @@ export interface DecidePortalBudgetInput {
 export async function decideBudgetByPerson(
   tx: Db,
   orgId: string,
-  input: { patientId: string; contactId: string; budgetId: string; decision: DecidePortalBudgetInput; via: "portal" | "enlace" },
+  input: {
+    patientId: string
+    contactId: string
+    budgetId: string
+    decision: DecidePortalBudgetInput
+    via: "portal" | "enlace"
+  },
 ): Promise<{ budget: BudgetWithTotals; replay: boolean }> {
   const current = await getBudgetDetail(tx, orgId, input.patientId, input.budgetId)
   const followUp =
-    (current.status === "parcial" || current.status === "pospuesto") && current.decisionContactId === input.contactId
+    (current.status === "parcial" || current.status === "pospuesto") &&
+    current.decisionContactId === input.contactId
   if (current.status !== "presentado" && !followUp) {
     const decided = ["aceptado", "parcial", "rechazado", "pospuesto"].includes(current.status)
-    if (decided && current.decisionContactId === input.contactId) return { budget: current, replay: true }
+    if (decided && current.decisionContactId === input.contactId)
+      return { budget: current, replay: true }
     throw conflict("BUDGET_STATUS", "Este presupuesto ya no admite decisión")
   }
   if (!Array.isArray(input.decision.decisions) || input.decision.decisions.length === 0) {
     throw validation("Debe decidir cada línea exactamente una vez")
   }
   try {
-    const budget = await decideBudget(tx, orgId, null, input.patientId, input.budgetId, {
-      optionId: input.decision.optionId ?? null,
-      decisions: input.decision.decisions,
-      decidedByContactId: input.contactId,
-      decisionNote: input.decision.decisionNote ?? null,
-    }, { skipOwnPlan: true, via: input.via })
+    const budget = await decideBudget(
+      tx,
+      orgId,
+      null,
+      input.patientId,
+      input.budgetId,
+      {
+        optionId: input.decision.optionId ?? null,
+        decisions: input.decision.decisions,
+        decidedByContactId: input.contactId,
+        decisionNote: input.decision.decisionNote ?? null,
+      },
+      { skipOwnPlan: true, via: input.via },
+    )
     return { budget, replay: false }
   } catch (error) {
     if (error instanceof ServiceError && error.code === "BUDGET_STATUS") {
@@ -1417,7 +1667,8 @@ export async function decidePortalBudget(
   input: DecidePortalBudgetInput,
 ): Promise<{ budget: PortalBudgetView; replay: boolean }> {
   requireScope(ctx.session, "budgets")
-  const locale = await portalBudgetLocale(tx, ctx.orgId)
+  // Quien responde decide por el paciente: lo valida la misma regla al decidir.
+  const context = await portalBudgetContext(tx, ctx.orgId, [budgetId], true)
   const result = await decideBudgetByPerson(tx, ctx.orgId, {
     patientId: ctx.session.patientId,
     contactId: ctx.session.contactId,
@@ -1426,15 +1677,30 @@ export async function decidePortalBudget(
     via: "portal",
   })
   if (result.replay) {
-    await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decision_replayed", "treatment_budget", budgetId)
-    return { budget: toPortalBudget(result.budget, locale), replay: true }
+    await logAccess(
+      tx,
+      ctx.orgId,
+      ctx.session.id,
+      "budget.decision_replayed",
+      "treatment_budget",
+      budgetId,
+    )
+    return { budget: toPortalBudget(result.budget, context), replay: true }
   }
   const decided = result.budget
-  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.budget_decided", "treatment_budget", budgetId, {
-    sessionId: ctx.session.id,
-    contactId: ctx.session.contactId,
-    status: decided.status,
-  })
+  await auditPortal(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    "portal.budget_decided",
+    "treatment_budget",
+    budgetId,
+    {
+      sessionId: ctx.session.id,
+      contactId: ctx.session.contactId,
+      status: decided.status,
+    },
+  )
   await logAccess(tx, ctx.orgId, ctx.session.id, "budget.decided", "treatment_budget", budgetId, {
     status: decided.status,
   })
@@ -1444,7 +1710,7 @@ export async function decidePortalBudget(
     body: "Un representante decidió un presupuesto desde el portal.",
     href: `/patients/${ctx.session.patientId}?tab=plan`,
   })
-  return { budget: toPortalBudget(decided, locale), replay: false }
+  return { budget: toPortalBudget(decided, context), replay: false }
 }
 
 /**
@@ -1452,7 +1718,11 @@ export async function decidePortalBudget(
  * su presupuesto, para quien lleva la venta (decisión 9). Solo se anota la
  * lectura de lo que su acceso permite ver.
  */
-export async function markPortalBudgetSeen(tx: Db, ctx: PortalContext, budgetId: string): Promise<void> {
+export async function markPortalBudgetSeen(
+  tx: Db,
+  ctx: PortalContext,
+  budgetId: string,
+): Promise<void> {
   requireScope(ctx.session, "budgets")
   const current = await getBudgetDetail(tx, ctx.orgId, ctx.session.patientId, budgetId)
   if (current.status === "borrador") throw notFound("Presupuesto")
@@ -1464,7 +1734,11 @@ export async function markPortalBudgetSeen(tx: Db, ctx: PortalContext, budgetId:
  * cada presupuesto en el portal, leída del registro de accesos, para quien
  * lleva la venta. Sin lectura no hay fila.
  */
-export async function budgetsSeenInPortal(tx: Db, orgId: string, budgetIds: readonly string[]): Promise<Map<string, Date>> {
+export async function budgetsSeenInPortal(
+  tx: Db,
+  orgId: string,
+  budgetIds: readonly string[],
+): Promise<Map<string, Date>> {
   if (budgetIds.length === 0) return new Map()
   const rows = await tx
     .select({ budgetId: portalAccessLog.entityId, at: max(portalAccessLog.createdAt) })
@@ -1478,7 +1752,11 @@ export async function budgetsSeenInPortal(tx: Db, orgId: string, budgetIds: read
       ),
     )
     .groupBy(portalAccessLog.entityId)
-  return new Map(rows.filter((row) => row.budgetId && row.at).map((row) => [row.budgetId as string, row.at as Date]))
+  return new Map(
+    rows
+      .filter((row) => row.budgetId && row.at)
+      .map((row) => [row.budgetId as string, row.at as Date]),
+  )
 }
 
 export interface PortalDocumentView {
@@ -1491,7 +1769,10 @@ export interface PortalDocumentView {
 }
 
 /** Solo documentos explícitamente autorizados en el alcance (sin storageKey). */
-export async function listPortalDocuments(tx: Db, ctx: PortalContext): Promise<PortalDocumentView[]> {
+export async function listPortalDocuments(
+  tx: Db,
+  ctx: PortalContext,
+): Promise<PortalDocumentView[]> {
   const authorized = ctx.session.scope?.documents ?? []
   if (authorized.length === 0) return []
   const docs = await listPatientDocuments(tx, ctx.orgId, ctx.session.patientId)
@@ -1520,10 +1801,18 @@ export async function getPortalDocumentUrl(
 ): Promise<{ url: string; expiresInSeconds: number }> {
   requireDocumentInScope(ctx.session, documentId)
   const doc = await getPatientDocument(tx, ctx.orgId, ctx.session.patientId, documentId)
-  await auditPortal(tx, ctx.orgId, portalActor(ctx.session), "portal.document_read", "patient_document", documentId, {
-    sessionId: ctx.session.id,
-    contactId: ctx.session.contactId,
-  })
+  await auditPortal(
+    tx,
+    ctx.orgId,
+    portalActor(ctx.session),
+    "portal.document_read",
+    "patient_document",
+    documentId,
+    {
+      sessionId: ctx.session.id,
+      contactId: ctx.session.contactId,
+    },
+  )
   await logAccess(tx, ctx.orgId, ctx.session.id, "document.read", "patient_document", documentId)
   const expiresInSeconds = 300
   const url = await storage.attachmentUrl(doc.storageKey, expiresInSeconds)

@@ -1,3 +1,5 @@
+import type { PatientGuide } from "@odentia/clinical"
+import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
 import {
   Badge,
   Button,
@@ -19,6 +21,7 @@ import {
   toast,
 } from "@odentia/ui"
 import {
+  applySubmitError,
   ConfirmDialog,
   common,
   DataTable,
@@ -47,14 +50,34 @@ import {
 } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, getRouteApi, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, getRouteApi, Link, useNavigate } from "@tanstack/react-router"
 import { type ColumnDef, getCoreRowModel, useReactTable } from "@tanstack/react-table"
 import { ChevronDown, Plus, Tag } from "lucide-react"
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { z } from "zod"
-import { formatMoney, formatMoneyInput, parseMoney } from "@odentia/clinical"
-import { productUi } from "../../product/product-ui"
-import { capitalize, missingOfficialCode, OfficialCodeField, officialCodeText } from "../../components/official-code-field"
+import {
+  capitalize,
+  missingOfficialCode,
+  OfficialCodeField,
+  officialCodeText,
+} from "../../components/official-code-field"
+import {
+  EMPTY_GUIDE,
+  GuideSummary,
+  guideDraftOf,
+  guideSchema,
+  guideToSave,
+  hasGuide,
+  ServiceGuideSection,
+} from "../../components/service-guide"
 import {
   ServiceMaterialsCost,
   ServiceMaterialsEditor,
@@ -65,8 +88,10 @@ import { ServiceSelect } from "../../components/service-select"
 import { RadioChips } from "../../components/ui/radio-chips"
 import { useReceptionName } from "../../lib/agent-names"
 import { ApiError } from "../../lib/api"
-import { useClinicSpecialties } from "../../lib/clinical-forms"
-import { useCan, usePermission } from "../../lib/crm"
+import { fetchConsentTemplates, useClinicSpecialties } from "../../lib/clinical-forms"
+import { formatDate } from "../../lib/clinical-journey"
+import { useCan, useMemberName, usePermission } from "../../lib/crm"
+import { fetchConsentTemplateServices } from "../../lib/encounter-documents"
 import { financeErrorMessage } from "../../lib/finance"
 import {
   draftLineOf,
@@ -79,25 +104,27 @@ import { PageDraftGuard } from "../../lib/page-draft-guard"
 import {
   BILLING_MODE_LABELS,
   type BillingMode,
+  createServiceApi,
+  fetchService,
+  fetchServiceMaterials,
+  fetchServices,
+  fetchTemplatePatientGuide,
+  fetchTreatmentTemplate,
   MATERIAL_QUANTITY_MAX,
+  type OfficialCoding,
   PRICE_DISCLOSURE_BATCH,
   PRICE_DISCLOSURE_OPTIONS,
   PRICE_DISCLOSURE_TAG,
   type PriceDisclosure,
-  createServiceApi,
-  setServicesPriceDisclosureApi,
-  fetchService,
-  fetchServiceMaterials,
-  fetchServices,
-  fetchTreatmentTemplate,
-  type OfficialCoding,
-  saveServiceMaterialsApi,
-  type ServiceCatalogItem,
   SERVICE_PLACE_OPTIONS,
+  type ServiceCatalogItem,
+  saveServiceMaterialsApi,
+  setServicesPriceDisclosureApi,
   TREATMENT_SCOPE_LABELS,
   type TreatmentTemplateItem,
   updateServiceApi,
 } from "../../lib/services"
+import { productUi } from "../../product/product-ui"
 
 export const Route = createFileRoute("/_org/services/")({
   /** Los filtros los lee `useListSearch`; aquí solo se tipa la especialidad para los enlaces (Especialidades abre la lista filtrada). */
@@ -223,7 +250,10 @@ function TarifarioPage() {
     getNextPageParam: (last) => last.nextCursor,
   })
 
-  const rows = useMemo(() => (pagesQuery.data?.pages ?? []).flatMap((page) => page.data), [pagesQuery.data])
+  const rows = useMemo(
+    () => (pagesQuery.data?.pages ?? []).flatMap((page) => page.data),
+    [pagesQuery.data],
+  )
   const total = pagesQuery.data?.pages[0]?.total ?? 0
   /**
    * Fila vigente de la oferta abierta: si el filtro la deja fuera, no hay
@@ -231,7 +261,8 @@ function TarifarioPage() {
    */
   const editing =
     target?.kind === "offer"
-      ? (rows.find((row) => row.id === target.id) ?? (extraOffer?.id === target.id ? extraOffer : null))
+      ? (rows.find((row) => row.id === target.id) ??
+        (extraOffer?.id === target.id ? extraOffer : null))
       : null
 
   const sortedRows = useMemo(() => {
@@ -267,9 +298,12 @@ function TarifarioPage() {
   const usesInternalCode = rows.some((row) => row.code)
 
   const disclosureMutation = useMutation({
-    mutationFn: (priceDisclosure: PriceDisclosure) => setServicesPriceDisclosureApi(selected, priceDisclosure),
+    mutationFn: (priceDisclosure: PriceDisclosure) =>
+      setServicesPriceDisclosureApi(selected, priceDisclosure),
     onSuccess: async (result, priceDisclosure) => {
-      const label = PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === priceDisclosure)?.label ?? priceDisclosure
+      const label =
+        PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === priceDisclosure)?.label ??
+        priceDisclosure
       const updated = result.data.updated
       setSelected([])
       await queryClient.invalidateQueries({ queryKey: ["services"] })
@@ -423,7 +457,9 @@ function TarifarioPage() {
             <span className="inline-flex flex-wrap items-center gap-1.5">
               {formatMoney(row.original.priceCents, row.original.currency, profileLocale)}
               {PRICE_DISCLOSURE_TAG[row.original.priceDisclosure] ? (
-                <Badge variant="secondary">{PRICE_DISCLOSURE_TAG[row.original.priceDisclosure]}</Badge>
+                <Badge variant="secondary">
+                  {PRICE_DISCLOSURE_TAG[row.original.priceDisclosure]}
+                </Badge>
               ) : null}
             </span>
           ),
@@ -500,46 +536,41 @@ function TarifarioPage() {
    * propios de cada una).
    */
   const profileReady = profileLocale !== undefined && profileCurrency !== undefined
-  const editor =
-    !profileReady ? (
-      <DetailPanel
-        title="Servicios y precios"
-        headerContent={null}
-        onClose={closeOffer}
-      >
-        {profileQuery.isError ? (
-          <ErrorState
-            message="No se pudo cargar la configuración regional"
-            onRetry={() => void profileQuery.refetch()}
-          />
-        ) : (
-          <LoadingState />
-        )}
-      </DetailPanel>
-    ) : target?.kind === "create" ? (
-      <OfferEditor
-        key="alta"
-        offer={null}
-        asPanel={mode === "panel"}
-        open={surfaceOpen}
-        canWrite={canManage}
-        onClose={closeOffer}
-        orgCurrency={profileCurrency}
-        orgLocale={profileLocale}
-      />
-    ) : editing ? (
-      <OfferEditor
-        key={editing.id}
-        offer={editing}
-        revealMaterials={target?.kind === "offer" && target.focus === "materiales"}
-        asPanel={mode === "panel"}
-        open={surfaceOpen}
-        canWrite={canManage}
-        onClose={closeOffer}
-        orgCurrency={profileCurrency}
-        orgLocale={profileLocale}
-      />
-    ) : null
+  const editor = !profileReady ? (
+    <DetailPanel title="Servicios y precios" headerContent={null} onClose={closeOffer}>
+      {profileQuery.isError ? (
+        <ErrorState
+          message="No se pudo cargar la configuración regional"
+          onRetry={() => void profileQuery.refetch()}
+        />
+      ) : (
+        <LoadingState />
+      )}
+    </DetailPanel>
+  ) : target?.kind === "create" ? (
+    <OfferEditor
+      key="alta"
+      offer={null}
+      asPanel={mode === "panel"}
+      open={surfaceOpen}
+      canWrite={canManage}
+      onClose={closeOffer}
+      orgCurrency={profileCurrency}
+      orgLocale={profileLocale}
+    />
+  ) : editing ? (
+    <OfferEditor
+      key={editing.id}
+      offer={editing}
+      revealMaterials={target?.kind === "offer" && target.focus === "materiales"}
+      asPanel={mode === "panel"}
+      open={surfaceOpen}
+      canWrite={canManage}
+      onClose={closeOffer}
+      orgCurrency={profileCurrency}
+      orgLocale={profileLocale}
+    />
+  ) : null
   const editorVisible = surfaceOpen && editor !== null
   const activeOfferId = editorVisible && target?.kind === "offer" ? target.id : null
 
@@ -567,13 +598,24 @@ function TarifarioPage() {
           subtitle={`${org.name} · lo que ofrece la clínica y cuánto cuesta`}
           primary={
             canManage
-              ? { label: "Agregar servicios", icon: <Plus aria-hidden />, onClick: () => void navigate({ to: "/services/biblioteca" }) }
+              ? {
+                  label: "Agregar servicios",
+                  icon: <Plus aria-hidden />,
+                  onClick: () => void navigate({ to: "/services/biblioteca" }),
+                }
               : undefined
           }
-          menu={canManage ? [{ label: "Crear un servicio propio", onSelect: () => openOffer(null) }] : undefined}
+          menu={
+            canManage
+              ? [{ label: "Crear un servicio propio", onSelect: () => openOffer(null) }]
+              : undefined
+          }
         />
         {canWriteMaterials && profileLocale !== undefined ? (
-          <ServicesWithoutMaterialsCard locale={profileLocale} onOpen={(id) => void openOfferById(id)} />
+          <ServicesWithoutMaterialsCard
+            locale={profileLocale}
+            onOpen={(id) => void openOfferById(id)}
+          />
         ) : null}
         <FilterBar
           filters={[
@@ -585,8 +627,13 @@ function TarifarioPage() {
             },
             { key: "estado", label: "Estado", type: "select", options: STATE_OPTIONS },
           ]}
-          sortOptions={hasPlaces() ? TARIFARIO_SORT_OPTIONS : TARIFARIO_SORT_OPTIONS.filter((option) => option.value !== "ambito")}
-          searchPlaceholder="Buscar por nombre o código interno" searchLabel="Buscar en servicios"
+          sortOptions={
+            hasPlaces()
+              ? TARIFARIO_SORT_OPTIONS
+              : TARIFARIO_SORT_OPTIONS.filter((option) => option.value !== "ambito")
+          }
+          searchPlaceholder="Buscar por nombre o código interno"
+          searchLabel="Buscar en servicios"
         />
 
         {pagesQuery.isPending ? (
@@ -606,9 +653,7 @@ function TarifarioPage() {
                 : "Todavía no hay servicios con precio. Los agrega quien administra la clínica."
             }
             actionLabel={canManage ? "Agregar servicios" : undefined}
-            onAction={
-              canManage ? () => void navigate({ to: "/services/biblioteca" }) : undefined
-            }
+            onAction={canManage ? () => void navigate({ to: "/services/biblioteca" }) : undefined}
             secondaryActionLabel={canManage ? "Crear un servicio propio" : undefined}
             onSecondaryAction={canManage ? () => openOffer(null) : undefined}
           />
@@ -666,7 +711,9 @@ function TarifarioPage() {
         >
           <p className="text-sm font-medium" role="status">
             {selected.length === 1 ? "1 seleccionado" : `${selected.length} seleccionados`}
-            {selected.length >= PRICE_DISCLOSURE_BATCH ? ` · como mucho ${PRICE_DISCLOSURE_BATCH} a la vez` : ""}
+            {selected.length >= PRICE_DISCLOSURE_BATCH
+              ? ` · como mucho ${PRICE_DISCLOSURE_BATCH} a la vez`
+              : ""}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Select
@@ -678,7 +725,9 @@ function TarifarioPage() {
                 className="min-h-11 w-auto"
                 aria-label={`Cómo dice el precio ${receptionName}`}
                 aria-invalid={disclosureMutation.isError || undefined}
-                aria-describedby={disclosureMutation.isError ? "tarifario-como-dice-error" : undefined}
+                aria-describedby={
+                  disclosureMutation.isError ? "tarifario-como-dice-error" : undefined
+                }
               >
                 <SelectValue placeholder="Cómo dice el precio" />
               </SelectTrigger>
@@ -704,7 +753,11 @@ function TarifarioPage() {
             </Button>
           </div>
           {disclosureMutation.isError ? (
-            <p id="tarifario-como-dice-error" role="alert" className="basis-full text-sm text-destructive">
+            <p
+              id="tarifario-como-dice-error"
+              role="alert"
+              className="basis-full text-sm text-destructive"
+            >
               {`No se cambió cómo dice el precio. ${submitErrorMessage(disclosureMutation.error)}`}
             </p>
           ) : null}
@@ -822,6 +875,8 @@ function offerSchemaFor(rules: {
       if (message) ctx.addIssue({ code: "custom", message })
     }),
     /** Los materiales que se descuentan cada vez (ADR 0067), cada uno con su cantidad. */
+    /** Lo que se le explica al paciente. */
+    patientGuide: guideSchema,
     materials: z.array(materialLineSchema).superRefine((lines, ctx) => {
       const result = materialsToSave(lines, rules.locale, MATERIAL_QUANTITY_MAX)
       if (!("errors" in result)) return
@@ -849,6 +904,7 @@ const emptyOfferValues: OfferFormValues = {
   leavesCondition: "",
   leavesVariant: "",
   officialCode: null,
+  patientGuide: EMPTY_GUIDE,
   materials: [],
 }
 
@@ -876,13 +932,19 @@ function offerValues(
     evaluationServiceId: offer.evaluationServiceId ?? "",
     leavesCondition: offer.leavesFinding?.condition ?? "",
     leavesVariant: offer.leavesFinding?.variant ?? "",
+    patientGuide: guideDraftOf(offer.patientGuide),
     ...loaded,
   }
 }
 
-/** Los datos del servicio, sin el código oficial ni los materiales (que se comparan aparte). */
+/** Los datos del servicio, sin el código oficial, los materiales ni la explicación (que se comparan aparte). */
 function serviceKey(values: OfferFormValues): string {
-  return JSON.stringify({ ...values, officialCode: undefined, materials: undefined })
+  return JSON.stringify({
+    ...values,
+    officialCode: undefined,
+    materials: undefined,
+    patientGuide: undefined,
+  })
 }
 
 /**
@@ -892,7 +954,8 @@ function serviceKey(values: OfferFormValues): string {
  */
 function offerFieldName(serverField: string): string | undefined {
   if (serverField === "priceCents") return "price"
-  if (serverField === "leavesFinding" || serverField === "leavesFinding.condition") return "leavesCondition"
+  if (serverField === "leavesFinding" || serverField === "leavesFinding.condition")
+    return "leavesCondition"
   if (serverField === "leavesFinding.variant") return "leavesVariant"
   const row = /^items\[(\d+)\]\./.exec(serverField)
   return row ? `materials[${row[1]}].quantityText` : undefined
@@ -971,7 +1034,12 @@ function OfferEditor({
   /** Lo que el detalle dice del código: cargando, sin poder leerlo o el leído. */
   const official: OfficialState = {
     coding: officialCoding,
-    status: officialQuery.isPending && offer !== null && codeList !== null ? "pending" : officialQuery.isError ? "error" : "ready",
+    status:
+      officialQuery.isPending && offer !== null && codeList !== null
+        ? "pending"
+        : officialQuery.isError
+          ? "error"
+          : "ready",
   }
   /**
    * Un código propio que una edición nueva de la lista retiró: donde la lista
@@ -992,7 +1060,8 @@ function OfferEditor({
     [isTemplate, officialCoding],
   )
   /** ¿El código elegido es otro que el guardado? Si no se pudo leer el guardado y no se cambia, no se envía. */
-  const codeChangedIn = (value: OfficialCoding | null) => (value?.code ?? null) !== (initialCode?.code ?? null)
+  const codeChangedIn = (value: OfficialCoding | null) =>
+    (value?.code ?? null) !== (initialCode?.code ?? null)
 
   /** El tratamiento de la biblioteca, por id directo (incluye retirados, solo lectura). */
   const linkedTemplateQuery = useQuery({
@@ -1054,6 +1123,7 @@ function OfferEditor({
 
   const save = async (value: OfferFormValues) => {
     materialsFailure.current = null
+    const guide = offer ? guideToSave(offer.patientGuide, value.patientGuide) : null
     const codeChanged = codeChangedIn(value.officialCode)
     const officialCode = { officialCode: value.officialCode?.code ?? null }
     const body = {
@@ -1066,9 +1136,12 @@ function OfferEditor({
       priceDisclosure: value.priceDisclosure,
       evaluationServiceId: value.evaluationServiceId === "" ? null : value.evaluationServiceId,
       // Lo tratado queda dibujado: lo que deja en la pieza al completarse.
-      leavesFinding: productUi().services.leaves?.body(value.leavesCondition, value.leavesVariant) ?? null,
+      leavesFinding:
+        productUi().services.leaves?.body(value.leavesCondition, value.leavesVariant) ?? null,
     }
-    const toSave = materialsDirtyIn(value) ? materialsToSave(value.materials, orgLocale, MATERIAL_QUANTITY_MAX) : null
+    const toSave = materialsDirtyIn(value)
+      ? materialsToSave(value.materials, orgLocale, MATERIAL_QUANTITY_MAX)
+      : null
     const materials = toSave && "items" in toSave ? toSave.items : null
     const sentKey = JSON.stringify([serviceKey(value), officialCode.officialCode])
     const saved = savedService.current
@@ -1078,17 +1151,28 @@ function OfferEditor({
     const saveService =
       !targetId ||
       (saved?.key !== sentKey &&
-        (offer === null || serviceKey(value) !== defaultServiceKey || codeChanged || materials === null))
+        (offer === null ||
+          serviceKey(value) !== defaultServiceKey ||
+          codeChanged ||
+          (materials === null && !guide)))
     let serviceId = targetId
+    // Solo la explicación: viaja sola, sin pedir arreglar lo demás del servicio.
+    if (!saveService && guide && targetId) await updateServiceApi(targetId, guide)
     if (saveService) {
       const result = targetId
         ? await updateServiceApi(targetId, {
             ...body,
+            ...guide,
             // La especialidad se elige siempre aquí; el ámbito de una oferta de la biblioteca viene de su plantilla.
             ...(value.specialtyId ? { specialtyId: value.specialtyId } : {}),
             // El código del país lo elige solo un servicio propio; sin lista no viaja, y al
             // editar solo viaja si cambió.
-            ...(isTemplate ? {} : { scope: value.scope, ...(codeList && (!offer || codeChanged) ? officialCode : {}) }),
+            ...(isTemplate
+              ? {}
+              : {
+                  scope: value.scope,
+                  ...(codeList && (!offer || codeChanged) ? officialCode : {}),
+                }),
           })
         : await createServiceApi({
             ...body,
@@ -1124,13 +1208,77 @@ function OfferEditor({
           ? "Servicio guardado y activo, con sus materiales"
           : "Servicio guardado y activo"
         : !saveService
-          ? "Materiales guardados: se descuentan desde la próxima atención"
+          ? guide
+            ? materials
+              ? "Explicación y materiales guardados"
+              : "Explicación guardada"
+            : "Materiales guardados: se descuentan desde la próxima atención"
           : materials
             ? "Servicio y materiales guardados"
             : "Servicio actualizado",
     )
     onClose()
   }
+
+  /*
+   * Lo que se le explica al paciente: un dato más del formulario y se guarda con
+   * su «Guardar». El texto sugerido solo llena estos campos.
+   */
+  const memberName = useMemberName()
+  const canReadConsents = can("clinical.read") || can("settings.read")
+  const canOpenForms = can("settings.read")
+  const suggestionQuery = useQuery({
+    queryKey: ["services", "patient-guide", templateId],
+    queryFn: () => fetchTemplatePatientGuide(templateId as string),
+    enabled: canWrite && templateId !== null && !hasGuide(offer?.patientGuide),
+    staleTime: 300_000,
+  })
+  const consentLinksQuery = useQuery({
+    queryKey: ["consent-template-services"],
+    queryFn: fetchConsentTemplateServices,
+    enabled: offer !== null && canReadConsents,
+    staleTime: 60_000,
+  })
+  const consentKeys = (consentLinksQuery.data?.data ?? [])
+    .filter((row) => offer !== null && row.serviceIds.includes(offer.id))
+    .map((row) => row.templateKey)
+  const consentTemplatesQuery = useQuery({
+    queryKey: ["consent-templates", "publicado"],
+    queryFn: () => fetchConsentTemplates({ status: "publicado" }),
+    enabled: consentKeys.length > 0,
+    staleTime: 60_000,
+  })
+  const consentTitles = [
+    ...new Set(
+      (consentTemplatesQuery.data?.data ?? [])
+        .filter((row) => consentKeys.includes(row.key))
+        .map((row) => row.title),
+    ),
+  ]
+  const consentLine =
+    consentTitles.length > 0 ? (
+      <p className="text-sm text-muted-foreground">
+        Riesgos y qué pasa si no se trata salen de su consentimiento:{" "}
+        {canOpenForms ? (
+          <Link
+            to="/settings/forms"
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            {consentTitles.join(", ")}
+          </Link>
+        ) : (
+          consentTitles.join(", ")
+        )}
+        .
+      </p>
+    ) : null
+  const reviewedWords =
+    offer?.patientGuideReviewedAt && hasGuide(offer.patientGuide)
+      ? offer.patientGuideReviewedBy
+        ? `Revisado por ${memberName(offer.patientGuideReviewedBy)} el ${formatDate(offer.patientGuideReviewedAt)}`
+        : `Revisado el ${formatDate(offer.patientGuideReviewedAt)}`
+      : null
+  const [guideSaving, setGuideSaving] = useState(false)
 
   const form = useOfferForm(
     defaultValues,
@@ -1140,7 +1288,9 @@ function OfferEditor({
       scopeShown: hasPlaces() && !isTemplate,
       // Sin leer el código guardado no se exige otro: guardar no lo envía si no se cambia.
       codeIssue: (value) =>
-        isTemplate || (officialQuery.isError && !codeChangedIn(value)) ? null : missingOfficialCode(codeList, value),
+        isTemplate || (officialQuery.isError && !codeChangedIn(value))
+          ? null
+          : missingOfficialCode(codeList, value),
     }),
     save,
   )
@@ -1171,14 +1321,23 @@ function OfferEditor({
   }, [open, materialsTaken, offer, materialsQuery.isSuccess, savedLines, form])
 
   // El cierre protegido necesita saber si hay cambios: del servicio, del código o de los materiales.
-  const serviceDirty = useStore(form.store, (state) => serviceKey(state.values) !== defaultServiceKey)
+  const serviceDirty = useStore(
+    form.store,
+    (state) => serviceKey(state.values) !== defaultServiceKey,
+  )
   const codeChanged = useStore(form.store, (state) => codeChangedIn(state.values.officialCode))
   const materialsDirty = useStore(form.store, (state) => materialsDirtyIn(state.values))
-  const isDirty = serviceDirty || materialsDirty || codeChanged
+  const guideDirty = useStore(
+    form.store,
+    (state) => guideToSave(offer?.patientGuide, state.values.patientGuide) !== null,
+  )
+  const isDirty = serviceDirty || materialsDirty || codeChanged || guideDirty
   const surface = useFormSurface(form, {
     fieldMap: offerFieldName,
     formMessage: (error) =>
-      error === materialsFailure.current ? `No se guardaron los materiales: ${submitErrorOf(error).form ?? ""}` : null,
+      error === materialsFailure.current
+        ? `No se guardaron los materiales: ${submitErrorOf(error).form ?? ""}`
+        : null,
   })
 
   const headerContent = (
@@ -1241,6 +1400,18 @@ function OfferEditor({
           )
         }
       />
+      {offer ? (
+        <ServiceGuideSection
+          form={form}
+          fields="patientGuide"
+          idPrefix={`${offer.id}-guia`}
+          saved={offer.patientGuide}
+          suggestion={suggestionQuery.data?.data.suggestion}
+          reviewedWords={guideDirty ? null : reviewedWords}
+          consents={consentLine}
+          disabled={surface.isSubmitting || guideSaving}
+        />
+      ) : null}
       {canWriteMaterials ? (
         <>
           <ServiceMaterialsEditor
@@ -1289,6 +1460,16 @@ function OfferEditor({
     const readOnly = (
       <div className="flex flex-col gap-4">
         <OfferReadOnly offer={offer} official={official} locale={orgLocale} />
+        {hasGuide(offer.patientGuide) ? (
+          <section aria-label="Lo que se le explica al paciente" className="flex flex-col gap-2">
+            <h3 className="text-sm font-medium">Lo que se le explica al paciente</h3>
+            <GuideSummary guide={offer.patientGuide} />
+            {reviewedWords ? (
+              <p className="text-xs text-muted-foreground">{reviewedWords}</p>
+            ) : null}
+            {consentLine}
+          </section>
+        ) : null}
         {seesMaterials ? (
           <ServiceMaterialsReadOnly
             data={savedMaterials}
@@ -1323,6 +1504,29 @@ function OfferEditor({
     headerContent,
     isDirty,
     submitLabel: offer ? common.actions.save : "Guardar y activar",
+    isSubmitting: surface.isSubmitting || guideSaving,
+    onSubmit: (event: FormEvent) => {
+      const values = form.state.values
+      // Explicar un servicio no pide arreglar lo demás: uno de antes, sin código o
+      // sin ámbito, también se explica (la API lo permite igual).
+      if (
+        offer &&
+        guideDirty &&
+        !serviceDirty &&
+        !codeChanged &&
+        !materialsDirty &&
+        guideSchema.safeParse(values.patientGuide).success
+      ) {
+        event.preventDefault()
+        event.stopPropagation()
+        setGuideSaving(true)
+        void save(values)
+          .catch((error: unknown) => applySubmitError(form, error, { fieldMap: offerFieldName }))
+          .finally(() => setGuideSaving(false))
+        return
+      }
+      surface.onSubmit(event)
+    },
     onClose,
   }
 
@@ -1355,7 +1559,11 @@ function OfficialCodeDetail({ official, own }: { official: OfficialState; own: b
   const list = useClinicalProfile().services
   if (!list) return null
   // Uno de la biblioteca toma el código de su tratamiento: no hay nada que elegir aquí.
-  const missing = !list.required ? null : own ? "Sin código vigente: elígelo al editar" : "Sin código vigente"
+  const missing = !list.required
+    ? null
+    : own
+      ? "Sin código vigente: elígelo al editar"
+      : "Sin código vigente"
   return (
     <DetailField label={capitalize(list.codeName)}>
       {official.status === "pending" ? (
@@ -1403,7 +1611,9 @@ function OfferReadOnly({
           </DetailField>
         ) : null}
         {leaves ? (
-          <DetailField label={leaves.label}>{offer.leavesFinding ? leaves.words(offer.leavesFinding) : null}</DetailField>
+          <DetailField label={leaves.label}>
+            {offer.leavesFinding ? leaves.words(offer.leavesFinding) : null}
+          </DetailField>
         ) : null}
         <DetailField label="Estado">{offer.isActive ? "Activa" : "Inactiva"}</DetailField>
         <OfficialCodeDetail official={official} own={offer.source === "custom"} />
@@ -1417,13 +1627,7 @@ function OfferReadOnly({
  * Datos que el formulario no edita, plegados para no cargar la tarjeta. El
  * código del país de uno de la biblioteca viene de su tratamiento y no se cambia.
  */
-function OfferDetails({
-  offer,
-  official,
-}: {
-  offer: ServiceCatalogItem
-  official: OfficialState
-}) {
+function OfferDetails({ offer, official }: { offer: ServiceCatalogItem; official: OfficialState }) {
   return (
     <Collapsible>
       <CollapsibleTrigger className="text-sm font-medium">
@@ -1433,7 +1637,9 @@ function OfferDetails({
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2">
         <DetailList columns={1}>
-          {offer.source === "template" ? <OfficialCodeDetail official={official} own={false} /> : null}
+          {offer.source === "template" ? (
+            <OfficialCodeDetail official={official} own={false} />
+          ) : null}
           <DetailField label="Duración">
             {offer.durationMin === null ? null : `${offer.durationMin} min`}
           </DetailField>
@@ -1493,7 +1699,9 @@ function OfferFields({
         ) : (
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium">Dónde se hace</span>
-            <p className="text-sm">{offer?.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : "—"}</p>
+            <p className="text-sm">
+              {offer?.scope ? (TREATMENT_SCOPE_LABELS[offer.scope] ?? offer.scope) : "—"}
+            </p>
             <p className="text-xs text-muted-foreground">Viene de la biblioteca.</p>
           </div>
         )}
@@ -1511,7 +1719,9 @@ function OfferFields({
           )}
         </form.AppField>
         <form.AppField name="durationMin">
-          {(field) => <field.TextField id={`${idPrefix}-dur`} label="Duración (min)" inputMode="numeric" />}
+          {(field) => (
+            <field.TextField id={`${idPrefix}-dur`} label="Duración (min)" inputMode="numeric" />
+          )}
         </form.AppField>
       </div>
       <form.AppField name="billingMode">
@@ -1542,7 +1752,9 @@ function OfferFields({
         {(field) => (
           <field.TextField
             id={`${idPrefix}-codigo`}
-            label={isTemplate ? "Código interno de la clínica (opcional)" : "Código interno (opcional)"}
+            label={
+              isTemplate ? "Código interno de la clínica (opcional)" : "Código interno (opcional)"
+            }
             description="Solo para uso interno de la clínica."
           />
         )}
@@ -1648,7 +1860,15 @@ function OfferLeavesFinding({
  * una persona; caja y presupuesto usan siempre la tarifa. Con «Desde» o «Solo
  * con evaluación» se elige qué evaluación ofrece.
  */
-function PriceDisclosureFields({ form, idPrefix, offerId }: { form: OfferForm; idPrefix: string; offerId: string | null }) {
+function PriceDisclosureFields({
+  form,
+  idPrefix,
+  offerId,
+}: {
+  form: OfferForm
+  idPrefix: string
+  offerId: string | null
+}) {
   const receptionName = useReceptionName()
   const disclosure = useStore(form.store, (state) => state.values.priceDisclosure)
   const legendId = `${idPrefix}-precio-agente`
@@ -1703,10 +1923,12 @@ function DisclosureChoice({ id, legendId }: { id: string; legendId: string }) {
         onChange={(next) => field.handleChange(next)}
       />
       <FieldDescription id={descriptionId} className="text-xs">
-        {PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === field.state.value)?.says} Caja y presupuesto usan
-        siempre la tarifa.
+        {PRICE_DISCLOSURE_OPTIONS.find((option) => option.value === field.state.value)?.says} Caja y
+        presupuesto usan siempre la tarifa.
       </FieldDescription>
-      {control.invalid ? <FieldError id={errorId} errors={errors.map((message) => ({ message }))} /> : null}
+      {control.invalid ? (
+        <FieldError id={errorId} errors={errors.map((message) => ({ message }))} />
+      ) : null}
     </Field>
   )
 }

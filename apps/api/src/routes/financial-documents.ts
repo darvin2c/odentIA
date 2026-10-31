@@ -1,21 +1,23 @@
 import { withOrgContext } from "@odentia/db"
-import { Hono } from "hono"
-import { z } from "zod"
 import {
   generateConsentPdf,
   getDocumentSendOptions,
   getFinancialDocumentPdf,
   getHealthDocumentSendOptions,
   getRefundReceiptPdf,
+  HEALTH_DOCUMENT_TYPES,
+  renderHealthDocumentPdf,
   saveRecipientEmail,
   sendFinancialDocument,
   sendHealthDocument,
 } from "@odentia/services"
+import type { Context } from "hono"
+import { Hono } from "hono"
+import { z } from "zod"
 import { traceClinicalRead } from "../lib/clinical-trace.js"
 import { canAccess, orgContextOf } from "../lib/context.js"
 import { errorBody } from "../lib/error.js"
 import { type CrmDeps, runService, serviceErrorResponse, validationError } from "./helpers.js"
-import type { Context } from "hono"
 
 function forbid(c: Context) {
   return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a documentos económicos"), 403)
@@ -62,6 +64,11 @@ const paperQuery = z.object({
   paper: z.enum(["A4", "Letter"]).optional(),
 })
 
+const healthPdfQuery = z.object({
+  documentType: z.enum(HEALTH_DOCUMENT_TYPES),
+  documentId: z.uuid(),
+})
+
 const sendInput = z
   .object({
     documentType,
@@ -74,7 +81,11 @@ const sendInput = z
     // Clave del intento: reenviar con la misma no manda el documento dos veces.
     requestId: z.uuid().nullish(),
     // Otro correo escrito en el momento: exige confirmación explícita de quien envía.
-    otherEmail: z.string().trim().max(200, { error: "El correo no tiene un formato válido" }).nullish(),
+    otherEmail: z
+      .string()
+      .trim()
+      .max(200, { error: "El correo no tiene un formato válido" })
+      .nullish(),
     confirmOtherEmail: z.boolean().optional(),
   })
   .strict()
@@ -126,7 +137,9 @@ const refundPdfQuery = z.object({
   paper: z.enum(["A4", "Letter"]).optional(),
 })
 
-export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storage" | "secretsKey">) {
+export function createFinancialDocumentsRoute(
+  deps: Pick<CrmDeps, "db" | "storage" | "secretsKey">,
+) {
   const app = new Hono()
 
   app.get("/:id/financial-document-options", async (c) => {
@@ -148,6 +161,52 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     )
   })
 
+  // El papel de salud para que el equipo lo vea o lo imprima: el mismo que se envía.
+  app.get("/:id/health-document-pdf", async (c) => {
+    const { orgId, userId, memberRole } = orgContextOf(c)
+    if (!canAccess(memberRole, "clinical.read")) {
+      return c.json(errorBody(c, "FORBIDDEN", "No tienes acceso a la historia clínica"), 403)
+    }
+    const parsed = healthPdfQuery.safeParse(c.req.query())
+    if (!parsed.success) return validationError(c, parsed.error.issues)
+    const patientId = c.req.param("id")
+    try {
+      // Como al enviarlo: si al firmar no se pudo guardar su PDF, se guarda ahora (una sola
+      // vez). Si tampoco se puede, se ve igual, generado al vuelo y sin guardarlo.
+      if (parsed.data.documentType === "consent") {
+        await generateConsentPdf({
+          run: (fn) => withOrgContext(deps.db, orgId, fn),
+          storage: deps.storage,
+          orgId,
+          userId,
+          consentId: parsed.data.documentId,
+        }).catch(() => null)
+      }
+      const pdf = await withOrgContext(deps.db, orgId, (tx) =>
+        renderHealthDocumentPdf(
+          tx,
+          orgId,
+          patientId,
+          parsed.data.documentType,
+          parsed.data.documentId,
+          deps.storage,
+          { viewing: true },
+        ),
+      )
+      await traceClinicalRead(deps.db, { orgId, userId, patientId, resource: "documentos" })
+      return new Response(Buffer.from(pdf.bytes), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${encodeURIComponent(pdf.filename)}"`,
+          "Cache-Control": "private, no-store",
+        },
+      })
+    } catch (error) {
+      return serviceErrorResponse(c, error) ?? Promise.reject(error)
+    }
+  })
+
   app.get("/:id/financial-document-pdf", async (c) => {
     const { orgId, userId, memberRole } = orgContextOf(c)
     const parsed = paperQuery.safeParse(c.req.query())
@@ -164,6 +223,9 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
           memberRole,
         }),
       )
+      if (pdf.carriesClinical) {
+        await traceClinicalRead(deps.db, { orgId, userId, patientId: c.req.param("id"), resource: "documentos" })
+      }
       return c.body(Buffer.from(pdf.bytes), 200, {
         "Content-Type": "application/pdf",
         "Content-Disposition": `inline; filename="${pdf.filename}"`,
@@ -298,7 +360,13 @@ export function createFinancialDocumentsRoute(deps: Pick<CrmDeps, "db" | "storag
     if (!parsed.success) return validationError(c, parsed.error.issues)
     try {
       const pdf = await withOrgContext(deps.db, orgId, (tx) =>
-        getRefundReceiptPdf(tx, orgId, c.req.param("id"), parsed.data.receiptId, parsed.data.paper ?? null),
+        getRefundReceiptPdf(
+          tx,
+          orgId,
+          c.req.param("id"),
+          parsed.data.receiptId,
+          parsed.data.paper ?? null,
+        ),
       )
       return c.body(Buffer.from(pdf.bytes), 200, {
         "Content-Type": "application/pdf",

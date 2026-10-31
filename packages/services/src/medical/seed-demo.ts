@@ -16,28 +16,35 @@
 
 import { randomUUID } from "node:crypto"
 import { LEGAL } from "@odentia/auth/legal"
+import { DEFAULT_REGISTRATION_CONFIG, type PatientGuide } from "@odentia/clinical"
 import type { Db } from "@odentia/db"
 import { account, member, organization, user } from "@odentia/db/schema/auth"
-import { encounter, orgSpecialty, treatmentTemplate } from "@odentia/db/schema/clinical"
+import {
+  encounter,
+  orgSpecialty,
+  serviceCatalog,
+  treatmentTemplate,
+} from "@odentia/db/schema/clinical"
 import { branch, orgProfile } from "@odentia/db/schema/org"
 import { saasSubscription } from "@odentia/db/schema/saas-billing"
 import { processingAgreementAcceptance } from "@odentia/db/schema/workspace"
 import { and, eq, inArray } from "drizzle-orm"
-import { DEFAULT_REGISTRATION_CONFIG } from "@odentia/clinical"
 import { upsertAgentConfig } from "../agentConfig.js"
 import { createAppointment, createRoom } from "../appointments.js"
 import { setProfessionalSchedule } from "../availability.js"
+import { createBudget, deliverBudget, updateBudgetPresentation } from "../budgets.js"
 import { savePatientHealth } from "../clinical.js"
 import { setProfessionalSpecialties } from "../clinical-forms.js"
-import { createFollowUp } from "../follow-ups.js"
 import { createContact } from "../contacts.js"
 import { DEMO_COUNTRIES } from "../demo-recipes.js"
-import { createPatient } from "../patients.js"
+import { createFollowUp } from "../follow-ups.js"
 import { savePatientRegistrationConfig } from "../patient-registration.js"
+import { createPatient } from "../patients.js"
 import { ensureDefaultPaymentMethods } from "../payment-methods.js"
+import { addPlanItem } from "../plan.js"
 import { setProfessionalProfile } from "../professional-profiles.js"
 import { seedOperation, seedPromotions } from "../seed-operation.js"
-import { fromTemplates } from "../service-catalog.js"
+import { fromTemplates, updateService } from "../service-catalog.js"
 import { ensureClinicSpecialties } from "../specialties.js"
 import { MEDICAL_DEMO_KINDS } from "./demo-kinds.js"
 
@@ -115,6 +122,7 @@ export async function seedMedicalDemo(
     product: "medical",
     legalName: "Consultorio San Martín S.A.C.",
     tradeName: "Consultorio San Martín",
+    fiscalDocType: "RUC",
     fiscalDocNumber: "20609876543",
     countryCode: "PE",
     currency: "PEN",
@@ -131,14 +139,23 @@ export async function seedMedicalDemo(
   })
   await db.transaction((tx) => ensureDefaultPaymentMethods(tx, ORG, VELA_ID, "PE"))
   // Clío encendida (entrega 10): las atenciones en borrador ofrecen «Dictar la atención».
-  await db.transaction((tx) => upsertAgentConfig(tx, ORG, { clinicalAssistantEnabled: true }, { actorUserId: VELA_ID }))
+  await db.transaction((tx) =>
+    upsertAgentConfig(tx, ORG, { clinicalAssistantEnabled: true }, { actorUserId: VELA_ID }),
+  )
   // Registro en línea activo, como la demo de odentIA: sin él, a quien escribe por
   // primera vez Sofi no puede mandarle el enlace para reservar (auditoría del 27-oct).
   await db.transaction((tx) =>
     savePatientRegistrationConfig(tx, ORG, VELA_ID, {
       expectedVersion: 0,
       enabled: true,
-      fields: { ...DEFAULT_REGISTRATION_CONFIG.fields, docType: "required", docNumber: "required", sex: "required", email: "hidden", address: "hidden" },
+      fields: {
+        ...DEFAULT_REGISTRATION_CONFIG.fields,
+        docType: "required",
+        docNumber: "required",
+        sex: "required",
+        email: "hidden",
+        address: "hidden",
+      },
       privacyNotice:
         "Consultorio San Martín usará tus datos solo para registrarte como paciente, atenderte y recordarte tus citas. Puedes pedir verlos, corregirlos o eliminarlos escribiendo a recepción.",
     }),
@@ -196,11 +213,19 @@ export async function seedMedicalDemo(
     electrocardiograma: 6000,
     "glucosa-capilar": 1000,
     "ecografia-transvaginal": 12000,
+    "control-prenatal-7-o-mas": 120000,
+    "ecografia-obstetrica": 12000,
+    "toma-de-muestra-de-sangre": 3000,
   }
   const library = await db
     .select({ id: treatmentTemplate.id, key: treatmentTemplate.key })
     .from(treatmentTemplate)
-    .where(and(eq(treatmentTemplate.product, "medical"), inArray(treatmentTemplate.key, Object.keys(prices))))
+    .where(
+      and(
+        eq(treatmentTemplate.product, "medical"),
+        inArray(treatmentTemplate.key, Object.keys(prices)),
+      ),
+    )
   if (library.length !== Object.keys(prices).length) {
     throw new Error("Falta la biblioteca de latidIA: ejecuta seed:procedures")
   }
@@ -331,7 +356,14 @@ export async function seedMedicalDemo(
     {
       patientId: luis,
       conditions: [{ name: "Hipertensión arterial", status: "activa" }],
-      answers: { habitos: { tabaco: "fuma", cigarrillosDia: 10, alcohol: "ocasional", actividadFisica: "sedentaria" } },
+      answers: {
+        habitos: {
+          tabaco: "fuma",
+          cigarrillosDia: 10,
+          alcohol: "ocasional",
+          actividadFisica: "sedentaria",
+        },
+      },
     },
     {
       patientId: rosa,
@@ -364,42 +396,84 @@ export async function seedMedicalDemo(
   // Los controles de presión de Luis, ya firmados (entrega 5): la sección
   // «Signos vitales» los dibuja en el tiempo y el examen dice lo no examinado.
   const controls = [
-    { daysAgo: 240, vitals: { presionSistolica: 152, presionDiastolica: 96, frecuenciaCardiaca: 84, peso: 86, talla: 170, glucosaCapilar: 132 } },
-    { daysAgo: 180, vitals: { presionSistolica: 146, presionDiastolica: 92, frecuenciaCardiaca: 80, peso: 85, talla: 170 } },
-    { daysAgo: 120, vitals: { presionSistolica: 138, presionDiastolica: 88, frecuenciaCardiaca: 78, peso: 83.5, talla: 170, glucosaCapilar: 118 } },
-    { daysAgo: 60, vitals: { presionSistolica: 132, presionDiastolica: 84, frecuenciaCardiaca: 76, peso: 82, talla: 170, glucosaCapilar: 112 } },
+    {
+      daysAgo: 240,
+      vitals: {
+        presionSistolica: 152,
+        presionDiastolica: 96,
+        frecuenciaCardiaca: 84,
+        peso: 86,
+        talla: 170,
+        glucosaCapilar: 132,
+      },
+    },
+    {
+      daysAgo: 180,
+      vitals: {
+        presionSistolica: 146,
+        presionDiastolica: 92,
+        frecuenciaCardiaca: 80,
+        peso: 85,
+        talla: 170,
+      },
+    },
+    {
+      daysAgo: 120,
+      vitals: {
+        presionSistolica: 138,
+        presionDiastolica: 88,
+        frecuenciaCardiaca: 78,
+        peso: 83.5,
+        talla: 170,
+        glucosaCapilar: 118,
+      },
+    },
+    {
+      daysAgo: 60,
+      vitals: {
+        presionSistolica: 132,
+        presionDiastolica: 84,
+        frecuenciaCardiaca: 76,
+        peso: 82,
+        talla: 170,
+        glucosaCapilar: 112,
+      },
+    },
   ]
   let lastControl: string | null = null
   for (const control of controls) {
     const startedAt = new Date(lima(-control.daysAgo, "10:00"))
-    const [signed] = await db.insert(encounter).values({
-      organizationId: ORG,
-      patientId: luis,
-      branchId: sede.id,
-      professionalUserId: VELA_ID,
-      status: "finalizada",
-      reason: "Control de presión arterial",
-      vitals: control.vitals,
-      examination: {
-        sistemas: {
-          estadoGeneral: { estado: "sin_alteraciones" },
-          toraxPulmones: { estado: "sin_alteraciones" },
-          corazon: { estado: "sin_alteraciones" },
-          extremidades:
-            control.daysAgo > 150
-              ? { estado: "con_hallazgos", hallazgo: "Edema leve en ambos tobillos, con fóvea." }
-              : { estado: "sin_alteraciones" },
+    const [signed] = await db
+      .insert(encounter)
+      .values({
+        organizationId: ORG,
+        patientId: luis,
+        branchId: sede.id,
+        professionalUserId: VELA_ID,
+        status: "finalizada",
+        reason: "Control de presión arterial",
+        vitals: control.vitals,
+        examination: {
+          sistemas: {
+            estadoGeneral: { estado: "sin_alteraciones" },
+            toraxPulmones: { estado: "sin_alteraciones" },
+            corazon: { estado: "sin_alteraciones" },
+            extremidades:
+              control.daysAgo > 150
+                ? { estado: "con_hallazgos", hallazgo: "Edema leve en ambos tobillos, con fóvea." }
+                : { estado: "sin_alteraciones" },
+          },
         },
-      },
-      evolution: "Hipertensión arterial en control; continúa con enalapril y dieta baja en sal.",
-      startedAt,
-      endedAt: new Date(startedAt.getTime() + 20 * 60 * 1000),
-      finalizedAt: new Date(startedAt.getTime() + 20 * 60 * 1000),
-      finalizedBy: VELA_ID,
-      signerName: "Elena Vela",
-      signerTitle: "Médico cirujano",
-      signerRegistration: "CMP 045678",
-    }).returning({ id: encounter.id })
+        evolution: "Hipertensión arterial en control; continúa con enalapril y dieta baja en sal.",
+        startedAt,
+        endedAt: new Date(startedAt.getTime() + 20 * 60 * 1000),
+        finalizedAt: new Date(startedAt.getTime() + 20 * 60 * 1000),
+        finalizedBy: VELA_ID,
+        signerName: "Elena Vela",
+        signerTitle: "Médico cirujano",
+        signerRegistration: "CMP 045678",
+      })
+      .returning({ id: encounter.id })
     lastControl = signed?.id ?? lastControl
   }
 
@@ -416,9 +490,127 @@ export async function seedMedicalDemo(
     }),
   )
 
+  // El presupuesto de atención de Julia, embarazada (el papel de latidIA, sin etapas): un
+  // consultorio no lo necesita para atender (`budgetRequired: false`), pero puede entregarlo.
+  const prenatal = await db
+    .select({ id: serviceCatalog.id, key: treatmentTemplate.key })
+    .from(serviceCatalog)
+    .innerJoin(treatmentTemplate, eq(treatmentTemplate.id, serviceCatalog.templateId))
+    .where(
+      and(
+        eq(serviceCatalog.organizationId, ORG),
+        inArray(treatmentTemplate.key, [
+          "control-prenatal-7-o-mas",
+          "ecografia-obstetrica",
+          "toma-de-muestra-de-sangre",
+        ]),
+      ),
+    )
+  const prenatalId = (key: string) => {
+    const found = prenatal.find((row) => row.key === key)
+    if (!found) throw new Error(`Falta el servicio ${key}`)
+    return found.id
+  }
+  const guides: Record<string, PatientGuide> = {
+    "control-prenatal-7-o-mas": {
+      visitLength: "unos 30 minutos",
+      how: "En cada control se toman su presión y su peso, se mide el crecimiento del útero, se escucha el corazón del bebé y se revisan sus dudas y sus resultados.",
+      includes: "todos los controles hasta el parto y las indicaciones de vitaminas y hierro.",
+      excludes:
+        "Parto, cesárea y hospitalización\nAnálisis de laboratorio y medicamentos\nVacunas y evaluación de otros especialistas",
+      schedule: [
+        { when: "Semanas 10 a 13", what: "Primer control, análisis de sangre y primera ecografía" },
+        { when: "Semanas 14 a 27", what: "Cada 4 semanas; ecografía de las semanas 18 a 22" },
+        { when: "Semanas 28 a 36", what: "Cada 2 semanas; ecografía de las semanas 30 a 34" },
+        { when: "Semana 37 hasta el parto", what: "Cada semana; preparación para el parto" },
+      ],
+      warnings:
+        "Sangrado o pérdida de líquido, dolor fuerte en el vientre, fiebre, dolor de cabeza intenso o visión borrosa, hinchazón repentina de cara o manos, o si, más adelante, nota que su bebé se mueve menos.",
+    },
+    "ecografia-obstetrica": {
+      how: "Sin dolor ni radiación. Comprueban la edad del embarazo, la formación del bebé, su crecimiento y la placenta.",
+      includes: "las ecografías con su informe.",
+    },
+    "toma-de-muestra-de-sangre": {
+      how: "Sirve para hemograma, grupo y factor Rh, glucosa, VIH, sífilis y hepatitis B; luego, prueba de azúcar y control de anemia.",
+      includes: "la toma de la muestra. El laboratorio se paga aparte.",
+    },
+  }
+  await db.transaction(async (tx) => {
+    for (const [key, patientGuide] of Object.entries(guides)) {
+      // Ecografías y muestras se cobran por cada una; el paquete, una vez.
+      await updateService(tx, ORG, VELA_ID, prenatalId(key), {
+        patientGuide,
+        ...(key === "control-prenatal-7-o-mas" ? {} : { billingMode: "session" }),
+      })
+    }
+    const startedAt = new Date(lima(0, "09:00"))
+    const [visit] = await tx
+      .insert(encounter)
+      .values({
+        organizationId: ORG,
+        patientId: julia,
+        branchId: sede.id,
+        professionalUserId: VELA_ID,
+        status: "borrador",
+        reason: "Primer control de embarazo",
+        startedAt,
+      })
+      .returning({ id: encounter.id })
+    if (!visit) throw new Error("No se creó la atención prenatal")
+    const items = []
+    for (const key of Object.keys(guides)) {
+      items.push(
+        await addPlanItem(tx, ORG, VELA_ID, julia, {
+          serviceId: prenatalId(key),
+          sourceEncounterId: visit.id,
+          diagnosisCode: "Z34.9",
+          ...(key === "control-prenatal-7-o-mas" ? {} : { plannedSessions: 3 }),
+        }),
+      )
+    }
+    const prenatalBudget = await createBudget(tx, ORG, VELA_ID, julia, {
+      itemIds: items.map((item) => item.id),
+      title: "Control de embarazo hasta el parto",
+    })
+    await updateBudgetPresentation(
+      tx,
+      ORG,
+      VELA_ID,
+      julia,
+      prenatalBudget.id,
+      {
+        findings:
+          "Está en la semana 12 de su primer embarazo y, por lo que vimos hoy, va con normalidad.",
+        proposal:
+          "Acompañarla hasta el parto, con controles y exámenes en las semanas que importan, para cuidar su salud y la de su bebé y detectar a tiempo cualquier problema.",
+      },
+      { clinicalAccess: true },
+    )
+    await deliverBudget(tx, ORG, VELA_ID, julia, prenatalBudget.id)
+    await tx
+      .update(encounter)
+      .set({
+        status: "finalizada",
+        endedAt: new Date(startedAt.getTime() + 30 * 60 * 1000),
+        finalizedAt: new Date(startedAt.getTime() + 30 * 60 * 1000),
+        finalizedBy: VELA_ID,
+        signerName: "Elena Vela",
+        signerTitle: "Médico cirujano",
+        signerRegistration: "CMP 045678",
+      })
+      .where(and(eq(encounter.id, visit.id), eq(encounter.organizationId, ORG)))
+  })
+
   const recipe = MEDICAL_DEMO_KINDS.find((kind) => kind.key === "medicina_general")
   if (!recipe) throw new Error("Falta la receta de Medicina general")
-  const operation = { orgId: ORG, ownerUserId: VELA_ID, recipe, country: DEMO_COUNTRIES.PE, seed: 20_261_029 }
+  const operation = {
+    orgId: ORG,
+    ownerUserId: VELA_ID,
+    recipe,
+    country: DEMO_COUNTRIES.PE,
+    seed: 20_261_029,
+  }
   await db.transaction(async (tx) => {
     await seedPromotions(tx, operation)
     await seedOperation(tx, operation)

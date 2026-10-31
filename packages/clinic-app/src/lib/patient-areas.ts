@@ -213,6 +213,7 @@ const RETIRED_SECTIONS: Record<string, PatientSectionId> = {
  */
 const COMMON_DOCUMENT_FILTERS = [
   { id: "requieren", label: "Requieren acción" },
+  { id: "presupuestos", label: "Presupuestos" },
   { id: "recetas", label: "Recetas" },
   { id: "ordenes", label: "Órdenes" },
   { id: "consentimientos", label: "Consentimientos" },
@@ -229,8 +230,11 @@ export function documentFilters(): ReadonlyArray<{ id: DocumentFilter; label: st
   const { kind: own, medicalLeave } = productUi().documents
   // Los descansos médicos, después de las recetas, si el producto los emite (latidIA, issue 229).
   const common: ReadonlyArray<{ id: DocumentFilter; label: string }> = medicalLeave
-    ? COMMON_DOCUMENT_FILTERS.flatMap((filter): Array<{ id: DocumentFilter; label: string }> =>
-        filter.id === "recetas" ? [filter, { id: "descansos", label: "Descansos médicos" }] : [filter],
+    ? COMMON_DOCUMENT_FILTERS.flatMap(
+        (filter): Array<{ id: DocumentFilter; label: string }> =>
+          filter.id === "recetas"
+            ? [filter, { id: "descansos", label: "Descansos médicos" }]
+            : [filter],
       )
     : COMMON_DOCUMENT_FILTERS
   return own ? [...common, { id: own.filter, label: own.label }] : common
@@ -344,20 +348,31 @@ export function navSectionOf(id: PatientSectionId): PatientSectionId {
 export function areaNav(area: PatientAreaId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
   return visibleSections(can, isPatient)
     .filter((section) => section.area === area && !section.parent)
-    .map((section) => ({ value: section.id, label: section.label, ...(section.group ? { group: section.group } : {}) }))
+    .map((section) => ({
+      value: section.id,
+      label: section.label,
+      ...(section.group ? { group: section.group } : {}),
+    }))
 }
 
 /**
  * Lo que se elige dentro de una sección con secciones debajo: ella y las suyas
  * («Odontograma · Periodontograma»). Vacío si no tiene ninguna visible.
  */
-export function subsectionNav(id: PatientSectionId, can: Can, isPatient: PageOf = true): AreaNavEntry[] {
+export function subsectionNav(
+  id: PatientSectionId,
+  can: Can,
+  isPatient: PageOf = true,
+): AreaNavEntry[] {
   const parent = navSectionOf(id)
   const visible = visibleSections(can, isPatient)
   const children = visible.filter((section) => section.parent === parent)
   if (children.length === 0) return []
   const own = visible.find((section) => section.id === parent)
-  return [...(own ? [own] : []), ...children].map((section) => ({ value: section.id, label: section.label }))
+  return [...(own ? [own] : []), ...children].map((section) => ({
+    value: section.id,
+    label: section.label,
+  }))
 }
 
 /** Pestañas con al menos una sección visible y la sección que abre cada una. */

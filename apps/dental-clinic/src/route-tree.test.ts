@@ -48,3 +48,9 @@ it("las hojas del odontograma, que son de la app, quedan dentro de la página de
       ?.parentId,
   ).toBe("/_org/patients/$patientId")
 })
+
+it("comprobar un documento es público: cuelga de la raíz, fuera de la clínica", () => {
+  const route = routes.find((row) => row.id === "/comprobar/$token")
+  expect(route?.parentId).toBeNull()
+  expect(route?.file).toContain("routes/public/comprobar.$token")
+})

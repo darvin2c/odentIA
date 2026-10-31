@@ -55,12 +55,12 @@ import {
 } from "../../lib/clinical-journey"
 import { usePermission } from "../../lib/crm"
 import { type Encounter, fetchPatientHealth, type PlanItem } from "../../lib/patients"
-import { ChoiceSelect } from "../ui/choice-select"
-import { DiagnosisSearch } from "./diagnosis-search"
-import { FollowUpScheduler } from "./follow-up-scheduler"
-import { HealthDocumentSendDrawer } from "./health-document-send"
 import { productUi } from "../../product/product-ui"
 import { openAppointmentAnywhere } from "../agenda/schedule-host"
+import { ChoiceSelect } from "../ui/choice-select"
+import { DiagnosisSearch } from "./diagnosis-search"
+import { PrescriptionPaper } from "./document-papers"
+import { FollowUpScheduler } from "./follow-up-scheduler"
 
 const MAX_TITLE = 200
 const MAX_TEXT = 2000
@@ -140,7 +140,10 @@ function followUpSchema(fixedItem: boolean) {
       repeat: z.string(),
       instructions: z
         .string()
-        .max(MAX_INSTRUCTIONS, `Las indicaciones tienen como mucho ${MAX_INSTRUCTIONS} caracteres.`),
+        .max(
+          MAX_INSTRUCTIONS,
+          `Las indicaciones tienen como mucho ${MAX_INSTRUCTIONS} caracteres.`,
+        ),
     })
     .superRefine((value, ctx) => {
       if (!fixedItem && value.kind === "tratamiento" && !value.planItemId)
@@ -220,7 +223,8 @@ export function ControlesPanel({
   const [repeatError, setRepeatError] = useState<string | null>(null)
 
   const createMutation = useMutation({
-    mutationFn: (body: Parameters<typeof createFollowUpApi>[1]) => createFollowUpApi(patientId, body),
+    mutationFn: (body: Parameters<typeof createFollowUpApi>[1]) =>
+      createFollowUpApi(patientId, body),
   })
   const createForm = useAppForm({
     defaultValues: {
@@ -237,7 +241,11 @@ export function ControlesPanel({
     onSubmit: async ({ value }) => {
       // El tratamiento del recorrido manda siempre: el panel nunca conserva la
       // selección anterior cuando se cambia de tratamiento en la ficha.
-      const kind = itemId ? "tratamiento" : value.kind === "tratamiento" ? "tratamiento" : "mantenimiento"
+      const kind = itemId
+        ? "tratamiento"
+        : value.kind === "tratamiento"
+          ? "tratamiento"
+          : "mantenimiento"
       const planItemId = itemId ?? value.planItemId
       await createMutation.mutateAsync({
         kind,
@@ -375,17 +383,18 @@ export function ControlesPanel({
                   {FOLLOW_UP_STATUS_LABELS[row.status]}
                 </Badge>
                 <span className="text-sm text-muted-foreground">
-                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto{" "}
-                  {formatDate(row.dueAt)}
+                  {FOLLOW_UP_KIND_LABELS[row.kind] ?? row.kind} · previsto {formatDate(row.dueAt)}
                   {row.legacyScheduledAt && !row.appointment
                     ? ` · fecha histórica ${formatDateTime(row.legacyScheduledAt)}`
                     : ""}
                 </span>
               </div>
               <p className="text-sm text-muted-foreground">{followUpAppointmentLabel(row)}</p>
-              {row.repeatEveryMonths && (row.status === "pendiente" || row.status === "programado") ? (
+              {row.repeatEveryMonths &&
+              (row.status === "pendiente" || row.status === "programado") ? (
                 <p className="text-sm text-muted-foreground">
-                  Se repite {followUpRepeatWords(row.repeatEveryMonths)}: al completarlo queda indicado el siguiente.
+                  Se repite {followUpRepeatWords(row.repeatEveryMonths)}: al completarlo queda
+                  indicado el siguiente.
                 </p>
               ) : null}
               {row.appointment &&
@@ -659,34 +668,16 @@ export function PrescriptionEntry({
   patientId: string
   prescription: Prescription
   items?: PlanItem[]
-  /** Abierta al mostrarse sola (Documentos la abre al lado). */
+  /** Abierta al mostrarse sola. */
   defaultOpen?: boolean
 }): React.JSX.Element {
-  const canWrite = usePermission("clinical.write")
   const canRead = usePermission("clinical.read")
-  const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ["prescription", patientId, prescription.id],
     queryFn: () => fetchPrescriptionDetail(patientId, prescription.id),
     enabled: canRead,
   })
-  const [cancelling, setCancelling] = useState(false)
-  const [sending, setSending] = useState(false)
-  const cancelMutation = useMutation({
-    mutationFn: (reason: string) => cancelPrescriptionApi(patientId, prescription.id, { reason }),
-  })
-  const cancelForm = useAppForm({
-    defaultValues: { reason: "" },
-    validators: { onSubmit: reasonSchema("Indica el motivo de la anulación.") },
-    onSubmit: async ({ value }) => {
-      await cancelMutation.mutateAsync(value.reason.trim())
-      setCancelling(false)
-      cancelForm.reset({ reason: "" })
-      void queryClient.invalidateQueries({ queryKey: ["prescriptions", patientId] })
-      void queryClient.invalidateQueries({ queryKey: ["treatment-journey", patientId] })
-    },
-  })
-  const cancelSurface = useFormSurface(cancelForm)
+  const [viewing, setViewing] = useState(false)
   const rows = detail.data?.data.items ?? prescription.items ?? []
   const planItem = items?.find((item) => item.id === prescription.planItemId) ?? null
   return (
@@ -733,60 +724,19 @@ export function PrescriptionEntry({
               : ""}
           </p>
         ) : null}
-        {prescription.status === "emitida" ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              to="/patients/$patientId/prescriptions/$prescriptionId/print"
-              params={{ patientId, prescriptionId: prescription.id }}
-              target="_blank"
-              className={buttonVariants({ size: "sm", variant: "outline" })}
-            >
-              Imprimir
-            </Link>
-            {canWrite ? (
-              <Button type="button" size="sm" variant="outline" onClick={() => setSending(true)}>
-                Enviar a la persona
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {sending ? (
-          <HealthDocumentSendDrawer
-            open
-            patientId={patientId}
-            documentType="prescription"
-            documentId={prescription.id}
-            onClose={() => setSending(false)}
-          />
-        ) : null}
-        {canWrite && prescription.status === "emitida" ? (
-          <div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setCancelling(true)}
-            >
-              Anular receta
-            </Button>
-          </div>
-        ) : null}
+        <div>
+          <Button type="button" size="sm" variant="outline" onClick={() => setViewing(true)}>
+            Ver
+          </Button>
+        </div>
       </div>
-      <FormDrawer
-        {...cancelSurface}
-        dock={false}
-        open={cancelling}
-        title="Anular receta"
-        description="La receta conserva su contenido original y el motivo de anulación."
-        submitLabel="Anular receta"
-        onClose={() => {
-          if (!cancelSurface.isSubmitting) setCancelling(false)
-        }}
-      >
-        <cancelForm.AppField name="reason">
-          {(field) => <field.TextareaField label="Motivo de anulación" maxLength={MAX_TEXT} />}
-        </cancelForm.AppField>
-      </FormDrawer>
+      {viewing ? (
+        <PrescriptionPaper
+          patientId={patientId}
+          prescription={prescription}
+          onClose={() => setViewing(false)}
+        />
+      ) : null}
     </details>
   )
 }
@@ -962,7 +912,11 @@ export function RecetasPanel({
             const path = ["items", index, "genericName"]
             // Con un peso cualquiera, la revisión de un medicamento solo dice lo suyo.
             if (rules.check([{ genericName: name }], 1).errors.length > 0) {
-              ctx.addIssue({ code: "custom", path, message: "Este medicamento no va en la receta común." })
+              ctx.addIssue({
+                code: "custom",
+                path,
+                message: "Este medicamento no va en la receta común.",
+              })
               return
             }
             if (conflictsOf(name).length === 0) return
@@ -1019,7 +973,9 @@ export function RecetasPanel({
     validators: { onSubmit: schema },
     onSubmit: async ({ value }) => {
       const { rules, conflictsOf } = latest.current
-      const warned = value.items.some((medication) => conflictsOf(medication.genericName.trim()).length > 0)
+      const warned = value.items.some(
+        (medication) => conflictsOf(medication.genericName.trim()).length > 0,
+      )
       const acknowledged = warned && value.overriding && value.allergyOverrideReason.trim() !== ""
       const result = await createMutation.mutateAsync({
         encounterId: encounterId ?? null,
@@ -1069,14 +1025,19 @@ export function RecetasPanel({
   const overriding = useStore(form.store, (state) => state.values.overriding)
   const conflictsByMedication = medications.map((medication) => conflictsOf(medication.genericName))
   const typedWeight = weight.trim() ? Number(weight.replace(",", ".")) : null
-  const ruleCheck = rules.check(medications, typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null)
+  const ruleCheck = rules.check(
+    medications,
+    typedWeight !== null && Number.isFinite(typedWeight) ? typedWeight : null,
+  )
   // Lo contraindicado en el embarazo va como una alergia: se cambia o se receta con motivo.
   const conflicts = [...new Set(conflictsByMedication.flat())]
   const onlyAllergies = ruleCheck.warnings.length === 0
   // El peso del último registro se propone una vez; quien receta lo corrige.
   useEffect(() => {
     if (rules.weight.required && rules.weight.suggested !== null && weight === "")
-      form.setFieldValue("patientWeightKg", String(rules.weight.suggested), { dontUpdateMeta: true })
+      form.setFieldValue("patientWeightKg", String(rules.weight.suggested), {
+        dontUpdateMeta: true,
+      })
   }, [rules.weight.required, rules.weight.suggested, weight, form])
 
   const rows = (list.data?.data ?? []).filter(
@@ -1130,10 +1091,18 @@ export function RecetasPanel({
                   )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].brandName`}>
-                  {(field) => <field.TextField label="Nombre comercial (opcional)" maxLength={MAX_TITLE} />}
+                  {(field) => (
+                    <field.TextField label="Nombre comercial (opcional)" maxLength={MAX_TITLE} />
+                  )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].strength`}>
-                  {(field) => <field.TextField label="Concentración" maxLength={60} placeholder="Ej.: 500 mg" />}
+                  {(field) => (
+                    <field.TextField
+                      label="Concentración"
+                      maxLength={60}
+                      placeholder="Ej.: 500 mg"
+                    />
+                  )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].dosageForm`}>
                   {() => (
@@ -1148,7 +1117,13 @@ export function RecetasPanel({
                   )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].dose`}>
-                  {(field) => <field.TextField label="Dosis" maxLength={MAX_TITLE} placeholder="Ej.: 1 tableta" />}
+                  {(field) => (
+                    <field.TextField
+                      label="Dosis"
+                      maxLength={MAX_TITLE}
+                      placeholder="Ej.: 1 tableta"
+                    />
+                  )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].route`}>
                   {() => (
@@ -1168,7 +1143,9 @@ export function RecetasPanel({
                   {(field) => <field.TextField label="Duración" maxLength={MAX_TITLE} />}
                 </form.AppField>
                 <form.AppField name={`items[${index}].quantity`}>
-                  {(field) => <field.TextField label="Cantidad total" inputMode="numeric" maxLength={4} />}
+                  {(field) => (
+                    <field.TextField label="Cantidad total" inputMode="numeric" maxLength={4} />
+                  )}
                 </form.AppField>
                 <form.AppField name={`items[${index}].instructions`}>
                   {(field) => <field.TextField label="Instrucciones" maxLength={MAX_TEXT} />}
@@ -1218,7 +1195,9 @@ export function RecetasPanel({
                   inputMode="decimal"
                   maxLength={5}
                   value={field.state.value}
-                  onChange={(event) => field.handleChange(event.target.value.replace(/[^\d.,]/g, ""))}
+                  onChange={(event) =>
+                    field.handleChange(event.target.value.replace(/[^\d.,]/g, ""))
+                  }
                 />
               )}
             </field.Control>
@@ -1226,7 +1205,10 @@ export function RecetasPanel({
         </form.AppField>
       ) : null}
       {ruleCheck.errors.length > 0 ? (
-        <div role="alert" className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+        <div
+          role="alert"
+          className="flex flex-col gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm"
+        >
           <p className="font-medium">No se puede emitir así</p>
           <ul className="list-disc pl-5">
             {ruleCheck.errors.map((line) => (
@@ -1236,7 +1218,10 @@ export function RecetasPanel({
         </div>
       ) : null}
       {ruleCheck.reminders.length > 0 ? (
-        <div role="note" className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+        <div
+          role="note"
+          className="flex flex-col gap-1 rounded-md border border-warning/40 bg-warning/5 p-3 text-sm"
+        >
           {ruleCheck.reminders.map((line) => (
             <p key={line}>{line}</p>
           ))}
@@ -1368,11 +1353,7 @@ export function RecetasPanel({
           </p>
         </div>
         {canWrite && allowCreate ? (
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => setCreateOpen(true)}
-          >
+          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
             Emitir receta
           </Button>
         ) : null}

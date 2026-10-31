@@ -19,31 +19,37 @@ import type { Db } from "@odentia/db"
 import { patientDocument } from "@odentia/db/schema/clinical"
 import { auditEvent, orgProfile } from "@odentia/db/schema/org"
 import { and, eq, isNull, sql } from "drizzle-orm"
-import { PDFDocument, StandardFonts } from "pdf-lib"
 import { getConsentPrint, getOrderPrint } from "./clinical-forms.js"
+import {
+  ORDER_KIND_WORDS,
+  renderMedicalLeavePdf,
+  renderOrderPdf,
+  renderPrescriptionPdf,
+} from "./clinical-papers.js"
+import { renderConsentPaperPdf, renderConsentPdf } from "./consent-pdf.js"
+import { type CheckableDocument, documentCheckUrl } from "./document-check.js"
+import { loadDocumentClinic } from "./document-clinic.js"
 import { invalidField, notFound, ServiceError, validation } from "./errors.js"
 import {
-  deliverDocumentPdf,
   type DocumentChannelOption,
+  deliverDocumentPdf,
   documentChannelsFor,
   requireDocumentConnection,
   type SendDeps,
 } from "./financial-documents.js"
-import { NEUTRAL_LOCALE, NEUTRAL_TIMEZONE } from "./locale.js"
-import { requirePatient } from "./patients.js"
-import { MUTED, safe, when, Writer, type Zone } from "./pdf-writer.js"
-import { getPrescriptionPrint } from "./prescriptions.js"
 import { getMedicalLeavePrint } from "./medical-leaves.js"
-import { medicalLeaveWords } from "@odentia/clinical"
-import type { Storage } from "./storage.js"
+import { requirePatient } from "./patients.js"
+import { getPrescriptionPrint } from "./prescriptions.js"
 import { type DecisionRecipient, listDecisionRecipients } from "./responsibilities.js"
+import type { Storage } from "./storage.js"
 import { sendPersonalLink } from "./su-enlace.js"
 
 export const HEALTH_DOCUMENT_TYPES = ["prescription", "order", "consent", "medical_leave"] as const
 export type HealthDocumentType = (typeof HEALTH_DOCUMENT_TYPES)[number]
 
 function assertHealthType(value: string): HealthDocumentType {
-  if ((HEALTH_DOCUMENT_TYPES as readonly string[]).includes(value)) return value as HealthDocumentType
+  if ((HEALTH_DOCUMENT_TYPES as readonly string[]).includes(value))
+    return value as HealthDocumentType
   throw validation("Documento inválido: receta, orden, consentimiento o descanso médico")
 }
 
@@ -55,24 +61,36 @@ export type HealthDocumentRecipient = DecisionRecipient
  * edad y su representante legal vigente. Un menor no lo recibe en su propio
  * chat, y al cumplir 18 deja de recibirlo quien lo representó de niño.
  */
-export function listHealthDocumentRecipients(tx: Db, orgId: string, patientId: string): Promise<HealthDocumentRecipient[]> {
+export function listHealthDocumentRecipients(
+  tx: Db,
+  orgId: string,
+  patientId: string,
+): Promise<HealthDocumentRecipient[]> {
   return listDecisionRecipients(tx, orgId, patientId)
 }
 
 /** WhatsApp primero; sin WhatsApp, el correo. Ningún otro canal lleva papeles de salud. */
 /** Lo que dice la opción de WhatsApp de una receta pasadas las 24 horas. */
-export const RECIPE_BY_LINK = "Pasaron 24 horas: le llega «Su enlace» y descarga la receta en «Tus papeles»"
+export const RECIPE_BY_LINK =
+  "Pasaron 24 horas: le llega «Su enlace» y descarga la receta en «Tus papeles»"
 
 /**
  * Una receta fuera de las 24 horas de WhatsApp no espera a que la persona
  * escriba: sale «Su enlace» (ya aprobado) y la receta queda en «Tus papeles».
  */
 function viaPersonalLink(option: DocumentChannelOption): DocumentChannelOption {
-  if (option.channel !== "whatsapp" || option.usable || !option.reason?.startsWith("Fuera de la ventana")) return option
+  if (
+    option.channel !== "whatsapp" ||
+    option.usable ||
+    !option.reason?.startsWith("Fuera de la ventana")
+  )
+    return option
   return { ...option, usable: true, reason: RECIPE_BY_LINK }
 }
 
-export function proposeHealthChannel<T extends { channel: string; usable: boolean }>(options: T[]): T | null {
+export function proposeHealthChannel<T extends { channel: string; usable: boolean }>(
+  options: T[],
+): T | null {
   return (
     options.find((o) => o.channel === "whatsapp" && o.usable) ??
     options.find((o) => o.channel === "email" && o.usable) ??
@@ -108,12 +126,18 @@ async function loadHealthMeta(
 ): Promise<HealthDocumentMeta> {
   if (type === "prescription") {
     const print = await getPrescriptionPrint(tx, orgId, patientId, documentId)
-    if (print.prescription.status !== "emitida") throw validation("La receta está anulada: no se envía")
-    return { label: `Receta N.º ${print.prescription.prescriptionNumber}`, own: "tu receta", other: "la receta" }
+    if (print.prescription.status !== "emitida")
+      throw validation("La receta está anulada: no se envía")
+    return {
+      label: `Receta N.º ${print.prescription.prescriptionNumber}`,
+      own: "tu receta",
+      other: "la receta",
+    }
   }
   if (type === "medical_leave") {
     const print = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
-    if (print.leave.status !== "emitido") throw validation("El descanso médico está anulado: no se envía")
+    if (print.leave.status !== "emitido")
+      throw validation("El descanso médico está anulado: no se envía")
     return {
       label: `Descanso médico N.º ${print.leave.leaveNumber}`,
       own: "tu descanso médico",
@@ -162,7 +186,8 @@ export async function getHealthDocumentSendOptions(
   const recipients = await listHealthDocumentRecipients(tx, orgId, patientId)
   const document = { type, label: meta.label }
   const recipient =
-    (input.recipientContactId && recipients.find((r) => r.contactId === input.recipientContactId)) ||
+    (input.recipientContactId &&
+      recipients.find((r) => r.contactId === input.recipientContactId)) ||
     recipients.find((r) => r.isDefault) ||
     null
   if (!recipient) {
@@ -194,7 +219,12 @@ export async function getHealthDocumentSendOptions(
     channels,
     proposed,
     document,
-    message: proposeHealthMessage(meta, recipient, person.displayName, profile?.tradeName || profile?.legalName || ""),
+    message: proposeHealthMessage(
+      meta,
+      recipient,
+      person.displayName,
+      profile?.tradeName || profile?.legalName || "",
+    ),
     printOnly: proposed
       ? null
       : `${recipient.displayName} no tiene WhatsApp ni correo por donde enviarlo: solo se puede imprimir`,
@@ -203,184 +233,18 @@ export async function getHealthDocumentSendOptions(
 
 // --- PDF -----------------------------------------------------------------------
 
-export async function newWriter(title: string): Promise<{ pdf: PDFDocument; w: Writer }> {
-  const pdf = await PDFDocument.create()
-  pdf.setTitle(safe(title))
-  pdf.setProducer("odentIA")
-  const w = new Writer(
-    pdf,
-    await pdf.embedFont(StandardFonts.Helvetica),
-    await pdf.embedFont(StandardFonts.HelveticaBold),
-  )
-  return { pdf, w }
-}
-
-export interface Establishment {
-  legalName: string | null
-  tradeName: string | null
-  fiscalDocType: string | null
-  fiscalDocNumber: string | null
-  address: string | null
-  locale?: string | null
-  timezone?: string | null
-}
-
-export function header(w: Writer, establishment: Establishment | null) {
-  if (!establishment) return
-  w.text(establishment.tradeName ?? establishment.legalName ?? "", { size: 12, bold: true })
-  w.text(
-    [
-      establishment.legalName,
-      establishment.fiscalDocNumber &&
-        [establishment.fiscalDocType, establishment.fiscalDocNumber].filter(Boolean).join(" "),
-      establishment.address,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-    { size: 8, color: MUTED },
-  )
-  w.gap()
-}
-
-export function patientLine(person: {
-  displayName: string
-  patientNumber: number
-  docType: string | null
-  docNumber: string | null
-  birthDate: string | null
-}): string {
-  return `Paciente: ${person.displayName} · HC ${String(person.patientNumber).padStart(6, "0")}${
-    person.docNumber ? ` · ${person.docType ?? ""} ${person.docNumber}` : ""
-  }${person.birthDate ? ` · nacimiento ${person.birthDate}` : ""}`
-}
-
-export function zoneOf(establishment: Establishment | null): Zone {
-  return {
-    locale: establishment?.locale || NEUTRAL_LOCALE,
-    timezone: establishment?.timezone || NEUTRAL_TIMEZONE,
-  }
-}
-
-/** PDF de la receta: lo mismo que su hoja impresa. */
-export async function renderPrescriptionPdf(data: Awaited<ReturnType<typeof getPrescriptionPrint>>) {
-  const { prescription: rx, patient: person, establishment } = data
-  const zone = zoneOf(establishment)
-  const { pdf, w } = await newWriter(`Receta ${rx.prescriptionNumber}`)
-  header(w, establishment)
-  w.text("RECETA", { size: 9, bold: true, color: MUTED })
-  w.text(`Receta N.º ${rx.prescriptionNumber}`, { size: 15, bold: true })
-  w.text(`Emitida ${when(rx.issuedAt, zone)}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(patientLine(person))
-  // El peso con que se recetó (latidIA, a un menor de 12 años).
-  if (rx.patientWeightKg) w.text(`Peso: ${Number(rx.patientWeightKg)} kg`)
-  if (rx.diagnosisCode) w.text(`Diagnóstico: ${rx.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-  w.heading("Medicamentos")
-  for (const item of rx.items) {
-    w.text(
-      `${item.genericName ?? item.medicationName}${item.strength ? ` ${item.strength}` : ""}${
-        item.dosageForm ? ` · ${item.dosageForm}` : ""
-      }${item.brandName ? ` (${item.brandName})` : ""}`,
-      { bold: true },
-    )
-    w.text(
-      `${item.dose} · vía ${item.route} · ${item.frequency} · ${item.duration}${
-        item.quantity ? ` · cantidad ${item.quantity}` : ""
-      }`,
-      { indent: 10 },
-    )
-    if (item.instructions) w.text(item.instructions, { indent: 10 })
-  }
-  if (rx.notes) {
-    w.heading("Indicaciones")
-    w.text(rx.notes)
-  }
-  if (rx.validUntil) w.text(`Válida hasta ${rx.validUntil}`, { size: 9 })
-  w.gap(14)
-  w.text(
-    `${rx.prescriberName ?? "-"}${rx.prescriberTitle ? ` · ${rx.prescriberTitle}` : ""}${
-      rx.prescriberRegistration ? ` · ${rx.prescriberRegistration}` : ""
-    }`,
-    { size: 9, bold: true },
-  )
-  w.text("Firma con su perfil profesional.", { size: 8, color: MUTED })
-  return pdf.save({ useObjectStreams: false })
-}
-
-const ORDER_KIND_WORDS: Record<string, string> = {
-  imagen: "Orden de imagen",
-  laboratorio: "Orden de laboratorio",
-  interconsulta: "Derivación",
-}
-
-/** PDF de la orden: lo mismo que su hoja impresa. */
-export async function renderOrderPdf(data: Awaited<ReturnType<typeof getOrderPrint>>) {
-  const { order, patient: person, establishment, requestedBy } = data
-  const zone = zoneOf(establishment)
-  const kind = ORDER_KIND_WORDS[order.kind] ?? "Orden"
-  const { pdf, w } = await newWriter(`${kind} · ${order.title}`)
-  header(w, establishment)
-  w.text(kind.toUpperCase(), { size: 9, bold: true, color: MUTED })
-  w.text(order.title, { size: 15, bold: true })
-  w.text(`Pedida ${when(order.createdAt, zone)}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(patientLine(person))
-  w.text(`Para: ${order.recipient}`)
-  if (order.diagnosisCode) w.text(`Diagnóstico: ${order.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-  if (order.detail) {
-    w.heading("Detalle")
-    w.text(order.detail)
-  }
-  w.gap(14)
-  if (requestedBy) {
-    w.text(
-      `${requestedBy.name}${requestedBy.title ? ` · ${requestedBy.title}` : ""}${
-        requestedBy.registration ? ` · ${requestedBy.registration}` : ""
-      }`,
-      { size: 9, bold: true },
-    )
-    w.text("Pide con su perfil profesional.", { size: 8, color: MUTED })
-  }
-  return pdf.save({ useObjectStreams: false })
+const CHECK_TYPE: Record<HealthDocumentType, CheckableDocument> = {
+  prescription: "prescription",
+  order: "order",
+  medical_leave: "medical_leave",
+  consent: "consent",
 }
 
 /**
- * PDF del descanso médico: lo mismo que su hoja impresa. Un documento propio,
- * sin el formato oficial de ningún país (issue 229, decisión 8); el
- * diagnóstico va solo si la persona lo autorizó.
- */
-export async function renderMedicalLeavePdf(data: Awaited<ReturnType<typeof getMedicalLeavePrint>>) {
-  const { leave, patient: person, establishment } = data
-  const zone = zoneOf(establishment)
-  const { pdf, w } = await newWriter(`Descanso médico ${leave.leaveNumber}`)
-  header(w, establishment)
-  w.text("DESCANSO MÉDICO", { size: 9, bold: true, color: MUTED })
-  w.text(`Constancia N.º ${leave.leaveNumber}`, { size: 15, bold: true })
-  w.text(`Emitida ${when(leave.issuedAt, zone)}`, { size: 8, color: MUTED })
-  w.gap()
-  w.text(patientLine(person))
-  w.gap(6)
-  w.text(`Se indican ${medicalLeaveWords(leave.startsOn, leave.days)}.`, { bold: true })
-  if (leave.showDiagnosis && leave.diagnosisCode)
-    w.text(`Diagnóstico: ${leave.diagnosisCode} ${data.diagnosisDescription ?? ""}`.trim())
-  if (leave.notes) {
-    w.heading("Indicaciones")
-    w.text(leave.notes)
-  }
-  w.gap(14)
-  w.text(
-    `${leave.signerName ?? "-"}${leave.signerTitle ? ` · ${leave.signerTitle}` : ""}${
-      leave.signerRegistration ? ` · ${leave.signerRegistration}` : ""
-    }`,
-    { size: 9, bold: true },
-  )
-  w.text("Firma con su perfil profesional.", { size: 8, color: MUTED })
-  return pdf.save({ useObjectStreams: false })
-}
-
-/**
- * El PDF de un papel de salud, para enviarlo; imprimir usa su hoja en
- * pantalla. Receta y orden se generan; el consentimiento es el guardado.
+ * El PDF de un papel de salud: el mismo para enviarlo, para «Tus papeles» y para
+ * que el equipo lo vea. Receta, orden y descanso se generan, con su sello si se
+ * anularon (enviarlos sigue prohibido: `loadHealthMeta`). El consentimiento firmado
+ * es el guardado, el de la huella; el pendiente es la hoja para firmar en papel.
  */
 export async function renderHealthDocumentPdf(
   tx: Db,
@@ -390,11 +254,17 @@ export async function renderHealthDocumentPdf(
   documentId: string,
   /** Para leer el consentimiento guardado; receta y orden no lo usan. */
   storage: Pick<Storage, "getAttachment"> = {},
+  /** Para verlo el equipo: lo que no tiene PDF guardado se genera al vuelo, sin guardarlo. */
+  options: { viewing?: boolean } = {},
 ): Promise<{ bytes: Uint8Array; filename: string; label: string }> {
+  const context = async () => ({
+    clinic: await loadDocumentClinic(tx, orgId),
+    checkUrl: await documentCheckUrl(tx, orgId, CHECK_TYPE[type], documentId),
+  })
   if (type === "prescription") {
     const data = await getPrescriptionPrint(tx, orgId, patientId, documentId)
     return {
-      bytes: await renderPrescriptionPdf(data),
+      bytes: await renderPrescriptionPdf(data, await context()),
       filename: `Receta-${data.prescription.prescriptionNumber}.pdf`,
       label: `Receta N.º ${data.prescription.prescriptionNumber}`,
     }
@@ -402,7 +272,7 @@ export async function renderHealthDocumentPdf(
   if (type === "medical_leave") {
     const data = await getMedicalLeavePrint(tx, orgId, patientId, documentId)
     return {
-      bytes: await renderMedicalLeavePdf(data),
+      bytes: await renderMedicalLeavePdf(data, await context()),
       filename: `Descanso-medico-${data.leave.leaveNumber}.pdf`,
       label: `Descanso médico N.º ${data.leave.leaveNumber}`,
     }
@@ -411,7 +281,7 @@ export async function renderHealthDocumentPdf(
     const data = await getOrderPrint(tx, orgId, documentId)
     if (data.order.patientId !== patientId) throw notFound("Orden")
     return {
-      bytes: await renderOrderPdf(data),
+      bytes: await renderOrderPdf(data, await context()),
       filename: `Orden-${data.order.title}.pdf`,
       label: `${ORDER_KIND_WORDS[data.order.kind] ?? "Orden"} · ${data.order.title}`,
     }
@@ -419,19 +289,50 @@ export async function renderHealthDocumentPdf(
   const data = await getConsentPrint(tx, orgId, documentId)
   if (data.document.patientId !== patientId) throw notFound("Consentimiento")
   const doc = data.document
+  if (doc.status === "pendiente") {
+    return {
+      bytes: await renderConsentPaperPdf(data, await loadDocumentClinic(tx, orgId)),
+      filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+      label: `Consentimiento · ${doc.titleSnapshot}`,
+    }
+  }
+  const named = {
+    filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
+    label: `Consentimiento · ${doc.titleSnapshot}`,
+  }
+  // Revocado, el que se ve es el de la revocación: dice que ya no vale.
+  const revoked = options.viewing && doc.status === "revocado"
+  const storedId = revoked ? (doc.revokePdfDocumentId ?? null) : doc.pdfDocumentId
+  const storedSha = revoked ? (doc.revokePdfSha256 ?? null) : doc.pdfSha256
+  if (options.viewing && (!storedId || !storedSha)) {
+    // Un anulado nunca tuvo PDF; un firmado cuyo guardado falló no traba a quien lo abre.
+    const clinic = await loadDocumentClinic(tx, orgId)
+    return { ...named, bytes: await renderConsentPdf(data, clinic) }
+  }
   // Se envía el PDF que se guardó al firmar, no uno nuevo: es el de la huella (#47).
-  if (!doc.pdfDocumentId || !doc.pdfSha256)
-    throw new ServiceError("CONSENT_PDF_MISSING", 409, "El consentimiento aún no tiene su PDF guardado")
-  if (!storage.getAttachment) throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo leer el PDF guardado")
+  if (!storedId || !storedSha)
+    throw new ServiceError(
+      "CONSENT_PDF_MISSING",
+      409,
+      "El consentimiento aún no tiene su PDF guardado",
+    )
+  if (!storage.getAttachment)
+    throw new ServiceError("STORAGE_UNAVAILABLE", 503, "No se pudo leer el PDF guardado")
   const [file] = await tx
     .select({ storageKey: patientDocument.storageKey })
     .from(patientDocument)
-    .where(and(eq(patientDocument.id, doc.pdfDocumentId), eq(patientDocument.organizationId, orgId)))
+    .where(
+      and(eq(patientDocument.id, storedId), eq(patientDocument.organizationId, orgId)),
+    )
     .limit(1)
   if (!file) throw notFound("PDF del consentimiento")
   const bytes = await storage.getAttachment(file.storageKey)
-  if (createHash("sha256").update(bytes).digest("hex") !== doc.pdfSha256)
-    throw new ServiceError("CONSENT_PDF_ALTERED", 409, "El PDF guardado no coincide con su huella: no se envía")
+  if (createHash("sha256").update(bytes).digest("hex") !== storedSha)
+    throw new ServiceError(
+      "CONSENT_PDF_ALTERED",
+      409,
+      "El PDF guardado no coincide con su huella: no se envía",
+    )
   return {
     bytes,
     filename: `Consentimiento-${doc.titleSnapshot}.pdf`,
@@ -496,7 +397,11 @@ export async function sendHealthDocument(
         recipientName?: string
       }
       if (sent.documentId !== input.documentId)
-        throw new ServiceError("REQUEST_ID_CONFLICT", 409, "Esa clave de envío ya se usó con otro documento")
+        throw new ServiceError(
+          "REQUEST_ID_CONFLICT",
+          409,
+          "Esa clave de envío ya se usó con otro documento",
+        )
       return {
         conversationId: sent.conversationId ?? "",
         messageId: previous.entityId ?? "",
@@ -513,7 +418,9 @@ export async function sendHealthDocument(
     : recipients.find((r) => r.isDefault)
   if (!recipient) {
     const message = "Un papel de salud solo se envía a la propia persona o a su representante legal"
-    throw new ServiceError("DOCUMENT_RECIPIENT_NOT_AUTHORIZED", 403, message, { recipientContactId: message })
+    throw new ServiceError("DOCUMENT_RECIPIENT_NOT_AUTHORIZED", 403, message, {
+      recipientContactId: message,
+    })
   }
   const conn = await requireDocumentConnection(tx, orgId, input.connectionId)
   if (conn.channel !== "whatsapp" && conn.channel !== "email")
@@ -558,9 +465,17 @@ export async function sendHealthDocument(
       }
     }
   }
-  const rendered = await renderHealthDocumentPdf(tx, orgId, input.patientId, type, input.documentId, deps.storage)
+  const rendered = await renderHealthDocumentPdf(
+    tx,
+    orgId,
+    input.patientId,
+    type,
+    input.documentId,
+    deps.storage,
+  )
   const message = input.message?.trim()
-  if (message && message.length > 500) throw invalidField("message", "El mensaje admite hasta 500 caracteres")
+  if (message && message.length > 500)
+    throw invalidField("message", "El mensaje admite hasta 500 caracteres")
   const person = await requirePatient(tx, orgId, input.patientId)
   const [profile] = await tx
     .select({ tradeName: orgProfile.tradeName, legalName: orgProfile.legalName })

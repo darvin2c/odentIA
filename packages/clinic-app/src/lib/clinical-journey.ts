@@ -8,12 +8,20 @@
  */
 
 import type { FollowUpStatus, ResponsibilityKind } from "@odentia/clinical"
+import { dayMinutesIn, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import type { AppointmentStatus } from "./agenda"
 import { apiFetch } from "./api"
 import type { BudgetLine, BudgetWithTotals } from "./budgets"
-import type { Encounter, PatientDocument, PlanItem, ProcedureItem, SiteFinding, TreatmentNextAction, TreatmentPlan } from "./patients"
-import { dayMinutesIn, minutesToInstant, zonedDateOf } from "@odentia/ui-patterns"
 import { activeOrgLocale, activeOrgTimeZone } from "./locale"
+import type {
+  Encounter,
+  PatientDocument,
+  PlanItem,
+  ProcedureItem,
+  SiteFinding,
+  TreatmentNextAction,
+  TreatmentPlan,
+} from "./patients"
 
 const base = (patientId: string) => `/api/patients/${patientId}`
 
@@ -229,7 +237,10 @@ export function completeFollowUpApi(
 }
 
 /** «Dejar de repetir»: el control sigue en pie; al completarlo ya no deja otro. */
-export function stopFollowUpRepeatApi(patientId: string, followUpId: string): Promise<{ data: FollowUp }> {
+export function stopFollowUpRepeatApi(
+  patientId: string,
+  followUpId: string,
+): Promise<{ data: FollowUp }> {
   return apiFetch<{ data: FollowUp }>(`${base(patientId)}/follow-ups/${followUpId}/stop-repeat`, {
     method: "POST",
     body: JSON.stringify({}),
@@ -295,32 +306,6 @@ export interface Prescription {
   prescriberTitle?: string | null
   prescriberRegistration?: string | null
   items?: PrescriptionItem[]
-}
-
-/** Datos de la hoja impresa de una receta. */
-export interface PrescriptionPrint {
-  prescription: Prescription
-  diagnosisDescription: string | null
-  patient: {
-    displayName: string
-    patientNumber: number
-    docType: string | null
-    docNumber: string | null
-    birthDate: string | null
-  }
-  establishment: {
-    legalName: string
-    tradeName: string | null
-    fiscalDocType: string | null
-    fiscalDocNumber: string | null
-    address: string | null
-  } | null
-}
-
-export function fetchPrescriptionPrint(patientId: string, prescriptionId: string) {
-  return apiFetch<{ data: PrescriptionPrint }>(
-    `${base(patientId)}/prescriptions/${prescriptionId}/print`,
-  )
 }
 
 export interface PrescriptionMedicationBody {

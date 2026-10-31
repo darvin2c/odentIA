@@ -42,3 +42,9 @@ it("una dirección que cambió de sitio sigue existiendo, igual que su destino",
 it("latidIA no trae las páginas del odontograma", () => {
   expect(routes.some((route) => route.id.includes("odontogram"))).toBe(false)
 })
+
+it("comprobar un documento es público: cuelga de la raíz, fuera de la clínica", () => {
+  const route = routes.find((row) => row.id === "/comprobar/$token")
+  expect(route?.parentId).toBeNull()
+  expect(route?.file).toContain("routes/public/comprobar.$token")
+})

@@ -1,10 +1,8 @@
-import { appWords } from "../../lib/product-words"
 import { diagnosisCodeLabel } from "@odentia/clinical"
-import { Badge, Button, buttonVariants, Input, toast } from "@odentia/ui"
-import { FormDrawer, RowActions, useAppForm, useFormSurface } from "@odentia/ui-patterns"
+import { Badge, Button, Input, toast } from "@odentia/ui"
+import { FormDrawer, useAppForm, useFormSurface } from "@odentia/ui-patterns"
 import { useStore } from "@tanstack/react-form"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 import { z } from "zod"
 import {
@@ -19,44 +17,26 @@ import {
 } from "../../lib/clinical-forms"
 import { useMyUserId, useOrgMembers } from "../../lib/crm"
 import { uploadPatientFile } from "../../lib/encounter-documents"
+import { appWords } from "../../lib/product-words"
 import { DiagnosisSearch } from "./diagnosis-search"
-import { HealthDocumentSendDrawer } from "./health-document-send"
 
-function statusVariant(status: ClinicalOrder["status"]): "default" | "secondary" | "success" | "destructive" {
+function statusVariant(
+  status: ClinicalOrder["status"],
+): "default" | "secondary" | "success" | "destructive" {
   if (status === "completado") return "success"
   if (status === "cancelado") return "destructive"
   if (status === "en_proceso") return "default"
   return "secondary"
 }
 
-/**
- * Una orden en una fila: qué es, para quién, su estado y su única acción
- * («Imprimir»); lo demás (enviar, subir el resultado, cancelar) va en el menú.
- */
+/** Una orden en una fila: qué es, para quién, su estado y su única acción, «Ver». */
 export function OrderRow({
   order,
-  canWrite,
-  onChanged,
+  onView,
 }: {
   order: ClinicalOrder
-  canWrite: boolean
-  onChanged: () => void
+  onView: () => void
 }): React.JSX.Element {
-  const [sending, setSending] = useState(false)
-  const [resultOpen, setResultOpen] = useState(false)
-  const [cancelOpen, setCancelOpen] = useState(false)
-  const open = order.status === "solicitado" || order.status === "en_proceso"
-  const items = [
-    ...(order.status !== "cancelado"
-      ? [{ key: "send", label: "Enviar a la persona", onSelect: () => setSending(true) }]
-      : []),
-    ...(canWrite && open
-      ? [
-          { key: "result", label: "Subir el resultado", onSelect: () => setResultOpen(true) },
-          { key: "cancel", label: "Cancelar…", tone: "danger" as const, onSelect: () => setCancelOpen(true) },
-        ]
-      : []),
-  ]
   return (
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="flex min-w-0 flex-col">
@@ -65,50 +45,25 @@ export function OrderRow({
         </p>
         <p className="text-sm text-muted-foreground">
           {ORDER_STATUS_LABELS[order.status]}
-          {order.diagnosisCode ? ` · ${diagnosisCodeLabel(order.diagnosisSystem, order.diagnosisCode)}` : ""} · para {order.recipient}
+          {order.diagnosisCode
+            ? ` · ${diagnosisCodeLabel(order.diagnosisSystem, order.diagnosisCode)}`
+            : ""}{" "}
+          · para {order.recipient}
           {order.detail ? ` · ${order.detail}` : ""}
         </p>
-        {order.status === "completado" && order.resultText ? (
-          <p className="mt-1 text-sm">
-            <strong>Resultado:</strong> {order.resultText}
-          </p>
-        ) : null}
-        {order.status === "completado" && order.resultDocumentId ? (
-          <p className="text-xs text-muted-foreground">El resultado quedó en Documentos.</p>
-        ) : null}
-        {order.status === "cancelado" && order.cancelReason ? (
-          <p className="text-xs text-muted-foreground">Cancelada: {order.cancelReason}</p>
-        ) : null}
       </div>
       <div className="flex items-center gap-1">
         <Badge variant={statusVariant(order.status)}>{ORDER_STATUS_LABELS[order.status]}</Badge>
-        {order.status !== "cancelado" ? (
-          <Link
-            to="/patients/$patientId/orders/$orderId/print"
-            params={{ patientId: order.patientId, orderId: order.id }}
-            target="_blank"
-            className={buttonVariants({ size: "sm", variant: "outline" })}
-          >
-            Imprimir
-          </Link>
-        ) : null}
-        {items.length > 0 ? <RowActions label={`Acciones de ${order.title}`} items={items} /> : null}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          aria-label={`Ver ${order.title}`}
+          onClick={onView}
+        >
+          Ver
+        </Button>
       </div>
-      {sending ? (
-        <HealthDocumentSendDrawer
-          open
-          patientId={order.patientId}
-          documentType="order"
-          documentId={order.id}
-          onClose={() => setSending(false)}
-        />
-      ) : null}
-      {resultOpen ? (
-        <OrderResultDrawer order={order} onClose={() => setResultOpen(false)} onSaved={onChanged} />
-      ) : null}
-      {cancelOpen ? (
-        <OrderCancelDrawer order={order} onClose={() => setCancelOpen(false)} onSaved={onChanged} />
-      ) : null}
     </div>
   )
 }
@@ -121,7 +76,11 @@ const resultSchema = z
   })
   .superRefine((value, ctx) => {
     if (!value.file && !value.text.trim())
-      ctx.addIssue({ code: "custom", path: ["file"], message: "Sube el archivo o escribe el resultado" })
+      ctx.addIssue({
+        code: "custom",
+        path: ["file"],
+        message: "Sube el archivo o escribe el resultado",
+      })
   })
 
 export function OrderResultDrawer({
@@ -162,7 +121,9 @@ export function OrderResultDrawer({
       onClose()
     },
   })
-  const surface = useFormSurface(form, { fieldMap: { resultDocumentId: "file", resultText: "text" } })
+  const surface = useFormSurface(form, {
+    fieldMap: { resultDocumentId: "file", resultText: "text" },
+  })
   return (
     <FormDrawer
       {...surface}
@@ -177,7 +138,10 @@ export function OrderResultDrawer({
       <div className="flex flex-col gap-4">
         <form.AppField name="file">
           {(field) => (
-            <field.Control label="Archivo del resultado" description="Queda en Documentos, unido a esta orden.">
+            <field.Control
+              label="Archivo del resultado"
+              description="Queda en Documentos, unido a esta orden."
+            >
               {(control) => (
                 <Input
                   {...control.props}
@@ -190,7 +154,9 @@ export function OrderResultDrawer({
           )}
         </form.AppField>
         <form.AppField name="text">
-          {(field) => <field.TextareaField label="Resultado escrito (opcional)" rows={3} maxLength={10000} />}
+          {(field) => (
+            <field.TextareaField label="Resultado escrito (opcional)" rows={3} maxLength={10000} />
+          )}
         </form.AppField>
       </div>
     </FormDrawer>
@@ -198,10 +164,14 @@ export function OrderResultDrawer({
 }
 
 const cancelSchema = z.object({
-  reason: z.string().trim().min(1, "Escribe el motivo").max(2000, "Escribe como mucho 2000 caracteres."),
+  reason: z
+    .string()
+    .trim()
+    .min(1, "Escribe el motivo")
+    .max(2000, "Escribe como mucho 2000 caracteres."),
 })
 
-function OrderCancelDrawer({
+export function OrderCancelDrawer({
   order,
   onClose,
   onSaved,
@@ -268,7 +238,11 @@ interface NewOrderValues {
 const newOrderSchema = z
   .object({
     kind: z.custom<ClinicalOrderKind>(),
-    title: z.string().trim().min(1, "Escribe qué se pide").max(200, "Escribe como mucho 200 caracteres."),
+    title: z
+      .string()
+      .trim()
+      .min(1, "Escribe qué se pide")
+      .max(200, "Escribe como mucho 200 caracteres."),
     colleagueId: z.string(),
     recipient: z.string().trim().max(200, "Escribe como mucho 200 caracteres."),
     diagnosisCode: z.string(),
@@ -278,7 +252,11 @@ const newOrderSchema = z
   })
   .superRefine((value, ctx) => {
     if (!(value.kind === "interconsulta" && value.colleagueId) && !value.recipient.trim())
-      ctx.addIssue({ code: "custom", path: ["recipient"], message: "Indica para quién es la orden" })
+      ctx.addIssue({
+        code: "custom",
+        path: ["recipient"],
+        message: "Indica para quién es la orden",
+      })
   })
 
 /** El ejemplo de cada orden, con lo que se pide en el producto de la app. */
@@ -292,8 +270,8 @@ function kindPlaceholder(kind: ClinicalOrderKind): string {
 /**
  * Nueva orden: tipo, qué se pide, para quién (un centro, un laboratorio, otro
  * profesional o un colega de la clínica) y el diagnóstico que la motiva, que
- * desde la atención viene puesto. «Crear y entregar» termina en imprimir o
- * enviar.
+ * desde la atención viene puesto. Al crearla, quien la pidió abre su papel, con
+ * «Enviar» e «Imprimir».
  */
 export function NewOrderDrawer({
   open,
@@ -317,8 +295,6 @@ export function NewOrderDrawer({
 }): React.JSX.Element {
   const myUserId = useMyUserId()
   const members = useOrgMembers()
-  const [created, setCreated] = useState<ClinicalOrder | null>(null)
-  const [sending, setSending] = useState(false)
 
   const specialtiesQuery = useQuery({
     queryKey: ["specialties-active"],
@@ -359,9 +335,11 @@ export function NewOrderDrawer({
         diagnosisSystem: value.diagnosisCode ? value.diagnosisSystem : null,
       })
       toast.success(
-        result.data.recipientUserId ? `Orden creada: ${result.data.recipient} recibió la tarea` : "Orden creada",
+        result.data.recipientUserId
+          ? `Orden creada: ${result.data.recipient} recibió la tarea`
+          : "Orden creada",
       )
-      setCreated(result.data)
+      onCreated(result.data)
     },
   })
   const surface = useFormSurface(form, { fieldMap: { recipientUserId: "colleagueId" } })
@@ -369,53 +347,8 @@ export function NewOrderDrawer({
   const colleagueId = useStore(form.store, (state) => state.values.colleagueId)
   const diagnosisSystem = useStore(form.store, (state) => state.values.diagnosisSystem)
 
-  if (created) {
-    return (
-      <>
-        <FormDrawer
-          open={open && !sending}
-          onClose={() => onCreated(created)}
-          title="Entregar la orden"
-          description={`${ORDER_KIND_TITLES[created.kind]} · ${created.title}`}
-          hideSubmit
-          cancelLabel="Listo"
-          onSubmit={(event) => event.preventDefault()}
-        >
-          <div className="flex flex-col gap-3">
-            <p className="text-sm">Imprímela para entregarla en mano o envíasela a la persona.</p>
-            <div className="flex flex-wrap gap-2">
-              <Link
-                to="/patients/$patientId/orders/$orderId/print"
-                params={{ patientId, orderId: created.id }}
-                target="_blank"
-                className={buttonVariants({ variant: "default" })}
-              >
-                Imprimir
-              </Link>
-              <Button type="button" variant="outline" onClick={() => setSending(true)}>
-                Enviar a la persona
-              </Button>
-            </div>
-          </div>
-        </FormDrawer>
-        {sending ? (
-          <HealthDocumentSendDrawer
-            open
-            patientId={patientId}
-            documentType="order"
-            documentId={created.id}
-            onClose={() => {
-              setSending(false)
-              onCreated(created)
-            }}
-          />
-        ) : null}
-      </>
-    )
-  }
-
   return (
-    <FormDrawer {...surface} open={open} onClose={onClose} title="Nueva orden" submitLabel="Crear y entregar">
+    <FormDrawer {...surface} open={open} onClose={onClose} title="Nueva orden" submitLabel="Crear">
       <div className="flex flex-col gap-4">
         <form.AppField
           name="kind"
@@ -429,7 +362,13 @@ export function NewOrderDrawer({
           )}
         </form.AppField>
         <form.AppField name="title">
-          {(field) => <field.TextField label="Qué se pide" maxLength={200} placeholder={kindPlaceholder(kind)} />}
+          {(field) => (
+            <field.TextField
+              label="Qué se pide"
+              maxLength={200}
+              placeholder={kindPlaceholder(kind)}
+            />
+          )}
         </form.AppField>
         {kind === "interconsulta" && colleagues.length > 0 ? (
           <form.AppField name="colleagueId">
@@ -490,7 +429,10 @@ export function NewOrderDrawer({
                 placeholder="Sin especialidad"
                 options={[
                   { value: "", label: "Sin especialidad" },
-                  ...(specialtiesQuery.data?.data ?? []).map((s) => ({ value: s.id, label: s.name })),
+                  ...(specialtiesQuery.data?.data ?? []).map((s) => ({
+                    value: s.id,
+                    label: s.name,
+                  })),
                 ]}
               />
             )}
