@@ -64,6 +64,16 @@ describe("en qué está una conversación abierta", () => {
     expect(conversationWords(open({ agentAttending: true, teamLive: true }))?.text).toBe("Conversa alguien del equipo · Sofi espera")
   })
 
+  it("lo que no salió pide a una persona: no dice que la atiende el agente ni que espera al paciente", () => {
+    const failed = { text: "No se pudo enviar", tone: "team" }
+    expect(conversationWords(open({ sendFailed: true, agentAttending: true }))).toEqual(failed)
+    expect(conversationWords(open({ sendFailed: true, agentAttending: true, pendingContact: 1 }))).toEqual(failed)
+    // Un tema va antes: es lo que alguien tiene que contestar.
+    expect(conversationWords(open({ sendFailed: true, handoffPriority: "alta" }))).toEqual({ text: "Te lo pasó Sofi · Ahora", tone: "urgent" })
+    // Cerrada no pide nada.
+    expect(conversationWords({ ...open({ sendFailed: true }), status: "closed" })).toEqual({ text: "Cerrada", tone: "closed" })
+  })
+
   it("lo que espera al paciente dice si hay una cita propuesta o cuándo se le recordó", () => {
     expect(conversationWords(open({ pendingContact: 1, agentAttending: true }))).toEqual({
       text: "Espera al paciente · cita propuesta",

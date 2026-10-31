@@ -6,6 +6,7 @@ import {
   agentAttendingSql,
   awaitingPatientSinceSql,
   type ConversationView,
+  lastIsFailedOutSql,
   teamLiveSql,
   unansweredSql,
 } from "./conversation-state.js"
@@ -37,6 +38,8 @@ export interface ConversationAttention {
   handoffPriority: HandoffPriorityLevel | null
   /** Espera respuesta de la clínica: la misma regla que la vista `unanswered`. */
   unanswered: boolean
+  /** El último mensaje del hilo no salió: pide a una persona aunque el agente la atienda (`needsPersonSql`). */
+  sendFailed: boolean
   /**
    * Se espera al paciente desde este momento: abierta, lo último es un
    * saliente aceptado y no hay derivación abierta. Nulo si no.
@@ -112,6 +115,7 @@ const NO_ATTENTION: ConversationAttention = {
   pendingContact: 0,
   handoffPriority: null,
   unanswered: false,
+  sendFailed: false,
   awaitingPatientSince: null,
   nudgedAt: null,
   assignedName: null,
@@ -144,6 +148,7 @@ async function conversationAttention(
     id: string
     agent_attending: boolean
     unanswered: boolean
+    send_failed: boolean
     awaiting_since: Date | string | null
     nudged_at: Date | string | null
     assigned_name: string | null
@@ -154,6 +159,7 @@ async function conversationAttention(
     webchat_contact: string | null
   }>(sql`
     select c.id, ${agentAttendingSql(c)} as agent_attending, ${unansweredSql(c)} as unanswered, ${teamLiveSql(c)} as team_live,
+      (c.status = 'open' and ${lastIsFailedOutSql(c)}) as send_failed,
       ${awaitingPatientSinceSql(c)} as awaiting_since, c.nudged_at,
       ua.name as assigned_name, c.close_reason, c.closed_at, uc.name as closed_by_name,
       (case when cn.provider = 'web_chat' and not c.is_test then c.contact_id end) as webchat_contact
@@ -169,6 +175,7 @@ async function conversationAttention(
       pendingContact: 0,
       handoffPriority: null,
       unanswered: row.unanswered === true,
+      sendFailed: row.send_failed === true,
       awaitingPatientSince: iso(row.awaiting_since),
       nudgedAt: iso(row.nudged_at),
       assignedName: row.assigned_name,
@@ -317,7 +324,7 @@ export async function getInboxConversationDetail(tx: Db, orgId: string, id: stri
 export interface InboxSummary {
   /** Abiertas con los filtros dados. */
   open: number
-  /** «Por atender»: piden a una persona (un tema o un mensaje que el agente no atiende). */
+  /** «Por atender»: piden a una persona (un tema, un mensaje que el agente no atiende o lo último que no salió). */
   attend: number
   /** Las atiende el agente. */
   agent: number

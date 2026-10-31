@@ -1,9 +1,17 @@
 import { randomUUID } from "node:crypto"
-import { channelAdapters, type OutboundMessage, ProviderRejectedError, ProviderThrottledError } from "@odentia/channels"
+import { channelAdapters, type OutboundMessage, ProviderRejectedError, ProviderThrottledError, WHATSAPP_TOKEN_REJECTED_CODE } from "@odentia/channels"
 import { type Db, type OutboundMessageJob, type QueueMessage, sendOutboundMessage, withOrgContext } from "@odentia/db"
 import { channelConnection, conversation, message } from "@odentia/db/schema/crm"
 import { auditEvent } from "@odentia/db/schema/org"
-import { decryptConfig, isSaasSendBlocked, resolvePersonalLinkRefs, type Storage } from "@odentia/services"
+import {
+  decryptConfig,
+  isSaasSendBlocked,
+  noteSignupTokenProblem,
+  reportSignupTokenFailure,
+  resolvePersonalLinkRefs,
+  SIGNUP_TOKEN_DEAD,
+  type Storage,
+} from "@odentia/services"
 import { and, eq, lt, sql } from "drizzle-orm"
 import { MAX_DELIVERIES } from "./inbound.js"
 export interface SendDeps {
@@ -12,6 +20,33 @@ export interface SendDeps {
   secretsKey: Buffer
   /** mock = sin HTTP (dev/e2e); live = envío real al proveedor. */
   senderMode: "mock" | "live"
+  /** Rol owner, solo para abrir el caso de Soporte de una clave que Meta rechazó. */
+  ownerDb: Db
+}
+
+/** La clave de una conexión hecha con el botón de Facebook, tal como se usó en un envío. */
+interface SignupTokenInUse {
+  connectionId: string
+  token: string
+  expiresAt: string | null
+}
+
+/**
+ * Meta rechazó un envío porque ya no acepta la clave (ADR 0073): la conexión lo
+ * dice y la campana avisa sin esperar la revisión de cada 12 horas, que no cubre
+ * una clave retirada antes de tiempo. En su propia transacción: la del envío ya
+ * se deshizo y el rechazo del mensaje no depende de esto. Si falla, queda esa
+ * revisión. Una conexión ya marcada no repite ni el aviso ni el caso.
+ */
+async function noteRejectedSignupToken(db: Db, deps: SendDeps, orgId: string, used: SignupTokenInUse): Promise<void> {
+  await withOrgContext(db, orgId, (tx) => noteSignupTokenProblem(tx, orgId, used.connectionId, deps.secretsKey, used.token, SIGNUP_TOKEN_DEAD))
+  await reportSignupTokenFailure(deps.ownerDb, {
+    orgId,
+    connectionId: used.connectionId,
+    code: String(WHATSAPP_TOKEN_REJECTED_CODE),
+    detail: "WhatsApp rechazó un envío porque ya no acepta la clave",
+    expiresAt: used.expiresAt,
+  })
 }
 
 async function notify(tx: Db, payload: Record<string, unknown>): Promise<void> {
@@ -134,6 +169,7 @@ export async function processOutbound(
   let providerAttempted = false
   let conversationId: string | null = null
   let waiting = false
+  let signupToken = null as SignupTokenInUse | null
   try {
     await withOrgContext(db, orgId, async (tx) => {
       const [row] = await tx
@@ -197,6 +233,11 @@ export async function processOutbound(
         const config = decryptConfig(deps.secretsKey, row.connection.configEncrypted)
         const adapter = channelAdapters[row.connection.provider as keyof typeof channelAdapters]
         if (!adapter) throw new Error(`Proveedor desconocido: ${row.connection.provider}`)
+        // Solo la del botón y sin marcar: las demás conexiones (la app propia, una demo) no llevan este estado.
+        const token = config["accessToken"]
+        if (row.connection.signup && row.connection.signup.tokenProblem !== SIGNUP_TOKEN_DEAD && typeof token === "string") {
+          signupToken = { connectionId: row.connection.id, token, expiresAt: row.connection.signup.tokenExpiresAt ?? null }
+        }
         providerAttempted = true
         externalId = (await adapter.sendMessage(config, outbound, { fetch: deps.fetch, webhookSecret: row.connection.webhookSecret })).externalId
       }
@@ -254,6 +295,11 @@ export async function processOutbound(
           await notify(tx, { orgId, kind: "message.updated", conversationId, messageId, at: new Date().toISOString() })
         }
       }).catch(() => {})
+      if (signupToken && error instanceof ProviderRejectedError && error.code === WHATSAPP_TOKEN_REJECTED_CODE) {
+        await noteRejectedSignupToken(db, deps, orgId, signupToken).catch((failure: unknown) => {
+          console.error(`worker: no se pudo anotar la clave rechazada (${signupToken?.connectionId})`, failure)
+        })
+      }
       return "done"
     }
     if (msg.read_ct >= MAX_DELIVERIES) {
