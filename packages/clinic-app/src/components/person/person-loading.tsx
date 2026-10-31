@@ -30,13 +30,18 @@ import { PersonSectionSkeleton, SubsectionTabs } from "../skeletons/person-secti
  * toma su nombre al llegar o se va sin haber ofrecido nada.
  */
 
+const PERSON_SHAPE_FRESH_MS = 60_000
+
 /** Lo ya sabido de quien se abre; `null` lo que falta. */
 function useKnownPerson(seesAll: boolean): { pageOf: PersonShape["pageOf"] | null; archived: boolean | null } {
   const queryClient = useQueryClient()
   const { personId, patientId } = useParams({ strict: false }) as { personId?: string; patientId?: string }
   if (personId) {
     const page = queryClient.getQueryData<{ data: PersonPage }>(personQueryKey(personId))?.data
-    const shape = page ? personShapeOf(page) : queryClient.getQueryData<PersonShape>(personShapeKey(personId))
+    // Lo que dijo la lista vale un momento: otra persona del equipo pudo registrarla o archivarla.
+    const listedAt = queryClient.getQueryState(personShapeKey(personId))?.dataUpdatedAt ?? 0
+    const listed = Date.now() - listedAt < PERSON_SHAPE_FRESH_MS ? queryClient.getQueryData<PersonShape>(personShapeKey(personId)) : undefined
+    const shape = page ? personShapeOf(page) : listed
     if (shape) return shape
   }
   // La dirección de una ficha es de un paciente, y quien no lee el CRM solo llega a pacientes.
@@ -58,7 +63,17 @@ export function PeopleLoading() {
 }
 
 /** La sección abierta de la persona, con lo que el rol ve en ella. */
-export function PersonSectionLoading({ section, pageOf = true, unknownKind = false }: { section: PatientSectionId; pageOf?: PageOf; unknownKind?: boolean }) {
+export function PersonSectionLoading({
+  section,
+  pageOf = true,
+  unknownKind = false,
+  archived = false,
+}: {
+  section: PatientSectionId
+  pageOf?: PageOf
+  unknownKind?: boolean
+  archived?: boolean | null
+}) {
   const can = useCan()
   const product = productUi()
   const clinicalSummary = clinicalSummaryFor(can, pageOf)
@@ -70,6 +85,8 @@ export function PersonSectionLoading({ section, pageOf = true, unknownKind = fal
       placeLabel={product.site?.placeLabel}
       budgetOptional={!product.plan.budgetRequired}
       own={product.record.sections.find((item) => item.id === section)?.skeleton}
+      patient={unknownKind ? null : pageOf === true}
+      archived={archived}
     />
   )
 }
@@ -94,7 +111,8 @@ export function PersonLoading() {
   const areaLabel = PATIENT_AREAS.find((area) => area.id === current.area)?.label ?? current.area
   const subsections = subsectionNav(section, can, pageOf)
   const rules = personHeaderRules(can, pageOf === true)
-  // «Responsable» es lo que menos tiene: lo que también ve es de cualquier persona.
+  // «Responsable» es lo que menos tiene: lo que también ve es de cualquier persona. Lo que pide la dirección
+  // conserva su nombre: casi siempre es de un paciente, y sin él ninguna pestaña se vería marcada.
   const anyPersonAreas = new Set<string>(visibleAreas(can, "responsable").map((area) => area.id))
   const anyPersonEntries = new Set<string>(areaNav(current.area, can, "responsable").map((entry) => entry.value))
   return (
@@ -104,9 +122,9 @@ export function PersonLoading() {
       actionsUnsure={unknownKind || known.archived === null}
       onOpen={(next) => void navigate({ to: ".", search: { tab: next } } as never)}
       nav={{
-        areas: visibleAreas(can, pageOf).map((area) => ({ ...area, unsure: unknownKind && !anyPersonAreas.has(area.id) })),
+        areas: visibleAreas(can, pageOf).map((area) => ({ ...area, unsure: unknownKind && area.id !== current.area && !anyPersonAreas.has(area.id) })),
         area: current.area,
-        entries: areaNav(current.area, can, pageOf).map((entry) => ({ ...entry, unsure: unknownKind && !anyPersonEntries.has(entry.value) })),
+        entries: areaNav(current.area, can, pageOf).map((entry) => ({ ...entry, unsure: unknownKind && entry.value !== (current.parent ?? current.id) && !anyPersonEntries.has(entry.value) })),
         current: current.parent ?? current.id,
         sideNav: SIDE_NAV_AREAS.has(current.area),
         mobileLabel: areaLabel === current.label ? current.label : `${areaLabel} · ${current.label}`,
@@ -115,10 +133,10 @@ export function PersonLoading() {
       {subsections.length > 1 ? (
         <div className="flex min-w-0 flex-col gap-4">
           <SubsectionTabs label={`Dentro de ${areaLabel}`} value={section} items={subsections} />
-          <PersonSectionLoading section={section} pageOf={pageOf} unknownKind={unknownKind} />
+          <PersonSectionLoading section={section} pageOf={pageOf} unknownKind={unknownKind} archived={known.archived} />
         </div>
       ) : (
-        <PersonSectionLoading section={section} pageOf={pageOf} unknownKind={unknownKind} />
+        <PersonSectionLoading section={section} pageOf={pageOf} unknownKind={unknownKind} archived={known.archived} />
       )}
     </PersonPageSkeleton>
   )

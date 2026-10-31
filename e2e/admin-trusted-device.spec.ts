@@ -58,6 +58,8 @@ test("equipo reconocido: sin código en el mismo equipo; se pide desde otro paí
   await page.goto(ADMIN)
   await expect(page).not.toHaveURL(/\/security/)
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible()
+  // El título ya se ve al recargar, mientras la API confirma la sesión: se espera a que la confirme.
+  await expect(page.locator("[data-slot=skeleton]:visible")).toHaveCount(0, { timeout: 15_000 })
 
   // Desde otro país: se pide el código y dice por qué.
   // Con la página abierta: lo siguiente que pide datos lleva a poner el código.

@@ -12,7 +12,8 @@ import { ApiError } from "./api"
  * Si la clínica empieza a pedir verificación en dos pasos con la pantalla
  * abierta (ADR 0107), la primera consulta que lo dice recarga: el layout
  * muestra entonces cómo seguir. Un guardado que falla por eso no recarga: lo
- * escrito se conserva, y el aviso ofrece seguir cuando la persona quiera.
+ * escrito se conserva, y desde ahí tampoco recarga una consulta: el aviso ofrece
+ * seguir cuando la persona quiera.
  */
 export function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -32,19 +33,32 @@ function asksTwoFactor(error: unknown): error is ApiError {
 }
 
 let reloading = false
+let stepOffered = false
 function reloadWhenTwoFactorRequired(error: unknown): void {
-  if (reloading || typeof window === "undefined") return
+  if (reloading || stepOffered || typeof window === "undefined") return
   if (asksTwoFactor(error)) {
     reloading = true
     window.location.reload()
   }
 }
 
+/**
+ * El motivo ya lo dice el formulario o el aviso de la pantalla, que corre después de
+ * este: el aviso lo reemplaza y solo dice cómo seguir, para que no se digan dos.
+ */
 function offerTwoFactorStep(error: unknown): void {
   if (!asksTwoFactor(error)) return
-  toast.error(error.message, {
-    id: "verificacion-en-dos-pasos",
-    duration: Number.POSITIVE_INFINITY,
-    action: { label: "Verificar ahora", onClick: () => window.location.reload() },
-  })
+  stepOffered = true
+  setTimeout(() => {
+    toast.dismiss()
+    toast.error("Esta clínica pide verificar tu acceso. Lo escrito sigue aquí hasta que continúes.", {
+      id: "verificacion-en-dos-pasos",
+      duration: Number.POSITIVE_INFINITY,
+      closeButton: true,
+      onDismiss: () => {
+        stepOffered = false
+      },
+      action: { label: "Verificar ahora", onClick: () => window.location.reload() },
+    })
+  }, 0)
 }

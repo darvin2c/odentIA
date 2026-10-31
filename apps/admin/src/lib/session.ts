@@ -12,18 +12,21 @@ export const adminSessionSchema = z.object({
 export type AdminSession = z.infer<typeof adminSessionSchema>
 
 /**
- * Quién entró por última vez en este navegador, para dibujar el marco y el
- * esqueleto al recargar mientras la API confirma la sesión. Decide qué se dibuja
- * un instante, nunca qué se permite: lo que se muestra después lo da la API.
+ * Quién trabaja en esta pestaña, para dibujar el marco y el esqueleto al recargar
+ * mientras la API confirma la sesión. Solo lo que se dibuja y solo mientras la
+ * pestaña siga abierta: en un equipo prestado no queda nada al cerrarla. Decide qué
+ * se dibuja un instante, nunca qué se permite.
  */
 const SEEN_KEY = "odentia-admin-session"
-let seen: { raw: string | null; session: AdminSession | null } = { raw: null, session: null }
+const seenSchema = z.object({ role: z.enum(["admin", "support"]), user: adminSessionSchema.shape.user })
+export type SeenSession = z.infer<typeof seenSchema>
+let seen: { raw: string | null; session: SeenSession | null } = { raw: null, session: null }
 
-function readSeenSession(): AdminSession | null {
+function readSeenSession(): SeenSession | null {
   try {
-    const raw = window.localStorage.getItem(SEEN_KEY)
+    const raw = window.sessionStorage.getItem(SEEN_KEY)
     if (raw !== seen.raw) {
-      const parsed = raw ? adminSessionSchema.safeParse(JSON.parse(raw)) : null
+      const parsed = raw ? seenSchema.safeParse(JSON.parse(raw)) : null
       seen = { raw, session: parsed?.success ? parsed.data : null }
     }
     return seen.session
@@ -32,11 +35,11 @@ function readSeenSession(): AdminSession | null {
   }
 }
 
-/** También se olvida al salir y cuando la API ya no la reconoce. */
+/** También se olvida al salir y cuando la API la rechaza. */
 export function rememberSeenSession(session: AdminSession | null): void {
   try {
-    if (session) window.localStorage.setItem(SEEN_KEY, JSON.stringify(session))
-    else window.localStorage.removeItem(SEEN_KEY)
+    if (session) window.sessionStorage.setItem(SEEN_KEY, JSON.stringify({ role: session.actor.role, user: session.user }))
+    else window.sessionStorage.removeItem(SEEN_KEY)
   } catch {
     // Sin almacenamiento, la recarga solo dibuja menos mientras llega la sesión.
   }
@@ -45,7 +48,7 @@ export function rememberSeenSession(session: AdminSession | null): void {
 const NO_CHANGES = () => () => undefined
 
 /** Lo mismo al hidratar que en el servidor (nada) y, enseguida, lo guardado. */
-export function useSeenSession(): AdminSession | null {
+export function useSeenSession(): SeenSession | null {
   return useSyncExternalStore(NO_CHANGES, readSeenSession, () => null)
 }
 
@@ -54,10 +57,9 @@ export async function requireAdminSession(): Promise<AdminSession> {
   try {
     session = adminSessionSchema.parse(await api<unknown>("/api/admin/access/session"))
   } catch (error) {
-    if (error instanceof ApiError && error.status === 401) {
-      rememberSeenSession(null)
-      throw redirect({ href: loginUrl() })
-    }
+    // Un rechazo (otra cuenta, sin rol de personal) la olvida; un fallo del servidor o de la red, no.
+    if (error instanceof ApiError && error.status < 500) rememberSeenSession(null)
+    if (error instanceof ApiError && error.status === 401) throw redirect({ href: loginUrl() })
     throw error
   }
   if (!session.verified) {
@@ -80,21 +82,17 @@ export function requireAdminRole({ context }: { context: { adminSession: AdminSe
 const appRoute = getRouteApi("/_app")
 
 /**
- * Quien mira, sin ningún pedido: lo trae el `beforeLoad` de `/_app`. Mientras
- * corre (al recargar la página) el esqueleto se dibuja con lo visto la última vez.
+ * Si quien mira es de la administración, sin ningún pedido: lo trae el `beforeLoad`
+ * de `/_app`; mientras corre (al recargar) un esqueleto solo se dibuja con lo visto
+ * en esta pestaña. Decide qué se muestra, no qué se permite.
  */
-function useViewer(): AdminSession | null {
+export function useIsAdmin(): boolean {
   const confirmed = appRoute.useRouteContext({ select: (context) => (context as { adminSession?: AdminSession }).adminSession })
   const lastSeen = useSeenSession()
-  return confirmed ?? lastSeen
+  return (confirmed?.actor.role ?? lastSeen?.role) === "admin"
 }
 
-/** Si quien mira es de la administración. Decide qué se muestra, no qué se permite. */
-export function useIsAdmin(): boolean {
-  return useViewer()?.actor.role === "admin"
-}
-
-/** Quién es quien mira, del mismo lugar que `useIsAdmin`. */
+/** Quién es quien mira: solo lo piden pantallas ya confirmadas. */
 export function useAdminUserId(): string {
-  return useViewer()?.actor.userId ?? ""
+  return appRoute.useRouteContext().adminSession.actor.userId
 }

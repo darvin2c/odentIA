@@ -137,4 +137,89 @@ test("Admin al recargar muestra su marco y el esqueleto de la pantalla abierta",
   gate.resolve()
   await expect(page.locator("[data-slot=skeleton]:visible")).toHaveCount(0, { timeout: 15_000 })
   expect(errors).toEqual([])
+  // Un rechazo olvida lo guardado: otra cuenta en este navegador no ve a quien estuvo antes.
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  const seen = () => page.evaluate(() => sessionStorage.getItem("odentia-admin-session"))
+  expect(await seen()).toContain(user.email)
+  await page.route(
+    (url) => url.pathname === "/api/admin/access/session",
+    (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": new URL(page.url()).origin, "access-control-allow-credentials": "true" },
+        body: JSON.stringify({ error: { code: "STAFF_ONLY", message: "Solo para el personal" } }),
+      }),
+  )
+  await page.reload()
+  await expect.poll(seen).toBeNull()
+})
+
+test("una persona archivada, abierta desde la lista, no ofrece escribirle ni reservar", async ({ owner, fixtureDb }) => {
+  const { page, org } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const [person] = await fixtureDb
+    .insert(contact)
+    .values({ organizationId: org.id, displayName: "Ana Archivada", phone: "+51911222335", isActive: false })
+    .returning({ id: contact.id })
+  await gotoHydrated(page, tenant(org.slug, "/people?ver=archivados"))
+  const link = page.getByRole("link", { name: "Ana Archivada" }).first()
+  await expect(link).toBeVisible()
+  const gate = await holdApi(page, (url) => url.pathname === `/api/people/${person.id}`)
+  await link.click()
+  await expect(page.getByRole("button", { name: "Más acciones" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Escribirle" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Reservar cita" })).toHaveCount(0)
+  gate.resolve()
+  await expect(page.getByRole("heading", { level: 1, name: "Ana Archivada" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Escribirle" })).toHaveCount(0)
+})
+
+test("con varias sedes ya conocidas, el menú de Inventario trae «Trasladar» desde que carga", async ({ owner }) => {
+  const { page, org } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await gotoHydrated(page, tenant(org.slug, "/home"))
+  expect((await api(page, "POST", "/api/branches", org.slug, { name: "Sede Uno" })).status).toBe(201)
+  await gotoHydrated(page, tenant(org.slug, "/agenda"))
+  await expect(page.getByRole("heading", { level: 1, name: "Agenda" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Sede Central" })).toBeVisible()
+  const gate = await holdApi(page, (url) => url.pathname.startsWith("/api/") || url.pathname.endsWith(".js"))
+  await page.evaluate(() => {
+    history.pushState({}, "", "/inventory")
+    dispatchEvent(new PopStateEvent("popstate"))
+  })
+  await expect(page.getByRole("heading", { level: 1, name: "Inventario" })).toBeVisible()
+  await page.getByRole("button", { name: /más/i }).last().click()
+  await expect(page.getByRole("menuitem", { name: "Trasladar" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  gate.resolve()
+})
+
+test("un guardado rechazado por los dos pasos ofrece seguir y no saca de la pantalla", async ({ owner, fixtureDb }) => {
+  const { page, org } = owner
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const [person] = await fixtureDb
+    .insert(contact)
+    .values({ organizationId: org.id, displayName: "Sara Sigue", phone: "+51911222336" })
+    .returning({ id: contact.id })
+  await gotoHydrated(page, tenant(org.slug, `/people/${person.id}`))
+  await expect(page.getByRole("heading", { level: 1, name: "Sara Sigue" })).toBeVisible()
+  await page.evaluate(() => {
+    ;(window as unknown as { sinRecargar: boolean }).sinRecargar = true
+  })
+  await page.route(
+    (url) => url.pathname === `/api/people/${person.id}/archived`,
+    (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        headers: { "access-control-allow-origin": new URL(page.url()).origin, "access-control-allow-credentials": "true" },
+        body: JSON.stringify({ error: { code: "TWO_FACTOR_CODE_REQUIRED", message: "Esta clínica pide el código de tu app de autenticación" } }),
+      }),
+  )
+  await page.getByRole("button", { name: "Más acciones" }).click()
+  await page.getByRole("menuitem", { name: "Archivar" }).click()
+  await page.getByRole("button", { name: "Archivar" }).last().click()
+  await expect(page.getByRole("button", { name: "Verificar ahora" })).toBeVisible()
+  expect(await page.evaluate(() => (window as unknown as { sinRecargar?: boolean }).sinRecargar)).toBe(true)
 })

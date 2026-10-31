@@ -29,7 +29,7 @@ import { api } from "../lib/api"
 import { authClient } from "../lib/auth-client"
 import { DraftGuard } from "../lib/draft-guard"
 import { panelUrl } from "../lib/host"
-import { type AdminSession, rememberSeenSession, requireAdminSession, useSeenSession } from "../lib/session"
+import { rememberSeenSession, requireAdminSession, type SeenSession, useSeenSession } from "../lib/session"
 
 export const Route = createFileRoute("/_app")({
   // Sin SSR: si el código hace falta lo decide la API con la cookie del equipo
@@ -46,9 +46,10 @@ const RouterLink: ShellLinkComponent = ({ to, search, ...props }) => (
 const appRoute = getRouteApi("/_app")
 
 /**
- * Al recargar, mientras la API confirma la sesión: el esqueleto de la pantalla de
- * la dirección y, si este navegador ya vio a esta persona, su marco. Sin números
- * en el menú: esos sí se piden, y con la sesión confirmada.
+ * Al recargar, mientras la API confirma la sesión: el marco y el esqueleto de la
+ * pantalla de la dirección, si esta pestaña ya sabe quién trabaja en ella. Sin saberlo
+ * (al hidratar, o en una pestaña nueva) la espera general: el esqueleto de una pantalla
+ * depende del rol. Sin números en el menú: esos se piden con la sesión confirmada.
  */
 function AdminPending() {
   const router = useRouter()
@@ -61,7 +62,7 @@ function AdminPending() {
       <Screen />
     </AdminFrame>
   ) : (
-    <Screen />
+    <PagePending />
   )
 }
 
@@ -84,13 +85,13 @@ function AdminLayout() {
     staleTime: 60_000,
   })
   return (
-    <AdminFrame session={adminSession} waitlist={waitlist.data} complaints={complaints.data?.pending}>
+    <AdminFrame session={{ role: adminSession.actor.role, user: adminSession.user }} waitlist={waitlist.data} complaints={complaints.data?.pending}>
       <Outlet />
     </AdminFrame>
   )
 }
 
-function AdminFrame({ session, waitlist, complaints, children }: { session: AdminSession; waitlist?: number; complaints?: number; children: ReactNode }) {
+function AdminFrame({ session, waitlist, complaints, children }: { session: SeenSession; waitlist?: number; complaints?: number; children: ReactNode }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const queryClient = useQueryClient()
   const items: AppShellNavEntry[] = [
@@ -98,7 +99,7 @@ function AdminFrame({ session, waitlist, complaints, children }: { session: Admi
     { label: "Lista de espera", to: "/waitlist", icon: ListChecks, badge: waitlist || undefined },
     { label: "Organizaciones", to: "/organizations", icon: Building2 },
     { label: "Usuarios", to: "/users", icon: Users },
-    ...(session.actor.role === "admin"
+    ...(session.role === "admin"
       ? [
           { label: "Cobros y planes", to: "/billing", icon: CreditCard },
           { label: "Comisiones", to: "/commissions", icon: Coins },
@@ -111,7 +112,7 @@ function AdminFrame({ session, waitlist, complaints, children }: { session: Admi
       icon: BookOpen,
       badge: complaints || undefined,
     },
-    ...(session.actor.role === "admin"
+    ...(session.role === "admin"
       ? [{ label: "Equipo y actividad", to: "/team", icon: ShieldCheck }]
       : []),
   ]

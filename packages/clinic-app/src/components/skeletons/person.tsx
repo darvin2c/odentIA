@@ -155,7 +155,9 @@ function SideNavShape({ entries, current }: { entries: PersonSkeletonNav["entrie
     <div className="hidden shrink-0 flex-col gap-0.5 sm:flex sm:w-44 lg:w-52">
       {groups.map((group) => (
         <div key={group.title ?? "secciones"} className="flex flex-col gap-0.5">
-          {group.title ? (
+          {group.title && group.items.every((item) => item.unsure) ? (
+            <Skeleton className="mt-3 mb-1 ml-3 h-4 w-32" />
+          ) : group.title ? (
             <p className="mt-3 mb-1 px-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">{group.title}</p>
           ) : null}
           {group.items.map((item) => item.unsure ? (
